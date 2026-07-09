@@ -414,15 +414,6 @@ tracker/
     │   ├── tos.php            # Terms of service
     │   └── unsubscribe.php    # Email notification preferences
     └── .htaccess              # Deny all access
-│
-├── sql/                       # DB helpers / migrations (run once; not needed at runtime, web-denied)
-│   ├── performance_indexes.sql # Index definitions for existing installs
-│   ├── apply_indexes.php      # Idempotent index applier: php sql/apply_indexes.php
-│   ├── 2026-07-08_audit_settings.sql # Adds audit/hardening settings keys (safe INSERT IGNORE)
-│   └── 2026-07-08_livesync_mode.sql   # Adds the Live Syncs counter mode key (safe INSERT IGNORE)
-│
-└── tests/
-    └── run.php                # Unit tests for pure helpers: php tests/run.php
 ```
 
 ---
