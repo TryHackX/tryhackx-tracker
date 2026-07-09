@@ -1,0 +1,14 @@
+# Static assets are meant to be publicly served (CSS/JS/images), so access is allowed here —
+# but harden the directory: no directory listing and never execute server-side code out of it
+# (defence-in-depth against an uploaded/planted script ever landing under assets/).
+Options -Indexes
+
+<FilesMatch "\.(php|phtml|php[0-9]|phar|pht|cgi|pl|py|sh)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>

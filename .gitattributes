@@ -1,0 +1,23 @@
+# Normalize line endings: store as LF in the repo, check out native on each OS.
+# Prevents CRLF noise when committing from Windows/WAMP.
+* text=auto
+
+# Explicit text types (kept LF)
+*.php   text
+*.js    text
+*.css   text
+*.html  text
+*.md    text
+*.json  text
+*.sql   text
+*.svg   text
+.htaccess text
+
+# Binary assets — never touch
+*.ico   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.woff  binary
+*.woff2 binary

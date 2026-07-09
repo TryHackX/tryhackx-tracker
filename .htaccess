@@ -1,0 +1,54 @@
+RewriteEngine On
+
+# Set this to the URL path the app is served from.
+#   domain root  -> RewriteBase /
+#   subfolder    -> RewriteBase /tracker/   (matches this folder name under www/)
+RewriteBase /tracker/
+
+# Block access to hidden files (except .htaccess itself)
+<FilesMatch "^\.(?!htaccess)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block direct access to sensitive file extensions
+<FilesMatch "\.(sql|log|bak|old|ini|sh|env|lock)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Security headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    Header set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    # Content-Security-Policy. 'unsafe-inline'/'unsafe-eval' are needed by the inline
+    # scripts / onclick handlers and Google reCAPTCHA. Remote hosts allowed: jsDelivr
+    # (Bootstrap + icons) and Google/Gstatic (reCAPTCHA). Tighten if you self-host these.
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com https://www.recaptcha.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https://www.google.com https://www.gstatic.com; connect-src 'self'; frame-src https://www.google.com https://www.recaptcha.net; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+</IfModule>
+
+# Prevent directory listings
+Options -Indexes
+
+# Serve static assets directly
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Route API requests
+RewriteRule ^api/(.*)$ api.php?endpoint=$1 [QSA,L]
+
+# Route everything else to index.php
+RewriteRule ^(.*)$ index.php?action=$1 [QSA,L]
