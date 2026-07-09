@@ -484,34 +484,6 @@ All require active admin session. Prefix: `admin/`
 
 ---
 
-## Updating
-
-For existing installations updating from an older version:
-
-1. Back up your database and `config/` directory
-2. Replace all files except the `config/` directory
-3. Apply any pending migrations from `sql/` — they are data-only and safe to re-run:
-   ```bash
-   mysql -u <user> -p <database> < sql/2026-07-08_audit_settings.sql
-   mysql -u <user> -p <database> < sql/2026-07-08_livesync_mode.sql
-   mysql -u <user> -p <database> < sql/2026-07-09_opentracker_service.sql
-   ```
-   These add new settings keys (stats cache TTL, extra rate limits, session timeouts, trusted-proxy
-   options, Live Syncs counter mode, and the OpenTracker service-restart options) with sensible
-   defaults **without** overwriting anything you've customised. Then open **Admin → Settings** and
-   review the new fields (in particular set **Tracker Statistics → Cache Lifetime / TTL** to ≥ your
-   real upstream fetch time, and — if you want one-click restarts — **OpenTracker Service → Service
-   name**; see [OpenTracker service restart](#opentracker-service-restart) for the sudoers rule).
-4. The application will otherwise continue working — settings are stored in the database, not in files
-
-There are **no schema (DDL) changes** in this update; every new option lives in the `settings` table.
-
-> **Security housekeeping when updating:** remove any leftover `*.orig`/`*.bak` files (e.g. a stray
-> `config/hash.txt.orig` would leak the admin password hash), delete `install.php` if present, and
-> make sure `config/database.php` contains no plaintext credentials in comments.
-
----
-
 ## Troubleshooting
 
 ### Tracker stats stuck on "Syncing Swarms…" / never refresh
