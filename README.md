@@ -56,7 +56,7 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **HMAC Tokens** — SHA-256 signed unsubscribe links with timing-safe comparison
 - **No Secrets in Source** — DB credentials are injected by the installer or via `DB_HOST`/`DB_NAME`/`DB_USER`/`DB_PASS` environment variables; nothing sensitive is committed
 - **Generic Error Responses** — raw database/exception messages are logged server-side, never returned to clients
-- **Directory Protection** — `.htaccess` deny rules on `config/`, `includes/`, `templates/`, `api/`, `sql/`, `tests/`, `.claude/`; `assets/` blocks server-side script execution and directory listing (see [Reverse proxy / Nginx](#reverse-proxy--nginx-notes) for non-Apache servers)
+- **Directory Protection** — `.htaccess` deny rules on `config/`, `includes/`, `templates/`, `api/`, `sql/`, `tests/`; `assets/` blocks server-side script execution and directory listing (see [Reverse proxy / Nginx](#reverse-proxy--nginx-notes) for non-Apache servers)
 - **Security Headers** — `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`
 - **Subresource Integrity** — pinned CDN assets (Bootstrap, Bootstrap Icons) loaded with `integrity` hashes
 - **Reverse-Proxy Aware** — optional trusted-proxy allow-list + configurable client-IP header so per-IP limits work correctly behind Cloudflare / nginx without opening a spoofing hole
@@ -325,7 +325,7 @@ On **Nginx** you must replicate two things in your server config:
 
 ```nginx
 # 1. Never serve the private directories (equivalent of the deny-all .htaccess files)
-location ~ ^/(config|includes|templates|api|sql|tests|\.claude)/ { deny all; return 404; }
+location ~ ^/(config|includes|templates|api|sql|tests)/ { deny all; return 404; }
 location ~* \.(orig|bak|sql|log|lock|marker)$ { deny all; return 404; }
 
 # 2. Front-controller routing
