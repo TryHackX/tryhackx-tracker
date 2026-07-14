@@ -49,11 +49,15 @@ $autoClosedUnblock = autoCloseRelatedAppeals($db, $report['infoHash'], 'unblock'
 // Auto-close pending block appeals (hash is now blocked — their goal is achieved)
 $autoClosedBlock = autoCloseRelatedAppeals($db, $report['infoHash'], 'block', 0, $cfg);
 
+// The blacklist file changed — ask the tracker to reload it immediately (SIGHUP, no downtime).
+$reload = $blacklistWritten ? autoReloadTrackerBlacklist($cfg) : null;
+
 $response = ['success' => true, 'message' => 'Hash blocked and report archived', 'archived' => true];
 if ($blacklistPath && !$blacklistWritten) {
     $response['blacklist_warning'] = 'Hash blocked in database but could not write to blacklist file.';
     $response['blacklist_errors'] = $permCheck['errors'] ?? [];
     $response['blacklist_suggestions'] = $permCheck['suggestions'] ?? [];
 }
+if ($reload) $response['reload'] = $reload;
 $response['auto_closed'] = $autoClosedUnblock + $autoClosedBlock;
 jsonResponse($response);

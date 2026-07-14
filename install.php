@@ -340,6 +340,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 'tracker_stats_livesync_mode' => 'upstream',
                 'opentracker_service_name' => '',
                 'opentracker_restart_use_sudo' => '1',
+                'opentracker_auto_reload' => '1',
                 'tracker_blacklist_warn_count' => '1',
                 'tracker_blacklist_danger_count' => '5',
                 'tracker_uptime_warn_days' => '14',

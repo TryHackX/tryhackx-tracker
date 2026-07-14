@@ -590,6 +590,70 @@ function getTrackerServiceWarnings(array $cfg): array {
     return $res;
 }
 
+// --- Tracker service: execute restart / reload ------------------------------
+// Shared by the Restart/Reload endpoints, the permission Test, and the automatic post-change reload.
+// A "restart" bounces the whole service (brief downtime); a "reload" asks systemd to run the unit's
+// ExecReload — for a standard OpenTracker unit that is `/bin/kill -HUP $MAINPID`, i.e. the SIGHUP that
+// makes OpenTracker re-read its white/blacklist WITHOUT dropping connections. Both clear the pending
+// blacklist-change log on success, because the tracker then holds the current blacklist file.
+
+/** Is PHP's exec() usable (present and not listed in disable_functions)? System actions need it. */
+function trackerExecAvailable(): bool {
+    $disabled = array_map('trim', explode(',', strtolower((string)ini_get('disable_functions'))));
+    return function_exists('exec') && !in_array('exec', $disabled, true);
+}
+
+/**
+ * Build the shell command for `systemctl <verb> <service>` (verb = restart|reload) against the
+ * configured unit, honouring the "Run via sudo" setting. Returns null when the feature can't run
+ * (unknown verb, no/invalid service name, or exec() disabled). The service name is whitelisted AND
+ * passed through escapeshellarg, so it can never be used to inject a second command.
+ */
+function trackerServiceCommand(string $verb, array $cfg): ?string {
+    if ($verb !== 'restart' && $verb !== 'reload') return null;
+    $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
+    if ($service === '' || !isServiceNameValid($service)) return null;
+    if (!trackerExecAvailable()) return null;
+    $useSudo = (($cfg['opentracker_restart_use_sudo'] ?? '1') === '1');
+    return ($useSudo ? 'sudo -n ' : '') . 'systemctl ' . $verb . ' ' . escapeshellarg($service) . ' 2>&1';
+}
+
+/**
+ * Run `systemctl <verb> <service>` and return ['ok','output','code','cmd']. ok is true only on a
+ * zero exit code. When the command cannot be built (see trackerServiceCommand) ok is false, code -1.
+ */
+function runTrackerServiceCommand(string $verb, array $cfg): array {
+    $cmd = trackerServiceCommand($verb, $cfg);
+    if ($cmd === null) {
+        return ['ok' => false, 'output' => '', 'code' => -1, 'cmd' => ''];
+    }
+    $output = [];
+    $ret    = null;
+    @exec($cmd, $output, $ret);
+    return ['ok' => $ret === 0, 'output' => trim(implode("\n", $output)), 'code' => (int)$ret, 'cmd' => $cmd];
+}
+
+/**
+ * Best-effort: after the blacklist file has changed, ask the tracker to reload it (SIGHUP via
+ * `systemctl reload`) so the change applies immediately — no downtime, no manual restart. Only runs
+ * when auto-reload is enabled AND a valid service is configured AND exec() is available; otherwise it
+ * quietly does nothing and the dashboard's "restart recommended" hint remains as the fallback. On a
+ * successful reload the pending-change log is cleared. Never throws. Returns a small status array for
+ * the API response, or null when no reload was attempted.
+ */
+function autoReloadTrackerBlacklist(array $cfg): ?array {
+    if (($cfg['opentracker_auto_reload'] ?? '1') !== '1') return null;
+    $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
+    if ($service === '' || !isServiceNameValid($service) || !trackerExecAvailable()) return null;
+
+    $res = runTrackerServiceCommand('reload', $cfg);
+    if ($res['ok']) {
+        resetBlacklistChanges();
+        return ['attempted' => true, 'ok' => true];
+    }
+    return ['attempted' => true, 'ok' => false, 'output' => $res['output']];
+}
+
 /**
  * Archive an appeal: move from appeals to appeal_archives.
  */

@@ -43,9 +43,13 @@ if ($report['email']) {
 $autoClosedUnblock = autoCloseRelatedAppeals($db, $report['infoHash'], 'unblock', 0, $cfg);
 $autoClosedBlock = autoCloseRelatedAppeals($db, $report['infoHash'], 'block', 0, $cfg);
 
+// The blacklist file changed — ask the tracker to reload it immediately (SIGHUP, no downtime).
+$reload = $blacklistWritten ? autoReloadTrackerBlacklist($cfg) : null;
+
 $response = ['success' => true, 'message' => 'Hash blocked in archive'];
 if ($blacklistPath && !$blacklistWritten) {
     $response['blacklist_warning'] = 'Hash blocked in database but could not write to blacklist file.';
 }
+if ($reload) $response['reload'] = $reload;
 $response['auto_closed'] = $autoClosedUnblock + $autoClosedBlock;
 jsonResponse($response);

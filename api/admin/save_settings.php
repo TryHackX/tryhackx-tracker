@@ -27,7 +27,7 @@ $allowed = [
     'donations_enabled', 'wallet_btc', 'wallet_eth', 'wallet_xmr', 'donation_fields',
     'transparency_enabled', 'transparency_per_page',
     'tracker_stats_enabled', 'tracker_stats_url', 'tracker_stats_interval', 'tracker_stats_page_interval', 'tracker_stats_cache_ttl', 'tracker_stats_show_home', 'tracker_stats_timeout', 'tracker_stats_min_loading', 'tracker_stats_max_loading', 'tracker_stats_peer_label_style', 'tracker_stats_livesync_mode',
-    'opentracker_service_name', 'opentracker_restart_use_sudo',
+    'opentracker_service_name', 'opentracker_restart_use_sudo', 'opentracker_auto_reload',
     'tracker_uptime_warn_days', 'tracker_uptime_danger_days',
     'tracker_blacklist_warn_count', 'tracker_blacklist_danger_count',
     'auto_archive_days', 'auto_archive_appeal_days', 'sent_emails_retention_days',

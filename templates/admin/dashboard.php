@@ -32,8 +32,11 @@
                     <button type="button" class="tracker-warn-badge d-hidden" id="tracker-warn-badge" tabindex="0" aria-label="Tracker restart recommendations">
                         <i class="bi bi-exclamation-triangle-fill"></i><span id="tracker-warn-count" class="tracker-warn-count"></span>
                     </button>
+                    <button type="button" class="btn btn-sm btn-outline-info tracker-reload-btn" id="btn-reload-tracker" title="Reload the tracker blacklist (SIGHUP, no downtime) — <?= sanitize($svcName) ?>">
+                        <i class="bi bi-arrow-clockwise"></i> Reload
+                    </button>
                     <button type="button" class="btn btn-sm btn-outline-secondary tracker-restart-btn" id="btn-restart-tracker" title="Restart the tracker service (<?= sanitize($svcName) ?>)">
-                        <i class="bi bi-arrow-clockwise"></i> Restart tracker
+                        <i class="bi bi-bootstrap-reboot"></i> Restart tracker
                     </button>
                 </div>
                 <?php endif; ?>
@@ -230,6 +233,33 @@
                         </div>
                     </form>
                     <div id="restart-modal-alert" class="mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reload Tracker Modal -->
+    <div class="modal fade" id="reloadTrackerModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-arrow-clockwise text-info"></i> Reload Tracker Blacklist</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-light mb-2" style="font-size:0.9rem;">This runs <code>systemctl reload <?= sanitize($svcName) ?></code> on the server, sending it a <strong>SIGHUP</strong> so it re-reads its white/blacklist <strong>without downtime</strong> (no dropped connections). Enter your admin password to confirm.</p>
+                    <div id="reload-warn-list" class="mb-2"></div>
+                    <form id="reload-tracker-form">
+                        <div class="mb-3">
+                            <label class="form-label" style="font-size:0.85rem;color:#bbb;">Admin Password *</label>
+                            <input type="password" class="form-control bg-dark text-light border-secondary" id="reload-password" required>
+                        </div>
+                        <div class="d-flex justify-content-center gap-2 mt-3">
+                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-info btn-sm text-dark"><i class="bi bi-arrow-clockwise"></i> Reload now</button>
+                        </div>
+                    </form>
+                    <div id="reload-modal-alert" class="mt-2"></div>
                 </div>
             </div>
         </div>

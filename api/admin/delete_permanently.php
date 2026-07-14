@@ -88,6 +88,7 @@ if (!$report) {
 }
 
 // Remove hash from blacklist file if it was blocked and no other blocked reports exist for it
+$blacklistChanged = false;
 if ($report['blocked']) {
     $stmt = $db->prepare("SELECT COUNT(*) FROM reports WHERE infoHash = ? AND blocked = 1 AND id != ?");
     $stmt->execute([$report['infoHash'], $id]);
@@ -102,7 +103,7 @@ if ($report['blocked']) {
         // Security check: strip null bytes and control characters
         $blacklistPath = preg_replace('/[\x00-\x1F\x7F]/', '', $blacklistPath);
         if ($blacklistPath) {
-            removeHashFromBlacklist($report['infoHash'], $blacklistPath);
+            $blacklistChanged = removeHashFromBlacklist($report['infoHash'], $blacklistPath);
         }
     }
 }
@@ -140,7 +141,12 @@ try {
     jsonResponse(['error' => 'A database error occurred while deleting the report.'], 500);
 }
 
-jsonResponse([
+// The blacklist file changed — ask the tracker to reload it immediately (SIGHUP, no downtime).
+$reload = $blacklistChanged ? autoReloadTrackerBlacklist($cfg) : null;
+
+$response = [
     'success' => true,
     'message' => 'Report and all associated data deleted permanently. Reporter notified: ' . ($emailSent ? 'Yes' : 'No')
-]);
+];
+if ($reload) $response['reload'] = $reload;
+jsonResponse($response);

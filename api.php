@@ -67,6 +67,8 @@ $apiRoutes = [
     'admin/delete_permanently' => 'api/admin/delete_permanently.php',
     'admin/tracker_service_status' => 'api/admin/tracker_service_status.php',
     'admin/restart_tracker' => 'api/admin/restart_tracker.php',
+    'admin/reload_tracker'  => 'api/admin/reload_tracker.php',
+    'admin/test_tracker_permission' => 'api/admin/test_tracker_permission.php',
 ];
 
 if (!isset($apiRoutes[$endpoint])) {

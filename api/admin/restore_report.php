@@ -32,6 +32,28 @@ $stmt->execute([
 $stmt = $db->prepare("DELETE FROM archives WHERE id = ?");
 $stmt->execute([$id]);
 
+// The report is restored as ACTIVE and UNBLOCKED (blocked forced to 0 above). If it was blocked in
+// the archive and nothing else keeps this hash blocked, drop it from the blacklist file too —
+// otherwise the DB (unblocked) and the tracker (still blocking) drift apart. This removal path was
+// previously missing, so a "Restore to active" left the hash blocked at the tracker.
+$blacklistChanged = false;
+if (!empty($report['blocked'])) {
+    $stmt = $db->prepare("SELECT COUNT(*) FROM reports WHERE infoHash = ? AND blocked = 1 AND id != ?");
+    $stmt->execute([$report['infoHash'], $id]);
+    $otherBlockedReports = (int)$stmt->fetchColumn();
+
+    $stmt = $db->prepare("SELECT COUNT(*) FROM archives WHERE infoHash = ? AND blocked = 1");
+    $stmt->execute([$report['infoHash']]);
+    $otherBlockedArchives = (int)$stmt->fetchColumn();
+
+    if ($otherBlockedReports === 0 && $otherBlockedArchives === 0) {
+        $blacklistPath = $cfg['blacklist_path'] ?? '';
+        if ($blacklistPath !== '') {
+            $blacklistChanged = removeHashFromBlacklist($report['infoHash'], $blacklistPath);
+        }
+    }
+}
+
 // Send restoration notification email
 try {
     sendStatusNotification($db, $id, 'restored', $cfg);
@@ -39,4 +61,10 @@ try {
     // Non-blocking — report is already restored
 }
 
-jsonResponse(['success' => true, 'message' => 'Report restored to active']);
+// The blacklist file changed — ask the tracker to reload it immediately (SIGHUP, no downtime).
+$reload = $blacklistChanged ? autoReloadTrackerBlacklist($cfg) : null;
+
+$response = ['success' => true, 'message' => 'Report restored to active'];
+if ($blacklistChanged) $response['blacklist_updated'] = true;
+if ($reload) $response['reload'] = $reload;
+jsonResponse($response);

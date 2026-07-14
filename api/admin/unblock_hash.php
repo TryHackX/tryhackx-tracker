@@ -37,9 +37,13 @@ if ($report['email']) {
 // Auto-close pending unblock appeals for this hash (hash is now unblocked — their goal is achieved)
 $autoClosed = autoCloseRelatedAppeals($db, $report['infoHash'], 'unblock', 0, $cfg);
 
+// The blacklist file changed — ask the tracker to reload it immediately (SIGHUP, no downtime).
+$reload = ($blacklistPath && $blacklistUpdated) ? autoReloadTrackerBlacklist($cfg) : null;
+
 $response = ['success' => true, 'message' => 'Hash unblocked'];
 if ($blacklistPath && !$blacklistUpdated) {
     $response['blacklist_warning'] = 'Unblocked in database but could not remove from blacklist file.';
 }
+if ($reload) $response['reload'] = $reload;
 $response['auto_closed'] = $autoClosed;
 jsonResponse($response);

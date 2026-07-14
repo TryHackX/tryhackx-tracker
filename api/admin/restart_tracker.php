@@ -31,21 +31,18 @@ if (!isServiceNameValid($service)) {
 }
 
 // exec() must exist and not be blacklisted in disable_functions.
-$disabled = array_map('trim', explode(',', strtolower((string)ini_get('disable_functions'))));
-if (!function_exists('exec') || in_array('exec', $disabled, true)) {
+if (!trackerExecAvailable()) {
     jsonResponse(['error' => 'PHP exec() is disabled on this server — the service cannot be restarted from the panel.'], 500);
 }
 
 $useSudo = (($cfg['opentracker_restart_use_sudo'] ?? '1') === '1');
-// escapeshellarg on the (already whitelisted) name — defence in depth against shell metacharacters.
-$cmd = ($useSudo ? 'sudo -n ' : '') . 'systemctl restart ' . escapeshellarg($service) . ' 2>&1';
+// runTrackerServiceCommand whitelists the unit name and escapeshellarg's it — defence in depth
+// against shell metacharacters — before running `systemctl restart <service>`.
+$res    = runTrackerServiceCommand('restart', $cfg);
+$outStr = $res['output'];
+$ret    = $res['code'];
 
-$output = [];
-$ret    = null;
-@exec($cmd, $output, $ret);
-$outStr = trim(implode("\n", $output));
-
-if ($ret === 0) {
+if ($res['ok']) {
     // The tracker has restarted and re-read the blacklist — pending changes are no longer pending.
     resetBlacklistChanges();
     jsonResponse([

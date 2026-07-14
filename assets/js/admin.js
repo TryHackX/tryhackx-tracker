@@ -420,6 +420,7 @@ async function handleRestore() {
         bootstrap.Modal.getInstance(document.getElementById('actionModal')).hide();
         showToast('success', 'Report restored to active');
         loadReports();
+        refreshTrackerWarnings();
     } else {
         showModalAlert('error', json.error || 'Error');
     }
@@ -1043,6 +1044,21 @@ function initTrackerService() {
         });
     }
     if (form) form.addEventListener('submit', handleRestartTracker);
+
+    // Reload (SIGHUP) — same confirm-with-password flow, but no downtime.
+    const reloadBtn = document.getElementById('btn-reload-tracker');
+    const reloadForm = document.getElementById('reload-tracker-form');
+    if (reloadBtn) {
+        reloadBtn.addEventListener('click', () => {
+            const pw = document.getElementById('reload-password');
+            if (pw) pw.value = '';
+            document.getElementById('reload-modal-alert').innerHTML = '';
+            renderReloadModalWarnings();
+            new bootstrap.Modal(document.getElementById('reloadTrackerModal')).show();
+        });
+    }
+    if (reloadForm) reloadForm.addEventListener('submit', handleReloadTracker);
+
     refreshTrackerWarnings();
     // Keep uptime-based advice fresh without a page reload (cheap cache-hit GET).
     setInterval(refreshTrackerWarnings, 120000);
@@ -1087,6 +1103,15 @@ function applyTrackerWarnings(json) {
         ? 'Restart unavailable: PHP exec() is disabled on the server'
         : ('Restart the tracker service' + (json.service ? ' (' + json.service + ')' : ''));
 
+    // The Reload button shares the same exec-availability gate.
+    const reloadBtn = document.getElementById('btn-reload-tracker');
+    if (reloadBtn) {
+        reloadBtn.disabled = json.exec_available === false;
+        reloadBtn.title = reloadBtn.disabled
+            ? 'Reload unavailable: PHP exec() is disabled on the server'
+            : ('Reload the tracker blacklist (SIGHUP, no downtime)' + (json.service ? ' — ' + json.service : ''));
+    }
+
     // Only rebuild the chip + popover when something actually changed, so a background refresh
     // doesn't dispose a popover the admin is currently reading.
     const sig = level + '|' + items.map(it => it.level + ':' + it.text).join('|');
@@ -1130,6 +1155,15 @@ function renderRestartModalWarnings() {
         : '';
 }
 
+function renderReloadModalWarnings() {
+    const el = document.getElementById('reload-warn-list');
+    if (!el) return;
+    const items = (lastTrackerStatus && lastTrackerStatus.items) || [];
+    el.innerHTML = items.length
+        ? '<div class="tracker-modal-warnbox">' + trackerWarnListHtml(items) + '</div>'
+        : '';
+}
+
 async function handleRestartTracker(e) {
     e.preventDefault();
     const pw = document.getElementById('restart-password').value;
@@ -1151,6 +1185,42 @@ async function handleRestartTracker(e) {
             refreshTrackerWarnings();
         } else {
             alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || 'Restart failed')}</div>`;
+            setTimeout(() => {
+                const alertDiv = alertEl.querySelector('.modal-alert-sm');
+                if (alertDiv) alertDiv.classList.add('alert-fade');
+            }, 6500);
+            setTimeout(() => alertEl.innerHTML = '', 7000);
+        }
+    } catch {
+        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">Network error.</div>`;
+        setTimeout(() => alertEl.innerHTML = '', 5000);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+}
+
+async function handleReloadTracker(e) {
+    e.preventDefault();
+    const pw = document.getElementById('reload-password').value;
+    const alertEl = document.getElementById('reload-modal-alert');
+    alertEl.innerHTML = '';
+
+    const btn = e.target.querySelector('button[type="submit"]');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reloading...';
+
+    try {
+        const json = await apiCall('admin/reload_tracker', 'POST', { password: pw });
+        if (json.success) {
+            const modalEl = document.getElementById('reloadTrackerModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) modal.hide();
+            showToast('success', json.message || 'Tracker blacklist reloaded');
+            refreshTrackerWarnings();
+        } else {
+            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || 'Reload failed')}</div>`;
             setTimeout(() => {
                 const alertDiv = alertEl.querySelector('.modal-alert-sm');
                 if (alertDiv) alertDiv.classList.add('alert-fade');

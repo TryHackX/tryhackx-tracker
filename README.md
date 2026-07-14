@@ -29,7 +29,7 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Report Workflow** — pending → reviewed → blocked/archived, with inline editing for company/entity fields
 - **Appeal Management** — accept/reject appeals with optional admin response, auto-close related appeals
 - **Blacklist Integration** — block/unblock info hashes via newline-separated blacklist file, with path validation
-- **Tracker Restart + Smart Recommendations** — optional one-click `systemctl restart` of your tracker service (password-confirmed), with orange/red hints that surface when a restart is due after blacklist changes or a long uptime — see [OpenTracker service restart](#opentracker-service-restart)
+- **Tracker Reload / Restart + Smart Recommendations** — automatically reload the tracker's blacklist (SIGHUP via `systemctl reload`, no downtime) after every block/unblock/restore, plus one-click **Reload** and **Restart** buttons (password-confirmed), permission **Test** buttons, and orange/red hints that surface when a restart is due after blacklist changes or a long uptime — see [OpenTracker service reload & restart](#opentracker-service-reload--restart)
 - **Email Notifications** — professional dark-themed HTML emails for all status changes, with per-type unsubscribe
 - **Auto-Archiving** — automatically archive old reviewed reports and resolved appeals after configurable days
 - **Settings** — all configuration via web UI (site info, reCAPTCHA, CAPTCHA tuning, donations, footer, etc.)
@@ -200,7 +200,7 @@ All settings are managed through **Admin Panel → Settings** (`/?action=admin` 
 | **Donation Fields** | Enable/disable, custom label+value fields (max 15), auto-detects URLs vs addresses |
 | **Transparency** | Enable/disable, results per page |
 | **Tracker Statistics** | Enable, source URL, home/page refresh intervals, **cache lifetime (TTL)**, request timeout, loading delays, peer-label style — see [Tracker statistics & caching](#tracker-statistics--caching) |
-| **OpenTracker Service** | systemd unit name, sudo toggle, restart-recommendation thresholds — see [OpenTracker service restart](#opentracker-service-restart) |
+| **OpenTracker Service** | systemd unit name, sudo toggle, blacklist auto-reload (SIGHUP), permission test buttons, restart-recommendation thresholds — see [OpenTracker service reload & restart](#opentracker-service-reload--restart) |
 | **Footer** | Copyright year, brand/tracker software/OS elements with names and URLs |
 | **Security & Credentials** | Admin username, password change (separate form) |
 
@@ -258,41 +258,65 @@ every visitor triggering their own fetch, the data is cached **server-side** and
 > hits the endpoint periodically, e.g. `*/2 * * * * curl -s 'https://your-domain/api.php?endpoint=tracker_stats&source=home' >/dev/null`.
 > Combined with a longer TTL this makes visitors *always* hit a warm cache.
 
-### OpenTracker service restart
+### OpenTracker service reload & restart
 
 OpenTracker reads its blacklist file **only at startup**, so a blocked/unblocked hash doesn't take
-effect until the tracker is restarted. To make that a one-click operation — and to nudge you when
-it's due — set **Admin → Settings → OpenTracker Service → Service name** to your systemd unit
-(e.g. `opentracker` or `opentracker.service`). When set:
+effect until the tracker re-reads it. OpenTracker's own docs say: *"To make opentracker reload its
+white/blacklist, send a SIGHUP unix signal."* This app can do that for you. Set **Admin → Settings →
+OpenTracker Service → Service name** to your systemd unit (e.g. `opentracker` or `opentracker.service`).
+When set:
 
-- A **Restart tracker** button appears in the Dashboard header. It runs `systemctl restart <name>`
-  on the server (password-confirmed) and clears the pending-change tracking on success.
-- **Smart recommendations** appear as a warning chip next to the button. Hover (or tap on mobile)
-  to see the full list; the button's glow and the chip colour reflect the highest active severity.
+- **Automatic reload (default on).** After every panel action that changes the blacklist file —
+  accepting a report (block), accepting an appeal, unblocking, restoring a report to active, or a
+  permanent delete — the app runs `systemctl reload <name>`, which delivers **SIGHUP** so OpenTracker
+  re-reads its white/blacklist **without any downtime**. On success the pending-change tracking is
+  cleared. It's best-effort: if it can't run (no permission, `exec()` disabled) the action still
+  succeeds and the restart hint below stays as a fallback. Toggle it with **Auto-reload blacklist**.
+- A **Reload** button in the Dashboard header does the same thing on demand (password-confirmed,
+  SIGHUP, no downtime), and a **Restart tracker** button runs `systemctl restart <name>` (full
+  restart, brief downtime). Both clear the pending-change tracking on success.
+- **Smart recommendations** appear as a warning chip next to the buttons. Hover (or tap on mobile)
+  to see the full list; the buttons' glow and the chip colour reflect the highest active severity.
   Warnings stack and are configurable:
   - **Blacklist changed since last start** — orange once pending changes reach *Blacklist → orange*
     (default **1**), red at *Blacklist → red* (default **5**). "Pending" is measured against the
     tracker's boot time (from the stats cache uptime), so it self-clears the moment the tracker
-    restarts — whether from the panel or from the shell.
+    restarts — whether from the panel or from the shell. (Auto-reload clears it on each successful
+    reload too.)
   - **Long uptime** — orange at *Uptime → orange* days (default **14**), red at *Uptime → red*
     (default **30**). Requires Tracker Statistics to be enabled (that's where uptime comes from).
 
-Leave the service name empty to hide the button and chip entirely.
+Leave the service name empty to hide the buttons and chip entirely.
 
-**Server permission (required).** php-fpm runs unprivileged, so grant it permission to run just that
-one command via sudo (keep **Run via sudo = Yes**):
+**Server permission (required).** php-fpm runs unprivileged, so grant it permission to run just those
+commands via sudo (keep **Run via sudo = Yes**). Add both the restart and the reload rule:
 
 ```bash
 # adjust the user (php-fpm user, often www-data) and unit name to match your box
-echo 'www-data ALL=(root) NOPASSWD: /bin/systemctl restart opentracker' \
-  | sudo tee /etc/sudoers.d/tracker-restart
+cat <<'EOF' | sudo tee /etc/sudoers.d/tracker-restart
+www-data ALL=(root) NOPASSWD: /bin/systemctl restart opentracker
+www-data ALL=(root) NOPASSWD: /bin/systemctl reload opentracker
+EOF
 sudo chmod 440 /etc/sudoers.d/tracker-restart
 ```
 
-The service name is validated against a strict systemd-unit whitelist and passed through
-`escapeshellarg`, so it can't be used to inject a second command. If PHP's `exec()` is disabled the
-button is greyed out with an explanatory note. On failure the exact `systemctl`/sudo output is shown
-so you can fix the sudoers rule.
+For **Reload** to work, the systemd unit must define an `ExecReload` that sends SIGHUP. If your
+`opentracker.service` doesn't already have one, add it and reload the daemon:
+
+```ini
+# /etc/systemd/system/opentracker.service  (in the [Service] section)
+ExecReload=/bin/kill -HUP $MAINPID
+```
+```bash
+sudo systemctl daemon-reload
+```
+
+Use the **Test restart permission** / **Test reload permission** buttons in Settings to verify the
+sudoers rules — they run a read-only `sudo -n -l` check (they never restart or reload anything) and
+print copy-paste fix instructions if a rule is missing. The service name is validated against a
+strict systemd-unit whitelist and passed through `escapeshellarg`, so it can't be used to inject a
+second command. If PHP's `exec()` is disabled the buttons are greyed out with an explanatory note.
+On failure the exact `systemctl`/sudo output is shown so you can fix the sudoers rule.
 
 ### Reverse proxy / Nginx notes
 
@@ -365,7 +389,9 @@ tracker/
 │       ├── change_password.php # POST — change admin credentials
 │       ├── check_blacklist.php # GET — test blacklist file permissions
 │       ├── tracker_service_status.php # GET — restart recommendations for the dashboard
-│       └── restart_tracker.php # POST — restart the tracker service (password-confirmed)
+│       ├── restart_tracker.php # POST — restart the tracker service (password-confirmed)
+│       ├── reload_tracker.php  # POST — reload the tracker blacklist via SIGHUP (password-confirmed)
+│       └── test_tracker_permission.php # GET — test sudo perms for restart/reload (read-only)
 │
 ├── assets/
 │   ├── css/
@@ -414,15 +440,6 @@ tracker/
     │   ├── tos.php            # Terms of service
     │   └── unsubscribe.php    # Email notification preferences
     └── .htaccess              # Deny all access
-│
-├── sql/                       # DB helpers / migrations (run once; not needed at runtime, web-denied)
-│   ├── performance_indexes.sql # Index definitions for existing installs
-│   ├── apply_indexes.php      # Idempotent index applier: php sql/apply_indexes.php
-│   ├── 2026-07-08_audit_settings.sql # Adds audit/hardening settings keys (safe INSERT IGNORE)
-│   └── 2026-07-08_livesync_mode.sql   # Adds the Live Syncs counter mode key (safe INSERT IGNORE)
-│
-└── tests/
-    └── run.php                # Unit tests for pure helpers: php tests/run.php
 ```
 
 ---
@@ -490,34 +507,8 @@ All require active admin session. Prefix: `admin/`
 | `admin/check_blacklist` | GET | Test blacklist file permissions |
 | `admin/tracker_service_status` | GET | Restart recommendations + service status for the dashboard |
 | `admin/restart_tracker` | POST | Restart the configured tracker service (password-confirmed) |
-
----
-
-## Updating
-
-For existing installations updating from an older version:
-
-1. Back up your database and `config/` directory
-2. Replace all files except the `config/` directory
-3. Apply any pending migrations from `sql/` — they are data-only and safe to re-run:
-   ```bash
-   mysql -u <user> -p <database> < sql/2026-07-08_audit_settings.sql
-   mysql -u <user> -p <database> < sql/2026-07-08_livesync_mode.sql
-   mysql -u <user> -p <database> < sql/2026-07-09_opentracker_service.sql
-   ```
-   These add new settings keys (stats cache TTL, extra rate limits, session timeouts, trusted-proxy
-   options, Live Syncs counter mode, and the OpenTracker service-restart options) with sensible
-   defaults **without** overwriting anything you've customised. Then open **Admin → Settings** and
-   review the new fields (in particular set **Tracker Statistics → Cache Lifetime / TTL** to ≥ your
-   real upstream fetch time, and — if you want one-click restarts — **OpenTracker Service → Service
-   name**; see [OpenTracker service restart](#opentracker-service-restart) for the sudoers rule).
-4. The application will otherwise continue working — settings are stored in the database, not in files
-
-There are **no schema (DDL) changes** in this update; every new option lives in the `settings` table.
-
-> **Security housekeeping when updating:** remove any leftover `*.orig`/`*.bak` files (e.g. a stray
-> `config/hash.txt.orig` would leak the admin password hash), delete `install.php` if present, and
-> make sure `config/database.php` contains no plaintext credentials in comments.
+| `admin/reload_tracker` | POST | Reload the tracker blacklist via SIGHUP / `systemctl reload` (password-confirmed) |
+| `admin/test_tracker_permission` | GET | Read-only `sudo -n -l` check of restart/reload permission (`op=restart\|reload`) |
 
 ---
 
@@ -557,6 +548,14 @@ raw `api.php?endpoint=tracker_stats&source=stats` JSON): `syncing_in_background:
 - Use the **Test** button in admin settings to verify path and permissions
 - The PHP process user (e.g., `www-data`) must have read+write access
 - On Linux: `sudo chown www-data:www-data /path/to/blacklist && sudo chmod 664 /path/to/blacklist`
+
+### Blacklist changes not taking effect at the tracker
+The file updates but OpenTracker keeps its old copy until it re-reads it (only at startup or on
+SIGHUP). Configure the service name and enable **Auto-reload blacklist** so the app sends SIGHUP
+(`systemctl reload`) automatically after each change — see
+[OpenTracker service reload & restart](#opentracker-service-reload--restart). Use **Test reload
+permission** to confirm the sudoers rule, and make sure the unit defines
+`ExecReload=/bin/kill -HUP $MAINPID`.
 
 ### 500 errors or blank pages
 - Check PHP error logs: `tail -f /var/log/apache2/error.log`

@@ -163,10 +163,15 @@ if ($updatedAppeal) {
 // Auto-close and archive other pending appeals for the same hash + type
 $autoClosed = autoCloseRelatedAppeals($db, $appeal['infoHash'], $appealType, $id, $cfg);
 
-jsonResponse([
+// If the blacklist file changed (a hash was blocked or unblocked), reload the tracker (SIGHUP).
+$reload = ($blocked || $unblocked) ? autoReloadTrackerBlacklist($cfg) : null;
+
+$response = [
     'success' => true,
     'message' => 'Appeal ' . $newStatus,
     'unblocked' => $unblocked,
     'blocked' => $blocked,
     'auto_closed' => $autoClosed,
-]);
+];
+if ($reload) $response['reload'] = $reload;
+jsonResponse($response);

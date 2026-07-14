@@ -431,20 +431,39 @@
             <!-- OpenTracker Service -->
             <div class="settings-section">
                 <h5>OpenTracker Service</h5>
-                <small class="settings-hint d-block mb-3">Define the systemd unit of your tracker (e.g. <code>opentracker</code> or <code>opentracker.service</code>). When set, a <strong>Restart tracker</strong> button appears on the Dashboard that runs <code>systemctl restart &lt;name&gt;</code> on the server, together with smart recommendations that turn <span class="text-warning">orange</span> or <span class="text-danger">red</span> when a restart is advisable (after blacklist changes, or a long uptime). The web/PHP user must be allowed to run that command &mdash; see the README (sudoers). Leave the name empty to hide the button entirely.</small>
+                <small class="settings-hint d-block mb-3">Define the systemd unit of your tracker (e.g. <code>opentracker</code> or <code>opentracker.service</code>). When set, <strong>Reload</strong> and <strong>Restart tracker</strong> buttons appear on the Dashboard, together with smart recommendations that turn <span class="text-warning">orange</span> or <span class="text-danger">red</span> when a restart is advisable (after blacklist changes, or a long uptime). <strong>Reload</strong> runs <code>systemctl reload &lt;name&gt;</code> &mdash; a <strong>SIGHUP</strong> that makes OpenTracker re-read its white/blacklist with <em>no downtime</em>; <strong>Restart</strong> runs <code>systemctl restart &lt;name&gt;</code> (brief downtime). The web/PHP user must be allowed to run those commands &mdash; use the <strong>Test</strong> buttons below and see the README (sudoers). Leave the name empty to hide the buttons entirely.</small>
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label class="form-label">Service name <small class="settings-hint">(empty = disabled)</small></label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="opentracker_service_name" value="<?= sanitize($cfg['opentracker_service_name'] ?? '') ?>" placeholder="opentracker" pattern="[A-Za-z0-9._@-]+" maxlength="128">
                         <small class="settings-hint">Only letters, digits and <code>. _ @ -</code> are allowed.</small>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-3">
                         <label class="form-label">Run via sudo</label>
                         <select class="form-select bg-dark text-light border-secondary" name="opentracker_restart_use_sudo">
-                            <option value="1" <?= ($cfg['opentracker_restart_use_sudo'] ?? '1') === '1' ? 'selected' : '' ?>>Yes &mdash; <code>sudo -n systemctl</code></option>
-                            <option value="0" <?= ($cfg['opentracker_restart_use_sudo'] ?? '1') === '0' ? 'selected' : '' ?>>No &mdash; direct <code>systemctl</code></option>
+                            <option value="1" <?= ($cfg['opentracker_restart_use_sudo'] ?? '1') === '1' ? 'selected' : '' ?>>Yes &mdash; <code>sudo -n</code></option>
+                            <option value="0" <?= ($cfg['opentracker_restart_use_sudo'] ?? '1') === '0' ? 'selected' : '' ?>>No &mdash; direct</option>
                         </select>
-                        <small class="settings-hint">Most setups need sudo: php-fpm runs unprivileged and cannot restart services directly.</small>
+                        <small class="settings-hint">Most setups need sudo: php-fpm runs unprivileged.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Auto-reload blacklist</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="opentracker_auto_reload">
+                            <option value="1" <?= ($cfg['opentracker_auto_reload'] ?? '1') === '1' ? 'selected' : '' ?>>Yes &mdash; SIGHUP on change</option>
+                            <option value="0" <?= ($cfg['opentracker_auto_reload'] ?? '1') === '0' ? 'selected' : '' ?>>No &mdash; manual only</option>
+                        </select>
+                        <small class="settings-hint">Auto <code>systemctl reload</code> after every block/unblock/restore so changes apply instantly.</small>
+                    </div>
+                </div>
+                <div class="row g-3 mt-1">
+                    <div class="col-12">
+                        <label class="form-label d-block">Permission test</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-restart"><i class="bi bi-shield-check"></i> Test restart permission</button>
+                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-reload"><i class="bi bi-shield-check"></i> Test reload permission</button>
+                        </div>
+                        <small class="settings-hint d-block mt-1">Checks whether the web user may run the command (via <code>sudo -n -l</code>) &mdash; it does <strong>not</strong> restart or reload anything. Save the service name first. Fix instructions are shown if the test fails.</small>
+                        <div id="tracker-perm-result" class="mt-1 blacklist-result"></div>
                     </div>
                 </div>
                 <div class="row g-3 mt-1">
@@ -653,6 +672,46 @@
             el.innerHTML = '<span class="text-danger">Network error</span>';
         }
     });
+
+    // --- OpenTracker restart/reload permission test -------------------------
+    // Calls the read-only `sudo -n -l` check on the server. It never restarts or reloads anything;
+    // it only reports whether the web user is allowed to, plus copy-paste sudoers fixes on failure.
+    async function runTrackerPermTest(op, btn) {
+        const el = document.getElementById('tracker-perm-result');
+        const label = op === 'reload' ? 'reload' : 'restart';
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
+        el.innerHTML = '<span class="text-info">Testing ' + label + ' permission...</span>';
+        try {
+            const res = await fetch(API_BASE + 'admin/test_tracker_permission&op=' + encodeURIComponent(op), {
+                method: 'GET',
+                headers: { 'X-CSRF-Token': CSRF },
+            });
+            const json = await res.json();
+            const suggestions = (json.suggestions || []);
+            const meta = '<br><small style="color:#a0a0b0;">Command: <code>' + esc(json.command || '') + '</code>'
+                + (json.output ? '<br>Output: <code>' + esc(json.output) + '</code>' : '')
+                + '<br>OS: ' + esc(json.os || '') + ' | PHP user: ' + esc(json.php_user || '') + '</small>';
+            if (json.ok) {
+                el.innerHTML = '<span class="text-success">&#10003; The web user can ' + label + ' the tracker.</span>'
+                    + (suggestions.length ? '<br><small style="color:#a0a0b0;">' + suggestions.map(esc).join('<br>') + '</small>' : '')
+                    + meta;
+            } else {
+                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || ['Permission test failed']).map(esc).join('<br>') + '</span>'
+                    + (suggestions.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + suggestions.map(esc).join('<br>') + '</small>' : '')
+                    + meta;
+            }
+        } catch {
+            el.innerHTML = '<span class="text-danger">Network error</span>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
+    }
+
+    document.getElementById('btn-test-restart').addEventListener('click', (e) => runTrackerPermTest('restart', e.currentTarget));
+    document.getElementById('btn-test-reload').addEventListener('click', (e) => runTrackerPermTest('reload', e.currentTarget));
 
     document.getElementById('btn-logout').addEventListener('click', async () => {
         await fetch(API_BASE + 'admin/logout', { method: 'POST', headers: { 'X-CSRF-Token': CSRF } });
