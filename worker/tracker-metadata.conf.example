@@ -6,8 +6,8 @@ user = tracker_meta
 password = CHANGE_ME
 
 [worker]
-concurrency = 3
-timeout_seconds = 90
+concurrency = 4
+timeout_seconds = 180
 poll_interval = 3
 stale_claim_minutes = 10
 heartbeat_file = /home/tracker/metadata_worker/heartbeat
