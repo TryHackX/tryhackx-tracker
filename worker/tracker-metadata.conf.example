@@ -1,0 +1,19 @@
+# /etc/tracker-metadata.conf — owned by root:tracker, mode 0640
+[db]
+host = localhost
+name = tracker
+user = tracker_meta
+password = CHANGE_ME
+
+[worker]
+concurrency = 3
+timeout_seconds = 90
+poll_interval = 3
+stale_claim_minutes = 10
+heartbeat_file = /home/tracker/metadata_worker/heartbeat
+listen_port = 6881
+# own tracker first, then a few public trackers to speed up metadata discovery
+trackers = udp://tryhackx.org:6969/announce,udp://tracker.opentrackr.org:1337/announce,udp://open.stealth.si:80/announce,udp://tracker.torrent.eu.org:451/announce
+max_files = 5000
+tmp_dir = /home/tracker/metadata_worker/tmp
+log_level = INFO

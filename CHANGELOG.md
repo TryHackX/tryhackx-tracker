@@ -4,6 +4,89 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-08-18
+
+> **Whitelist mode.** Run OpenTracker with `-DWANT_ACCESSLIST_WHITE` and let the app own the
+> accesslist: public registration, server-to-server API, admin Whitelist page, metadata worker.
+> Upgrade = copy the files; the database upgrades itself on the first request
+> (`settings.schema_version = 2`). Existing installations keep working unchanged in blacklist mode
+> (`tracker_mode` defaults to `blacklist`). See README → *Whitelist mode* for the switch-over runbook.
+
+### Added
+- **Tracker mode** setting (`blacklist` | `whitelist`). Block/unblock from reports, appeals,
+  restore and permanent delete now go through mode-aware helpers (`trackerBlockHash()` /
+  `trackerUnblockHash()` / `isHashBlocked()` in `includes/whitelist.php`): in whitelist mode
+  "block" = **ban** (hash removed from the served list and refused on registration), "unblock" =
+  lift the ban.
+- **Whitelist service** (`includes/whitelist.php`): DB is the source of truth (`whitelist`,
+  `banned_hashes`), the accesslist file is appended for additions and **regenerated atomically**
+  (temp file + `rename`, keyset pagination) for removals; refuses to write an EMPTY file
+  (OpenTracker whitelist mode is fail-closed); SIGHUP reload is **debounced** (additions ≥ 45 s
+  apart, removals/bans within 15 s, ≤ 12 reloads / 5 min because OpenTracker keeps superseded
+  list generations for 5 minutes) with failure backoff; append and regeneration are serialised
+  on one lock; a per-request janitor plus `tools/janitor.php` (systemd timer) fire pending work
+  even without web traffic. Path safety: absolute, outside the web root, no `.php`/`.htaccess`
+  names, no symlinks. `tools/whitelist_cli.php` for status / bulk add / regen / import.
+- **Public registration page** `?action=whitelist`: one magnet link or 40-hex hash per line,
+  CAPTCHA always required (registration is disabled — fail closed — when no CAPTCHA provider is
+  configured), per-IP hourly submissions, per-IP and global daily caps (IPv6 counted per /64),
+  duplicate / banned checks, registrant IP stored, per-item results with a generated magnet link
+  and "active in ~N s", "check status" form (`whitelist_check`). Mode-aware public copy (home,
+  info, terms, status page), nav link, `tracker.redirect_url` friendly.
+- **Server-to-server API** `v1/whitelist/submit` / `v1/whitelist/ping` with
+  `Authorization: Bearer key_id.secret` (only `sha256(secret)` is stored, shown once at creation);
+  additive-only and idempotent; **any failed authentication with an Authorization header bans the
+  source IP (v4 exact / v6 /64) for `api_ban_days` = 30** and stores the whole offending request
+  (headers minus secrets, body up to 256 KB) for review; no-header requests get 401 without a
+  ban; disabled keys 403 without a ban; `api_ban_exempt_ips` (seeded with the server's own
+  addresses) are never banned; global insert throttle on ban rows. `tools/api_client_example.py`.
+- **Admin Whitelist page** (`?action=admin-whitelist`, `assets/js/admin-whitelist.js` +
+  shared `assets/js/admin-common.js`): status card (mode, file health, DB counts, pending reload,
+  last reload, worker heartbeat, warnings; Regenerate / Reload / Import blacklist → bans), table
+  with the multi-column sort stack, hash-prefix / IP / name / file-name search (FULLTEXT with LIKE
+  fallback), source / metadata / banned filters, **Group by IP** with per-IP counts, bulk delete /
+  ban / fetch-metadata, details modal (magnet generator with the tracker's announce URLs, name,
+  size, collapsible file tree, seeders/leechers/completed via live OpenTracker scrape, source and
+  forum reference, ban reason), Banned hashes view, API clients view (create → token shown once,
+  enable/disable, rename, delete), API bans view (pretty-printed request snapshot, lift, manual
+  ban). All dynamic DOM is built with `textContent`/`createElement` — torrent names, file paths
+  and snapshots are attacker-controlled.
+- **Metadata worker** (`worker/`): `python3-libtorrent` daemon under systemd (unprivileged
+  `tracker` user, hardened unit, column-level MySQL grants) that resolves torrent name / size /
+  file list through DHT + trackers in upload mode into `whitelist` / `whitelist_files`;
+  heartbeat file shown in the panel; rows are queued by the panel or automatically for
+  API/forum/admin additions.
+- **CAPTCHA provider**: Google reCAPTCHA v2 or **Cloudflare Turnstile** (`captcha_provider`,
+  `turnstile_site_key`, `turnstile_secret`), one shared modal `assets/js/captcha.js` (removed the
+  three duplicated copies), generic `verifyCaptcha()` / `captchaTokenFromInput()` (accepts
+  `captcha_token` and the legacy `g-recaptcha-response`), siteverify calls with hard timeouts,
+  CSP updated for `challenges.cloudflare.com`.
+- **Schema bootstrap** `includes/schema.php` (`ensureSchema()`, advisory-locked, idempotent,
+  shared with `install.php`).
+- `tools/opentracker/sighup-udp-workers.patch` — upstream OpenTracker spawns
+  `listen.udp.workers` threads before it blocks SIGHUP, so `systemctl reload` could kill the
+  process instead of reloading the list; the patch blocks the signals first.
+
+### Changed
+- `api.php` resolves the endpoint before `session_start()`; `v1/*` calls are stateless (no session
+  cookie) and skip the report janitors. The whitelist janitor runs on every request (pollers
+  included) — it is a single small state-file read.
+- `getTrackerServiceWarnings()` reports whitelist health (empty/unwritable file, pending
+  regeneration or reload, failed reloads, stale worker) instead of blacklist-change counts when in
+  whitelist mode; `check_block` / `submit_report` answer with `whitelisted` in whitelist mode.
+- Settings page: new **CAPTCHA** (provider + Turnstile keys), **Tracker Mode & Whitelist** and
+  **Server-to-server API** sections; `save_settings.php` validates the new keys.
+- Dashboard / Settings headers link to the Whitelist page.
+
+### Fixed
+- `removeHashFromBlacklist()` now writes a temp file and `rename()`s it — the previous in-place
+  truncate could let OpenTracker observe an empty blacklist during a reload.
+
+### Security
+- Bearer secrets stored hashed; API bans keyed per IPv6 /64; JSON responses/snapshots use
+  `JSON_INVALID_UTF8_SUBSTITUTE`; whitelist path restrictions; admin whitelist UI free of
+  `innerHTML` interpolation; forum reference links only for `http(s)` URLs with `rel="noopener"`.
+
 ## [1.1.0] — 2026-07-14
 
 ### Added

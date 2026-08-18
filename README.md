@@ -7,7 +7,10 @@
 
 A self-hosted BitTorrent tracker information and DMCA/abuse report management system. Built with PHP and MySQL — no frameworks, no dependencies, no build step.
 
-Compatible with [erdgeist OpenTracker](https://erdgeist.org/arts/software/opentracker/) and any other tracker software that uses a newline-separated text file for blacklisting info hashes. Point the blacklist file path in admin settings to your tracker's blacklist file and the application manages entries automatically.
+Compatible with [erdgeist OpenTracker](https://erdgeist.org/arts/software/opentracker/) and any other tracker software that uses a newline-separated text file for black- or whitelisting info hashes. Two modes (setting **Tracker mode**):
+
+- **Blacklist** (classic) — every torrent is served except blocked hashes; the app manages the blacklist file.
+- **Whitelist** (1.2.0+) — **only registered hashes are served**. The app owns the whitelist (database → atomically generated file → SIGHUP), offers a public **registration page** (CAPTCHA + rate limits), a **server-to-server API** with bearer keys and strict IP bans (used by the [Flarum forum extension](https://github.com/TryHackX/flarum-homepage-blocks) to register every posted magnet link), an **admin Whitelist page** (multi-column sort, IP grouping, name/file search, magnet generator, seed/leech scrape, bans, API clients) and an optional **metadata worker** (libtorrent, DHT) that stores torrent names and file lists. See [Whitelist mode](#whitelist-mode).
 
 Provides a public-facing website for tracker information, abuse report submission, report status checking, block checking, appeal management, and a full-featured admin panel with email notifications.
 
@@ -32,7 +35,16 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Tracker Reload / Restart + Smart Recommendations** — automatically reload the tracker's blacklist (SIGHUP via `systemctl reload`, no downtime) after every block/unblock/restore, plus one-click **Reload** and **Restart** buttons (password-confirmed), permission **Test** buttons, and orange/red hints that surface when a restart is due after blacklist changes or a long uptime — see [OpenTracker service reload & restart](#opentracker-service-reload--restart)
 - **Email Notifications** — professional dark-themed HTML emails for all status changes, with per-type unsubscribe
 - **Auto-Archiving** — automatically archive old reviewed reports and resolved appeals after configurable days
-- **Settings** — all configuration via web UI (site info, reCAPTCHA, CAPTCHA tuning, donations, footer, etc.)
+- **Settings** — all configuration via web UI (site info, CAPTCHA provider + tuning, whitelist, API, donations, footer, etc.)
+
+### Whitelist mode (1.2.0)
+- **Registration page** (`?action=whitelist`) — anyone can register magnet links / info hashes for free (CAPTCHA always required, per-IP hourly + daily caps, global daily cap, duplicate / banned checks, registrant IP stored for abuse detection); shows a generated magnet with the tracker's announce URLs and a "check status" form
+- **Whitelist file service** — DB is the source of truth; the accesslist file is appended for additions and **regenerated atomically** (temp file + rename) for removals; the tracker is reloaded via SIGHUP with debounce (adds ≥ 45 s apart, removals/bans promptly, capped per 5 min); refuses to write an empty file (OpenTracker whitelist mode is fail-closed); a systemd timer runs the janitor so pending reloads fire even without web traffic
+- **Server-to-server API** (`v1/whitelist/submit`, `v1/whitelist/ping`) — `Authorization: Bearer key_id.secret` (only the secret's SHA-256 is stored), additive-only, idempotent; **any failed authentication attempt bans the source IP (v4 exact / v6 /64) for 30 days**, storing the whole offending request for review; exempt-IP list (seeded with the server's own addresses); admin panel to create/disable/delete clients and to view/lift bans
+- **Admin Whitelist page** — status card (mode, file health, DB counts, pending reload, last reload, worker heartbeat, warnings), table with multi-column sort, hash-prefix / IP / name / file-name search (FULLTEXT), source & metadata filters, **Group by IP**, bulk delete/ban/fetch-metadata, details modal (magnet generator, name/size/file tree, seeders/leechers via live scrape, source & forum reference), Banned hashes, API clients, API bans (pretty-printed request snapshot)
+- **Metadata worker** — optional `python3-libtorrent` daemon (systemd, unprivileged, column-level MySQL grants) that resolves name / size / file list through DHT + trackers in upload mode; the panel queues rows and polls
+- **Mode-aware moderation** — in whitelist mode "block" = ban (removed from the served list, can never be re-registered) and the report/appeal flows, status page and public copy adapt automatically
+- **CAPTCHA provider** — Google reCAPTCHA v2 or Cloudflare Turnstile (one shared modal, fail-closed verification with timeouts)
 
 ### Email System
 - **Submission Confirmation** — sent when a report is filed
@@ -192,7 +204,9 @@ All settings are managed through **Admin Panel → Settings** (`/?action=admin` 
 |---------|----------|
 | **Site Configuration** | Site name, URL, announce URLs (HTTP/S + UDP), GitHub URL |
 | **Contact & Email** | Site email, contact visibility, email obfuscation, HMAC secret |
-| **reCAPTCHA v2** | Enable/disable globally and per-context (report, login, status, appeals, block check) |
+| **CAPTCHA** | Provider (reCAPTCHA v2 / Turnstile), keys, enable globally and per-context (report, login, status, appeals, block check); the whitelist registration page always requires a CAPTCHA |
+| **Tracker Mode & Whitelist** | `blacklist` / `whitelist`, whitelist file path (+ Test), public registration on/off, max hashes per submission, submissions per hour, per-IP and global daily caps, minimum seconds between tracker reloads, OpenTracker scrape URL — see [Whitelist mode](#whitelist-mode) |
+| **Server-to-server API** | Enable, ban length (days), exempt IPs — clients and bans are managed on the Whitelist page |
 | **Smart CAPTCHA** | Point threshold, grace period, points per action type |
 | **Public Pages** | Auto-archive days for reports and appeals |
 | **Rate Limits & Blacklist** | Reports/status-checks/block-lookups/appeals per hour (per IP), items per page, message length limits, blacklist file path with test |
@@ -317,6 +331,183 @@ print copy-paste fix instructions if a rule is missing. The service name is vali
 strict systemd-unit whitelist and passed through `escapeshellarg`, so it can't be used to inject a
 second command. If PHP's `exec()` is disabled the buttons are greyed out with an explanatory note.
 On failure the exact `systemctl`/sudo output is shown so you can fix the sudoers rule.
+
+### Whitelist mode
+
+Since 1.2.0 the app can drive OpenTracker in **whitelist** mode: the tracker answers only for
+info hashes present in its accesslist file. This is the answer to datacenters/bots hammering a
+public tracker with millions of foreign torrents — after the switch the tracker only tracks *your*
+catalogue (forum magnets + registered hashes), memory drops from hundreds of MB to a few MB and the
+outbound peer-list traffic disappears. (It does **not** reduce inbound UDP `connect` floods — only
+a kernel/edge rate limit can; see the note at the end.)
+
+#### 1. Build OpenTracker with whitelist support
+
+Black- and whitelist are compile-time exclusive. Build from source with:
+
+```bash
+sudo apt install -y build-essential git zlib1g-dev wget xz-utils
+mkdir -p ~/build && cd ~/build
+wget http://www.fefe.de/libowfat/libowfat-0.34.tar.xz && tar -xf libowfat-0.34.tar.xz && mv libowfat-0.34 libowfat
+make -C libowfat -j$(nproc)
+git clone git://erdgeist.org/opentracker && cd opentracker
+git apply /path/to/tryhackx-tracker/tools/opentracker/sighup-udp-workers.patch   # see below
+make -j$(nproc) opentracker FEATURES="-DWANT_ACCESSLIST_WHITE -DWANT_COMPRESSION_GZIP -DWANT_RESTRICT_STATS -DWANT_FULLSCRAPE -DWANT_MODEST_FULLSCRAPES -DWANT_SPOT_WOODPECKER"
+strings opentracker | grep -E 'access\.whitelist|deflate|access\.stats_path'   # all three must appear
+```
+
+> `make FEATURES=...` on the command line **overrides** the Makefile's `include Makefile.gzip`,
+> so `-DWANT_COMPRESSION_GZIP` must be listed explicitly. Keep `-DWANT_RESTRICT_STATS` — without it
+> `/stats` (including `mode=statedump`) is public.
+
+> **`tools/opentracker/sighup-udp-workers.patch`** — upstream spawns the `listen.udp.workers`
+> threads before it blocks SIGHUP, so `systemctl reload` (SIGHUP) can hit a worker thread and
+> **kill the tracker** instead of reloading the list. The one-line patch blocks the signals first.
+> Apply it whenever you use `listen.udp.workers`.
+
+`/home/tracker/opentracker.conf` (no `listen.*` line = default dual-stack bind on 6969):
+
+```
+listen.udp.workers 4
+access.whitelist /home/tracker/accesslist/whitelist
+access.stats 203.0.113.10                # your web server's IP (requires -DWANT_RESTRICT_STATS)
+access.stats_path stats-8f3a1c2d9e0b     # random path instead of /stats — put it in "Tracker stats URL"
+tracker.redirect_url https://tracker.example.org/?action=whitelist   # HTTP GET / → registration page
+```
+
+#### 2. Whitelist file location
+
+The file is **replaced by rename()** as the web user, so the *directory* must be writable by PHP;
+OpenTracker (user `tracker`) only needs to read it:
+
+```bash
+sudo install -d -o tracker -g www-data -m 2770 /home/tracker/accesslist
+```
+
+Set **Settings → Tracker Mode & Whitelist → Whitelist file path** to
+`/home/tracker/accesslist/whitelist` and press **Test**. Do not create the file by hand — the panel's
+**Regenerate file** (or the first addition) creates it as `www-data`, mode 0644. The path is
+validated: absolute, outside the web root, no `.php`/`.htaccess` names, no symlinks.
+
+#### 3. Switch over (zero-downtime order)
+
+1. Deploy the app (schema upgrades itself on the first request: tables `whitelist`,
+   `whitelist_files`, `banned_hashes`, `api_clients`, `api_bans`; `settings.schema_version = 2`).
+2. Bootstrap the whitelist while still in blacklist mode, e.g. from a file of hashes:
+   `sudo -u www-data php tools/whitelist_cli.php add --source=forum < hashes.txt`
+   (or paste them into **Whitelist → Add hashes**).
+3. **Import blacklist → bans** (Whitelist page) so previously blocked hashes stay unservable.
+4. Settings: `Tracker mode = whitelist`, then **Regenerate file** and check
+   `grep -cE '^[0-9a-f]{40}$' /home/tracker/accesslist/whitelist` equals the active count.
+5. Install the new binary + config, `systemctl start opentracker`, and verify with
+   `journalctl -u opentracker` (**no** "Can't open accesslist file") and one HTTP announce for a
+   whitelisted hash (bencoded `interval`) vs a random one (`failure reason ... not authorized`).
+6. Rollback = restore the previous binary/config and set `Tracker mode = blacklist`.
+
+Install the janitor timer so pending reloads fire even when nobody visits the site (there is no
+cron dependency otherwise):
+
+```ini
+# /etc/systemd/system/tracker-whitelist-janitor.service
+[Unit]
+Description=Tracker whitelist janitor
+[Service]
+Type=oneshot
+User=www-data
+ExecStart=/usr/bin/php /var/www/tracker.example.org/tools/janitor.php
+```
+```ini
+# /etc/systemd/system/tracker-whitelist-janitor.timer
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+[Install]
+WantedBy=timers.target
+```
+`sudo systemctl enable --now tracker-whitelist-janitor.timer`. The sudoers rule from
+[OpenTracker service reload & restart](#opentracker-service-reload--restart) is all the web user needs.
+
+#### 4. Public registration
+
+`?action=whitelist` — one magnet link or 40-hex hash per line (max **Max hashes per submission**),
+CAPTCHA **always** required (registration is disabled when no CAPTCHA provider is configured —
+fail closed), **Submissions per hour** per IP (v6 counted per /64), **New hashes per day** per IP
+and globally. Every row stores the registrant IP; hashes on the ban list are refused. The response
+lists each item as *registered / already registered / banned / invalid* and tells the user in how
+many seconds the tracker will pick the new hashes up.
+
+#### 5. Server-to-server API
+
+Create a client on **Whitelist → API clients** — the bearer token `key_id.secret` is shown **once**
+(only `sha256(secret)` is stored). Enable the API in Settings (`api_enabled`).
+
+```
+POST /api.php?endpoint=v1/whitelist/submit
+Authorization: Bearer 0123456789abcdef.<64 hex>
+Content-Type: application/json
+
+{"items":[{"magnet":"magnet:?xt=urn:btih:...","name":"optional","ref":{"post_id":12,"discussion_id":3,"url":"https://forum/d/3/1"}},
+          {"hash":"<40 hex>"}],
+ "source":"forum"}
+→ 200 {"ok":true,"results":[{"index":0,"hash":"...","status":"added|exists|banned|invalid","error":null}],
+        "summary":{"added":1,"exists":0,"banned":0,"invalid":0},"active_in_seconds":37,"server_time":1755500000}
+
+GET  /api.php?endpoint=v1/whitelist/ping   → {"ok":true,"server_time":..,"mode":"whitelist","whitelist_count":159,"api_version":1,"client":"label"}
+```
+
+Rules (deliberately strict — "very restrictive"):
+
+- ≤ 500 items per call, body ≤ 512 KB, additive-only (there is no remove endpoint — removal is a
+  moderation decision made in the panel).
+- **Any failed authentication with an `Authorization` header present** (malformed header, unknown
+  key ID, wrong secret) → **the source IP is banned for `api_ban_days` (30)** and the full request
+  (headers without secrets, body up to 256 KB) is stored — review, lift or add bans on
+  **Whitelist → API bans**. Requests without any `Authorization` header get 401 and are not banned
+  (crawler noise); a *disabled* key gets 403 without a ban (admin action).
+- IPs in **API ban exempt IPs** (seeded with `127.0.0.1, ::1` and the server's own address — keep
+  your forum's outbound IP there) are never banned nor blocked. Test new keys from an exempt IP.
+- `tools/api_client_example.py` is a stdlib-only client; the Flarum extension
+  [flarum-homepage-blocks](https://github.com/TryHackX/flarum-homepage-blocks) ≥ 2.6.0 uses this API
+  to register every magnet posted on the forum (live + "scan whole forum").
+
+#### 6. Metadata worker (optional)
+
+See [`worker/README.md`](worker/README.md): a small `python3-libtorrent` daemon that resolves torrent
+name / size / file list for whitelisted hashes (DHT + trackers, upload mode — never downloads
+payload) into `whitelist` / `whitelist_files`, where the panel shows and searches them. Runs as the
+`tracker` user with column-level MySQL grants; the panel shows its heartbeat.
+
+#### CLI
+
+```bash
+sudo -u www-data php tools/whitelist_cli.php status
+sudo -u www-data php tools/whitelist_cli.php add [--source=admin|api|forum|web] [--meta=0] < hashes.txt
+sudo -u www-data php tools/whitelist_cli.php regen [--reload]
+sudo -u www-data php tools/whitelist_cli.php import-blacklist
+sudo -u www-data php tools/whitelist_cli.php reload
+```
+
+#### What whitelist mode does NOT fix — inbound UDP floods (optional, not applied by default)
+
+~70 % of an abused tracker's traffic is UDP `connect` (action 0), which never touches the
+accesslist. If your link/CPU still suffers, rate-limit **per source IP at the kernel** — separate
+table, only `udp dport 6969`, instant rollback with `nft delete table inet ottrack`:
+
+```nft
+table inet ottrack {
+    set flood4 { type ipv4_addr; flags dynamic, timeout; timeout 10m; size 131072; }
+    set trusted4 { type ipv4_addr; elements = { 127.0.0.1 } }
+    chain prerouting {
+        type filter hook prerouting priority raw - 10; policy accept;
+        udp dport != 6969 accept
+        ip saddr @trusted4 accept
+        ip saddr @flood4 update @flood4 { ip saddr } counter drop
+        udp dport 6969 add @flood4 { ip saddr limit rate over 60/second burst 120 packets } counter drop
+    }
+}
+```
+plus larger UDP buffers (`net.core.rmem_max = 16777216`, `net.core.netdev_max_backlog = 5000`).
+Start generous (60/s) and tighten while watching `nft list set inet ottrack flood4`.
 
 ### Reverse proxy / Nginx notes
 
@@ -458,6 +649,14 @@ The installer creates the following tables:
 | `sent_emails` | Log of all sent email notifications |
 | `unsubscribed_emails` | Legacy full-unsubscribe list |
 | `email_preferences` | Per-email, per-type notification preferences |
+| `whitelist` | Whitelisted info hashes (source, IP, metadata, scrape cache, ban flag) — schema v2 |
+| `whitelist_files` | File lists resolved by the metadata worker (FULLTEXT searchable) |
+| `banned_hashes` | Hashes that must never be served / re-registered (whitelist mode "block") |
+| `api_clients` | Server-to-server API clients (bearer key id + secret hash) |
+| `api_bans` | IP bans issued by the API auth layer (with request snapshot) or manually |
+
+Schema upgrades are applied automatically on the first request (`includes/schema.php`,
+`settings.schema_version`); fresh installs get the same tables from `install.php`.
 
 ---
 
@@ -468,7 +667,8 @@ The installer creates the following tables:
 - **Frontend:** Vanilla JavaScript (no build step), Bootstrap 5 (CDN) for admin panel, custom dark theme CSS for public pages
 - **Email:** PHP `mail()` with multipart MIME (HTML + plain text), dark-themed templates
 - **Icons:** Bootstrap Icons (CDN, admin panel only)
-- **CAPTCHA:** Google reCAPTCHA v2 (explicit render mode, modal overlay)
+- **CAPTCHA:** Google reCAPTCHA v2 or Cloudflare Turnstile (explicit render mode, one shared modal — `assets/js/captcha.js`)
+- **Metadata worker (optional):** Python 3 + `python3-libtorrent` (see `worker/`)
 
 ---
 
@@ -487,6 +687,10 @@ All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` w
 | `unsubscribe` | GET/POST | Unsubscribe from emails (GET = link click, POST = one-click) |
 | `save_email_preferences` | POST | Save per-type notification preferences |
 | `transparency` | GET | Get transparency page data |
+| `whitelist_submit` | POST | Register magnet links / hashes (CSRF + CAPTCHA + rate limits) |
+| `whitelist_check` | GET/POST | Is a hash registered / banned? |
+| `v1/whitelist/submit` | POST | Server-to-server registration (bearer key, see [Whitelist mode](#whitelist-mode)) |
+| `v1/whitelist/ping` | GET | Server-to-server health check |
 
 ### Admin Endpoints
 
@@ -509,6 +713,16 @@ All require active admin session. Prefix: `admin/`
 | `admin/restart_tracker` | POST | Restart the configured tracker service (password-confirmed) |
 | `admin/reload_tracker` | POST | Reload the tracker blacklist via SIGHUP / `systemctl reload` (password-confirmed) |
 | `admin/test_tracker_permission` | GET | Read-only `sudo -n -l` check of restart/reload permission (`op=restart\|reload`) |
+| `admin/check_whitelist_path` | POST | Test the whitelist file / directory permissions |
+| `admin/whitelist_status` | GET | Status card data (file, state, counts, worker heartbeat, warnings) |
+| `admin/fetch_whitelist` | GET | Paginated whitelist (`sort=col:dir,…`, `search`, `search_files`, `source`, `meta`, `banned`, `ip`, `group=ip`) |
+| `admin/whitelist_item` | GET | Details for one entry (magnet, files, scrape, ban reason, API client) |
+| `admin/whitelist_add` / `whitelist_delete` / `whitelist_ban` / `whitelist_unban` | POST | Manage entries |
+| `admin/whitelist_fetch_meta` / `whitelist_scrape` | POST | Queue metadata fetch / live scrape |
+| `admin/whitelist_regenerate` / `whitelist_import_blacklist` | POST | Rewrite the file (+ reload) / import the legacy blacklist as bans |
+| `admin/fetch_banned` / `banned_add` | GET / POST | Banned hashes |
+| `admin/fetch_api_clients` / `api_client_create` / `api_client_update` / `api_client_delete` | GET / POST | API clients (secret shown once) |
+| `admin/fetch_api_bans` / `api_ban_lift` / `api_ban_add` | GET / POST | API bans (`&id=` returns the request snapshot) |
 
 ---
 
