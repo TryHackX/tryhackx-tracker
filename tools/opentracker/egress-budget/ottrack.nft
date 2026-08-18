@@ -1,0 +1,36 @@
+#!/usr/sbin/nft -f
+# OpenTracker egress budget — see README "What whitelist mode does NOT fix".
+#
+# Why: on a small VPS the tracker answers EVERY UDP packet of the swarm that still points at it
+# (tens of thousands of clients with unregistered torrents, ~90-200k pps). When its replies saturate
+# the virtual NIC's transmit path, the hypervisor starts dropping INBOUND packets for the whole VM
+# (measured: 50 % of TCP SYNs / ICMP lost, web + SSH + game server unusable) — even though the guest
+# shows zero RX drops. Capping what the tracker sends keeps the box reachable.
+#
+# Policy: replies to clients that recently received a real announce/scrape reply (>= 20 B payload,
+# i.e. a whitelisted torrent) always pass and mark the client as "good" for 3 h; everything else the
+# tracker emits (connect replies + 8-byte "not authorized" replies) shares one packet-rate budget.
+# New whitelisted clients get through the budget on their first successful announce and are then
+# prioritised.
+#
+# Apply:    sudo nft -f ottrack.nft          (persist: /etc/nftables.d/ + include in /etc/nftables.conf)
+# Watch:    sudo nft list counters table inet ottrack ; sudo nft list set inet ottrack good4 | grep -c '\.'
+# Rollback: sudo nft delete table inet ottrack
+# Tune:     the limit below (50000/second worked on a 6-vCPU OVH VPS; 90000 = effectively off there).
+table inet ottrack {
+    set good4 { type ipv4_addr; flags dynamic, timeout; timeout 3h; size 262144; }
+    set good6 { type ipv6_addr; flags dynamic, timeout; timeout 3h; size 65536; }
+    counter announce_ok {}
+    counter passed_good {}
+    counter capped {}
+    chain output {
+        type filter hook output priority filter; policy accept;
+        udp sport != 6969 accept
+        # real announce (>= 20 B payload) or scrape reply -> remember the client for 3 h
+        meta nfproto ipv4 udp length >= 28 update @good4 { ip daddr }  counter name announce_ok accept
+        meta nfproto ipv6 udp length >= 28 update @good6 { ip6 daddr } counter name announce_ok accept
+        ip  daddr @good4 counter name passed_good accept
+        ip6 daddr @good6 counter name passed_good accept
+        limit rate over 50000/second counter name capped drop
+    }
+}

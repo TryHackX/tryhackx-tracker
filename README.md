@@ -338,8 +338,8 @@ Since 1.2.0 the app can drive OpenTracker in **whitelist** mode: the tracker ans
 info hashes present in its accesslist file. This is the answer to datacenters/bots hammering a
 public tracker with millions of foreign torrents — after the switch the tracker only tracks *your*
 catalogue (forum magnets + registered hashes), memory drops from hundreds of MB to a few MB and the
-outbound peer-list traffic disappears. (It does **not** reduce inbound UDP `connect` floods — only
-a kernel/edge rate limit can; see the note at the end.)
+outbound peer-list traffic disappears. (It does **not** reduce the inbound UDP swarm — see
+*What whitelist mode does NOT fix* at the end of this section for the measured egress-budget fix.)
 
 #### 1. Build OpenTracker with whitelist support
 
@@ -487,27 +487,35 @@ sudo -u www-data php tools/whitelist_cli.php import-blacklist
 sudo -u www-data php tools/whitelist_cli.php reload
 ```
 
-#### What whitelist mode does NOT fix — inbound UDP floods (optional, not applied by default)
+#### What whitelist mode does NOT fix — the inbound UDP swarm (optional, measured on tryhackx.org)
 
-~70 % of an abused tracker's traffic is UDP `connect` (action 0), which never touches the
-accesslist. If your link/CPU still suffers, rate-limit **per source IP at the kernel** — separate
-table, only `udp dport 6969`, instant rollback with `nft delete table inet ottrack`:
+Whitelist mode does not reduce **inbound** traffic: every client that ever had this tracker in a
+torrent keeps sending `connect` + `announce` (measured on tryhackx.org: **90–210k packets/s from
+~60 000 distinct IPs per 5 s**, the busiest single IP ≈ 70 pkt/s, 99.4 % of packets from IPs below
+60 pkt/s — i.e. a diffuse BitTorrent swarm, *not* a few attackers). Two consequences and one lever:
 
-```nft
-table inet ottrack {
-    set flood4 { type ipv4_addr; flags dynamic, timeout; timeout 10m; size 131072; }
-    set trusted4 { type ipv4_addr; elements = { 127.0.0.1 } }
-    chain prerouting {
-        type filter hook prerouting priority raw - 10; policy accept;
-        udp dport != 6969 accept
-        ip saddr @trusted4 accept
-        ip saddr @flood4 update @flood4 { ip saddr } counter drop
-        udp dport 6969 add @flood4 { ip saddr limit rate over 60/second burst 120 packets } counter drop
-    }
-}
-```
-plus larger UDP buffers (`net.core.rmem_max = 16777216`, `net.core.netdev_max_backlog = 5000`).
-Start generous (60/s) and tighten while watching `nft list set inet ottrack flood4`.
+- **Per-source-IP rate limits are useless** against this pattern (they catch < 1 % of packets and a
+  dynamic nft set of that many addresses overflows within a minute); they only help against a
+  *concentrated* flood. Measure first: `tcpdump -nn -i any -c 200000 udp dst port 6969 | awk
+  '{print $3}' | sort | uniq -c | sort -rn | head`.
+- **The tracker answers every packet.** On a VPS its ~90k pps of replies saturated the virtual NIC's
+  transmit path and the hypervisor then dropped ~50 % of **all inbound** packets for the VM (TCP SYNs,
+  SSH, the game server on the same box) — with zero RX drops visible in the guest. Bigger socket
+  buffers (`net.core.rmem/wmem_default`) made it *worse* (more tracker packets queued ahead of
+  everyone else's).
+- **Lever = an egress budget for the tracker**, in [`tools/opentracker/egress-budget/`](tools/opentracker/egress-budget/):
+  - `ottrack.nft` — nftables OUTPUT table: replies to clients that recently received a real
+    announce/scrape reply (whitelisted torrents; `udp length >= 28`) always pass and mark the client
+    "good" for 3 h; connect replies + 8-byte "not authorized" replies to everyone else share one
+    packet budget (`limit rate over 50000/second`, tune it). Rollback: `nft delete table inet ottrack`.
+  - `tracker-egress-prio.sh` (+ `.service`) — `tc prio` root qdisc: everything except UDP sport 6969
+    leaves first. Rollback: `tc qdisc replace dev ens3 root fq_codel`.
+
+  Result on tryhackx.org: TCP connects from outside 20/40 delayed → 0/40, ICMP loss 66 % → 0 %,
+  downloads 0 → 6 MB/s, while the tracker still serves every whitelisted client (≈ 3 500 "good"
+  addresses within 30 s). The unregistered swarm only decays when its clients give up; a proper way
+  to speed that up is a UDP reply that makes them back off (long `interval`), which is a policy /
+  patch decision, not a config one.
 
 ### Reverse proxy / Nginx notes
 

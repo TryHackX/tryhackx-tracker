@@ -63,6 +63,11 @@ All notable changes to this project are documented here. The format is loosely b
   CSP updated for `challenges.cloudflare.com`.
 - **Schema bootstrap** `includes/schema.php` (`ensureSchema()`, advisory-locked, idempotent,
   shared with `install.php`).
+- `tools/opentracker/egress-budget/` — nftables egress budget for OpenTracker replies (whitelisted
+  clients always pass, the unregistered swarm shares a packet-rate cap) + `tc prio` qdisc unit that
+  sends everything except tracker replies first. Measured on a VPS whose hypervisor dropped ~50 % of
+  all inbound packets while the tracker answered ~90k pps; README documents the measurements and why
+  per-source-IP limits do not help against a diffuse swarm.
 - `tools/opentracker/sighup-udp-workers.patch` — upstream OpenTracker spawns
   `listen.udp.workers` threads before it blocks SIGHUP, so `systemctl reload` could kill the
   process instead of reloading the list; the patch blocks the signals first.
@@ -79,6 +84,10 @@ All notable changes to this project are documented here. The format is loosely b
 - Dashboard / Settings headers link to the Whitelist page.
 
 ### Fixed
+- Metadata worker: torrents were added with libtorrent's default `paused` flag while being taken out
+  of the queue manager (`auto_managed` cleared), so they never connected to any peer and every fetch
+  timed out; both flags are cleared now (86/86 forum hashes failed before, 116/160 resolve within
+  seconds after). DHT bootstrap moved to the `dht_bootstrap_nodes` session setting.
 - `removeHashFromBlacklist()` now writes a temp file and `rename()`s it — the previous in-place
   truncate could let OpenTracker observe an empty blacklist during a reload.
 

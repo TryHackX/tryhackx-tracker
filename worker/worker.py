@@ -45,7 +45,7 @@ class Config:
         self.max_files = max(1, min(50000, int(w.get("max_files", 5000))))
         self.tmp_dir = w.get("tmp_dir", "/home/tracker/metadata_worker/tmp")
         self.log_level = w.get("log_level", "INFO").upper()
-        self.dht_routers = [r.strip() for r in w.get("dht_routers", "router.bittorrent.com:6881,router.utorrent.com:6881,dht.transmissionbt.com:6881,dht.aelitis.com:6881").split(",") if r.strip()]
+        self.dht_routers = [r.strip() for r in w.get("dht_routers", "router.bittorrent.com:6881,router.utorrent.com:6881,dht.transmissionbt.com:6881,dht.aelitis.com:6881,dht.libtorrent.org:25401").split(",") if r.strip()]
         self.download_rate = int(w.get("download_rate_limit", 262144))
         self.connections = int(w.get("connections_limit", 200))
 
@@ -97,14 +97,10 @@ class Worker:
             "user_agent": "tracker-metadata/1.0 libtorrent/" + lt.__version__,
             "alert_mask": lt.alert.category_t.status_notification | lt.alert.category_t.error_notification,
             "announce_to_all_trackers": True, "announce_to_all_tiers": True,
+            # session-level DHT bootstrap (add_dht_router() is deprecated in libtorrent 2.x)
+            "dht_bootstrap_nodes": ",".join(cfg.dht_routers),
         }
         self.ses = lt.session(settings)
-        for r in cfg.dht_routers:
-            host, _, port = r.rpartition(":")
-            try:
-                self.ses.add_dht_router(host, int(port))
-            except Exception as e:
-                log.warning("dht router %s: %s", r, e)
         log.info("session started (libtorrent %s), listen %s, concurrency %d, timeout %ds", lt.__version__, cfg.listen_port, cfg.concurrency, cfg.timeout)
 
     # ── queue ──────────────────────────────────────────────────────────────
@@ -146,7 +142,11 @@ class Worker:
             params = lt.parse_magnet_uri("magnet:?xt=urn:btih:" + row["info_hash"])
         params.save_path = self.cfg.tmp_dir
         params.flags |= lt.torrent_flags.upload_mode
-        params.flags &= ~lt.torrent_flags.auto_managed
+        # libtorrent's default add_torrent_params flags include `paused` AND `auto_managed` (the queue
+        # manager is what un-pauses auto-managed torrents). We take the torrent out of the queue
+        # manager, so we MUST clear `paused` too — otherwise it never connects to anyone and every
+        # fetch ends in a timeout.
+        params.flags &= ~(lt.torrent_flags.auto_managed | lt.torrent_flags.paused)
         try:
             params.trackers = list(dict.fromkeys(list(params.trackers) + self.cfg.trackers))
         except Exception:

@@ -31,3 +31,7 @@ worker/tracker-metadata.conf
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Python bytecode (worker)
+__pycache__/
+*.pyc

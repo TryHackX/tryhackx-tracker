@@ -15,5 +15,7 @@ listen_port = 6881
 # own tracker first, then a few public trackers to speed up metadata discovery
 trackers = udp://tryhackx.org:6969/announce,udp://tracker.opentrackr.org:1337/announce,udp://open.stealth.si:80/announce,udp://tracker.torrent.eu.org:451/announce
 max_files = 5000
+# DHT bootstrap nodes (comma-separated host:port); default = the usual public routers
+# dht_routers = router.bittorrent.com:6881,router.utorrent.com:6881,dht.transmissionbt.com:6881,dht.aelitis.com:6881,dht.libtorrent.org:25401
 tmp_dir = /home/tracker/metadata_worker/tmp
 log_level = INFO

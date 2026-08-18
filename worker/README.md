@@ -38,7 +38,7 @@ journalctl -u tracker-metadata -f
 ```
 
 The panel's status card shows the heartbeat age; *Fetch details* on a live torrent should finish
-within `timeout_seconds` (default 90 s). Torrents with no reachable peers end as `failed`
+within `timeout_seconds` (default 90 s; the example conf uses 180 s) — a live torrent usually resolves in 2–10 s. Torrents with no reachable peers end as `failed`
 (timeout) and can be retried with *Refresh metadata*.
 
 Privacy note: resolving metadata means announcing this server's IP + the hash to DHT and the
