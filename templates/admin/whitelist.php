@@ -332,9 +332,9 @@
                 <div class="modal-body">
                     <p class="wl-hint"><strong>Label:</strong> <span id="token-label"></span> &nbsp; <strong>Key ID:</strong> <code id="token-keyid"></code></p>
                     <p class="text-warning wl-hint"><i class="bi bi-exclamation-triangle-fill"></i> Copy the bearer token now &mdash; it is <strong>shown only once</strong> and cannot be recovered. Only a hash of the secret is stored.</p>
-                    <div class="magnet-wrapper">
-                        <code id="token-value" class="text-info magnet-code"></code>
-                        <button type="button" class="btn btn-sm magnet-copy-btn" id="token-copy" title="Copy token"><i class="bi bi-clipboard"></i></button>
+                    <div class="wl-copybox">
+                        <code id="token-value" class="wl-copybox-code"></code>
+                        <button type="button" class="btn btn-sm wl-copybox-btn" id="token-copy" title="Copy token" aria-label="Copy token"><i class="bi bi-clipboard"></i></button>
                     </div>
                     <div class="d-flex justify-content-end gap-2 mt-3">
                         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Done</button>
@@ -353,7 +353,7 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div id="snapshot-meta" class="wl-kv mb-3"></div>
+                    <div id="snapshot-meta" class="wl-kv wl-kv-cols mb-3"></div>
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <span class="wl-label">Request snapshot</span>
                         <button type="button" class="btn btn-sm btn-outline-secondary" id="snapshot-copy"><i class="bi bi-clipboard"></i> Copy JSON</button>
@@ -404,7 +404,7 @@
     <!-- Toast container -->
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.min.js" integrity="sha384-G/EV+4j2dNv+tEPo3++6LCgdCROaejBqfUeNjuKAiuXbjrxilcCdDz6ZAVfHWe1Y" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-whitelist.js<?= assetVer('assets/js/admin-whitelist.js') ?>"></script>
 </body>

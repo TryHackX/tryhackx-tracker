@@ -4,7 +4,9 @@
 // ban snapshots are attacker-controlled. Row data lives in Maps keyed by id; buttons carry data-id.
 (function () {
     'use strict';
-    const { apiCall, el, showToast, confirmAction, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard } = window.AdminCommon;
+    // Quick feedback (copies) goes through copyToClipboard → flashTip (tooltip on the clicked element);
+    // showToast is reserved for real outcomes (added / banned / deleted / errors).
+    const { apiCall, el, showToast, confirmAction, promptModal, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard } = window.AdminCommon;
 
     const $ = (id) => document.getElementById(id);
     const bodyDs = document.body.dataset;
@@ -243,8 +245,8 @@
             cb.checked = state.wl.selected.has(row.id);
             tr.appendChild(el('td', null, cb));
             tr.appendChild(el('td', { className: 'wl-id', text: String(row.id) }));
-            const hashCell = el('td', { className: 'wl-hash-cell', title: 'Click to copy' }, [el('code', { text: row.info_hash })]);
-            hashCell.addEventListener('click', () => copyToClipboard(row.info_hash));
+            const hashCell = el('td', { className: 'wl-hash-cell', title: row.info_hash + ' — click to copy' }, [el('code', { text: row.info_hash })]);
+            hashCell.addEventListener('click', (e) => copyToClipboard(row.info_hash, e.currentTarget));
             tr.appendChild(hashCell);
             const nameTd = el('td', { className: 'wl-name', title: row.name || '' });
             nameTd.appendChild(el('span', { text: row.name || '—' }));
@@ -326,10 +328,20 @@
 
     async function banRows(ids) {
         if (!ids.length) return;
-        const reason = window.prompt(`Ban ${ids.length} ${ids.length === 1 ? 'hash' : 'hashes'} — reason (optional):`, '');
+        const noun = ids.length === 1 ? 'hash' : 'hashes';
+        const reason = await promptModal({
+            title: `Ban ${ids.length} ${noun}`,
+            label: 'Reason (optional)',
+            placeholder: 'e.g. DMCA notice #1234',
+            hint: 'Banned hashes are removed from the served whitelist and cannot be re-registered until unbanned.',
+            okLabel: `Ban ${ids.length} ${noun}`,
+            danger: true,
+            multiline: true,
+            maxlength: 255,
+        });
         if (reason === null) return;
         try {
-            const r = await apiCall('admin/whitelist_ban', 'POST', { ids, reason });
+            const r = await apiCall('admin/whitelist_ban', 'POST', { ids, reason: reason.trim() });
             if (r.success) { showToast(`Banned ${r.banned} new hashes (${r.affected} removed from the served list)`, 'success'); ids.forEach(id => state.wl.selected.delete(id)); }
             else showToast(r.error || 'Ban failed', 'danger');
         } catch { showToast('Network error', 'danger'); }
@@ -394,8 +406,13 @@
 
         const kvBox = el('div', { className: 'wl-kv' });
         const row = (label, valueNodes) => kvBox.appendChild(el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: label }), el('div', { className: 'wl-kv-value' }, valueNodes)]));
-        row('Info hash', [el('code', { text: it.info_hash }), ' ', iconBtn('bi-clipboard', 'Copy hash', 'btn-outline-secondary', (e) => copyToClipboard(it.info_hash, e.currentTarget))]);
-        row('Magnet link', [el('div', { className: 'magnet-wrapper' }, [el('code', { className: 'magnet-code text-info', text: magnet }), el('button', { type: 'button', className: 'btn btn-sm magnet-copy-btn', title: 'Copy magnet', onclick: (e) => copyToClipboard(magnet, e.currentTarget) }, el('i', { className: 'bi bi-clipboard' }))])]);
+        // Monospace box + aligned copy button; the copy feedback is a tooltip on that button (flashTip).
+        const copyBox = (text, title) => el('div', { className: 'wl-copybox' }, [
+            el('code', { className: 'wl-copybox-code', text }),
+            el('button', { type: 'button', className: 'btn btn-sm wl-copybox-btn', title, 'aria-label': title, onclick: (e) => copyToClipboard(text, e.currentTarget) }, el('i', { className: 'bi bi-clipboard' })),
+        ]);
+        row('Info hash', [copyBox(it.info_hash, 'Copy hash')]);
+        row('Magnet link', [copyBox(magnet, 'Copy magnet link')]);
         row('Name', [el('span', { text: it.name || '—' })]);
         row('Size', [el('span', { text: it.total_size ? `${fmtBytes(it.total_size)} · ${it.files_count || 0} files` + (it.piece_length ? ` · piece ${fmtBytes(it.piece_length)}` : '') : '—' })]);
         const metaNodes = [metaBadge(it.meta_status)];
@@ -539,8 +556,8 @@
         if (!r.rows.length) body.appendChild(el('tr', null, el('td', { colspan: 6, className: 'text-center text-muted py-4', text: 'No banned hashes.' })));
         r.rows.forEach(row => {
             const tr = el('tr');
-            const hc = el('td', { className: 'wl-hash-cell', title: 'Click to copy' }, el('code', { text: row.info_hash }));
-            hc.addEventListener('click', () => copyToClipboard(row.info_hash));
+            const hc = el('td', { className: 'wl-hash-cell', title: row.info_hash + ' — click to copy' }, el('code', { text: row.info_hash }));
+            hc.addEventListener('click', (e) => copyToClipboard(row.info_hash, e.currentTarget));
             tr.appendChild(hc);
             tr.appendChild(el('td', { className: 'wl-name', text: row.name || '—', title: row.name || '' }));
             tr.appendChild(el('td', { className: 'wl-reason', text: row.reason || '—', title: row.reason || '' }));
@@ -600,7 +617,7 @@
             tr.appendChild(el('td', { className: 'wl-num', text: String(c.requests_count) }));
             const act = el('td', { className: 'wl-actions' });
             act.appendChild(iconBtn('bi-pencil', 'Rename', 'btn-outline-secondary', async () => {
-                const label = window.prompt('New label:', c.label);
+                const label = await promptModal({ title: 'Rename API client', label: 'Label', value: c.label, okLabel: 'Rename', maxlength: 100 });
                 if (label === null || !label.trim()) return;
                 const rr = await apiCall('admin/api_client_update', 'POST', { id: c.id, label: label.trim() });
                 if (rr.success) { showToast('Renamed', 'success'); loadClients(); } else showToast(rr.error || 'Rename failed', 'danger');
@@ -618,7 +635,7 @@
     function initClientCreate() {
         const tokenModal = bootstrap.Modal.getOrCreateInstance($('tokenModal'));
         $('btn-cl-create').addEventListener('click', async () => {
-            const label = window.prompt('Client label (e.g. "Flarum forum"):', '');
+            const label = await promptModal({ title: 'Create API client', label: 'Client label', placeholder: 'e.g. Flarum forum', hint: 'The bearer token is shown once, right after creation.', okLabel: 'Create', maxlength: 100 });
             if (label === null || !label.trim()) return;
             try {
                 const r = await apiCall('admin/api_client_create', 'POST', { label: label.trim() });

@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] — 2026-08-18
+
+### Changed
+- Admin UX: every text input that used `window.prompt` (bulk ban reason, API client label / rename)
+  is now a proper modal (`promptModal()` in `admin-common.js`); modals sit slightly above centre on
+  desktop and at the top on phones; copy actions show a Popper/Bootstrap tooltip on the button
+  ("Copied!") instead of a corner toast (`bootstrap.bundle.min.js` is loaded now); Whitelist page
+  is ~80 vw wide on desktop (100 % on tablets/phones), details-modal key/value area and status card
+  tiles restyled; hash/magnet in monospace copy boxes.
+- CSP: `connect-src` also allows `https://cdn.jsdelivr.net` (DevTools source-map fetches no longer
+  spam the console).
+
 ## [1.2.1] — 2026-08-18
 
 ### Added

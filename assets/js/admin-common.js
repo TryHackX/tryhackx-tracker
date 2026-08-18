@@ -1,7 +1,7 @@
 // === Shared admin helpers (whitelist page; the dashboard keeps its own copies in admin.js) ===
-// Exposes window.AdminCommon = { apiCall, esc, showToast, confirmAction, makeSortStack, renderPagination,
-// fmtBytes, fmtDate, fmtAgo, copyToClipboard, el }. Everything renders via textContent / createElement —
-// values shown here (torrent names, file paths, IPs, snapshots) come from untrusted sources.
+// Exposes window.AdminCommon = { apiCall, esc, showToast, confirmAction, promptModal, flashTip, makeSortStack,
+// renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, el }. Everything renders via textContent /
+// createElement — values shown here (torrent names, file paths, IPs, snapshots) come from untrusted sources.
 (function () {
     'use strict';
 
@@ -82,6 +82,13 @@
         setTimeout(() => toast.remove(), type === 'danger' ? 7000 : 4000);
     }
 
+    /* Small dialogs (confirm / prompt) may be opened on top of another modal (details modal → Ban / Delete).
+       Bootstrap drops body.modal-open when the top one closes, which un-locks page scroll under the modal
+       that is still open — put it back. */
+    function restoreModalOpen() {
+        if (document.querySelector('.modal.show')) document.body.classList.add('modal-open');
+    }
+
     let confirmModalEl = null;
     /** confirmAction(title, message, {okLabel, danger}) → Promise<boolean>. Also accepts (message). */
     function confirmAction(title, message, opts = {}) {
@@ -121,12 +128,126 @@
             };
             const onOk = () => { resolved = true; cleanup(); modal.hide(); resolve(true); };
             const onCancel = () => { resolved = true; cleanup(); modal.hide(); resolve(false); };
-            const onHidden = () => { if (!resolved) { cleanup(); resolve(false); } };
+            const onHidden = () => { restoreModalOpen(); if (!resolved) { cleanup(); resolve(false); } };
             okBtn.addEventListener('click', onOk);
             cancelBtn.addEventListener('click', onCancel);
             confirmModalEl.addEventListener('hidden.bs.modal', onHidden);
             modal.show();
         });
+    }
+
+    let promptModalEl = null;
+    /**
+     * promptModal({ title, label, value, placeholder, okLabel, danger, multiline, maxlength, hint })
+     * → Promise<string|null>. Replacement for window.prompt: one shared Bootstrap modal, input focused on
+     * show, Enter submits (Ctrl/Cmd+Enter for the textarea), Esc / Cancel / backdrop resolve null.
+     * The value is returned untrimmed (empty string is a valid answer — callers decide).
+     */
+    function promptModal(opts = {}) {
+        if (typeof opts === 'string') opts = { title: opts };
+        const o = Object.assign({ title: 'Input', label: '', value: '', placeholder: '', okLabel: 'OK', danger: false, multiline: false, maxlength: null, hint: '' }, opts);
+        return new Promise((resolve) => {
+            if (!promptModalEl) {
+                promptModalEl = el('div', { className: 'modal confirm-modal prompt-modal', id: 'commonPromptModal', tabindex: '-1', 'aria-labelledby': 'commonPrompt-title' }, [
+                    el('div', { className: 'modal-dialog modal-dialog-centered prompt-dialog' }, [
+                        el('div', { className: 'modal-content bg-dark' }, [
+                            el('div', { className: 'modal-body' }, [
+                                el('h6', { className: 'text-light mb-3 prompt-title', id: 'commonPrompt-title' }),
+                                el('label', { className: 'form-label wl-label prompt-label', id: 'commonPrompt-label', for: 'commonPrompt-input' }),
+                                el('div', { id: 'commonPrompt-field' }),
+                                el('div', { className: 'wl-small text-muted mt-1 prompt-hint', id: 'commonPrompt-hint' }),
+                                el('div', { className: 'd-flex justify-content-end gap-2 mt-3' }, [
+                                    el('button', { className: 'btn btn-sm btn-outline-secondary', id: 'commonPrompt-cancel', type: 'button' }, [el('i', { className: 'bi bi-x-lg' }), ' Cancel']),
+                                    el('button', { className: 'btn btn-sm btn-primary', id: 'commonPrompt-ok', type: 'button' }),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                ]);
+                document.body.appendChild(promptModalEl);
+            }
+            promptModalEl.querySelector('#commonPrompt-title').textContent = o.title || '';
+            const labelEl = promptModalEl.querySelector('#commonPrompt-label');
+            labelEl.textContent = o.label || '';
+            labelEl.classList.toggle('d-hidden', !o.label);
+            const hintEl = promptModalEl.querySelector('#commonPrompt-hint');
+            hintEl.textContent = o.hint || '';
+            hintEl.classList.toggle('d-hidden', !o.hint);
+            // Fresh field each time so input ⇄ textarea and maxlength never leak between calls.
+            const field = promptModalEl.querySelector('#commonPrompt-field');
+            field.textContent = '';
+            const input = o.multiline
+                ? el('textarea', { className: 'form-control form-control-sm bg-dark text-light border-secondary', id: 'commonPrompt-input', rows: '3' })
+                : el('input', { type: 'text', className: 'form-control form-control-sm bg-dark text-light border-secondary', id: 'commonPrompt-input', autocomplete: 'off' });
+            if (o.placeholder) input.setAttribute('placeholder', o.placeholder);
+            if (o.maxlength) input.setAttribute('maxlength', String(o.maxlength));
+            input.value = o.value == null ? '' : String(o.value);
+            field.appendChild(input);
+            const okBtn = promptModalEl.querySelector('#commonPrompt-ok');
+            const cancelBtn = promptModalEl.querySelector('#commonPrompt-cancel');
+            okBtn.className = 'btn btn-sm ' + (o.danger ? 'btn-danger' : 'btn-primary');
+            okBtn.textContent = '';
+            okBtn.appendChild(el('i', { className: 'bi ' + (o.danger ? 'bi-slash-circle' : 'bi-check-lg') }));
+            okBtn.appendChild(document.createTextNode(' ' + (o.okLabel || 'OK')));
+
+            const modal = bootstrap.Modal.getOrCreateInstance(promptModalEl);
+            let resolved = false;
+            const cleanup = () => {
+                okBtn.removeEventListener('click', onOk);
+                cancelBtn.removeEventListener('click', onCancel);
+                input.removeEventListener('keydown', onKey);
+                promptModalEl.removeEventListener('shown.bs.modal', onShown);
+                promptModalEl.removeEventListener('hidden.bs.modal', onHidden);
+            };
+            const finish = (val) => { if (resolved) return; resolved = true; cleanup(); modal.hide(); resolve(val); };
+            const onOk = () => finish(input.value);
+            const onCancel = () => finish(null);
+            const onKey = (e) => {
+                if (e.key !== 'Enter' || e.isComposing) return;
+                if (o.multiline && !(e.ctrlKey || e.metaKey)) return;
+                e.preventDefault();
+                finish(input.value);
+            };
+            const onShown = () => { input.focus(); if (!o.multiline && input.value) input.select(); };
+            const onHidden = () => { restoreModalOpen(); if (!resolved) { resolved = true; cleanup(); resolve(null); } };
+            okBtn.addEventListener('click', onOk);
+            cancelBtn.addEventListener('click', onCancel);
+            input.addEventListener('keydown', onKey);
+            promptModalEl.addEventListener('shown.bs.modal', onShown);
+            promptModalEl.addEventListener('hidden.bs.modal', onHidden);
+            modal.show();
+        });
+    }
+
+    /**
+     * flashTip(el, text, {variant, duration, placement}) — short Bootstrap tooltip anchored to the element the
+     * user just clicked ("Copied!"), auto-disposed after ~1.2 s. Falls back to showToast when the tooltip
+     * plugin (needs the bootstrap *bundle* with Popper) is unavailable or the element is not in the DOM.
+     */
+    function flashTip(target, text, opts = {}) {
+        const variant = opts.variant === 'error' ? 'danger' : (opts.variant || 'success');
+        const ms = Number(opts.duration) > 0 ? Number(opts.duration) : 1200;
+        const bs = typeof bootstrap !== 'undefined' ? bootstrap : null;
+        if (!bs || !bs.Tooltip || !target || !(target instanceof Element) || !target.isConnected) {
+            showToast(text, variant);
+            return;
+        }
+        try {
+            const prev = bs.Tooltip.getInstance(target);
+            if (prev) prev.dispose();
+            const tip = new bs.Tooltip(target, {
+                title: String(text),
+                trigger: 'manual',
+                placement: opts.placement || 'top',
+                container: 'body',
+                customClass: 'flash-tip flash-tip-' + variant,
+                animation: true,
+            });
+            tip.show();
+            setTimeout(() => { try { tip.dispose(); } catch { /* element gone */ } }, ms);
+        } catch {
+            showToast(text, variant);
+        }
     }
 
     /**
@@ -249,16 +370,28 @@
         return Math.floor(seconds / 86400) + ' d ' + Math.floor((seconds % 86400) / 3600) + ' h';
     }
 
-    function copyToClipboard(text, btn) {
-        return navigator.clipboard.writeText(text).then(() => {
-            if (btn) {
-                const orig = btn.innerHTML;
-                btn.innerHTML = '<i class="bi bi-check-lg text-success"></i>';
-                setTimeout(() => { btn.innerHTML = orig; }, 1200);
+    /**
+     * copyToClipboard(text, anchor) — quick feedback is a tooltip on the clicked element (button, hash cell…),
+     * not a toast. An icon-only button briefly swaps its icon for a check mark. Without an anchor (or without
+     * the tooltip plugin) flashTip falls back to a toast.
+     */
+    function copyToClipboard(text, anchor) {
+        const target = anchor instanceof Element ? anchor : null;
+        const write = navigator.clipboard && navigator.clipboard.writeText
+            ? navigator.clipboard.writeText(String(text))
+            : Promise.reject(new Error('no clipboard'));
+        return write.then(() => {
+            if (target) {
+                const icon = target.matches('button') ? target.querySelector('i.bi') : null;
+                if (icon) {
+                    const orig = icon.className;
+                    icon.className = 'bi bi-check-lg text-success';
+                    setTimeout(() => { icon.className = orig; }, 1200);
+                }
             }
-            showToast('Copied to clipboard', 'success');
-        }).catch(() => showToast('Clipboard not available', 'warning'));
+            flashTip(target, 'Copied!', { variant: 'success' });
+        }).catch(() => flashTip(target, 'Clipboard not available', { variant: 'warning', duration: 2000 }));
     }
 
-    window.AdminCommon = { apiCall, esc, el, showToast, confirmAction, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard };
+    window.AdminCommon = { apiCall, esc, el, showToast, confirmAction, promptModal, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard };
 })();
