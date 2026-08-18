@@ -18,8 +18,8 @@
     <?= captchaHeadTags($cfg) ?>
     <?php endif; ?>
 </head>
-<body class="admin-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>">
-    <div class="admin-container">
+<body class="admin-body admin-hc" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>">
+    <div class="admin-container admin-wide">
         <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
         <div class="admin-header">
             <h2><i class="bi bi-shield-lock"></i> Admin Panel</h2>
@@ -77,7 +77,10 @@
         </div>
 
         <div class="table-responsive">
-            <table class="table table-dark table-hover" id="reports-table">
+            <table class="table table-dark table-hover dash-table" id="reports-table">
+                <colgroup id="reports-colgroup">
+                    <col class="dash-c-id"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">
+                </colgroup>
                 <thead><tr>
                     <th class="sortable" data-sort="id">ID <i class="bi bi-arrow-down-up sort-icon"></i></th>
                     <th class="sortable" data-sort="name">Name <i class="bi bi-arrow-down-up sort-icon"></i></th>
@@ -271,6 +274,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/captcha.js<?= assetVer('assets/js/captcha.js') ?>"></script>
+    <!-- admin-common.js only defines window.AdminCommon (shared pagination renderer); admin.js keeps its own globals -->
+    <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin.js<?= assetVer('assets/js/admin.js') ?>"></script>
 </body>
 </html>

@@ -60,7 +60,8 @@
             });
             let json = await res.json();
 
-            if (json.captcha_required) {
+            // CAPTCHA may be demanded up to twice (a solved token can expire while typing) — re-show it.
+            for (let attempt = 0; attempt < 2 && json.captcha_required; attempt++) {
                 const token = await window.showCaptchaModal();
                 if (!token) { alertEl.className = 'alert-box error'; alertEl.textContent = 'CAPTCHA cancelled'; return; }
                 data['captcha_token'] = token;
@@ -75,9 +76,14 @@
 
             if (json.success) {
                 window.location.reload();
+            } else if ((json.error || '').indexOf('CSRF') !== -1) {
+                // the session behind this page expired (PHP session GC) — reload for a fresh token
+                alertEl.className = 'alert-box error';
+                alertEl.textContent = 'This login page had expired — reloading, please try again.';
+                setTimeout(() => window.location.reload(), 1200);
             } else {
                 alertEl.className = 'alert-box error';
-                alertEl.textContent = 'Invalid username or password';
+                alertEl.textContent = json.error === 'Invalid credentials' ? 'Invalid username or password' : (json.error || 'Login failed');
             }
         } catch {
             alertEl.className = 'alert-box error';

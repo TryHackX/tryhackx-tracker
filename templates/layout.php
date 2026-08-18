@@ -80,6 +80,7 @@ $recaptchaNeeded = ($action === 'report' && isCaptchaEnabled($cfg, 'report'))
         <div class="captcha-box">
             <p>Please verify you are human</p>
             <div id="captcha-widget" class="captcha-widget"></div>
+            <div class="captcha-actions"><button type="button" class="btn btn-secondary captcha-cancel" id="captcha-cancel">Cancel</button></div>
         </div>
     </div>
     <?php endif; ?>

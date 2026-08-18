@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-08-18
+
+### Added
+- **OpenTracker `udp-reject-interval` patch** (`tools/opentracker/udp-reject-interval.patch`, config
+  `access.udp_reject_interval 86400`): a UDP announce for a hash the accesslist rejects gets a
+  well-formed "0 peers, interval N" reply instead of upstream's truncated 8-byte packet, so compliant
+  clients stop hammering the tracker for N seconds. `egress-budget/ottrack.nft` recognises that reply
+  and does not treat it as a whitelisted-client reply. README documents building both binaries
+  (WHITE + BLACK) and how a mode switch really works.
+- Admin Whitelist: **Fetch metadata** for *missing / failed / missing+failed / all* (one UPDATE →
+  the worker drains the queue at its own pace) and **Refresh S/L** for *this page / stale / all*
+  (`scrapeOpenTrackerMany()`: up to 50 hashes per OpenTracker `/scrape` request, binary-safe bencode
+  parser, 20 s budget with a cursor so the UI loops); endpoints `admin/whitelist_meta_queue`,
+  `admin/whitelist_scrape_bulk`.
+- Local blacklist-mode smoke test (`deploy/smoke_blacklist.py` in the workspace): switches the test
+  install to `tracker_mode=blacklist`, report → block (file) → check → restore (unblock) → back.
+
+### Changed
+- Dashboard restyled to match the Whitelist page (wide container, fixed column widths, shared
+  First/Prev/page/Next/Last pagination, contrast); wider search box; Settings header consistent.
+- Public CAPTCHA modal sits above centre / near the top on phones and has a Cancel button; home-page
+  "Register your torrent" CTA uses the same muted button style as the registration page.
+- Admin login page shows the real error (stale CSRF → auto-reload for a fresh token, CAPTCHA
+  re-shown when the first token expired, lockout message) instead of "Invalid username or password"
+  for everything.
+
 ## [1.2.2] — 2026-08-18
 
 ### Changed

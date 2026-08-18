@@ -628,7 +628,7 @@
 .admin-pagination button:disabled { opacity: 0.3; cursor: not-allowed; }
 .admin-pagination span { color: #888; }
 
-/* First/Last + "page N of M" jump box (AdminCommon.renderPagination; the dashboard has its own renderer). */
+/* First/Last + "page N of M" jump box (AdminCommon.renderPagination — used by the whitelist views and the dashboard). */
 .admin-pagination .pg-edge { padding-left: 0.6rem; padding-right: 0.6rem; }
 .admin-pagination .pg-jump { display: inline-flex; align-items: center; gap: 0.35rem; color: #9aa4b2; white-space: nowrap; }
 .admin-pagination .pg-input {
@@ -1020,27 +1020,100 @@ input[type="number"] {
     .wl-name { max-width: 160px; }
 }
 
-/* ---- Whitelist page: full-width container + page-scoped contrast overrides ----
-   body.wl-body scopes the overrides to this page only (modals live outside .admin-container). Bootstrap's
-   .text-muted resolves to a light-theme rgba that is nearly invisible on #0d1117/#121212 here. */
-/* Desktop: ~80vw wide but never narrower than 1100px (and never wider than the viewport); tablets and
-   phones (≤ 992px) get the full width. */
+/* ---- Wide admin pages (dashboard, whitelist, settings header): full-width container + contrast overrides ----
+   .admin-wide on the container: desktop ~80vw wide but never narrower than 1100px (and never wider than the
+   viewport); tablets and phones (≤ 992px) get the full width. body.admin-hc scopes the contrast overrides
+   (modals live outside .admin-container): Bootstrap's .text-muted resolves to a light-theme rgba that is nearly
+   invisible on #0d1117/#121212 here. (.wl-page / .wl-body are kept as aliases for the whitelist page.) */
+.admin-container.admin-wide,
 .admin-container.wl-page { max-width: 100%; width: min(100%, max(80vw, 1100px)); margin: 0 auto; padding: 1.25rem 1.2rem; }
 @media (max-width: 992px) {
+    .admin-container.admin-wide,
     .admin-container.wl-page { width: 100%; }
 }
-.wl-body .text-muted,
-.wl-body .text-secondary { color: #9aa4b2 !important; }
-.wl-body .modal-content.bg-dark .text-muted { color: #a0a8b4 !important; }
-.wl-body .admin-pagination span { color: #9aa4b2; }
-.wl-body .form-control.bg-dark::placeholder { color: #7f8c9a; }
-.wl-body ::selection { background: #2f5a8a; color: #fff; }
-.wl-body .table-dark td small { color: #a3bcd6; }
-.wl-body .source-tab { color: #9aa4b2; }
-.wl-body .source-tab.active { color: #4a9eff; }
-.wl-body .toolbar-search-icon { color: #9aa4b2; }
-.wl-body .table-dark tbody tr.wl-row-banned:hover td,
-.wl-body .table-dark tbody tr.wl-row-muted:hover td { opacity: 0.9; }
+/* Settings: header spans the wide container, the long form stays at a readable width. */
+.admin-wide #settings-form { max-width: 1300px; margin: 0 auto; }
+.admin-hc .text-muted,
+.admin-hc .text-secondary { color: #9aa4b2 !important; }
+.admin-hc .modal-content.bg-dark .text-muted { color: #a0a8b4 !important; }
+.admin-hc .admin-pagination span { color: #9aa4b2; }
+.admin-hc .form-control.bg-dark::placeholder { color: #7f8c9a; }
+.admin-hc ::selection { background: #2f5a8a; color: #fff; }
+.admin-hc .table-dark td small { color: #a3bcd6; }
+.admin-hc .source-tab { color: #9aa4b2; }
+.admin-hc .source-tab.active { color: #4a9eff; }
+.admin-hc .toolbar-search-icon { color: #9aa4b2; }
+.admin-hc .table-empty-state { color: #b0b8c4; }
+.admin-hc .table-dark tbody tr.wl-row-banned:hover td,
+.admin-hc .table-dark tbody tr.wl-row-muted:hover td { opacity: 0.9; }
+
+/* Toolbar search on the wide pages: a comfortable search box. The search cluster (icon + box + filters) asks
+   for 560px and may grow to ~1100px, the box itself up to 640px. When the right-hand controls do not fit
+   next to it any more, they wrap onto their own line, right-aligned, instead of squashing the box. */
+.admin-wide .toolbar-search { flex: 1 1 560px; max-width: 1100px; }
+.admin-wide .search-input-wrap { flex: 1 1 420px; min-width: 240px; max-width: 640px; }
+.admin-wide .toolbar-right { margin-left: auto; }
+@media (max-width: 768px) {
+    /* phones: the box keeps at least 160px; filters that do not fit next to it wrap underneath (full width)
+       instead of being clipped by the cluster's overflow:hidden. */
+    .admin-wide .toolbar-search { flex-basis: auto; flex-wrap: wrap; }
+    .admin-wide .search-input-wrap { flex: 1 1 160px; min-width: 160px; max-width: none; }
+    .admin-wide .toolbar-search .toolbar-status-filter { flex: 1 1 auto; max-width: none; }
+    .admin-wide .toolbar-right { margin-left: 0; }
+}
+
+/* Toolbar dropdown tools (bulk "Fetch metadata" / "Refresh S/L" split control) — dark menu, sm buttons. */
+.wl-tool-dd .dropdown-toggle-split { padding-left: 0.45rem; padding-right: 0.45rem; }
+.wl-tool-dd .btn.wl-busy { cursor: progress; }
+.wl-tool-dd .btn.wl-busy > i { animation: wlSpin 1s linear infinite; }
+@keyframes wlSpin { to { transform: rotate(360deg); } }
+.wl-dd-menu {
+    --bs-dropdown-bg: #1e1e1e;
+    --bs-dropdown-border-color: #3a3a3a;
+    --bs-dropdown-color: #d4d4d4;
+    --bs-dropdown-link-color: #d4d4d4;
+    --bs-dropdown-link-hover-color: #fff;
+    --bs-dropdown-link-hover-bg: rgba(74, 158, 255, 0.15);
+    --bs-dropdown-link-active-color: #fff;
+    --bs-dropdown-link-active-bg: rgba(74, 158, 255, 0.3);
+    --bs-dropdown-header-color: #8b96a5;
+    --bs-dropdown-divider-bg: #333;
+    --bs-dropdown-font-size: 0.85rem;
+    --bs-dropdown-min-width: 15rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    z-index: 1060;
+}
+.wl-dd-menu .dropdown-item i { margin-right: 0.35rem; color: #9aa4b2; }
+.wl-dd-menu .dropdown-item:hover i { color: #4a9eff; }
+.wl-dd-menu .dropdown-header { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 0.3rem; }
+.wl-dd-menu .wl-dd-note { color: #8b96a5; font-size: 0.75rem; line-height: 1.4; max-width: 18rem; white-space: normal; padding-top: 0.35rem; }
+
+/* ---- Dashboard table: same fixed-column look as the whitelist tables. Pinned columns (id / hash / ip /
+   status / date / actions) never wrap; the text columns (name / email / company / entity / object /
+   description) share the rest and ellipsize (full value in the cell title). ---- */
+.admin-wide .dash-table { table-layout: fixed; width: 100%; min-width: 1180px; margin-bottom: 0; }
+.admin-wide .dash-table th,
+.admin-wide .dash-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.admin-wide .dash-table td { padding: 0.45rem 0.5rem; }
+.admin-wide .dash-table td small { font-size: 0.8rem; }
+.admin-wide .dash-table .hash-cell { max-width: none; font-size: 0.76rem; font-family: SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+.admin-wide .dash-table .col-desc { max-width: none; }
+.admin-wide .dash-table .th-actions { width: auto; }
+.admin-wide .dash-table .dash-id { color: #9aa4b2; }
+.admin-wide .dash-table .dash-date { color: #b0b8c4; font-size: 0.8rem; }
+.dash-c-id      { width: 56px; }
+.dash-c-hash    { width: 190px; }
+.dash-c-ip      { width: 128px; }
+.dash-c-status  { width: 96px; }
+.dash-c-type    { width: 84px; }
+.dash-c-report  { width: 72px; }
+.dash-c-date    { width: 150px; }
+.dash-c-actions { width: 64px; }
+.dash-c-flex    { width: auto; }
+@media (min-width: 1700px) {
+    /* enough room for the full 40-hex hash */
+    .dash-c-hash { width: 316px; }
+}
 
 /* ---- Whitelist tables: fixed layout, explicit column widths, single-line cells ----
    Only the flexible columns (name / reason / label / endpoint) have no <col> width; everything else is
@@ -1109,5 +1182,6 @@ input[type="number"] {
     .wl-page #wl-table th { padding-left: 0.4rem; padding-right: 0.4rem; }
 }
 @media (max-width: 768px) {
+    .admin-container.admin-wide,
     .admin-container.wl-page { padding: 0.75rem; }
 }

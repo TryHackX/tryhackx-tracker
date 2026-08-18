@@ -372,6 +372,77 @@
         } catch { showToast('Network error', 'danger'); }
     }
 
+    // ───────────────────────── bulk tools (toolbar dropdowns) ─────────────────────────
+    const META_SCOPE_LABEL = { missing: 'missing (never fetched)', failed: 'failed', missing_failed: 'missing + failed', all: 'active' };
+
+    /** Bulk "Fetch metadata": one UPDATE server-side; the worker drains the queue one hash after another. */
+    async function queueMetaScope(scope) {
+        if (!META_SCOPE_LABEL[scope]) return;
+        if (scope === 'all' && !await confirmAction('Re-fetch all metadata', 'Queue EVERY active hash for a metadata re-fetch (already fetched ones included)? The worker processes the queue one hash after another — a big list can take hours.', { okLabel: 'Queue all', danger: false })) return;
+        const btn = $('btn-wl-meta-bulk');
+        btn.disabled = true;
+        try {
+            const r = await apiCall('admin/whitelist_meta_queue', 'POST', { scope });
+            if (r.success) {
+                const n = Number(r.queued) || 0;
+                let msg = n === 0
+                    ? `Nothing to queue — no ${META_SCOPE_LABEL[scope]} hashes without a pending fetch`
+                    : `Queued ${n} ${META_SCOPE_LABEL[scope]} ${n === 1 ? 'hash' : 'hashes'} — the worker fetches them one by one in the background`;
+                let type = n === 0 ? 'info' : 'success';
+                if (n > 0 && (r.worker_heartbeat_age === null || r.worker_heartbeat_age === undefined)) { msg += ' — warning: the metadata worker seems to be down (no heartbeat)'; type = 'warning'; }
+                else if (n > 0 && r.worker_heartbeat_age > 120) { msg += ` — warning: worker heartbeat is ${fmtAgo(r.worker_heartbeat_age)} old`; type = 'warning'; }
+                showToast(msg, type);
+            } else showToast(r.error || 'Request failed', 'danger');
+        } catch { showToast('Network error', 'danger'); }
+        btn.disabled = false;
+        loadStatus(); loadWhitelist();
+    }
+
+    let scrapeRunning = false;
+    /**
+     * Bulk "Refresh S/L": the server scrapes 50 hashes per tracker request within a time budget and answers
+     * truncated=true + a cursor while rows remain — loop until done, showing progress in the button label.
+     */
+    async function scrapeBulk(scope) {
+        if (scrapeRunning) return;
+        const btn = $('btn-wl-scrape-bulk'), caret = $('btn-wl-scrape-caret'), label = $('wl-scrape-label');
+        const ids = scope === 'page' ? [...state.wl.rows.keys()] : null;
+        if (scope === 'page' && !ids.length) { showToast('No rows on this page to scrape', 'info'); return; }
+        scrapeRunning = true;
+        const origLabel = label.textContent;
+        btn.disabled = true; caret.disabled = true;
+        btn.classList.add('wl-busy');
+        const progress = (t) => { label.textContent = t; };
+        let scraped = 0, requests = 0, failed = 0, afterId = 0, rounds = 0, warning = null, aborted = false;
+        progress('Scraping…');
+        try {
+            for (;;) {
+                rounds++;
+                const body = { scope, after_id: afterId };
+                if (ids) body.ids = ids;
+                const r = await apiCall('admin/whitelist_scrape_bulk', 'POST', body);
+                if (!r.success) { showToast(r.error || 'Scrape failed', 'danger'); aborted = true; break; }
+                scraped += Number(r.scraped) || 0;
+                requests += Number(r.requests) || 0;
+                failed += Number(r.failed) || 0;
+                if (r.after_id) afterId = r.after_id;
+                if (r.warning) warning = r.warning;
+                progress(`scraped ${scraped}…` + (r.remaining ? ` (${r.remaining} left)` : ''));
+                if (!r.truncated || rounds >= 200) break;
+            }
+        } catch { showToast('Network error', 'danger'); aborted = true; }
+        if (!aborted) {
+            const what = scope === 'page' ? 'this page' : scope === 'stale' ? 'stale rows' : 'all active hashes';
+            if (scraped === 0 && warning) showToast(`Scrape (${what}): ${warning}`, 'warning');
+            else showToast(`Scraped ${scraped} ${scraped === 1 ? 'hash' : 'hashes'} (${what}) in ${requests} tracker request${requests === 1 ? '' : 's'}` + (failed ? ` — ${failed} request${failed === 1 ? '' : 's'} got no answer` : '') + (warning ? ` — ${warning}` : ''), failed || warning ? 'warning' : 'success');
+        }
+        label.textContent = origLabel;
+        btn.classList.remove('wl-busy');
+        btn.disabled = false; caret.disabled = false;
+        scrapeRunning = false;
+        loadWhitelist();
+    }
+
     // ───────────────────────── details modal ─────────────────────────
     function stopDetailPoll() { if (detailPollTimer) { clearTimeout(detailPollTimer); detailPollTimer = null; } }
 
@@ -781,6 +852,13 @@
         $('btn-bulk-delete').addEventListener('click', () => deleteRows([...state.wl.selected]));
         $('btn-bulk-ban').addEventListener('click', () => banRows([...state.wl.selected]));
         $('btn-bulk-meta').addEventListener('click', () => fetchMeta([...state.wl.selected], false));
+        // toolbar bulk tools (dropdown items carry data-meta-scope / data-scrape-scope). Close the menu
+        // explicitly first: the actions disable the toggle while running, and Bootstrap skips auto-close
+        // for a disabled toggle.
+        const closeMenu = (toggleId) => { const t = $(toggleId); if (t && bootstrap.Dropdown) bootstrap.Dropdown.getOrCreateInstance(t).hide(); };
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-scope]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); queueMetaScope(b.dataset.metaScope); }));
+        document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-scope]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-scrape-caret'); scrapeBulk(b.dataset.scrapeScope); }));
+        $('btn-wl-scrape-bulk').addEventListener('click', () => scrapeBulk('page'));
 
         // banned toolbar
         const bnSearch = $('bn-search');

@@ -352,9 +352,17 @@ wget http://www.fefe.de/libowfat/libowfat-0.34.tar.xz && tar -xf libowfat-0.34.t
 make -C libowfat -j$(nproc)
 git clone git://erdgeist.org/opentracker && cd opentracker
 git apply /path/to/tryhackx-tracker/tools/opentracker/sighup-udp-workers.patch   # see below
-make -j$(nproc) opentracker FEATURES="-DWANT_ACCESSLIST_WHITE -DWANT_COMPRESSION_GZIP -DWANT_RESTRICT_STATS -DWANT_FULLSCRAPE -DWANT_MODEST_FULLSCRAPES -DWANT_SPOT_WOODPECKER"
-strings opentracker | grep -E 'access\.whitelist|deflate|access\.stats_path'   # all three must appear
+patch -p1 < /path/to/tryhackx-tracker/tools/opentracker/udp-reject-interval.patch # see below (optional)
+COMMON="-DWANT_COMPRESSION_GZIP -DWANT_RESTRICT_STATS -DWANT_FULLSCRAPE -DWANT_MODEST_FULLSCRAPES -DWANT_SPOT_WOODPECKER"
+make -j$(nproc) opentracker FEATURES="-DWANT_ACCESSLIST_WHITE $COMMON" && cp opentracker ../opentracker.white
+make clean && make -j$(nproc) opentracker FEATURES="-DWANT_ACCESSLIST_BLACK $COMMON" && cp opentracker ../opentracker.black
+strings ../opentracker.white | grep -E 'access\.whitelist|deflate|access\.stats_path'   # all three must appear
 ```
+
+Black- and whitelist are compile-time exclusive, so keep **both** binaries around
+(`/home/tracker/opentracker` = the active one, `/home/tracker/opentracker.black` = the other):
+switching **Tracker mode** in the panel only switches the web app — to really switch you also swap
+the binary, use the matching `access.whitelist` / `access.blacklist` line and restart the service.
 
 > `make FEATURES=...` on the command line **overrides** the Makefile's `include Makefile.gzip`,
 > so `-DWANT_COMPRESSION_GZIP` must be listed explicitly. Keep `-DWANT_RESTRICT_STATS` — without it
@@ -365,11 +373,21 @@ strings opentracker | grep -E 'access\.whitelist|deflate|access\.stats_path'   #
 > **kill the tracker** instead of reloading the list. The one-line patch blocks the signals first.
 > Apply it whenever you use `listen.udp.workers`.
 
+> **`tools/opentracker/udp-reject-interval.patch`** (optional, recommended for a busy public IP) —
+> upstream answers a UDP announce for a hash the accesslist rejects with a truncated 8-byte packet;
+> clients treat that as a broken tracker and keep retrying (libtorrent backs off to 1 h at most), so
+> the old swarm never calms down. With `access.udp_reject_interval 86400` in the conf the tracker
+> answers with a **well-formed "0 peers, come back in 24 h"** reply instead and compliant clients go
+> quiet for a day (HTTP keeps the explicit "not authorized" failure). Pairs with
+> `egress-budget/ottrack.nft`, which recognises that reply (interval 86400) and does not count it as
+> a whitelisted-client reply.
+
 `/home/tracker/opentracker.conf` (no `listen.*` line = default dual-stack bind on 6969):
 
 ```
 listen.udp.workers 4
 access.whitelist /home/tracker/accesslist/whitelist
+access.udp_reject_interval 86400         # optional, needs udp-reject-interval.patch
 access.stats 203.0.113.10                # your web server's IP (requires -DWANT_RESTRICT_STATS)
 access.stats_path stats-8f3a1c2d9e0b     # random path instead of /stats — put it in "Tracker stats URL"
 tracker.redirect_url https://tracker.example.org/?action=whitelist   # HTTP GET / → registration page

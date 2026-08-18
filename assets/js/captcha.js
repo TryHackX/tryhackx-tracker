@@ -97,11 +97,33 @@
         resetWidget();
     };
 
-    // Close modal on overlay click (outside the box) — counts as cancel.
+    // Cancelling only hides the overlay and resolves null — the widget stays rendered in the box, so a
+    // cancelled prompt keeps its state (a later showCaptchaModal() resets it for a fresh token).
+    // Backdrop click (outside the box) counts as cancel, but only when the press STARTED on the backdrop:
+    // a drag that begins inside the box (selecting the challenge, a slipped tap) and ends on the overlay
+    // must not close it.
+    let pressedOnOverlay = false;
+    document.addEventListener('mousedown', (e) => {
+        const overlay = document.getElementById('captcha-overlay');
+        pressedOnOverlay = !!overlay && e.target === overlay;
+    }, true);
     document.addEventListener('click', (e) => {
         const overlay = document.getElementById('captcha-overlay');
-        if (overlay && e.target === overlay) {
+        if (!overlay || !overlay.classList.contains('show')) return;
+        if (e.target === overlay) {
+            if (pressedOnOverlay) finish(null);
+            pressedOnOverlay = false;
+            return;
+        }
+        // explicit Cancel button inside the box (optional markup: .captcha-cancel / #captcha-cancel)
+        if (e.target.closest && e.target.closest('.captcha-cancel, #captcha-cancel')) {
+            e.preventDefault();
             finish(null);
         }
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const overlay = document.getElementById('captcha-overlay');
+        if (overlay && overlay.classList.contains('show')) finish(null);
     });
 })();

@@ -64,7 +64,10 @@ a:hover { opacity: 0.8; text-decoration: underline; }
 /* === Form centering === */
 .form-center { text-align: center; margin: 1rem 0; }
 
-/* === CAPTCHA Modal === */
+/* === CAPTCHA Modal ===
+   Same placement idea as the admin dialogs: a little above the vertical centre on desktop, near the top on
+   phones; always centred horizontally. The overlay is the backdrop (click = cancel), the box keeps the
+   rendered widget so a cancelled prompt does not lose the widget state. */
 .captcha-overlay {
     display: none;
     position: fixed;
@@ -72,23 +75,34 @@ a:hover { opacity: 0.8; text-decoration: underline; }
     background: rgba(0, 0, 0, 0.75);
     z-index: 9999;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
+    padding: 0.75rem 0.375rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 .captcha-overlay.show { display: flex; }
+@media (min-width: 576px) {
+    .captcha-overlay { padding: 12vh 1rem 4vh; }
+}
 .captcha-box {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 1.5rem;
     text-align: center;
+    width: 100%;
     max-width: 340px;
+    margin: 0 auto;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 .captcha-box p {
     color: var(--text-muted);
     font-size: 0.85rem;
     margin-bottom: 1rem;
 }
-.captcha-box .captcha-widget { display: inline-block; }
+.captcha-box .captcha-widget { display: inline-block; max-width: 100%; }
+.captcha-box .captcha-actions { margin-top: 1rem; }
+.captcha-box .captcha-cancel { padding: 0.4rem 1.1rem; font-size: 0.85rem; }
 
 /* === Transparency === */
 body.page-transparency .container,
@@ -352,6 +366,13 @@ ul.feature-list li::before {
 }
 .btn:hover { opacity: 0.85; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+
+/* Link styled as a button (home page "Register your torrent" CTA) — identical to <button class="btn">: the
+   generic a / a:visited / a:hover rules would otherwise paint it pink and underline it. */
+a.btn, a.btn:visited { color: #000; text-decoration: none; }
+a.btn:hover, a.btn:focus-visible { opacity: 0.85; text-decoration: none; }
+a.btn.btn-secondary, a.btn.btn-secondary:visited { color: var(--text); }
 
 .btn-secondary {
     background: transparent;

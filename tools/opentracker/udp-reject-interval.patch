@@ -1,0 +1,59 @@
+From: TryHackX <contact@tryhackx.org>
+Subject: [PATCH] UDP: answer announces for hashes the accesslist rejects with a real "0 peers, come back in N seconds" reply
+
+Upstream answers a UDP announce for a hash that is not allowed (WHITE: not on the whitelist,
+BLACK: blacklisted) with an 8-byte truncated packet. Clients treat that as a broken tracker and keep
+retrying (libtorrent backs off to at most 1 h) — the swarm that still points at the tracker never
+calms down. With `access.udp_reject_interval N` (seconds, 0/absent = upstream behaviour) the tracker
+sends a well-formed announce reply instead: interval = N, leechers = 0, seeders = 0, no peers.
+Compliant clients then wait N seconds before asking again. HTTP announces keep the explicit
+"not authorized" failure reason.
+
+Apply on top of sighup-udp-workers.patch:  patch -p1 < udp-reject-interval.patch
+Config:  access.udp_reject_interval 86400
+---
+--- a/opentracker.c
++++ b/opentracker.c
+@@ -47,4 +47,5 @@
+ static char        *g_serverdir;
+ static char        *g_serveruser;
+ static unsigned int g_udp_workers;
++uint32_t            g_udp_reject_interval;
+
+@@ -501,6 +502,11 @@
+       while (isspace(*value))
+         ++value;
+       scan_uint(value, &g_udp_workers);
++    } else if (!byte_diff(p, 26, "access.udp_reject_interval") && isspace(p[26])) {
++      char *value = p + 26;
++      while (isspace(*value))
++        ++value;
++      scan_uint(value, &g_udp_reject_interval);
+ #ifdef WANT_ACCESSLIST_WHITE
+     } else if (!byte_diff(p, 16, "access.whitelist") && isspace(p[16])) {
+       set_config_option(&g_accesslist_filename, p + 17);
+--- a/trackerlogic.h
++++ b/trackerlogic.h
+@@ -80,5 +80,6 @@
+ #define g_now_minutes (g_now_seconds / 60)
+
+ extern uint32_t g_tracker_id;
++extern uint32_t g_udp_reject_interval; /* access.udp_reject_interval: UDP reply for rejected hashes (0 = 8-byte upstream reply) */
+ typedef enum { FLAG_TCP, FLAG_UDP, FLAG_MCA, FLAG_SELFPIPE } PROTO_FLAG;
+
+--- a/trackerlogic.c
++++ b/trackerlogic.c
+@@ -90,6 +90,13 @@
+       memcpy(ws->reply, invalid_hash, strlen(invalid_hash));
+       return strlen(invalid_hash);
+     }
++    if (proto == FLAG_UDP && g_udp_reject_interval) {
++      /* well-formed announce reply: interval, leechers 0, seeders 0, no peers -> the client backs off */
++      *(uint32_t *)(ws->reply + 0) = htonl(g_udp_reject_interval);
++      *(uint32_t *)(ws->reply + 4) = 0;
++      *(uint32_t *)(ws->reply + 8) = 0;
++      return 12;
++    }
+     return 0;
+   }
+

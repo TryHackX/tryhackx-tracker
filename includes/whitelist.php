@@ -808,6 +808,184 @@ function scrapeOpenTracker(PDO $db, array $cfg, array $row, bool $force = false)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Bulk scrape / bulk metadata queue (admin "Refresh S/L" and "Fetch metadata" tools)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const WL_SCRAPE_BATCH         = 50;    // info_hash= parameters per bulk /scrape request (OpenTracker accepts many)
+const WL_SCRAPE_BULK_MAX_ROWS = 2000;  // hard cap of rows one bulk-scrape call may touch
+const WL_SCRAPE_BULK_BUDGET   = 20.0;  // seconds of wall time per bulk-scrape call (the UI calls again while truncated)
+const WL_SCRAPE_STALE_AFTER   = 600;   // "stale" scope: scraped_at NULL or older than this many seconds
+
+/**
+ * Minimal binary-safe bencode decoder. Returns int|string|array, or null on malformed input
+ * (bencode has no null value, so null is unambiguous). Dict keys are kept as the RAW strings —
+ * a scrape reply keys `files` by the 20-byte binary info hash, never assume ASCII.
+ */
+function bdecode(string $s, int &$pos = 0, int $depth = 0) {
+    $len = strlen($s);
+    if ($depth > 32 || $pos >= $len) return null;
+    $c = $s[$pos];
+    if ($c === 'i') {
+        $end = strpos($s, 'e', $pos + 1);
+        if ($end === false) return null;
+        $num = substr($s, $pos + 1, $end - $pos - 1);
+        if (!preg_match('/^-?\d+$/', $num)) return null;
+        $pos = $end + 1;
+        return (int)$num;
+    }
+    if ($c === 'l' || $c === 'd') {
+        $isDict = ($c === 'd');
+        $pos++;
+        $out = [];
+        while (true) {
+            if ($pos >= $len) return null;
+            if ($s[$pos] === 'e') { $pos++; return $out; }
+            if ($isDict) {
+                $k = bdecode($s, $pos, $depth + 1);
+                if (!is_string($k)) return null;
+                $v = bdecode($s, $pos, $depth + 1);
+                if ($v === null) return null;
+                $out[$k] = $v;
+            } else {
+                $v = bdecode($s, $pos, $depth + 1);
+                if ($v === null) return null;
+                $out[] = $v;
+            }
+        }
+    }
+    if (ctype_digit($c)) {
+        $colon = strpos($s, ':', $pos);
+        if ($colon === false) return null;
+        $n = substr($s, $pos, $colon - $pos);
+        if (!ctype_digit($n) || strlen($n) > 12) return null;
+        $n = (int)$n;
+        if ($colon + 1 + $n > $len) return null;
+        $pos = $colon + 1 + $n;
+        return substr($s, $colon + 1, $n);
+    }
+    return null;
+}
+
+/**
+ * Parse a tracker /scrape reply (`d5:filesd20:<20 raw bytes>d8:completei..e10:downloadedi..e10:incompletei..ee...ee`).
+ * Returns [hex_hash => ['seeders','leechers','completed']] — an empty array when the tracker knows none of the
+ * hashes (valid reply, all zero) — or null when the body is not a scrape reply (error page, failure reason...).
+ */
+function parseScrapeReply(string $body): ?array {
+    $pos = 0;
+    $dec = bdecode($body, $pos);
+    if (!is_array($dec) || !array_key_exists('files', $dec) || !is_array($dec['files'])) return null;
+    $out = [];
+    foreach ($dec['files'] as $key => $stats) {
+        $key = (string)$key; // PHP turns canonical-integer keys into ints; (string) restores the exact bytes
+        if (strlen($key) !== 20 || !is_array($stats)) continue;
+        $out[bin2hex($key)] = [
+            'seeders'   => max(0, (int)($stats['complete'] ?? 0)),
+            'leechers'  => max(0, (int)($stats['incomplete'] ?? 0)),
+            'completed' => max(0, (int)($stats['downloaded'] ?? 0)),
+        ];
+    }
+    return $out;
+}
+
+/** Small HTTP GET for tracker scrapes (curl when available, streams otherwise). Returns the body or null. */
+function whitelistHttpGet(string $url, int $timeout = 4): ?string {
+    $body = null;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => min(2, $timeout), CURLOPT_FOLLOWLOCATION => false, CURLOPT_USERAGENT => 'tryhackx-tracker/1.2 scrape']);
+        $body = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($body === false || $code !== 200) $body = null;
+    } else {
+        $ctx = stream_context_create(['http' => ['timeout' => $timeout, 'ignore_errors' => true]]);
+        $body = @file_get_contents($url, false, $ctx);
+        if ($body === false || $body === '') $body = null;
+    }
+    return is_string($body) ? $body : null;
+}
+
+/**
+ * Bulk scrape: fetch seeders/leechers for many rows with as few HTTP requests as possible — OpenTracker
+ * accepts several info_hash= parameters per /scrape, so hashes go WL_SCRAPE_BATCH per request. Every row of an
+ * answered batch gets scrape_* + scraped_at updated (hashes the tracker omits are unknown to it → 0/0/0);
+ * rows of a batch that got no usable answer are left untouched. Batches are processed in the given order and
+ * the loop stops between batches once $budget seconds are used up (or after two dead requests without a single
+ * answer). $rows = [['id'=>int,'info_hash'=>hex], ...].
+ * Returns ['scraped'=>rows updated, 'requests'=>int, 'failed'=>requests without a usable answer, 'processed'=>rows
+ *          attempted (answered or not), 'truncated'=>bool (budget ran out, rows remain), 'last_id'=>?int (last row
+ *          attempted — cursor for the caller), 'error'=>?string].
+ */
+function scrapeOpenTrackerMany(PDO $db, array $cfg, array $rows, float $budget = WL_SCRAPE_BULK_BUDGET): array {
+    $out = ['scraped' => 0, 'requests' => 0, 'failed' => 0, 'processed' => 0, 'truncated' => false, 'last_id' => null, 'error' => null];
+    $base = trim((string)($cfg['whitelist_scrape_url'] ?? ''));
+    if ($base === '' || !preg_match('#^https?://#i', $base)) { $out['error'] = 'Scrape URL is not configured'; return $out; }
+    $items = [];
+    foreach ($rows as $r) {
+        $h = strtolower((string)($r['info_hash'] ?? ''));
+        $id = (int)($r['id'] ?? 0);
+        if ($id < 1 || !isValidInfoHash($h)) continue;
+        $items[] = ['id' => $id, 'hash' => $h];
+    }
+    if (!$items) return $out;
+    $deadline = microtime(true) + max(1.0, $budget);
+    $sep = str_contains($base, '?') ? '&' : '?';
+    $upd = $db->prepare("UPDATE whitelist SET scrape_seeders = ?, scrape_leechers = ?, scrape_completed = ?, scraped_at = NOW() WHERE id = ?");
+    $batches = array_chunk($items, WL_SCRAPE_BATCH);
+    foreach ($batches as $i => $batch) {
+        if (microtime(true) >= $deadline) { $out['truncated'] = true; break; }
+        $qs = [];
+        foreach ($batch as $it) $qs[] = 'info_hash=' . rawurlencode(hex2bin($it['hash']));
+        $out['requests']++;
+        $out['processed'] += count($batch);
+        $out['last_id'] = $batch[count($batch) - 1]['id'];
+        $body = whitelistHttpGet($base . $sep . implode('&', $qs), 4);
+        $files = $body !== null ? parseScrapeReply($body) : null;
+        if ($files === null) {
+            $out['failed']++;
+            // a dead tracker: do not burn the whole budget on connect timeouts
+            if ($out['scraped'] === 0 && $out['failed'] >= 2) { $out['error'] = 'Tracker did not answer'; break; }
+            continue;
+        }
+        $db->beginTransaction();
+        try {
+            foreach ($batch as $it) {
+                $f = $files[$it['hash']] ?? ['seeders' => 0, 'leechers' => 0, 'completed' => 0];
+                $upd->execute([$f['seeders'], $f['leechers'], $f['completed'], $it['id']]);
+                $out['scraped']++;
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+    if ($out['error'] === null && $out['requests'] > 0 && $out['scraped'] === 0 && $out['failed'] === $out['requests']) $out['error'] = 'Tracker did not answer';
+    return $out;
+}
+
+/**
+ * Bulk (re)queue metadata fetching by scope — ONE UPDATE, no per-row loop; the worker drains the queue at its
+ * own pace. Scopes: 'missing' (never fetched), 'failed', 'missing_failed', 'all' (every active row, done ones
+ * included; rows already pending or being fetched right now are left alone so a worker claim is never
+ * clobbered). Non-banned rows only, priority 0 (below manual per-row requests). Returns rows queued, or null
+ * for an unknown scope.
+ */
+function whitelistQueueMetaByScope(PDO $db, string $scope): ?int {
+    $conds = [
+        'missing'        => "meta_status = 'none'",
+        'failed'         => "meta_status = 'failed'",
+        'missing_failed' => "meta_status IN ('none','failed')",
+        'all'            => "meta_status NOT IN ('pending','fetching')",
+    ];
+    if (!isset($conds[$scope])) return null;
+    $st = $db->prepare("UPDATE whitelist SET meta_status = 'pending', meta_priority = 0, meta_requested_at = NOW(), meta_error = NULL, meta_claim = NULL WHERE banned = 0 AND " . $conds[$scope]);
+    $st->execute();
+    return $st->rowCount();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Mode-aware block / unblock (used by the report / appeal / archive endpoints)
 // ─────────────────────────────────────────────────────────────────────────────
 

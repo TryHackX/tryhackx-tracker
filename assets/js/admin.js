@@ -195,16 +195,16 @@ async function loadReports() {
         }
         return `
         <tr>
-            <td>${r.id}</td>
-            <td>${esc(r.name)}</td>
-            <td><small>${esc(r.email)}</small></td>
-            <td class="editable-cell" ondblclick="inlineEdit(this, ${r.id}, 'company')">${esc(r.company)}</td>
-            <td class="editable-cell" ondblclick="inlineEdit(this, ${r.id}, 'representative')">${esc(r.representative)}</td>
-            <td>${esc(r.objectTitle)}</td>
+            <td class="dash-id">${r.id}</td>
+            <td title="${escAttr(r.name)}">${esc(r.name)}</td>
+            <td title="${escAttr(r.email)}"><small>${esc(r.email)}</small></td>
+            <td class="editable-cell" title="${escAttr(r.company)}" ondblclick="inlineEdit(this, ${r.id}, 'company')">${esc(r.company)}</td>
+            <td class="editable-cell" title="${escAttr(r.representative)}" ondblclick="inlineEdit(this, ${r.id}, 'representative')">${esc(r.representative)}</td>
+            <td title="${escAttr(r.objectTitle)}">${esc(r.objectTitle)}</td>
             <td class="hash-cell hash-copy" title="Click to copy: ${r.infoHash}" onclick="copyHash(this, '${r.infoHash}')">${r.infoHash}</td>
-            <td><small>${esc(r.ip)}</small></td>
+            <td title="${escAttr(r.ip)}"><small>${esc(r.ip)}</small></td>
             <td class="col-badge">${statusBadge}</td>
-            <td><small>${r.timestamp}</small></td>
+            <td class="dash-date"><small>${r.timestamp}</small></td>
             <td class="td-actions"><button class="btn btn-sm btn-outline-info" onclick="openModal(${r.id})"><i class="bi bi-three-dots"></i></button></td>
         </tr>`;
     }).join('');
@@ -214,6 +214,11 @@ async function loadReports() {
 
 function renderPagination(total, page, pages) {
     const el = document.getElementById('pagination');
+    // Shared renderer (First / Prev / page box / Next / Last) from admin-common.js when it is loaded.
+    if (window.AdminCommon && typeof window.AdminCommon.renderPagination === 'function') {
+        window.AdminCommon.renderPagination(el, { total, page, pages, onPage: goPage });
+        return;
+    }
     if (pages <= 1) { el.innerHTML = ''; return; }
     el.innerHTML = `
         <button ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})"><i class="bi bi-chevron-left"></i> Prev</button>
@@ -482,6 +487,14 @@ function updateTableHeaders(src) {
 
     const isAppeal = src === 'appeals' || src === 'appeal_archives';
 
+    // Fixed-layout column widths (admin.css .dash-c-*): the two views pin different columns.
+    const colgroup = document.getElementById('reports-colgroup');
+    if (colgroup) {
+        colgroup.innerHTML = isAppeal
+            ? '<col class="dash-c-id"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-type"><col class="dash-c-report"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">'
+            : '<col class="dash-c-id"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">';
+    }
+
     if (isAppeal) {
         thead.innerHTML = `
             <th class="sortable" data-sort="id">ID <i class="bi bi-arrow-down-up sort-icon"></i></th>
@@ -584,6 +597,12 @@ function esc(str) {
     const d = document.createElement('div');
     d.textContent = str;
     return d.innerHTML;
+}
+
+// For double-quoted attribute values (title="..."): esc() leaves quotes alone (innerHTML serialisation only
+// escapes & < >), so a value containing a quote could otherwise close the attribute.
+function escAttr(str) {
+    return esc(str).replace(/"/g, '&quot;');
 }
 
 function copyHash(td, hash) {
@@ -697,16 +716,16 @@ async function loadAppeals() {
         const shortMsg = a.message ? (a.message.length > 50 ? esc(a.message.substring(0, 50)) + '...' : esc(a.message)) : '';
         return `
         <tr>
-            <td>${a.id}</td>
-            <td>${esc(a.name)}</td>
-            <td><small>${esc(a.email)}</small></td>
-            <td class="col-desc"><small title="${esc(a.message)}">${shortMsg}</small></td>
+            <td class="dash-id">${a.id}</td>
+            <td title="${escAttr(a.name)}">${esc(a.name)}</td>
+            <td title="${escAttr(a.email)}"><small>${esc(a.email)}</small></td>
+            <td class="col-desc" title="${escAttr(a.message)}"><small>${shortMsg}</small></td>
             <td class="col-badge">${typeBadge}</td>
             <td>${a.report_id ? '<a href="#" class="text-info" onclick="openReportFromAppeal(' + a.report_id + ', \'' + esc(a.infoHash) + '\');return false;">#' + a.report_id + '</a>' : '—'}</td>
             <td class="hash-cell hash-copy" title="Click to copy: ${a.infoHash}" onclick="copyHash(this, '${a.infoHash}')">${a.infoHash}</td>
-            <td><small>${esc(a.ip)}</small></td>
+            <td title="${escAttr(a.ip)}"><small>${esc(a.ip)}</small></td>
             <td class="col-badge">${badge}</td>
-            <td><small>${a.timestamp}</small></td>
+            <td class="dash-date"><small>${a.timestamp}</small></td>
             <td class="td-actions"><button class="btn btn-sm btn-outline-info" onclick="openAppealModal(${a.id})"><i class="bi bi-three-dots"></i></button></td>
         </tr>`;
     }).join('');

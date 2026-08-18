@@ -9,8 +9,8 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
 </head>
 <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
-<body class="admin-body wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-api-ban-days="<?= (int)($cfg['api_ban_days'] ?? 30) ?>" data-service="<?= sanitize($svcName) ?>">
-    <div class="admin-container wl-page">
+<body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-api-ban-days="<?= (int)($cfg['api_ban_days'] ?? 30) ?>" data-service="<?= sanitize($svcName) ?>">
+    <div class="admin-container admin-wide wl-page">
         <div class="admin-header">
             <h2><i class="bi bi-list-check"></i> Whitelist</h2>
             <div class="admin-header-actions">
@@ -86,6 +86,31 @@
                             <label class="form-check-label" for="wl-group-ip">Group by IP</label>
                         </div>
                         <span id="wl-total" class="text-muted wl-total"></span>
+                        <!-- Bulk metadata queue: one UPDATE server-side, the worker drains the queue one hash after another -->
+                        <div class="btn-group wl-tool-dd" id="wl-meta-bulk-group">
+                            <button type="button" class="btn btn-sm btn-outline-info dropdown-toggle" id="btn-wl-meta-bulk" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false" title="Queue metadata fetching for many rows at once. The metadata worker then fetches them in the background, one hash after another."><i class="bi bi-cloud-download"></i> Fetch metadata</button>
+                            <ul class="dropdown-menu dropdown-menu-end wl-dd-menu">
+                                <li><h6 class="dropdown-header">Queue metadata for&hellip;</h6></li>
+                                <li><button type="button" class="dropdown-item" data-meta-scope="missing"><i class="bi bi-dash-circle"></i> Missing (never fetched)</button></li>
+                                <li><button type="button" class="dropdown-item" data-meta-scope="failed"><i class="bi bi-x-circle"></i> Failed</button></li>
+                                <li><button type="button" class="dropdown-item" data-meta-scope="missing_failed"><i class="bi bi-plus-slash-minus"></i> Missing + failed</button></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><button type="button" class="dropdown-item" data-meta-scope="all"><i class="bi bi-arrow-repeat"></i> All active hashes (re-fetch)</button></li>
+                                <li><div class="dropdown-item-text wl-dd-note">Only queues the rows — the metadata worker fetches them in the background, one hash after another. Large queues take a while.</div></li>
+                            </ul>
+                        </div>
+                        <!-- Bulk scrape (split control): main button = this page, caret = stale / all -->
+                        <div class="btn-group wl-tool-dd" id="wl-scrape-bulk-group">
+                            <button type="button" class="btn btn-sm btn-outline-info" id="btn-wl-scrape-bulk" title="Refresh seeders / leechers of the rows on this page from the tracker (50 hashes per scrape request)"><i class="bi bi-arrow-repeat"></i> <span id="wl-scrape-label">Refresh S/L</span></button>
+                            <button type="button" class="btn btn-sm btn-outline-info dropdown-toggle dropdown-toggle-split" id="btn-wl-scrape-caret" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false" title="More scrape options"><span class="visually-hidden">Toggle scrape options</span></button>
+                            <ul class="dropdown-menu dropdown-menu-end wl-dd-menu">
+                                <li><h6 class="dropdown-header">Scrape seeders / leechers for&hellip;</h6></li>
+                                <li><button type="button" class="dropdown-item" data-scrape-scope="page"><i class="bi bi-file-earmark"></i> This page</button></li>
+                                <li><button type="button" class="dropdown-item" data-scrape-scope="stale"><i class="bi bi-hourglass-split"></i> Stale (not scraped in 10 min)</button></li>
+                                <li><button type="button" class="dropdown-item" data-scrape-scope="all"><i class="bi bi-collection"></i> All active hashes</button></li>
+                                <li><div class="dropdown-item-text wl-dd-note">Batches of 50 hashes per tracker request; long runs continue automatically until everything is scraped.</div></li>
+                            </ul>
+                        </div>
                         <button class="btn btn-sm btn-primary" id="btn-wl-add"><i class="bi bi-plus-lg"></i> Add hashes</button>
                     </div>
                 </div>
