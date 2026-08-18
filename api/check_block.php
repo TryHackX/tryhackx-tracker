@@ -4,11 +4,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = readJsonBody();
     $hash = strtolower(trim($input['hash'] ?? ''));
 
-    // reCAPTCHA (smart)
+    // CAPTCHA (smart)
     if (isCaptchaRequired($cfg, 'block_check')) {
-        $recaptcha = $input['g-recaptcha-response'] ?? '';
-        if (!verifyRecaptcha($recaptcha, $cfg)) {
-            jsonResponse(['error' => 'reCAPTCHA verification failed', 'captcha_required' => true], 400);
+        if (!verifyCaptcha(captchaTokenFromInput($input), $cfg)) {
+            jsonResponse(['error' => 'CAPTCHA verification failed', 'captcha_required' => true], 400);
         }
         onCaptchaSolved();
     }
@@ -39,12 +38,18 @@ if (!$report) {
 
 addCaptchaPoints($cfg, 'block_check');
 
-if (!$report || !$report['blocked']) {
+// Whitelist mode: a hash can be banned without any report (admin/appeal/import) — banned_hashes is
+// authoritative there. Blacklist mode keeps the report-driven answer.
+$bannedNoReport = trackerMode($cfg) === 'whitelist' && isHashBanned($db, $hash);
+$whitelisted = trackerMode($cfg) === 'whitelist' ? (isHashWhitelisted($db, $hash) !== null) : null;
+
+if ((!$report || !$report['blocked']) && !$bannedNoReport) {
     // Always return "not blocked" — never reveal whether reports exist
     jsonResponse([
         'success' => true,
         'infoHash' => $hash,
         'blocked' => false,
+        'whitelisted' => $whitelisted,
         'captcha_solved' => wasCaptchaJustSolved(),
     ]);
 }
@@ -53,7 +58,8 @@ jsonResponse([
     'success' => true,
     'infoHash' => $hash,
     'blocked' => true,
-    'company' => $report['company'],
-    'representative' => $report['representative'],
+    'company' => ($report && $report['blocked']) ? $report['company'] : null,
+    'representative' => ($report && $report['blocked']) ? $report['representative'] : null,
+    'whitelisted' => $whitelisted,
     'captcha_solved' => wasCaptchaJustSolved(),
 ]);

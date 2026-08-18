@@ -7,7 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
-    <?php if (isRecaptchaEnabled($cfg, 'login')): ?>
+    <?php if (isCaptchaEnabled($cfg, 'login')): ?>
     <style>
     .captcha-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:9999; justify-content:center; align-items:center; }
     .captcha-overlay.show { display:flex; }
@@ -15,10 +15,7 @@
     .captcha-box p { color:#888; font-size:.85rem; margin-bottom:1rem; }
     .captcha-box .captcha-widget { display:inline-block; }
     </style>
-    <script>
-    const RECAPTCHA_SITEKEY = '<?= sanitize($cfg['recaptcha_site_key'] ?? '') ?>';
-    </script>
-    <script src="https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit" async defer></script>
+    <?= captchaHeadTags($cfg) ?>
     <?php endif; ?>
 </head>
 <body class="admin-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>">
@@ -40,6 +37,7 @@
                     </button>
                 </div>
                 <?php endif; ?>
+                <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
                 <a href="<?= $baseUrl ?>?action=settings" class="btn btn-sm btn-outline-info"><i class="bi bi-gear"></i> Settings</a>
                 <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
             </div>
@@ -201,7 +199,7 @@
         </div>
     </div>
 
-    <?php if (isRecaptchaEnabled($cfg, 'login')): ?>
+    <?php if (isCaptchaEnabled($cfg, 'login')): ?>
     <div class="captcha-overlay" id="captcha-overlay">
         <div class="captcha-box">
             <p>Please verify you are human</p>
@@ -270,6 +268,7 @@
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.min.js" integrity="sha384-G/EV+4j2dNv+tEPo3++6LCgdCROaejBqfUeNjuKAiuXbjrxilcCdDz6ZAVfHWe1Y" crossorigin="anonymous"></script>
+    <script src="<?= $baseUrl ?>assets/js/captcha.js<?= assetVer('assets/js/captcha.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin.js<?= assetVer('assets/js/admin.js') ?>"></script>
 </body>
 </html>

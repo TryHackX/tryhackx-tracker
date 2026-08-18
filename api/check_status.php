@@ -3,11 +3,10 @@ requirePost();
 
 $input = readJsonBody();
 
-// reCAPTCHA (smart)
+// CAPTCHA (smart)
 if (isCaptchaRequired($cfg, 'status')) {
-    $recaptcha = $input['g-recaptcha-response'] ?? '';
-    if (!verifyRecaptcha($recaptcha, $cfg)) {
-        jsonResponse(['error' => 'reCAPTCHA verification failed', 'captcha_required' => true], 400);
+    if (!verifyCaptcha(captchaTokenFromInput($input), $cfg)) {
+        jsonResponse(['error' => 'CAPTCHA verification failed', 'captcha_required' => true], 400);
     }
     onCaptchaSolved();
 }

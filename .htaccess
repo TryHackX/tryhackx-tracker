@@ -36,7 +36,7 @@ RewriteBase /tracker/
     # Content-Security-Policy. 'unsafe-inline'/'unsafe-eval' are needed by the inline
     # scripts / onclick handlers and Google reCAPTCHA. Remote hosts allowed: jsDelivr
     # (Bootstrap + icons) and Google/Gstatic (reCAPTCHA). Tighten if you self-host these.
-    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com https://www.recaptcha.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https://www.google.com https://www.gstatic.com; connect-src 'self'; frame-src https://www.google.com https://www.recaptcha.net; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com https://www.recaptcha.net https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https://www.google.com https://www.gstatic.com; connect-src 'self'; frame-src https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
 </IfModule>
 
 # Prevent directory listings

@@ -55,9 +55,9 @@ if ($appealType === 'unblock' && $newStatus === 'accepted' && !empty($input['unb
         $unblocked = true;
     }
 
-    // Remove ALL occurrences from blacklist file (case-insensitive)
-    $blacklistPath = $cfg['blacklist_path'] ?? '';
-    removeHashFromBlacklist($appeal['infoHash'], $blacklistPath);
+    // Unblock on the tracker (mode-aware: lift ban / remove from blacklist file) + reload.
+    $listChange = trackerUnblockHash($db, $cfg, $appeal['infoHash']);
+    $unblocked = true; // an accepted unblock appeal always lifts the tracker-side block
 }
 
 // Handle block appeals
@@ -80,11 +80,10 @@ if ($appealType === 'block' && $newStatus === 'accepted' && !empty($input['do_bl
         $blocked = true;
     }
 
-    // Add to blacklist file (deduplicated)
-    $blacklistPath = $cfg['blacklist_path'] ?? '';
-    if ($blocked) {
-        addHashToBlacklist($appeal['infoHash'], $blacklistPath);
-    }
+    // Block on the tracker (mode-aware) + reload. An accepted block request blocks the hash even when
+    // no report row exists for it (whitelist mode: the ban prevents future registration too).
+    $listChange = trackerBlockHash($db, $cfg, $appeal['infoHash'], ['source' => 'appeal', 'source_id' => $id, 'reason' => 'Block request #' . $id . ' accepted']);
+    $blocked = true;
 }
 
 // Send email notification to appellant
@@ -163,8 +162,8 @@ if ($updatedAppeal) {
 // Auto-close and archive other pending appeals for the same hash + type
 $autoClosed = autoCloseRelatedAppeals($db, $appeal['infoHash'], $appealType, $id, $cfg);
 
-// If the blacklist file changed (a hash was blocked or unblocked), reload the tracker (SIGHUP).
-$reload = ($blocked || $unblocked) ? autoReloadTrackerBlacklist($cfg) : null;
+// The tracker list changed (a hash was blocked or unblocked) — reload status comes from the helper.
+$reload = isset($listChange) ? ($listChange['reload'] ?? null) : null;
 
 $response = [
     'success' => true,

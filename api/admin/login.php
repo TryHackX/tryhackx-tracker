@@ -14,9 +14,8 @@ if (isLoginLocked($ip, $cfg)) {
 }
 
 if (isCaptchaRequired($cfg, 'login')) {
-    $recaptcha = $input['g-recaptcha-response'] ?? '';
-    if (!verifyRecaptcha($recaptcha, $cfg)) {
-        jsonResponse(['error' => 'reCAPTCHA failed', 'captcha_required' => true], 400);
+    if (!verifyCaptcha(captchaTokenFromInput($input), $cfg)) {
+        jsonResponse(['error' => 'CAPTCHA verification failed', 'captcha_required' => true], 400);
     }
     onCaptchaSolved();
 }

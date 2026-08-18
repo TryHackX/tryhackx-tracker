@@ -212,6 +212,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
             UNIQUE KEY `email_type` (`email`, `type`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+        // Whitelist / API tables (schema v2) — shared definition with includes/schema.php so upgrades
+        // and fresh installs create exactly the same structures.
+        require_once __DIR__ . '/includes/schema.php';
+        foreach (trackerSchemaStatements() as $sql) {
+            $pdo->exec($sql);
+        }
+
         // Save DB config
         $_SESSION['install_db'] = [
             'host' => $dbHost,
@@ -359,6 +366,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 'footer_os_enabled' => '1',
                 'footer_os_since_year' => date('Y'),
             ];
+
+            // Whitelist / CAPTCHA provider / API defaults + schema version (see includes/schema.php)
+            require_once __DIR__ . '/includes/schema.php';
+            $defaults += trackerSchemaDefaultSettings();
+            $defaults['schema_version'] = (string)TRACKER_SCHEMA_VERSION;
 
             $stmt = $pdo->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)");
             foreach ($defaults as $k => $v) {

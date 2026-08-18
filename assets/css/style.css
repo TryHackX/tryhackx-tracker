@@ -1488,3 +1488,24 @@ footer p { margin: 0.25rem 0; }
     }
 }
 
+
+/* === Whitelist registration page === */
+.wl-rules { margin: 0.5rem 0 1.5rem 1.2rem; color: var(--text-muted, #a0a0b0); font-size: 0.92rem; }
+.wl-rules li { margin-bottom: 0.3rem; }
+.wl-results { margin-top: 1.5rem; }
+.wl-row { display: flex; gap: 0.8rem; align-items: flex-start; padding: 0.6rem 0.8rem; margin-bottom: 0.5rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+.wl-row-main { flex: 1; min-width: 0; }
+.wl-badge { flex: 0 0 auto; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); white-space: nowrap; }
+.wl-added .wl-badge   { color: var(--success); border-color: var(--success); background: rgba(76,175,80,0.12); }
+.wl-exists .wl-badge  { color: var(--accent); border-color: var(--accent); background: rgba(74,158,255,0.12); }
+.wl-banned .wl-badge  { color: var(--error); border-color: var(--error); background: rgba(244,67,54,0.12); }
+.wl-invalid .wl-badge { color: var(--warning); border-color: var(--warning); background: rgba(255,152,0,0.12); }
+.wl-hash { word-break: break-all; font-size: 0.85rem; }
+.wl-error { color: var(--warning); font-size: 0.82rem; margin-top: 0.2rem; }
+.wl-magnet { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.4rem; }
+.wl-magnet code { flex: 1; min-width: 0; font-size: 0.75rem; word-break: break-all; opacity: 0.85; }
+.wl-copy { position: static; flex: 0 0 auto; font-size: 0.75rem; padding: 0.15rem 0.5rem; }
+@media (max-width: 600px) {
+    .wl-row { flex-direction: column; gap: 0.4rem; }
+    .wl-magnet { flex-direction: column; align-items: stretch; }
+}

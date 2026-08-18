@@ -35,9 +35,8 @@ if ($deleteAttempts >= $captchaAttempts && isRecaptchaEnabled($cfg, 'login')) {
     $inGrace = isset($_SESSION['captcha_solved_at']) && (time() - $_SESSION['captcha_solved_at']) < $grace * 60;
     
     if (!$inGrace) {
-        $recaptcha = $input['g-recaptcha-response'] ?? '';
-        if (!verifyRecaptcha($recaptcha, $cfg)) {
-            jsonResponse(['error' => 'reCAPTCHA verification failed', 'captcha_required' => true], 400);
+        if (!verifyCaptcha(captchaTokenFromInput($input), $cfg)) {
+            jsonResponse(['error' => 'CAPTCHA verification failed', 'captcha_required' => true], 400);
         }
         onCaptchaSolved();
     }
@@ -99,12 +98,9 @@ if ($report['blocked']) {
     $otherBlockedArchives = (int)$stmt->fetchColumn();
 
     if ($otherBlockedReports === 0 && $otherBlockedArchives === 0) {
-        $blacklistPath = $cfg['blacklist_path'] ?? '';
-        // Security check: strip null bytes and control characters
-        $blacklistPath = preg_replace('/[\x00-\x1F\x7F]/', '', $blacklistPath);
-        if ($blacklistPath) {
-            $blacklistChanged = removeHashFromBlacklist($report['infoHash'], $blacklistPath);
-        }
+        $unblock = trackerUnblockHash($db, $cfg, $report['infoHash']);
+        $blacklistChanged = $unblock['file_ok'];
+        $unblockReload = $unblock['reload'] ?? null;
     }
 }
 
@@ -141,8 +137,8 @@ try {
     jsonResponse(['error' => 'A database error occurred while deleting the report.'], 500);
 }
 
-// The blacklist file changed — ask the tracker to reload it immediately (SIGHUP, no downtime).
-$reload = $blacklistChanged ? autoReloadTrackerBlacklist($cfg) : null;
+// The tracker list changed — reload status came from the mode-aware unblock helper.
+$reload = $unblockReload ?? null;
 
 $response = [
     'success' => true,

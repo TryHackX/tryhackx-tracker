@@ -79,37 +79,153 @@ function verifyCsrfHeader(): bool {
     return verifyCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
 }
 
-function verifyRecaptcha(string $response, array $cfg): bool {
-    $secret = $cfg['recaptcha_secret'] ?? '';
-    // Fail closed: if asked to verify but no secret is configured, we cannot prove the
-    // token is valid, so reject. Whether CAPTCHA applies at all is decided upstream by
-    // isRecaptchaEnabled()/isCaptchaRequired(), both of which require a configured secret.
-    if (!$secret) return false;
-    $data = http_build_query([
-        'secret' => $secret,
-        'response' => $response,
-        'remoteip' => getClientIp(),
-    ]);
-    $opts = ['http' => [
-        'method' => 'POST',
-        'header' => 'Content-Type: application/x-www-form-urlencoded',
-        'content' => $data,
-    ]];
-    $result = @file_get_contents('https://www.google.com/recaptcha/api/siteverify', false, stream_context_create($opts));
-    if ($result === false) return false;
-    $json = json_decode($result, true);
-    return !empty($json['success']);
+// ─────────────────────────────────────────────────────────────────────────────
+// CAPTCHA (provider-agnostic: Google reCAPTCHA v2 or Cloudflare Turnstile)
+// ─────────────────────────────────────────────────────────────────────────────
+// Setting `captcha_provider` selects the widget/verifier; `recaptcha_enabled` remains the master
+// "CAPTCHA enabled" switch and `recaptcha_on_<ctx>` the per-context toggles (legacy names kept so
+// existing installations keep working unchanged). The old verifyRecaptcha()/isRecaptchaEnabled()
+// names are preserved as thin wrappers.
+
+/** Active provider: 'recaptcha' (default) or 'turnstile'. */
+function captchaProvider(array $cfg): string {
+    return (($cfg['captcha_provider'] ?? 'recaptcha') === 'turnstile') ? 'turnstile' : 'recaptcha';
 }
 
-function isRecaptchaEnabled(array $cfg, string $context = 'report'): bool {
-    if (empty($cfg['recaptcha_enabled']) || $cfg['recaptcha_enabled'] !== '1') return false;
-    if (empty($cfg['recaptcha_site_key']) || empty($cfg['recaptcha_secret'])) return false;
+/** Public site key of the active provider ('' when missing). */
+function captchaSiteKey(array $cfg): string {
+    return trim((string)($cfg[captchaProvider($cfg) === 'turnstile' ? 'turnstile_site_key' : 'recaptcha_site_key'] ?? ''));
+}
+
+/** Secret of the active provider ('' when missing). */
+function captchaSecret(array $cfg): string {
+    return trim((string)($cfg[captchaProvider($cfg) === 'turnstile' ? 'turnstile_secret' : 'recaptcha_secret'] ?? ''));
+}
+
+/** True when CAPTCHA is switched on AND the active provider has both a site key and a secret. */
+function captchaConfigured(array $cfg): bool {
+    if (($cfg['recaptcha_enabled'] ?? '0') !== '1') return false;
+    return captchaSiteKey($cfg) !== '' && captchaSecret($cfg) !== '';
+}
+
+/**
+ * One HTTP helper for the siteverify calls: form-encoded POST, hard timeouts (connect 3 s, total
+ * 5 s), TLS verification on. Returns the decoded JSON object or null on any transport/parse error
+ * so callers fail closed. cURL is preferred; falls back to a stream context with a timeout.
+ */
+function captchaHttpPost(string $url, array $fields): ?array {
+    $body = http_build_query($fields);
+    $result = false;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        if ($ch === false) return null;
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $body,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_TIMEOUT        => 5,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded', 'Accept: application/json'],
+        ]);
+        $result = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+        if ($result === false || $code < 200 || $code >= 300) return null;
+    } else {
+        $opts = ['http' => [
+            'method'  => 'POST',
+            'header'  => "Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\n",
+            'content' => $body,
+            'timeout' => 5,
+            'ignore_errors' => false,
+        ], 'ssl' => ['verify_peer' => true, 'verify_peer_name' => true]];
+        $result = @file_get_contents($url, false, stream_context_create($opts));
+        if ($result === false) return null;
+    }
+    $json = json_decode((string)$result, true);
+    return is_array($json) ? $json : null;
+}
+
+/** Google reCAPTCHA v2 verification. Fail closed on missing secret / transport error. */
+function verifyRecaptcha(string $response, array $cfg): bool {
+    $secret = trim((string)($cfg['recaptcha_secret'] ?? ''));
+    // Fail closed: if asked to verify but no secret is configured, we cannot prove the
+    // token is valid, so reject. Whether CAPTCHA applies at all is decided upstream by
+    // isCaptchaEnabled()/isCaptchaRequired(), both of which require a configured secret.
+    if ($secret === '' || $response === '') return false;
+    $json = captchaHttpPost('https://www.google.com/recaptcha/api/siteverify', [
+        'secret'   => $secret,
+        'response' => $response,
+        'remoteip' => getClientIp($cfg),
+    ]);
+    return $json !== null && ($json['success'] ?? false) === true;
+}
+
+/** Cloudflare Turnstile verification. Fail closed on missing secret / transport error. */
+function verifyTurnstile(string $token, array $cfg): bool {
+    $secret = trim((string)($cfg['turnstile_secret'] ?? ''));
+    if ($secret === '' || $token === '') return false;
+    $json = captchaHttpPost('https://challenges.cloudflare.com/turnstile/v0/siteverify', [
+        'secret'   => $secret,
+        'response' => $token,
+        'remoteip' => getClientIp($cfg),
+    ]);
+    return $json !== null && ($json['success'] ?? false) === true;
+}
+
+/** Verify a token with whichever provider is active. Empty token → false. */
+function verifyCaptcha(string $token, array $cfg): bool {
+    if ($token === '') return false;
+    return captchaProvider($cfg) === 'turnstile' ? verifyTurnstile($token, $cfg) : verifyRecaptcha($token, $cfg);
+}
+
+/** Pull the CAPTCHA token out of a decoded request body (new generic name first, legacy names after). */
+function captchaTokenFromInput(array $input): string {
+    foreach (['captcha_token', 'g-recaptcha-response', 'cf-turnstile-response'] as $k) {
+        if (isset($input[$k]) && is_string($input[$k]) && $input[$k] !== '') return $input[$k];
+    }
+    return '';
+}
+
+/** CAPTCHA switched on, provider configured, and enabled for this context (recaptcha_on_<ctx>). */
+function isCaptchaEnabled(array $cfg, string $context = 'report'): bool {
+    if (!captchaConfigured($cfg)) return false;
     $key = 'recaptcha_on_' . $context;
     return !empty($cfg[$key]) && $cfg[$key] === '1';
 }
 
+/** Legacy alias of isCaptchaEnabled(). */
+function isRecaptchaEnabled(array $cfg, string $context = 'report'): bool {
+    return isCaptchaEnabled($cfg, $context);
+}
+
+/**
+ * <head> tags for the active provider: the widget script plus an inline script exposing
+ * CAPTCHA_PROVIDER / CAPTCHA_SITEKEY (and RECAPTCHA_SITEKEY for backwards compatibility) to
+ * assets/js/captcha.js. Emits nothing when CAPTCHA is not configured.
+ */
+function captchaHeadTags(array $cfg): string {
+    if (!captchaConfigured($cfg)) return '';
+    $provider = captchaProvider($cfg);
+    $siteKey = captchaSiteKey($cfg);
+    $src = $provider === 'turnstile'
+        ? 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+        : 'https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit';
+    $keyJs = json_encode($siteKey, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $html  = "<script>\n";
+    $html .= "    const CAPTCHA_PROVIDER = '" . $provider . "';\n";
+    $html .= "    const CAPTCHA_SITEKEY = " . $keyJs . ";\n";
+    $html .= "    const RECAPTCHA_SITEKEY = CAPTCHA_SITEKEY;\n";
+    $html .= "    </script>\n";
+    $html .= '    <script src="' . $src . '" async defer></script>' . "\n";
+    return $html;
+}
+
 function isCaptchaRequired(array $cfg, string $context = 'report'): bool {
-    if (!isRecaptchaEnabled($cfg, $context)) return false;
+    if (!isCaptchaEnabled($cfg, $context)) return false;
     // First visit: CAPTCHA never solved in this session → always require
     if (!isset($_SESSION['captcha_solved_at'])) return true;
     // Grace period: if CAPTCHA was recently solved, skip
@@ -431,9 +547,22 @@ function removeHashFromBlacklist(string $hash, string $blacklistPath): bool {
     $lines = file($blacklistPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     $filtered = array_filter($lines, fn($line) => strtolower(trim($line)) !== $hashLower);
 
-    // Only write if something changed
+    // Only write if something changed. Write a temp file in the same directory and rename() over the
+    // original: OpenTracker re-reads the file on SIGHUP and would treat a half-written or momentarily
+    // empty file as "no entries" — never let it observe an intermediate state.
     if (count($filtered) !== count($lines)) {
-        file_put_contents($blacklistPath, implode("\n", $filtered) . "\n", LOCK_EX);
+        $payload = $filtered ? implode("\n", $filtered) . "\n" : '';
+        $tmp = $blacklistPath . '.tmp.' . getmypid();
+        $written = false;
+        if (is_writable(dirname($blacklistPath)) && @file_put_contents($tmp, $payload, LOCK_EX) !== false) {
+            @chmod($tmp, 0664);
+            $written = @rename($tmp, $blacklistPath);
+            if (!$written) @unlink($tmp);
+        }
+        if (!$written) {
+            // Directory not writable (legacy layout: file writable, dir not) — fall back to in-place rewrite.
+            file_put_contents($blacklistPath, $payload, LOCK_EX);
+        }
         // The file really changed — the tracker still holds the old copy until it restarts.
         recordBlacklistChange('del');
     }
@@ -582,7 +711,28 @@ function getTrackerServiceWarnings(array $cfg): array {
         }
     }
 
-    $res = classifyTrackerWarnings($adds, $dels, $uptime, $cfg);
+    // In whitelist mode the file-change log is irrelevant (the whitelist service reloads by itself);
+    // instead surface the whitelist file / reload / worker health as warnings.
+    if (function_exists('trackerMode') && trackerMode($cfg) === 'whitelist') {
+        $res = classifyTrackerWarnings(0, 0, $uptime, $cfg);
+        $db = $GLOBALS['db'] ?? null;
+        if ($db instanceof PDO && function_exists('whitelistStatus')) {
+            try {
+                $ws = whitelistStatus($db, $cfg);
+                foreach ($ws['warnings'] as $w) {
+                    $res['items'][] = $w;
+                    if ($w['level'] === 'danger') $res['level'] = 'danger';
+                    elseif ($w['level'] === 'warn' && $res['level'] === 'none') $res['level'] = 'warn';
+                }
+                $res['count'] = count($res['items']);
+                $res['whitelist'] = ['active' => $ws['counts']['active'], 'pending_reload' => (bool)$ws['state']['pending_reload'], 'regen_needed' => (bool)$ws['state']['regen_needed']];
+            } catch (\Throwable $e) {}
+        }
+        $adds = 0; $dels = 0;
+    } else {
+        $res = classifyTrackerWarnings($adds, $dels, $uptime, $cfg);
+    }
+    $res['mode']           = function_exists('trackerMode') ? trackerMode($cfg) : 'blacklist';
     $res['pending_adds']   = $adds;
     $res['pending_dels']   = $dels;
     $res['uptime_seconds'] = $uptime;
@@ -647,6 +797,7 @@ function autoReloadTrackerBlacklist(array $cfg): ?array {
     if ($service === '' || !isServiceNameValid($service) || !trackerExecAvailable()) return null;
 
     $res = runTrackerServiceCommand('reload', $cfg);
+    if (function_exists('whitelistNoteReloaded')) whitelistNoteReloaded($res['ok'], $res['output']);
     if ($res['ok']) {
         resetBlacklistChanges();
         return ['attempted' => true, 'ok' => true];

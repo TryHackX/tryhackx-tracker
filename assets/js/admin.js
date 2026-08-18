@@ -1,43 +1,10 @@
 const API_BASE = document.body.dataset.apiBase;
 
-let captchaWidgetId = null;
-let captchaResolve = null;
-
-window.onRecaptchaLoad = function() {};
-
-function showCaptchaModal() {
-    return new Promise((resolve) => {
-        const overlay = document.getElementById('captcha-overlay');
-        const container = document.getElementById('captcha-widget');
-        if (!overlay || !container || typeof grecaptcha === 'undefined' || typeof RECAPTCHA_SITEKEY === 'undefined') {
-            resolve('');
-            return;
-        }
-        captchaResolve = resolve;
-        if (captchaWidgetId !== null) {
-            grecaptcha.reset(captchaWidgetId);
-        } else {
-            captchaWidgetId = grecaptcha.render(container, {
-                sitekey: RECAPTCHA_SITEKEY,
-                theme: 'dark',
-                callback: (token) => {
-                    overlay.classList.remove('show');
-                    if (captchaResolve) { captchaResolve(token); captchaResolve = null; }
-                },
-            });
-        }
-        overlay.classList.add('show');
-    });
+// CAPTCHA modal lives in assets/js/captcha.js (window.showCaptchaModal), shared with the public site.
+function requestCaptchaToken() {
+    if (typeof window.showCaptchaModal !== 'function') return Promise.resolve('');
+    return window.showCaptchaModal().then((t) => t || '');
 }
-
-document.addEventListener('click', (e) => {
-    const overlay = document.getElementById('captcha-overlay');
-    if (overlay && e.target === overlay) {
-        overlay.classList.remove('show');
-        if (captchaResolve) { captchaResolve(''); captchaResolve = null; }
-    }
-});
-
 
 let currentPage = 1;
 let sortStack = [{ col: 'date', dir: 'desc' }];
@@ -981,7 +948,7 @@ async function handleDeletePermSubmit(e) {
         let json = await apiCall('admin/delete_permanently', 'POST', payload);
 
         if (json.captcha_required) {
-            const token = await showCaptchaModal();
+            const token = await requestCaptchaToken();
             if (!token) {
                 alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">CAPTCHA verification required.</div>`;
                 setTimeout(() => {
@@ -991,6 +958,7 @@ async function handleDeletePermSubmit(e) {
                 setTimeout(() => alertEl.innerHTML = '', 5000);
                 return;
             }
+            payload['captcha_token'] = token;
             payload['g-recaptcha-response'] = token;
             json = await apiCall('admin/delete_permanently', 'POST', payload);
         }

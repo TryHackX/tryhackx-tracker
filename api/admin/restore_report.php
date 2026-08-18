@@ -47,10 +47,9 @@ if (!empty($report['blocked'])) {
     $otherBlockedArchives = (int)$stmt->fetchColumn();
 
     if ($otherBlockedReports === 0 && $otherBlockedArchives === 0) {
-        $blacklistPath = $cfg['blacklist_path'] ?? '';
-        if ($blacklistPath !== '') {
-            $blacklistChanged = removeHashFromBlacklist($report['infoHash'], $blacklistPath);
-        }
+        $unblock = trackerUnblockHash($db, $cfg, $report['infoHash']);
+        $blacklistChanged = $unblock['file_ok'];
+        $reload = $unblock['reload'] ?? null;
     }
 }
 
@@ -61,8 +60,7 @@ try {
     // Non-blocking — report is already restored
 }
 
-// The blacklist file changed — ask the tracker to reload it immediately (SIGHUP, no downtime).
-$reload = $blacklistChanged ? autoReloadTrackerBlacklist($cfg) : null;
+$reload = $reload ?? null;
 
 $response = ['success' => true, 'message' => 'Report restored to active'];
 if ($blacklistChanged) $response['blacklist_updated'] = true;

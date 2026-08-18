@@ -6,6 +6,10 @@
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=tos" class="<?= $action === 'tos' ? 'active' : '' ?>">Terms</a>
         <span class="sep">|</span>
+        <?php if (trackerMode($cfg) === 'whitelist' && ($cfg['whitelist_public_enabled'] ?? '1') === '1'): ?>
+        <a href="<?= $baseUrl ?>?action=whitelist" class="<?= $action === 'whitelist' ? 'active' : '' ?>">Whitelist</a>
+        <span class="sep">|</span>
+        <?php endif; ?>
         <a href="<?= $baseUrl ?>?action=report" class="<?= $action === 'report' ? 'active' : '' ?>">Report</a>
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=status" class="<?= $action === 'status' ? 'active' : '' ?>">Status</a>

@@ -24,9 +24,8 @@ if (!$report['blocked']) {
 $stmt = $db->prepare("UPDATE reports SET blocked = 0 WHERE id = ?");
 $stmt->execute([$id]);
 
-// Remove ALL occurrences of hash from blacklist file (case-insensitive)
-$blacklistPath = $cfg['blacklist_path'] ?? '';
-$blacklistUpdated = removeHashFromBlacklist($report['infoHash'], $blacklistPath);
+// Unblock on the tracker (mode-aware: lift the ban / remove from the blacklist file) + reload.
+$unblock = trackerUnblockHash($db, $cfg, $report['infoHash']);
 
 // Notify reporter
 if ($report['email']) {
@@ -37,13 +36,10 @@ if ($report['email']) {
 // Auto-close pending unblock appeals for this hash (hash is now unblocked — their goal is achieved)
 $autoClosed = autoCloseRelatedAppeals($db, $report['infoHash'], 'unblock', 0, $cfg);
 
-// The blacklist file changed — ask the tracker to reload it immediately (SIGHUP, no downtime).
-$reload = ($blacklistPath && $blacklistUpdated) ? autoReloadTrackerBlacklist($cfg) : null;
-
-$response = ['success' => true, 'message' => 'Hash unblocked'];
-if ($blacklistPath && !$blacklistUpdated) {
+$response = ['success' => true, 'message' => $unblock['mode'] === 'whitelist' ? 'Hash unbanned' : 'Hash unblocked'];
+if (!$unblock['file_ok'] && ($unblock['mode'] === 'blacklist' && ($cfg['blacklist_path'] ?? '') !== '')) {
     $response['blacklist_warning'] = 'Unblocked in database but could not remove from blacklist file.';
 }
-if ($reload) $response['reload'] = $reload;
+if ($unblock['reload']) $response['reload'] = $unblock['reload'];
 $response['auto_closed'] = $autoClosed;
 jsonResponse($response);

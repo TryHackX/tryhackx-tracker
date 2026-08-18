@@ -9,6 +9,9 @@
     <li>Commercial use policy violations are subject to a fee of EUR 5,000.</li>
     <li>We reserve the right to publish information about policy violations.</li>
     <li>We respect user privacy. We do not store personal data beyond what is necessary for tracker operation.</li>
+<?php if (trackerMode($cfg) === 'whitelist'): ?>
+    <li>Whitelist registrations are free and anonymous; the registrant's IP address is stored to detect abuse. Registered info hashes may be removed or banned at any time, and abusive registrants may be banned.</li>
+<?php endif; ?>
     <li>Terms may change. Continued use of the service constitutes acceptance of changes.</li>
     <li><strong>Connecting to the tracker constitutes acceptance of these terms.</strong></li>
 </ol>

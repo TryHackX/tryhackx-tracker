@@ -14,6 +14,7 @@
             <h2>Settings</h2>
             <div class="admin-header-actions">
                 <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
                 <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
             </div>
         </div>
@@ -75,24 +76,41 @@
                 </div>
             </div>
 
-            <!-- reCAPTCHA v2 -->
+            <!-- CAPTCHA (reCAPTCHA v2 / Cloudflare Turnstile) -->
             <div class="settings-section">
-                <h5>reCAPTCHA v2</h5>
+                <h5>CAPTCHA</h5>
+                <p class="settings-hint mb-2">Pick a provider and fill its keys. The switches below decide where a CAPTCHA is asked; the public whitelist registration page always requires one (it is disabled when CAPTCHA is not configured).</p>
                 <div class="row g-3">
                     <div class="col-md-4">
-                        <label class="form-label">Enable reCAPTCHA</label>
+                        <label class="form-label">Enable CAPTCHA</label>
                         <select class="form-select bg-dark text-light border-secondary" name="recaptcha_enabled">
                             <option value="1" <?= ($cfg['recaptcha_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Yes</option>
                             <option value="0" <?= ($cfg['recaptcha_enabled'] ?? '0') === '0' ? 'selected' : '' ?>>No</option>
                         </select>
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label">Site Key</label>
+                        <label class="form-label">Provider</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="captcha_provider">
+                            <option value="recaptcha" <?= ($cfg['captcha_provider'] ?? 'recaptcha') !== 'turnstile' ? 'selected' : '' ?>>Google reCAPTCHA v2</option>
+                            <option value="turnstile" <?= ($cfg['captcha_provider'] ?? '') === 'turnstile' ? 'selected' : '' ?>>Cloudflare Turnstile</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4"></div>
+                    <div class="col-md-6">
+                        <label class="form-label">reCAPTCHA Site Key</label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="recaptcha_site_key" value="<?= sanitize($cfg['recaptcha_site_key'] ?? '') ?>">
                     </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Secret Key</label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="recaptcha_secret" value="<?= sanitize($cfg['recaptcha_secret'] ?? '') ?>">
+                    <div class="col-md-6">
+                        <label class="form-label">reCAPTCHA Secret Key</label>
+                        <input type="password" autocomplete="off" class="form-control bg-dark text-light border-secondary" name="recaptcha_secret" value="<?= sanitize($cfg['recaptcha_secret'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Turnstile Site Key</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="turnstile_site_key" value="<?= sanitize($cfg['turnstile_site_key'] ?? '') ?>" placeholder="0x4AAAAAAA...">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Turnstile Secret Key</label>
+                        <input type="password" autocomplete="off" class="form-control bg-dark text-light border-secondary" name="turnstile_secret" value="<?= sanitize($cfg['turnstile_secret'] ?? '') ?>">
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">On Report Form</label>
@@ -211,6 +229,65 @@
                         <small class="settings-hint">Prune sent_emails rows older than X days. Off by default.</small>
                     </div>
                 </div>
+            </div>
+
+            <!-- Tracker mode & whitelist -->
+            <div class="settings-section" id="section-whitelist">
+                <h5>Tracker Mode &amp; Whitelist</h5>
+                <p class="settings-hint mb-2">
+                    <strong>Blacklist</strong> = OpenTracker built with <code>-DWANT_ACCESSLIST_BLACK</code>: everything is served except blocked hashes.
+                    <strong>Whitelist</strong> = built with <code>-DWANT_ACCESSLIST_WHITE</code>: <em>only</em> registered hashes are served (public registration page, forum sync, API).
+                    The mode must match the compiled binary and its <code>access.whitelist</code> / <code>access.blacklist</code> config line.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Tracker mode</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="tracker_mode">
+                            <option value="blacklist" <?= ($cfg['tracker_mode'] ?? 'blacklist') !== 'whitelist' ? 'selected' : '' ?>>Blacklist (classic)</option>
+                            <option value="whitelist" <?= ($cfg['tracker_mode'] ?? '') === 'whitelist' ? 'selected' : '' ?>>Whitelist (registration required)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-9">
+                        <label class="form-label">Whitelist file path <small class="settings-hint">(outside the web root; directory writable by PHP, e.g. <code>/home/tracker/accesslist/whitelist</code>)</small></label>
+                        <div class="input-group">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" name="whitelist_path" value="<?= sanitize($cfg['whitelist_path'] ?? '') ?>" placeholder="/home/tracker/accesslist/whitelist">
+                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-whitelist">Test</button>
+                        </div>
+                        <div id="whitelist-result" class="mt-1 blacklist-result"></div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Public registration page</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="whitelist_public_enabled">
+                            <option value="1" <?= ($cfg['whitelist_public_enabled'] ?? '1') === '1' ? 'selected' : '' ?>>Enabled</option>
+                            <option value="0" <?= ($cfg['whitelist_public_enabled'] ?? '1') === '0' ? 'selected' : '' ?>>Disabled</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Max hashes per submission</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_max_per_submission" value="<?= sanitize($cfg['whitelist_max_per_submission'] ?? '20') ?>" min="1" max="500">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Submissions / hour (per IP)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_whitelist" value="<?= sanitize($cfg['rate_limit_whitelist'] ?? '10') ?>" min="0" max="1000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">New hashes / day (per IP) <small class="settings-hint">(0 = off)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_ip_daily_max" value="<?= sanitize($cfg['whitelist_ip_daily_max'] ?? '50') ?>" min="0" max="100000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">New hashes / day (global cap) <small class="settings-hint">(0 = off)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_daily_cap" value="<?= sanitize($cfg['whitelist_daily_cap'] ?? '2000') ?>" min="0" max="10000000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Min. seconds between reloads <small class="settings-hint">(additions; removals reload sooner)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_reload_min_interval" value="<?= sanitize($cfg['whitelist_reload_min_interval'] ?? '45') ?>" min="10" max="3600">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">OpenTracker scrape URL <small class="settings-hint">(seeders/leechers in the whitelist panel)</small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="whitelist_scrape_url" value="<?= sanitize($cfg['whitelist_scrape_url'] ?? 'http://127.0.0.1:6969/scrape') ?>" placeholder="http://127.0.0.1:6969/scrape">
+                    </div>
+                </div>
+                <div class="settings-hint mt-2">Manage the list itself (browse, add, ban, regenerate the file) on the <a href="<?= $baseUrl ?>?action=admin-whitelist">Whitelist page</a>.</div>
             </div>
 
             <!-- Rate Limits & Blacklist -->
@@ -667,6 +744,33 @@
                 el.innerHTML = '<span class="text-danger">&#10007; ' + json.errors.join('<br>') + '</span>' +
                     (json.suggestions.length ? '<br><small class="text-warning">' + json.suggestions.join('<br>') + '</small>' : '') +
                     '<br><small style="color: #a0a0b0;">OS: ' + json.os + ' | PHP user: ' + json.php_user + '</small>';
+            }
+        } catch {
+            el.innerHTML = '<span class="text-danger">Network error</span>';
+        }
+    });
+
+    document.getElementById('btn-test-whitelist').addEventListener('click', async () => {
+        const el = document.getElementById('whitelist-result');
+        const pathInput = document.querySelector('input[name="whitelist_path"]');
+        const pathVal = pathInput ? pathInput.value.trim() : '';
+        el.innerHTML = '<span class="text-info">Testing...</span>';
+        try {
+            const res = await fetch(API_BASE + 'admin/check_whitelist_path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+                body: JSON.stringify({ whitelist_path: pathVal })
+            });
+            const json = await res.json();
+            const sug = (json.suggestions || []).map(esc);
+            if (json.ok) {
+                el.innerHTML = '<span class="text-success">&#10003; Directory is writable and the file is readable.</span>' +
+                    (sug.length ? '<br><small style="color: #a0a0b0;">' + sug.join('<br>') + '</small>' : '') +
+                    (json.file ? '<br><small style="color:#a0a0b0;">File: ' + (json.file.exists ? esc(String(json.file.lines)) + ' lines, ' + esc(String(json.file.size)) + ' B, mode ' + esc(json.file.mode || '') + ', owner ' + esc(json.file.owner || '') : 'does not exist yet') + '</small>' : '');
+            } else {
+                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || ['Test failed']).map(esc).join('<br>') + '</span>' +
+                    (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') +
+                    '<br><small style="color: #a0a0b0;">OS: ' + esc(json.os || '') + ' | PHP user: ' + esc(json.php_user || '') + '</small>';
             }
         } catch {
             el.innerHTML = '<span class="text-danger">Network error</span>';

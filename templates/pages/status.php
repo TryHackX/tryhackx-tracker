@@ -46,7 +46,7 @@
         <p class="status-guide-title"><strong>Status Guide:</strong></p>
         <p><span class="status-badge pending status-badge-sm">Awaiting Review</span> &mdash; Your report has been received and is waiting for an administrator to review it.</p>
         <p><span class="status-badge checked status-badge-sm">Reviewed</span> &mdash; An administrator has reviewed your report.</p>
-        <p><span class="status-badge blocked status-badge-sm">Blocked</span> &mdash; The reported info hash has been permanently added to the tracker blacklist.</p>
+        <p><span class="status-badge blocked status-badge-sm">Blocked</span> &mdash; <?= trackerMode($cfg) === 'whitelist' ? 'The reported info hash has been banned on the tracker (removed from the whitelist; it cannot be registered again).' : 'The reported info hash has been permanently added to the tracker blacklist.' ?></p>
         <p><span class="status-badge archived status-badge-sm">Archived / Closed</span> &mdash; The report has been processed and archived. No further action will be taken unless a new report is submitted.</p>
     </div>
 

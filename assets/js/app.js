@@ -1,45 +1,10 @@
-// === CAPTCHA Modal System ===
-let captchaWidgetId = null;
-let captchaResolve = null;
-
-function onRecaptchaLoad() {
-    // Widget rendered on demand inside modal
+// === CAPTCHA ===
+// The modal itself lives in assets/js/captcha.js (window.showCaptchaModal / window.captchaReset),
+// shared with the admin panel and provider-agnostic (reCAPTCHA v2 / Turnstile).
+function requestCaptchaToken() {
+    if (typeof window.showCaptchaModal !== 'function') return Promise.resolve(null);
+    return window.showCaptchaModal();
 }
-
-function showCaptchaModal() {
-    return new Promise((resolve) => {
-        const overlay = document.getElementById('captcha-overlay');
-        const container = document.getElementById('captcha-widget');
-        if (!overlay || !container || typeof grecaptcha === 'undefined' || typeof RECAPTCHA_SITEKEY === 'undefined') {
-            resolve('');
-            return;
-        }
-        captchaResolve = resolve;
-        // Reset widget if already rendered
-        if (captchaWidgetId !== null) {
-            grecaptcha.reset(captchaWidgetId);
-        } else {
-            captchaWidgetId = grecaptcha.render(container, {
-                sitekey: RECAPTCHA_SITEKEY,
-                theme: 'dark',
-                callback: (token) => {
-                    overlay.classList.remove('show');
-                    if (captchaResolve) { captchaResolve(token); captchaResolve = null; }
-                },
-            });
-        }
-        overlay.classList.add('show');
-    });
-}
-
-// Close modal on overlay click (outside the box)
-document.addEventListener('click', (e) => {
-    const overlay = document.getElementById('captcha-overlay');
-    if (e.target === overlay) {
-        overlay.classList.remove('show');
-        if (captchaResolve) { captchaResolve(''); captchaResolve = null; }
-    }
-});
 
 async function fetchWithCaptcha(endpoint, data) {
     const body = JSON.stringify(data);
@@ -56,8 +21,10 @@ async function fetchWithCaptcha(endpoint, data) {
     }
 
     if (json.captcha_required) {
-        const token = await showCaptchaModal();
+        const token = await requestCaptchaToken();
         if (!token) return { error: 'CAPTCHA cancelled' };
+        // Send under both names: `captcha_token` (generic) and the legacy reCAPTCHA field name.
+        data['captcha_token'] = token;
         data['g-recaptcha-response'] = token;
         try {
             const res2 = await fetch(APP_API + endpoint, {
@@ -247,6 +214,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Public whitelist registration page (?action=whitelist)
+    initWhitelistPage();
+
     // Initialize tracker stats page or homepage widget
     initTrackerStats();
 });
@@ -422,6 +392,10 @@ async function handleReportSubmit(e) {
         if (json.success) {
             alert.className = 'alert alert-success show';
             alert.textContent = 'Report submitted successfully! Your report number: #' + json.id;
+            // Whitelist mode: the reported hash may not even be registered here (nothing to serve).
+            if (json.whitelisted === false) {
+                alert.textContent += ' Note: this info hash is not registered on this tracker (nothing to serve); the report is kept so the hash can be pre-banned.';
+            }
             form.reset();
             const mc = document.getElementById('msg-counter');
             if (mc) {
@@ -836,6 +810,212 @@ function escAttr(str) {
     return String(str == null ? '' : str)
         .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// === Whitelist registration page (?action=whitelist) ===
+// Client-side pre-validation mirrors the server (parseHashInput): one magnet link or 40-hex hash per
+// token; the server is authoritative. Rendering uses textContent/escHtml only — inputs and names
+// come from the user / other people.
+function wlParseToken(tok) {
+    tok = tok.trim();
+    if (!tok) return null;
+    if (/^magnet:\?/i.test(tok)) return extractHashFromMagnet(tok);
+    if (/^(urn:btih:)?[a-f0-9]{40}$/i.test(tok)) return tok.replace(/^urn:btih:/i, '').toLowerCase();
+    if (/^(urn:btih:)?[a-z2-7]{32}$/i.test(tok)) {
+        try { const h = base32ToHex(tok.replace(/^urn:btih:/i, '').toUpperCase()); if (h && h.length === 40) return h; } catch {}
+    }
+    return '';
+}
+
+function wlCountInput(text) {
+    const seen = new Set();
+    let valid = 0, invalid = 0;
+    text.split(/[\s,;]+/).filter(Boolean).forEach(tok => {
+        const h = wlParseToken(tok);
+        if (h === null) return;
+        if (h) { if (!seen.has(h)) { seen.add(h); valid++; } } else invalid++;
+    });
+    return { valid, invalid };
+}
+
+function initWhitelistPage() {
+    const form = document.getElementById('wl-form');
+    const checkForm = document.getElementById('wl-check-form');
+    if (form) {
+        const ta = document.getElementById('wl-input');
+        const counter = document.getElementById('wl-counter');
+        const max = parseInt(ta.dataset.max || '20', 10);
+        const refresh = () => {
+            const c = wlCountInput(ta.value);
+            counter.textContent = `${c.valid} valid` + (c.invalid ? ` / ${c.invalid} invalid` : '') + (c.valid > max ? ` — max ${max}` : '');
+            counter.style.color = (c.valid > max) ? 'var(--error)' : (c.invalid ? 'var(--warning)' : '');
+        };
+        ta.addEventListener('input', refresh);
+        refresh();
+        form.addEventListener('submit', handleWhitelistSubmit);
+    }
+    if (checkForm) checkForm.addEventListener('submit', handleWhitelistCheck);
+}
+
+async function handleWhitelistSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const alert = document.getElementById('wl-alert');
+    const btn = document.getElementById('wl-submit');
+    const ta = document.getElementById('wl-input');
+    const group = ta.closest('.form-group');
+    const max = parseInt(ta.dataset.max || '20', 10);
+    alert.className = 'alert';
+    group.classList.remove('has-error');
+
+    const c = wlCountInput(ta.value);
+    if (c.valid === 0) { group.classList.add('has-error'); return; }
+    if (c.valid > max) {
+        alert.className = 'alert alert-error show';
+        alert.textContent = `Too many hashes — at most ${max} per submission.`;
+        return;
+    }
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = 'Registering…';
+    try {
+        const json = await fetchWithCaptcha('whitelist_submit', {
+            input: ta.value,
+            csrf_token: form.csrf_token.value,
+        });
+        if (json.success) {
+            alert.className = 'alert alert-success show';
+            const s = json.summary || {};
+            const parts = [];
+            if (s.added) parts.push(`${s.added} registered`);
+            if (s.exists) parts.push(`${s.exists} already registered`);
+            if (s.banned) parts.push(`${s.banned} banned`);
+            if (s.invalid) parts.push(`${s.invalid} invalid`);
+            let msg = parts.join(', ') + '.';
+            if (s.added) {
+                const secs = parseInt(json.active_in_seconds || 0, 10);
+                msg += secs > 0 ? ` New hashes become active on the tracker within ~${secs} s.` : ' New hashes are active on the tracker.';
+            }
+            if (json.file_ok === false) msg += ' (Warning: the tracker list file could not be updated — the admin has been notified.)';
+            alert.textContent = msg;
+            renderWhitelistResults(json);
+            ta.value = '';
+            document.getElementById('wl-counter').textContent = '0 valid';
+            btn.textContent = orig;
+            startCooldown(btn, 10);
+        } else {
+            btn.textContent = orig;
+            const messages = {
+                rate_limit: 'Too many submissions from your network. Try again later.',
+                daily_cap: 'Daily registration limit reached. Try again tomorrow.',
+                too_many: `Too many hashes — at most ${max} per submission.`,
+                no_valid: 'No valid magnet links or info hashes found.',
+                registration_disabled: 'Public registration is disabled on this tracker.',
+                registration_unavailable: 'Registration is temporarily unavailable (CAPTCHA not configured).',
+                'CAPTCHA cancelled': 'CAPTCHA cancelled — please try again.',
+                'CAPTCHA verification failed': 'CAPTCHA verification failed — please try again.',
+            };
+            showFormSubmitError(form, alert, btn, json, messages);
+            if (json && json.retry_after) startCooldown(btn, Math.min(120, parseInt(json.retry_after, 10) || 60));
+            if (json && Array.isArray(json.results)) renderWhitelistResults(json);
+        }
+    } catch {
+        btn.textContent = orig;
+        showFormNetworkError(alert, btn);
+    }
+}
+
+function renderWhitelistResults(json) {
+    const box = document.getElementById('wl-results');
+    const list = document.getElementById('wl-results-list');
+    const summary = document.getElementById('wl-results-summary');
+    if (!box || !list) return;
+    list.textContent = '';
+    const results = Array.isArray(json.results) ? json.results : [];
+    if (!results.length) { box.hidden = true; return; }
+    const labels = { added: 'Registered', exists: 'Already registered', banned: 'Banned', invalid: 'Invalid' };
+    results.forEach(r => {
+        const row = document.createElement('div');
+        row.className = 'wl-row wl-' + (r.status || 'invalid');
+        const badge = document.createElement('span');
+        badge.className = 'wl-badge';
+        badge.textContent = labels[r.status] || r.status;
+        const main = document.createElement('div');
+        main.className = 'wl-row-main';
+        const hash = document.createElement('code');
+        hash.className = 'wl-hash';
+        hash.textContent = r.hash || (r.input || '').slice(0, 80);
+        main.appendChild(hash);
+        if (r.error) {
+            const err = document.createElement('div');
+            err.className = 'wl-error';
+            err.textContent = r.error;
+            main.appendChild(err);
+        }
+        const magnet = r.hash && json.magnets ? json.magnets[r.hash] : null;
+        if (magnet) {
+            const mrow = document.createElement('div');
+            mrow.className = 'wl-magnet';
+            const mcode = document.createElement('code');
+            mcode.textContent = magnet;
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'copy-btn wl-copy';
+            b.title = 'Copy magnet link';
+            b.textContent = 'Copy';
+            b.addEventListener('click', () => {
+                navigator.clipboard.writeText(magnet).then(() => { b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1500); });
+            });
+            mrow.appendChild(mcode);
+            mrow.appendChild(b);
+            main.appendChild(mrow);
+        }
+        row.appendChild(badge);
+        row.appendChild(main);
+        list.appendChild(row);
+    });
+    if (summary) summary.textContent = '';
+    box.hidden = false;
+}
+
+async function handleWhitelistCheck(e) {
+    e.preventDefault();
+    const input = document.getElementById('wl-check-input');
+    const alert = document.getElementById('wl-check-alert');
+    const btn = document.getElementById('wl-check-submit');
+    const raw = input.value.trim();
+    alert.className = 'alert';
+    const h = wlParseToken(raw);
+    if (!h) {
+        alert.className = 'alert alert-error show';
+        alert.textContent = 'Enter a magnet link or a 40-character info hash.';
+        return;
+    }
+    btn.disabled = true;
+    try {
+        const res = await fetch(APP_API + 'whitelist_check&hash=' + encodeURIComponent(h), { headers: { 'Accept': 'application/json' } });
+        const json = await res.json();
+        if (json.success) {
+            if (json.banned) {
+                alert.className = 'alert alert-error show';
+                alert.textContent = `Hash ${json.hash} is BANNED on this tracker.`;
+            } else if (json.whitelisted) {
+                alert.className = 'alert alert-success show';
+                alert.textContent = `Hash ${json.hash} is registered` + (json.added_at ? ` (since ${json.added_at})` : '') + '.';
+            } else {
+                alert.className = 'alert alert-error show';
+                alert.textContent = json.mode === 'whitelist' ? `Hash ${json.hash} is NOT registered on this tracker.` : `Hash ${json.hash} is served (open tracker mode).`;
+            }
+        } else {
+            alert.className = 'alert alert-error show';
+            alert.textContent = json.error || 'Lookup failed.';
+        }
+    } catch {
+        alert.className = 'alert alert-error show';
+        alert.textContent = 'Network error. Please try again.';
+    } finally {
+        startCooldown(btn, 3);
+    }
 }
 
 // === Tracker Telemetry (Stats Page & Home Widget) ===

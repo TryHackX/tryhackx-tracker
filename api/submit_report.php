@@ -8,11 +8,10 @@ if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
     jsonResponse(['error' => 'Invalid CSRF token'], 403);
 }
 
-// reCAPTCHA (smart)
+// CAPTCHA (smart)
 if (isCaptchaRequired($cfg, 'report')) {
-    $recaptcha = $input['g-recaptcha-response'] ?? '';
-    if (!verifyRecaptcha($recaptcha, $cfg)) {
-        jsonResponse(['error' => 'reCAPTCHA verification failed', 'captcha_required' => true], 400);
+    if (!verifyCaptcha(captchaTokenFromInput($input), $cfg)) {
+        jsonResponse(['error' => 'CAPTCHA verification failed', 'captcha_required' => true], 400);
     }
     onCaptchaSolved();
 }
@@ -96,11 +95,13 @@ if ($stmt->fetch()) {
     jsonResponse(['error' => 'duplicate'], 409);
 }
 
-// Check if hash is already on the blacklist file
-$blacklistPath = $cfg['blacklist_path'] ?? '';
-if (isHashInBlacklist($infoHash, $blacklistPath)) {
+// Check if hash is already blocked on the tracker (banned in whitelist mode / listed in blacklist mode)
+if (isHashBlocked($db, $cfg, $infoHash)) {
     jsonResponse(['error' => 'This info hash is already blocked on the tracker.', 'fields' => ['infoHash']], 409);
 }
+// Whitelist mode: tell the reporter whether the hash is even registered here (a report for an
+// unregistered hash is still accepted — blocking it pre-bans the hash).
+$whitelisted = trackerMode($cfg) === 'whitelist' ? (isHashWhitelisted($db, $infoHash) !== null) : null;
 
 // Insert
 $stmt = $db->prepare(
@@ -121,4 +122,4 @@ try {
 }
 
 addCaptchaPoints($cfg, 'report');
-jsonResponse(['success' => true, 'id' => $reportId, 'captcha_solved' => wasCaptchaJustSolved()]);
+jsonResponse(['success' => true, 'id' => $reportId, 'captcha_solved' => wasCaptchaJustSolved(), 'whitelisted' => $whitelisted, 'tracker_mode' => trackerMode($cfg)]);

@@ -24,15 +24,9 @@ if ($report['blocked']) {
 $stmt = $db->prepare("UPDATE reports SET blocked = 1, checked = 1 WHERE id = ?");
 $stmt->execute([$id]);
 
-// Write to blacklist file (deduplicated — won't add if already present)
-$blacklistPath = $cfg['blacklist_path'] ?? '';
-$blacklistWritten = false;
-if ($blacklistPath) {
-    $permCheck = checkBlacklistPermissions($blacklistPath);
-    if ($permCheck['ok']) {
-        $blacklistWritten = addHashToBlacklist($report['infoHash'], $blacklistPath);
-    }
-}
+// Block on the tracker: whitelist mode = ban (remove from served list), blacklist mode = append to
+// the blacklist file. Mode-aware helper; also triggers the (debounced) tracker reload.
+$block = trackerBlockHash($db, $cfg, $report['infoHash'], ['source' => 'report', 'source_id' => $id, 'reason' => 'Report #' . $id . ' blocked']);
 
 // Notify reporter about blocking
 if ($report['email']) {
@@ -49,15 +43,12 @@ $autoClosedUnblock = autoCloseRelatedAppeals($db, $report['infoHash'], 'unblock'
 // Auto-close pending block appeals (hash is now blocked — their goal is achieved)
 $autoClosedBlock = autoCloseRelatedAppeals($db, $report['infoHash'], 'block', 0, $cfg);
 
-// The blacklist file changed — ask the tracker to reload it immediately (SIGHUP, no downtime).
-$reload = $blacklistWritten ? autoReloadTrackerBlacklist($cfg) : null;
-
-$response = ['success' => true, 'message' => 'Hash blocked and report archived', 'archived' => true];
-if ($blacklistPath && !$blacklistWritten) {
-    $response['blacklist_warning'] = 'Hash blocked in database but could not write to blacklist file.';
-    $response['blacklist_errors'] = $permCheck['errors'] ?? [];
-    $response['blacklist_suggestions'] = $permCheck['suggestions'] ?? [];
+$response = ['success' => true, 'message' => ($block['mode'] === 'whitelist' ? 'Hash banned' : 'Hash blocked') . ' and report archived', 'archived' => true];
+if (!$block['file_ok'] && ($block['errors'] || ($block['mode'] === 'blacklist' && ($cfg['blacklist_path'] ?? '') !== ''))) {
+    $response['blacklist_warning'] = 'Hash blocked in database but the tracker list file could not be updated.';
+    $response['blacklist_errors'] = $block['errors'];
+    $response['blacklist_suggestions'] = $block['suggestions'];
 }
-if ($reload) $response['reload'] = $reload;
+if ($block['reload']) $response['reload'] = $block['reload'];
 $response['auto_closed'] = $autoClosedUnblock + $autoClosedBlock;
 jsonResponse($response);

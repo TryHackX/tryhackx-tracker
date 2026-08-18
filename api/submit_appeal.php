@@ -13,11 +13,10 @@ if (!rateLimitAllow('appeal', getClientIp($cfg), (int)($cfg['rate_limit_appeal']
     jsonResponse(['error' => 'rate_limit'], 429);
 }
 
-// reCAPTCHA (smart)
+// CAPTCHA (smart)
 if (isCaptchaRequired($cfg, 'appeal')) {
-    $recaptcha = $input['g-recaptcha-response'] ?? '';
-    if (!verifyRecaptcha($recaptcha, $cfg)) {
-        jsonResponse(['error' => 'reCAPTCHA verification failed', 'captcha_required' => true], 400);
+    if (!verifyCaptcha(captchaTokenFromInput($input), $cfg)) {
+        jsonResponse(['error' => 'CAPTCHA verification failed', 'captcha_required' => true], 400);
     }
     onCaptchaSolved();
 }

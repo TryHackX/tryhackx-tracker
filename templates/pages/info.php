@@ -9,11 +9,16 @@
 <h2>How does the tracker work?</h2>
 <p>A BitTorrent client sends an "announce" request to the tracker with the torrent's info_hash. The tracker responds with a list of peers currently sharing or downloading the same torrent. The tracker only knows: the info_hash, the peer's IP address, and port.</p>
 
+<?php if (trackerMode($cfg) === 'whitelist'): ?>
+<h2>Whitelist mode</h2>
+<p>This tracker runs OpenTracker in <strong>whitelist mode</strong>: announces are only answered for info hashes that were <strong>registered</strong> beforehand. Torrents posted on our community forum are registered automatically; anyone else can register a magnet link or info hash for free on the <a href="<?= $baseUrl ?>?action=whitelist">Whitelist page</a> (CAPTCHA + rate limits apply, the registrant's IP is stored to fight abuse). Registered hashes may be removed or banned after an abuse report. Unregistered hashes receive an empty / "not authorized" answer.</p>
+<?php endif; ?>
+
 <h2>What data does the tracker store?</h2>
 <p>The tracker only stores active swarms &mdash; a list of info_hashes and their associated peers (IP + port). This data is temporary and removed when a peer's session expires. No files, torrent names, or content are stored.</p>
 
 <h2>Frequently Asked Questions</h2>
-<div class="faq-item"><div class="faq-q">Can you remove an info_hash?</div><div class="faq-a">The tracker automatically removes swarms when all peers' sessions expire. We do not control which torrents are tracked.</div></div>
+<div class="faq-item"><div class="faq-q">Can you remove an info_hash?</div><div class="faq-a"><?php if (trackerMode($cfg) === 'whitelist'): ?>Yes — in whitelist mode a hash can be removed from (or banned on) the whitelist, after which the tracker stops answering announces for it. Use the report form.<?php else: ?>The tracker automatically removes swarms when all peers' sessions expire. We do not control which torrents are tracked.<?php endif; ?></div></div>
 <div class="faq-item"><div class="faq-q">Can you see what content is behind a hash?</div><div class="faq-a">No. An info_hash is merely a SHA1 digest of the torrent's metadata. The tracker has no information about file contents.</div></div>
 <div class="faq-item"><div class="faq-q">Do you keep IP address logs?</div><div class="faq-a">No. We do not keep persistent connection logs. Random IP addresses are inserted into peer lists to protect privacy.</div></div>
 <div class="faq-item"><div class="faq-q">What should copyright holders do?</div><div class="faq-a">Since the tracker does not store any files or content, copyright holders should contact the indexing site (e.g., the torrent site), not the tracker. You may, however, submit a report using our form.</div></div>

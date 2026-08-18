@@ -3,9 +3,11 @@ $pageTitles = [
     'home' => 'Home', 'info' => 'Info', 'tos' => 'Terms',
     'report' => 'Report', 'status' => 'Status',
     'transparency' => 'Transparency', 'unsubscribe' => 'Unsubscribe',
+    'whitelist' => 'Whitelist',
 ];
-$recaptchaNeeded = ($action === 'report' && isRecaptchaEnabled($cfg, 'report'))
-    || ($action === 'status' && (isRecaptchaEnabled($cfg, 'status') || isRecaptchaEnabled($cfg, 'block_check') || isRecaptchaEnabled($cfg, 'appeal')));
+$recaptchaNeeded = ($action === 'report' && isCaptchaEnabled($cfg, 'report'))
+    || ($action === 'status' && (isCaptchaEnabled($cfg, 'status') || isCaptchaEnabled($cfg, 'block_check') || isCaptchaEnabled($cfg, 'appeal')))
+    || ($action === 'whitelist' && captchaConfigured($cfg));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -20,7 +22,7 @@ $recaptchaNeeded = ($action === 'report' && isRecaptchaEnabled($cfg, 'report'))
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <?php endif; ?>
     <?php if ($recaptchaNeeded): ?>
-    <script src="https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit" async defer></script>
+    <?= captchaHeadTags($cfg) ?>
     <?php endif; ?>
 </head>
 <body<?= ($action === 'transparency' || $action === 'stats') ? ' class="page-' . $action . '"' : '' ?>>
@@ -84,13 +86,11 @@ $recaptchaNeeded = ($action === 'report' && isRecaptchaEnabled($cfg, 'report'))
     <script>
     const APP_BASE = '<?= $baseUrl ?>';
     const APP_API = '<?= $baseUrl ?>api.php?endpoint=';
-    <?php if ($recaptchaNeeded): ?>
-    const RECAPTCHA_SITEKEY = '<?= sanitize($cfg['recaptcha_site_key'] ?? '') ?>';
-    <?php endif; ?>
     <?php if (($cfg['contact_obfuscate'] ?? '0') === '1' && !empty($cfg['site_email'])): ?>
     const OBF_EMAIL = <?= obfuscateEmail($cfg['site_email']) ?>;
     <?php endif; ?>
     </script>
+    <script src="<?= $baseUrl ?>assets/js/captcha.js<?= assetVer('assets/js/captcha.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/app.js<?= assetVer('assets/js/app.js') ?>"></script>
 </body>
 </html>

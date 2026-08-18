@@ -45,6 +45,7 @@ $ret    = $res['code'];
 if ($res['ok']) {
     // The tracker has restarted and re-read the blacklist — pending changes are no longer pending.
     resetBlacklistChanges();
+    whitelistNoteReloaded(true, $outStr ?? '');
     jsonResponse([
         'success' => true,
         'message' => 'Tracker service "' . $service . '" restarted.',

@@ -15,13 +15,17 @@ require_once __DIR__ . '/config/app.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/settings.php';
 require_once __DIR__ . '/includes/functions.php';
+require_once __DIR__ . '/includes/schema.php';
+require_once __DIR__ . '/includes/whitelist.php';
 require_once __DIR__ . '/includes/auth.php';
 
 $db = getDb();
 $cfg = getSettings($db);
+ensureSchema($db, $cfg);
 autoArchiveOldReports($db, $cfg);
 autoArchiveOldAppeals($db, $cfg);
 pruneOldSentEmails($db, $cfg);
+whitelistJanitor($db, $cfg);
 $csrfToken = generateCsrfToken();
 
 $action = $_GET['action'] ?? 'home';
@@ -36,14 +40,17 @@ $routes = [
     'transparency' => 'templates/pages/transparency.php',
     'unsubscribe'  => 'templates/pages/unsubscribe.php',
     'stats'        => 'templates/pages/stats.php',
+    'whitelist'    => 'templates/pages/whitelist.php',
 ];
 
 $baseUrl = getBaseUrl();
 
-if ($action === 'admin' || $action === 'settings') {
+if ($action === 'admin' || $action === 'settings' || $action === 'admin-whitelist') {
     if (adminSessionValid($cfg)) {
         if ($action === 'settings') {
             include __DIR__ . '/templates/admin/settings.php';
+        } elseif ($action === 'admin-whitelist') {
+            include __DIR__ . '/templates/admin/whitelist.php';
         } else {
             include __DIR__ . '/templates/admin/dashboard.php';
         }

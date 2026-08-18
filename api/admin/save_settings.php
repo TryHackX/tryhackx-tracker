@@ -36,6 +36,14 @@ $allowed = [
     'footer_brand_name', 'footer_brand_url', 'footer_brand_enabled',
     'footer_tracker_name', 'footer_tracker_url', 'footer_tracker_author', 'footer_tracker_author_url', 'footer_tracker_enabled',
     'footer_os_name', 'footer_os_url', 'footer_os_enabled', 'footer_os_since_year',
+    // whitelist mode
+    'tracker_mode', 'whitelist_path', 'whitelist_public_enabled', 'whitelist_max_per_submission',
+    'rate_limit_whitelist', 'whitelist_ip_daily_max', 'whitelist_daily_cap', 'whitelist_reload_min_interval',
+    'whitelist_scrape_url',
+    // captcha provider
+    'captcha_provider', 'turnstile_site_key', 'turnstile_secret',
+    // server-to-server API
+    'api_enabled', 'api_ban_days', 'api_ban_exempt_ips',
 ];
 
 $data = [];
@@ -47,6 +55,46 @@ foreach ($allowed as $key) {
 
 if (empty($data)) {
     jsonResponse(['error' => 'No valid settings provided'], 400);
+}
+
+// ── Whitelist / API / CAPTCHA settings validation ──
+if (isset($data['tracker_mode']) && !in_array($data['tracker_mode'], ['blacklist', 'whitelist'], true)) {
+    jsonResponse(['error' => 'Invalid tracker mode.'], 400);
+}
+if (isset($data['whitelist_path'])) {
+    $data['whitelist_path'] = normalizeListPath($data['whitelist_path']);
+    if ($data['whitelist_path'] !== '') {
+        $v = validateWhitelistPath($data['whitelist_path']);
+        if (!$v['ok']) jsonResponse(['error' => 'Whitelist path rejected: ' . $v['error']], 400);
+    }
+}
+if (isset($data['captcha_provider']) && !in_array($data['captcha_provider'], ['recaptcha', 'turnstile'], true)) {
+    jsonResponse(['error' => 'Invalid CAPTCHA provider.'], 400);
+}
+if (isset($data['whitelist_scrape_url']) && $data['whitelist_scrape_url'] !== '' && !preg_match('#^https?://[^\s]+$#i', $data['whitelist_scrape_url'])) {
+    jsonResponse(['error' => 'Scrape URL must be an http(s) URL.'], 400);
+}
+$intClamp = [
+    'whitelist_max_per_submission' => [1, 500, 20], 'rate_limit_whitelist' => [0, 1000, 10],
+    'whitelist_ip_daily_max' => [0, 100000, 50], 'whitelist_daily_cap' => [0, 10000000, 2000],
+    'whitelist_reload_min_interval' => [10, 3600, 45], 'api_ban_days' => [1, 3650, 30],
+];
+foreach ($intClamp as $k => [$min, $max, $def]) {
+    if (isset($data[$k])) {
+        $n = is_numeric($data[$k]) ? (int)$data[$k] : $def;
+        $data[$k] = (string)max($min, min($max, $n));
+    }
+}
+foreach (['whitelist_public_enabled', 'api_enabled'] as $k) {
+    if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
+}
+if (isset($data['api_ban_exempt_ips'])) {
+    $clean = [];
+    foreach (apiParseIpList($data['api_ban_exempt_ips']) as $e) {
+        $ipPart = explode('/', $e, 2)[0];
+        if (filter_var($ipPart, FILTER_VALIDATE_IP)) $clean[] = $e;
+    }
+    $data['api_ban_exempt_ips'] = implode(', ', $clean);
 }
 
 // Validate and sanitize donation_fields JSON
