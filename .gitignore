@@ -35,3 +35,9 @@ desktop.ini
 # Python bytecode (worker)
 __pycache__/
 *.pyc
+
+# Local working notes / tooling — never part of the release
+.claude/
+*.log
+HANDOFF*.md
+SPEC-*.md
