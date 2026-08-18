@@ -2,7 +2,7 @@
 /**
  * CLI janitor for the whitelist service — run it from a systemd timer (or cron) as the web user:
  *
- *   sudo -u www-data php /var/www/tracker.tryhackx.org/tools/janitor.php
+ *   sudo -u www-data php /var/www/tracker/tools/janitor.php
  *
  * It fires any due whitelist file regeneration / tracker reload (SIGHUP) that the request-driven
  * janitor could not run because nobody visited the site, removes stale temp files and prunes old

@@ -27,6 +27,7 @@ const WL_SCRAPE_TTL            = 60;     // seconds to cache seeders/leechers fr
 const WL_TMP_MAX_AGE           = 3600;   // stale *.tmp.* files older than this are removed by the janitor
 const WL_REGEN_LOCK_TIMEOUT    = 10;     // seconds to wait for the regen lock before reporting busy
 const WL_META_AUTO_SOURCES     = ['api', 'forum', 'admin']; // sources whose hashes get metadata fetched automatically
+const WL_SQL_IN_CHUNK          = 5000;   // max placeholders per IN (...) — MySQL caps native prepares at 65 535
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Small helpers
@@ -34,7 +35,7 @@ const WL_META_AUTO_SOURCES     = ['api', 'forum', 'admin']; // sources whose has
 
 /** Rate-limit / ban key for an IP: IPv4 = exact address, IPv6 = its /64 prefix (SLAAC hosts rotate inside a /64). */
 function ipBucket(string $ip): string {
-    $ip = trim($ip);
+    $ip = unmapIpv4($ip);
     if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
         $bin = @inet_pton($ip);
         if ($bin !== false && strlen($bin) === 16) {
@@ -78,7 +79,8 @@ function validateWhitelistPath(string $path): array {
     $realDir = @realpath($dir);
     if ($realDir === false) return ['ok' => false, 'error' => "Directory does not exist: $dir"];
     $appRoot = @realpath(__DIR__ . '/..');
-    $docRoot = @realpath((string)($_SERVER['DOCUMENT_ROOT'] ?? ''));
+    $dr = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
+    $docRoot = $dr !== '' ? @realpath($dr) : false;   // CLI: realpath('') would be the cwd
     foreach (array_filter([$appRoot, $docRoot]) as $root) {
         $root = rtrim($root, '/\\');
         if ($root !== '' && ($realDir === $root || str_starts_with($realDir . DIRECTORY_SEPARATOR, $root . DIRECTORY_SEPARATOR))) {
@@ -256,9 +258,15 @@ function whitelistRegenerate(PDO $db, array $cfg): array {
             return ['ok' => false, 'count' => 0, 'bytes' => 0, 'ms' => 0, 'error' => $err, 'busy' => false];
         }
         // Keyset pagination keeps memory flat and avoids unbuffered-query pitfalls on the shared PDO.
-        $count = 0; $bytes = 0; $last = '';
+        $count = 0; $bytes = 0; $last = ''; $writeFailed = false;
+        // a short/failed write must never be renamed into place: OpenTracker would silently lose the tail
+        $put = function (string $buf) use (&$fh, &$bytes, &$writeFailed): bool {
+            $n = @fwrite($fh, $buf);
+            if ($n === false || $n !== strlen($buf)) { $writeFailed = true; return false; }
+            $bytes += $n; return true;
+        };
         $stmt = $db->prepare("SELECT info_hash FROM whitelist WHERE banned = 0 AND info_hash > ? ORDER BY info_hash LIMIT 50000");
-        while (true) {
+        while (!$writeFailed) {
             $stmt->execute([$last]);
             $rows = $stmt->fetchAll(PDO::FETCH_COLUMN);
             if (!$rows) break;
@@ -268,14 +276,22 @@ function whitelistRegenerate(PDO $db, array $cfg): array {
                 if (strlen($h) !== 40) continue;
                 $buf .= $h . "\n";
                 $count++;
-                if (strlen($buf) >= 65536) { $bytes += fwrite($fh, $buf); $buf = ''; }
+                if (strlen($buf) >= 65536) { if (!$put($buf)) break; $buf = ''; }
             }
-            if ($buf !== '') $bytes += fwrite($fh, $buf);
+            if (!$writeFailed && $buf !== '') $put($buf);
             $last = end($rows);
             if (count($rows) < 50000) break;
         }
-        fflush($fh);
-        fclose($fh); $fh = null;
+        if (!$writeFailed && @fflush($fh) === false) $writeFailed = true;
+        if (@fclose($fh) === false) $writeFailed = true;
+        $fh = null;
+        clearstatcache(true, $tmp);
+        if ($writeFailed || $bytes !== $count * 41 || @filesize($tmp) !== $bytes) {
+            @unlink($tmp);
+            $err = 'Writing the temp whitelist file failed or was truncated (disk full?) — kept the previous file.';
+            whitelistStateUpdate(function (&$s) use ($err) { $s['regen_needed'] = true; if (!$s['regen_needed_since']) $s['regen_needed_since'] = time(); $s['last_error'] = $err; $s['last_error_at'] = time(); });
+            return ['ok' => false, 'count' => $count, 'bytes' => $bytes, 'ms' => (int)((microtime(true) - $t0) * 1000), 'error' => $err, 'busy' => false];
+        }
         if ($count === 0) {
             @unlink($tmp);
             $err = 'Refusing to write an EMPTY whitelist — OpenTracker in whitelist mode would reject every announce. Add at least one hash first.';
@@ -462,11 +478,9 @@ function whitelistJanitor(PDO $db, array $cfg): void {
 // Parsing
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Clean a display name (from dn= or metadata): decode, strip control chars, collapse whitespace, cap length. */
+/** Clean a PLAIN display name (API/admin/metadata): strip control chars, collapse whitespace, cap length. */
 function cleanTorrentName(?string $name): ?string {
     if ($name === null) return null;
-    $name = str_replace('+', ' ', $name);
-    $name = rawurldecode($name);
     $name = preg_replace('/[\x00-\x1F\x7F]/u', ' ', $name) ?? '';
     $name = trim(preg_replace('/\s+/u', ' ', $name) ?? '');
     if ($name === '') return null;
@@ -491,7 +505,8 @@ function parseMagnetOrHash(string $token): array {
         $hash = strlen($raw) === 40 ? strtolower($raw) : (base32ToHex(strtoupper($raw)) ?? null);
         if (!$hash || !isValidInfoHash($hash)) { $out['error'] = 'Invalid base32 info hash'; return $out; }
         $out['hash'] = strtolower($hash);
-        if (preg_match('/[?&]dn=([^&]+)/i', $token, $dn)) $out['name'] = cleanTorrentName($dn[1]);
+        // dn= is percent-encoded (and '+' means space in practice) — decode HERE only, never for plain names
+        if (preg_match('/[?&]dn=([^&]+)/i', $token, $dn)) $out['name'] = cleanTorrentName(rawurldecode(str_replace('+', ' ', $dn[1])));
         $out['magnet'] = mb_substr($token, 0, 2048);
         return $out;
     }
@@ -583,15 +598,17 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
     $addedHashes = [];
     if ($valid) {
         $hashes = array_values(array_unique(array_map(fn($it) => $it['hash'], $valid)));
-        $ph = implode(',', array_fill(0, count($hashes), '?'));
-        $banned = [];
-        $st = $db->prepare("SELECT info_hash FROM banned_hashes WHERE info_hash IN ($ph)");
-        $st->execute($hashes);
-        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $h) $banned[$h] = true;
-        $existing = [];
-        $st = $db->prepare("SELECT info_hash, banned FROM whitelist WHERE info_hash IN ($ph)");
-        $st->execute($hashes);
-        foreach ($st->fetchAll() as $row) $existing[$row['info_hash']] = (int)$row['banned'];
+        // chunked IN() lists: native prepares are capped at 65 535 placeholders (CLI bulk add can exceed it)
+        $banned = []; $existing = [];
+        foreach (array_chunk($hashes, WL_SQL_IN_CHUNK) as $chunk) {
+            $ph = implode(',', array_fill(0, count($chunk), '?'));
+            $st = $db->prepare("SELECT info_hash FROM banned_hashes WHERE info_hash IN ($ph)");
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $h) $banned[$h] = true;
+            $st = $db->prepare("SELECT info_hash, banned FROM whitelist WHERE info_hash IN ($ph)");
+            $st->execute($chunk);
+            foreach ($st->fetchAll() as $row) $existing[$row['info_hash']] = (int)$row['banned'];
+        }
 
         $ins = $db->prepare("INSERT IGNORE INTO whitelist (info_hash, name, magnet_link, source, source_ref, api_client_id, ip, ip_bucket, meta_status, meta_requested_at)
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -670,10 +687,13 @@ function whitelistBan(PDO $db, array $cfg, array $hashes, array $ctx = []): arra
                          ON DUPLICATE KEY UPDATE reason = COALESCE(VALUES(reason), reason), source = VALUES(source), source_id = VALUES(source_id)");
     $newBans = 0;
     foreach ($hashes as $h) { $ins->execute([$h, $reason, $src, $srcId]); if ($ins->rowCount() === 1) $newBans++; }
-    $ph = implode(',', array_fill(0, count($hashes), '?'));
-    $st = $db->prepare("UPDATE whitelist SET banned = 1 WHERE banned = 0 AND info_hash IN ($ph)");
-    $st->execute($hashes);
-    $affected = $st->rowCount();
+    $affected = 0;
+    foreach (array_chunk($hashes, WL_SQL_IN_CHUNK) as $chunk) {
+        $ph = implode(',', array_fill(0, count($chunk), '?'));
+        $st = $db->prepare("UPDATE whitelist SET banned = 1 WHERE banned = 0 AND info_hash IN ($ph)");
+        $st->execute($chunk);
+        $affected += $st->rowCount();
+    }
     if ($affected > 0 && trackerMode($cfg) === 'whitelist') {
         whitelistRegenerate($db, $cfg);
         whitelistMarkDirty(true);

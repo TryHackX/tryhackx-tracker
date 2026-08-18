@@ -116,8 +116,8 @@ Provides a public-facing website for tracker information, abuse report submissio
 ### 1. Download
 
 ```bash
-git clone https://github.com/TryHackX/tracker.git
-cd tracker
+git clone https://github.com/TryHackX/tryhackx-tracker.git
+cd tryhackx-tracker
 ```
 
 Or download and extract the ZIP from GitHub releases.
@@ -539,7 +539,11 @@ Also port the security headers from `.htaccess` into an `add_header` block, and 
 (`REMOTE_ADDR`), which will be the proxy — so all visitors would share one IP for rate limiting. Set
 **Admin → Settings → Admin Sessions & Proxy → Trusted proxy IPs** to your proxy addresses and
 **Client IP header** to the header it sets (e.g. `CF-Connecting-IP` or `X-Forwarded-For`). The
-forwarded header is trusted **only** when the request actually originates from a listed proxy.
+forwarded header is trusted **only** when the request actually originates from a listed proxy, and a
+comma-separated `X-Forwarded-For` is read from the **right** (skipping listed proxies) — the left-most
+entry is whatever the client sent. Prefer a header the proxy *overwrites* (`CF-Connecting-IP`,
+`X-Real-IP`) when you have one; the API bans / exempt list and the registration limits are keyed by
+this IP.
 
 > **Note on CSP:** the Content-Security-Policy in `.htaccess` intentionally allows `'unsafe-inline'`
 > / `'unsafe-eval'` because the pages use inline `onclick` handlers and Google reCAPTCHA. If you

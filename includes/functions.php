@@ -274,8 +274,21 @@ function resetCaptchaGrace(array $cfg): void {
  *   - name the header the proxy sets in `client_ip_header` (e.g. CF-Connecting-IP or X-Forwarded-For).
  * The forwarded header is only trusted when REMOTE_ADDR is one of the configured proxies.
  */
+/** "::ffff:1.2.3.4" (IPv4-mapped, seen behind v4v6 sockets) → "1.2.3.4"; anything else unchanged. */
+function unmapIpv4(string $ip): string {
+    $ip = trim($ip);
+    if (str_contains($ip, ':') && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $bin = @inet_pton($ip);
+        if ($bin !== false && strlen($bin) === 16 && substr($bin, 0, 12) === str_repeat("\0", 10) . "\xff\xff") {
+            $v4 = @inet_ntop(substr($bin, 12));
+            if ($v4 !== false) return $v4;
+        }
+    }
+    return $ip;
+}
+
 function getClientIp(?array $cfg = null): string {
-    $remote = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    $remote = unmapIpv4($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
     $cfg = $cfg ?? ($GLOBALS['cfg'] ?? null);
     if (!is_array($cfg)) return $remote;
 
@@ -290,9 +303,17 @@ function getClientIp(?array $cfg = null): string {
     $value = $_SERVER[$serverKey] ?? '';
     if ($value === '') return $remote;
 
-    // X-Forwarded-For may be a list "client, proxy1, proxy2"; the left-most is the origin client.
-    $candidate = trim(explode(',', $value)[0]);
-    return filter_var($candidate, FILTER_VALIDATE_IP) ? $candidate : $remote;
+    // X-Forwarded-For is a list "client, proxy1, proxy2". Proxies APPEND, so the left-most entry is
+    // whatever the client sent (spoofable). Walk from the RIGHT and take the first hop that is not one
+    // of our trusted proxies — that is the address the trusted proxy actually talked to.
+    $hops = array_reverse(array_map('trim', explode(',', $value)));
+    foreach ($hops as $hop) {
+        if ($hop === '' || !filter_var($hop, FILTER_VALIDATE_IP)) return $remote;   // garbage → don't guess
+        $hop = unmapIpv4($hop);
+        if (in_array($hop, $trusted, true)) continue;
+        return $hop;
+    }
+    return $remote;
 }
 
 function checkRateLimit(PDO $db, string $ip, int $maxPerHour): bool {

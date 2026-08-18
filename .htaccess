@@ -42,6 +42,11 @@ RewriteBase /tracker/
 # Prevent directory listings
 Options -Indexes
 
+# Pass the Authorization header to PHP (php-fpm / CGI drop it otherwise) — needed by the bearer S2S API
+<IfModule mod_setenvif.c>
+    SetEnvIf Authorization "(.+)" HTTP_AUTHORIZATION=$1
+</IfModule>
+
 # Serve static assets directly
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d

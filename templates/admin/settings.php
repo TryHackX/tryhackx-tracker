@@ -290,6 +290,34 @@
                 <div class="settings-hint mt-2">Manage the list itself (browse, add, ban, regenerate the file) on the <a href="<?= $baseUrl ?>?action=admin-whitelist">Whitelist page</a>.</div>
             </div>
 
+            <!-- Server-to-server API -->
+            <div class="settings-section" id="section-api">
+                <h5>Server-to-server API</h5>
+                <p class="settings-hint mb-2">
+                    <code>POST v1/whitelist/submit</code> / <code>GET v1/whitelist/ping</code> with <code>Authorization: Bearer key_id.secret</code>
+                    (used by the forum extension). <strong>Every failed authentication that carries an Authorization header bans the source IP</strong>
+                    (IPv4 exactly, IPv6 per /64) for the number of days below and stores the offending request. Requests without a header get 401 without a ban.
+                    Clients (keys) and bans are managed on the <a href="<?= $baseUrl ?>?action=admin-whitelist">Whitelist page</a>.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">API</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="api_enabled">
+                            <option value="1" <?= ($cfg['api_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled</option>
+                            <option value="0" <?= ($cfg['api_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Ban length (days)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="api_ban_days" value="<?= sanitize($cfg['api_ban_days'] ?? '30') ?>" min="1" max="3650">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Never-ban IPs <small class="settings-hint">(comma-separated IPs or CIDRs; keep this server's own addresses here — the forum on the same host must never lock itself out)</small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="api_ban_exempt_ips" value="<?= sanitize($cfg['api_ban_exempt_ips'] ?? '127.0.0.1, ::1') ?>" placeholder="127.0.0.1, ::1, 203.0.113.10">
+                    </div>
+                </div>
+            </div>
+
             <!-- Rate Limits & Blacklist -->
             <div class="settings-section">
                 <h5>Rate Limits &amp; Blacklist</h5>

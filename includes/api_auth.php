@@ -69,9 +69,14 @@ function apiRequestSnapshot(string $rawBody, string $endpoint): array {
         if (!isset($_SERVER[$k])) continue;
         $v = (string)$_SERVER[$k];
         if ($k === 'HTTP_AUTHORIZATION' || $k === 'HTTP_X_TRACKER_KEY') {
-            // keep the scheme + key id, mask the secret
-            $v = preg_replace('/^(\s*Bearer\s+[A-Za-z0-9_-]{1,32})\.?.*$/i', '$1.***', $v) ?? '***';
-            if (strlen($v) > 80) $v = substr($v, 0, 80) . '…';
+            // never store a credential: keep the scheme and, for a well-formed bearer token, the key id only
+            if (preg_match('/^\s*(Bearer)\s+([a-f0-9]{16})\./i', $v, $mm)) {
+                $v = $mm[1] . ' ' . strtolower($mm[2]) . '.***';
+            } elseif (preg_match('/^\s*([A-Za-z][A-Za-z0-9_-]{0,20})\s+\S/', $v, $mm)) {
+                $v = $mm[1] . ' ***';   // Basic / Digest / unknown scheme — value dropped
+            } else {
+                $v = '***';             // raw token without a scheme — dropped entirely
+            }
         }
         $headers[$name] = mb_substr($v, 0, 512);
     }
@@ -155,7 +160,6 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
         apiBan($db, $cfg, $ip, $reason, $detail, apiRequestSnapshot((string)$rawBody, $endpoint), $keyId, $endpoint);
         jsonResponse(['error' => 'forbidden'], 403);
     };
-    if ($rawBody === null) $fail('malformed', 'request body exceeds ' . API_MAX_BODY_BYTES . ' bytes');
     if (!preg_match('/^\s*Bearer\s+([a-f0-9]{16})\.([a-f0-9]{64})\s*$/i', $auth, $m)) {
         $fail('malformed', 'Authorization header is not "Bearer <key_id>.<secret>"');
     }
@@ -166,6 +170,8 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
     if (!$client) $fail('unknown_key', 'no client with this key id', $keyId);
     if (!hash_equals((string)$client['secret_hash'], hash('sha256', $secret))) $fail('bad_secret', 'secret does not match', $keyId);
     if ((int)$client['enabled'] !== 1) jsonResponse(['error' => 'forbidden'], 403); // admin action, no ban
+    // authenticated client, oversized payload → 413, never a ban (a big forum scan batch is not an attack)
+    if ($rawBody === null) jsonResponse(['error' => 'payload_too_large', 'max_bytes' => API_MAX_BODY_BYTES], 413);
     try {
         $db->prepare("UPDATE api_clients SET last_used_at = NOW(), last_used_ip = ?, requests_count = requests_count + 1 WHERE id = ?")
            ->execute([$ip, (int)$client['id']]);

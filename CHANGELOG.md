@@ -92,6 +92,17 @@ All notable changes to this project are documented here. The format is loosely b
   truncate could let OpenTracker observe an empty blacklist during a reload.
 
 ### Security
+- Review fixes before release: API ban snapshots never store a credential value (only the scheme and
+  the 16-hex key id of a well-formed bearer token); an authenticated client with an oversized body
+  gets 413 instead of a 30-day ban; `getClientIp()` walks `X-Forwarded-For` from the right and skips
+  trusted proxies (the left-most, client-supplied hop was trusted before — spoofable exempt IPs /
+  rate-limit keys); IPv4-mapped IPv6 addresses (`::ffff:a.b.c.d`) are unmapped before bucketing so
+  they no longer all share one `::/64` ban / rate-limit bucket; `.htaccess` passes the Authorization
+  header through to php-fpm/CGI; whitelist regeneration verifies every write and the final size and
+  refuses to install a truncated file; `validateWhitelistPath()` no longer treats the CLI's cwd as the
+  document root; IN(...) lookups are chunked (65 535-placeholder limit on bulk CLI adds); plain names
+  from the API are no longer URL-decoded twice; the Settings page gained the missing
+  **Server-to-server API** section (`api_enabled`, `api_ban_days`, `api_ban_exempt_ips`).
 - Bearer secrets stored hashed; API bans keyed per IPv6 /64; JSON responses/snapshots use
   `JSON_INVALID_UTF8_SUBSTITUTE`; whitelist path restrictions; admin whitelist UI free of
   `innerHTML` interpolation; forum reference links only for `http(s)` URLs with `rel="noopener"`.
