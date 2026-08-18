@@ -1,0 +1,28 @@
+Block SIGHUP (and the other thread-handled signals) before any thread is created.
+
+Upstream opentracker (2024-2026 master) spawns the UDP worker threads (listen.udp.workers N /
+-p/-P options) while parsing the command line / config file, i.e. BEFORE main() calls
+defaul_signal_handlers(). Those workers therefore inherit an UNBLOCKED SIGHUP; when systemd runs
+`ExecReload=/bin/kill -HUP $MAINPID` the kernel may deliver the signal to a worker thread and the
+whole process terminates (systemd logs "Deactivated successfully" because SIGHUP counts as a clean
+exit) instead of re-reading the accesslist. Without listen.udp.workers the bug is invisible.
+
+Apply on top of git://erdgeist.org/opentracker before `make`:
+    cd opentracker && git apply sighup-udp-workers.patch
+
+diff --git a/opentracker.c b/opentracker.c
+index f63db72..871291f 100644
+--- a/opentracker.c
++++ b/opentracker.c
+@@ -655,6 +655,11 @@ int main(int argc, char **argv) {
+   char     *statefile = 0;
+   pthread_t thread_id; /* time cacher */
+ 
++  /* Block the signals handled by dedicated threads (SIGHUP → accesslist reload via sigwait) BEFORE any
++     thread is created: UDP worker threads are spawned while parsing -p/-P/listen.* options and would
++     otherwise inherit an unblocked SIGHUP and terminate the process on `systemctl reload`. */
++  defaul_signal_handlers();
++
+   memset(serverip, 0, sizeof(ot_ip6));
+ #ifdef WANT_V4_ONLY
+   serverip[10] = serverip[11] = -1;

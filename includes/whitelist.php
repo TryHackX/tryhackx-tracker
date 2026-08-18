@@ -510,7 +510,7 @@ function parseMagnetOrHash(string $token): array {
  * Deduplicates by hash (first occurrence wins). Returns ['items'=>[...], 'too_many'=>bool].
  */
 function parseHashInput(string $text, int $max): array {
-    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $text = str_replace(["\r\n", "\r", "\xEF\xBB\xBF"], ["\n", "\n", ''], $text); // normalise EOL, drop UTF-8 BOMs
     // split on newlines and on whitespace/commas that separate tokens; magnets contain no whitespace
     $tokens = preg_split('/[\s,;]+/', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
     $items = []; $seen = []; $tooMany = false;
