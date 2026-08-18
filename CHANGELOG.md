@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] — 2026-08-19
+
+### Fixed
+- **`egress-budget/ottrack.nft`**: the budget chain let every non-`udp sport 6969` packet fall through
+  to the rate limit — i.e. ALL outbound TCP (web, SSH, HTTP announces) shared the tracker's UDP budget
+  and was dropped whenever it was exhausted. The chain now accepts `meta l4proto != udp`, loopback and
+  other UDP first; only OpenTracker's UDP replies are metered. If you deployed the earlier file, reload it.
+- OpenTracker HTTP side dead under load: with systemd's default `LimitNOFILE=1024` the accept queue
+  fills, `accept()` fails, the main thread spins at 100 % CPU and every HTTP announce/scrape times out
+  ("Tracker did not answer" in the panel, empty S/L). README now says to set `LimitNOFILE=65536` in the
+  unit (drop-in) — the whole HTTP path (announce, scrape, stats) depends on it.
+- Admin login / dashboard CAPTCHA modal now uses the shared placement (above centre, top on phones)
+  and has a Cancel button; Settings → "Security & Credentials" is capped to the form width.
+
+### Added
+- Public whitelist page shows the official number of registered torrents.
+
 ## [1.3.0] — 2026-08-18
 
 ### Added

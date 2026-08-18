@@ -8,13 +8,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
     <?php if (isCaptchaEnabled($cfg, 'login')): ?>
-    <style>
-    .captcha-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:9999; justify-content:center; align-items:center; }
-    .captcha-overlay.show { display:flex; }
-    .captcha-box { background:#1e1e1e; border:1px solid #333; border-radius:8px; padding:1.5rem; text-align:center; max-width:340px; }
-    .captcha-box p { color:#888; font-size:.85rem; margin-bottom:1rem; }
-    .captcha-box .captcha-widget { display:inline-block; }
-    </style>
+    <!-- CAPTCHA modal styles (.captcha-overlay / .captcha-box) are shared in assets/css/admin.css -->
     <?= captchaHeadTags($cfg) ?>
     <?php endif; ?>
 </head>
@@ -209,6 +203,7 @@
         <div class="captcha-box">
             <p>Please verify you are human</p>
             <div id="captcha-widget" class="captcha-widget"></div>
+            <div class="captcha-actions"><button type="button" class="btn btn-secondary captcha-cancel" id="captcha-cancel">Cancel</button></div>
         </div>
     </div>
     <?php endif; ?>

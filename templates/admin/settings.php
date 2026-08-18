@@ -694,6 +694,8 @@
             </div>
         </form>
 
+        <!-- Security & Credentials lives outside #settings-form (own endpoint) but must share its width cap. -->
+        <div class="settings-narrow">
         <hr class="border-secondary">
 
         <!-- Security -->
@@ -725,6 +727,7 @@
             </form>
             <div id="password-alert" class="mt-2"></div>
         </div>
+        </div><!-- /.settings-narrow -->
     </div>
 
     <!-- Settings Save Confirmation Modal -->

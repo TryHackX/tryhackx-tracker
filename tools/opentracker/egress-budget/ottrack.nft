@@ -26,6 +26,10 @@ table inet ottrack {
     counter capped {}
     chain output {
         type filter hook output priority filter; policy accept;
+        # ONLY the tracker's UDP replies are subject to the budget: everything else (all TCP — web,
+        # SSH, HTTP announces —, other UDP, loopback) must leave this chain right here.
+        meta l4proto != udp accept
+        oifname "lo" accept
         udp sport != 6969 accept
         # real announce (>= 20 B payload) or scrape reply -> remember the client for 3 h.
         # A reject reply from the udp-reject-interval patch is also 20 B (interval == 86400 at payload

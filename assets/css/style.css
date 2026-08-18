@@ -1511,6 +1511,8 @@ footer p { margin: 0.25rem 0; }
 
 
 /* === Whitelist registration page === */
+.wl-count { margin: -0.25rem 0 1rem; color: var(--text-muted, #a0a0b0); font-size: 0.9rem; }
+.wl-count strong { color: var(--accent, #4a9eff); }
 .wl-rules { margin: 0.5rem 0 1.5rem 1.2rem; color: var(--text-muted, #a0a0b0); font-size: 0.92rem; }
 .wl-rules li { margin-bottom: 0.3rem; }
 .wl-results { margin-top: 1.5rem; }

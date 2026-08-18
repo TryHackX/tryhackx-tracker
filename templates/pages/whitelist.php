@@ -6,6 +6,19 @@ $wlMax      = max(1, (int)($cfg['whitelist_max_per_submission'] ?? 20));
 $wlUdp      = trim((string)($cfg['announce_url'] ?? ''));
 $wlHttp     = trim((string)($cfg['announce_url_https'] ?? ''));
 $wlOpen     = $wlMode && $wlPublic && $wlCaptcha;
+// Official number of registered (active, non-banned) hashes. Cheap path: the state file
+// (config/whitelist_state.json) — `count` is the row count of the last regeneration plus every append since
+// (bans/removals regenerate). Falls back to a COUNT(*) (small table) when the file was never generated
+// (fresh install) or the state is flagged as out of date (regen pending / last regen failed).
+$wlCount = null;
+if ($wlMode) {
+    $wlState = function_exists('whitelistStateRead') ? whitelistStateRead() : [];
+    if (!empty($wlState['generated_at']) && empty($wlState['regen_needed'])) {
+        $wlCount = max(0, (int)($wlState['count'] ?? 0));
+    } elseif (isset($db)) {
+        try { $wlCount = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 0")->fetchColumn(); } catch (Throwable $e) { $wlCount = null; }
+    }
+}
 ?>
 <h1>Whitelist — register your torrent</h1>
 
@@ -14,6 +27,9 @@ $wlOpen     = $wlMode && $wlPublic && $wlCaptcha;
 <p>See <a href="<?= $baseUrl ?>?action=info">Info</a> for the announce URLs.</p>
 <?php elseif (!$wlPublic || !$wlCaptcha): ?>
 <p>This tracker serves <strong>registered torrents only</strong>. Public registration is currently <strong>unavailable</strong><?= !$wlCaptcha ? ' (CAPTCHA is not configured on this site)' : '' ?>. Torrents posted on the community forum are registered automatically.</p>
+<?php if ($wlCount !== null): ?>
+<p class="wl-count">Currently <strong><?= number_format($wlCount) ?></strong> <?= $wlCount === 1 ? 'torrent is' : 'torrents are' ?> registered on this tracker.</p>
+<?php endif; ?>
 <div id="wl-check-block">
     <h2 class="section-heading-spaced">Check a hash</h2>
     <form id="wl-check-form" novalidate>
@@ -25,6 +41,9 @@ $wlOpen     = $wlMode && $wlPublic && $wlCaptcha;
 </div>
 <?php else: ?>
 <p>This tracker serves <strong>registered torrents only</strong>. Registration is <strong>free and anonymous</strong> — paste one or more magnet links (or plain 40-character info hashes), solve the CAPTCHA and the hashes are added to the whitelist. Torrents posted on the community forum are registered automatically.</p>
+<?php if ($wlCount !== null): ?>
+<p class="wl-count">Currently <strong><?= number_format($wlCount) ?></strong> <?= $wlCount === 1 ? 'torrent is' : 'torrents are' ?> registered on this tracker.</p>
+<?php endif; ?>
 <ul class="wl-rules">
     <?php if (($cfg['whitelist_require_tracker'] ?? '0') === '1'): ?>
     <li><strong>Only magnet links that already announce to this tracker are accepted</strong> — the magnet must contain <code>&amp;tr=<?= sanitize($wlUdp ?: $wlHttp) ?></code><?= ($wlUdp && $wlHttp) ? ' (or the HTTP announce URL below)' : '' ?>. Plain hashes are refused.</li>

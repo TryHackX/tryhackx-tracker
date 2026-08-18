@@ -320,10 +320,18 @@ For **Reload** to work, the systemd unit must define an `ExecReload` that sends 
 ```ini
 # /etc/systemd/system/opentracker.service  (in the [Service] section)
 ExecReload=/bin/kill -HUP $MAINPID
+LimitNOFILE=65536
 ```
 ```bash
 sudo systemctl daemon-reload
 ```
+
+> **`LimitNOFILE` matters.** systemd's default soft limit is 1024 open files. A busy public tracker
+> keeps more HTTP (TCP) connections than that in flight; once the limit is hit `accept()` fails,
+> OpenTracker's main thread spins at 100 % CPU, the accept backlog fills up and **every HTTP
+> announce / scrape times out** (the panel shows "Tracker did not answer", S/L stay empty) while UDP
+> keeps working. Check with `ls /proc/$(pidof opentracker)/fd | wc -l` vs `grep 'open files'
+> /proc/$(pidof opentracker)/limits`.
 
 Use the **Test restart permission** / **Test reload permission** buttons in Settings to verify the
 sudoers rules — they run a read-only `sudo -n -l` check (they never restart or reload anything) and
