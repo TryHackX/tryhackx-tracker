@@ -45,6 +45,21 @@ if ($parsed['too_many']) {
     jsonResponse(['error' => 'too_many', 'max' => $max], 400);
 }
 $items = $parsed['items'];
+
+// Optional gate: only magnets that announce to THIS tracker (a hash whose torrent never points at
+// us would occupy the whitelist for nothing). Bare hashes cannot prove it, so they are refused too.
+if (($cfg['whitelist_require_tracker'] ?? '0') === '1') {
+    $ourHosts = whitelistTrackerHosts($cfg);
+    $need = 'Magnet link must include our tracker (' . implode(' or ', array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')])) . ')';
+    foreach ($items as &$it) {
+        if (empty($it['hash'])) continue;
+        if (empty($it['magnet']) || !magnetHasTrackerHost((string)$it['magnet'], $ourHosts)) {
+            $it['hash'] = null;
+            $it['error'] = empty($it['magnet']) ? 'Bare hashes are not accepted — paste the full magnet link containing our tracker' : $need;
+        }
+    }
+    unset($it);
+}
 $validCount = count(array_filter($items, fn($it) => !empty($it['hash'])));
 if ($validCount === 0) {
     jsonResponse(['error' => 'no_valid', 'results' => array_map(fn($it) => ['input' => $it['input'], 'hash' => null, 'status' => 'invalid', 'error' => $it['error']], $items)], 400);

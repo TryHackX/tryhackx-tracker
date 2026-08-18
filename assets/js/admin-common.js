@@ -181,18 +181,47 @@
         return api;
     }
 
-    /** renderPagination(container, {total, page, pages, onPage}) — same look as the dashboard. */
+    /**
+     * renderPagination(container, {total, page, pages, onPage}) — « First / ‹ Prev / [page] of M / Next › / Last ».
+     * The number box jumps on Enter or change (clamped to 1..pages). Same look as the dashboard, which keeps
+     * its own renderer in admin.js; this one is used by every whitelist view.
+     */
     function renderPagination(container, { total = 0, page = 1, pages = 1, onPage }) {
         if (!container) return;
         container.textContent = '';
+        page = Math.max(1, Number(page) || 1);
+        pages = Math.max(1, Number(pages) || 1);
         if (pages <= 1) return;
-        const prev = el('button', { type: 'button', disabled: page <= 1 ? true : null }, [el('i', { className: 'bi bi-chevron-left' }), ' Prev']);
-        prev.addEventListener('click', () => onPage && onPage(page - 1));
-        const next = el('button', { type: 'button', disabled: page >= pages ? true : null }, ['Next ', el('i', { className: 'bi bi-chevron-right' })]);
-        next.addEventListener('click', () => onPage && onPage(page + 1));
+        const go = (p) => {
+            p = Math.min(pages, Math.max(1, Math.round(p)));
+            if (p !== page && onPage) onPage(p);
+        };
+        const goFromInput = (inp) => {
+            const raw = String(inp.value).trim();
+            const n = raw === '' ? NaN : Number(raw);
+            if (!isFinite(n)) { inp.value = String(page); return; } // empty / garbage: stay put
+            go(n);
+        };
+        const btn = (label, target, disabled, cls) => {
+            const b = el('button', { type: 'button', className: cls || null, disabled: disabled ? true : null }, label);
+            b.addEventListener('click', () => go(target));
+            return b;
+        };
+        const first = btn([el('i', { className: 'bi bi-chevron-double-left' }), ' First'], 1, page <= 1, 'pg-edge');
+        const prev = btn([el('i', { className: 'bi bi-chevron-left' }), ' Prev'], page - 1, page <= 1);
+        const next = btn(['Next ', el('i', { className: 'bi bi-chevron-right' })], page + 1, page >= pages);
+        const last = btn(['Last ', el('i', { className: 'bi bi-chevron-double-right' })], pages, page >= pages, 'pg-edge');
+        const input = el('input', { type: 'number', className: 'pg-input', min: '1', max: String(pages), step: '1', value: String(page), title: 'Go to page (Enter)', 'aria-label': 'Page number' });
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); goFromInput(input); } });
+        input.addEventListener('change', () => goFromInput(input));
+        input.addEventListener('focus', () => input.select());
+        const jump = el('span', { className: 'pg-jump' }, ['Page ', input, ` of ${pages}`]);
+        container.appendChild(first);
         container.appendChild(prev);
-        container.appendChild(el('span', { text: `Page ${page} of ${pages}` + (total ? ` · ${total} rows` : '') }));
+        container.appendChild(jump);
+        if (total) container.appendChild(el('span', { className: 'pg-total', text: `· ${total} rows` }));
         container.appendChild(next);
+        container.appendChild(last);
     }
 
     function fmtBytes(n) {

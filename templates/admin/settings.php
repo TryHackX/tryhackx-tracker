@@ -286,6 +286,18 @@
                         <label class="form-label">OpenTracker scrape URL <small class="settings-hint">(seeders/leechers in the whitelist panel)</small></label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="whitelist_scrape_url" value="<?= sanitize($cfg['whitelist_scrape_url'] ?? 'http://127.0.0.1:6969/scrape') ?>" placeholder="http://127.0.0.1:6969/scrape">
                     </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Public registration: require our tracker</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="whitelist_require_tracker">
+                            <option value="0" <?= ($cfg['whitelist_require_tracker'] ?? '0') !== '1' ? 'selected' : '' ?>>Off — any hash / magnet</option>
+                            <option value="1" <?= ($cfg['whitelist_require_tracker'] ?? '0') === '1' ? 'selected' : '' ?>>On — magnet must announce to us</option>
+                        </select>
+                        <div class="settings-hint mt-1">When on, bare hashes are refused and a magnet is accepted only if one of its <code>tr=</code> URLs points at a host below (announce URL hosts always count). Admin adds and the API are not affected.</div>
+                    </div>
+                    <div class="col-md-9">
+                        <label class="form-label">Our tracker hosts <small class="settings-hint">(comma-separated hostnames / IPs, e.g. <code>tryhackx.org, 203.0.113.10</code>; the hosts of the announce URLs above are always included)</small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="whitelist_tracker_hosts" value="<?= sanitize($cfg['whitelist_tracker_hosts'] ?? '') ?>" placeholder="tryhackx.org, 203.0.113.10">
+                    </div>
                 </div>
                 <div class="settings-hint mt-2">Manage the list itself (browse, add, ban, regenerate the file) on the <a href="<?= $baseUrl ?>?action=admin-whitelist">Whitelist page</a>.</div>
             </div>

@@ -575,6 +575,22 @@ async function handleBlockCheck(e) {
             } else {
                 statusEl.innerHTML = '<span class="status-badge checked">Not Blocked</span>';
             }
+            // Whitelist mode: a second badge — registered (served) / not registered — independent of blocks
+            const wlRow = document.getElementById('bc-row-whitelist');
+            if (wlRow) {
+                if (typeof json.whitelisted === 'boolean') {
+                    const wlEl = document.getElementById('bc-whitelist');
+                    wlEl.textContent = '';
+                    const badge = document.createElement('span');
+                    badge.className = 'status-badge ' + (json.whitelisted ? 'checked' : 'blocked');
+                    badge.textContent = json.whitelisted ? 'Whitelisted' : 'Not whitelisted';
+                    wlEl.appendChild(badge);
+                    wlEl.appendChild(document.createTextNode(json.whitelisted ? ' — registered, the tracker serves this swarm' : ' — not registered on this tracker (nothing is served)'));
+                    wlRow.style.display = '';
+                } else {
+                    wlRow.style.display = 'none';
+                }
+            }
             document.getElementById('bc-row-company').style.display = json.blocked ? '' : 'none';
             document.getElementById('bc-row-entity').style.display = json.blocked ? '' : 'none';
             document.getElementById('bc-company').textContent = json.company || '—';

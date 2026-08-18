@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] — 2026-08-18
+
+### Added
+- **Require our tracker** for public registration (`whitelist_require_tracker`, `whitelist_tracker_hosts`):
+  only magnet links whose `tr=` list points at one of the configured hosts (announce-URL hosts always
+  count) are accepted; bare hashes are refused with an explanatory message. Off by default; admin adds
+  and the S2S API are unaffected.
+- Status page → *Block check* shows a second badge in whitelist mode: **Whitelisted / Not whitelisted**
+  next to Blocked / Not Blocked.
+- Admin: the *Whitelist* link moved from the Reload/Restart button group into the dashboard tabs row
+  (no more accidental clicks next to Restart); Whitelist page uses the full width, fixed column widths
+  (no wrapping / horizontal scrollbar), readable muted labels, pagination with First/Last and a
+  page-number input.
+
 ## [1.2.0] — 2026-08-18
 
 > **Whitelist mode.** Run OpenTracker with `-DWANT_ACCESSLIST_WHITE` and let the app own the

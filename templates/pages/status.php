@@ -112,6 +112,7 @@
             <table>
                 <tr><td>Info Hash</td><td id="bc-hash" class="status-hash-cell"></td></tr>
                 <tr><td>Status</td><td id="bc-status"></td></tr>
+                <tr id="bc-row-whitelist" style="display:none"><td>Whitelist</td><td id="bc-whitelist"></td></tr>
                 <tr id="bc-row-company" style="display:none"><td>Company / Organization</td><td id="bc-company"></td></tr>
                 <tr id="bc-row-entity" style="display:none"><td>Represented Entity</td><td id="bc-entity"></td></tr>
             </table>

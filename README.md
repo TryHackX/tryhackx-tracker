@@ -205,7 +205,7 @@ All settings are managed through **Admin Panel → Settings** (`/?action=admin` 
 | **Site Configuration** | Site name, URL, announce URLs (HTTP/S + UDP), GitHub URL |
 | **Contact & Email** | Site email, contact visibility, email obfuscation, HMAC secret |
 | **CAPTCHA** | Provider (reCAPTCHA v2 / Turnstile), keys, enable globally and per-context (report, login, status, appeals, block check); the whitelist registration page always requires a CAPTCHA |
-| **Tracker Mode & Whitelist** | `blacklist` / `whitelist`, whitelist file path (+ Test), public registration on/off, max hashes per submission, submissions per hour, per-IP and global daily caps, minimum seconds between tracker reloads, OpenTracker scrape URL — see [Whitelist mode](#whitelist-mode) |
+| **Tracker Mode & Whitelist** | `blacklist` / `whitelist`, whitelist file path (+ Test), public registration on/off, max hashes per submission, submissions per hour, per-IP and global daily caps, minimum seconds between tracker reloads, OpenTracker scrape URL, **require our tracker** (public registration accepts only magnets whose `tr=` list includes one of *Our tracker hosts* / the announce hosts; bare hashes refused) — see [Whitelist mode](#whitelist-mode) |
 | **Server-to-server API** | Enable, ban length (days), exempt IPs — clients and bans are managed on the Whitelist page |
 | **Smart CAPTCHA** | Point threshold, grace period, points per action type |
 | **Public Pages** | Auto-archive days for reports and appeals |
@@ -435,6 +435,12 @@ fail closed), **Submissions per hour** per IP (v6 counted per /64), **New hashes
 and globally. Every row stores the registrant IP; hashes on the ban list are refused. The response
 lists each item as *registered / already registered / banned / invalid* and tells the user in how
 many seconds the tracker will pick the new hashes up.
+
+**Require our tracker** (1.2.1, off by default): when on, a submission is accepted only as a magnet
+link whose `tr=` parameters include one of **Our tracker hosts** (hostnames / IPs; the hosts of the
+configured announce URLs always count) — a hash whose torrent never announces to this tracker would
+just occupy the whitelist. Bare hashes are refused with an explanatory error; admin adds and the
+S2S API are not affected (the forum extension has the same option on its side).
 
 #### 5. Server-to-server API
 

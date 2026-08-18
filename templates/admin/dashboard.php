@@ -37,7 +37,6 @@
                     </button>
                 </div>
                 <?php endif; ?>
-                <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
                 <a href="<?= $baseUrl ?>?action=settings" class="btn btn-sm btn-outline-info"><i class="bi bi-gear"></i> Settings</a>
                 <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
             </div>
@@ -49,6 +48,9 @@
             <button class="source-tab" data-source="archives"><i class="bi bi-archive"></i> Archives <span id="archives-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="appeals"><i class="bi bi-megaphone"></i> Appeals <span id="appeals-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="appeal_archives"><i class="bi bi-archive"></i> Appeal Archives</button>
+            <!-- Plain link, not a data-source tab: no data-source attr and a separate class so admin.js's
+                 .source-tab click handler never binds to it. -->
+            <a href="<?= $baseUrl ?>?action=admin-whitelist" class="source-tab-link" title="Open the whitelist page"><i class="bi bi-list-check"></i> Whitelist</a>
         </div>
 
         <!-- Toolbar -->

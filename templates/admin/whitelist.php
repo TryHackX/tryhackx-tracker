@@ -9,8 +9,8 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
 </head>
 <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
-<body class="admin-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-api-ban-days="<?= (int)($cfg['api_ban_days'] ?? 30) ?>" data-service="<?= sanitize($svcName) ?>">
-    <div class="admin-container">
+<body class="admin-body wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-api-ban-days="<?= (int)($cfg['api_ban_days'] ?? 30) ?>" data-service="<?= sanitize($svcName) ?>">
+    <div class="admin-container wl-page">
         <div class="admin-header">
             <h2><i class="bi bi-list-check"></i> Whitelist</h2>
             <div class="admin-header-actions">
@@ -102,6 +102,9 @@
 
             <div class="table-responsive">
                 <table class="table table-dark table-hover wl-table" id="wl-table">
+                    <colgroup>
+                        <col class="wl-c-check"><col class="wl-c-id"><col class="wl-c-hash"><col class="wl-c-flex"><col class="wl-c-size"><col class="wl-c-source"><col class="wl-c-ip"><col class="wl-c-meta"><col class="wl-c-sl"><col class="wl-c-date"><col class="wl-c-actions">
+                    </colgroup>
                     <thead><tr>
                         <th class="wl-th-check"><input type="checkbox" class="form-check-input" id="wl-select-all" title="Select all on this page"></th>
                         <th class="sortable" data-sort="id">ID <i class="bi bi-arrow-down-up sort-icon"></i></th>
@@ -140,13 +143,16 @@
             </div>
             <div class="table-responsive">
                 <table class="table table-dark table-hover wl-table" id="bn-table">
+                    <colgroup>
+                        <col class="wl-c-hash"><col class="wl-c-flex"><col class="wl-c-flex"><col class="wl-c-source"><col class="wl-c-date"><col class="wl-c-actions-2">
+                    </colgroup>
                     <thead><tr>
                         <th class="sortable" data-sort="hash">Info Hash <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th>Name</th>
                         <th class="sortable" data-sort="reason">Reason <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable col-badge" data-sort="source">Source <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="date">Date <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="th-actions">Actions</th>
+                        <th class="th-actions wl-th-actions">Actions</th>
                     </tr></thead>
                     <tbody id="bn-body"></tbody>
                 </table>
@@ -167,6 +173,9 @@
             </div>
             <div class="table-responsive">
                 <table class="table table-dark table-hover wl-table" id="cl-table">
+                    <colgroup>
+                        <col class="wl-c-flex"><col class="wl-c-keyid"><col class="wl-c-secret"><col class="wl-c-enabled"><col class="wl-c-date"><col class="wl-c-date"><col class="wl-c-ip"><col class="wl-c-num"><col class="wl-c-actions-2">
+                    </colgroup>
                     <thead><tr>
                         <th>Label</th>
                         <th>Key ID</th>
@@ -175,8 +184,8 @@
                         <th>Created</th>
                         <th>Last used</th>
                         <th>Last IP</th>
-                        <th>Requests</th>
-                        <th class="th-actions">Actions</th>
+                        <th class="wl-num">Requests</th>
+                        <th class="th-actions wl-th-actions">Actions</th>
                     </tr></thead>
                     <tbody id="cl-body"></tbody>
                 </table>
@@ -206,6 +215,9 @@
             </div>
             <div class="table-responsive">
                 <table class="table table-dark table-hover wl-table" id="ab-table">
+                    <colgroup>
+                        <col class="wl-c-ipv6"><col class="wl-c-bucket"><col class="wl-c-flex"><col class="wl-c-keyid"><col class="wl-c-flex"><col class="wl-c-date"><col class="wl-c-date"><col class="wl-c-date-lg"><col class="wl-c-actions-2">
+                    </colgroup>
                     <thead><tr>
                         <th class="sortable" data-sort="ip">IP <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th>Bucket</th>
@@ -215,7 +227,7 @@
                         <th class="sortable" data-sort="date">Created <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="expires">Expires <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th>Lifted</th>
-                        <th class="th-actions">Actions</th>
+                        <th class="th-actions wl-th-actions">Actions</th>
                     </tr></thead>
                     <tbody id="ab-body"></tbody>
                 </table>

@@ -541,6 +541,48 @@ function parseHashInput(string $text, int $max): array {
     return ['items' => $items, 'too_many' => $tooMany];
 }
 
+/**
+ * Hosts (lowercase, no port) that count as "our tracker" for the require-our-tracker filter:
+ * the configured `whitelist_tracker_hosts` list plus, always, the hosts of the announce URLs.
+ */
+function whitelistTrackerHosts(array $cfg): array {
+    $hosts = [];
+    foreach (preg_split('/[\s,;]+/', (string)($cfg['whitelist_tracker_hosts'] ?? '')) ?: [] as $h) {
+        $h = strtolower(trim($h, " \t\r\n/."));
+        if ($h === '') continue;
+        if (preg_match('#^[a-z]+://#', $h)) $h = (string)(parse_url($h, PHP_URL_HOST) ?? '');
+        elseif (preg_match('/^(.+):\d{1,5}$/', $h, $m) && !preg_match('/^[0-9a-f:]+$/i', $h)) $h = $m[1]; // host:port (not a bare IPv6)
+        $h = trim($h, '[]');
+        if ($h !== '') $hosts[$h] = true;
+    }
+    foreach (['announce_url', 'announce_url_https'] as $k) {
+        $u = trim((string)($cfg[$k] ?? ''));
+        $h = $u !== '' ? strtolower((string)(parse_url($u, PHP_URL_HOST) ?? '')) : '';
+        if ($h !== '') $hosts[trim($h, '[]')] = true;
+    }
+    return array_keys($hosts);
+}
+
+/** Hosts (lowercase, no port, no brackets) of every tr= parameter of a magnet URI. */
+function magnetTrackerHosts(string $magnet): array {
+    $out = [];
+    if (!preg_match_all('/[?&]tr=([^&#]+)/i', $magnet, $mm)) return $out;
+    foreach ($mm[1] as $enc) {
+        $u = rawurldecode(str_replace('+', '%20', $enc));
+        $h = (string)(parse_url(trim($u), PHP_URL_HOST) ?? '');
+        if ($h !== '') $out[strtolower(trim($h, '[]'))] = true;
+    }
+    return array_keys($out);
+}
+
+/** True when the magnet announces to at least one of the given hosts. */
+function magnetHasTrackerHost(string $magnet, array $hosts): bool {
+    if (!$hosts) return false;
+    $set = array_fill_keys(array_map('strtolower', $hosts), true);
+    foreach (magnetTrackerHosts($magnet) as $h) if (isset($set[$h])) return true;
+    return false;
+}
+
 /** Build a magnet link for a hash using this tracker's configured announce URLs. */
 function buildMagnet(string $hash, ?string $name, array $cfg): string {
     $m = 'magnet:?xt=urn:btih:' . strtolower($hash);

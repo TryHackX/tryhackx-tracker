@@ -39,7 +39,7 @@ $allowed = [
     // whitelist mode
     'tracker_mode', 'whitelist_path', 'whitelist_public_enabled', 'whitelist_max_per_submission',
     'rate_limit_whitelist', 'whitelist_ip_daily_max', 'whitelist_daily_cap', 'whitelist_reload_min_interval',
-    'whitelist_scrape_url',
+    'whitelist_scrape_url', 'whitelist_require_tracker', 'whitelist_tracker_hosts',
     // captcha provider
     'captcha_provider', 'turnstile_site_key', 'turnstile_secret',
     // server-to-server API
@@ -85,7 +85,16 @@ foreach ($intClamp as $k => [$min, $max, $def]) {
         $data[$k] = (string)max($min, min($max, $n));
     }
 }
-foreach (['whitelist_public_enabled', 'api_enabled'] as $k) {
+if (isset($data['whitelist_tracker_hosts'])) {
+    // keep only plausible hostnames / IPs (with optional port); the helper strips schemes/ports on read
+    $clean = [];
+    foreach (preg_split('/[\s,;]+/', (string)$data['whitelist_tracker_hosts']) ?: [] as $h) {
+        $h = trim($h);
+        if ($h !== '' && strlen($h) <= 253 && preg_match('#^([a-z]+://)?[A-Za-z0-9.:\[\]-]+(/.*)?$#', $h)) $clean[] = $h;
+    }
+    $data['whitelist_tracker_hosts'] = implode(', ', array_unique($clean));
+}
+foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
 if (isset($data['api_ban_exempt_ips'])) {

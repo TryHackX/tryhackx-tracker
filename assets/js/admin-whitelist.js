@@ -246,20 +246,20 @@
             const hashCell = el('td', { className: 'wl-hash-cell', title: 'Click to copy' }, [el('code', { text: row.info_hash })]);
             hashCell.addEventListener('click', () => copyToClipboard(row.info_hash));
             tr.appendChild(hashCell);
-            const nameTd = el('td', { className: 'wl-name' });
-            nameTd.appendChild(el('span', { text: row.name || '—', title: row.name || '' }));
+            const nameTd = el('td', { className: 'wl-name', title: row.name || '' });
+            nameTd.appendChild(el('span', { text: row.name || '—' }));
             if (row.files_count) nameTd.appendChild(el('span', { className: 'text-muted wl-small', text: ` · ${row.files_count} file${row.files_count === 1 ? '' : 's'}` }));
             tr.appendChild(nameTd);
-            tr.appendChild(el('td', { text: row.total_size ? fmtBytes(row.total_size) : '—' }));
-            const srcTd = el('td', null, sourceBadge(row.source));
+            tr.appendChild(el('td', { className: 'wl-size', text: row.total_size ? fmtBytes(row.total_size) : '—' }));
+            const srcTd = el('td', { className: 'wl-source' }, sourceBadge(row.source));
             if (row.source_ref && isHttpUrl(row.source_ref.url)) {
                 srcTd.appendChild(document.createTextNode(' '));
                 srcTd.appendChild(el('a', { href: row.source_ref.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open source post', className: 'wl-ref-link' }, el('i', { className: 'bi bi-box-arrow-up-right' })));
             }
             tr.appendChild(srcTd);
-            const ipTd = el('td', { className: 'wl-ip' });
+            const ipTd = el('td', { className: 'wl-ip', title: row.ip || '' });
             if (row.ip) {
-                const a = el('a', { href: '#', title: 'Filter by this IP', text: row.ip });
+                const a = el('a', { href: '#', title: 'Filter by ' + row.ip, text: row.ip });
                 a.addEventListener('click', (e) => { e.preventDefault(); setIpFilter(row.ip); });
                 ipTd.appendChild(a);
                 if (state.wl.group && row.ip !== lastIp && state.wl.ipCounts[row.ip] > 1) {
@@ -268,7 +268,7 @@
                 }
             } else ipTd.textContent = '—';
             tr.appendChild(ipTd);
-            const metaTd = el('td', null, metaBadge(row.meta_status));
+            const metaTd = el('td', { className: 'wl-meta' }, metaBadge(row.meta_status));
             if (row.meta_status === 'failed' && row.meta_error) metaTd.title = row.meta_error;
             tr.appendChild(metaTd);
             tr.appendChild(el('td', { className: 'wl-sl', text: row.scraped_at ? `${row.scrape_seeders ?? 0} / ${row.scrape_leechers ?? 0}` : '—', title: row.scraped_at ? 'scraped ' + fmtDate(row.scraped_at) : 'not scraped yet' }));
@@ -542,9 +542,9 @@
             const hc = el('td', { className: 'wl-hash-cell', title: 'Click to copy' }, el('code', { text: row.info_hash }));
             hc.addEventListener('click', () => copyToClipboard(row.info_hash));
             tr.appendChild(hc);
-            tr.appendChild(el('td', { className: 'wl-name', text: row.name || '—' }));
-            tr.appendChild(el('td', { text: row.reason || '—' }));
-            tr.appendChild(el('td', null, badge(row.source + (row.source_id ? ' #' + row.source_id : ''), 'wl-b-muted')));
+            tr.appendChild(el('td', { className: 'wl-name', text: row.name || '—', title: row.name || '' }));
+            tr.appendChild(el('td', { className: 'wl-reason', text: row.reason || '—', title: row.reason || '' }));
+            tr.appendChild(el('td', { className: 'wl-source' }, badge(row.source + (row.source_id ? ' #' + row.source_id : ''), 'wl-b-muted')));
             tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(row.created_at) }));
             const act = el('td', { className: 'wl-actions' });
             if (row.whitelist_id) act.appendChild(iconBtn('bi-eye', 'Whitelist entry details', 'btn-outline-info', () => openDetails(row.whitelist_id)));
@@ -584,20 +584,20 @@
         if (!r.clients.length) body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-muted py-4', text: 'No API clients yet. Create one and paste its bearer token into the forum extension settings.' })));
         r.clients.forEach(c => {
             const tr = el('tr');
-            tr.appendChild(el('td', { text: c.label }));
-            tr.appendChild(el('td', null, el('code', { text: c.key_id })));
-            tr.appendChild(el('td', null, el('code', { className: 'text-muted', text: '····' + (c.secret_hint || '') })));
+            tr.appendChild(el('td', { className: 'wl-cl-label', text: c.label, title: c.label }));
+            tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { text: c.key_id })));
+            tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { className: 'text-muted', text: '····' + (c.secret_hint || '') })));
             const sw = el('input', { type: 'checkbox', className: 'form-check-input', role: 'switch', title: c.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable' });
             sw.checked = !!c.enabled;
             sw.addEventListener('change', async () => {
                 const rr = await apiCall('admin/api_client_update', 'POST', { id: c.id, enabled: sw.checked ? 1 : 0 });
                 if (rr.success) showToast(sw.checked ? 'Client enabled' : 'Client disabled', 'success'); else { showToast(rr.error || 'Update failed', 'danger'); sw.checked = !sw.checked; }
             });
-            tr.appendChild(el('td', null, el('div', { className: 'form-check form-switch m-0' }, sw)));
+            tr.appendChild(el('td', { className: 'wl-enabled' }, el('div', { className: 'form-check form-switch m-0 d-inline-block' }, sw)));
             tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(c.created_at) }));
             tr.appendChild(el('td', { className: 'wl-date', text: c.last_used_at ? fmtDate(c.last_used_at) : 'never' }));
-            tr.appendChild(el('td', { text: c.last_used_ip || '—' }));
-            tr.appendChild(el('td', { text: String(c.requests_count) }));
+            tr.appendChild(el('td', { className: 'wl-ip', text: c.last_used_ip || '—', title: c.last_used_ip || '' }));
+            tr.appendChild(el('td', { className: 'wl-num', text: String(c.requests_count) }));
             const act = el('td', { className: 'wl-actions' });
             act.appendChild(iconBtn('bi-pencil', 'Rename', 'btn-outline-secondary', async () => {
                 const label = window.prompt('New label:', c.label);
@@ -650,11 +650,11 @@
         if (!r.rows.length) body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-muted py-4', text: state.ab.status === 'active' ? 'No active API bans.' : 'No API bans recorded.' })));
         r.rows.forEach(b => {
             const tr = el('tr', { className: b.active ? '' : 'wl-row-muted' });
-            tr.appendChild(el('td', null, el('code', { text: b.ip })));
-            tr.appendChild(el('td', { className: 'text-muted wl-small', text: b.ip_bucket !== b.ip ? b.ip_bucket : '' }));
-            tr.appendChild(el('td', null, [badge(b.reason, b.reason === 'manual' ? 'wl-b-muted' : 'wl-b-bad'), b.detail ? el('div', { className: 'text-muted wl-small', text: b.detail }) : null]));
-            tr.appendChild(el('td', null, b.key_id ? el('code', { text: b.key_id }) : '—'));
-            tr.appendChild(el('td', { className: 'wl-small', text: b.endpoint || '—' }));
+            tr.appendChild(el('td', { className: 'wl-ip wl-mono', title: b.ip }, el('code', { text: b.ip })));
+            tr.appendChild(el('td', { className: 'text-muted wl-small wl-mono', text: b.ip_bucket !== b.ip ? b.ip_bucket : '', title: b.ip_bucket !== b.ip ? b.ip_bucket : '' }));
+            tr.appendChild(el('td', { className: 'wl-reason', title: b.detail || b.reason || '' }, [badge(b.reason, b.reason === 'manual' ? 'wl-b-muted' : 'wl-b-bad'), b.detail ? el('div', { className: 'text-muted wl-small wl-ellipsis', text: b.detail }) : null]));
+            tr.appendChild(el('td', { className: 'wl-mono' }, b.key_id ? el('code', { text: b.key_id }) : '—'));
+            tr.appendChild(el('td', { className: 'wl-small wl-endpoint', text: b.endpoint || '—', title: b.endpoint || '' }));
             tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(b.created_at) }));
             tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(b.expires_at) }));
             tr.appendChild(el('td', { className: 'wl-date', text: b.lifted_at ? fmtDate(b.lifted_at) + (b.lifted_by ? ' (' + b.lifted_by + ')' : '') : (b.active ? '' : 'expired') }));

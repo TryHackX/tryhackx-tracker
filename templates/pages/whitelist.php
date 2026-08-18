@@ -26,6 +26,9 @@ $wlOpen     = $wlMode && $wlPublic && $wlCaptcha;
 <?php else: ?>
 <p>This tracker serves <strong>registered torrents only</strong>. Registration is <strong>free and anonymous</strong> — paste one or more magnet links (or plain 40-character info hashes), solve the CAPTCHA and the hashes are added to the whitelist. Torrents posted on the community forum are registered automatically.</p>
 <ul class="wl-rules">
+    <?php if (($cfg['whitelist_require_tracker'] ?? '0') === '1'): ?>
+    <li><strong>Only magnet links that already announce to this tracker are accepted</strong> — the magnet must contain <code>&amp;tr=<?= sanitize($wlUdp ?: $wlHttp) ?></code><?= ($wlUdp && $wlHttp) ? ' (or the HTTP announce URL below)' : '' ?>. Plain hashes are refused.</li>
+    <?php endif; ?>
     <li>Up to <strong><?= $wlMax ?></strong> hashes per submission, one per line.</li>
     <li>Your IP address is stored with each registration to detect abuse. Spam and abusive submissions get the IP banned.</li>
     <li>Registered hashes may be removed or banned at any time (e.g. after an abuse report). Banned hashes cannot be re-registered.</li>
