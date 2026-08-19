@@ -6,7 +6,7 @@
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=tos" class="<?= $action === 'tos' ? 'active' : '' ?>">Terms</a>
         <span class="sep">|</span>
-        <?php if (trackerMode($cfg) === 'whitelist' && ($cfg['whitelist_public_enabled'] ?? '1') === '1'): ?>
+        <?php if ((trackerMode($cfg) === 'whitelist' || (function_exists('scheduleEnabled') && scheduleEnabled($cfg))) && ($cfg['whitelist_public_enabled'] ?? '1') === '1'): ?>
         <a href="<?= $baseUrl ?>?action=whitelist" class="<?= $action === 'whitelist' ? 'active' : '' ?>">Whitelist</a>
         <span class="sep">|</span>
         <?php endif; ?>

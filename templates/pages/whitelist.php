@@ -1,17 +1,19 @@
 <?php
 $wlMode     = trackerMode($cfg) === 'whitelist';
+$wlSched    = function_exists('scheduleEnabled') && scheduleEnabled($cfg);   // whitelist hours → registration always open
+$wlReg      = $wlMode || $wlSched;   // registration UI shown (whitelist mode now, or scheduled whitelist hours)
 $wlPublic   = ($cfg['whitelist_public_enabled'] ?? '1') === '1';
 $wlCaptcha  = captchaConfigured($cfg);
 $wlMax      = max(1, (int)($cfg['whitelist_max_per_submission'] ?? 20));
 $wlUdp      = trim((string)($cfg['announce_url'] ?? ''));
 $wlHttp     = trim((string)($cfg['announce_url_https'] ?? ''));
-$wlOpen     = $wlMode && $wlPublic && $wlCaptcha;
+$wlOpen     = $wlReg && $wlPublic && $wlCaptcha;
 // Official number of registered (active, non-banned) hashes. Cheap path: the state file
 // (config/whitelist_state.json) — `count` is the row count of the last regeneration plus every append since
 // (bans/removals regenerate). Falls back to a COUNT(*) (small table) when the file was never generated
 // (fresh install) or the state is flagged as out of date (regen pending / last regen failed).
 $wlCount = null;
-if ($wlMode) {
+if ($wlReg) {
     $wlState = function_exists('whitelistStateRead') ? whitelistStateRead() : [];
     if (!empty($wlState['generated_at']) && empty($wlState['regen_needed'])) {
         $wlCount = max(0, (int)($wlState['count'] ?? 0));
@@ -19,14 +21,24 @@ if ($wlMode) {
         try { $wlCount = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 0")->fetchColumn(); } catch (Throwable $e) { $wlCount = null; }
     }
 }
+// Scheduled mode notice: hours + what the tracker does right now + next change (schedule timezone)
+$wlSchedNotice = '';
+if ($wlSched) {
+    $wlNext = scheduleNextChange($cfg);
+    $wlSchedNotice = 'Whitelist hours: <strong>' . sanitize(scheduleDescribe($cfg)) . '</strong>. Right now the tracker is in <strong>'
+        . ($wlMode ? 'whitelist' : 'open') . ' mode</strong>'
+        . ($wlNext ? '; next change at <strong>' . sanitize(scheduleFormatLocal($cfg, $wlNext)) . '</strong> (' . sanitize(scheduleTimezone($cfg)) . ').' : '.')
+        . ($wlMode ? '' : ' Registrations made now become active at the start of the next whitelist hours.');
+}
 ?>
 <h1>Whitelist — register your torrent</h1>
 
-<?php if (!$wlMode): ?>
+<?php if (!$wlReg): ?>
 <p>This tracker currently runs in <strong>open (blacklist) mode</strong>: every torrent is served unless it was blocked after an abuse report. There is nothing to register.</p>
 <p>See <a href="<?= $baseUrl ?>?action=info">Info</a> for the announce URLs.</p>
 <?php elseif (!$wlPublic || !$wlCaptcha): ?>
-<p>This tracker serves <strong>registered torrents only</strong>. Public registration is currently <strong>unavailable</strong><?= !$wlCaptcha ? ' (CAPTCHA is not configured on this site)' : '' ?>. Torrents posted on the community forum are registered automatically.</p>
+<?php if ($wlSchedNotice !== ''): ?><div class="wl-schedule-notice"><?= $wlSchedNotice ?></div><?php endif; ?>
+<p>This tracker serves <strong>registered torrents only</strong><?= $wlSched ? ' during whitelist hours (open mode otherwise)' : '' ?>. Public registration is currently <strong>unavailable</strong><?= !$wlCaptcha ? ' (CAPTCHA is not configured on this site)' : '' ?>. Torrents posted on the community forum are registered automatically.</p>
 <?php if ($wlCount !== null): ?>
 <p class="wl-count">Currently <strong><?= number_format($wlCount) ?></strong> <?= $wlCount === 1 ? 'torrent is' : 'torrents are' ?> registered on this tracker.</p>
 <?php endif; ?>
@@ -40,7 +52,8 @@ if ($wlMode) {
     <div id="wl-check-alert" class="alert"></div>
 </div>
 <?php else: ?>
-<p>This tracker serves <strong>registered torrents only</strong>. Registration is <strong>free and anonymous</strong> — paste one or more magnet links (or plain 40-character info hashes), solve the CAPTCHA and the hashes are added to the whitelist. Torrents posted on the community forum are registered automatically.</p>
+<?php if ($wlSchedNotice !== ''): ?><div class="wl-schedule-notice"><?= $wlSchedNotice ?></div><?php endif; ?>
+<p>This tracker serves <strong>registered torrents only</strong><?= $wlSched ? ' during whitelist hours (open mode otherwise)' : '' ?>. Registration is <strong>free and anonymous</strong> — paste one or more magnet links (or plain 40-character info hashes), <?= captchaProvider($cfg) === 'recaptcha_v3' ? 'pass the (invisible) CAPTCHA check' : 'solve the CAPTCHA' ?> and the hashes are added to the whitelist. Torrents posted on the community forum are registered automatically.</p>
 <?php if ($wlCount !== null): ?>
 <p class="wl-count">Currently <strong><?= number_format($wlCount) ?></strong> <?= $wlCount === 1 ? 'torrent is' : 'torrents are' ?> registered on this tracker.</p>
 <?php endif; ?>

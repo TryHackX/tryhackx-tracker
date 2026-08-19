@@ -4,9 +4,11 @@
  *
  *   sudo -u www-data php /var/www/tracker/tools/janitor.php
  *
- * It fires any due whitelist file regeneration / tracker reload (SIGHUP) that the request-driven
- * janitor could not run because nobody visited the site, removes stale temp files and prunes old
- * API bans. Safe to run every minute; exits 0 always. See README "Whitelist mode".
+ * It first applies the scheduled tracker mode (whitelist hours → blacklist/whitelist switch via the
+ * configured root helper; see includes/schedule.php — this is the ONLY place the switch runs, never a
+ * web request), then fires any due whitelist file regeneration / tracker reload (SIGHUP) that the
+ * request-driven janitor could not run because nobody visited the site, removes stale temp files and
+ * prunes old API bans. Safe to run every minute; exits 0 always. See README "Whitelist mode".
  */
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 
@@ -18,6 +20,7 @@ require_once $root . '/includes/settings.php';
 require_once $root . '/includes/functions.php';
 require_once $root . '/includes/schema.php';
 require_once $root . '/includes/whitelist.php';
+require_once $root . '/includes/schedule.php';
 
 try {
     $db  = getDb();
@@ -25,12 +28,19 @@ try {
     ensureSchema($db, $cfg);
     $GLOBALS['db'] = $db; $GLOBALS['cfg'] = $cfg;
     $before = whitelistStateRead();
+    // scheduled mode first: it may flip tracker_mode (in $cfg too), which the whitelist janitor honours
+    $sched = scheduleApply($db, $cfg);
+    if ($sched['changed'] || !$sched['ok']) {
+        echo sprintf('[schedule] %s %s→%s%s%s', $sched['ok'] ? 'switched' : 'FAILED', $sched['from'], $sched['to'] ?? '?',
+            $sched['error'] ? ' error=' . $sched['error'] : '', $sched['notes'] ? ' notes=' . implode(' | ', $sched['notes']) : ''), "\n";
+    }
     whitelistJanitor($db, $cfg);
     $after = whitelistStateRead();
-    $msg = sprintf('mode=%s pending_reload=%s regen_needed=%s last_reload_ok=%s fail_count=%d count=%d',
-        trackerMode($cfg), $after['pending_reload'] ? 'yes' : 'no', $after['regen_needed'] ? 'yes' : 'no',
+    $msg = sprintf('mode=%s schedule=%s pending_reload=%s regen_needed=%s last_reload_ok=%s fail_count=%d count=%d',
+        trackerMode($cfg), scheduleEnabled($cfg) ? ('on desired=' . (scheduleDesiredMode($cfg) ?? 'invalid')) : 'off',
+        $after['pending_reload'] ? 'yes' : 'no', $after['regen_needed'] ? 'yes' : 'no',
         $after['last_reload_ok'] === null ? 'n/a' : ($after['last_reload_ok'] ? 'yes' : 'no'), (int)$after['fail_count'], (int)$after['count']);
-    if (in_array('-v', $argv ?? [], true) || $before['pending_reload'] || $before['regen_needed']) echo $msg, "\n";
+    if (in_array('-v', $argv ?? [], true) || $before['pending_reload'] || $before['regen_needed'] || $sched['changed']) echo $msg, "\n";
 } catch (\Throwable $e) {
     fwrite(STDERR, '[janitor] ' . $e->getMessage() . "\n");
 }

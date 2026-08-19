@@ -73,6 +73,9 @@ $recaptchaNeeded = ($action === 'report' && isCaptchaEnabled($cfg, 'report'))
             $footerLine2[] = 'Content rights waived via CC0';
             ?>
             <p><?= implode(' &bull; ', $footerLine2) ?></p>
+            <?php if ($recaptchaNeeded): ?>
+            <?= captchaNoticeHtml($cfg) ?>
+            <?php endif; ?>
         </footer>
     </div>
     <?php if ($recaptchaNeeded): ?>

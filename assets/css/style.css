@@ -104,6 +104,12 @@ a:hover { opacity: 0.8; text-decoration: underline; }
 .captcha-box .captcha-actions { margin-top: 1rem; }
 .captcha-box .captcha-cancel { padding: 0.4rem 1.1rem; font-size: 0.85rem; }
 
+/* reCAPTCHA v3: no widget. Google allows hiding the floating badge when the "protected by reCAPTCHA"
+   notice (captchaNoticeHtml(), printed in the footer) is shown instead. */
+.grecaptcha-badge { visibility: hidden; }
+.captcha-notice { color: var(--text-muted); font-size: 0.75rem; margin-top: 0.5rem; }
+.captcha-notice a { color: var(--text-muted); text-decoration: underline; }
+
 /* === Transparency === */
 body.page-transparency .container,
 body.page-stats .container {
@@ -1511,6 +1517,8 @@ footer p { margin: 0.25rem 0; }
 
 
 /* === Whitelist registration page === */
+.wl-schedule-notice { margin: 0 0 1rem; padding: 0.7rem 1rem; border-radius: var(--radius); border: 1px solid var(--accent, #4a9eff); background: rgba(74, 158, 255, 0.10); font-size: 0.92rem; line-height: 1.5; }
+.wl-schedule-notice strong { color: var(--accent, #4a9eff); }
 .wl-count { margin: -0.25rem 0 1rem; color: var(--text-muted, #a0a0b0); font-size: 0.9rem; }
 .wl-count strong { color: var(--accent, #4a9eff); }
 .wl-rules { margin: 0.5rem 0 1.5rem 1.2rem; color: var(--text-muted, #a0a0b0); font-size: 0.92rem; }

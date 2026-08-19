@@ -682,10 +682,15 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
     ksort($results);
     $file = ['ok' => true, 'mode' => 'skipped', 'error' => null];
     $reload = null;
-    if ($addedHashes && trackerMode($cfg) === 'whitelist') {
+    // Whitelist mode: append + lazy reload. Blacklist mode under a SCHEDULE: keep the (unserved) file
+    // current too, but never mark dirty / reload — the switch to whitelist regenerates and restarts.
+    $wlLive = trackerMode($cfg) === 'whitelist';
+    if ($addedHashes && ($wlLive || (function_exists('scheduleEnabled') && scheduleEnabled($cfg)))) {
         $file = whitelistAppendHashes($db, $cfg, $addedHashes);
-        whitelistMarkDirty(false);
-        $reload = whitelistMaybeReload($cfg);
+        if ($wlLive) {
+            whitelistMarkDirty(false);
+            $reload = whitelistMaybeReload($cfg);
+        }
     }
     return [
         'results' => array_values($results),
@@ -744,8 +749,12 @@ function whitelistBan(PDO $db, array $cfg, array $hashes, array $ctx = []): arra
     return ['banned' => $newBans, 'affected' => $affected];
 }
 
-/** Lift a ban. If a whitelist row exists it becomes active again (append + lazy reload). */
-function whitelistUnban(PDO $db, array $cfg, string $hash): bool {
+/**
+ * Lift a ban. If a whitelist row exists it becomes active again (append + lazy reload). Under a
+ * SCHEDULE the hash is also removed from the blacklist file, otherwise the next switch to blacklist
+ * mode would block it again and the switch back would re-import it as a ban.
+ */
+function whitelistUnban(PDO $db, array $cfg, string $hash, bool $touchBlacklist = true): bool {
     $hash = strtolower($hash);
     if (!isValidInfoHash($hash)) return false;
     $db->prepare("DELETE FROM banned_hashes WHERE info_hash = ?")->execute([$hash]);
@@ -755,6 +764,13 @@ function whitelistUnban(PDO $db, array $cfg, string $hash): bool {
         whitelistAppendHashes($db, $cfg, [$hash]);
         whitelistMarkDirty(false);
         whitelistMaybeReload($cfg);
+    }
+    if ($touchBlacklist && function_exists('scheduleEnabled') && scheduleEnabled($cfg)) {
+        $bl = normalizeListPath((string)($cfg['blacklist_path'] ?? ''));
+        if ($bl !== '' && is_file($bl) && isHashInBlacklist($hash, $bl)) {
+            removeHashFromBlacklist($hash, $bl);
+            if (trackerMode($cfg) !== 'whitelist') autoReloadTrackerBlacklist($cfg);
+        }
     }
     return true;
 }
@@ -1006,6 +1022,11 @@ function trackerBlockHash(PDO $db, array $cfg, string $hash, array $ctx = []): a
         $out['reload'] = $r['affected'] > 0 ? ['attempted' => true, 'ok' => (bool)($s['last_reload_ok'] ?? false)] : null;
         return $out;
     }
+    // Under a SCHEDULE the ban is recorded in banned_hashes as well (DB-only in blacklist mode), so the
+    // hash stays blocked after the next switch to whitelist mode without waiting for the import.
+    if (function_exists('scheduleEnabled') && scheduleEnabled($cfg)) {
+        try { whitelistBan($db, $cfg, [$hash], $ctx); } catch (\Throwable $e) { error_log('[schedule] ban mirror failed: ' . $e->getMessage()); }
+    }
     $blacklistPath = normalizeListPath((string)($cfg['blacklist_path'] ?? ''));
     if ($blacklistPath === '') return $out; // not configured — same as before (DB-only block)
     $perm = checkBlacklistPermissions($blacklistPath);
@@ -1022,9 +1043,14 @@ function trackerUnblockHash(PDO $db, array $cfg, string $hash, array $ctx = []):
     $out = ['file_ok' => false, 'errors' => [], 'suggestions' => [], 'reload' => null, 'mode' => trackerMode($cfg)];
     if (!isValidInfoHash($hash)) { $out['errors'][] = 'Invalid info hash.'; return $out; }
     if ($out['mode'] === 'whitelist') {
-        whitelistUnban($db, $cfg, $hash);
+        whitelistUnban($db, $cfg, $hash);   // under a schedule this also drops it from the blacklist file
         $out['file_ok'] = true;
         return $out;
+    }
+    // Under a SCHEDULE lift the DB ban too, otherwise the next switch would re-block the hash
+    // (the blacklist file itself is handled right below, once).
+    if (function_exists('scheduleEnabled') && scheduleEnabled($cfg)) {
+        try { whitelistUnban($db, $cfg, $hash, false); } catch (\Throwable $e) { error_log('[schedule] unban mirror failed: ' . $e->getMessage()); }
     }
     $blacklistPath = normalizeListPath((string)($cfg['blacklist_path'] ?? ''));
     if ($blacklistPath === '') return $out;
@@ -1085,11 +1111,29 @@ function whitelistStatus(PDO $db, array $cfg): array {
         if ((int)$state['fail_count'] >= 2) $warnings[] = ['level' => 'danger', 'text' => 'The last ' . (int)$state['fail_count'] . ' tracker reloads failed: ' . ($state['last_reload_output'] ?: 'unknown error') . ' — is the service running?'];
         if ($counts['pending_meta'] > 0 && ($hb === null || $hb > 300)) $warnings[] = ['level' => 'warn', 'text' => 'Metadata worker heartbeat ' . ($hb === null ? 'missing' : formatUptime($hb) . ' old') . ' — ' . $counts['pending_meta'] . ' hashes wait for metadata.'];
     }
+    // scheduled mode (includes/schedule.php): surface a failed / overdue switch in both modes
+    $schedule = null;
+    if (function_exists('scheduleStatus')) {
+        $schedule = scheduleStatus($cfg);
+        if ($schedule['enabled']) {
+            if (!$schedule['valid']) $warnings[] = ['level' => 'danger', 'text' => 'Scheduled mode is ON but the schedule JSON is invalid — fix it in Settings (the mode will not switch).'];
+            elseif ($schedule['desired'] !== null && $schedule['desired'] !== $mode) {
+                // out of sync: a failed switch is an error right away; otherwise give the minute timer a
+                // grace period, then suspect the timer itself (tools/janitor.php not running)
+                if ($schedule['last_result'] === 'failed') {
+                    $warnings[] = ['level' => 'danger', 'text' => 'Schedule wants ' . strtoupper($schedule['desired']) . ' mode but the tracker is in ' . strtoupper($mode) . ' — the last switch FAILED: ' . ($schedule['last_error'] ?: 'unknown error')];
+                } elseif ((time() - (int)$schedule['last_check_at']) > 180) {
+                    $warnings[] = ['level' => 'warn', 'text' => 'Schedule wants ' . strtoupper($schedule['desired']) . ' mode but the tracker is in ' . strtoupper($mode) . ' and the schedule was not evaluated in the last 3 minutes — is the janitor timer (tools/janitor.php) running?'];
+                }
+            }
+        }
+    }
     return [
         'mode' => $mode, 'path' => $path, 'permissions' => $perm, 'file' => $file, 'state' => $state, 'counts' => $counts,
         'worker_heartbeat_age' => $hb, 'reload_min_interval' => max(10, (int)($cfg['whitelist_reload_min_interval'] ?? 45)),
         'next_reload_in' => whitelistSecondsToNextReload($cfg), 'warnings' => $warnings,
         'service' => ['name' => (string)($cfg['opentracker_service_name'] ?? ''), 'auto_reload' => (($cfg['opentracker_auto_reload'] ?? '1') === '1'), 'exec' => trackerExecAvailable()],
+        'schedule' => $schedule,
     ];
 }
 

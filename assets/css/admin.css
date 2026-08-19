@@ -105,6 +105,12 @@
 .captcha-box .captcha-actions { margin-top: 1rem; }
 .captcha-box .captcha-cancel { padding: 0.4rem 1.1rem; font-size: 0.85rem; }
 
+/* reCAPTCHA v3: no widget. The floating badge is hidden because the login page prints the
+   "protected by reCAPTCHA" notice (captchaNoticeHtml()) instead, as Google's FAQ allows. */
+.grecaptcha-badge { visibility: hidden; }
+.captcha-notice { font-size: 0.75rem; margin: 0.75rem 0 0; }
+.captcha-notice a { color: inherit; text-decoration: underline; }
+
 .admin-container {
     max-width: 1300px;
     margin: 0 auto;

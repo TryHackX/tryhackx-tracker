@@ -11,7 +11,9 @@ $input = readJsonBody();
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
     jsonResponse(['error' => 'Invalid CSRF token'], 403);
 }
-if (trackerMode($cfg) !== 'whitelist' || ($cfg['whitelist_public_enabled'] ?? '1') !== '1') {
+// Registration is open in whitelist mode and, under a SCHEDULE, in blacklist mode too (the hashes are
+// served during the next whitelist hours; the file is regenerated at the switch).
+if ((trackerMode($cfg) !== 'whitelist' && !scheduleEnabled($cfg)) || ($cfg['whitelist_public_enabled'] ?? '1') !== '1') {
     jsonResponse(['error' => 'registration_disabled'], 400);
 }
 if (!captchaConfigured($cfg)) {

@@ -25,6 +25,7 @@ require_once __DIR__ . '/includes/settings.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/schema.php';
 require_once __DIR__ . '/includes/whitelist.php';
+require_once __DIR__ . '/includes/schedule.php';
 require_once __DIR__ . '/includes/api_auth.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/mail.php';

@@ -40,8 +40,11 @@ $allowed = [
     'tracker_mode', 'whitelist_path', 'whitelist_public_enabled', 'whitelist_max_per_submission',
     'rate_limit_whitelist', 'whitelist_ip_daily_max', 'whitelist_daily_cap', 'whitelist_reload_min_interval',
     'whitelist_scrape_url', 'whitelist_require_tracker', 'whitelist_tracker_hosts',
-    // captcha provider
+    // scheduled tracker mode (includes/schedule.php)
+    'tracker_schedule_enabled', 'tracker_schedule', 'tracker_schedule_tz', 'tracker_mode_switch_cmd',
+    // captcha provider (reCAPTCHA v2 keys are the legacy recaptcha_* entries above)
     'captcha_provider', 'turnstile_site_key', 'turnstile_secret',
+    'recaptcha_v3_site_key', 'recaptcha_v3_secret', 'recaptcha_v3_min_score',
     // server-to-server API
     'api_enabled', 'api_ban_days', 'api_ban_exempt_ips',
 ];
@@ -68,8 +71,14 @@ if (isset($data['whitelist_path'])) {
         if (!$v['ok']) jsonResponse(['error' => 'Whitelist path rejected: ' . $v['error']], 400);
     }
 }
-if (isset($data['captcha_provider']) && !in_array($data['captcha_provider'], ['recaptcha', 'turnstile'], true)) {
+if (isset($data['captcha_provider']) && !in_array($data['captcha_provider'], ['recaptcha', 'recaptcha_v3', 'turnstile'], true)) {
     jsonResponse(['error' => 'Invalid CAPTCHA provider.'], 400);
+}
+if (isset($data['recaptcha_v3_min_score'])) {
+    // 0.0–1.0, one decimal; blank/garbage falls back to Google's suggested 0.5
+    $raw = str_replace(',', '.', $data['recaptcha_v3_min_score']);
+    $score = is_numeric($raw) ? (float)$raw : 0.5;
+    $data['recaptcha_v3_min_score'] = number_format(max(0.0, min(1.0, $score)), 1, '.', '');
 }
 if (isset($data['whitelist_scrape_url']) && $data['whitelist_scrape_url'] !== '' && !preg_match('#^https?://[^\s]+$#i', $data['whitelist_scrape_url'])) {
     jsonResponse(['error' => 'Scrape URL must be an http(s) URL.'], 400);
@@ -94,8 +103,20 @@ if (isset($data['whitelist_tracker_hosts'])) {
     }
     $data['whitelist_tracker_hosts'] = implode(', ', array_unique($clean));
 }
-foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'] as $k) {
+foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
+}
+// ── Scheduled tracker mode ──
+if (isset($data['tracker_schedule'])) {
+    $sched = scheduleParseJson($data['tracker_schedule']);
+    if ($sched === null) jsonResponse(['error' => 'Invalid schedule: use "all", "none" or {"from":"HH:MM","to":"HH:MM"} for each of mon..sun (times 00:00–23:59).'], 400);
+    $data['tracker_schedule'] = json_encode($sched);   // normalised, all 7 keys
+}
+if (isset($data['tracker_schedule_tz']) && !scheduleValidTimezone($data['tracker_schedule_tz'])) {
+    jsonResponse(['error' => 'Invalid schedule timezone. Use an IANA identifier such as Europe/Warsaw or UTC.'], 400);
+}
+if (isset($data['tracker_mode_switch_cmd']) && !scheduleValidSwitchCommand($data['tracker_mode_switch_cmd'])) {
+    jsonResponse(['error' => 'Invalid mode switch command: only letters, digits, space and _ . / - are allowed (no shell metacharacters); the mode argument is appended automatically. Leave empty to only flip the setting.'], 400);
 }
 if (isset($data['api_ban_exempt_ips'])) {
     $clean = [];

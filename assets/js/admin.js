@@ -1,9 +1,10 @@
 const API_BASE = document.body.dataset.apiBase;
 
 // CAPTCHA modal lives in assets/js/captcha.js (window.showCaptchaModal), shared with the public site.
-function requestCaptchaToken() {
+// `action` is the reCAPTCHA v3 action name (v3 shows no modal — the token is fetched silently).
+function requestCaptchaToken(action) {
     if (typeof window.showCaptchaModal !== 'function') return Promise.resolve('');
-    return window.showCaptchaModal().then((t) => t || '');
+    return window.showCaptchaModal({ action: action || 'submit' }).then((t) => t || '');
 }
 
 let currentPage = 1;
@@ -967,7 +968,7 @@ async function handleDeletePermSubmit(e) {
         let json = await apiCall('admin/delete_permanently', 'POST', payload);
 
         if (json.captcha_required) {
-            const token = await requestCaptchaToken();
+            const token = await requestCaptchaToken('delete_permanently');
             if (!token) {
                 alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">CAPTCHA verification required.</div>`;
                 setTimeout(() => {

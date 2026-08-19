@@ -76,7 +76,8 @@
                 </div>
             </div>
 
-            <!-- CAPTCHA (reCAPTCHA v2 / Cloudflare Turnstile) -->
+            <!-- CAPTCHA (reCAPTCHA v2 / reCAPTCHA v3 / Cloudflare Turnstile) -->
+            <?php $captchaProviderSel = captchaProvider($cfg); ?>
             <div class="settings-section">
                 <h5>CAPTCHA</h5>
                 <p class="settings-hint mb-2">Pick a provider and fill its keys. The switches below decide where a CAPTCHA is asked; the public whitelist registration page always requires one (it is disabled when CAPTCHA is not configured).</p>
@@ -91,18 +92,32 @@
                     <div class="col-md-4">
                         <label class="form-label">Provider</label>
                         <select class="form-select bg-dark text-light border-secondary" name="captcha_provider">
-                            <option value="recaptcha" <?= ($cfg['captcha_provider'] ?? 'recaptcha') !== 'turnstile' ? 'selected' : '' ?>>Google reCAPTCHA v2</option>
-                            <option value="turnstile" <?= ($cfg['captcha_provider'] ?? '') === 'turnstile' ? 'selected' : '' ?>>Cloudflare Turnstile</option>
+                            <option value="recaptcha" <?= $captchaProviderSel === 'recaptcha' ? 'selected' : '' ?>>Google reCAPTCHA v2 (checkbox)</option>
+                            <option value="recaptcha_v3" <?= $captchaProviderSel === 'recaptcha_v3' ? 'selected' : '' ?>>Google reCAPTCHA v3 (invisible, score)</option>
+                            <option value="turnstile" <?= $captchaProviderSel === 'turnstile' ? 'selected' : '' ?>>Cloudflare Turnstile</option>
                         </select>
                     </div>
                     <div class="col-md-4"></div>
                     <div class="col-md-6">
-                        <label class="form-label">reCAPTCHA Site Key</label>
+                        <label class="form-label">reCAPTCHA v2 Site Key</label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="recaptcha_site_key" value="<?= sanitize($cfg['recaptcha_site_key'] ?? '') ?>">
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">reCAPTCHA Secret Key</label>
+                        <label class="form-label">reCAPTCHA v2 Secret Key</label>
                         <input type="password" autocomplete="off" class="form-control bg-dark text-light border-secondary" name="recaptcha_secret" value="<?= sanitize($cfg['recaptcha_secret'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">reCAPTCHA v3 Site Key</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="recaptcha_v3_site_key" value="<?= sanitize($cfg['recaptcha_v3_site_key'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">reCAPTCHA v3 Secret Key</label>
+                        <input type="password" autocomplete="off" class="form-control bg-dark text-light border-secondary" name="recaptcha_v3_secret" value="<?= sanitize($cfg['recaptcha_v3_secret'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">reCAPTCHA v3 Min Score</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="recaptcha_v3_min_score" value="<?= sanitize($cfg['recaptcha_v3_min_score'] ?? '0.5') ?>" min="0" max="1" step="0.1">
+                        <small class="settings-hint">Score below this &rarr; CAPTCHA failed; 0.5 is Google's suggested start. v3 has no widget &mdash; users are scored silently (a "protected by reCAPTCHA" notice is shown under the forms instead of the badge).</small>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Turnstile Site Key</label>
@@ -300,6 +315,98 @@
                     </div>
                 </div>
                 <div class="settings-hint mt-2">Manage the list itself (browse, add, ban, regenerate the file) on the <a href="<?= $baseUrl ?>?action=admin-whitelist">Whitelist page</a>.</div>
+
+                <!-- Scheduled mode (whitelist hours) — includes/schedule.php -->
+                <?php
+                $schedDays   = function_exists('scheduleParseJson') ? (scheduleParseJson((string)($cfg['tracker_schedule'] ?? '')) ?? array_fill_keys(SCHEDULE_DAYS, 'none')) : [];
+                $schedTz     = function_exists('scheduleTimezone') ? scheduleTimezone($cfg) : 'Europe/Warsaw';
+                $schedOn     = function_exists('scheduleEnabled') && scheduleEnabled($cfg);
+                $schedSt     = function_exists('scheduleStatus') ? scheduleStatus($cfg) : null;
+                $schedTzList = function_exists('timezone_identifiers_list') ? timezone_identifiers_list() : [$schedTz];
+                $schedTzGroups = [];
+                foreach ($schedTzList as $tzId) { $schedTzGroups[strpos($tzId, '/') !== false ? substr($tzId, 0, strpos($tzId, '/')) : 'Other'][] = $tzId; }
+                ?>
+                <h6 class="mt-4 mb-1" id="section-schedule">Scheduled mode <small class="settings-hint fw-normal">(whitelist hours)</small></h6>
+                <p class="settings-hint mb-2">
+                    Run the tracker in <strong>whitelist</strong> mode during the hours below and in <strong>open (blacklist)</strong> mode at every other moment.
+                    The switch itself is done by the root helper below (it swaps the OpenTracker binary + config and restarts the service; argument <code>white</code> / <code>black</code>),
+                    called by the janitor timer (<code>tools/janitor.php</code>, every minute) — never by a web request. While the schedule is ON the "Tracker mode" select above is
+                    overridden by the schedule within a minute; bans are kept consistent between the whitelist (banned hashes) and the blacklist file at every switch.
+                    Public registration stays open in both modes; hashes registered during open hours become active at the next whitelist window.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-2">
+                        <label class="form-label">Scheduled mode</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="tracker_schedule_enabled" id="sched-enabled">
+                            <option value="0" <?= !$schedOn ? 'selected' : '' ?>>Off</option>
+                            <option value="1" <?= $schedOn ? 'selected' : '' ?>>On</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Timezone</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="tracker_schedule_tz">
+                            <?php foreach ($schedTzGroups as $grp => $ids): ?>
+                            <optgroup label="<?= sanitize($grp) ?>">
+                                <?php foreach ($ids as $tzId): ?>
+                                <option value="<?= sanitize($tzId) ?>" <?= $tzId === $schedTz ? 'selected' : '' ?>><?= sanitize($tzId) ?></option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Mode switch command <small class="settings-hint">(root helper; <code>white</code>/<code>black</code> is appended; empty = only flip the web setting)</small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="tracker_mode_switch_cmd" value="<?= sanitize($cfg['tracker_mode_switch_cmd'] ?? 'sudo -n /usr/local/sbin/tracker-mode.sh') ?>" placeholder="sudo -n /usr/local/sbin/tracker-mode.sh" maxlength="255">
+                    </div>
+                    <div class="col-12">
+                        <input type="hidden" name="tracker_schedule" id="sched-json" value="<?= sanitize(json_encode($schedDays)) ?>">
+                        <div class="table-responsive">
+                            <table class="table table-dark table-sm align-middle mb-1 sched-table" id="sched-table">
+                                <thead><tr><th style="width:5rem">Day</th><th style="width:16rem">Rule</th><th style="width:9rem">From</th><th style="width:9rem">To</th><th></th></tr></thead>
+                                <tbody>
+                                <?php foreach (SCHEDULE_DAYS as $d):
+                                    $v = $schedDays[$d] ?? 'none';
+                                    $kind = is_array($v) ? 'window' : $v;
+                                    $from = is_array($v) ? $v['from'] : '10:00';
+                                    $to   = is_array($v) ? $v['to'] : '02:30';
+                                ?>
+                                <tr data-sched-day="<?= $d ?>">
+                                    <td><strong><?= SCHEDULE_DAY_LABELS[$d] ?></strong></td>
+                                    <td>
+                                        <select class="form-select form-select-sm bg-dark text-light border-secondary" data-sched-kind>
+                                            <option value="all" <?= $kind === 'all' ? 'selected' : '' ?>>Whitelist all day</option>
+                                            <option value="window" <?= $kind === 'window' ? 'selected' : '' ?>>Whitelist window</option>
+                                            <option value="none" <?= $kind === 'none' ? 'selected' : '' ?>>Blacklist (open) all day</option>
+                                        </select>
+                                    </td>
+                                    <td><input type="time" class="form-control form-control-sm bg-dark text-light border-secondary" data-sched-from value="<?= sanitize($from) ?>" step="60"></td>
+                                    <td><input type="time" class="form-control form-control-sm bg-dark text-light border-secondary" data-sched-to value="<?= sanitize($to) ?>" step="60"></td>
+                                    <td class="settings-hint" data-sched-note></td>
+                                </tr>
+                                <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="settings-hint">
+                            A window starts on that weekday at <em>From</em>; when <em>To</em> &le; <em>From</em> it ends on the <strong>next day</strong> at <em>To</em>
+                            (e.g. Mon 10:00 → 02:30 = Monday 10:00 until Tuesday 02:30). Outside every window the tracker runs <strong>OPEN (blacklist)</strong> mode.
+                        </div>
+                        <?php if ($schedSt): ?>
+                        <div class="settings-hint mt-2" id="sched-summary">
+                            <strong>Saved schedule:</strong> <?= sanitize($schedSt['describe']) ?>.
+                            <?php if ($schedSt['enabled']): ?>
+                                Desired mode now: <strong><?= sanitize($schedSt['desired'] ?? 'invalid') ?></strong> (tracker is in <strong><?= sanitize($schedSt['current']) ?></strong>);
+                                next change: <strong><?= sanitize($schedSt['next_change_local'] ?? 'none') ?></strong> <?= $schedSt['next_change_local'] ? '(' . sanitize($schedSt['tz']) . ')' : '' ?>.
+                                <?php if ($schedSt['last_result']): ?>
+                                    Last switch: <strong><?= sanitize($schedSt['last_result']) ?></strong><?= $schedSt['last_switch_at'] ? ' at ' . date('Y-m-d H:i', (int)$schedSt['last_switch_at']) . ' (' . sanitize((string)$schedSt['last_from']) . ' → ' . sanitize((string)$schedSt['last_to']) . ')' : '' ?><?= $schedSt['last_error'] ? ' — <span class="text-danger">' . sanitize($schedSt['last_error']) . '</span>' : '' ?>.
+                                <?php endif; ?>
+                            <?php else: ?>
+                                Schedule is off — the tracker stays in the mode selected above.
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
             </div>
 
             <!-- Server-to-server API -->
@@ -898,6 +1005,47 @@
         return JSON.stringify(fields);
     }
 
+    // Scheduled mode editor: 7 weekday rows → JSON in the hidden tracker_schedule input.
+    // {"mon":"all"|"none"|{"from":"HH:MM","to":"HH:MM"}, ...}; time inputs only apply to "window".
+    const schedRows = Array.from(document.querySelectorAll('#sched-table tr[data-sched-day]'));
+    function schedSyncRow(row) {
+        const kind = row.querySelector('[data-sched-kind]').value;
+        const from = row.querySelector('[data-sched-from]');
+        const to = row.querySelector('[data-sched-to]');
+        const note = row.querySelector('[data-sched-note]');
+        from.disabled = to.disabled = (kind !== 'window');
+        if (kind === 'window' && from.value && to.value) {
+            note.textContent = to.value <= from.value ? 'ends next day at ' + to.value : 'same day';
+        } else if (kind === 'window') {
+            note.textContent = 'set both times';
+        } else {
+            note.textContent = kind === 'all' ? 'whitelist 00:00–24:00' : 'open (blacklist) mode';
+        }
+    }
+    function collectSchedule() {
+        const out = {};
+        schedRows.forEach(row => {
+            const kind = row.querySelector('[data-sched-kind]').value;
+            if (kind === 'window') {
+                out[row.dataset.schedDay] = {
+                    from: row.querySelector('[data-sched-from]').value || '00:00',
+                    to: row.querySelector('[data-sched-to]').value || '00:00',
+                };
+            } else {
+                out[row.dataset.schedDay] = kind === 'all' ? 'all' : 'none';
+            }
+        });
+        const json = JSON.stringify(out);
+        const hidden = document.getElementById('sched-json');
+        if (hidden) hidden.value = json;
+        return json;
+    }
+    schedRows.forEach(row => {
+        schedSyncRow(row);
+        row.querySelectorAll('select, input').forEach(i => i.addEventListener('change', () => { schedSyncRow(row); collectSchedule(); }));
+        row.querySelectorAll('input').forEach(i => i.addEventListener('input', () => schedSyncRow(row)));
+    });
+
     let settingsPayloadToSubmit = null;
 
     async function saveSettingsSubmit(data) {
@@ -973,6 +1121,7 @@
         const data = {};
         new FormData(form).forEach((v, k) => data[k] = v);
         data.donation_fields = collectDonationFields();
+        if (schedRows.length) data.tracker_schedule = collectSchedule();
 
         const limitsChanged = data.delete_captcha_attempts !== currentCaptchaAttempts ||
                               data.delete_lockout_attempts !== currentLockoutAttempts ||

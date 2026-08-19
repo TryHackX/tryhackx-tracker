@@ -24,6 +24,9 @@
             <input type="password" name="password" class="form-control" required></div>
             <button type="submit" class="btn btn-primary w-100">Sign in</button>
         </form>
+        <?php if (isCaptchaEnabled($cfg, 'login')): ?>
+        <?= captchaNoticeHtml($cfg, 'captcha-notice text-muted') ?>
+        <?php endif; ?>
     </div>
     <?php if (isCaptchaEnabled($cfg, 'login')): ?>
     <div class="captcha-overlay" id="captcha-overlay">
@@ -56,8 +59,9 @@
             let json = await res.json();
 
             // CAPTCHA may be demanded up to twice (a solved token can expire while typing) — re-show it.
+            // (reCAPTCHA v3: no modal — showCaptchaModal() fetches a score token silently.)
             for (let attempt = 0; attempt < 2 && json.captcha_required; attempt++) {
-                const token = await window.showCaptchaModal();
+                const token = await window.showCaptchaModal({ action: 'admin_login' });
                 if (!token) { alertEl.className = 'alert-box error'; alertEl.textContent = 'CAPTCHA cancelled'; return; }
                 data['captcha_token'] = token;
                 data['g-recaptcha-response'] = token;

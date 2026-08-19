@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 2;
+const TRACKER_SCHEMA_VERSION = 4;   // 3 = scheduled tracker mode settings, 4 = reCAPTCHA v3 settings (no DDL change)
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -133,9 +133,18 @@ function trackerSchemaDefaultSettings(): array {
         'captcha_provider'            => 'recaptcha',
         'turnstile_site_key'          => '',
         'turnstile_secret'            => '',
+        // schema v4: Google reCAPTCHA v3 (invisible, score based) as a third provider
+        'recaptcha_v3_site_key'       => '',
+        'recaptcha_v3_secret'         => '',
+        'recaptcha_v3_min_score'      => '0.5',
         'api_enabled'                 => '0',
         'api_ban_days'                => '30',
         'api_ban_exempt_ips'          => implode(', ', array_unique($selfIps)),
+        // schema v3: scheduled tracker mode (includes/schedule.php)
+        'tracker_schedule_enabled'    => '0',
+        'tracker_schedule'            => '{"mon":"none","tue":"none","wed":"none","thu":"none","fri":"none","sat":"none","sun":"none"}',
+        'tracker_schedule_tz'         => 'Europe/Warsaw',
+        'tracker_mode_switch_cmd'     => 'sudo -n /usr/local/sbin/tracker-mode.sh',
     ];
 }
 

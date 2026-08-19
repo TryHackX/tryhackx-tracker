@@ -104,9 +104,18 @@
 </div>
 <?php endif; ?>
 
-<?php $homeWhitelist = trackerMode($cfg) === 'whitelist'; $homePublicReg = $homeWhitelist && ($cfg['whitelist_public_enabled'] ?? '1') === '1'; ?>
+<?php
+$homeWhitelist = trackerMode($cfg) === 'whitelist';
+$homeSched     = function_exists('scheduleEnabled') && scheduleEnabled($cfg);   // whitelist hours: registration is always open
+$homePublicReg = ($homeWhitelist || $homeSched) && ($cfg['whitelist_public_enabled'] ?? '1') === '1';
+?>
 <h2>About the Tracker</h2>
-<?php if ($homeWhitelist): ?>
+<?php if ($homeSched): ?>
+<p>This is a free BitTorrent tracker running erdgeist OpenTracker software in <strong>scheduled whitelist mode</strong>: during whitelist hours (<?= sanitize(scheduleDescribe($cfg)) ?>) it serves <strong>registered torrents only</strong>; outside those hours it runs as an open tracker. Right now it is in <strong><?= $homeWhitelist ? 'whitelist' : 'open' ?> mode</strong>. Registration is free and anonymous<?= $homePublicReg ? ' — <a href="' . $baseUrl . '?action=whitelist">register your torrent here</a>' : '' ?>. It has been running on Linux Debian since 2020 and supports both IPv4 and IPv6.</p>
+<?php if ($homePublicReg): ?>
+<p class="form-center"><a class="btn" href="<?= $baseUrl ?>?action=whitelist">Register your torrent</a></p>
+<?php endif; ?>
+<?php elseif ($homeWhitelist): ?>
 <p>This is a free BitTorrent tracker running erdgeist OpenTracker software in <strong>whitelist mode</strong>: it serves <strong>registered torrents only</strong>. Registration is free and anonymous<?= $homePublicReg ? ' — <a href="' . $baseUrl . '?action=whitelist">register your torrent here</a>' : '' ?>. It has been running on Linux Debian since 2020 and supports both IPv4 and IPv6.</p>
 <?php if ($homePublicReg): ?>
 <p class="form-center"><a class="btn" href="<?= $baseUrl ?>?action=whitelist">Register your torrent</a></p>
@@ -118,7 +127,10 @@
 <h2>Features</h2>
 <ul class="feature-list">
     <li>We do not host or store any content or torrent files</li>
-<?php if ($homeWhitelist): ?>
+<?php if ($homeSched): ?>
+    <li>Only registered info hashes are served during whitelist hours — open tracker otherwise</li>
+    <li>We store torrent metadata (names / file lists) of registered hashes and registrant IP addresses to fight abuse; no peer connection logs are kept</li>
+<?php elseif ($homeWhitelist): ?>
     <li>Only registered info hashes are served — no unsolicited swarms</li>
     <li>We store torrent metadata (names / file lists) of registered hashes and registrant IP addresses to fight abuse; no peer connection logs are kept</li>
 <?php else: ?>

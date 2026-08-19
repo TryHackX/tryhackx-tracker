@@ -502,6 +502,39 @@ Rules (deliberately strict — "very restrictive"):
   [flarum-homepage-blocks](https://github.com/TryHackX/flarum-homepage-blocks) ≥ 2.6.0 uses this API
   to register every magnet posted on the forum (live + "scan whole forum").
 
+#### 5b. Scheduled mode — whitelist hours (optional, 1.4.0)
+
+Run whitelist mode only during configured hours (per weekday, in a timezone) and the open blacklist
+mode the rest of the time — e.g. whitelist Mon–Fri 10:00 → 02:30 next day and all weekend, open
+at night. Because black- and whitelist are compile-time exclusive builds, the switch swaps the binary
+and config **symlinks** and restarts the service through a tiny root helper:
+
+```bash
+# layout: /home/tracker/opentracker.{white,black}, opentracker.conf.{white,black},
+#         opentracker -> opentracker.white (symlink), opentracker.conf -> opentracker.conf.white
+sudo install -m 0755 tools/opentracker/tracker-mode.sh /usr/local/sbin/tracker-mode.sh
+echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-mode.sh' | sudo tee /etc/sudoers.d/tracker-mode
+sudo chmod 0440 /etc/sudoers.d/tracker-mode && sudo visudo -c -f /etc/sudoers.d/tracker-mode
+sudo /usr/local/sbin/tracker-mode.sh status     # white | black
+```
+
+Then **Settings → Tracker Mode & Whitelist → Scheduled mode**: On, timezone, the switch command
+(`sudo -n /usr/local/sbin/tracker-mode.sh`; leave empty to only flip the web setting), and one row
+per weekday: *Whitelist all day* / *Whitelist window from–to* (`to ≤ from` = ends the next day) /
+*Blacklist (open) all day*. Settings keys: `tracker_schedule_enabled`, `tracker_schedule` (JSON
+`{"mon":{"from":"10:00","to":"02:30"}, …, "sat":"all", "sun":"all"}`), `tracker_schedule_tz`,
+`tracker_mode_switch_cmd`.
+
+The janitor timer (`tools/janitor.php`, every minute — never a web request) compares the desired
+mode with `tracker_mode` and, when they differ, runs the helper with `white`/`black`, flips the
+setting and keeps bans consistent: switching to blacklist appends every banned hash to the blacklist
+file; switching to whitelist imports the blacklist file into the ban list and regenerates the served
+whitelist file first. `tools/whitelist_cli.php mode [--apply]` shows current / desired / next change
+or forces a switch. While a schedule is on, the public whitelist page stays available in both modes
+(registration works; hashes are served during the next whitelist hours) with a notice showing the
+hours and the next change; the status card shows the schedule state and the last switch result.
+Without a schedule everything behaves as before (blacklist mode hides the whitelist page).
+
 #### 6. Metadata worker (optional)
 
 See [`worker/README.md`](worker/README.md): a small `python3-libtorrent` daemon that resolves torrent

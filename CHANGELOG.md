@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] — 2026-08-19
+
+### Added
+- **Scheduled mode (whitelist hours)** — `includes/schedule.php`: per-weekday windows in a timezone
+  (`tracker_schedule_enabled`, `tracker_schedule` JSON, `tracker_schedule_tz`,
+  `tracker_mode_switch_cmd`); the janitor timer switches the OpenTracker build via
+  `tools/opentracker/tracker-mode.sh` (binary + config symlinks, restart; sudoers snippet in README),
+  flips `tracker_mode` and keeps bans consistent both ways (banned hashes → blacklist file /
+  blacklist file → bans + whitelist regeneration). Settings editor with a 7-day grid, status-card
+  item, CLI `whitelist_cli.php mode [--apply]`, public whitelist page + nav stay available under a
+  schedule with a notice about the hours and the next change. `tests/schedule_test.php` (71 checks).
+- **reCAPTCHA v3** as a third CAPTCHA provider (`captcha_provider=recaptcha_v3`,
+  `recaptcha_v3_site_key`, `recaptcha_v3_secret`, `recaptcha_v3_min_score`): silent, score-based —
+  no modal; the required "protected by reCAPTCHA" notice replaces the floating badge.
+
 ## [1.3.1] — 2026-08-19
 
 ### Fixed

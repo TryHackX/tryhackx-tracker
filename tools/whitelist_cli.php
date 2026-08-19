@@ -7,6 +7,7 @@
  *   sudo -u www-data php tools/whitelist_cli.php regen [--reload]
  *   sudo -u www-data php tools/whitelist_cli.php import-blacklist
  *   sudo -u www-data php tools/whitelist_cli.php reload
+ *   sudo -u www-data php tools/whitelist_cli.php mode [--apply]      (scheduled mode: current / desired / next change; --apply switches now)
  *
  * Used for the initial bootstrap (e.g. piping the forum's magnet hashes) and for scripted maintenance.
  */
@@ -20,6 +21,7 @@ require_once $root . '/includes/settings.php';
 require_once $root . '/includes/functions.php';
 require_once $root . '/includes/schema.php';
 require_once $root . '/includes/whitelist.php';
+require_once $root . '/includes/schedule.php';
 
 $db  = getDb();
 $cfg = getSettings($db);
@@ -74,6 +76,29 @@ switch ($cmd) {
         whitelistMarkDirty(true);
         $rl = whitelistMaybeReload($cfg, true);
         echo 'reload: ' . ($rl ? ($rl['ok'] ? 'ok' : 'FAILED ' . $rl['output']) : 'not attempted (service/exec not configured)') . "\n";
+        break;
+
+    case 'mode':
+        $printMode = function () use (&$cfg) {
+            $st = scheduleStatus($cfg);
+            printf("schedule=%s tz=%s current=%s desired=%s next_change=%s\n",
+                $st['enabled'] ? ($st['valid'] ? 'on' : 'on (INVALID JSON)') : 'off', $st['tz'], $st['current'],
+                $st['desired'] ?? 'n/a', $st['next_change_local'] ?? 'n/a');
+            echo "hours: " . $st['describe'] . "\n";
+            printf("cmd: %s | last: %s%s%s\n", $st['cmd'] !== '' ? $st['cmd'] : '(none — setting flip only)',
+                $st['last_result'] ?? 'never', $st['last_switch_at'] ? ' at ' . date('Y-m-d H:i:s', $st['last_switch_at']) . " ({$st['last_from']}→{$st['last_to']})" : '',
+                $st['last_error'] ? ' error=' . $st['last_error'] : '');
+        };
+        $printMode();
+        if (!empty($opts['apply'])) {
+            $r = scheduleApply($db, $cfg, true);
+            printf("apply: %s changed=%s%s%s%s%s\n", $r['ok'] ? 'ok' : 'FAILED', $r['changed'] ? 'yes' : 'no',
+                $r['to'] ? " {$r['from']}→{$r['to']}" : '', $r['skipped'] ? " skipped={$r['skipped']}" : '',
+                $r['error'] ? " error={$r['error']}" : '', $r['notes'] ? ' notes=' . implode(' | ', $r['notes']) : '');
+            if ($r['output'] !== '') echo "output: " . $r['output'] . "\n";
+            $printMode();
+            exit($r['ok'] ? 0 : 1);
+        }
         break;
 
     default:

@@ -74,6 +74,34 @@
         const perm = s.permissions || {};
         const modeBadge = badge(s.mode === 'whitelist' ? 'WHITELIST' : 'BLACKLIST', s.mode === 'whitelist' ? 'wl-b-ok' : 'wl-b-warn');
         grid.appendChild(kv('Tracker mode', [modeBadge]));
+        // scheduled mode (whitelist hours): off / desired + next change / last switch outcome
+        const sc = s.schedule;
+        if (sc && sc.enabled) {
+            const parts = [];
+            if (!sc.valid) {
+                parts.push(badge('INVALID JSON', 'wl-b-bad'));
+            } else {
+                const inSync = sc.desired === s.mode;
+                parts.push(badge('wants ' + (sc.desired === 'whitelist' ? 'WHITELIST' : 'BLACKLIST'), inSync ? 'wl-b-ok' : 'wl-b-warn'));
+                if (!inSync) parts.push(' ', badge('out of sync', 'wl-b-warn'));
+                parts.push(' ', el('span', { className: 'text-muted', text: sc.next_change ? 'next change ' + fmtDate(new Date(sc.next_change * 1000).toISOString()) + ' (' + (sc.next_change_local || '') + ' ' + sc.tz + ')' : 'no change scheduled' }));
+            }
+            parts.push(el('div', { className: 'wl-small text-muted', text: sc.describe || '' }));
+            if (sc.last_result) {
+                const okRes = sc.last_result === 'ok';
+                parts.push(el('div', { className: 'wl-small' }, [
+                    el('span', { className: 'text-muted', text: 'last switch: ' }),
+                    badge(okRes ? 'ok' : 'FAILED', okRes ? 'wl-b-ok' : 'wl-b-bad'), ' ',
+                    el('span', { className: 'text-muted', text: (sc.last_from && sc.last_to ? sc.last_from + ' → ' + sc.last_to + ' ' : '') + (sc.last_switch_at ? fmtAgo(Math.floor(s.server_time - sc.last_switch_at)) + ' ago' : (sc.last_attempt_at ? 'attempted ' + fmtAgo(Math.floor(s.server_time - sc.last_attempt_at)) + ' ago' : '')) }),
+                ]));
+                if (!okRes && sc.last_error) parts.push(el('div', { className: 'wl-small text-danger', text: sc.last_error }));
+                if (sc.last_notes) parts.push(el('div', { className: 'wl-small text-muted', text: sc.last_notes }));
+            }
+            if (!sc.cmd_set) parts.push(el('div', { className: 'wl-small text-muted', text: 'no switch command — only the web setting flips' }));
+            grid.appendChild(kv('Schedule', parts));
+        } else {
+            grid.appendChild(kv('Schedule', [badge('off', 'wl-b-muted'), ' ', el('span', { className: 'text-muted wl-small', text: 'fixed mode (Settings → Scheduled mode)' })]));
+        }
         grid.appendChild(kv('Whitelist file', [
             el('code', { className: 'wl-path', text: s.path || '(not configured)' }), ' ',
             perm.ok ? badge('ok', 'wl-b-ok') : badge('problem', 'wl-b-bad'),

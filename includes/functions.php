@@ -80,26 +80,41 @@ function verifyCsrfHeader(): bool {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CAPTCHA (provider-agnostic: Google reCAPTCHA v2 or Cloudflare Turnstile)
+// CAPTCHA (provider-agnostic: Google reCAPTCHA v2 / v3 or Cloudflare Turnstile)
 // ─────────────────────────────────────────────────────────────────────────────
 // Setting `captcha_provider` selects the widget/verifier; `recaptcha_enabled` remains the master
 // "CAPTCHA enabled" switch and `recaptcha_on_<ctx>` the per-context toggles (legacy names kept so
 // existing installations keep working unchanged). The old verifyRecaptcha()/isRecaptchaEnabled()
 // names are preserved as thin wrappers.
+//
+// Providers and their setting keys (each pair is <provider>_site_key / <provider>_secret):
+//   recaptcha     Google reCAPTCHA v2 checkbox      recaptcha_site_key / recaptcha_secret
+//   recaptcha_v3  Google reCAPTCHA v3 (invisible)   recaptcha_v3_site_key / recaptcha_v3_secret + recaptcha_v3_min_score
+//   turnstile     Cloudflare Turnstile              turnstile_site_key / turnstile_secret
+// v3 shows no widget: the browser fetches a token silently (grecaptcha.execute) and the siteverify
+// answer carries a 0.0–1.0 score; anything below `recaptcha_v3_min_score` counts as a failed CAPTCHA.
 
-/** Active provider: 'recaptcha' (default) or 'turnstile'. */
+/** Active provider: 'recaptcha' (v2 checkbox, default), 'recaptcha_v3' (invisible, score based) or 'turnstile'. */
 function captchaProvider(array $cfg): string {
-    return (($cfg['captcha_provider'] ?? 'recaptcha') === 'turnstile') ? 'turnstile' : 'recaptcha';
+    $p = (string)($cfg['captcha_provider'] ?? 'recaptcha');
+    return in_array($p, ['turnstile', 'recaptcha_v3'], true) ? $p : 'recaptcha';
 }
 
 /** Public site key of the active provider ('' when missing). */
 function captchaSiteKey(array $cfg): string {
-    return trim((string)($cfg[captchaProvider($cfg) === 'turnstile' ? 'turnstile_site_key' : 'recaptcha_site_key'] ?? ''));
+    return trim((string)($cfg[captchaProvider($cfg) . '_site_key'] ?? ''));
 }
 
 /** Secret of the active provider ('' when missing). */
 function captchaSecret(array $cfg): string {
-    return trim((string)($cfg[captchaProvider($cfg) === 'turnstile' ? 'turnstile_secret' : 'recaptcha_secret'] ?? ''));
+    return trim((string)($cfg[captchaProvider($cfg) . '_secret'] ?? ''));
+}
+
+/** reCAPTCHA v3 minimum score (0.0–1.0; default 0.5, Google's suggested starting point). */
+function recaptchaV3MinScore(array $cfg): float {
+    $raw = trim((string)($cfg['recaptcha_v3_min_score'] ?? '0.5'));
+    $score = is_numeric($raw) ? (float)$raw : 0.5;
+    return max(0.0, min(1.0, $score));
 }
 
 /** True when CAPTCHA is switched on AND the active provider has both a site key and a secret. */
@@ -176,10 +191,39 @@ function verifyTurnstile(string $token, array $cfg): bool {
     return $json !== null && ($json['success'] ?? false) === true;
 }
 
-/** Verify a token with whichever provider is active. Empty token → false. */
-function verifyCaptcha(string $token, array $cfg): bool {
+/**
+ * Google reCAPTCHA v3 verification (same siteverify endpoint as v2, but the answer is scored).
+ * Passes only when success === true AND score >= recaptcha_v3_min_score. When $expectedAction is
+ * given and the answer carries an `action`, it must match (callers without a context pass null and
+ * the action is not checked). Fail closed on missing secret / transport error / missing score.
+ */
+function verifyRecaptchaV3(string $token, array $cfg, ?string $expectedAction = null): bool {
+    $secret = trim((string)($cfg['recaptcha_v3_secret'] ?? ''));
+    if ($secret === '' || $token === '') return false;
+    $json = captchaHttpPost('https://www.google.com/recaptcha/api/siteverify', [
+        'secret'   => $secret,
+        'response' => $token,
+        'remoteip' => getClientIp($cfg),
+    ]);
+    if ($json === null || ($json['success'] ?? false) !== true) return false;
+    // A v3 token always comes back with a score; no score means a v2 key was pasted under v3 — reject.
+    if (!isset($json['score']) || !is_numeric($json['score'])) return false;
+    if ((float)$json['score'] < recaptchaV3MinScore($cfg)) return false;
+    if ($expectedAction !== null && isset($json['action']) && (string)$json['action'] !== $expectedAction) return false;
+    return true;
+}
+
+/**
+ * Verify a token with whichever provider is active. Empty token → false. $expectedAction is only
+ * meaningful for reCAPTCHA v3 (the action name the page passed to grecaptcha.execute); null skips it.
+ */
+function verifyCaptcha(string $token, array $cfg, ?string $expectedAction = null): bool {
     if ($token === '') return false;
-    return captchaProvider($cfg) === 'turnstile' ? verifyTurnstile($token, $cfg) : verifyRecaptcha($token, $cfg);
+    switch (captchaProvider($cfg)) {
+        case 'turnstile':    return verifyTurnstile($token, $cfg);
+        case 'recaptcha_v3': return verifyRecaptchaV3($token, $cfg, $expectedAction);
+        default:             return verifyRecaptcha($token, $cfg);
+    }
 }
 
 /** Pull the CAPTCHA token out of a decoded request body (new generic name first, legacy names after). */
@@ -211,9 +255,18 @@ function captchaHeadTags(array $cfg): string {
     if (!captchaConfigured($cfg)) return '';
     $provider = captchaProvider($cfg);
     $siteKey = captchaSiteKey($cfg);
-    $src = $provider === 'turnstile'
-        ? 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
-        : 'https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit';
+    switch ($provider) {
+        case 'turnstile':
+            $src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+            break;
+        case 'recaptcha_v3':
+            // v3: no widget — the loader is bound to the site key and tokens come from grecaptcha.execute().
+            // (rawurlencode leaves only [A-Za-z0-9-_.~%], so the URL is safe to print raw in the attribute.)
+            $src = 'https://www.google.com/recaptcha/api.js?render=' . rawurlencode($siteKey);
+            break;
+        default:
+            $src = 'https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit';
+    }
     $keyJs = json_encode($siteKey, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $html  = "<script>\n";
     $html .= "    const CAPTCHA_PROVIDER = '" . $provider . "';\n";
@@ -222,6 +275,18 @@ function captchaHeadTags(array $cfg): string {
     $html .= "    </script>\n";
     $html .= '    <script src="' . $src . '" async defer></script>' . "\n";
     return $html;
+}
+
+/**
+ * reCAPTCHA v3 terms notice. Google requires either the floating badge or this text (with links); the
+ * stylesheets hide the badge (.grecaptcha-badge) so the notice must be printed near every form that
+ * runs grecaptcha.execute(). Empty string for every other provider / when CAPTCHA is not configured.
+ */
+function captchaNoticeHtml(array $cfg, string $class = 'captcha-notice'): string {
+    if (!captchaConfigured($cfg) || captchaProvider($cfg) !== 'recaptcha_v3') return '';
+    return '<p class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '">This site is protected by reCAPTCHA and the Google '
+        . '<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Privacy Policy</a> and '
+        . '<a href="https://policies.google.com/terms" target="_blank" rel="noopener">Terms of Service</a> apply.</p>';
 }
 
 function isCaptchaRequired(array $cfg, string $context = 'report'): bool {
