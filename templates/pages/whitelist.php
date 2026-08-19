@@ -47,7 +47,7 @@ if ($wlSched) {
     <form id="wl-check-form" novalidate>
         <div class="form-group"><label for="wl-check-input">Magnet link or info hash</label>
         <input type="text" id="wl-check-input" name="hash" maxlength="2048" placeholder="magnet:?xt=urn:btih:… or 40 hex characters"></div>
-        <div class="form-center"><button type="submit" class="btn btn-secondary" id="wl-check-submit">Check</button></div>
+        <div class="form-center"><button type="submit" class="btn" id="wl-check-submit">Check</button></div>
     </form>
     <div id="wl-check-alert" class="alert"></div>
 </div>
@@ -103,7 +103,7 @@ if ($wlSched) {
     <form id="wl-check-form" novalidate>
         <div class="form-group"><label for="wl-check-input">Magnet link or info hash</label>
         <input type="text" id="wl-check-input" name="hash" maxlength="2048" placeholder="magnet:?xt=urn:btih:… or 40 hex characters"></div>
-        <div class="form-center"><button type="submit" class="btn btn-secondary" id="wl-check-submit">Check</button></div>
+        <div class="form-center"><button type="submit" class="btn" id="wl-check-submit">Check</button></div>
     </form>
     <div id="wl-check-alert" class="alert"></div>
 </div>
