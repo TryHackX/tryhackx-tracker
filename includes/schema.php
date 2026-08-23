@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 5;   // 3 = scheduled tracker mode settings, 4 = reCAPTCHA v3 settings (no DDL change), 5 = stats timeline tables
+const TRACKER_SCHEMA_VERSION = 6;   // 3 = scheduled tracker mode settings, 4 = reCAPTCHA v3 settings (no DDL change), 5 = stats timeline tables, 6 = observed-hash index tables
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -163,6 +163,53 @@ function trackerSchemaStatements(): array {
             `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
             `index_rows` INT UNSIGNED NOT NULL DEFAULT 0
         ) $engine",
+
+        // ── Observed-hash index (schema v6, includes/index.php): a catalogue of info hashes seen on the
+        //    tracker (mostly during OPEN hours via full scrape). NOT a whitelist — it is never served. Meta
+        //    columns mirror `whitelist` so the metadata worker drains both queues with one code path.
+        "CREATE TABLE IF NOT EXISTS `index_hashes` (
+            `info_hash` CHAR(40) NOT NULL PRIMARY KEY,
+            `name` VARCHAR(255) DEFAULT NULL,
+            `first_seen` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `last_seen` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `seen_count` INT UNSIGNED NOT NULL DEFAULT 1,
+            `last_seeders` INT UNSIGNED NOT NULL DEFAULT 0,
+            `last_leechers` INT UNSIGNED NOT NULL DEFAULT 0,
+            `last_completed` INT UNSIGNED NOT NULL DEFAULT 0,
+            `peak_seeders` INT UNSIGNED NOT NULL DEFAULT 0,
+            `grace_until` DATETIME DEFAULT NULL,
+            `protected_until` DATETIME DEFAULT NULL,
+            `promoted_at` DATETIME DEFAULT NULL,
+            `meta_status` ENUM('none','pending','fetching','done','failed') NOT NULL DEFAULT 'none',
+            `meta_priority` TINYINT NOT NULL DEFAULT -1,
+            `meta_requested_at` DATETIME DEFAULT NULL,
+            `meta_claimed_at` DATETIME DEFAULT NULL,
+            `meta_claim` CHAR(16) DEFAULT NULL,
+            `meta_fetched_at` DATETIME DEFAULT NULL,
+            `meta_error` VARCHAR(255) DEFAULT NULL,
+            `total_size` BIGINT UNSIGNED DEFAULT NULL,
+            `files_count` INT UNSIGNED DEFAULT NULL,
+            `piece_length` INT UNSIGNED DEFAULT NULL,
+            `scrape_seeders` INT UNSIGNED DEFAULT NULL,
+            `scrape_leechers` INT UNSIGNED DEFAULT NULL,
+            `scrape_completed` INT UNSIGNED DEFAULT NULL,
+            `scraped_at` DATETIME DEFAULT NULL,
+            KEY `idx_index_last_seen` (`last_seen`),
+            KEY `idx_index_grace` (`grace_until`),
+            KEY `idx_index_protected` (`protected_until`),
+            KEY `idx_index_meta` (`meta_status`, `meta_priority`, `meta_requested_at`),
+            KEY `idx_index_seeders` (`last_seeders`),
+            KEY `idx_index_promoted` (`promoted_at`),
+            FULLTEXT KEY `ft_index_name` (`name`)
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `index_files` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `path` VARCHAR(1000) NOT NULL,
+            `size` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            KEY `idx_if_hash` (`info_hash`),
+            FULLTEXT KEY `ft_if_path` (`path`)
+        ) $engine",
     ];
 }
 
@@ -205,6 +252,17 @@ function trackerSchemaDefaultSettings(): array {
         'stats_timeline_raw_days'     => '7',
         'stats_timeline_keep_days'    => '60',
         'stats_timeline_public'       => '1',
+        // schema v6: observed-hash index (includes/index.php)
+        'index_enabled'               => '0',
+        'index_source_url'            => 'http://127.0.0.1:6969/scrape',
+        'index_poll_minutes'          => '30',
+        'index_min_seeders'           => '1',
+        'index_max_rows'              => '200000',
+        'index_grace_days'            => '3',
+        'index_protect_days'          => '10',
+        'index_meta_daily_budget'     => '500',
+        'index_keep_files'            => '1',
+        'index_poll_budget'           => '45',
     ];
 }
 

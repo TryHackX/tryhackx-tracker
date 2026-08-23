@@ -309,6 +309,41 @@ How it works (`includes/stats_timeline.php`):
 Requires *Tracker Statistics* to be enabled with a reachable Stats Source URL. Schema v5 creates the
 tables on the first request after the upgrade; the janitor timer is the only new moving part.
 
+### Observed-hash index — a catalogue of what's out there (1.5.0)
+
+Admin → Settings → **Index (observed hashes)** turns on a catalogue of info hashes *seen on the
+tracker* (mostly during OPEN hours, when the whole swarm is served), browsable at
+`?action=admin-index`. **It is not a whitelist** — nothing in the index is ever served or written to
+the accesslist; it is a read-only catalogue with metadata, seeders/leechers, search and a
+*Promote → whitelist* action.
+
+How it works (`includes/index.php`, all off unless `index_enabled=1`):
+
+- **Poll** — the janitor timer fetches a full scrape (`GET index_source_url`, no `info_hash` =
+  full scrape; gzip) every `index_poll_minutes`. A **streaming parser** reads it in bounded memory
+  (a 1.7 M-entry / 56 MB-gzip scrape parses in ~3 s using ~30 MB), keeps only
+  `complete >= index_min_seeders`, upserts in batches under `index_poll_budget` seconds (a huge scrape
+  is processed partially — it's just an observation), and drops rows that are whitelisted or banned.
+  OpenTracker's *modest fullscrape* limit already caps full scrapes to once per 5 min per IP.
+- **Metadata** — the janitor promotes up to `index_meta_daily_budget` rows/day from *none* to *pending*
+  (highest seeders first), with `meta_requested_at` spread across the next 24 h so the metadata worker's
+  **second queue** (drained only after the whitelist queue is empty) doesn't flood the DHT. Set the
+  budget to **0** to catalogue without any DHT metadata fetching.
+- **Lifecycle** — a new row lives until `grace_until` (`index_grace_days`) unless its metadata resolves;
+  a resolved row lives until `protected_until` (`index_protect_days`), extended on every poll where it
+  still has ≥ 1 seeder. The hourly pruner drops expired rows and caps the table at `index_max_rows`
+  (oldest unprotected `last_seen` first). A 200 000-row cap is well under 200 MB on disk.
+- **Worker** — set `index_table = index_hashes` in `tracker-metadata.conf` and grant the `tracker_meta`
+  user on the index tables (see [worker/README.md](worker/README.md)). Leave `index_table` empty to keep
+  whitelist-only behaviour.
+- **CLI** — `sudo -u www-data php tools/whitelist_cli.php index [--poll] [--tick]` prints the status /
+  forces a poll / runs one janitor tick.
+
+> **Before enabling on a busy tracker, measure the full-scrape cost during OPEN hours.** During
+> whitelist hours the full scrape only contains the whitelisted torrents (tiny); during OPEN it is the
+> whole swarm. Poll from **localhost**, watch OpenTracker's single HTTP thread (`top`/`pidstat`), and
+> start with `index_meta_daily_budget = 0` (catalogue only, no DHT) until the CPU cost looks safe.
+
 ### OpenTracker service reload & restart
 
 OpenTracker reads its blacklist file **only at startup**, so a blocked/unblocked hash doesn't take
@@ -705,6 +740,7 @@ tracker/
 │   ├── js/
 │   │   ├── app.js             # Public site JavaScript
 │   │   ├── admin.js           # Admin panel JavaScript
+│   │   ├── admin-index.js     # Observed-hash index page (?action=admin-index)
 │   │   └── stats-timeline.js  # Swarm timeline chart (public stats page + admin whitelist page)
 │   ├── vendor/uplot/          # uPlot (MIT) — vendored, no CDN
 │   └── img/
@@ -772,6 +808,8 @@ The installer creates the following tables:
 | `api_bans` | IP bans issued by the API auth layer (with request snapshot) or manually |
 | `stats_samples` | Statistics timeline: raw samples (UNIX `ts`, gauges + cumulative counters + mode) — schema v5 |
 | `stats_samples_5m` / `stats_samples_1h` | 5-minute / hourly roll-ups (avg/min/max, last counter value, whitelist share) |
+| `index_hashes` | Observed-hash index: hashes seen on the tracker (S/L, seen count, grace/protect, metadata) — schema v6 |
+| `index_files` | File lists for indexed hashes (keyed by info_hash, FULLTEXT searchable) |
 
 Schema upgrades are applied automatically on the first request (`includes/schema.php`,
 `settings.schema_version`); fresh installs get the same tables from `install.php`.
@@ -807,6 +845,7 @@ All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` w
 | `transparency` | GET | Get transparency page data |
 | `tracker_stats` | GET | Shared-cache tracker statistics (`source=home|stats`, `stale_ok=1`) |
 | `stats_timeline` | GET | Timeline series (`range=24h|7d|14d|30d|60d`, optional `series=`); public while `stats_timeline_public=1`, else admins |
+| `admin/fetch_index`, `admin/index_*` | GET/POST | Observed-hash index list / item / poll / scrape / meta / promote / delete (admin) |
 | `whitelist_submit` | POST | Register magnet links / hashes (CSRF + CAPTCHA + rate limits) |
 | `whitelist_check` | GET/POST | Is a hash registered / banned? |
 | `v1/whitelist/submit` | POST | Server-to-server registration (bearer key, see [Whitelist mode](#whitelist-mode)) |

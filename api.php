@@ -27,6 +27,7 @@ require_once __DIR__ . '/includes/schema.php';
 require_once __DIR__ . '/includes/whitelist.php';
 require_once __DIR__ . '/includes/schedule.php';
 require_once __DIR__ . '/includes/stats_timeline.php';
+require_once __DIR__ . '/includes/index.php';
 require_once __DIR__ . '/includes/api_auth.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/mail.php';
@@ -41,7 +42,7 @@ ensureSchema($db, $cfg);
 // the stats poller and the admin tracker-service status poll are both hit repeatedly and have
 // nothing to do with the report/appeal janitors, so running them there is pure overhead. They
 // still run everywhere else. S2S calls never run them either.
-if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'admin/tracker_service_status', 'admin/whitelist_status'], true)) {
+if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status'], true)) {
     autoArchiveOldReports($db, $cfg);
     autoArchiveOldAppeals($db, $cfg);
     pruneOldSentEmails($db, $cfg);
@@ -104,6 +105,16 @@ $apiRoutes = [
     'admin/whitelist_import_blacklist' => 'api/admin/whitelist_import_blacklist.php',
     'admin/fetch_banned'         => 'api/admin/fetch_banned.php',
     'admin/banned_add'           => 'api/admin/banned_add.php',
+    // ── Observed-hash index (admin) ──
+    'admin/fetch_index'          => 'api/admin/fetch_index.php',
+    'admin/index_item'           => 'api/admin/index_item.php',
+    'admin/index_delete'         => 'api/admin/index_delete.php',
+    'admin/index_promote'        => 'api/admin/index_promote.php',
+    'admin/index_fetch_meta'     => 'api/admin/index_fetch_meta.php',
+    'admin/index_scrape'         => 'api/admin/index_scrape.php',
+    'admin/index_scrape_bulk'    => 'api/admin/index_scrape_bulk.php',
+    'admin/index_status'         => 'api/admin/index_status.php',
+    'admin/index_poll_now'       => 'api/admin/index_poll_now.php',
     // ── API clients / bans (admin) ──
     'admin/fetch_api_clients'    => 'api/admin/fetch_api_clients.php',
     'admin/api_client_create'    => 'api/admin/api_client_create.php',

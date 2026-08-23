@@ -15,6 +15,13 @@ listen_port = 6881
 # own tracker first, then a few public trackers to speed up metadata discovery
 trackers = udp://tryhackx.org:6969/announce,udp://tracker.opentrackr.org:1337/announce,udp://open.stealth.si:80/announce,udp://tracker.torrent.eu.org:451/announce
 max_files = 5000
+# Observed-hash index second queue (includes/index.php). Leave index_table empty to keep whitelist-only
+# behaviour. When set, the worker drains index_hashes AFTER the whitelist queue is empty (needs the
+# tracker_meta grants on index_hashes / index_files — see README). index_keep_files=0 skips file lists
+# for index rows (name/size only, smaller DB).
+# index_table = index_hashes
+# index_files_table = index_files
+# index_keep_files = 1
 # DHT bootstrap nodes (comma-separated host:port); default = the usual public routers
 # dht_routers = router.bittorrent.com:6881,router.utorrent.com:6881,dht.transmissionbt.com:6881,dht.aelitis.com:6881,dht.libtorrent.org:25401
 tmp_dir = /home/tracker/metadata_worker/tmp

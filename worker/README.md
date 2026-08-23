@@ -31,6 +31,27 @@ GRANT SELECT, INSERT, DELETE ON tracker.whitelist_files TO 'tracker_meta'@'local
 FLUSH PRIVILEGES;
 ```
 
+### Optional second queue — the observed-hash index (1.5.0)
+
+To let the worker also resolve metadata for the **observed-hash index** (`includes/index.php` — the
+catalogue of hashes seen on the tracker, never served), set `index_table = index_hashes` in the conf
+and grant the same column-level access on the index tables. The worker drains this queue only after the
+whitelist queue is empty, and only rows whose `meta_requested_at` is due (the janitor spreads them
+across the day under `index_meta_daily_budget`). Leave `index_table` empty to keep whitelist-only behaviour.
+
+```sql
+GRANT SELECT (info_hash, magnet_link, meta_status, meta_claim, meta_claimed_at, meta_priority, meta_requested_at),
+      UPDATE (name, total_size, files_count, piece_length, meta_status, meta_claim, meta_claimed_at, meta_fetched_at, meta_error)
+      ON tracker.index_hashes TO 'tracker_meta'@'localhost';
+GRANT SELECT, INSERT, DELETE ON tracker.index_files TO 'tracker_meta'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+Note: `index_hashes` has no `magnet_link` column, so the `SELECT (… magnet_link …)` grant above simply
+covers the columns the worker reads across both tables — the worker only selects `info_hash` from the
+index and builds the magnet from the hash. If you prefer an exact grant, drop `magnet_link` from the
+index grant: `GRANT SELECT (info_hash, meta_status, meta_claim, meta_claimed_at, meta_priority, meta_requested_at) ON tracker.index_hashes …`.
+
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now tracker-metadata

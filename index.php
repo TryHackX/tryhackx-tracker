@@ -19,6 +19,7 @@ require_once __DIR__ . '/includes/schema.php';
 require_once __DIR__ . '/includes/whitelist.php';
 require_once __DIR__ . '/includes/schedule.php';
 require_once __DIR__ . '/includes/stats_timeline.php';
+require_once __DIR__ . '/includes/index.php';
 require_once __DIR__ . '/includes/auth.php';
 
 $db = getDb();
@@ -47,12 +48,14 @@ $routes = [
 
 $baseUrl = getBaseUrl();
 
-if ($action === 'admin' || $action === 'settings' || $action === 'admin-whitelist') {
+if ($action === 'admin' || $action === 'settings' || $action === 'admin-whitelist' || $action === 'admin-index') {
     if (adminSessionValid($cfg)) {
         if ($action === 'settings') {
             include __DIR__ . '/templates/admin/settings.php';
         } elseif ($action === 'admin-whitelist') {
             include __DIR__ . '/templates/admin/whitelist.php';
+        } elseif ($action === 'admin-index') {
+            include __DIR__ . '/templates/admin/index_page.php';
         } else {
             include __DIR__ . '/templates/admin/dashboard.php';
         }

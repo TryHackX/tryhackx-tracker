@@ -1261,3 +1261,24 @@ input[type="number"] {
     .tl-meta { text-align: left; }
     .tl-range-btn { padding: 0.3rem 0.55rem; }
 }
+
+/* === Observed-hash Index page (templates/admin/index_page.php + assets/js/admin-index.js) === */
+.idx-subtitle { font-size: 0.72rem; color: #888; font-weight: 400; margin-left: 0.5rem; }
+.idx-note { font-size: 0.8rem; color: #c9a227; margin: 0.6rem 0 0; }
+.idx-c-check { width: 34px; } .idx-c-hash { width: 160px; } .idx-c-size { width: 90px; }
+.idx-c-sl { width: 90px; } .idx-c-seen { width: 60px; } .idx-c-dates { width: 150px; }
+.idx-c-meta { width: 80px; } .idx-c-actions { width: 90px; }
+.idx-th-check { text-align: center; }
+#idx-table td, #idx-table th { vertical-align: middle; }
+#idx-table .idx-dates { font-size: 0.72rem; line-height: 1.25; }
+#idx-table .wl-name-cell span:first-child { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.idx-mgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.35rem 1.2rem; margin-bottom: 0.5rem; }
+.idx-mkv { display: flex; justify-content: space-between; gap: 0.75rem; border-bottom: 1px solid #1c1c2a; padding: 0.25rem 0; font-size: 0.85rem; }
+.idx-mkv-k { color: #8a8a9a; } .idx-mkv-v { color: #e6e6ee; font-family: 'JetBrains Mono', Consolas, monospace; text-align: right; word-break: break-all; }
+.idx-magnet { display: flex; gap: 0.4rem; } .idx-magnet input { font-size: 0.72rem; }
+.idx-file-list { list-style: none; margin: 0.25rem 0 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.idx-file-list li { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.15rem 0.25rem; border-bottom: 1px solid #171724; font-size: 0.78rem; }
+.idx-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .idx-file-size { flex: 0 0 auto; }
+.wl-bulkbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid #222; }
+.wl-bulkbar #idx-sel-count { color: #9aa; font-size: 0.85rem; margin-right: auto; }
+@media (max-width: 992px) { .idx-mgrid { grid-template-columns: 1fr; } }

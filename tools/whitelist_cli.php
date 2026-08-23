@@ -9,6 +9,7 @@
  *   sudo -u www-data php tools/whitelist_cli.php reload
  *   sudo -u www-data php tools/whitelist_cli.php mode [--apply]      (scheduled mode: current / desired / next change; --apply switches now)
  *   sudo -u www-data php tools/whitelist_cli.php timeline [--tick]  (statistics timeline: state + row counts; --tick samples/rolls up now)
+ *   sudo -u www-data php tools/whitelist_cli.php index [--tick] [--poll] (observed-hash index: status; --tick runs the janitor tick, --poll forces a poll now)
  *
  * Used for the initial bootstrap (e.g. piping the forum's magnet hashes) and for scripted maintenance.
  */
@@ -24,6 +25,7 @@ require_once $root . '/includes/schema.php';
 require_once $root . '/includes/whitelist.php';
 require_once $root . '/includes/schedule.php';
 require_once $root . '/includes/stats_timeline.php';
+require_once $root . '/includes/index.php';
 
 $db  = getDb();
 $cfg = getSettings($db);
@@ -121,6 +123,31 @@ switch ($cmd) {
             $st['last_prune_at'] ? date('Y-m-d H:i', $st['last_prune_at']) : 'never',
             $st['last_error'] ? " LAST ERROR ({$st['last_error_at']}): {$st['last_error']}" : '');
         if ($st['last_sample']) echo 'last values: ' . json_encode($st['last_sample']) . "\n";
+        break;
+
+    case 'index':
+        if (!empty($opts['poll'])) {
+            $p = indexPoll($db, $cfg, null, time());
+            printf("poll: %s entries=%d kept=%d%s removed_wl=%d removed_ban=%d bytes=%d ms=%d%s\n", $p['ok'] ? 'ok' : 'FAILED',
+                $p['entries'], $p['kept'], $p['truncated'] ? ' TRUNCATED' : '', $p['removed_wl'], $p['removed_ban'], $p['bytes'], $p['ms'], $p['error'] ? " error={$p['error']}" : '');
+        }
+        if (!empty($opts['tick'])) {
+            $t = indexTick($db, $cfg);
+            printf("tick: enabled=%s polled=%s meta_queued=%d prune=%s%s\n", $t['enabled'] ? 'yes' : 'no', $t['polled'] ? 'yes' : 'no',
+                (int)$t['meta_queued'], $t['prune'] ? "{$t['prune']['expired']}/{$t['prune']['capped']}" : 'skipped', $t['error'] ? " error={$t['error']}" : '');
+        }
+        $s = indexStatus($db, $cfg);
+        $c = $s['counts']; $st = $s['state'];
+        printf("index=%s source=%s poll=%dm min_seeders=%d max_rows=%d grace=%dd protect=%dd meta_budget=%d/day\n",
+            $s['enabled'] ? 'on' : 'off', $s['source_url'], $s['poll_minutes'], $s['min_seeders'], $s['max_rows'], $s['grace_days'], $s['protect_days'], $s['meta_daily_budget']);
+        printf("rows: total=%d in_grace=%d protected=%d promoted=%d files=%d | meta none=%d pending=%d fetching=%d done=%d failed=%d\n",
+            $c['total'], $c['in_grace'], $c['protected'], $c['promoted'], $c['files'], $c['meta_none'], $c['meta_pending'], $c['meta_fetching'], $c['meta_done'], $c['meta_failed']);
+        printf("last_poll=%s%s meta_budget_used=%d/%s last_prune=%s%s\n",
+            $st['last_poll_at'] ? date('Y-m-d H:i:s', $st['last_poll_at']) : 'never',
+            $st['last_poll'] ? " (entries={$st['last_poll']['entries']} kept={$st['last_poll']['kept']} ms={$st['last_poll']['ms']})" : '',
+            (int)$st['meta_budget_used'], $st['meta_budget_day'] ?: '-',
+            $st['last_prune_at'] ? date('Y-m-d H:i', $st['last_prune_at']) : 'never',
+            $st['last_error'] ? " LAST ERROR ({$st['last_error_at']}): {$st['last_error']}" : '');
         break;
 
     default:

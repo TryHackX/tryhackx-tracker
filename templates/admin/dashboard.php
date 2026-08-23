@@ -45,6 +45,7 @@
             <!-- Plain link, not a data-source tab: no data-source attr and a separate class so admin.js's
                  .source-tab click handler never binds to it. -->
             <a href="<?= $baseUrl ?>?action=admin-whitelist" class="source-tab-link" title="Open the whitelist page"><i class="bi bi-list-check"></i> Whitelist</a>
+            <a href="<?= $baseUrl ?>?action=admin-index" class="source-tab-link" title="Open the observed-hash index"><i class="bi bi-collection"></i> Index</a>
         </div>
 
         <!-- Toolbar -->

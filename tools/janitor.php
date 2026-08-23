@@ -24,6 +24,7 @@ require_once $root . '/includes/schema.php';
 require_once $root . '/includes/whitelist.php';
 require_once $root . '/includes/schedule.php';
 require_once $root . '/includes/stats_timeline.php';
+require_once $root . '/includes/index.php';
 
 try {
     $db  = getDb();
@@ -45,6 +46,14 @@ try {
             (int)($tl['rollup']['5m'] ?? 0), (int)($tl['rollup']['1h'] ?? 0),
             $tl['prune'] ? ' pruned=' . (int)$tl['prune']['raw'] . '/' . (int)$tl['prune']['5m'] : '',
             $tl['error'] !== null ? ' error=' . $tl['error'] : ''), "\n";
+    }
+    // observed-hash index: poll (if due) / meta budget / prune (no-op when disabled)
+    $ix = indexTick($db, $cfg);
+    if ($ix['enabled'] && ($ix['error'] !== null || $ix['polled'] || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[index] polled=%s%s meta_queued=%d%s%s', $ix['polled'] ? 'yes' : 'no',
+            $ix['poll'] ? ' (entries=' . (int)$ix['poll']['entries'] . ' kept=' . (int)$ix['poll']['kept'] . ($ix['poll']['truncated'] ? ' TRUNCATED' : '') . ' ms=' . (int)$ix['poll']['ms'] . ')' : '',
+            (int)$ix['meta_queued'], $ix['prune'] ? ' pruned=' . (int)$ix['prune']['expired'] . '/' . (int)$ix['prune']['capped'] : '',
+            $ix['error'] !== null ? ' error=' . $ix['error'] : ''), "\n";
     }
     $after = whitelistStateRead();
     $msg = sprintf('mode=%s schedule=%s pending_reload=%s regen_needed=%s last_reload_ok=%s fail_count=%d count=%d',

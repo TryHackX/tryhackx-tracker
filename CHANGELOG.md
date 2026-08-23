@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format is loosely b
 ## [1.5.0] — unreleased
 
 ### Added
+- **Observed-hash index** — `includes/index.php` (schema v6: `index_hashes`, `index_files`): a browsable
+  catalogue of info hashes *seen* on the tracker (mostly during OPEN hours via full scrape) — **not a
+  whitelist**, nothing here is served. The janitor polls `GET /scrape` (full scrape, gzip) with a
+  **streaming bencode parser** (bounded memory: 1.7 M entries parse in ~3 s / 30 MB), keeps
+  `complete >= index_min_seeders`, upserts in batches under a wall-clock budget, and drops rows that are
+  whitelisted or banned. Lifecycle: a new row lives to `grace_until` unless its metadata resolves; a
+  resolved row lives to `protected_until`, extended on every poll where it still has ≥ 1 seeder; the
+  hourly pruner drops expired rows and caps the table at `index_max_rows`. The metadata worker gains a
+  **second queue** (`index_table` in its conf; drained only after the whitelist queue, needs column
+  grants — see `worker/README.md`), fed by a daily budget (`index_meta_daily_budget`) the janitor spreads
+  across 24 h. Admin page `?action=admin-index` (`assets/js/admin-index.js`): search (hash/name/files),
+  meta + lifecycle filters, S/L, details modal with file list + magnet, status card, **Poll now**, and
+  bulk **Fetch metadata / Refresh S/L / Promote → whitelist / Delete**. Endpoints `admin/fetch_index`,
+  `index_item`, `index_delete`, `index_promote`, `index_fetch_meta`, `index_scrape(_bulk)`,
+  `index_status`, `index_poll_now`. Settings section "Index (observed hashes)"; CLI
+  `whitelist_cli.php index [--tick|--poll]`; `tests/index_test.php` (36 checks). Off by default.
 - **Statistics timeline** — `includes/stats_timeline.php` (schema v5: `stats_samples`,
   `stats_samples_5m`, `stats_samples_1h`, UNIX `ts`): one sample per `stats_timeline_interval`
   (30–600 s) taken by the janitor timer (reusing the shared stats cache when fresh) *and* by every

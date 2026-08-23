@@ -15,6 +15,7 @@
             <div class="admin-header-actions">
                 <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-speedometer2"></i> Dashboard</a>
                 <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
+                <a href="<?= $baseUrl ?>?action=admin-index" class="btn btn-sm btn-outline-info"><i class="bi bi-collection"></i> Index</a>
                 <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
             </div>
         </div>
@@ -686,6 +687,69 @@
                             <option value="0" <?= ($cfg['stats_timeline_public'] ?? '1') === '0' ? 'selected' : '' ?>>No &mdash; admins only</option>
                         </select>
                         <small class="settings-hint">When off, the chart and the <code>stats_timeline</code> API answer only logged-in admins.</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Observed-hash Index -->
+            <div class="settings-section" id="section-index">
+                <h5>Index (observed hashes)</h5>
+                <small class="settings-hint d-block mb-3">A catalogue of info hashes <strong>seen on the tracker</strong> (mostly during OPEN hours, when the whole swarm is served), browsable at <a href="<?= $baseUrl ?>?action=admin-index">Index</a>. <strong>This is not a whitelist</strong> &mdash; nothing here is served or written to the accesslist; it is a read-only catalogue with metadata, S/L, search and a <em>Promote &rarr; whitelist</em> action. The janitor polls a full scrape (<code>GET&nbsp;/scrape</code>) every <em>Poll interval</em>, keeps hashes with at least <em>Min seeders</em>, and the metadata worker resolves names in the background (second queue, below the whitelist &mdash; needs DB grants, see <code>worker/README.md</code>). <strong>Measure the full-scrape cost during OPEN hours before enabling on a busy tracker.</strong></small>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Enable Index</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="index_enabled">
+                            <option value="1" <?= ($cfg['index_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Yes</option>
+                            <option value="0" <?= ($cfg['index_enabled'] ?? '0') === '0' ? 'selected' : '' ?>>No</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Full-scrape Source URL</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="index_source_url" value="<?= sanitize($cfg['index_source_url'] ?? 'http://127.0.0.1:6969/scrape') ?>" placeholder="http://127.0.0.1:6969/scrape">
+                        <small class="settings-hint">OpenTracker <code>/scrape</code> with no info_hash = full scrape. Localhost recommended.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Poll Interval (min)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_poll_minutes" value="<?= sanitize($cfg['index_poll_minutes'] ?? '30') ?>" min="5" max="1440">
+                        <small class="settings-hint">5&ndash;1440. OpenTracker's modest-fullscrape limit is 5&nbsp;min/IP.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Min Seeders to Index</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_min_seeders" value="<?= sanitize($cfg['index_min_seeders'] ?? '1') ?>" min="0" max="100000">
+                        <small class="settings-hint">Drop the dead-swarm tail. 1 = at least one seeder.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Max Rows (cap)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_max_rows" value="<?= sanitize($cfg['index_max_rows'] ?? '200000') ?>" min="1000" max="5000000">
+                        <small class="settings-hint">Oldest unprotected rows are pruned above this.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Poll Time Budget (s)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_poll_budget" value="<?= sanitize($cfg['index_poll_budget'] ?? '45') ?>" min="5" max="120">
+                        <small class="settings-hint">Wall-clock cap per poll; a huge scrape is processed partially.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Grace (days)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_grace_days" value="<?= sanitize($cfg['index_grace_days'] ?? '3') ?>" min="1" max="90">
+                        <small class="settings-hint">A new hash is dropped after this unless its metadata resolves.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Protect (days)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_protect_days" value="<?= sanitize($cfg['index_protect_days'] ?? '10') ?>" min="1" max="365">
+                        <small class="settings-hint">A resolved hash lives this long; extended while it still has seeders.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Metadata Budget (per day)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_meta_daily_budget" value="<?= sanitize($cfg['index_meta_daily_budget'] ?? '500') ?>" min="0" max="1000000">
+                        <small class="settings-hint">Rows queued for metadata per day, spread across 24&nbsp;h. 0 = never auto-fetch.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Keep File Lists</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="index_keep_files">
+                            <option value="1" <?= ($cfg['index_keep_files'] ?? '1') === '1' ? 'selected' : '' ?>>Yes</option>
+                            <option value="0" <?= ($cfg['index_keep_files'] ?? '1') === '0' ? 'selected' : '' ?>>No (name/size only)</option>
+                        </select>
+                        <small class="settings-hint">The worker also honours <code>index_keep_files</code> in its own conf.</small>
                     </div>
                 </div>
             </div>

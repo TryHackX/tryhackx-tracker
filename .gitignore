@@ -19,6 +19,9 @@ config/stats_timeline_state.lock
 config/stats_timeline_*.json
 config/stats_timeline_*.json.tmp.*
 config/stats_timeline_*.json.lock
+config/index_state.json
+config/index_state.json.tmp.*
+config/index_state.lock
 config/*.marker
 
 # Stray backups — must never ship to production (e.g. hash.txt.orig leaks the admin hash)
