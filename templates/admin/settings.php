@@ -652,6 +652,44 @@
                 </div>
             </div>
 
+            <!-- Statistics Timeline -->
+            <div class="settings-section" id="section-timeline">
+                <h5>Statistics Timeline</h5>
+                <small class="settings-hint d-block mb-3">Records the tracker statistics over time (seeds, leechers, peers, torrents, announce rates, tracker mode) and draws a stock-style chart on the public <strong>/?action=stats</strong> page and on the admin Whitelist page. Samples are taken by the <strong>janitor timer</strong> (<code>tools/janitor.php</code>, every minute — see README) and, for free, by every upstream refresh the stats page makes; roll-ups (5 min / 1 h) and retention run from the same timer. Requires <em>Tracker Statistics</em> above to be enabled with a valid Stats Source URL.</small>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Enable Timeline</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="stats_timeline_enabled">
+                            <option value="1" <?= ($cfg['stats_timeline_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Yes</option>
+                            <option value="0" <?= ($cfg['stats_timeline_enabled'] ?? '0') === '0' ? 'selected' : '' ?>>No</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Sample Interval (Sec)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="stats_timeline_interval" value="<?= sanitize($cfg['stats_timeline_interval'] ?? '60') ?>" min="30" max="600">
+                        <small class="settings-hint">One sample per this many seconds (30&ndash;600). 60 matches the janitor timer.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Keep Raw Samples (Days)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="stats_timeline_raw_days" value="<?= sanitize($cfg['stats_timeline_raw_days'] ?? '7') ?>" min="1" max="30">
+                        <small class="settings-hint">Raw resolution (1&ndash;30 days); used by the 24 h view.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Keep 5-min Roll-ups (Days)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="stats_timeline_keep_days" value="<?= sanitize($cfg['stats_timeline_keep_days'] ?? '60') ?>" min="7" max="3650">
+                        <small class="settings-hint">7&ndash;3650 days; hourly roll-ups are kept forever (~9 k rows/year).</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Public Chart</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="stats_timeline_public">
+                            <option value="1" <?= ($cfg['stats_timeline_public'] ?? '1') === '1' ? 'selected' : '' ?>>Yes &mdash; on the stats page</option>
+                            <option value="0" <?= ($cfg['stats_timeline_public'] ?? '1') === '0' ? 'selected' : '' ?>>No &mdash; admins only</option>
+                        </select>
+                        <small class="settings-hint">When off, the chart and the <code>stats_timeline</code> API answer only logged-in admins.</small>
+                    </div>
+                </div>
+            </div>
+
             <!-- OpenTracker Service -->
             <div class="settings-section">
                 <h5>OpenTracker Service</h5>

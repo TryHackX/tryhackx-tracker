@@ -8,6 +8,7 @@
  *   sudo -u www-data php tools/whitelist_cli.php import-blacklist
  *   sudo -u www-data php tools/whitelist_cli.php reload
  *   sudo -u www-data php tools/whitelist_cli.php mode [--apply]      (scheduled mode: current / desired / next change; --apply switches now)
+ *   sudo -u www-data php tools/whitelist_cli.php timeline [--tick]  (statistics timeline: state + row counts; --tick samples/rolls up now)
  *
  * Used for the initial bootstrap (e.g. piping the forum's magnet hashes) and for scripted maintenance.
  */
@@ -22,6 +23,7 @@ require_once $root . '/includes/functions.php';
 require_once $root . '/includes/schema.php';
 require_once $root . '/includes/whitelist.php';
 require_once $root . '/includes/schedule.php';
+require_once $root . '/includes/stats_timeline.php';
 
 $db  = getDb();
 $cfg = getSettings($db);
@@ -99,6 +101,26 @@ switch ($cmd) {
             $printMode();
             exit($r['ok'] ? 0 : 1);
         }
+        break;
+
+    case 'timeline':
+        if (!empty($opts['tick'])) {
+            $t = statsTimelineTick($db, $cfg);
+            printf("tick: enabled=%s sampled=%s source=%s rollup5m=%d rollup1h=%d prune=%s%s\n", $t['enabled'] ? 'yes' : 'no', $t['sampled'] ? 'yes' : 'no',
+                $t['source'] ?? '-', (int)($t['rollup']['5m'] ?? 0), (int)($t['rollup']['1h'] ?? 0),
+                $t['prune'] ? "{$t['prune']['raw']}/{$t['prune']['5m']}" : 'skipped', $t['error'] !== null ? " error={$t['error']}" : '');
+        }
+        $s = statsTimelineStatus($db, $cfg);
+        $st = $s['state'];
+        printf("timeline=%s public=%s interval=%ds raw_days=%d keep_days=%d rows: raw=%d 5m=%d 1h=%d\n", $s['enabled'] ? 'on' : 'off', $s['public'] ? 'yes' : 'no',
+            $s['interval'], $s['raw_days'], $s['keep_days'], $s['counts']['raw'], $s['counts']['5m'], $s['counts']['1h']);
+        printf("last_sample=%s (%s) total=%d last_tick=%s rollup_until: 5m=%s 1h=%s last_prune=%s%s\n",
+            $st['last_sample_at'] ? date('Y-m-d H:i:s', $st['last_sample_at']) : 'never', $st['last_sample_source'] ?: '-', (int)$st['samples_total'],
+            $st['last_tick_at'] ? date('Y-m-d H:i:s', $st['last_tick_at']) : 'never',
+            $st['rollup_5m_until'] ? date('Y-m-d H:i', $st['rollup_5m_until']) : '-', $st['rollup_1h_until'] ? date('Y-m-d H:i', $st['rollup_1h_until']) : '-',
+            $st['last_prune_at'] ? date('Y-m-d H:i', $st['last_prune_at']) : 'never',
+            $st['last_error'] ? " LAST ERROR ({$st['last_error_at']}): {$st['last_error']}" : '');
+        if ($st['last_sample']) echo 'last values: ' . json_encode($st['last_sample']) . "\n";
         break;
 
     default:

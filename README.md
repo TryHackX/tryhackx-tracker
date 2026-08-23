@@ -272,6 +272,43 @@ every visitor triggering their own fetch, the data is cached **server-side** and
 > hits the endpoint periodically, e.g. `*/2 * * * * curl -s 'https://your-domain/api.php?endpoint=tracker_stats&source=home' >/dev/null`.
 > Combined with a longer TTL this makes visitors *always* hit a warm cache.
 
+### Statistics timeline — the swarm chart (1.5.0)
+
+Admin → Settings → **Statistics Timeline** records the tracker statistics over time and draws a
+stock-style chart (vendored [uPlot](https://github.com/leeoniya/uPlot), MIT, `assets/vendor/uplot/`,
+no CDN) on the public `/?action=stats` page (under the counters) and on the admin **Whitelist** page
+(collapsible card under the status card). Two synced panels: seeds / leechers / peers (left axis) with
+torrents and whitelisted torrents (right axis), and request rates (UDP / HTTP announces, connects,
+scrapes per second, derived from OpenTracker's cumulative counters; `null` across a restart or a gap).
+Hours in OPEN (blacklist) mode are shaded, so a [scheduled mode](#5b-scheduled-mode--whitelist-hours-optional-140)
+shows up as day/night bands. Ranges **24h / 7d / 2w / 1m / 2m**; click a legend entry to hide a
+series, drag to zoom, double-click to reset; the chart refreshes itself every minute.
+
+How it works (`includes/stats_timeline.php`):
+
+- **Sampling** — one sample per `stats_timeline_interval` seconds (30–600, default 60) from two
+  sources that share the same interval guard: the **janitor timer** (`tools/janitor.php`, the same
+  minute timer whitelist mode uses — see [Switch over](#3-switch-over-zero-downtime-order); it reuses
+  the shared stats cache when fresh and fetches the tracker otherwise) and, for free, **every upstream
+  fetch the stats page makes**. A quiet site is sampled by the timer, a busy one samples itself. One
+  parser (`parseTrackerStatsXml()`) serves both the stats page cache and the sampler.
+- **Storage** — `stats_samples` (raw, `ts` = UNIX seconds, kept `stats_timeline_raw_days`, default 7),
+  `stats_samples_5m` (5-minute roll-ups: avg/min/max of the gauges, last value of the counters, share of
+  whitelist-mode samples; kept `stats_timeline_keep_days`, default 60) and `stats_samples_1h` (hourly,
+  kept forever — ~9 k rows a year). Roll-ups and retention run from the janitor tick; the state (last
+  sample, roll-up cursors, last error) lives in `config/stats_timeline_state.json`.
+- **API** — `GET api.php?endpoint=stats_timeline&range=24h|7d|14d|30d|60d[&series=seeds,udp_rps]`
+  returns `{t:[…], seeds:[…], leechers:[…], peers:[…], torrents:[…], whitelist_count:[…], mode:[0|1…],
+  udp_rps:[…], tcp_rps:[…], connect_rps:[…], scrape_rps:[…], step, table, points}`; the table is
+  picked per range (raw → 5m → 1h so a payload stays below ~4 500 points) and each range is cached
+  for 30 s in `config/`. Public while `stats_timeline_public=1`, otherwise admins only (the chart
+  disappears from the public page too).
+- **CLI** — `sudo -u www-data php tools/whitelist_cli.php timeline [--tick]` prints the state and row
+  counts (`--tick` samples / rolls up right now). `tools/janitor.php -v` prints the tick result.
+
+Requires *Tracker Statistics* to be enabled with a reachable Stats Source URL. Schema v5 creates the
+tables on the first request after the upgrade; the janitor timer is the only new moving part.
+
 ### OpenTracker service reload & restart
 
 OpenTracker reads its blacklist file **only at startup**, so a blocked/unblocked hash doesn't take
@@ -667,7 +704,9 @@ tracker/
 │   │   └── admin.css          # Admin panel styles
 │   ├── js/
 │   │   ├── app.js             # Public site JavaScript
-│   │   └── admin.js           # Admin panel JavaScript
+│   │   ├── admin.js           # Admin panel JavaScript
+│   │   └── stats-timeline.js  # Swarm timeline chart (public stats page + admin whitelist page)
+│   ├── vendor/uplot/          # uPlot (MIT) — vendored, no CDN
 │   └── img/
 │       ├── favicon.ico
 │       ├── favicon.svg
@@ -731,6 +770,8 @@ The installer creates the following tables:
 | `banned_hashes` | Hashes that must never be served / re-registered (whitelist mode "block") |
 | `api_clients` | Server-to-server API clients (bearer key id + secret hash) |
 | `api_bans` | IP bans issued by the API auth layer (with request snapshot) or manually |
+| `stats_samples` | Statistics timeline: raw samples (UNIX `ts`, gauges + cumulative counters + mode) — schema v5 |
+| `stats_samples_5m` / `stats_samples_1h` | 5-minute / hourly roll-ups (avg/min/max, last counter value, whitelist share) |
 
 Schema upgrades are applied automatically on the first request (`includes/schema.php`,
 `settings.schema_version`); fresh installs get the same tables from `install.php`.
@@ -764,6 +805,8 @@ All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` w
 | `unsubscribe` | GET/POST | Unsubscribe from emails (GET = link click, POST = one-click) |
 | `save_email_preferences` | POST | Save per-type notification preferences |
 | `transparency` | GET | Get transparency page data |
+| `tracker_stats` | GET | Shared-cache tracker statistics (`source=home|stats`, `stale_ok=1`) |
+| `stats_timeline` | GET | Timeline series (`range=24h|7d|14d|30d|60d`, optional `series=`); public while `stats_timeline_public=1`, else admins |
 | `whitelist_submit` | POST | Register magnet links / hashes (CSRF + CAPTCHA + rate limits) |
 | `whitelist_check` | GET/POST | Is a hash registered / banned? |
 | `v1/whitelist/submit` | POST | Server-to-server registration (bearer key, see [Whitelist mode](#whitelist-mode)) |

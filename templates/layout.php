@@ -8,6 +8,8 @@ $pageTitles = [
 $recaptchaNeeded = ($action === 'report' && isCaptchaEnabled($cfg, 'report'))
     || ($action === 'status' && (isCaptchaEnabled($cfg, 'status') || isCaptchaEnabled($cfg, 'block_check') || isCaptchaEnabled($cfg, 'appeal')))
     || ($action === 'whitelist' && captchaConfigured($cfg));
+// swarm timeline chart (vendored uPlot) — only on the stats page when enabled and public
+$timelineNeeded = ($action === 'stats' && ($cfg['tracker_stats_enabled'] ?? '0') === '1' && statsTimelineEnabled($cfg) && statsTimelinePublic($cfg));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -20,6 +22,9 @@ $recaptchaNeeded = ($action === 'report' && isCaptchaEnabled($cfg, 'report'))
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/style.css<?= assetVer('assets/css/style.css') ?>">
     <?php if ($action === 'transparency' || $action === 'stats'): ?>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
+    <?php endif; ?>
+    <?php if ($timelineNeeded): ?>
+    <link rel="stylesheet" href="<?= $baseUrl ?>assets/vendor/uplot/uPlot.min.css<?= assetVer('assets/vendor/uplot/uPlot.min.css') ?>">
     <?php endif; ?>
     <?php if ($recaptchaNeeded): ?>
     <?= captchaHeadTags($cfg) ?>
@@ -96,5 +101,9 @@ $recaptchaNeeded = ($action === 'report' && isCaptchaEnabled($cfg, 'report'))
     </script>
     <script src="<?= $baseUrl ?>assets/js/captcha.js<?= assetVer('assets/js/captcha.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/app.js<?= assetVer('assets/js/app.js') ?>"></script>
+    <?php if ($timelineNeeded): ?>
+    <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/stats-timeline.js<?= assetVer('assets/js/stats-timeline.js') ?>"></script>
+    <?php endif; ?>
 </body>
 </html>

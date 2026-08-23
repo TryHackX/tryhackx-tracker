@@ -674,7 +674,7 @@
 .admin-pagination button:disabled { opacity: 0.3; cursor: not-allowed; }
 .admin-pagination span { color: #888; }
 
-/* First/Last + "page N of M" jump box (AdminCommon.renderPagination — used by the whitelist views and the dashboard). */
+/* First/Last + "page N of M" jump box (AdminCommon.renderPagination â€” used by the whitelist views and the dashboard). */
 .admin-pagination .pg-edge { padding-left: 0.6rem; padding-right: 0.6rem; }
 .admin-pagination .pg-jump { display: inline-flex; align-items: center; gap: 0.35rem; color: #9aa4b2; white-space: nowrap; }
 .admin-pagination .pg-input {
@@ -951,7 +951,7 @@ input[type="number"] {
 
 /* Key/value blocks. Shared label/value styling; two layouts:
    - .wl-status-grid (status card): small aligned tiles, badges vertically centred with their text;
-   - .wl-kv (details / snapshot modals): definition list — label column | value, one row per item,
+   - .wl-kv (details / snapshot modals): definition list â€” label column | value, one row per item,
      hairline separators; .wl-kv-cols splits it into two columns on wide modals. */
 .wl-kv-item { min-width: 0; }
 .wl-kv-label { color: #8b96a5; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.3; }
@@ -980,7 +980,7 @@ input[type="number"] {
 .wl-kv.wl-kv-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
 .wl-kv.wl-kv-cols .wl-kv-item { grid-template-columns: 96px minmax(0, 1fr); }
 @media (min-width: 992px) {
-    /* modal-lg: two columns → the second tile is on the first row too. */
+    /* modal-lg: two columns â†’ the second tile is on the first row too. */
     .wl-kv.wl-kv-cols .wl-kv-item:nth-child(2) { border-top: 0; }
 }
 @media (max-width: 575.98px) {
@@ -1068,7 +1068,7 @@ input[type="number"] {
 
 /* ---- Wide admin pages (dashboard, whitelist, settings header): full-width container + contrast overrides ----
    .admin-wide on the container: desktop ~80vw wide but never narrower than 1100px (and never wider than the
-   viewport); tablets and phones (≤ 992px) get the full width. body.admin-hc scopes the contrast overrides
+   viewport); tablets and phones (â‰¤ 992px) get the full width. body.admin-hc scopes the contrast overrides
    (modals live outside .admin-container): Bootstrap's .text-muted resolves to a light-theme rgba that is nearly
    invisible on #0d1117/#121212 here. (.wl-page / .wl-body are kept as aliases for the whitelist page.) */
 .admin-container.admin-wide,
@@ -1110,7 +1110,7 @@ input[type="number"] {
     .admin-wide .toolbar-right { margin-left: 0; }
 }
 
-/* Toolbar dropdown tools (bulk "Fetch metadata" / "Refresh S/L" split control) — dark menu, sm buttons. */
+/* Toolbar dropdown tools (bulk "Fetch metadata" / "Refresh S/L" split control) â€” dark menu, sm buttons. */
 .wl-tool-dd .dropdown-toggle-split { padding-left: 0.45rem; padding-right: 0.45rem; }
 .wl-tool-dd .btn.wl-busy { cursor: progress; }
 .wl-tool-dd .btn.wl-busy > i { animation: wlSpin 1s linear infinite; }
@@ -1212,7 +1212,7 @@ input[type="number"] {
 .wl-c-ipv6     { width: 176px; }
 .wl-c-bucket   { width: 168px; }
 .wl-c-flex     { width: auto; }
-/* Below ~1700px the 80vw page (min 1100px → ~1060px of content) cannot hold ten pinned columns plus a full
+/* Below ~1700px the 80vw page (min 1100px â†’ ~1060px of content) cannot hold ten pinned columns plus a full
    40-char hash: tighten the pinned columns and let the hash cell ellipsize (full hash in the cell title,
    click still copies it) so the whitelist table stays inside the page without a horizontal scrollbar. */
 @media (max-width: 1699.98px) {
@@ -1232,4 +1232,32 @@ input[type="number"] {
 @media (max-width: 768px) {
     .admin-container.admin-wide,
     .admin-container.wl-page { padding: 0.75rem; }
+}
+
+/* === Statistics timeline (assets/js/stats-timeline.js + vendored uPlot) === */
+.tl-card { position: relative; }
+.tl-head { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.tl-ranges { display: inline-flex; gap: 0; border: 1px solid #2a2a3a; border-radius: 6px; overflow: hidden; }
+.tl-range-btn { background: transparent; color: #9aa; border: 0; border-right: 1px solid #2a2a3a; padding: 0.3rem 0.75rem; font-size: 0.8rem; font-family: inherit; cursor: pointer; line-height: 1.3; transition: background 0.15s, color 0.15s; }
+.tl-range-btn:last-child { border-right: 0; }
+.tl-range-btn:hover { background: rgba(74, 158, 255, 0.12); color: #dfe; }
+.tl-range-btn.active { background: rgba(74, 158, 255, 0.22); color: #fff; font-weight: 600; }
+.tl-meta { font-size: 0.75rem; color: #888; text-align: right; }
+.tl-subtitle { font-size: 0.75rem; color: #888; margin: 0.6rem 0 0.2rem; }
+.tl-hint { display: block; font-size: 0.72rem; color: #666; margin-top: 0.5rem; }
+.tl-empty { padding: 1.5rem 1rem; text-align: center; color: #888; font-size: 0.9rem; border: 1px dashed #2a2a3a; border-radius: 6px; }
+.tl-chart { width: 100%; }
+.tl-chart .u-legend { font-size: 0.78rem; color: #bbb; text-align: left; padding: 0.25rem 0 0; }
+.tl-chart .u-legend .u-series { padding: 0 0.6rem 0.15rem 0; }
+.tl-chart .u-legend .u-series > * { padding: 0.1rem 0.25rem 0.1rem 0; }
+.tl-chart .u-legend .u-marker { border-radius: 2px; width: 0.9em; height: 0.9em; margin-right: 0.15rem; }
+.tl-chart .u-legend .u-series.u-off > * { opacity: 0.35; }
+.tl-chart .u-legend .u-value { font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace; color: #eee; }
+.tl-chart .u-legend .u-series:first-child .u-value { color: #aaa; }
+.tl-chart .u-select { background: rgba(74, 158, 255, 0.15); }
+.tl-chart .u-hz .u-cursor-x { border-right: 1px dashed rgba(255, 255, 255, 0.35); }
+@media (max-width: 600px) {
+    .tl-head { flex-direction: column; align-items: flex-start; }
+    .tl-meta { text-align: left; }
+    .tl-range-btn { padding: 0.3rem 0.55rem; }
 }

@@ -13,6 +13,12 @@ config/whitelist_state.json
 config/whitelist_state.json.tmp.*
 config/whitelist_state.lock
 config/whitelist_regen.lock
+config/stats_timeline_state.json
+config/stats_timeline_state.json.tmp.*
+config/stats_timeline_state.lock
+config/stats_timeline_*.json
+config/stats_timeline_*.json.tmp.*
+config/stats_timeline_*.json.lock
 config/*.marker
 
 # Stray backups — must never ship to production (e.g. hash.txt.orig leaks the admin hash)

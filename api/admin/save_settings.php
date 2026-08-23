@@ -27,6 +27,8 @@ $allowed = [
     'donations_enabled', 'wallet_btc', 'wallet_eth', 'wallet_xmr', 'donation_fields',
     'transparency_enabled', 'transparency_per_page',
     'tracker_stats_enabled', 'tracker_stats_url', 'tracker_stats_interval', 'tracker_stats_page_interval', 'tracker_stats_cache_ttl', 'tracker_stats_show_home', 'tracker_stats_timeout', 'tracker_stats_min_loading', 'tracker_stats_max_loading', 'tracker_stats_peer_label_style', 'tracker_stats_livesync_mode',
+    // statistics timeline (includes/stats_timeline.php)
+    'stats_timeline_enabled', 'stats_timeline_interval', 'stats_timeline_raw_days', 'stats_timeline_keep_days', 'stats_timeline_public',
     'opentracker_service_name', 'opentracker_restart_use_sudo', 'opentracker_auto_reload',
     'tracker_uptime_warn_days', 'tracker_uptime_danger_days',
     'tracker_blacklist_warn_count', 'tracker_blacklist_danger_count',
@@ -87,6 +89,8 @@ $intClamp = [
     'whitelist_max_per_submission' => [1, 500, 20], 'rate_limit_whitelist' => [0, 1000, 10],
     'whitelist_ip_daily_max' => [0, 100000, 50], 'whitelist_daily_cap' => [0, 10000000, 2000],
     'whitelist_reload_min_interval' => [10, 3600, 45], 'api_ban_days' => [1, 3650, 30],
+    'stats_timeline_interval' => [ST_INTERVAL_MIN, ST_INTERVAL_MAX, 60], 'stats_timeline_raw_days' => [1, 30, 7],
+    'stats_timeline_keep_days' => [7, 3650, 60],
 ];
 foreach ($intClamp as $k => [$min, $max, $def]) {
     if (isset($data[$k])) {
@@ -103,7 +107,7 @@ if (isset($data['whitelist_tracker_hosts'])) {
     }
     $data['whitelist_tracker_hosts'] = implode(', ', array_unique($clean));
 }
-foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled'] as $k) {
+foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
 // ── Scheduled tracker mode ──

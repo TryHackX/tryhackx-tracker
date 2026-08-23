@@ -18,6 +18,7 @@ require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/schema.php';
 require_once __DIR__ . '/includes/whitelist.php';
 require_once __DIR__ . '/includes/schedule.php';
+require_once __DIR__ . '/includes/stats_timeline.php';
 require_once __DIR__ . '/includes/auth.php';
 
 $db = getDb();

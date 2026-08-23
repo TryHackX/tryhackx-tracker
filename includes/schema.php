@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 4;   // 3 = scheduled tracker mode settings, 4 = reCAPTCHA v3 settings (no DDL change)
+const TRACKER_SCHEMA_VERSION = 5;   // 3 = scheduled tracker mode settings, 4 = reCAPTCHA v3 settings (no DDL change), 5 = stats timeline tables
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -109,6 +109,60 @@ function trackerSchemaStatements(): array {
             KEY `idx_api_bans_active` (`ip_bucket`, `lifted_at`, `expires_at`),
             KEY `idx_api_bans_created` (`created_at`)
         ) $engine",
+
+        // ── Statistics timeline (schema v5, includes/stats_timeline.php): raw samples + 5-minute / hourly roll-ups.
+        //    `ts` = UNIX seconds (sample time / bucket start). Counters (completed, *_announces, connects,
+        //    scrapes) are OpenTracker's cumulative values; the API derives per-second rates from them.
+        "CREATE TABLE IF NOT EXISTS `stats_samples` (
+            `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `torrents` INT UNSIGNED NOT NULL DEFAULT 0,
+            `peers` INT UNSIGNED NOT NULL DEFAULT 0,
+            `seeds` INT UNSIGNED NOT NULL DEFAULT 0,
+            `leechers` INT UNSIGNED NOT NULL DEFAULT 0,
+            `completed` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `udp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `tcp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `connects` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `scrapes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `uptime` INT UNSIGNED NOT NULL DEFAULT 0,
+            `mode` ENUM('whitelist','blacklist') NOT NULL DEFAULT 'blacklist',
+            `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `stats_samples_5m` (
+            `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `samples` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `torrents_avg` INT UNSIGNED NOT NULL DEFAULT 0, `torrents_min` INT UNSIGNED NOT NULL DEFAULT 0, `torrents_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `peers_avg` INT UNSIGNED NOT NULL DEFAULT 0, `peers_min` INT UNSIGNED NOT NULL DEFAULT 0, `peers_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `seeds_avg` INT UNSIGNED NOT NULL DEFAULT 0, `seeds_min` INT UNSIGNED NOT NULL DEFAULT 0, `seeds_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `leechers_avg` INT UNSIGNED NOT NULL DEFAULT 0, `leechers_min` INT UNSIGNED NOT NULL DEFAULT 0, `leechers_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `completed` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `udp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `tcp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `connects` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `scrapes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `uptime` INT UNSIGNED NOT NULL DEFAULT 0,
+            `wl_share` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `stats_samples_1h` (
+            `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `samples` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `torrents_avg` INT UNSIGNED NOT NULL DEFAULT 0, `torrents_min` INT UNSIGNED NOT NULL DEFAULT 0, `torrents_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `peers_avg` INT UNSIGNED NOT NULL DEFAULT 0, `peers_min` INT UNSIGNED NOT NULL DEFAULT 0, `peers_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `seeds_avg` INT UNSIGNED NOT NULL DEFAULT 0, `seeds_min` INT UNSIGNED NOT NULL DEFAULT 0, `seeds_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `leechers_avg` INT UNSIGNED NOT NULL DEFAULT 0, `leechers_min` INT UNSIGNED NOT NULL DEFAULT 0, `leechers_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `completed` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `udp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `tcp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `connects` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `scrapes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `uptime` INT UNSIGNED NOT NULL DEFAULT 0,
+            `wl_share` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0
+        ) $engine",
     ];
 }
 
@@ -145,6 +199,12 @@ function trackerSchemaDefaultSettings(): array {
         'tracker_schedule'            => '{"mon":"none","tue":"none","wed":"none","thu":"none","fri":"none","sat":"none","sun":"none"}',
         'tracker_schedule_tz'         => 'Europe/Warsaw',
         'tracker_mode_switch_cmd'     => 'sudo -n /usr/local/sbin/tracker-mode.sh',
+        // schema v5: statistics timeline (includes/stats_timeline.php)
+        'stats_timeline_enabled'      => '0',
+        'stats_timeline_interval'     => '60',
+        'stats_timeline_raw_days'     => '7',
+        'stats_timeline_keep_days'    => '60',
+        'stats_timeline_public'       => '1',
     ];
 }
 

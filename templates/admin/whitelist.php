@@ -7,6 +7,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
+    <?php if (statsTimelineEnabled($cfg)): ?>
+    <link rel="stylesheet" href="<?= $baseUrl ?>assets/vendor/uplot/uPlot.min.css<?= assetVer('assets/vendor/uplot/uPlot.min.css') ?>">
+    <?php endif; ?>
 </head>
 <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-api-ban-days="<?= (int)($cfg['api_ban_days'] ?? 30) ?>" data-service="<?= sanitize($svcName) ?>">
@@ -36,6 +39,20 @@
             </div>
             <ul class="wl-warnings d-hidden" id="wl-status-warnings"></ul>
         </div>
+
+        <?php if (statsTimelineEnabled($cfg)): ?>
+        <!-- Swarm timeline (assets/js/stats-timeline.js + vendored uPlot; samples by tools/janitor.php) -->
+        <div class="wl-status-card tl-card" id="wl-timeline-card">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-graph-up"></i> Swarm timeline <span class="wl-status-updated">one sample / <?= (int)statsTimelineInterval($cfg) ?> s · raw <?= (int)statsTimelineRawDays($cfg) ?> d · 5-min <?= (int)statsTimelineKeepDays($cfg) ?> d · <?= statsTimelinePublic($cfg) ? 'public' : 'admins only' ?></span></h6>
+                <div class="wl-status-actions">
+                    <a href="<?= $baseUrl ?>?action=settings#section-timeline" class="btn btn-sm btn-outline-secondary" title="Timeline settings"><i class="bi bi-gear"></i> Settings</a>
+                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-tl-toggle" data-tl-collapse="wl-timeline" aria-expanded="true" aria-controls="wl-timeline"><i class="bi bi-chevron-up"></i> <span>Collapse</span></button>
+                </div>
+            </div>
+            <div id="wl-timeline" data-timeline data-range="24h" data-compact="1"></div>
+        </div>
+        <?php endif; ?>
 
         <!-- Sub-view tabs -->
         <div class="source-tabs" id="wl-tabs">
@@ -432,5 +449,9 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-whitelist.js<?= assetVer('assets/js/admin-whitelist.js') ?>"></script>
+    <?php if (statsTimelineEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/stats-timeline.js<?= assetVer('assets/js/stats-timeline.js') ?>"></script>
+    <?php endif; ?>
 </body>
 </html>

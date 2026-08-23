@@ -26,6 +26,7 @@ require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/schema.php';
 require_once __DIR__ . '/includes/whitelist.php';
 require_once __DIR__ . '/includes/schedule.php';
+require_once __DIR__ . '/includes/stats_timeline.php';
 require_once __DIR__ . '/includes/api_auth.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/mail.php';
@@ -40,7 +41,7 @@ ensureSchema($db, $cfg);
 // the stats poller and the admin tracker-service status poll are both hit repeatedly and have
 // nothing to do with the report/appeal janitors, so running them there is pure overhead. They
 // still run everywhere else. S2S calls never run them either.
-if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'admin/tracker_service_status', 'admin/whitelist_status'], true)) {
+if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'admin/tracker_service_status', 'admin/whitelist_status'], true)) {
     autoArchiveOldReports($db, $cfg);
     autoArchiveOldAppeals($db, $cfg);
     pruneOldSentEmails($db, $cfg);
@@ -58,6 +59,7 @@ $apiRoutes = [
     'save_email_preferences' => 'api/save_email_preferences.php',
     'transparency'          => 'api/transparency.php',
     'tracker_stats'         => 'api/tracker_stats.php',
+    'stats_timeline'        => 'api/stats_timeline.php',
     'admin/login'           => 'api/admin/login.php',
     'admin/logout'          => 'api/admin/logout.php',
     'admin/fetch_reports'   => 'api/admin/fetch_reports.php',

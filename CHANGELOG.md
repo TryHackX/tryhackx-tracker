@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] — unreleased
+
+### Added
+- **Statistics timeline** — `includes/stats_timeline.php` (schema v5: `stats_samples`,
+  `stats_samples_5m`, `stats_samples_1h`, UNIX `ts`): one sample per `stats_timeline_interval`
+  (30–600 s) taken by the janitor timer (reusing the shared stats cache when fresh) *and* by every
+  upstream fetch of the stats page, 5-minute / hourly roll-ups and retention from the same tick,
+  `GET stats_timeline&range=24h|7d|14d|30d|60d` (table picked per range, 30 s cache per range, public
+  or admins-only), a shared `parseTrackerStatsXml()` / `fetchTrackerStatsXml()` used by
+  `api/tracker_stats.php` too. Stock-style chart (vendored **uPlot** 1.6.32, MIT, no CDN —
+  `assets/vendor/uplot/`, `assets/js/stats-timeline.js`) on the public stats page and on the admin
+  Whitelist page: seeds / leechers / peers / torrents / whitelisted torrents + a synced request-rate
+  panel (UDP & HTTP announces, connects, scrapes per second derived from the cumulative counters),
+  OPEN-hours shading, range buttons, legend toggles, drag-zoom, auto-refresh. Settings section
+  "Statistics Timeline"; CLI `whitelist_cli.php timeline [--tick]`; `tests/stats_timeline_test.php`
+  (63 checks: parser, due/slack logic, roll-ups, series/rates/gaps, prune, cache reuse).
+
 ## [1.4.0] — 2026-08-19
 
 ### Added

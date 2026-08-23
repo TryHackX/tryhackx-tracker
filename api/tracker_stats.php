@@ -276,52 +276,11 @@ register_shutdown_function($releaseLock);
 
 // --- 5. Fetch upstream XML -------------------------------------------------
 
-$xmlContent = null;
-$errorMsg   = null;
-$fetchStart = microtime(true);
-
-if (function_exists('curl_init')) {
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-    curl_setopt($ch, CURLOPT_USERAGENT, 'TryHackX Tracker Status Bot/1.0');
-    // Verify TLS certificates when the stats URL is https (harmless for http URLs).
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
-
-    $xmlContent = curl_exec($ch);
-    $httpCode   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlErr    = curl_error($ch);
-    curl_close($ch);
-
-    if ($xmlContent === false) {
-        $errorMsg   = 'cURL error: ' . $curlErr;
-        $xmlContent = null;
-    } elseif ($httpCode !== 200) {
-        $errorMsg   = 'HTTP error code: ' . $httpCode;
-        $xmlContent = null;
-    }
-}
-
-if ($xmlContent === null && ini_get('allow_url_fopen')) {
-    $ctx = stream_context_create([
-        'http' => [
-            'timeout' => $timeout,
-            'header'  => "User-Agent: TryHackX Tracker Status Bot/1.0\r\n",
-        ],
-    ]);
-    $fetched = @file_get_contents($url, false, $ctx);
-    if ($fetched !== false) {
-        $xmlContent = $fetched;
-        $errorMsg   = null;
-    } elseif ($errorMsg === null) {
-        $errorMsg = 'file_get_contents failed to fetch URL.';
-    }
-}
-
-$fetchDurationMs = (int)round((microtime(true) - $fetchStart) * 1000);
+// Shared fetcher (includes/stats_timeline.php): curl with TLS verification, streams as fallback.
+$fetch = fetchTrackerStatsXml($url, $timeout);
+$xmlContent      = $fetch['body'];
+$errorMsg        = $fetch['error'];
+$fetchDurationMs = $fetch['ms'];
 
 if (empty($xmlContent)) {
     // Persist diagnostic info into the cache itself so admins can inspect why the upstream
@@ -354,10 +313,8 @@ if (empty($xmlContent)) {
 
 // --- 6. Parse XML ----------------------------------------------------------
 
-libxml_use_internal_errors(true);
-$xml = simplexml_load_string(trim($xmlContent));
-if ($xml === false) {
-    libxml_clear_errors();
+$parsed = parseTrackerStatsXml($xmlContent);   // shared with the timeline sampler (includes/stats_timeline.php)
+if ($parsed === null) {
     if ($cacheData) {
         $cacheData['last_fetch_error']        = 'Invalid XML response from tracker.';
         $cacheData['last_fetch_error_at']     = time();
@@ -380,83 +337,8 @@ if ($xml === false) {
     ], 502);
 }
 
-$trackerId     = (string)($xml->tracker_id ?? '');
-$version       = trim((string)($xml->version ?? ''));
-$uptimeSeconds = (int)($xml->uptime ?? 0);
-
-// Human-readable uptime (shared, unit-tested helper — see includes/functions.php).
-$uptimeString = formatUptime($uptimeSeconds);
-
-$torrentsMutex    = (int)($xml->torrents->count_mutex ?? 0);
-$torrentsIterator = (int)($xml->torrents->count_iterator ?? 0);
-$torrents         = max($torrentsMutex, $torrentsIterator);
-
-$peers     = (int)($xml->peers->count ?? 0);
-$seeds     = (int)($xml->seeds->count ?? 0);
-$leechers  = max(0, $peers - $seeds);
-$completed = (int)($xml->completed->count ?? 0);
-
-$tcpAccept   = (int)($xml->connections->tcp->accept ?? 0);
-$tcpAnnounce = (int)($xml->connections->tcp->announce ?? 0);
-$tcpScrape   = (int)($xml->connections->tcp->scrape ?? 0);
-
-$udpOverall  = (int)($xml->connections->udp->overall ?? 0);
-$udpConnect  = (int)($xml->connections->udp->connect ?? 0);
-$udpAnnounce = (int)($xml->connections->udp->announce ?? 0);
-$udpScrape   = (int)($xml->connections->udp->scrape ?? 0);
-$udpMismatch = (int)($xml->connections->udp->missmatch ?? 0);
-
-$livesyncCount = (int)($xml->connections->livesync->count ?? 0);
-
-$httpErrors = [];
-if (isset($xml->debug->http_error->count)) {
-    foreach ($xml->debug->http_error->count as $err) {
-        $code  = (string)($err['code'] ?? 'Unknown');
-        $count = (int)$err;
-        if ($count > 0 || $code !== 'Unknown') {
-            $httpErrors[] = ['code' => $code, 'count' => $count];
-        }
-    }
-}
-
-$renewIntervals = [];
-if (isset($xml->debug->renew->count)) {
-    foreach ($xml->debug->renew->count as $renew) {
-        $renewIntervals[] = [
-            'interval' => (string)($renew['interval'] ?? ''),
-            'count'    => (int)$renew,
-        ];
-    }
-}
-
-$data = [
-    'success'        => true,
-    'tracker_id'     => $trackerId,
-    'version'        => $version,
-    'uptime_seconds' => $uptimeSeconds,
-    'uptime_string'  => $uptimeString,
-    'torrents'       => $torrents,
-    'peers'          => $peers,
-    'seeds'          => $seeds,
-    'leechers'       => $leechers,
-    'completed'      => $completed,
-    'connections'    => [
-        'tcp' => [
-            'accept'   => $tcpAccept,
-            'announce' => $tcpAnnounce,
-            'scrape'   => $tcpScrape,
-        ],
-        'udp' => [
-            'overall'  => $udpOverall,
-            'connect'  => $udpConnect,
-            'announce' => $udpAnnounce,
-            'scrape'   => $udpScrape,
-            'mismatch' => $udpMismatch,
-        ],
-        'livesync'    => $livesyncCount,
-    ],
-    'http_errors'    => $httpErrors,
-    'renew_intervals'=> $renewIntervals,
+$uptimeSeconds = (int)$parsed['uptime_seconds'];
+$data = ['success' => true] + $parsed + [
     // CRITICAL: fetched_at must be set to the moment the cache is being WRITTEN, not when
     // the request started — otherwise a slow upstream (20+ sec) makes the cache look already
     // half-stale the instant it's saved, which causes immediate re-fetches and a feedback
@@ -465,6 +347,9 @@ $data = [
     // Diagnostic — keep visible even on success so admins can spot if upstream is slow.
     'last_fetch_duration_ms' => $fetchDurationMs,
 ];
+
+// Statistics timeline: a fresh upstream document is a free sample (respects the configured interval).
+try { statsTimelineIngest($db, $cfg, $parsed, null, 'web'); } catch (\Throwable $e) { error_log('[stats timeline] ingest: ' . $e->getMessage()); }
 
 // --- 6b. Live Syncs local counter ------------------------------------------
 // In 'local' mode we ignore the tracker's own (always-0) livesync value and instead count how
