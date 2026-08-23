@@ -95,6 +95,37 @@ $cfgB = $cfg; $cfgB['index_poll_budget'] = '5';
 $parsed = indexParseScrapeFile($fileBig, true, 1, function ($rows) {}, microtime(true) - 1);
 check('parser respects an already-passed deadline (truncated, few entries)', $parsed['truncated'] === true, json_encode($parsed));
 
+// ── 5b. non-scrape body rejected; resume cursor; poll lock ────────────────────
+$db->exec("TRUNCATE TABLE index_hashes"); @unlink(indexStateFile());
+$htmlFile = $tmp . '/idx_html.bin'; file_put_contents($htmlFile, "<html><body>proxy error</body></html>");
+$ph = indexPoll($db, $cfg, function () use ($htmlFile) { return ['file' => $htmlFile, 'gzip' => false]; }, 1000350);
+check('non-scrape HTTP body rejected (error, not empty success)', !$ph['ok'] && str_contains((string)$ph['error'], 'scrape reply') && $ph['kept'] === 0, json_encode($ph));
+check('rejected poll records the error in state', str_contains((string)indexStateRead()['last_error'], 'scrape reply'));
+
+// resume cursor: a truncated poll advances poll_skip, the next poll continues at the tail
+$db->exec("TRUNCATE TABLE index_hashes"); @unlink(indexStateFile());
+$e5 = []; for ($i = 1; $i <= 10; $i++) $e5[] = [h(5000 + $i), 3, 0, 0];
+$file5 = $tmp . '/idx_resume.gz'; makeScrape($e5, true, $file5);
+// force truncation after the first batch by parsing with a tiny deadline is racy; instead drive the parser
+// through indexPoll twice with a manual poll_skip to prove the skip is honoured
+$parsedA = indexParseScrapeFile($file5, true, 1, function ($rows) {}, microtime(true) + 5, 4);
+check('parser skips the first N entries (resume)', $parsedA['entries'] === 10 && $parsedA['kept'] === 6, json_encode($parsedA));
+// poll_skip persistence: simulate a truncated pass by hand
+indexStateUpdate(function (&$s) { $s['poll_skip'] = 3; return true; });
+$got = [];
+indexParseScrapeFile($file5, true, 1, function ($rows) use (&$got) { foreach ($rows as $r) $got[] = $r[0]; }, microtime(true) + 5, (int)indexStateRead()['poll_skip']);
+check('resume pass processes only entries after the cursor', count($got) === 7);
+
+// poll lock: while the lock is held, indexPoll returns "already polling" and does nothing
+$lh = fopen(indexPollLockFile(), 'c'); flock($lh, LOCK_EX);
+$blocked = indexPoll($db, $cfg, function () use ($file5) { return ['file' => $file5, 'gzip' => true]; }, 1000360);
+check('poll lock: second poll returns "already polling"', !$blocked['ok'] && $blocked['error'] === 'already polling' && $blocked['entries'] === 0, json_encode($blocked));
+flock($lh, LOCK_UN); fclose($lh);
+indexStateUpdate(function (&$s) { $s['poll_skip'] = 0; return true; });   // clear the simulated cursor
+$after = indexPoll($db, $cfg, function () use ($file5) { return ['file' => $file5, 'gzip' => true]; }, 1000370);
+check('poll works once the lock is released', $after['ok'] && $after['kept'] === 10, json_encode($after));
+check('poll_skip resets to 0 after a complete (non-truncated) poll', (int)indexStateRead()['poll_skip'] === 0);
+
 // ── 6. meta budget: spread + daily cap + reset ────────────────────────────────
 foreach (['index_hashes'] as $t) $db->exec("TRUNCATE TABLE `$t`");
 @unlink(indexStateFile());

@@ -48,11 +48,12 @@ function indexRowsCount(PDO $db): int {
 
 function indexStateFile(): string { return __DIR__ . '/../config/index_state.json'; }
 function indexStateLockFile(): string { return __DIR__ . '/../config/index_state.lock'; }
+function indexPollLockFile(): string { return __DIR__ . '/../config/index_poll.lock'; }
 
 function indexStateDefaults(): array {
     return [
         'last_poll_at' => 0, 'last_poll' => null, 'last_error' => null, 'last_error_at' => 0,
-        'meta_budget_day' => '', 'meta_budget_used' => 0,
+        'meta_budget_day' => '', 'meta_budget_used' => 0, 'poll_skip' => 0,
         'last_prune_at' => 0, 'last_prune' => null, 'last_tick_at' => 0,
     ];
 }
@@ -132,9 +133,11 @@ function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array 
 /**
  * Stream-parse a scrape file (gzip or plain), keeping entries with complete >= $minSeeders. Calls
  * $onBatch(array $rows) every IDX_BATCH kept rows ($rows = [[hash_hex, seeders, leechers, completed], ...]).
- * Stops early once $deadline (microtime) passes. Returns ['entries'=>int,'kept'=>int,'truncated'=>bool].
+ * Skips the first $skip entries (resume cursor — see indexPoll), stops early once $deadline (microtime)
+ * passes. Returns ['entries'=>int (total seen incl. skipped),'kept'=>int,'truncated'=>bool].
+ * Rejects a body that does not begin like a bencoded scrape reply (`d5:files…`).
  */
-function indexParseScrapeFile(string $file, bool $gzip, int $minSeeders, callable $onBatch, float $deadline): array {
+function indexParseScrapeFile(string $file, bool $gzip, int $minSeeders, callable $onBatch, float $deadline, int $skip = 0): array {
     $out = ['entries' => 0, 'kept' => 0, 'truncated' => false];
     $fh = $gzip ? @gzopen($file, 'rb') : @fopen($file, 'rb');
     if (!$fh) { $out['error'] = 'cannot open scrape file'; return $out; }
@@ -143,21 +146,28 @@ function indexParseScrapeFile(string $file, bool $gzip, int $minSeeders, callabl
     $close = $gzip ? 'gzclose' : 'fclose';
     $carry = '';
     $batch = [];
+    $first = true;
     try {
         while (!$eof($fh)) {
             $chunk = $read($fh, 1 << 20);
             if ($chunk === false || $chunk === '') break;
             $buf = $carry . $chunk;
+            if ($first) {
+                $first = false;
+                // a real scrape reply starts with d5:filesd… — reject an HTML error page / wrong endpoint
+                if (strncmp($buf, 'd5:files', 8) !== 0) { $out['error'] = 'source did not look like a scrape reply'; break; }
+            }
             $last = 0;
             if (preg_match_all(IDX_ENTRY_RE, $buf, $mm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
                 foreach ($mm as $e) {
                     $out['entries']++;
+                    $last = $e[0][1] + strlen($e[0][0]);
+                    if ($out['entries'] <= $skip) continue;   // resume cursor: already processed in a prior pass
                     $c = (int)$e[2][0];
                     if ($c >= $minSeeders) {
                         $batch[] = [bin2hex($e[1][0]), $c, (int)$e[4][0], (int)$e[3][0]];
                         if (count($batch) >= IDX_BATCH) { $onBatch($batch); $out['kept'] += count($batch); $batch = []; }
                     }
-                    $last = $e[0][1] + strlen($e[0][0]);
                 }
             }
             $carry = substr($buf, $last);
@@ -211,54 +221,69 @@ function indexUpsertBatch(PDO $db, array $rows, int $graceDays, int $protectDays
 function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = null, ?string $tmpDir = null): array {
     $now = $now ?? time();
     $out = ['ok' => false, 'entries' => 0, 'kept' => 0, 'truncated' => false, 'removed_wl' => 0, 'removed_ban' => 0, 'bytes' => 0, 'ms' => 0, 'error' => null];
-    $tmpDir = $tmpDir ?? sys_get_temp_dir();
-    $graceDays = indexGraceDays($cfg); $protectDays = indexProtectDays($cfg); $minSeeders = indexMinSeeders($cfg);
-    $ownFile = false;
-    if ($fetcher !== null) {
-        $f = $fetcher();
-        $file = $f['file'] ?? null; $gzip = (bool)($f['gzip'] ?? false); $out['bytes'] = (int)($f['bytes'] ?? (($file && is_file($file)) ? filesize($file) : 0));
-        if (!$file || !is_file($file)) { $out['error'] = $f['error'] ?? 'fetch failed'; }
-    } else {
-        $fetched = indexFetchFullScrape(indexSourceUrl($cfg), min(90, max(5, indexPollBudget($cfg))), $tmpDir);
-        $file = $fetched['file']; $gzip = $fetched['gzip']; $out['bytes'] = $fetched['bytes']; $out['ms'] = $fetched['ms'];
-        $ownFile = $file !== null;
-        if ($fetched['error']) $out['error'] = $fetched['error'];
-    }
-    if ($out['error'] !== null || !$file) {
-        indexStateUpdate(function (array &$s) use ($out, $now) { $s['last_error'] = $out['error']; $s['last_error_at'] = $now; return true; });
+    // one poll at a time across processes (janitor CLI + web "Poll now" + a double click). Non-blocking:
+    // a second caller returns immediately instead of starting a duplicate full scrape.
+    $lockH = @fopen(indexPollLockFile(), 'c');
+    if (!$lockH || !@flock($lockH, LOCK_EX | LOCK_NB)) {
+        if ($lockH) @fclose($lockH);
+        $out['error'] = 'already polling';
         return $out;
     }
-    $t0 = microtime(true);
-    $deadline = $t0 + indexPollBudget($cfg);
     try {
-        $onBatch = function (array $rows) use ($db, $graceDays, $protectDays) {
-            $db->beginTransaction();
-            try { indexUpsertBatch($db, $rows, $graceDays, $protectDays); $db->commit(); }
-            catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
-        };
-        $p = indexParseScrapeFile($file, $gzip, $minSeeders, $onBatch, $deadline);
-        $out['entries'] = $p['entries']; $out['kept'] = $p['kept']; $out['truncated'] = $p['truncated'];
-        if (isset($p['error'])) $out['error'] = $p['error'];
-        // drop anything that lives in the whitelist or the ban list — those have their own tables
-        $out['removed_wl'] = (int)$db->exec("DELETE i FROM index_hashes i JOIN whitelist w ON w.info_hash = i.info_hash");
-        $out['removed_ban'] = (int)$db->exec("DELETE i FROM index_hashes i JOIN banned_hashes b ON b.info_hash = i.info_hash");
-        $out['ok'] = $out['error'] === null;
-    } catch (\Throwable $e) {
-        $out['error'] = 'poll: ' . $e->getMessage();
-        error_log('[index poll] ' . $e->getMessage());
+        $tmpDir = $tmpDir ?? sys_get_temp_dir();
+        $graceDays = indexGraceDays($cfg); $protectDays = indexProtectDays($cfg); $minSeeders = indexMinSeeders($cfg);
+        $skip = max(0, (int)indexStateRead()['poll_skip']);   // resume cursor from the previous truncated pass
+        $ownFile = false;
+        if ($fetcher !== null) {
+            $f = $fetcher();
+            $file = $f['file'] ?? null; $gzip = (bool)($f['gzip'] ?? false); $out['bytes'] = (int)($f['bytes'] ?? (($file && is_file($file)) ? filesize($file) : 0));
+            if (!$file || !is_file($file)) { $out['error'] = $f['error'] ?? 'fetch failed'; }
+        } else {
+            $fetched = indexFetchFullScrape(indexSourceUrl($cfg), min(90, max(5, indexPollBudget($cfg))), $tmpDir);
+            $file = $fetched['file']; $gzip = $fetched['gzip']; $out['bytes'] = $fetched['bytes']; $out['ms'] = $fetched['ms'];
+            $ownFile = $file !== null;
+            if ($fetched['error']) $out['error'] = $fetched['error'];
+        }
+        if ($out['error'] !== null || !$file) {
+            indexStateUpdate(function (array &$s) use ($out, $now) { $s['last_error'] = $out['error']; $s['last_error_at'] = $now; return true; });
+            return $out;
+        }
+        $t0 = microtime(true);
+        $deadline = $t0 + indexPollBudget($cfg);
+        try {
+            $onBatch = function (array $rows) use ($db, $graceDays, $protectDays) {
+                $db->beginTransaction();
+                try { indexUpsertBatch($db, $rows, $graceDays, $protectDays); $db->commit(); }
+                catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
+            };
+            $p = indexParseScrapeFile($file, $gzip, $minSeeders, $onBatch, $deadline, $skip);
+            $out['entries'] = $p['entries']; $out['kept'] = $p['kept']; $out['truncated'] = $p['truncated'];
+            if (isset($p['error'])) $out['error'] = $p['error'];
+            // drop anything that lives in the whitelist or the ban list — those have their own tables
+            $out['removed_wl'] = (int)$db->exec("DELETE i FROM index_hashes i JOIN whitelist w ON w.info_hash = i.info_hash");
+            $out['removed_ban'] = (int)$db->exec("DELETE i FROM index_hashes i JOIN banned_hashes b ON b.info_hash = i.info_hash");
+            $out['ok'] = $out['error'] === null;
+        } catch (\Throwable $e) {
+            $out['error'] = 'poll: ' . $e->getMessage();
+            error_log('[index poll] ' . $e->getMessage());
+        } finally {
+            if ($ownFile) @unlink($file);
+        }
+        $out['ms'] = $out['ms'] + (int)round((microtime(true) - $t0) * 1000);
+        $skipNext = ($out['ok'] && $out['truncated']) ? $out['entries'] : 0;   // resume at the tail next time; reset once the whole file was covered
+        indexStateUpdate(function (array &$s) use ($out, $now, $skipNext) {
+            $s['last_poll_at'] = $now;
+            $s['poll_skip'] = $skipNext;
+            $s['last_poll'] = ['at' => $now, 'entries' => $out['entries'], 'kept' => $out['kept'], 'truncated' => $out['truncated'],
+                               'removed_wl' => $out['removed_wl'], 'removed_ban' => $out['removed_ban'], 'bytes' => $out['bytes'], 'ms' => $out['ms']];
+            if ($out['error'] !== null) { $s['last_error'] = $out['error']; $s['last_error_at'] = $now; }
+            elseif ($out['ok']) { $s['last_error'] = null; }
+            return true;
+        });
+        return $out;
     } finally {
-        if ($ownFile) @unlink($file);
+        @flock($lockH, LOCK_UN); @fclose($lockH);
     }
-    $out['ms'] = $out['ms'] + (int)round((microtime(true) - $t0) * 1000);
-    indexStateUpdate(function (array &$s) use ($out, $now) {
-        $s['last_poll_at'] = $now;
-        $s['last_poll'] = ['at' => $now, 'entries' => $out['entries'], 'kept' => $out['kept'], 'truncated' => $out['truncated'],
-                           'removed_wl' => $out['removed_wl'], 'removed_ban' => $out['removed_ban'], 'bytes' => $out['bytes'], 'ms' => $out['ms']];
-        if ($out['error'] !== null) { $s['last_error'] = $out['error']; $s['last_error_at'] = $now; }
-        elseif ($out['ok']) { $s['last_error'] = null; }
-        return true;
-    });
-    return $out;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -302,11 +327,16 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
     $st = indexStateRead();
     if (!$force && $now - (int)$st['last_prune_at'] < IDX_PRUNE_EVERY) return null;
     $res = ['expired' => 0, 'capped' => 0, 'orphan_files' => 0];
-    // expired: never-resolved past grace, or done past protection
-    $res['expired'] = (int)$db->exec(
-        "DELETE FROM index_hashes WHERE
-            (meta_status <> 'done' AND grace_until IS NOT NULL AND grace_until < NOW())
-         OR (meta_status  = 'done' AND protected_until IS NOT NULL AND protected_until < NOW())");
+    // expired: never-resolved past grace, or done past protection. Batched with LIMIT so one prune never
+    // takes a huge row-lock set on a 200k table (each chunk autocommits — prune runs outside a transaction).
+    do {
+        $nd = (int)$db->exec(
+            "DELETE FROM index_hashes WHERE
+                ((meta_status <> 'done' AND grace_until IS NOT NULL AND grace_until < NOW())
+              OR (meta_status  = 'done' AND protected_until IS NOT NULL AND protected_until < NOW()))
+             LIMIT 5000");
+        $res['expired'] += $nd;
+    } while ($nd === 5000);
     // cap: delete oldest unprotected rows over the limit
     $max = indexMaxRows($cfg);
     $total = (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn();

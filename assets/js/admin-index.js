@@ -53,6 +53,8 @@
         let data;
         try { data = await apiCall('admin/fetch_index&' + qs.toString()); }
         catch (e) { showToast('Failed to load index: ' + e.message, 'error'); return; }
+        // apiCall resolves on non-2xx too (error body carries .error) — don't render an auth/server error as "empty"
+        if (data.error) { showToast('Failed to load index: ' + data.error, 'error'); return; }
         state.rows = data.rows || [];
         renderRows(data);
         $('idx-total').textContent = (data.total || 0).toLocaleString() + ' rows';
@@ -160,9 +162,9 @@
         ]);
         body.appendChild(actions);
         actions.querySelector('#m-promote').addEventListener('click', () => promoteHashes([hash], true));
-        actions.querySelector('#m-meta').addEventListener('click', async () => { try { const r = await apiCall('admin/index_fetch_meta', 'POST', { hashes: [hash] }); showToast('Queued ' + r.queued + ' for metadata'); } catch (e) { showToast(e.message, 'error'); } });
+        actions.querySelector('#m-meta').addEventListener('click', async () => { try { const r = await apiCall('admin/index_fetch_meta', 'POST', { hashes: [hash] }); if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; } showToast('Queued ' + r.queued + ' for metadata'); } catch (e) { showToast(e.message, 'error'); } });
         actions.querySelector('#m-scrape').addEventListener('click', async (e) => { try { const r = await apiCall('admin/index_scrape', 'POST', { hash }); if (r.success) { showToast('Scraped: ' + r.scrape.seeders + ' / ' + r.scrape.leechers); openModal(hash); } else showToast(r.error || 'Scrape failed', 'warning'); } catch (er) { showToast(er.message, 'error'); } });
-        actions.querySelector('#m-delete').addEventListener('click', async () => { if (await confirmAction('Delete index entry', 'Remove this hash from the index?', { danger: true, okLabel: 'Delete' })) { try { await apiCall('admin/index_delete', 'POST', { hashes: [hash] }); showToast('Deleted'); modal.hide(); state.selected.delete(hash); load(); loadStatus(); } catch (e) { showToast(e.message, 'error'); } } });
+        actions.querySelector('#m-delete').addEventListener('click', async () => { if (await confirmAction('Delete index entry', 'Remove this hash from the index?', { danger: true, okLabel: 'Delete' })) { try { const r = await apiCall('admin/index_delete', 'POST', { hashes: [hash] }); if (!r.success || r.error) { showToast(r.error || 'Delete failed', 'error'); return; } showToast('Deleted'); modal.hide(); state.selected.delete(hash); load(); loadStatus(); } catch (e) { showToast(e.message, 'error'); } } });
         // files
         if (d.files && d.files.length) {
             const list = el('div', { className: 'idx-files mt-2' }, [el('h6', { className: 'text-muted', text: 'Files (' + d.files.length + (d.files_truncated ? '+' : '') + ')' })]);
@@ -179,6 +181,7 @@
         if (!(await confirmAction('Promote to whitelist', 'Add ' + hashes.length + ' hash(es) to the whitelist (source: admin)? They will be served by the tracker.', { okLabel: 'Promote' }))) return;
         try {
             const r = await apiCall('admin/index_promote', 'POST', { hashes });
+            if (!r.success || r.error) { showToast(r.error || 'Promote failed', 'error'); return; }
             showToast('Promoted ' + r.promoted + (r.summary ? ' (added ' + (r.summary.added || 0) + ', existed ' + (r.summary.exists || 0) + ')' : ''));
             if (fromModal && modal) modal.hide();
             hashes.forEach(h => state.selected.delete(h));
@@ -189,15 +192,15 @@
         const hashes = [...state.selected];
         if (!hashes.length) return;
         if (!(await confirmAction('Delete from index', 'Delete ' + hashes.length + ' hash(es) from the index?', { danger: true, okLabel: 'Delete' }))) return;
-        try { const r = await apiCall('admin/index_delete', 'POST', { hashes }); showToast('Deleted ' + r.removed); state.selected.clear(); load(); loadStatus(); } catch (e) { showToast(e.message, 'error'); }
+        try { const r = await apiCall('admin/index_delete', 'POST', { hashes }); if (!r.success || r.error) { showToast(r.error || 'Delete failed', 'error'); return; } showToast('Deleted ' + r.removed); state.selected.clear(); load(); loadStatus(); } catch (e) { showToast(e.message, 'error'); }
     }
     async function metaSelected() {
         const hashes = [...state.selected];
         if (!hashes.length) return;
-        try { const r = await apiCall('admin/index_fetch_meta', 'POST', { hashes }); showToast('Queued ' + r.queued + ' for metadata'); } catch (e) { showToast(e.message, 'error'); }
+        try { const r = await apiCall('admin/index_fetch_meta', 'POST', { hashes }); if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; } showToast('Queued ' + r.queued + ' for metadata'); } catch (e) { showToast(e.message, 'error'); }
     }
     async function metaScope(scope) {
-        try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope }); showToast('Queued ' + r.queued + ' for metadata'); loadStatus(); } catch (e) { showToast(e.message, 'error'); }
+        try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope }); if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; } showToast('Queued ' + r.queued + ' for metadata'); loadStatus(); } catch (e) { showToast(e.message, 'error'); }
     }
     async function scrapeBulk(scope) {
         const label = $('idx-scrape-label');

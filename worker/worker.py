@@ -246,24 +246,28 @@ class Worker:
             if now - last_stale >= 60:
                 self.reset_stale()
                 last_stale = now
-            # process alerts
-            for a in self.ses.pop_alerts():
-                if isinstance(a, lt.metadata_received_alert):
-                    h = a.handle
-                    for token, item in list(self.active.items()):
-                        if item["handle"] == h:
-                            try:
-                                ti = h.torrent_file()
-                            except Exception:
-                                ti = None
-                            if ti is not None:
-                                self.finish(token, True, ti)
-                            break
-                elif isinstance(a, lt.torrent_error_alert):
-                    for token, item in list(self.active.items()):
-                        if item["handle"] == a.handle:
-                            log.debug("torrent error #%s: %s", item["row"]["id"], a.message())
-                            break
+            # process alerts (never let one malformed alert kill the daemon)
+            try:
+                for a in self.ses.pop_alerts():
+                    if isinstance(a, lt.metadata_received_alert):
+                        h = a.handle
+                        for token, item in list(self.active.items()):
+                            if item["handle"] == h:
+                                try:
+                                    ti = h.torrent_file()
+                                except Exception:
+                                    ti = None
+                                if ti is not None:
+                                    self.finish(token, True, ti)
+                                break
+                    elif isinstance(a, lt.torrent_error_alert):
+                        for token, item in list(self.active.items()):
+                            if item["handle"] == a.handle:
+                                # index rows have no 'id' (keyed by info_hash) — use the same fallback as start()
+                                log.debug("torrent error #%s: %s", item["row"].get("id", item["row"]["info_hash"]), a.message())
+                                break
+            except Exception as e:
+                log.warning("alert processing: %s", e)
             # deadlines
             for token, item in list(self.active.items()):
                 try:

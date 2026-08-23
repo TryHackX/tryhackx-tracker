@@ -40,17 +40,16 @@ whitelist queue is empty, and only rows whose `meta_requested_at` is due (the ja
 across the day under `index_meta_daily_budget`). Leave `index_table` empty to keep whitelist-only behaviour.
 
 ```sql
-GRANT SELECT (info_hash, magnet_link, meta_status, meta_claim, meta_claimed_at, meta_priority, meta_requested_at),
+GRANT SELECT (info_hash, meta_status, meta_claim, meta_claimed_at, meta_priority, meta_requested_at),
       UPDATE (name, total_size, files_count, piece_length, meta_status, meta_claim, meta_claimed_at, meta_fetched_at, meta_error)
       ON tracker.index_hashes TO 'tracker_meta'@'localhost';
 GRANT SELECT, INSERT, DELETE ON tracker.index_files TO 'tracker_meta'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-Note: `index_hashes` has no `magnet_link` column, so the `SELECT (… magnet_link …)` grant above simply
-covers the columns the worker reads across both tables — the worker only selects `info_hash` from the
-index and builds the magnet from the hash. If you prefer an exact grant, drop `magnet_link` from the
-index grant: `GRANT SELECT (info_hash, meta_status, meta_claim, meta_claimed_at, meta_priority, meta_requested_at) ON tracker.index_hashes …`.
+Note: `index_hashes` has no `magnet_link` column (the worker only selects `info_hash` from the index and
+builds the magnet from the hash), so the grant above lists exactly the columns it reads — a column-level
+`GRANT` naming a non-existent column is rejected by MariaDB, so do not add `magnet_link` here.
 
 ```bash
 sudo systemctl daemon-reload
