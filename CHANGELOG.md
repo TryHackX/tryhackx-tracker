@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] — 2026-08-23
+
+### Added
+- **Timeline ranger** — a Binance-style mini overview chart under the request-rate pane with a
+  draggable / resizable window: pan and freely narrow the visible range; drag-zoom on either chart and
+  the window stay in sync, double-click resets. Range buttons now go 24h / 7d / 2w / 1m / **3m**
+  (API accepts `90d`/`3m`; `60d`/`2m` still work).
+- The **Index page** shows the shared swarm-timeline card too (same data as the stats page and the
+  Whitelist card), and the chart gained an **"Indexed hashes"** series (off by default — toggle it in
+  the legend to watch the observed-hash catalogue grow during OPEN hours).
+
+### Fixed
+- Legend rows are vertically aligned (marker / label / value baselines matched).
+- The brush window now positions correctly on the first data load (deferred until the ranger scale is
+  committed; `setTimeout`, not rAF, so background tabs work too).
+- Settings → Tracker mode explains that **Scheduled mode overrides a manually saved mode** (the
+  janitor re-applies the schedule within a minute) and that the binary swap is done by
+  `tracker-mode.sh`, not by the setting alone — saving `tracker_mode` used to look like it
+  "didn't stick" with the schedule on.
+
 ## [1.5.0] — 2026-08-23
 
 ### Added

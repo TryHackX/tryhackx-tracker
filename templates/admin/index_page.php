@@ -7,6 +7,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
+    <?php if (statsTimelineEnabled($cfg)): ?>
+    <link rel="stylesheet" href="<?= $baseUrl ?>assets/vendor/uplot/uPlot.min.css<?= assetVer('assets/vendor/uplot/uPlot.min.css') ?>">
+    <?php endif; ?>
 </head>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>">
     <div class="admin-container admin-wide wl-page">
@@ -32,6 +35,21 @@
             </div>
             <p class="idx-note" id="idx-disabled-note" style="display:none">The index is <strong>disabled</strong>. Enable it in <a href="<?= $baseUrl ?>?action=settings#section-index">Settings &rarr; Index</a> (measure the full-scrape cost during OPEN hours first).</p>
         </div>
+
+        <?php if (statsTimelineEnabled($cfg)): ?>
+        <!-- Swarm timeline — the SAME shared timeline as the public stats page and the Whitelist card;
+             toggle the "Indexed hashes" series in the legend to see the index size over time. -->
+        <div class="wl-status-card tl-card" id="idx-timeline-card">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-graph-up"></i> Swarm timeline <span class="wl-status-updated">shared timeline (same data as the stats page) · toggle &ldquo;Indexed hashes&rdquo; in the legend</span></h6>
+                <div class="wl-status-actions">
+                    <a href="<?= $baseUrl ?>?action=settings#section-timeline" class="btn btn-sm btn-outline-secondary" title="Timeline settings"><i class="bi bi-gear"></i> Settings</a>
+                    <button type="button" class="btn btn-sm btn-outline-info" data-tl-collapse="idx-timeline" aria-expanded="true" aria-controls="idx-timeline"><i class="bi bi-chevron-up"></i> <span>Collapse</span></button>
+                </div>
+            </div>
+            <div id="idx-timeline" data-timeline data-range="24h" data-compact="1"></div>
+        </div>
+        <?php endif; ?>
 
         <div class="wl-view" id="view-index">
             <div class="admin-toolbar-card">
@@ -134,5 +152,9 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-index.js<?= assetVer('assets/js/admin-index.js') ?>"></script>
+    <?php if (statsTimelineEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/stats-timeline.js<?= assetVer('assets/js/stats-timeline.js') ?>"></script>
+    <?php endif; ?>
 </body>
 </html>

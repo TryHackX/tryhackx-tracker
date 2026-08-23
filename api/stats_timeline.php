@@ -1,6 +1,6 @@
 <?php
 /**
- * GET stats_timeline&range=24h|7d|14d|30d|60d   (aliases 2w / 1m / 2m)
+ * GET stats_timeline&range=24h|7d|14d|30d|60d|90d   (aliases 2w / 1m / 2m / 3m)
  *
  * Series for the swarm timeline chart (includes/stats_timeline.php). Public when
  * stats_timeline_public=1, otherwise admins only (full session check, like the other admin pollers).
@@ -21,7 +21,7 @@ if (!rateLimitAllow('timeline', ipBucket(getClientIp($cfg)), 60, 60)) jsonRespon
 
 $range = (string)($_GET['range'] ?? '24h');
 $rangeSec = statsTimelineRangeSeconds($range);
-if ($rangeSec === null) jsonResponse(['error' => 'Unknown range. Use 24h, 7d, 14d, 30d or 60d.'], 400);
+if ($rangeSec === null) jsonResponse(['error' => 'Unknown range. Use 24h, 7d, 14d, 30d, 60d or 90d.'], 400);
 $rangeKey = statsTimelineRangeKey($range);
 
 $wanted = null;

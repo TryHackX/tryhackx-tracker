@@ -3,25 +3,27 @@
  *
  * Mount points: any element with [data-timeline]; attributes:
  *   data-api   = api base (".../api.php?endpoint=")   (falls back to APP_API / body[data-api-base])
- *   data-range = initial range (24h|7d|14d|30d|60d)    (localStorage remembers the last choice)
+ *   data-range = initial range (24h|7d|14d|30d|90d)    (localStorage remembers the last choice)
  *   data-compact = "1" → shorter charts (admin card)
  *
- * Two synced charts: swarm gauges (seeds / leechers / peers on the left axis, torrents + whitelisted
- * torrents on the right axis) and request rates (UDP / HTTP announces, connects, scrapes per second,
- * derived server-side from OpenTracker's cumulative counters). Hours in OPEN (blacklist) mode are
+ * Three panes: swarm gauges (seeds / leechers / peers on the left axis, torrents + whitelisted
+ * torrents + indexed hashes on the right axis), request rates (UDP / HTTP announces, connects, scrapes per second,
+ * derived server-side from OpenTracker cumulative counters), and a Binance-style ranger (mini overview
+ * with a draggable/resizable window that pans/zooms both charts). Hours in OPEN (blacklist) mode are
  * shaded; click a legend entry to hide/show a series, drag to zoom, double-click to reset.
  */
 (function () {
     'use strict';
     if (typeof window === 'undefined') return;
 
-    const RANGES = [['24h', '24h'], ['7d', '7d'], ['14d', '2w'], ['30d', '1m'], ['60d', '2m']];
+    const RANGES = [['24h', '24h'], ['7d', '7d'], ['14d', '2w'], ['30d', '1m'], ['90d', '3m']];
     const GAUGES = [
         { key: 'seeds',           label: 'Seeds',                color: '#4a9eff', scale: 'peers',    on: true  },
         { key: 'leechers',        label: 'Leechers',             color: '#ff5252', scale: 'peers',    on: true  },
         { key: 'peers',           label: 'Peers',                color: '#ffb74d', scale: 'peers',    on: true  },
         { key: 'torrents',        label: 'Torrents',             color: '#b388ff', scale: 'torrents', on: true  },
         { key: 'whitelist_count', label: 'Whitelisted torrents', color: '#9e9e9e', scale: 'torrents', on: false },
+        { key: 'index_rows',      label: 'Indexed hashes',       color: '#26a69a', scale: 'torrents', on: false },
     ];
     const RATES = [
         { key: 'udp_rps',     label: 'UDP announces/s',  color: '#26c6da', on: true  },
@@ -71,7 +73,7 @@
 
     const axisBase = () => ({ stroke: '#8a8a9a', font: '11px system-ui, -apple-system, Segoe UI, sans-serif', ticks: { stroke: '#2a2a3a', width: 1 }, grid: { stroke: 'rgba(255,255,255,0.06)', width: 1 } });
 
-    function makeChart(host, width, height, defs, yFmt, legendFmt, payloadRef, sync, isRate) {
+    function makeChart(host, width, height, defs, yFmt, legendFmt, payloadRef, sync, isRate, onXScale) {
         const scales = { x: { time: true } };
         const axes = [Object.assign(axisBase(), { space: 70, values: (u, vals) => vals.map(v => {
             const d = new Date(v * 1000);
@@ -94,7 +96,10 @@
             width, height, scales, axes, series,
             legend: { live: true },
             cursor: { x: true, y: false, sync: sync ? { key: sync, setSeries: false } : undefined, drag: { x: true, y: false, setScale: true } },
-            hooks: { drawClear: [u => drawOpenSpans(u, payloadRef.current)] },
+            hooks: {
+                drawClear: [u => drawOpenSpans(u, payloadRef.current)],
+                setScale: onXScale ? [(u, key) => { if (key === 'x') onXScale(u); }] : [],
+            },
             padding: [8, 8, 0, 4],
         };
         const data = [[]].concat(defs.map(() => []));
@@ -115,24 +120,115 @@
         RANGES.forEach(([key, label]) => { const b = el('button', 'tl-range-btn' + (key === range ? ' active' : ''), label); b.type = 'button'; b.dataset.range = key; ranges.appendChild(b); });
         const meta = el('div', 'tl-meta');
         const status = el('span', 'tl-status', 'Loading…');
-        const hint = el('span', 'tl-hint', 'Click a legend entry to toggle a series · drag to zoom · double-click to reset · shaded = OPEN hours');
+        const hint = el('span', 'tl-hint', 'Click a legend entry to toggle a series · drag on a chart to zoom · drag / resize the window on the mini-chart to pan · double-click to reset · shaded = OPEN hours');
         meta.appendChild(status);
         head.appendChild(ranges); head.appendChild(meta);
         container.appendChild(head);
         const mainHost = el('div', 'tl-chart tl-chart-main');
         const rateTitle = el('div', 'tl-subtitle', 'Requests per second (derived from the tracker counters)');
         const rateHost = el('div', 'tl-chart tl-chart-rate');
+        const rangerHost = el('div', 'tl-chart tl-ranger');
         const empty = el('div', 'tl-empty d-hidden', 'No samples yet — the janitor timer records one sample per interval; come back in a few minutes.');
-        container.appendChild(mainHost); container.appendChild(rateTitle); container.appendChild(rateHost); container.appendChild(empty); container.appendChild(hint);
+        container.appendChild(mainHost); container.appendChild(rateTitle); container.appendChild(rateHost); container.appendChild(rangerHost); container.appendChild(empty); container.appendChild(hint);
 
         const payloadRef = { current: null };
         const syncKey = 'tl-' + Math.random().toString(36).slice(2);
-        const mainH = compact ? 220 : 300, rateH = compact ? 110 : 140;
+        const mainH = compact ? 220 : 300, rateH = compact ? 110 : 140, rangerH = 46;
         const MIN_W = 200;   // phones: the card is ~300 px wide; a larger floor would overflow it
         const w = Math.max(MIN_W, container.clientWidth || 800);
-        const main = makeChart(mainHost, w, mainH, GAUGES, fmtAxis, fmtInt, payloadRef, syncKey, false);
-        const rate = makeChart(rateHost, w, rateH, RATES, fmtAxis, fmtRate, payloadRef, syncKey, true);
+        // xScaleSync / updateBrush are function declarations (hoisted) so the charts can reference them at init
+        const main = makeChart(mainHost, w, mainH, GAUGES, fmtAxis, fmtInt, payloadRef, syncKey, false, (u) => xScaleSync(u));
+        const rate = makeChart(rateHost, w, rateH, RATES, fmtAxis, fmtRate, payloadRef, syncKey, true, (u) => xScaleSync(u));
         // charts with the same cursor.sync.key subscribe themselves to the uPlot sync group
+
+        // ── ranger (Binance-style brush): a mini overview chart with a draggable / resizable window ──
+        const ranger = new uPlot({
+            width: w, height: rangerH,
+            scales: { x: { time: true }, y: { auto: true, range: (u, min, max) => [0, Math.max(1, (isFinite(max) ? max : 0) * 1.05)] } },
+            axes: [{ show: false }, { show: false }],
+            legend: { show: false },
+            cursor: { show: false, drag: { x: false, y: false } },
+            series: [{}, { stroke: '#4a9eff', width: 1, fill: 'rgba(74, 158, 255, 0.10)', points: { show: false }, spanGaps: false }],
+            padding: [2, 8, 2, 4],
+        }, [[], []], rangerHost);
+        const over = ranger.over || ranger.root.querySelector('.u-over');
+        const brush = el('div', 'tl-brush');
+        const hL = el('div', 'tl-brush-h tl-brush-l');
+        const hR = el('div', 'tl-brush-h tl-brush-r');
+        brush.appendChild(hL); brush.appendChild(hR);
+        over.appendChild(brush);
+        over.style.touchAction = 'none';
+
+        let syncing = false;
+        function dataExt() { const t = main.data && main.data[0]; return (t && t.length > 1) ? [t[0], t[t.length - 1]] : null; }
+        function updateBrush() {
+            const ext = dataExt();
+            if (!ext) { brush.style.display = 'none'; return; }
+            const l = ranger.valToPos(Math.max(ext[0], main.scales.x.min), 'x');
+            const r = ranger.valToPos(Math.min(ext[1], main.scales.x.max), 'x');
+            // right after the FIRST setData the ranger scale may not be committed yet → NaN positions
+            if (!isFinite(l) || !isFinite(r)) { brush.style.display = 'none'; return; }
+            brush.style.display = '';
+            brush.style.left = Math.max(0, Math.min(l, r)) + 'px';
+            brush.style.width = Math.max(6, Math.abs(r - l)) + 'px';
+        }
+        /** Set the visible x window on both charts (clamped to the loaded data). */
+        function applyWindow(min, max) {
+            const ext = dataExt(); if (!ext) return;
+            const minSpan = Math.max((payloadRef.current && payloadRef.current.step || 60) * 3, (ext[1] - ext[0]) * 0.01);
+            min = Math.max(ext[0], Math.min(min, ext[1] - minSpan));
+            max = Math.min(ext[1], Math.max(max, min + minSpan));
+            syncing = true;
+            main.setScale('x', { min, max });
+            rate.setScale('x', { min, max });
+            syncing = false;
+            updateBrush();
+        }
+        /** A drag-zoom / double-click reset on one chart mirrors to the other and to the brush. */
+        function xScaleSync(u) {
+            if (syncing) return;
+            syncing = true;
+            const s = u.scales.x;
+            (u === main ? rate : main).setScale('x', { min: s.min, max: s.max });
+            syncing = false;
+            updateBrush();
+        }
+        let dragMode = null, dragStartX = 0, dragWin = null;
+        const startDrag = (mode) => (ev) => {
+            if (!dataExt()) return;
+            dragMode = mode; dragStartX = ev.clientX;
+            dragWin = [main.scales.x.min, main.scales.x.max];
+            ev.preventDefault(); ev.stopPropagation();
+        };
+        brush.addEventListener('pointerdown', startDrag('move'));
+        hL.addEventListener('pointerdown', startDrag('l'));
+        hR.addEventListener('pointerdown', startDrag('r'));
+        over.addEventListener('pointerdown', (ev) => {           // click outside the window: centre it there, then drag
+            if (ev.target !== over) return;
+            const ext = dataExt(); if (!ext) return;
+            const rect = over.getBoundingClientRect();
+            const tAt = ranger.posToVal(ev.clientX - rect.left, 'x');
+            const span = main.scales.x.max - main.scales.x.min;
+            applyWindow(tAt - span / 2, tAt + span / 2);
+            dragMode = 'move'; dragStartX = ev.clientX;
+            dragWin = [main.scales.x.min, main.scales.x.max];
+            ev.preventDefault();
+        });
+        document.addEventListener('pointermove', (ev) => {
+            if (!dragMode) return;
+            const ext = dataExt(); if (!ext) { dragMode = null; return; }
+            const s = ranger.scales.x;
+            const secPerPx = (s.max - s.min) / Math.max(1, over.clientWidth);
+            const dt = (ev.clientX - dragStartX) * secPerPx;
+            if (dragMode === 'move') {
+                const span = dragWin[1] - dragWin[0];
+                let nmin = Math.max(ext[0], Math.min(dragWin[0] + dt, ext[1] - span));
+                applyWindow(nmin, nmin + span);
+            } else if (dragMode === 'l') applyWindow(dragWin[0] + dt, dragWin[1]);
+            else applyWindow(dragWin[0], dragWin[1] + dt);
+        });
+        document.addEventListener('pointerup', () => { dragMode = null; });
+        over.addEventListener('dblclick', () => { const ext = dataExt(); if (ext) applyWindow(ext[0], ext[1]); });
 
         let seq = 0, pending = false, timer = null, lastOk = 0;
         // a drag-zoom narrows the x scale below the data extents; background refreshes must not undo it
@@ -143,9 +239,15 @@
             const t = p.t || [];
             put(main, [t].concat(GAUGES.map(d => p[d.key] || t.map(() => null))), keepZoom);
             put(rate, [t].concat(RATES.map(d => p[d.key] || t.map(() => null))), keepZoom);
+            ranger.setData([t, p.seeds || t.map(() => null)]);
+            // the ranger's auto x scale may be committed after this tick — try now AND on the next task
+            // (setTimeout, not rAF: rAF never fires in hidden/background tabs)
+            updateBrush();
+            setTimeout(updateBrush, 0);
             const none = !t.length;
             empty.classList.toggle('d-hidden', !none);
             mainHost.classList.toggle('d-hidden', none); rateHost.classList.toggle('d-hidden', none); rateTitle.classList.toggle('d-hidden', none);
+            rangerHost.classList.toggle('d-hidden', none);
             const stepTxt = p.step >= 3600 ? (p.step / 3600) + ' h' : (p.step >= 60 ? (p.step / 60) + ' min' : p.step + ' s');
             status.textContent = none ? 'No data for this range yet' : (p.points.toLocaleString() + ' points · ' + stepTxt + ' resolution (' + p.table + ') · updated ' + fmtTime(p.generated_at));
         };
@@ -179,10 +281,10 @@
         // responsive width
         if (typeof ResizeObserver !== 'undefined') {
             let raf = null;
-            new ResizeObserver(() => { if (raf) return; raf = requestAnimationFrame(() => { raf = null; const cw = Math.max(MIN_W, container.clientWidth || w); main.setSize({ width: cw, height: mainH }); rate.setSize({ width: cw, height: rateH }); }); }).observe(container);
+            new ResizeObserver(() => { if (raf) return; raf = requestAnimationFrame(() => { raf = null; const cw = Math.max(MIN_W, container.clientWidth || w); main.setSize({ width: cw, height: mainH }); rate.setSize({ width: cw, height: rateH }); ranger.setSize({ width: cw, height: rangerH }); updateBrush(); }); }).observe(container);
         }
         load(false); schedule();
-        container.__timeline = { main, rate, reload: () => load(true) };
+        container.__timeline = { main, rate, ranger, setWindow: applyWindow, reload: () => load(true) };
     }
 
     /** Collapse buttons: <button data-tl-collapse="<id of the [data-timeline] element>">; state kept in localStorage. */

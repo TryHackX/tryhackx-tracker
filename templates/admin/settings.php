@@ -262,6 +262,11 @@
                             <option value="blacklist" <?= ($cfg['tracker_mode'] ?? 'blacklist') !== 'whitelist' ? 'selected' : '' ?>>Blacklist (classic)</option>
                             <option value="whitelist" <?= ($cfg['tracker_mode'] ?? '') === 'whitelist' ? 'selected' : '' ?>>Whitelist (registration required)</option>
                         </select>
+                        <?php if (function_exists('scheduleEnabled') && scheduleEnabled($cfg)): ?>
+                        <small class="settings-hint text-warning d-block mt-1"><i class="bi bi-exclamation-triangle"></i> <strong>Scheduled mode is ON</strong> — the janitor re-applies the schedule's mode within a minute, so a manually saved mode is reverted. To switch manually, disable Scheduled Tracker Mode below first (and remember the setting alone does not swap the OpenTracker binary — the schedule / <code>tracker-mode.sh</code> does that).</small>
+                        <?php else: ?>
+                        <small class="settings-hint d-block mt-1">Saving this changes the web app's mode only. The OpenTracker binary/config are swapped by <code>tracker-mode.sh white|black</code> (run via the schedule, or manually over SSH).</small>
+                        <?php endif; ?>
                     </div>
                     <div class="col-md-9">
                         <label class="form-label">Whitelist file path <small class="settings-hint">(outside the web root; directory writable by PHP, e.g. <code>/home/tracker/accesslist/whitelist</code>)</small></label>

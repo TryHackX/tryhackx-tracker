@@ -38,7 +38,8 @@ const ST_MAX_5M_POINTS  = 4500;        // above this the API switches 5m → 1h
 /** Named ranges accepted by the API (aliases included) → seconds. */
 function statsTimelineRanges(): array {
     return ['24h' => 86400, '7d' => 7 * 86400, '14d' => 14 * 86400, '2w' => 14 * 86400,
-            '30d' => 30 * 86400, '1m' => 30 * 86400, '60d' => 60 * 86400, '2m' => 60 * 86400];
+            '30d' => 30 * 86400, '1m' => 30 * 86400, '60d' => 60 * 86400, '2m' => 60 * 86400,
+            '90d' => 90 * 86400, '3m' => 90 * 86400];
 }
 
 function statsTimelineSettingDefaults(): array {
@@ -434,10 +435,10 @@ function statsTimelineRangeSeconds(string $range): ?int {
     return $r[strtolower(trim($range))] ?? null;
 }
 
-/** Canonical cache key for a range (aliases map to the day form: 2w→14d, 1m→30d, 2m→60d). */
+/** Canonical cache key for a range (aliases map to the day form: 2w→14d, 1m→30d, 2m→60d, 3m→90d). */
 function statsTimelineRangeKey(string $range): string {
     $k = preg_replace('/[^a-z0-9]/', '', strtolower($range));
-    $canon = ['2w' => '14d', '1m' => '30d', '2m' => '60d'];
+    $canon = ['2w' => '14d', '1m' => '30d', '2m' => '60d', '3m' => '90d'];
     return $canon[$k] ?? $k;
 }
 
