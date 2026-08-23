@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [1.5.0] — unreleased
+## [1.5.0] — 2026-08-23
 
 ### Added
 - **Observed-hash index** — `includes/index.php` (schema v6: `index_hashes`, `index_files`): a browsable
