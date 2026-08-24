@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.2] — 2026-08-24
+
+### Added
+- **Rebuild done** button in the Fetch-metadata dropdown on both Index and Whitelist: every row
+  that still carries resolved metadata (name+size) but lost its `done` status to a bulk re-fetch
+  or a queue cancel goes straight back to `done` — nothing is fetched or deleted. The whitelist
+  "Cancel queued" is restore-aware now too (resolved rows → done, like the Index one).
+- **List loading feedback**: user actions (sort/filter/page/search) dim the table for the duration
+  of the request; a small pulsing dot next to the row counter lights on EVERY refresh, including
+  the silent 5-second live updates while metadata is being fetched (which are unchanged). The
+  whitelist keeps its old rows on screen while loading instead of swapping in a spinner row.
+
+## [1.9.1] — 2026-08-24
+
+### Fixed
+- **Named index rows stay searchable regardless of the queue state** — a bulk "All rows
+  (re-fetch)" used to make thousands of resolved entries vanish from the member search until the
+  worker re-resolved them; now anything with a stored name remains findable, "Cancel queued"
+  restores resolved rows to `done` (reported in the toast), and the All-rows re-fetch asks for
+  confirmation and explains what will happen.
+- Sort-click debounce raised to 450 ms (rapid header clicking fired a request per click);
+  password-checklist order (special character before digit, digit centred); verification-mail
+  wording; after a completed email change the NEW mailbox also receives a written confirmation;
+  Terms of Service gained a **User accounts** section (stored data, mails, cookies, cool-down,
+  account removal).
+
 ## [1.9.0] — 2026-08-24 (schema v9)
 
 ### Added — accounts
