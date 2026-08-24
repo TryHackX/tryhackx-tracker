@@ -141,25 +141,32 @@ class Worker:
                 log.warning("reset_stale(%s): %s", q["table"], e)
 
     def claim(self):
-        # try each queue in order; the whitelist must be empty before an index row is claimed
+        # try each queue in order; the whitelist must be empty before an index row is claimed.
+        # Two-step claim: a plain SELECT picks the candidate (consistent read, NO row locks — the old
+        # single UPDATE ... ORDER BY ... LIMIT 1 filesorted AND X-locked the whole pending set on a big
+        # queue), then the UPDATE claims exactly that row by primary key with a status recheck; if
+        # another actor won the race, retry with the next candidate.
         for q in self.queues:
-            token = secrets.token_hex(8)
-            try:
-                n = self.db.query(
-                    "UPDATE %s SET meta_status='fetching', meta_claim=%%s, meta_claimed_at=NOW() WHERE meta_status='pending'%s ORDER BY meta_priority DESC, meta_requested_at ASC LIMIT 1" % (q["table"], q["gate"]),
-                    (token,))
-                if not n:
-                    continue
-                rows = self.db.query("SELECT %s FROM %s WHERE meta_claim=%%s" % (q["select"], q["table"]), (token,), fetch=True)
-            except Exception as e:
-                log.warning("claim(%s): %s", q["table"], e)
-                continue
-            if not rows:
-                continue
-            row = rows[0]
-            row["token"] = token
-            row["_q"] = q
-            return row
+            for _attempt in range(3):
+                token = secrets.token_hex(8)
+                try:
+                    rows = self.db.query(
+                        "SELECT %s FROM %s WHERE meta_status='pending'%s ORDER BY meta_priority DESC, meta_requested_at ASC LIMIT 1" % (q["select"], q["table"], q["gate"]),
+                        fetch=True)
+                    if not rows:
+                        break                      # queue empty — fall through to the next queue
+                    row = rows[0]
+                    n = self.db.query(
+                        "UPDATE %s SET meta_status='fetching', meta_claim=%%s, meta_claimed_at=NOW() WHERE %s=%%s AND meta_status='pending'" % (q["table"], q["key_col"]),
+                        (token, row[q["key_col"]]))
+                    if not n:
+                        continue                   # raced — pick a fresh candidate
+                except Exception as e:
+                    log.warning("claim(%s): %s", q["table"], e)
+                    break
+                row["token"] = token
+                row["_q"] = q
+                return row
         return None
 
     def start(self, row):

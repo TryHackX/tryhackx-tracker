@@ -16,30 +16,48 @@
             renderStatus(s);
         } catch (e) { /* leave the spinner */ }
     }
-    function tile(label, value, cls) {
-        return el('div', { className: 'wl-kv' + (cls ? ' ' + cls : '') }, [el('span', { className: 'wl-kv-label', text: label }), el('span', { className: 'wl-kv-val', text: value })]);
+    function badge(text, cls) { return el('span', { className: 'wl-badge ' + (cls || ''), text }); }
+    function kv(label, value) {
+        return el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: label }), el('div', { className: 'wl-kv-value' }, value)]);
     }
+    const num = (n) => (Number(n) || 0).toLocaleString();
     function renderStatus(s) {
         const c = s.counts || {}, st = s.state || {};
         $('idx-disabled-note').style.display = s.enabled ? 'none' : '';
         const grid = $('idx-status-grid');
         grid.textContent = '';
-        grid.appendChild(tile('Status', s.enabled ? 'Enabled' : 'Disabled', s.enabled ? 'ok' : 'warn'));
-        grid.appendChild(tile('Rows', (c.total || 0).toLocaleString()));
-        grid.appendChild(tile('Protected', (c.protected || 0).toLocaleString()));
-        grid.appendChild(tile('In grace', (c.in_grace || 0).toLocaleString()));
-        grid.appendChild(tile('Promoted', (c.promoted || 0).toLocaleString()));
-        grid.appendChild(tile('Meta done', (c.meta_done || 0).toLocaleString()));
-        grid.appendChild(tile('Meta pending', ((c.meta_pending || 0) + (c.meta_fetching || 0)).toLocaleString()));
-        grid.appendChild(tile('Meta failed', (c.meta_failed || 0).toLocaleString()));
-        grid.appendChild(tile('Files', (c.files || 0).toLocaleString()));
-        grid.appendChild(tile('Poll every', s.poll_minutes + ' min'));
-        grid.appendChild(tile('Meta budget', (st.meta_budget_used || 0) + ' / ' + s.meta_daily_budget + '/day'));
+        grid.appendChild(kv('Index', [
+            badge(s.enabled ? 'ENABLED' : 'DISABLED', s.enabled ? 'wl-b-ok' : 'wl-b-warn'), ' ',
+            el('span', { className: 'text-muted wl-small', text: 'not a whitelist — nothing here is served' }),
+        ]));
+        const overCap = (c.total || 0) > (s.max_rows || 0);
+        grid.appendChild(kv('DB rows', [
+            el('span', { text: `${num(c.total)} total` }), ' · ',
+            el('span', { className: 'text-muted', text: `cap ${num(s.max_rows)}` }),
+            ...(overCap ? [' ', badge('over cap — prune trims', 'wl-b-warn')] : []),
+        ]));
+        grid.appendChild(kv('Lifecycle', [
+            el('span', { text: `${num(c.in_grace)} in grace` }), ' · ',
+            el('span', { text: `${num(c.protected)} protected` }), ' · ',
+            el('span', { text: `${num(c.promoted)} promoted` }),
+            el('div', { className: 'wl-small text-muted', text: `grace ${s.grace_days} d · protect ${s.protect_days} d (extended while seeded)` }),
+        ]));
+        grid.appendChild(kv('Metadata', [
+            el('span', { text: `${num(c.meta_done)} done` }), ' · ',
+            el('span', { text: `${num((c.meta_pending || 0) + (c.meta_fetching || 0))} queued` }), ' · ',
+            el('span', { text: `${num(c.meta_failed)} failed` }),
+            el('div', { className: 'wl-small text-muted', text: `budget ${num(st.meta_budget_used)} / ${num(s.meta_daily_budget)} today · ${num(c.files)} file entries` }),
+        ]));
         const lp = st.last_poll;
-        grid.appendChild(tile('Last poll', st.last_poll_at ? fmtDate(new Date(st.last_poll_at * 1000).toISOString()) : 'never'));
-        if (lp) grid.appendChild(tile('Last poll result', `${(lp.entries || 0).toLocaleString()} seen · ${(lp.kept || 0).toLocaleString()} kept${lp.truncated ? ' (truncated)' : ''} · ${lp.ms || 0} ms`));
-        if (st.last_error) grid.appendChild(tile('Last error', st.last_error, 'warn'));
-        $('idx-status-updated').textContent = 'grace ' + s.grace_days + ' d · protect ' + s.protect_days + ' d · cap ' + (s.max_rows || 0).toLocaleString();
+        grid.appendChild(kv('Poll', [
+            st.last_poll_at ? el('span', { text: fmtDate(new Date(st.last_poll_at * 1000).toISOString()) }) : badge('never', 'wl-b-muted'),
+            ...(lp && lp.truncated ? [' ', badge('truncated — resumes at the tail', 'wl-b-pending')] : []),
+            el('div', { className: 'wl-small text-muted', text: (lp ? `${num(lp.entries)} seen · ${num(lp.kept)} kept · ${(lp.ms / 1000).toFixed(1)} s · ` : '') + `every ${s.poll_minutes} min` }),
+        ]));
+        grid.appendChild(kv('Last error', st.last_error
+            ? [badge('error', 'wl-b-bad'), ' ', el('span', { className: 'wl-small', text: st.last_error })]
+            : [badge('none', 'wl-b-ok')]));
+        $('idx-status-updated').textContent = 'source ' + (s.source_url || '').replace(/^https?:\/\//, '');
     }
 
     // ── list ─────────────────────────────────────────────────────────────────
@@ -98,9 +116,9 @@
             tr.appendChild(el('td', { className: 'idx-dates' }, [el('span', { className: 'text-muted', text: fmtDate(r.first_seen) }), el('br'), el('span', { text: fmtDate(r.last_seen) })]));
             tr.appendChild(el('td', {}, metaBadge(r.meta_status, r.meta_error)));
             const act = el('td', { className: 'th-actions' });
-            const view = el('button', { type: 'button', className: 'btn btn-sm btn-outline-info', title: 'Details' }, el('i', { className: 'bi bi-eye' }));
+            const view = el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', title: 'Details' }, el('i', { className: 'bi bi-eye' }));
             view.addEventListener('click', () => openModal(r.info_hash));
-            const promote = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success', title: 'Promote to whitelist' }, el('i', { className: 'bi bi-arrow-up-circle' }));
+            const promote = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success wl-act', title: 'Promote to whitelist' }, el('i', { className: 'bi bi-arrow-up-circle' }));
             promote.addEventListener('click', () => promoteHashes([r.info_hash]));
             act.appendChild(view); act.appendChild(promote);
             tr.appendChild(act);
@@ -202,24 +220,54 @@
     async function metaScope(scope) {
         try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope }); if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; } showToast('Queued ' + r.queued + ' for metadata'); loadStatus(); } catch (e) { showToast(e.message, 'error'); }
     }
-    async function scrapeBulk(scope) {
+    async function promptDateRange() {
+        const from = await A.promptModal({ title: 'Custom date range', label: 'From (YYYY-MM-DD or YYYY-MM-DD HH:MM)', placeholder: '2026-08-20' });
+        if (from === null || !from.trim()) return null;
+        const to = await A.promptModal({ title: 'Custom date range', label: 'To (empty = now; a date covers the whole day)', placeholder: '2026-08-23' });
+        if (to === null) return null;
+        return { from: from.trim(), to: (to || '').trim() };
+    }
+    async function metaDate(hours) {
+        const body = { scope: 'date' };
+        if (hours === 'custom') { const r = await promptDateRange(); if (!r) return; body.from = r.from; if (r.to) body.to = r.to; }
+        else body.since_hours = Number(hours);
+        try { const r = await apiCall('admin/index_fetch_meta', 'POST', body); if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; } showToast(r.queued ? 'Queued ' + r.queued.toLocaleString() + ' first seen ' + r.from + ' \u2192 ' + r.to : 'Nothing to queue in that window (missing + failed only)', r.queued ? 'success' : 'info'); loadStatus(); }
+        catch (e) { showToast(e.message, 'error'); }
+    }
+    async function cancelMetaQueue() {
+        if (!(await confirmAction('Cancel queued metadata', 'Reset every QUEUED (pending) hash back to "no metadata"? Rows being fetched right now still finish. The janitor keeps queueing its daily budget; you can re-queue any time.', { danger: true, okLabel: 'Cancel queue' }))) return;
+        try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope: 'cancel' }); if (!r.success || r.error) { showToast(r.error || 'Cancel failed', 'error'); return; } showToast('Cancelled ' + (r.cancelled || 0).toLocaleString() + ' queued fetches'); load(); loadStatus(); }
+        catch (e) { showToast(e.message, 'error'); }
+    }
+    let scrapeRunning = false, scrapeStop = false;
+    async function scrapeBulk(scope, dateBody) {
         const label = $('idx-scrape-label');
+        const btn = $('btn-idx-scrape-bulk'), caret = $('btn-idx-scrape-caret');
+        if (scrapeRunning) { scrapeStop = true; label.textContent = 'Stopping\u2026'; return; }   // second click = stop
+        scrapeRunning = true; scrapeStop = false;
         const orig = label.textContent;
-        let after = '', total = 0, guard = 0;
+        const origTitle = btn.title;
+        caret.disabled = true;
+        btn.title = 'Click to stop after the current batch';
+        let after = '', total = 0, guard = 0, stopped = false;
+        label.textContent = 'Stop \u00b7 scraping\u2026';
         try {
             do {
                 const body = scope === 'page' ? { scope, hashes: state.rows.map(r => r.info_hash), after } : { scope, after };
+                if (dateBody) Object.assign(body, dateBody);
                 const r = await apiCall('admin/index_scrape_bulk', 'POST', body);
+                if (!r.success || r.error) { showToast(r.error || 'Scrape failed', 'error'); break; }
                 total += r.scraped || 0;
                 after = r.after || '';
-                label.textContent = 'Scraped ' + total + (r.remaining ? ' (' + r.remaining + ' left)' : '');
+                label.textContent = 'Stop \u00b7 scraped ' + total + (r.remaining ? ' (' + r.remaining + ' left)' : '');
                 if (r.warning) { showToast(r.warning, 'warning'); break; }
+                if (scrapeStop) { stopped = true; break; }
                 if (!r.truncated) break;
             } while (++guard < 500);
-            showToast('Refreshed S/L for ' + total + ' hashes');
+            showToast(stopped ? 'Stopped \u2014 refreshed ' + total + ' before stopping' : 'Refreshed S/L for ' + total + ' hashes', stopped ? 'info' : 'success');
             load();
         } catch (e) { showToast(e.message, 'error'); }
-        finally { label.textContent = orig; }
+        finally { label.textContent = orig; btn.title = origTitle; caret.disabled = false; scrapeRunning = false; scrapeStop = false; }
     }
 
     // ── wiring ─────────────────────────────────────────────────────────────
@@ -237,8 +285,14 @@
         $('btn-idx-meta-sel').addEventListener('click', metaSelected);
         $('btn-idx-clearsel').addEventListener('click', () => { state.selected.clear(); renderRows({ enabled: true }); syncBulkbar(); });
         document.querySelectorAll('#idx-meta-bulk-group [data-meta-scope]').forEach(b => b.addEventListener('click', () => metaScope(b.dataset.metaScope)));
+        document.querySelectorAll('#idx-meta-bulk-group [data-meta-date]').forEach(b => b.addEventListener('click', () => metaDate(b.dataset.metaDate === 'custom' ? 'custom' : Number(b.dataset.metaDate))));
+        document.querySelectorAll('#idx-meta-bulk-group [data-meta-cancel]').forEach(b => b.addEventListener('click', () => cancelMetaQueue()));
         $('btn-idx-scrape-bulk').addEventListener('click', () => scrapeBulk('page'));
         document.querySelectorAll('#idx-scrape-bulk-group [data-scrape-scope]').forEach(b => b.addEventListener('click', () => scrapeBulk(b.dataset.scrapeScope)));
+        document.querySelectorAll('#idx-scrape-bulk-group [data-scrape-date]').forEach(b => b.addEventListener('click', async () => {
+            if (b.dataset.scrapeDate === 'custom') { const r = await promptDateRange(); if (!r) return; scrapeBulk('date', r.to ? { from: r.from, to: r.to } : { from: r.from }); }
+            else scrapeBulk('date', { since_hours: Number(b.dataset.scrapeDate) });
+        }));
         $('btn-idx-poll').addEventListener('click', async () => {
             const btn = $('btn-idx-poll'); btn.disabled = true;
             const orig = btn.innerHTML; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Polling…';

@@ -404,8 +404,13 @@ function rateLimitAllow(string $action, string $ip, int $max, int $windowSec = 3
         $raw  = @file_get_contents($file);
         $data = $raw ? (json_decode($raw, true) ?: []) : [];
     }
-    // Prune expired timestamps across all keys to keep the file bounded.
+    // Prune expired timestamps to keep the file bounded — ONLY within this action's own namespace.
+    // The window differs per action (e.g. the public timeline poller uses 60 s while appeals use
+    // 3600 s); pruning every key with the caller's window would let a short-window call evict other
+    // actions' older hits and silently reset their hourly limits.
+    $prefix = $action . '|';
     foreach ($data as $k => $times) {
+        if (strncmp($k, $prefix, strlen($prefix)) !== 0) continue;
         $data[$k] = array_values(array_filter((array)$times, fn($t) => ($now - (int)$t) < $windowSec));
         if (empty($data[$k])) unset($data[$k]);
     }
@@ -450,6 +455,24 @@ function readJsonBody(bool $fallbackToPost = true): array {
         $data = $fallbackToPost ? $_POST : [];
     }
     return is_array($data) ? $data : [];
+}
+
+/**
+ * Parse a date window from request input for date-scoped queue/scrape actions:
+ * either since_hours=N (last N hours) or from / to strings (Y-m-d or Y-m-d H:i[:s]; to empty = now,
+ * a date-only `to` covers the whole end day). Returns [fromSql, toSql] or null when absent/invalid.
+ */
+function parseDateRangeInput(array $input): ?array {
+    $since = (int)($input['since_hours'] ?? 0);
+    if ($since > 0) return [date('Y-m-d H:i:s', time() - min($since, 24 * 366) * 3600), date('Y-m-d H:i:s')];
+    $from = trim((string)($input['from'] ?? ''));
+    $to = trim((string)($input['to'] ?? ''));
+    if ($from === '') return null;
+    $f = strtotime($from);
+    if ($f === false) return null;
+    $t = $to === '' ? time() : (preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) ? strtotime($to . ' 23:59:59') : strtotime($to));
+    if ($t === false || $t < $f) return null;
+    return [date('Y-m-d H:i:s', $f), date('Y-m-d H:i:s', $t)];
 }
 
 function generateUnsubscribeToken(string $email, string $secret): string {

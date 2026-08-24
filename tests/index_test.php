@@ -185,6 +185,19 @@ for ($i = 1; $i <= 12; $i++) $db->exec("INSERT INTO index_hashes (info_hash, las
 $pr3 = indexPrune($db, $cfgCap, null, true);
 check('protected rows survive the cap', $pr3['capped'] === 0 && (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn() === 12, json_encode($pr3));
 
+// a row whose metadata resolved between polls (protected_until NULL) must NOT be cap-pruned:
+// prune backfills its protection first
+$db->exec("TRUNCATE TABLE index_hashes"); @unlink(indexStateFile());
+$db->exec("INSERT INTO index_hashes (info_hash, last_seen, grace_until, meta_status, protected_until) VALUES ('" . h(950) . "', NOW() - INTERVAL 12 HOUR, NOW() + INTERVAL 1 DAY, 'done', NULL)");
+for ($i = 1; $i <= 11; $i++) $db->exec("INSERT INTO index_hashes (info_hash, last_seen, grace_until, meta_status) VALUES ('" . h(950 + $i) . "', NOW() - INTERVAL " . (13 - $i) . " HOUR, NOW() + INTERVAL 2 DAY, 'none')");
+$prB = indexPrune($db, $cfgCap, null, true);   // 12 rows, cap 10 → 2 pruned, but NEVER the done row
+check('prune backfills protection for freshly-done rows', $prB['protected_backfill'] === 1, json_encode($prB));
+check('freshly-done row survives the cap prune', (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE info_hash='" . h(950) . "' AND protected_until IS NOT NULL")->fetchColumn() === 1);
+// prune lock: while held, a concurrent prune is refused (returns null even with force)
+$plh = fopen(indexPruneLockFile(), 'c'); flock($plh, LOCK_EX);
+check('prune lock: concurrent prune returns null', indexPrune($db, $cfgCap, null, true) === null);
+flock($plh, LOCK_UN); fclose($plh);
+
 // prune throttled
 check('prune throttled (< 1h since last)', indexPrune($db, $cfg, time() + 10) === null);
 

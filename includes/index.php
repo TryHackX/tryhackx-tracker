@@ -49,6 +49,7 @@ function indexRowsCount(PDO $db): int {
 function indexStateFile(): string { return __DIR__ . '/../config/index_state.json'; }
 function indexStateLockFile(): string { return __DIR__ . '/../config/index_state.lock'; }
 function indexPollLockFile(): string { return __DIR__ . '/../config/index_poll.lock'; }
+function indexPruneLockFile(): string { return __DIR__ . '/../config/index_prune.lock'; }
 
 function indexStateDefaults(): array {
     return [
@@ -242,6 +243,9 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
             $fetched = indexFetchFullScrape(indexSourceUrl($cfg), min(90, max(5, indexPollBudget($cfg))), $tmpDir);
             $file = $fetched['file']; $gzip = $fetched['gzip']; $out['bytes'] = $fetched['bytes']; $out['ms'] = $fetched['ms'];
             $ownFile = $file !== null;
+            // a fatal (execution-time limit, OOM) skips finally blocks — make sure the temp scrape
+            // is removed at shutdown regardless (unlink of an already-removed file is a no-op)
+            if ($ownFile) register_shutdown_function(static function () use ($file) { @unlink($file); });
             if ($fetched['error']) $out['error'] = $fetched['error'];
         }
         if ($out['error'] !== null || !$file) {
@@ -326,7 +330,19 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
     $now = $now ?? time();
     $st = indexStateRead();
     if (!$force && $now - (int)$st['last_prune_at'] < IDX_PRUNE_EVERY) return null;
-    $res = ['expired' => 0, 'capped' => 0, 'orphan_files' => 0];
+    // one prune at a time across processes: a janitor tick and a manual/forced prune racing each other
+    // both compute "excess over the cap" from the same snapshot and together over-delete
+    $lockH = @fopen(indexPruneLockFile(), 'c');
+    if (!$lockH || !@flock($lockH, LOCK_EX | LOCK_NB)) { if ($lockH) @fclose($lockH); return null; }
+    try {
+    $res = ['expired' => 0, 'capped' => 0, 'orphan_files' => 0, 'protected_backfill' => 0];
+    // a row whose metadata resolved since the last poll has protected_until NULL until the next poll
+    // touches it — grant the protection window here FIRST so the cap-prune below can never eat a row
+    // the worker just resolved
+    $bf = $db->prepare("UPDATE index_hashes SET protected_until = DATE_ADD(NOW(), INTERVAL " . indexProtectDays($cfg) . " DAY)
+                        WHERE meta_status = 'done' AND protected_until IS NULL");
+    $bf->execute();
+    $res['protected_backfill'] = $bf->rowCount();
     // expired: never-resolved past grace, or done past protection. Batched with LIMIT so one prune never
     // takes a huge row-lock set on a 200k table (each chunk autocommits — prune runs outside a transaction).
     do {
@@ -337,10 +353,13 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
              LIMIT 5000");
         $res['expired'] += $nd;
     } while ($nd === 5000);
-    // cap: delete oldest unprotected rows over the limit
+    // cap: delete oldest unprotected rows over the limit — but not while a truncated poll awaits its
+    // resume: the un-reached tail still carries stale last_seen and would be evicted first, only to be
+    // re-inserted as brand-new rows (history reset) by the resume pass. poll_skip is non-zero only
+    // between a truncated pass and the pass that finishes the file, so the cap defers by one cycle at most.
     $max = indexMaxRows($cfg);
     $total = (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn();
-    if ($total > $max) {
+    if ($total > $max && (int)indexStateRead()['poll_skip'] === 0) {
         $excess = $total - $max;
         $ids = $db->query("SELECT info_hash FROM index_hashes WHERE protected_until IS NULL OR protected_until < NOW()
                            ORDER BY last_seen ASC LIMIT " . (int)$excess)->fetchAll(PDO::FETCH_COLUMN);
@@ -357,6 +376,9 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
     }
     indexStateUpdate(function (array &$s) use ($now, $res) { $s['last_prune_at'] = $now; $s['last_prune'] = $res; return true; });
     return $res;
+    } finally {
+        @flock($lockH, LOCK_UN); @fclose($lockH);
+    }
 }
 
 /**
@@ -375,7 +397,10 @@ function indexTick(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
             if ($out['poll']['error'] !== null) $out['error'] = $out['poll']['error'];
         }
         $out['meta_queued'] = indexQueueMetaBudget($db, $cfg, $now);
-        $out['prune'] = indexPrune($db, $cfg, $now);
+        // a big OPEN-hours poll can overshoot the cap by tens of thousands — don't wait for the hourly
+        // prune, trim right away when we're more than 5 % over
+        $force = indexRowsCount($db) > (int)(indexMaxRows($cfg) * 1.05);
+        $out['prune'] = indexPrune($db, $cfg, $now, $force);
         indexStateUpdate(function (array &$s) use ($now) { $s['last_tick_at'] = $now; return true; });
     } catch (\Throwable $e) {
         $out['error'] = $e->getMessage();
@@ -440,6 +465,27 @@ function indexRequestMeta(PDO $db, array $hashes, int $priority = 0): int {
     $st = $db->prepare("UPDATE index_hashes SET meta_status = 'pending', meta_priority = ?, meta_requested_at = NOW(), meta_error = NULL, meta_claim = NULL
                         WHERE info_hash IN ($in) AND meta_status NOT IN ('fetching')");
     $st->execute(array_merge([$priority], $clean));
+    return $st->rowCount();
+}
+
+/**
+ * Queue metadata for rows FIRST SEEN within [$from, $to] (Y-m-d H:i:s). Only never-fetched / failed rows.
+ * Manual date-scoped queueing uses priority 0 (above the janitor's budget rows at -1). Returns rows queued.
+ */
+function indexQueueMetaByDate(PDO $db, string $from, string $to): int {
+    $st = $db->prepare("UPDATE index_hashes SET meta_status = 'pending', meta_priority = 0, meta_requested_at = NOW(), meta_error = NULL, meta_claim = NULL
+                        WHERE meta_status IN ('none','failed') AND first_seen >= ? AND first_seen <= ?");
+    $st->execute([$from, $to]);
+    return $st->rowCount();
+}
+
+/**
+ * Cancel the index metadata queue: every 'pending' row goes back to 'none' ('fetching' rows finish on
+ * their own). The daily-budget counter is NOT refunded. Returns rows reset.
+ */
+function indexMetaCancel(PDO $db): int {
+    $st = $db->prepare("UPDATE index_hashes SET meta_status = 'none', meta_requested_at = NULL, meta_priority = -1 WHERE meta_status = 'pending'");
+    $st->execute();
     return $st->rowCount();
 }
 

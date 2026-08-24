@@ -16,7 +16,7 @@
     'use strict';
     if (typeof window === 'undefined') return;
 
-    const RANGES = [['24h', '24h'], ['7d', '7d'], ['14d', '2w'], ['30d', '1m'], ['90d', '3m']];
+    const RANGES = [['24h', '24h'], ['7d', '7d'], ['14d', '2w'], ['30d', '1m'], ['90d', '3m'], ['all', 'All']];
     const GAUGES = [
         { key: 'seeds',           label: 'Seeds',                color: '#4a9eff', scale: 'peers',    on: true  },
         { key: 'leechers',        label: 'Leechers',             color: '#ff5252', scale: 'peers',    on: true  },
@@ -75,10 +75,14 @@
 
     function makeChart(host, width, height, defs, yFmt, legendFmt, payloadRef, sync, isRate, onXScale) {
         const scales = { x: { time: true } };
-        const axes = [Object.assign(axisBase(), { space: 70, values: (u, vals) => vals.map(v => {
-            const d = new Date(v * 1000);
-            return (d.getHours() === 0 && d.getMinutes() === 0) ? pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) : pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-        }) })];
+        const axes = [Object.assign(axisBase(), { space: 70, values: (u, vals) => {
+            const span = (u.scales.x.max || 0) - (u.scales.x.min || 0);
+            return vals.map(v => {
+                const d = new Date(v * 1000);
+                if (span > 120 * 86400) return pad2(d.getMonth() + 1) + '.' + d.getFullYear();   // 'All' after a year+: months repeat, show the year
+                return (d.getHours() === 0 && d.getMinutes() === 0) ? pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) : pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+            });
+        } })];
         const zeroBased = (u, min, max) => [0, Math.max(1, (isFinite(max) ? max : 0) * 1.05)];
         if (isRate) {
             scales.rps = { auto: true, range: zeroBased };

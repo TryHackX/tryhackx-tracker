@@ -4,6 +4,53 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.2] — 2026-08-23
+
+### Added
+- **Date-scoped bulk actions** on the Whitelist and Index pages: *Fetch metadata* and *Refresh S/L*
+  for rows added / first seen in the **last 24 h / 7 d / 14 d** or a **custom from–to** window
+  (`scope=date` with `since_hours` or `from`/`to` on `whitelist_meta_queue`, `index_fetch_meta`,
+  `whitelist_scrape_bulk`, `index_scrape_bulk`; shared `parseDateRangeInput()`).
+- **Cancel queued** (`scope=cancel`): resets every queued (`pending`) metadata fetch back to `none` —
+  the stop button for a backlog that would take days; rows being fetched right now still finish.
+- **Stop** for the bulk *Refresh S/L* loops (the main button becomes *Stop* while scraping).
+- Timeline: **All** range (whole recorded history; hourly rows are thinned to ≤ ~5000 points), the
+  Index page shows the shared timeline card, "Indexed hashes" series.
+
+### Changed
+- Index status card restyled like the Whitelist card (badges, grouped counters, over-cap warning).
+- Index table: wider *Seen* column, action icons spaced; dashboard tab row keeps Whitelist + Index
+  together on the right.
+
+### Security (adversarial audit)
+- **Rate-limit window eviction (high)**: `rateLimitAllow()` pruned EVERY key in the shared state file
+  with the *caller's* window; the new public 60-s `stats_timeline` limiter therefore silently reset the
+  hourly limits of appeals / public whitelist submissions / status / block checks (an attacker — or just
+  a visitor with the stats page open — could turn "5 appeals/h" into "5/minute"). The prune now only
+  touches the caller's own action namespace; `tests/rate_limit_test.php` guards the regression.
+- `admin/index_poll_now` releases the session, survives a closed tab and gets an execution-time budget
+  (a long poll no longer blocks other admin requests or dies mid-upsert); the temp scrape file is also
+  removed on a fatal via a shutdown hook.
+- **PHP ↔ MySQL clock alignment**: the generated `config/database.php` now issues
+  `SET time_zone = date('P')` on connect, so `NOW()`/`CURRENT_TIMESTAMP` agree with PHP `date()` —
+  date-scoped queues/scrapes and the samplers no longer shift when the two zones differ (existing
+  installs: re-run the installer template change by adding the line to `config/database.php`).
+- Worker claim is now two-step (plain SELECT candidate → UPDATE by primary key with a status recheck):
+  the old `UPDATE … ORDER BY … LIMIT 1` filesorted *and* X-locked the whole pending set on a big queue.
+- Cap-prune is skipped while a truncated poll awaits its resume (the un-reached tail carried stale
+  `last_seen` and was evicted first, only to be re-inserted as brand-new rows by the resume pass).
+- Timeline x-axis shows `mm.yyyy` once the visible span exceeds ~4 months ("All" after a year of
+  history no longer repeats month labels with no year); Stop button keeps its tooltip after a run.
+
+### Fixed
+- **Index prune race**: two prunes (janitor tick + forced/manual) could run concurrently, each computing
+  the over-cap excess from the same snapshot and together over-deleting — prune now takes a non-blocking
+  lock (`config/index_prune.lock`).
+- **Freshly resolved rows were unprotected**: a row whose metadata arrived between polls had
+  `protected_until = NULL` until the next poll and could be cap-pruned. Prune now backfills the protection
+  window for every `done` row first.
+- A big OPEN-hours poll that overshoots the cap triggers a prune right away (not only hourly).
+
 ## [1.5.1] — 2026-08-23
 
 ### Added

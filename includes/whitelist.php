@@ -1001,6 +1001,27 @@ function whitelistQueueMetaByScope(PDO $db, string $scope): ?int {
     return $st->rowCount();
 }
 
+/**
+ * Queue metadata for rows ADDED within [$from, $to] (Y-m-d H:i:s). Only never-fetched / failed rows —
+ * "fetch what came in during this window" should not re-fetch finished ones. Returns rows queued.
+ */
+function whitelistQueueMetaByDate(PDO $db, string $from, string $to): int {
+    $st = $db->prepare("UPDATE whitelist SET meta_status = 'pending', meta_priority = 0, meta_requested_at = NOW(), meta_error = NULL, meta_claim = NULL
+                        WHERE banned = 0 AND meta_status IN ('none','failed') AND created_at >= ? AND created_at <= ?");
+    $st->execute([$from, $to]);
+    return $st->rowCount();
+}
+
+/**
+ * Cancel the metadata queue: every 'pending' row goes back to 'none' (rows currently 'fetching' finish
+ * on their own — the worker holds at most its concurrency count). Returns rows reset.
+ */
+function whitelistMetaCancel(PDO $db): int {
+    $st = $db->prepare("UPDATE whitelist SET meta_status = 'none', meta_requested_at = NULL, meta_priority = 0 WHERE meta_status = 'pending'");
+    $st->execute();
+    return $st->rowCount();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Mode-aware block / unblock (used by the report / appeal / archive endpoints)
 // ─────────────────────────────────────────────────────────────────────────────

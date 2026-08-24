@@ -35,11 +35,11 @@ const ST_API_CACHE_TTL  = 30;          // seconds the stats_timeline JSON is cac
 const ST_MAX_RAW_POINTS = 3000;        // above this the API switches raw → 5m
 const ST_MAX_5M_POINTS  = 4500;        // above this the API switches 5m → 1h
 
-/** Named ranges accepted by the API (aliases included) → seconds. */
+/** Named ranges accepted by the API (aliases included) → seconds. 'all' = the whole recorded history. */
 function statsTimelineRanges(): array {
     return ['24h' => 86400, '7d' => 7 * 86400, '14d' => 14 * 86400, '2w' => 14 * 86400,
             '30d' => 30 * 86400, '1m' => 30 * 86400, '60d' => 60 * 86400, '2m' => 60 * 86400,
-            '90d' => 90 * 86400, '3m' => 90 * 86400];
+            '90d' => 90 * 86400, '3m' => 90 * 86400, 'all' => 20 * 365 * 86400];
 }
 
 function statsTimelineSettingDefaults(): array {
@@ -473,13 +473,25 @@ function statsTimelineSeries(PDO $db, array $cfg, int $rangeSec, ?int $now = nul
     $now = $now ?? time();
     [$table, $step, $kind] = statsTimelineChooseTable($cfg, $rangeSec, $db, $now);
     $from = $now - $rangeSec;
+    $decimate = '';
+    if ($kind === '1h') {
+        // 'all' after years of history: thin the hourly rows so the payload stays ≤ ~5000 points
+        $cs = $db->prepare("SELECT COUNT(*) FROM `$table` WHERE ts >= ? AND ts <= ?");
+        $cs->execute([$from, $now]);
+        $cnt = (int)$cs->fetchColumn();
+        if ($cnt > 5000) {
+            $k = (int)ceil($cnt / 5000);
+            $step = 3600 * $k;
+            $decimate = " AND ts % " . (3600 * $k) . " = 0";
+        }
+    }
     if ($kind === 'raw') {
         $sql = "SELECT ts, torrents, peers, seeds, leechers, completed, udp_announces, tcp_announces, connects, scrapes, uptime,
-                       (mode = 'whitelist') AS wl, whitelist_count, index_rows FROM `$table` WHERE ts >= ? AND ts <= ? ORDER BY ts";
+                       (mode = 'whitelist') AS wl, whitelist_count, index_rows FROM `$table` WHERE ts >= ? AND ts <= ?$decimate ORDER BY ts";
     } else {
         $sql = "SELECT ts, torrents_avg AS torrents, peers_avg AS peers, seeds_avg AS seeds, leechers_avg AS leechers, completed,
                        udp_announces, tcp_announces, connects, scrapes, uptime, (wl_share >= 50) AS wl, whitelist_count, index_rows
-                FROM `$table` WHERE ts >= ? AND ts <= ? ORDER BY ts";
+                FROM `$table` WHERE ts >= ? AND ts <= ?$decimate ORDER BY ts";
     }
     $st = $db->prepare($sql);
     $st->execute([$from, $now]);

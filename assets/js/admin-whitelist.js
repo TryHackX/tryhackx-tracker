@@ -426,28 +426,75 @@
         loadStatus(); loadWhitelist();
     }
 
+    /** Ask for a custom from/to (Y-m-d, `to` empty = now). Returns {from,to} or null when cancelled/invalid. */
+    async function promptDateRange() {
+        const from = await promptModal({ title: 'Custom date range', label: 'From (YYYY-MM-DD or YYYY-MM-DD HH:MM)', placeholder: '2026-08-20' });
+        if (from === null || !from.trim()) return null;
+        const to = await promptModal({ title: 'Custom date range', label: 'To (empty = now; a date covers the whole day)', placeholder: '2026-08-23' });
+        if (to === null) return null;
+        return { from: from.trim(), to: (to || '').trim() };
+    }
+
+    /** Queue metadata for rows ADDED within a window (missing+failed only). hours = number | 'custom'. */
+    async function queueMetaDate(hours) {
+        const body = { scope: 'date' };
+        if (hours === 'custom') {
+            const r = await promptDateRange();
+            if (!r) return;
+            body.from = r.from; if (r.to) body.to = r.to;
+        } else body.since_hours = Number(hours);
+        const btn = $('btn-wl-meta-bulk');
+        btn.disabled = true;
+        try {
+            const r = await apiCall('admin/whitelist_meta_queue', 'POST', body);
+            if (r.success) {
+                const n = Number(r.queued) || 0;
+                let msg = n === 0 ? 'Nothing to queue in that window (missing + failed only)' : `Queued ${n} ${n === 1 ? 'hash' : 'hashes'} added ${r.from} → ${r.to}`;
+                let type = n === 0 ? 'info' : 'success';
+                if (n > 0 && (r.worker_heartbeat_age === null || r.worker_heartbeat_age === undefined)) { msg += ' — warning: the metadata worker seems to be down'; type = 'warning'; }
+                showToast(msg, type);
+            } else showToast(r.error || 'Request failed', 'danger');
+        } catch { showToast('Network error', 'danger'); }
+        btn.disabled = false;
+    }
+
+    /** Stop the metadata backlog: every queued (pending) row goes back to `none`; active fetches finish. */
+    async function cancelMetaQueue() {
+        if (!await confirmAction('Cancel queued metadata', 'Reset every QUEUED (pending) hash back to "no metadata"? Rows being fetched right now still finish. You can re-queue any time.', { okLabel: 'Cancel queue', danger: true })) return;
+        try {
+            const r = await apiCall('admin/whitelist_meta_queue', 'POST', { scope: 'cancel' });
+            if (r.success) showToast(`Cancelled ${r.cancelled} queued ${r.cancelled === 1 ? 'fetch' : 'fetches'}`);
+            else showToast(r.error || 'Request failed', 'danger');
+        } catch { showToast('Network error', 'danger'); }
+        loadWhitelist();
+    }
+
     let scrapeRunning = false;
+    let scrapeStop = false;
     /**
      * Bulk "Refresh S/L": the server scrapes 50 hashes per tracker request within a time budget and answers
      * truncated=true + a cursor while rows remain — loop until done, showing progress in the button label.
      */
-    async function scrapeBulk(scope) {
-        if (scrapeRunning) return;
+    async function scrapeBulk(scope, dateBody) {
         const btn = $('btn-wl-scrape-bulk'), caret = $('btn-wl-scrape-caret'), label = $('wl-scrape-label');
+        if (scrapeRunning) { scrapeStop = true; label.textContent = 'Stopping…'; return; }   // second click = stop
         const ids = scope === 'page' ? [...state.wl.rows.keys()] : null;
         if (scope === 'page' && !ids.length) { showToast('No rows on this page to scrape', 'info'); return; }
-        scrapeRunning = true;
+        scrapeRunning = true; scrapeStop = false;
         const origLabel = label.textContent;
-        btn.disabled = true; caret.disabled = true;
+        const origTitle = btn.title;
+        caret.disabled = true;                       // the main button stays clickable — it is the Stop button now
         btn.classList.add('wl-busy');
+        btn.title = 'Click to stop after the current batch';
         const progress = (t) => { label.textContent = t; };
-        let scraped = 0, requests = 0, failed = 0, afterId = 0, rounds = 0, warning = null, aborted = false;
-        progress('Scraping…');
+        let scraped = 0, requests = 0, failed = 0, afterId = 0, rounds = 0, warning = null, aborted = false, stopped = false;
+        progress('Stop · scraping…');
         try {
             for (;;) {
                 rounds++;
                 const body = { scope, after_id: afterId };
                 if (ids) body.ids = ids;
+                if (dateBody) Object.assign(body, dateBody);
                 const r = await apiCall('admin/whitelist_scrape_bulk', 'POST', body);
                 if (!r.success) { showToast(r.error || 'Scrape failed', 'danger'); aborted = true; break; }
                 scraped += Number(r.scraped) || 0;
@@ -455,19 +502,22 @@
                 failed += Number(r.failed) || 0;
                 if (r.after_id) afterId = r.after_id;
                 if (r.warning) warning = r.warning;
-                progress(`scraped ${scraped}…` + (r.remaining ? ` (${r.remaining} left)` : ''));
+                progress(`Stop · scraped ${scraped}…` + (r.remaining ? ` (${r.remaining} left)` : ''));
+                if (scrapeStop) { stopped = true; break; }
                 if (!r.truncated || rounds >= 200) break;
             }
         } catch { showToast('Network error', 'danger'); aborted = true; }
-        if (!aborted) {
-            const what = scope === 'page' ? 'this page' : scope === 'stale' ? 'stale rows' : 'all active hashes';
+        if (stopped) showToast(`Stopped — scraped ${scraped} before stopping`, 'info');
+        if (!aborted && !stopped) {
+            const what = scope === 'page' ? 'this page' : scope === 'stale' ? 'stale rows' : scope === 'date' ? 'the selected window' : 'all active hashes';
             if (scraped === 0 && warning) showToast(`Scrape (${what}): ${warning}`, 'warning');
             else showToast(`Scraped ${scraped} ${scraped === 1 ? 'hash' : 'hashes'} (${what}) in ${requests} tracker request${requests === 1 ? '' : 's'}` + (failed ? ` — ${failed} request${failed === 1 ? '' : 's'} got no answer` : '') + (warning ? ` — ${warning}` : ''), failed || warning ? 'warning' : 'success');
         }
         label.textContent = origLabel;
         btn.classList.remove('wl-busy');
-        btn.disabled = false; caret.disabled = false;
-        scrapeRunning = false;
+        btn.title = origTitle;
+        caret.disabled = false;
+        scrapeRunning = false; scrapeStop = false;
         loadWhitelist();
     }
 
@@ -885,7 +935,14 @@
         // for a disabled toggle.
         const closeMenu = (toggleId) => { const t = $(toggleId); if (t && bootstrap.Dropdown) bootstrap.Dropdown.getOrCreateInstance(t).hide(); };
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-scope]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); queueMetaScope(b.dataset.metaScope); }));
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-date]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); queueMetaDate(b.dataset.metaDate === 'custom' ? 'custom' : Number(b.dataset.metaDate)); }));
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-cancel]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); cancelMetaQueue(); }));
         document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-scope]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-scrape-caret'); scrapeBulk(b.dataset.scrapeScope); }));
+        document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-date]').forEach(b => b.addEventListener('click', async () => {
+            closeMenu('btn-wl-scrape-caret');
+            if (b.dataset.scrapeDate === 'custom') { const r = await promptDateRange(); if (!r) return; scrapeBulk('date', r.to ? { from: r.from, to: r.to } : { from: r.from }); }
+            else scrapeBulk('date', { since_hours: Number(b.dataset.scrapeDate) });
+        }));
         $('btn-wl-scrape-bulk').addEventListener('click', () => scrapeBulk('page'));
 
         // banned toolbar

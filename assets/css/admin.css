@@ -254,14 +254,16 @@
 }
 
 /* Plain navigation link that sits in the tab row but is not a data-source tab (no data-source, not
-   bound by admin.js). Pushed to the right end of the row so it reads as "go elsewhere". */
+   bound by admin.js). The first link is pushed to the right end of the row; any further links sit
+   right next to it (two auto margins would centre the first one). */
 .source-tab-link {
     display: inline-flex;
     align-items: center;
-    margin-left: auto;
     text-decoration: none;
     color: #9aa4b2;
 }
+.source-tab + .source-tab-link { margin-left: auto; }
+.source-tab-link + .source-tab-link { margin-left: 0.25rem; }
 .source-tab-link:hover,
 .source-tab-link:focus-visible {
     color: #4a9eff;
@@ -1030,7 +1032,7 @@ input[type="number"] {
 .wl-sl { white-space: nowrap; }
 .wl-date { white-space: nowrap; color: #b0b8c4; font-size: 0.8rem; }
 .wl-actions { white-space: nowrap; }
-.wl-act { padding: 0.15rem 0.4rem; font-size: 0.78rem; margin-right: 0.15rem; }
+.wl-act { padding: 0.15rem 0.4rem; font-size: 0.78rem; margin-right: 0.25rem; }
 .wl-row-banned td { opacity: 0.65; }
 .wl-row-muted td { opacity: 0.65; }
 .wl-group-first td { border-top: 2px solid #2a3a4c; }
@@ -1266,7 +1268,8 @@ input[type="number"] {
 .idx-subtitle { font-size: 0.72rem; color: #888; font-weight: 400; margin-left: 0.5rem; }
 .idx-note { font-size: 0.8rem; color: #c9a227; margin: 0.6rem 0 0; }
 .idx-c-check { width: 34px; } .idx-c-hash { width: 160px; } .idx-c-size { width: 90px; }
-.idx-c-sl { width: 90px; } .idx-c-seen { width: 60px; } .idx-c-dates { width: 150px; }
+#idx-table th { white-space: nowrap; }
+.idx-c-sl { width: 90px; } .idx-c-seen { width: 74px; } .idx-c-dates { width: 150px; }
 .idx-c-meta { width: 80px; } .idx-c-actions { width: 90px; }
 .idx-th-check { text-align: center; }
 #idx-table td, #idx-table th { vertical-align: middle; }

@@ -281,8 +281,10 @@ no CDN) on the public `/?action=stats` page (under the counters) and on the admi
 torrents and whitelisted torrents (right axis), and request rates (UDP / HTTP announces, connects,
 scrapes per second, derived from OpenTracker's cumulative counters; `null` across a restart or a gap).
 Hours in OPEN (blacklist) mode are shaded, so a [scheduled mode](#5b-scheduled-mode--whitelist-hours-optional-140)
-shows up as day/night bands. Ranges **24h / 7d / 2w / 1m / 2m**; click a legend entry to hide a
-series, drag to zoom, double-click to reset; the chart refreshes itself every minute.
+shows up as day/night bands. Ranges **24h / 7d / 2w / 1m / 3m / All** (All = the whole recorded
+history, hourly rows thinned to ≤ ~5000 points); a Binance-style **ranger** under the panes pans /
+narrows the visible window within the loaded range; click a legend entry to hide a series, drag to zoom
+(both panes + the ranger stay in sync), double-click to reset; the chart refreshes itself every minute.
 
 How it works (`includes/stats_timeline.php`):
 
@@ -297,7 +299,7 @@ How it works (`includes/stats_timeline.php`):
   whitelist-mode samples; kept `stats_timeline_keep_days`, default 60) and `stats_samples_1h` (hourly,
   kept forever — ~9 k rows a year). Roll-ups and retention run from the janitor tick; the state (last
   sample, roll-up cursors, last error) lives in `config/stats_timeline_state.json`.
-- **API** — `GET api.php?endpoint=stats_timeline&range=24h|7d|14d|30d|60d[&series=seeds,udp_rps]`
+- **API** — `GET api.php?endpoint=stats_timeline&range=24h|7d|14d|30d|60d|90d|all[&series=seeds,udp_rps]`
   returns `{t:[…], seeds:[…], leechers:[…], peers:[…], torrents:[…], whitelist_count:[…], mode:[0|1…],
   udp_rps:[…], tcp_rps:[…], connect_rps:[…], scrape_rps:[…], step, table, points}`; the table is
   picked per range (raw → 5m → 1h so a payload stays below ~4 500 points) and each range is cached
@@ -331,11 +333,18 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
   budget to **0** to catalogue without any DHT metadata fetching.
 - **Lifecycle** — a new row lives until `grace_until` (`index_grace_days`) unless its metadata resolves;
   a resolved row lives until `protected_until` (`index_protect_days`), extended on every poll where it
-  still has ≥ 1 seeder. The hourly pruner drops expired rows and caps the table at `index_max_rows`
-  (oldest unprotected `last_seen` first). A 200 000-row cap is well under 200 MB on disk.
+  still has ≥ 1 seeder. The hourly pruner (also forced right after a poll that overshoots the cap by
+  > 5 %) drops expired rows and caps the table at `index_max_rows` (oldest unprotected `last_seen` first);
+  it first backfills the protection window for rows whose metadata resolved since the last poll, and runs
+  under a lock so two prunes can never over-delete. A 200 000-row cap is ~100–150 MB on disk.
 - **Worker** — set `index_table = index_hashes` in `tracker-metadata.conf` and grant the `tracker_meta`
   user on the index tables (see [worker/README.md](worker/README.md)). Leave `index_table` empty to keep
   whitelist-only behaviour.
+- **Bulk actions with a date window** (Whitelist and Index pages): *Fetch metadata* and *Refresh S/L* for
+  rows added / first seen in the last 24 h / 7 d / 14 d or a custom from–to range (`scope=date` +
+  `since_hours` or `from`/`to`); **Cancel queued** (`scope=cancel`) resets every queued metadata fetch
+  back to *none* — the stop button for a backlog that would take days; the bulk *Refresh S/L* button turns
+  into **Stop** while its loop runs.
 - **CLI** — `sudo -u www-data php tools/whitelist_cli.php index [--poll] [--tick]` prints the status /
   forces a poll / runs one janitor tick.
 

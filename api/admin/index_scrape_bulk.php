@@ -5,7 +5,12 @@ $input = readJsonBody();
 $scope = strtolower(trim((string)($input['scope'] ?? '')));
 $after = strtolower(trim((string)($input['after'] ?? '')));
 if (!preg_match('/^[a-f0-9]{0,40}$/', $after)) $after = '';
-if (!in_array($scope, ['page', 'stale', 'all'], true)) jsonResponse(['error' => 'Invalid scope (page | stale | all)'], 400);
+if (!in_array($scope, ['page', 'stale', 'all', 'date'], true)) jsonResponse(['error' => 'Invalid scope (page | stale | all | date)'], 400);
+$dateRange = null;
+if ($scope === 'date') {
+    $dateRange = parseDateRangeInput($input);
+    if ($dateRange === null) jsonResponse(['error' => 'Invalid date range: pass since_hours=N, or from (Y-m-d [H:i]) and optional to.'], 400);
+}
 
 $cap = WL_SCRAPE_BULK_MAX_ROWS;
 $more = false;
@@ -24,9 +29,11 @@ if ($scope === 'page') {
     $rows = $st->fetchAll();
 } else {
     $w = "info_hash > ?";
+    $params = [$after];
     if ($scope === 'stale') $w .= " AND (scraped_at IS NULL OR scraped_at < DATE_SUB(NOW(), INTERVAL " . (int)WL_SCRAPE_STALE_AFTER . " SECOND))";
+    if ($scope === 'date') { $w .= " AND first_seen >= ? AND first_seen <= ?"; $params[] = $dateRange[0]; $params[] = $dateRange[1]; }
     $st = $db->prepare("SELECT info_hash FROM index_hashes WHERE $w ORDER BY info_hash LIMIT " . ($cap + 1));
-    $st->execute([$after]);
+    $st->execute($params);
     $rows = $st->fetchAll();
     if (count($rows) > $cap) { $more = true; array_pop($rows); }
 }
@@ -41,9 +48,11 @@ $truncated = ($res['error'] === null) && (!empty($res['truncated']) || $more);
 $remaining = 0;
 if ($scope !== 'page') {
     $w = "info_hash > ?";
+    $params = [$lastHash];
     if ($scope === 'stale') $w .= " AND (scraped_at IS NULL OR scraped_at < DATE_SUB(NOW(), INTERVAL " . (int)WL_SCRAPE_STALE_AFTER . " SECOND))";
+    if ($scope === 'date') { $w .= " AND first_seen >= ? AND first_seen <= ?"; $params[] = $dateRange[0]; $params[] = $dateRange[1]; }
     $st = $db->prepare("SELECT COUNT(*) FROM index_hashes WHERE $w");
-    $st->execute([$lastHash]);
+    $st->execute($params);
     $remaining = (int)$st->fetchColumn();
 } else {
     $remaining = max(0, count($rows) - (int)$res['processed']);

@@ -114,7 +114,15 @@
                                 <li><button type="button" class="dropdown-item" data-meta-scope="missing_failed"><i class="bi bi-plus-slash-minus"></i> Missing + failed</button></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><button type="button" class="dropdown-item" data-meta-scope="all"><i class="bi bi-arrow-repeat"></i> All active hashes (re-fetch)</button></li>
-                                <li><div class="dropdown-item-text wl-dd-note">Only queues the rows — the metadata worker fetches them in the background, one hash after another. Large queues take a while.</div></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><h6 class="dropdown-header">Added within&hellip; (missing + failed)</h6></li>
+                                <li><button type="button" class="dropdown-item" data-meta-date="24"><i class="bi bi-clock-history"></i> Last 24 hours</button></li>
+                                <li><button type="button" class="dropdown-item" data-meta-date="168"><i class="bi bi-calendar-week"></i> Last 7 days</button></li>
+                                <li><button type="button" class="dropdown-item" data-meta-date="336"><i class="bi bi-calendar-range"></i> Last 14 days</button></li>
+                                <li><button type="button" class="dropdown-item" data-meta-date="custom"><i class="bi bi-calendar-event"></i> Custom range&hellip;</button></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><button type="button" class="dropdown-item text-danger" data-meta-cancel><i class="bi bi-x-octagon"></i> Cancel queued (pending &rarr; none)</button></li>
+                                <li><div class="dropdown-item-text wl-dd-note">Only queues the rows — the metadata worker fetches them in the background, one hash after another. Large queues take a while; <em>Cancel queued</em> stops the backlog (rows being fetched right now still finish).</div></li>
                             </ul>
                         </div>
                         <!-- Bulk scrape (split control): main button = this page, caret = stale / all -->
@@ -126,6 +134,12 @@
                                 <li><button type="button" class="dropdown-item" data-scrape-scope="page"><i class="bi bi-file-earmark"></i> This page</button></li>
                                 <li><button type="button" class="dropdown-item" data-scrape-scope="stale"><i class="bi bi-hourglass-split"></i> Stale (not scraped in 10 min)</button></li>
                                 <li><button type="button" class="dropdown-item" data-scrape-scope="all"><i class="bi bi-collection"></i> All active hashes</button></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><h6 class="dropdown-header">Added within&hellip;</h6></li>
+                                <li><button type="button" class="dropdown-item" data-scrape-date="24"><i class="bi bi-clock-history"></i> Last 24 hours</button></li>
+                                <li><button type="button" class="dropdown-item" data-scrape-date="168"><i class="bi bi-calendar-week"></i> Last 7 days</button></li>
+                                <li><button type="button" class="dropdown-item" data-scrape-date="336"><i class="bi bi-calendar-range"></i> Last 14 days</button></li>
+                                <li><button type="button" class="dropdown-item" data-scrape-date="custom"><i class="bi bi-calendar-event"></i> Custom range&hellip;</button></li>
                                 <li><div class="dropdown-item-text wl-dd-note">Batches of 50 hashes per tracker request; long runs continue automatically until everything is scraped.</div></li>
                             </ul>
                         </div>
