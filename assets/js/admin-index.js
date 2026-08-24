@@ -9,6 +9,14 @@
     const state = { page: 1, pages: 1, search: '', searchFiles: false, meta: '', life: '', sort: [{ col: 'last', dir: 'desc' }], selected: new Set(), rows: [] };
     const nearRadius = () => Math.max(1, parseInt(document.body.dataset.nearPages || '2', 10) || 2);
     let modal = null;
+    // magnet built client-side from the announce URLs on <body> (same as the public search page)
+    const announces = [document.body.dataset.announce, document.body.dataset.announceHttps].filter(Boolean);
+    function magnetFor(hash, name) {
+        let m = 'magnet:?xt=urn:btih:' + hash;
+        if (name) m += '&dn=' + encodeURIComponent(name);
+        announces.forEach(u => { m += '&tr=' + encodeURIComponent(u); });
+        return m;
+    }
 
     // ── status card ──────────────────────────────────────────────────────────
     async function loadStatus() {
@@ -124,11 +132,12 @@
             const act = el('td', { className: 'th-actions' });
             const view = el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', title: 'Details' }, el('i', { className: 'bi bi-eye' }));
             view.addEventListener('click', () => openModal(r.info_hash));
+            const mag = el('a', { className: 'btn btn-sm btn-outline-secondary wl-act', title: 'Open magnet link in your torrent client', href: magnetFor(r.info_hash, r.name) }, el('i', { className: 'bi bi-magnet' }));
             const promote = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success wl-act', title: 'Promote to whitelist' }, el('i', { className: 'bi bi-arrow-up-circle' }));
             promote.addEventListener('click', () => promoteHashes([r.info_hash]));
-            act.appendChild(view); act.appendChild(promote);
+            act.appendChild(view); act.appendChild(mag); act.appendChild(promote);
             tr.appendChild(act);
-            tr.addEventListener('click', (e) => { if (e.target.closest('button') || e.target.closest('input')) return; openModal(r.info_hash); });
+            tr.addEventListener('click', (e) => { if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a')) return; openModal(r.info_hash); });
             tb.appendChild(tr);
         });
         const all = $('idx-check-all');

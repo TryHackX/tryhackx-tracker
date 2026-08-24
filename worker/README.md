@@ -28,6 +28,10 @@ GRANT SELECT (id, info_hash, magnet_link, meta_status, meta_claim, meta_claimed_
       UPDATE (name, total_size, files_count, piece_length, meta_status, meta_claim, meta_claimed_at, meta_fetched_at, meta_error)
       ON tracker.whitelist TO 'tracker_meta'@'localhost';
 GRANT SELECT, INSERT, DELETE ON tracker.whitelist_files TO 'tracker_meta'@'localhost';
+-- optional but recommended (1.7.0): lets the panel setting `meta_worker_concurrency`
+-- (Settings → Index) override the conf `concurrency` live, re-read every ~60 s.
+-- Without it the worker silently keeps the config-file value.
+GRANT SELECT ON tracker.settings TO 'tracker_meta'@'localhost';
 FLUSH PRIVILEGES;
 ```
 

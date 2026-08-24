@@ -345,10 +345,11 @@
         container.appendChild(last);
     }
 
+    // torrent sizes are powers of 1024 — label them with the matching IEC units (KiB/MiB/GiB)
     function fmtBytes(n) {
         n = Number(n);
         if (!isFinite(n) || n <= 0) return '—';
-        const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
         let i = 0;
         while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
         return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2)) + ' ' + u[i];

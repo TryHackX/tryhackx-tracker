@@ -33,7 +33,7 @@
             el('span', { className: counts.banned ? 'text-warning' : '', text: `${counts.banned} banned` }),
         ]));
         grid.appendChild(kv('Groups', [el('span', { text: String(state.groups.length) }), ' ',
-            el('span', { className: 'text-muted wl-small', text: 'guest = anonymous baseline · defaults granted at registration' })]));
+            el('span', { className: 'text-muted wl-small', text: 'guest = anonymous only · signed-in users get the union of their own groups' })]));
     }
 
     // ── groups data (shared) ────────────────────────────────────────────────
@@ -72,7 +72,8 @@
             const tr = el('tr', {});
             tr.appendChild(el('td', { className: 'wl-id', text: String(u.id) }));
             tr.appendChild(el('td', {}, el('strong', { text: u.username })));
-            tr.appendChild(el('td', { className: 'wl-small', text: u.email || '—' }));
+            tr.appendChild(el('td', { className: 'wl-small', title: u.email ? (u.email_verified ? 'verified address' : 'not verified') : '' },
+                [u.email || '—', u.email && u.email_verified ? el('i', { className: 'bi bi-patch-check-fill text-success ms-1', title: 'verified' }) : null]));
             tr.appendChild(el('td', {}, badge(u.status, u.status === 'active' ? 'wl-b-ok' : 'wl-b-bad')));
             const gTd = el('td', {});
             (u.groups || []).forEach(g => {
@@ -114,16 +115,34 @@
     }
 
     // ── user edit modal ─────────────────────────────────────────────────────
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    function ueValidate() {
+        const email = $('ue-email'), p1 = $('ue-password'), p2 = $('ue-password2');
+        const emailOk = email.value.trim() === '' || EMAIL_RE.test(email.value.trim());
+        const passOk = p1.value === '' || (p1.value.length >= 8 && p1.value.length <= 200);
+        const matchOk = p1.value === '' || p2.value === p1.value;
+        email.classList.toggle('is-invalid', !emailOk);
+        p1.classList.toggle('is-invalid', !passOk);
+        p2.classList.toggle('is-invalid', !matchOk);
+        return emailOk && passOk && matchOk;
+    }
+    function ueSyncPass2() {
+        $('ue-password2-wrap').classList.toggle('d-hidden', $('ue-password').value === '');
+    }
     function openEdit(u) {
         editUser = u;
         $('ue-name').textContent = u.username;
         $('ue-status').value = u.status;
         $('ue-email').value = u.email || '';
         $('ue-password').value = '';
+        $('ue-password2').value = '';
+        ['ue-email', 'ue-password', 'ue-password2'].forEach(id => $(id).classList.remove('is-invalid'));
+        ueSyncPass2();
         $('ue-alert').textContent = '';
         bootstrap.Modal.getOrCreateInstance($('usEditModal')).show();
     }
     async function saveEdit() {
+        if (!ueValidate()) return;
         const body = { id: editUser.id, status: $('ue-status').value, email: $('ue-email').value.trim() };
         if ($('ue-password').value !== '') body.password = $('ue-password').value;
         const r = await apiCall('admin/user_update', 'POST', body);
@@ -309,6 +328,9 @@
         $('us-filter-status').addEventListener('change', () => { state.us.status = $('us-filter-status').value; state.us.page = 1; loadUsers(); });
         $('us-filter-group').addEventListener('change', () => { state.us.group = $('us-filter-group').value; state.us.page = 1; loadUsers(); });
         $('ue-save').addEventListener('click', saveEdit);
+        $('ue-email').addEventListener('input', ueValidate);
+        $('ue-password').addEventListener('input', () => { ueSyncPass2(); ueValidate(); });
+        $('ue-password2').addEventListener('input', ueValidate);
         $('ug-save').addEventListener('click', saveGrant);
         $('ug-duration').addEventListener('change', () => $('ug-custom').classList.toggle('d-hidden', $('ug-duration').value !== 'custom'));
         $('un-send').addEventListener('click', sendNotify);

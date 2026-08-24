@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 7;   // 3 = scheduled tracker mode settings, 4 = reCAPTCHA v3 settings (no DDL change), 5 = stats timeline tables, 6 = observed-hash index tables, 7 = user accounts/groups + federation peers + api client scopes
+const TRACKER_SCHEMA_VERSION = 8;   // …, 5 = stats timeline tables, 6 = observed-hash index tables, 7 = user accounts/groups + federation peers + api client scopes, 8 = system admin group + panel-admin user migration + whitelist submit mode + worker concurrency setting
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -283,13 +283,19 @@ function trackerSchemaStatements(): array {
             KEY `idx_ut_expires` (`expires_at`)
         ) $engine",
 
-        // Baseline groups: `guest` = permissions every visitor has (anonymous included, the baseline
-        // every logged-in user inherits); `member` = default group granted on registration. Both are
-        // editable but cannot be deleted (is_system). INSERT IGNORE keeps admin edits.
+        // Baseline groups: `guest` = permissions of ANONYMOUS visitors only (signed-in users get the
+        // union of their own groups instead); `member` = default group granted on registration;
+        // `admin` = site administrators (its members pass every permission check, see
+        // userEffectivePermissions). All editable but cannot be deleted (is_system). INSERT IGNORE
+        // keeps admin edits; member is seeded with guest's classic permissions so a fresh registration
+        // never sees LESS than an anonymous visitor by default.
         "INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
-            ('guest', 'Guest', 'Baseline permissions for every visitor (anonymous included).', 0, 0, 1,
+            ('guest', 'Guest', 'Permissions of anonymous (not signed-in) visitors.', 0, 0, 1,
              '{\"whitelist.view\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}'),
-            ('member', 'Member', 'Default group for newly registered users.', 1, 1, 1, '{}')",
+            ('member', 'Member', 'Default group for newly registered users.', 1, 1, 1,
+             '{\"whitelist.view\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}'),
+            ('admin', 'Admin', 'Site administrators — members pass every permission check.', 1000, 0, 1,
+             '{\"index.view\":true,\"index.files\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}')",
 
         // ── Federation peers (schema v7, includes/federation.php): other tracker nodes we exchange index
         //    metadata with. Inbound access = an api_clients row with scope 'federation' (api_client_id);
@@ -336,6 +342,43 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     }
     if ($parts) $out[] = "ALTER TABLE `index_hashes` " . implode(', ', $parts);
     return $out;
+}
+
+/**
+ * Data migrations that need PHP logic (not plain idempotent SQL). Runs after the DDL, inside the
+ * schema lock. v8: make sure the `admin` system group exists (older installs pre-date the seed
+ * above) and mirror the PANEL admin into the `users` table so the site owner shows up in the user
+ * list with the admin group. The panel password hash is copied once — later panel password changes
+ * do NOT sync (the two logins stay independent).
+ */
+function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
+    // admin group (INSERT IGNORE above only fires on fresh CREATE; existing installs need it too)
+    $db->exec("INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
+        ('admin', 'Admin', 'Site administrators — members pass every permission check.', 1000, 0, 1,
+         '{\"index.view\":true,\"index.files\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}')");
+    // flag legacy guest/member rows as system if an old install lost the flag
+    $db->exec("UPDATE `user_groups` SET is_system = 1 WHERE slug IN ('guest','member','admin')");
+    // refresh the guest seed description ONLY if the admin never touched it (old wording implied
+    // guest was a baseline for signed-in users too, which is no longer true)
+    $db->prepare("UPDATE `user_groups` SET description = ? WHERE slug = 'guest' AND description = ?")
+       ->execute(['Permissions of anonymous (not signed-in) visitors.', 'Baseline permissions for every visitor (anonymous included).']);
+    // panel admin → users row (username from settings, hash from config/app.php)
+    $adminUser = trim((string)($cfg['admin_username'] ?? ''));
+    if ($adminUser !== '' && defined('ADMIN_PASSWORD_HASH') && preg_match('/^[A-Za-z0-9_.-]{3,32}$/', $adminUser)) {
+        $st = $db->prepare("SELECT id FROM users WHERE username = ?");
+        $st->execute([$adminUser]);
+        $uid = (int)($st->fetchColumn() ?: 0);
+        if ($uid === 0) {
+            $db->prepare("INSERT INTO users (username, email, pass_hash) VALUES (?, NULL, ?)")
+               ->execute([$adminUser, ADMIN_PASSWORD_HASH]);
+            $uid = (int)$db->lastInsertId();
+        }
+        $gid = (int)($db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchColumn() ?: 0);
+        if ($uid > 0 && $gid > 0) {
+            $db->prepare("INSERT IGNORE INTO user_group_members (user_id, group_id, granted_by, note) VALUES (?, ?, 'migration', 'panel admin')")
+               ->execute([$uid, $gid]);
+        }
+    }
 }
 
 /**
@@ -400,6 +443,12 @@ function trackerSchemaDefaultSettings(): array {
         'rate_limit_user_login'       => '10',
         'rate_limit_user_register'    => '5',
         'rate_limit_index_search'     => '120',
+        // schema v8: whitelist registration audience ('public' = anyone with CAPTCHA,
+        // 'users' = signed-in accounts with the whitelist.add permission, no CAPTCHA)
+        'whitelist_submit_mode'       => 'public',
+        // schema v8: metadata worker parallel fetches (empty = keep the worker's own config file
+        // value; 1-16 overrides it live — the worker re-reads this setting every ~60 s)
+        'meta_worker_concurrency'     => '',
         // schema v7: federation (includes/federation.php + worker/federation.py)
         'fed_enabled'                 => '0',
         'fed_node_name'               => '',
@@ -446,6 +495,7 @@ function ensureSchema(PDO $db, array &$cfg): void {
             foreach (trackerSchemaGuardedStatements($db) as $sql) {
                 try { $db->exec($sql); } catch (PDOException $e) { error_log('[tracker schema] ' . $e->getMessage()); throw $e; }
             }
+            try { trackerSchemaDataMigrations($db, $cfg); } catch (\Throwable $e) { error_log('[tracker schema] data migration: ' . $e->getMessage()); }
             $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
             foreach (trackerSchemaDefaultSettings() as $k => $v) {
                 $ins->execute([$k, $v]);

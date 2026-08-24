@@ -26,16 +26,13 @@
         <a href="<?= $baseUrl ?>?action=search" class="<?= $action === 'search' ? 'active' : '' ?>">Search</a>
         <?php endif; ?>
         <?php $navUser = $navUser ?? (usersEnabled($cfg) ? currentUser($db) : null); ?>
+        <?php $accountActive = in_array($action, ['account', 'login', 'register', 'reset', 'verify'], true); ?>
         <?php if ($navUser !== null): ?>
         <span class="sep">|</span>
-        <a href="<?= $baseUrl ?>?action=account" class="nav-user <?= $action === 'account' ? 'active' : '' ?>"><?= sanitize($navUser['username']) ?><span class="nav-unread" id="nav-unread" hidden></span></a>
+        <a href="<?= $baseUrl ?>?action=account" class="nav-user <?= $accountActive ? 'active' : '' ?>"><?= sanitize($navUser['username']) ?><span class="nav-unread" id="nav-unread" hidden></span></a>
         <?php elseif (usersLinksVisible($cfg)): ?>
         <span class="sep">|</span>
-        <a href="<?= $baseUrl ?>?action=login" class="<?= $action === 'login' ? 'active' : '' ?>">Sign in</a>
-        <?php if (usersRegistrationEnabled($cfg)): ?>
-        <span class="sep">|</span>
-        <a href="<?= $baseUrl ?>?action=register" class="<?= $action === 'register' ? 'active' : '' ?>">Register</a>
-        <?php endif; ?>
+        <a href="<?= $baseUrl ?>?action=login" class="<?= $accountActive ? 'active' : '' ?>">Account</a>
         <?php endif; ?>
     </div>
 </nav>

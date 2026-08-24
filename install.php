@@ -377,6 +377,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 $stmt->execute([$k, $v]);
             }
 
+            // Mirror the panel admin into the user system (admin group members pass every
+            // permission check). Upgraded installs get the same via trackerSchemaDataMigrations().
+            try {
+                if (preg_match('/^[A-Za-z0-9_.-]{3,32}$/', $adminUser)) {
+                    $pdo->prepare("INSERT IGNORE INTO users (username, email, pass_hash) VALUES (?, NULL, ?)")->execute([$adminUser, $hash]);
+                    $pdo->exec("INSERT IGNORE INTO user_group_members (user_id, group_id, granted_by, note)
+                                SELECT u.id, g.id, 'install', 'panel admin' FROM users u JOIN user_groups g ON g.slug = 'admin'
+                                WHERE u.username = " . $pdo->quote($adminUser));
+                }
+            } catch (Exception $e) { /* non-fatal — the admin can grant the group in the panel */ }
+
             // Create lock file
             file_put_contents(__DIR__ . '/config/installed.lock', date('Y-m-d H:i:s'));
 

@@ -4,6 +4,70 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] — 2026-08-24
+
+### Changed — permission semantics (schema v8)
+- **Groups**: the `guest` group now holds the permissions of **anonymous visitors only**. A
+  signed-in user gets **exactly the union of their own active groups** — guest is no longer
+  inherited, so a group can be *narrower* than guest (previously guest's permissions leaked to
+  every account, which made `stats.view` / `stats.timeline` / `home.stats` look broken on member
+  groups). Group *priority* only orders badges — it never overrides permissions. The admin Users
+  page explains this inline. Fresh installs seed `member` with guest's classic permissions so a
+  new registration never sees less than an anonymous visitor; **existing installs keep their
+  configured groups as-is** (review them after upgrading if you relied on guest inheritance).
+- **System `admin` group + panel-admin migration**: a new seeded system group `admin` whose
+  members pass **every** permission check (current and future). The migration mirrors the panel
+  admin (settings `admin_username`, panel password hash) into the `users` table once and grants it
+  the admin group — the site owner now shows up in the user list. Panel and user passwords do
+  **not** stay in sync afterwards.
+
+### Added
+- **Search relevance + whitelist arm** (`?action=search`): results are ordered by a real
+  **Best match** score (fulltext BOOLEAN MODE; rarer/longer words weigh more, a row matching more
+  words ranks higher) with seeders as tie-break; sort keys `relevance | seeders | last | size |
+  name`. With `whitelist.view` the search also folds in the **live whitelist** (whitelisted hashes
+  are removed from the index, so they were previously unfindable) — rows carry a `WL` badge.
+  With `index.files` the file-count chip opens a **file-list modal** (`index_files` endpoint).
+- **Search page rework**: toolbar attached to the table (admin style) with a search-icon input,
+  red-glow clear ×, restyled sort select and custom checkbox; **live search** (300 ms debounce, no
+  button), admin-style pagination (First/Prev/page box/Next/Last), fixed column widths (no layout
+  jump when Copy flips to ✓), IEC byte units (KiB/MiB/GiB — torrent sizes are powers of 1024)
+  everywhere incl. the admin panels.
+- **Sign-in duration** (`?action=login`): "Stay signed in for" — **forever** (default; ~10-year
+  remember cookie) / 1 hour (session-only, server-side deadline) / 1 day / 30 days (remember
+  cookie with that absolute expiry; token rotation keeps the original deadline).
+- **Email verification**: registration with an address (and every email change) sends a
+  confirmation link (`?action=verify`, 72 h, single use); the account page shows a
+  verified/unverified badge with resend (`user_verify_send`, 3/h/IP), the admin user list marks
+  verified addresses. Accounts work without confirming.
+- **Notifications**: paginated (10/page) with a **Delete read** button; auto-prune note (read
+  > 90 d, everything > 365 d — unchanged janitor behaviour, now documented in the UI).
+- **Whitelist registration audience** (`whitelist_submit_mode`): `public` (anyone + CAPTCHA, as
+  before) or **`users`** — only signed-in accounts holding the new **`whitelist.add`** permission
+  may register hashes (no CAPTCHA; per-account *and* per-IP rate limits; submissions carry
+  `source_ref = {"user":…,"id":…}`). Falls back to public while the account system is off.
+- **Metadata worker concurrency** (`meta_worker_concurrency`): how many hashes the worker resolves
+  in parallel (1–16), editable in Settings → Index; the worker re-reads it every ~60 s (no restart;
+  requires a `SELECT` grant on `settings` for the worker DB user — falls back to its config file
+  value otherwise, whose cap was raised 8 → 16).
+- **Timeline zoom = finer resolution**: zooming/panning the swarm timeline refetches the visible
+  span at the finest table that covers it (raw 60 s → 5 min → 1 h; `stats_timeline&from=&to=`),
+  so "All"/90 d charts no longer stay hourly when zoomed into a day. Zoom-out restores the cached
+  full-range payload; the status line shows "(raw · zoom)" while a window is active.
+- **Admin actions**: an **open-magnet icon button** (🧲 anchor) next to Details on the Index and
+  Whitelist tables (the whitelist copy button icon moved to a clipboard); user list is sortable by
+  **group** (highest-priority active membership).
+
+### Fixed / polished
+- Real-time validation: register (username/email/password/repeat), account (email format, new
+  password ≥ 8 + repeat box that appears when needed), admin user-edit modal (email format,
+  password ≥ 8 + repeat, shown as password fields). The confusing "Remove my email address"
+  checkbox is gone — clearing the email box removes the address.
+- Nav: **Sign in + Register collapsed into one "Account" link**; base page width 52 → 62 em so the
+  full menu stays on one line; mobile pass over the whole public site (nav without separators,
+  stacking search toolbar, scrollable tables, compact pagination, no horizontal page scroll at
+  375 px). Stats page `<title>` fixed (showed "Home").
+
 ## [1.6.0] — 2026-08-24
 
 ### Added

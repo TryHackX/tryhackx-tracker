@@ -6,6 +6,9 @@ user = tracker_meta
 password = CHANGE_ME
 
 [worker]
+# parallel metadata fetches (1-16). The panel setting `meta_worker_concurrency`
+# (Settings → Index) overrides this live when the tracker_meta user has
+# SELECT on the settings table — the worker re-reads it every ~60 s.
 concurrency = 4
 timeout_seconds = 180
 poll_interval = 3

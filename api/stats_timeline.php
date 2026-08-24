@@ -29,6 +29,33 @@ if (isset($_GET['series']) && trim((string)$_GET['series']) !== '') {
     $wanted = array_values(array_filter(array_map('trim', explode(',', strtolower((string)$_GET['series']))), fn($s) => preg_match('/^[a-z_]{1,32}$/', $s)));
 }
 
+// Optional zoom window: &from=<unix>&to=<unix> refetches just that span at the finest resolution
+// that covers it (raw → 5m → 1h). Windowed replies are small, skip the file cache entirely and
+// ride the same 60 req/min rate limit as everything else.
+$winFrom = isset($_GET['from']) && is_numeric($_GET['from']) ? (int)$_GET['from'] : null;
+$winTo = isset($_GET['to']) && is_numeric($_GET['to']) ? (int)$_GET['to'] : null;
+if ($winFrom !== null && $winTo !== null && $winTo > $winFrom && ($winTo - $winFrom) >= 60) {
+    try {
+        $payload = statsTimelineSeries($db, $cfg, $rangeSec, time(), $winFrom, $winTo);
+    } catch (\Throwable $e) {
+        error_log('[stats timeline] window series: ' . $e->getMessage());
+        jsonResponse(['error' => 'Timeline query failed'], 500);
+    }
+    $payload['range'] = $rangeKey;
+    $payload['cache_age'] = 0;
+    if ($wanted !== null) {
+        $keep = array_flip(array_merge(['success', 'range', 'range_seconds', 'from', 'to', 'step', 'table', 'windowed', 'points', 'interval', 'generated_at', 'cache_age', 't', 'mode'], $wanted));
+        $payload = array_intersect_key($payload, $keep);
+    }
+    while (ob_get_level()) ob_end_clean();
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: private, no-store');
+    $json = json_encode($payload);
+    if (strlen($json) > 4096 && !ini_get('zlib.output_compression')) ob_start('ob_gzhandler');
+    echo $json;
+    exit;
+}
+
 /** Emit a JSON string with the right headers (gzip when accepted); bypasses jsonResponse() so ob_gzhandler survives. */
 $emit = function (string $json, int $cacheAge) use ($public): void {
     while (ob_get_level()) ob_end_clean();

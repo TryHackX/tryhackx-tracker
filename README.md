@@ -47,8 +47,8 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **CAPTCHA provider** — Google reCAPTCHA v2 or Cloudflare Turnstile (one shared modal, fail-closed verification with timeouts)
 
 ### User accounts & federation (1.6.0, both off by default)
-- **User accounts** — registration/login with CAPTCHA, groups with per-feature permissions (the seeded `guest` group is every visitor's baseline), timed memberships (1 d … 1 y / custom from–to, extend-on-repurchase), in-app + email notifications, an account page and an admin Users page — see [User accounts, groups & permissions](#user-accounts-groups--permissions-160)
-- **Member search** (`?action=search`) — a permission-gated search over the resolved observed-hash index with magnet links
+- **User accounts** — registration/login with CAPTCHA (selectable sign-in duration, email verification), groups with per-feature permissions (`guest` = anonymous visitors; a signed-in user gets exactly the union of their own groups; system `admin` group passes everything — 1.7.0 semantics), timed memberships (1 d … 1 y / custom from–to, extend-on-repurchase), in-app + email notifications, an account page and an admin Users page — see [User accounts, groups & permissions](#user-accounts-groups--permissions-160)
+- **Member search** (`?action=search`) — a permission-gated, relevance-ranked live search over the resolved observed-hash index (whitelist folded in with `whitelist.view`) with magnet links and file-list modals
 - **Sales API** (`v1/users/*`, key scope `users`) — automate selling timed group access from an external shop
 - **Federation** — exchange resolved index metadata with peer trackers (cursor-paged gzip export + a Python importer on a systemd timer) to build one big shared catalogue — see [Federation / cluster](#federation--cluster--a-shared-metadata-catalogue-160)
 
@@ -336,7 +336,11 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
 - **Metadata** — the janitor promotes up to `index_meta_daily_budget` rows/day from *none* to *pending*
   (highest seeders first), with `meta_requested_at` spread across the next 24 h so the metadata worker's
   **second queue** (drained only after the whitelist queue is empty) doesn't flood the DHT. Set the
-  budget to **0** to catalogue without any DHT metadata fetching.
+  budget to **0** to catalogue without any DHT metadata fetching. **Worker parallel fetches**
+  (`meta_worker_concurrency`, 1.7.0): how many hashes the worker resolves at once (1–16, both
+  queues); the worker re-reads the setting every ~60 s — no restart — when its DB user has
+  `SELECT` on `settings` (see [worker/README.md](worker/README.md)); empty keeps the worker's own
+  config-file value.
 - **Lifecycle** — a new row lives until `grace_until` (`index_grace_days`) unless its metadata resolves;
   a resolved row lives until `protected_until` (`index_protect_days`), extended on every poll where it
   still has ≥ 1 seeder. The hourly pruner (also forced right after a poll that overshoots the cap by
@@ -366,22 +370,36 @@ default — with it off, everything behaves exactly like the classic single-admi
 
 - **Registration & sign-in** (`?action=register` / `?action=login`) — CAPTCHA-protected (registration
   *requires* a configured CAPTCHA; login uses the smart CAPTCHA `login` context), rate limited per
-  IP, with optional 30-day *remember me* cookies (only a hash is stored; rotated on every use and
-  invalidated on password change or ban) and an email **password reset**. The menu links can be
-  hidden (`users_links_visible=0`) so only people who know the URLs can sign in.
+  IP, live-validated forms, and a **"Stay signed in for"** choice: *forever* (default; ~10-year
+  remember cookie), *1 hour* (session-only, server-side deadline), *1 day* or *30 days* (remember
+  cookie with that absolute expiry — only a token hash is stored, rotation keeps the original
+  deadline, everything is invalidated on password change or ban). Email **password reset** plus
+  **email verification** (1.7.0): registering with an address (or changing it) sends a 72-hour
+  single-use confirmation link (`?action=verify`); the account page shows the verified badge with a
+  resend button and the admin list marks verified addresses — accounts work without confirming.
+  The menu links can be hidden (`users_links_visible=0`; the nav shows one **Account** entry).
 - **Groups with permissions** (Admin → **Users** → *Groups*): each group carries a set of
-  permissions — `index.view` / `index.files` / `index.magnet` (the member search), `whitelist.view`
-  (the public whitelist page), `stats.view` / `stats.timeline` / `home.stats` (the statistics
-  surfaces). The seeded **guest** group is the baseline *every* visitor gets (anonymous included) —
-  its defaults keep the classic public behaviour, and un-ticking something there hides it from
-  everyone without an account; the seeded **member** group is granted on registration
-  (`users_default_group`). A user's effective permissions = guest ∪ their active groups.
+  permissions — `index.view` / `index.files` / `index.magnet` (the member search),
+  `whitelist.view` (the public whitelist page + whitelisted rows in search), `whitelist.add`
+  (registering hashes when `whitelist_submit_mode=users`), `stats.view` / `stats.timeline` /
+  `home.stats` (the statistics surfaces). **Semantics (changed in 1.7.0 / schema v8):** the seeded
+  **guest** group applies to **anonymous visitors only**; a signed-in user has **exactly the union
+  of their own active groups** (guest is *not* inherited, so a group can be narrower than guest;
+  priority only orders badges). The seeded **member** group is granted on registration
+  (`users_default_group`) and on fresh installs starts with guest's classic permissions; the seeded
+  system **admin** group passes *every* permission check — the panel admin is mirrored into the
+  user list with it once (the two passwords do not stay in sync afterwards).
 - **Timed access**: grant a group permanently or for **1 d / 1 w / 2 w / 1 m / 3 m / 6 m / 1 y**, or
   a custom **from–to** window. Duration grants *extend* an existing membership (repeat purchases
   stack). The janitor expires memberships, warns `users_notify_expiry_days` days before the end and
-  posts in-app **notifications** (grant / revoke / expiry warning / expired; optional email copies).
+  posts in-app **notifications** (grant / revoke / expiry warning / expired; optional email copies;
+  paginated on the account page with a *Delete read* button — read ones auto-prune after 90 days).
 - **Member search** (`?action=search`): search everything the tracker has *seen* (resolved index
-  metadata only) — with per-permission columns (file counts, info hashes / magnet links).
+  metadata; with `whitelist.view` the live whitelist is folded in and badged `WL`) — ordered by
+  **Best match** relevance (fulltext score, rarer/longer words weigh more, seeders break ties) with
+  seeders/recency/size/name sorts, live-as-you-type with an admin-style toolbar and pagination,
+  per-permission columns (file counts open a **file-list modal** with `index.files`; info hashes /
+  magnet links with `index.magnet`).
 - **Selling group access**: create an API key with the **users** scope and call
   `v1/users/lookup | grant | revoke | provision` from your shop after a purchase — see
   [tools/api_client_example.py](tools/api_client_example.py). Grants made through the API notify the
@@ -605,6 +623,13 @@ link whose `tr=` parameters include one of **Our tracker hosts** (hostnames / IP
 configured announce URLs always count) — a hash whose torrent never announces to this tracker would
 just occupy the whitelist. Bare hashes are refused with an explanatory error; admin adds and the
 S2S API are not affected (the forum extension has the same option on its side).
+
+**Who can register hashes** (`whitelist_submit_mode`, 1.7.0): `public` (default — anyone, CAPTCHA
+always required) or **`users`** — only signed-in accounts holding the **`whitelist.add`**
+permission may register (no CAPTCHA; the account is the abuse gate). In users mode the hourly
+submission limit applies per account *and* per IP, each submission stores
+`source_ref = {"user":"…","id":…}` next to the registrant IP, and the whitelist page shows a
+sign-in prompt to everyone else. Needs the account system ON — otherwise it falls back to public.
 
 #### 5. Server-to-server API
 
@@ -877,7 +902,7 @@ The installer creates the following tables:
 | `index_hashes` | Observed-hash index: hashes seen on the tracker (S/L, seen count, grace/protect, metadata, `meta_source`) — schema v6/v7 |
 | `index_files` | File lists for indexed hashes (keyed by info_hash, FULLTEXT searchable) |
 | `users` | User accounts (username, optional email, password hash, status) — schema v7 |
-| `user_groups` | Groups with JSON permissions (seeded: `guest` = every visitor's baseline, `member` = granted on registration) |
+| `user_groups` | Groups with JSON permissions (seeded: `guest` = anonymous visitors, `member` = granted on registration, `admin` = passes every check) — schema v8 semantics |
 | `user_group_members` | Timed memberships (`granted_at`/`expires_at`, expiry warnings) |
 | `user_notifications` | In-app notifications (grants, expiry warnings, admin messages) |
 | `user_tokens` | Remember-me + password-reset tokens (sha256 only) |
@@ -925,7 +950,9 @@ All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` w
 | `user_me` / `user_notifications` | GET/POST | Profile + groups + permissions / notification list & mark-read (session) |
 | `user_update` | POST | Change own email / password (requires the current password) |
 | `user_reset_request` / `user_reset_confirm` | POST | Email password reset (CAPTCHA; token valid 2 h) |
-| `index_search` | GET | Member search over the resolved index (`search`, `search_files`, `sort`, `page`; gated by `index.*` permissions) |
+| `user_verify_send` | POST | (Re)send the email-verification link for the signed-in user (3/h/IP; link valid 72 h, consumed by `?action=verify`) |
+| `index_search` | GET | Member search over the resolved index + whitelist (`search`, `search_files`, `sort` incl. `relevance`, `page`; gated by `index.*` / `whitelist.view` permissions) |
+| `index_files` | GET | File list of one catalogue entry for the search page (`hash`; needs `index.view` + `index.files`) |
 | `v1/whitelist/submit` | POST | Server-to-server registration (bearer key, scope `whitelist`; see [Whitelist mode](#whitelist-mode)) |
 | `v1/whitelist/ping` | GET | Server-to-server health check (scope `whitelist`) |
 | `v1/users/lookup` / `grant` / `revoke` / `provision` | POST | Sales/shop integration (scope `users`): look up a user, grant/extend or revoke a timed group, create an account |

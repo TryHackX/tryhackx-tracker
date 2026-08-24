@@ -469,15 +469,37 @@ function statsTimelineChooseTable(array $cfg, int $rangeSec, ?PDO $db = null, ?i
  * rates derived from the cumulative counters (null across a tracker restart or a gap). Gaps larger than
  * 3 steps get an explicit null point so the chart breaks the line instead of bridging the outage.
  */
-function statsTimelineSeries(PDO $db, array $cfg, int $rangeSec, ?int $now = null): array {
+function statsTimelineSeries(PDO $db, array $cfg, int $rangeSec, ?int $now = null, ?int $winFrom = null, ?int $winTo = null): array {
     $now = $now ?? time();
-    [$table, $step, $kind] = statsTimelineChooseTable($cfg, $rangeSec, $db, $now);
     $from = $now - $rangeSec;
+    $to = $now;
+    $windowed = false;
+    // Optional zoom window [from,to]: the chart refetches the visible span at the finest table that
+    // still covers it, so zooming into an "all"/90d chart yields raw/5-min resolution instead of the
+    // hourly points the full range was decimated to.
+    if ($winFrom !== null && $winTo !== null && $winTo > $winFrom) {
+        $winTo = min($winTo, $now);
+        $winFrom = max($winFrom, $now - 20 * 365 * 86400);
+        if ($winTo > $winFrom) { $from = $winFrom; $to = $winTo; $windowed = true; }
+    }
+    if ($windowed) {
+        $span = $to - $from;
+        $interval = max(1, statsTimelineInterval($cfg));
+        if ($from >= $now - statsTimelineRawDays($cfg) * 86400 && intdiv($span, $interval) <= ST_MAX_RAW_POINTS) {
+            [$table, $step, $kind] = [ST_RAW_TABLE, $interval, 'raw'];
+        } elseif ($from >= $now - statsTimelineKeepDays($cfg) * 86400 && intdiv($span, 300) <= ST_MAX_5M_POINTS) {
+            [$table, $step, $kind] = [ST_5M_TABLE, 300, '5m'];
+        } else {
+            [$table, $step, $kind] = [ST_1H_TABLE, 3600, '1h'];
+        }
+    } else {
+        [$table, $step, $kind] = statsTimelineChooseTable($cfg, $rangeSec, $db, $now);
+    }
     $decimate = '';
     if ($kind === '1h') {
         // 'all' after years of history: thin the hourly rows so the payload stays ≤ ~5000 points
         $cs = $db->prepare("SELECT COUNT(*) FROM `$table` WHERE ts >= ? AND ts <= ?");
-        $cs->execute([$from, $now]);
+        $cs->execute([$from, $to]);
         $cnt = (int)$cs->fetchColumn();
         if ($cnt > 5000) {
             $k = (int)ceil($cnt / 5000);
@@ -494,7 +516,7 @@ function statsTimelineSeries(PDO $db, array $cfg, int $rangeSec, ?int $now = nul
                 FROM `$table` WHERE ts >= ? AND ts <= ?$decimate ORDER BY ts";
     }
     $st = $db->prepare($sql);
-    $st->execute([$from, $now]);
+    $st->execute([$from, $to]);
     $keys = ['t', 'torrents', 'peers', 'seeds', 'leechers', 'completed', 'whitelist_count', 'index_rows', 'mode', 'udp_rps', 'tcp_rps', 'scrape_rps', 'connect_rps'];
     $out = array_fill_keys($keys, []);
     $prev = null;
@@ -535,8 +557,8 @@ function statsTimelineSeries(PDO $db, array $cfg, int $rangeSec, ?int $now = nul
                  'scrapes' => (int)$r['scrapes'], 'connects' => (int)$r['connects']];
         $rows++;
     }
-    return ['success' => true, 'range_seconds' => $rangeSec, 'from' => $from, 'to' => $now, 'step' => $step, 'table' => $kind,
-            'points' => $rows, 'interval' => statsTimelineInterval($cfg), 'generated_at' => $now] + $out;
+    return ['success' => true, 'range_seconds' => $rangeSec, 'from' => $from, 'to' => $to, 'step' => $step, 'table' => $kind,
+            'windowed' => $windowed, 'points' => $rows, 'interval' => statsTimelineInterval($cfg), 'generated_at' => $now] + $out;
 }
 
 /** Row counts + state for the admin status card / CLI. */

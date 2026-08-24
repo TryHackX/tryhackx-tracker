@@ -285,6 +285,14 @@
                         </select>
                     </div>
                     <div class="col-md-3">
+                        <label class="form-label">Who can register hashes</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="whitelist_submit_mode">
+                            <option value="public" <?= ($cfg['whitelist_submit_mode'] ?? 'public') !== 'users' ? 'selected' : '' ?>>Anyone (CAPTCHA required)</option>
+                            <option value="users" <?= ($cfg['whitelist_submit_mode'] ?? 'public') === 'users' ? 'selected' : '' ?>>Registered users (whitelist.add permission, no CAPTCHA)</option>
+                        </select>
+                        <small class="settings-hint">"Registered users" needs the account system ON and the <code>whitelist.add</code> permission granted (Users &rarr; Groups); otherwise it falls back to public.</small>
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label">Max hashes per submission</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_max_per_submission" value="<?= sanitize($cfg['whitelist_max_per_submission'] ?? '20') ?>" min="1" max="500">
                     </div>
@@ -890,6 +898,11 @@
                             <option value="0" <?= ($cfg['index_meta_auto_queue'] ?? '0') === '0' ? 'selected' : '' ?>>No (daily budget only)</option>
                         </select>
                         <small class="settings-hint">When on, every observed hash without metadata is queued automatically (spread over ~1&nbsp;h, best seeded first) and the daily budget is <strong>ignored</strong>. Mind the DHT load on a big index.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Worker parallel fetches <small class="settings-hint">(empty = worker config)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="meta_worker_concurrency" value="<?= sanitize($cfg['meta_worker_concurrency'] ?? '') ?>" min="1" max="16" placeholder="e.g. 8">
+                        <small class="settings-hint">How many hashes the metadata worker resolves at once (whitelist + index queues). The worker re-reads this every ~60&nbsp;s — no restart needed. Higher = faster drain, more DHT/RAM load. 1&ndash;16.</small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Keep File Lists</label>

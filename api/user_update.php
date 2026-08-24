@@ -56,4 +56,10 @@ try {
 }
 userNotify($db, (int)$u['id'], 'account', 'Your ' . implode(' and ', $changed) . ' ' . (count($changed) > 1 ? 'were' : 'was') . ' changed',
     'If this was not you, change your password immediately.');
-jsonResponse(['success' => true, 'changed' => $changed]);
+// a NEW address starts unverified — send the confirmation link right away (best effort)
+$verifySent = false;
+if ($emailSet && $email !== '') {
+    $fresh = userFindById($db, (int)$u['id']);
+    if ($fresh) $verifySent = userVerifySend($db, $cfg, $fresh);
+}
+jsonResponse(['success' => true, 'changed' => $changed, 'verify_sent' => $verifySent]);

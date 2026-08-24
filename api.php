@@ -134,7 +134,9 @@ $apiRoutes = [
     'user_notifications'         => 'api/user_notifications.php',
     'user_reset_request'         => 'api/user_reset_request.php',
     'user_reset_confirm'         => 'api/user_reset_confirm.php',
+    'user_verify_send'           => 'api/user_verify_send.php',
     'index_search'               => 'api/index_search.php',
+    'index_files'                => 'api/index_files.php',
     // ── User accounts (admin) ──
     'admin/fetch_users'          => 'api/admin/fetch_users.php',
     'admin/user_update'          => 'api/admin/user_update.php',

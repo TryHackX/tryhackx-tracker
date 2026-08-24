@@ -35,7 +35,7 @@ class Config:
         w = cp["worker"] if cp.has_section("worker") else {}
         self.db = dict(host=db.get("host", "localhost"), user=db.get("user"), password=db.get("password"), database=db.get("name", "tracker"),
                        charset="utf8mb4", autocommit=True, connect_timeout=10, read_timeout=30, write_timeout=30)
-        self.concurrency = max(1, min(8, int(w.get("concurrency", 3))))
+        self.concurrency = max(1, min(16, int(w.get("concurrency", 3))))
         self.timeout = max(20, min(600, int(w.get("timeout_seconds", 90))))
         # Second queue: the observed-hash index (includes/index.php). Empty = disabled (default), so an
         # existing deployment keeps whitelist-only behaviour until index_table is configured AND the
@@ -93,6 +93,8 @@ class Worker:
         self.cfg = cfg
         self.db = Db(cfg.db)
         self.active = {}  # claim token -> dict(row, handle, deadline)
+        self._conc_override = None   # live override from the settings table (panel), None = use config
+        self._conc_checked_at = 0.0
         self.running = True
         os.makedirs(cfg.tmp_dir, exist_ok=True)
         os.makedirs(os.path.dirname(cfg.heartbeat), exist_ok=True)
@@ -121,6 +123,27 @@ class Worker:
                                 "files_fk": "info_hash", "select": "info_hash", "gate": " AND meta_requested_at <= NOW()"})
         log.info("session started (libtorrent %s), listen %s, concurrency %d, timeout %ds, queues %s",
                  lt.__version__, cfg.listen_port, cfg.concurrency, cfg.timeout, ",".join(q["table"] for q in self.queues))
+
+    def effective_concurrency(self):
+        """Config concurrency, unless the panel setting `meta_worker_concurrency` (1..16)
+        overrides it. Re-read at most every 60 s; any error (settings table not granted,
+        row absent, garbage value) silently falls back to the config file value."""
+        now = time.time()
+        if now - self._conc_checked_at >= 60:
+            self._conc_checked_at = now
+            val = None
+            try:
+                rows = self.db.query("SELECT `value` FROM settings WHERE `key`='meta_worker_concurrency'", fetch=True)
+                if rows:
+                    raw = str(rows[0].get("value") or "").strip()
+                    if raw.isdigit() and 1 <= int(raw) <= 16:
+                        val = int(raw)
+            except Exception:
+                val = None
+            if val != self._conc_override:
+                log.info("concurrency override from settings: %s (config %d)", val if val is not None else "none", self.cfg.concurrency)
+                self._conc_override = val
+        return self._conc_override or self.cfg.concurrency
 
     # ── queue ──────────────────────────────────────────────────────────────
     def heartbeat(self):
@@ -302,7 +325,7 @@ class Worker:
                     self.finish(token, False, None, f"timeout (no metadata within {self.cfg.timeout} s)")
             # claim new work
             try:
-                while len(self.active) < self.cfg.concurrency:
+                while len(self.active) < self.effective_concurrency():
                     row = self.claim()
                     if not row:
                         break

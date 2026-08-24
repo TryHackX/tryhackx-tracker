@@ -44,5 +44,8 @@ $user = $r['user'];
 userSessionStart($db, $user, $ip);
 userNotify($db, (int)$user['id'], 'welcome', 'Welcome to ' . ($cfg['site_name'] ?? 'the tracker') . '!',
     'Your account is ready. Your groups and their expiry dates are listed on this page.');
+// best-effort verification mail when an address was given (account works without confirming)
+$verifySent = trim((string)$user['email']) !== '' ? userVerifySend($db, $cfg, $user) : false;
 
-jsonResponse(['success' => true, 'user' => ['id' => (int)$user['id'], 'username' => $user['username']], 'captcha_solved' => true]);
+jsonResponse(['success' => true, 'user' => ['id' => (int)$user['id'], 'username' => $user['username']],
+              'verify_sent' => $verifySent, 'captcha_solved' => true]);

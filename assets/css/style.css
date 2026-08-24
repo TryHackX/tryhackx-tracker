@@ -15,7 +15,8 @@
     --error: #f44336;
     --warning: #ff9800;
     --radius: 6px;
-    --max-w: 52em;
+    /* wide enough for the full nav row (Home … Stats · Search · Account) on one line */
+    --max-w: 62em;
 }
 
 html { font-size: 16px; }
@@ -472,7 +473,11 @@ footer p { margin: 0.25rem 0; }
 @media (max-width: 600px) {
     .container { padding: 1rem; }
     h1 { font-size: 1.3rem; }
-    .main-nav { flex-direction: column; align-items: flex-start; }
+    /* phones: keep the nav centred, hide the "|" separators, tighten the links */
+    .main-nav { justify-content: center; }
+    .nav-links { gap: 0.15rem; }
+    .nav-links a { padding: 0.25rem 0.4rem; font-size: 0.9rem; }
+    .nav-links .sep { display: none; }
     .lang-switch { margin-top: 0.5rem; }
 }
 
@@ -1606,13 +1611,171 @@ footer p { margin: 0.25rem 0; }
 .acc-notif-head { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .acc-notif-body { margin: 0.35rem 0; font-size: 0.9rem; white-space: pre-line; }
 .acc-notif .btn-small { margin-top: 0.25rem; }
-.search-form { margin: 1rem 0; }
-.search-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.search-row input[type="text"] { flex: 1 1 16em; }
-.search-row select { flex: 0 0 auto; }
-.search-name { word-break: break-word; }
-.search-actions { white-space: nowrap; }
-.search-actions .btn { margin-right: 0.35rem; }
-.search-note { margin-top: 0.5rem; }
-body.page-search .container { max-width: 72em; }
+.acc-notif-tools { display: inline-flex; gap: 0.4rem; margin-left: 0.5rem; vertical-align: 0.1em; }
+.acc-notif-tools .btn-small { margin: 0; }
+.acc-badge-ok { background: rgba(76, 175, 80, 0.2); color: var(--success); border: 1px solid var(--success); }
+.acc-badge-warn { background: rgba(255, 152, 0, 0.15); color: var(--warning); border: 1px solid var(--warning); }
+.acc-verify-note { font-size: 0.8rem; margin: 0.6rem 0 0; }
+.acc-notif-note { font-size: 0.78rem; margin-top: 0.5rem; }
+.acc-notif-pagination { justify-content: flex-start; }
+.user-card { max-width: 30em; margin: 1.5rem auto; padding: 1.5rem 2rem 1rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+.user-card .user-form { margin-top: 0.5rem; }
 
+/* === Search page (?action=search) === */
+body.page-search .container { max-width: 72em; }
+.search-panel { margin: 1rem 0 0; }
+/* toolbar sits ON the table (same pattern as the admin panels): joined card above the rows */
+.search-toolbar {
+    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+    padding: 0.6rem 0.75rem;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
+    border-bottom: 0;
+}
+.search-box { position: relative; flex: 1 1 18em; min-width: 14em; display: flex; align-items: center; }
+.search-box-icon { position: absolute; left: 0.65rem; color: var(--text-muted); display: inline-flex; pointer-events: none; }
+.search-box input {
+    width: 100%;
+    padding: 0.45rem 2.1rem 0.45rem 2.1rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.9rem;
+}
+.search-box input:focus { outline: none; border-color: var(--accent); }
+.search-clear {
+    position: absolute; right: 0.4rem;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.5rem; height: 1.5rem; padding: 0;
+    background: transparent; border: 0; border-radius: 50%;
+    color: var(--error); cursor: pointer;
+    transition: text-shadow 0.15s, background 0.15s, filter 0.15s;
+}
+.search-clear:hover { background: rgba(244, 67, 54, 0.15); filter: drop-shadow(0 0 6px rgba(244, 67, 54, 0.9)); }
+.search-toolbar select {
+    padding: 0.45rem 0.6rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.search-toolbar select:focus { outline: none; border-color: var(--accent); }
+/* custom checkbox in the admin style */
+.search-check { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text-muted); font-size: 0.85rem; cursor: pointer; user-select: none; white-space: nowrap; }
+.search-check input { position: absolute; opacity: 0; width: 0; height: 0; }
+.search-check-box {
+    display: inline-block; width: 1rem; height: 1rem; flex: 0 0 auto;
+    border: 1px solid var(--border); border-radius: 3px; background: var(--bg);
+    position: relative; transition: border-color 0.15s, background 0.15s;
+}
+.search-check:hover .search-check-box { border-color: var(--accent); }
+.search-check input:focus-visible + .search-check-box { outline: 2px solid var(--link); outline-offset: 1px; }
+.search-check input:checked + .search-check-box { background: var(--accent); border-color: var(--accent); }
+.search-check input:checked + .search-check-box::after {
+    content: ''; position: absolute; left: 0.28rem; top: 0.08rem;
+    width: 0.3rem; height: 0.55rem;
+    border: solid #000; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.search-check input:checked ~ * { color: var(--text); }
+.search-total { margin-left: auto; font-size: 0.82rem; white-space: nowrap; }
+.search-table { table-layout: fixed; }
+.search-table thead th { border-top: 0; }
+.search-c-size { width: 6.5em; }
+.search-c-sl { width: 6.5em; }
+.search-c-seen { width: 10em; }
+.search-c-actions { width: 10.5em; }
+.search-name { word-break: break-word; }
+.search-name > span:first-child { margin-right: 0.15rem; }
+.search-num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.search-wl-badge {
+    display: inline-block; margin-left: 0.4rem; padding: 0 0.4em;
+    border: 1px solid var(--success); border-radius: 3px;
+    color: var(--success); font-size: 0.68rem; letter-spacing: 0.5px; vertical-align: 0.1em;
+}
+.search-files-chip {
+    display: inline-block; margin-left: 0.4rem; padding: 0 0.5em;
+    background: transparent; border: 1px solid var(--border); border-radius: 999px;
+    color: var(--text-muted); font-family: inherit; font-size: 0.75rem; line-height: 1.5;
+    vertical-align: 0.1em;
+}
+button.search-files-chip { cursor: pointer; transition: border-color 0.15s, color 0.15s; }
+button.search-files-chip:hover { border-color: var(--accent); color: var(--accent); }
+/* fixed-width action buttons — "Copy" → "✓" must not change the column width */
+.search-actions { white-space: nowrap; }
+.search-act-btn { min-width: 4.2em; text-align: center; padding: 0.25rem 0.4rem; margin-right: 0.35rem; }
+.search-act-btn:last-child { margin-right: 0; }
+.search-act-btn.copied { color: var(--success); border-color: var(--success); }
+.search-note { margin-top: 0.5rem; }
+/* pagination in the admin style (First/Prev/page box/Next/Last) */
+.trans-pagination .pg-jump { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-muted); }
+.trans-pagination .pg-input {
+    width: 4em; padding: 0.25rem 0.3rem; text-align: center;
+    background: var(--bg-code); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-family: inherit; font-size: 0.85rem;
+    -moz-appearance: textfield; appearance: textfield;
+}
+.trans-pagination .pg-input::-webkit-outer-spin-button,
+.trans-pagination .pg-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.trans-pagination .pg-input:focus { outline: none; border-color: var(--accent); }
+
+/* file-list modal (search page) */
+.files-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 4rem 1rem 2rem;
+    background: rgba(0, 0, 17, 0.85);
+}
+.files-overlay[hidden] { display: none; }
+.files-box {
+    width: 100%; max-width: 46em; max-height: 80vh;
+    display: flex; flex-direction: column;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+.files-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+.files-head h3 { margin: 0; font-size: 0.95rem; color: var(--accent); word-break: break-word; }
+.files-close { background: transparent; border: 0; color: var(--text-muted); font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 0.25rem; }
+.files-close:hover { color: var(--error); }
+.files-body { padding: 0.5rem 1rem 1rem; overflow-y: auto; font-size: 0.85rem; }
+.files-list { list-style: none; margin: 0; padding: 0; }
+.files-list li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
+.files-list li:last-child { border-bottom: 0; }
+.files-path { word-break: break-word; }
+.files-size { white-space: nowrap; }
+
+
+/* === Mobile pass (whole public site) === */
+@media (max-width: 768px) {
+    /* search page: toolbar stacks, controls go full width */
+    .search-toolbar { gap: 0.5rem; }
+    .search-box { flex: 1 1 100%; }
+    .search-toolbar select { flex: 1 1 auto; }
+    .search-total { margin-left: 0; flex-basis: 100%; text-align: right; }
+    .search-table { min-width: 560px; }   /* the wrap scrolls horizontally instead of crushing columns */
+    .trans-pagination { flex-wrap: wrap; row-gap: 0.4rem; }
+    .trans-pagination button { padding: 0.3rem 0.6rem; }
+    .trans-pagination .pg-edge { display: none; }   /* keep Prev/box/Next on small screens */
+    /* account page */
+    .account-head { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+    .section-heading-spaced { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+    .acc-notif-tools { margin-left: 0; }
+    .user-card { padding: 1rem 1rem 0.6rem; }
+    .files-overlay { padding: 1.5rem 0.5rem; }
+    .files-box { max-height: 88vh; }
+    /* long announce URLs / hashes stay inside their boxes */
+    .code-block { overflow-x: auto; }
+    .code-block code { word-break: break-all; }
+}
+@media (max-width: 480px) {
+    .search-act-btn { min-width: 3.4em; padding: 0.25rem 0.3rem; }
+    .search-c-seen { width: 7.5em; }
+    .search-c-actions { width: 8em; }
+    .account-kv td:first-child { width: auto; }
+    .home-stats-widget { margin-left: 0; margin-right: 0; }
+}

@@ -691,6 +691,129 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
 }
 
+/**
+ * Member-facing catalogue search (?action=search): resolved index rows, optionally UNIONed with the
+ * live whitelist (whitelist.view permission — whitelisted hashes are removed from the index, so
+ * without this arm they would be unfindable). Supports a real relevance sort: the fulltext BOOLEAN
+ * MODE score of the name (InnoDB weighs rare/longer words higher and ignores stopwords, so a row
+ * matching "2008" AND "of" ranks above one matching only "2008", which ranks above only "of").
+ *
+ * $q: page, per_page, sort ('relevance:desc'|'seeders:desc'|…), search, search_files (bool),
+ *     include_whitelist (bool). Returns ['rows','total','page','pages','per_page']; each row:
+ *     info_hash, name, total_size, files_count, seeders, leechers, last_seen, src ('index'|'whitelist').
+ */
+function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
+    $page = max(1, (int)($q['page'] ?? 1));
+    $perPage = max(1, min(100, (int)($q['per_page'] ?? 25)));
+    $offset = ($page - 1) * $perPage;
+    $withWl = !empty($q['include_whitelist']);
+    $searchFiles = !empty($q['search_files']);
+    $search = trim((string)($q['search'] ?? ''));
+
+    $sort = (string)($q['sort'] ?? 'relevance:desc');
+    if (!preg_match('/^(relevance|seeders|size|last|name):(asc|desc)$/', $sort, $sm)) { $sm = [null, 'relevance', 'desc']; }
+    $dir = strtoupper($sm[2]);
+    $orderMap = [
+        'relevance' => "score DESC, seeders DESC",   // relevance is only ever "best first"
+        'seeders'   => "seeders $dir, score DESC",
+        'size'      => "total_size $dir",
+        'last'      => "last_seen $dir",
+        'name'      => "name $dir",
+    ];
+    $order = $orderMap[$sm[1]] . ", info_hash ASC";
+
+    $isHash = $search !== '' && preg_match('/^[a-f0-9]{6,40}$/i', $search);
+    $ft = ($search !== '' && !$isHash && mb_strlen($search) >= 3) ? indexFulltextTerm($search) : '';
+
+    // one arm = [select SQL, params, count SQL, params]; built for fulltext first, LIKE fallback
+    $buildArm = function (bool $wl, bool $useFt) use ($search, $isHash, $ft, $searchFiles): array {
+        $tbl = $wl ? 'whitelist' : 'index_hashes';
+        $cols = $wl
+            ? "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, 0) AS seeders, COALESCE(scrape_leechers, 0) AS leechers,
+               COALESCE(scraped_at, updated_at, created_at) AS last_seen, 'whitelist' AS src"
+            : "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, last_seeders) AS seeders, COALESCE(scrape_leechers, last_leechers) AS leechers,
+               last_seen, 'index' AS src";
+        $where = $wl
+            ? ["banned = 0", "(meta_status = 'done' OR (name IS NOT NULL AND name <> ''))"]
+            : ["meta_status = 'done'"];
+        $params = [];
+        $scoreSql = '0';
+        $scoreParams = [];
+        if ($search !== '') {
+            if ($isHash) {
+                $where[] = "info_hash LIKE ?";
+                $params[] = strtolower($search) . '%';
+            } elseif ($useFt && $ft !== '') {
+                $scoreSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
+                $scoreParams = [$ft];
+                $match = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
+                if ($searchFiles) {
+                    $sub = $wl ? "id IN (SELECT whitelist_id FROM whitelist_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE))"
+                               : "info_hash IN (SELECT info_hash FROM index_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE))";
+                    $where[] = "($match OR $sub)";
+                    $params[] = $ft; $params[] = $ft;
+                } else {
+                    $where[] = $match;
+                    $params[] = $ft;
+                }
+            } else {
+                $like = "name LIKE ?";
+                if ($searchFiles) {
+                    $sub = $wl ? "id IN (SELECT whitelist_id FROM whitelist_files WHERE path LIKE ?)"
+                               : "info_hash IN (SELECT info_hash FROM index_files WHERE path LIKE ?)";
+                    $where[] = "($like OR $sub)";
+                    $params[] = '%' . $search . '%'; $params[] = '%' . $search . '%';
+                } else {
+                    $where[] = $like;
+                    $params[] = '%' . $search . '%';
+                }
+            }
+        }
+        $w = 'WHERE ' . implode(' AND ', $where);
+        return [
+            "SELECT $cols, $scoreSql AS score FROM `$tbl` $w", array_merge($scoreParams, $params),
+            "SELECT COUNT(*) FROM `$tbl` $w", $params,
+        ];
+    };
+
+    $run = function (bool $useFt) use ($db, $buildArm, $withWl, $order, $perPage, $offset): array {
+        $arms = [$buildArm(false, $useFt)];
+        if ($withWl) {
+            // a hash can sit in BOTH tables between polls — prefer the whitelist row
+            $arms[0][0] .= " AND info_hash NOT IN (SELECT info_hash FROM whitelist WHERE banned = 0)";
+            $arms[0][2] .= " AND info_hash NOT IN (SELECT info_hash FROM whitelist WHERE banned = 0)";
+            $arms[] = $buildArm(true, $useFt);
+        }
+        $total = 0;
+        foreach ($arms as $a) {
+            $c = $db->prepare($a[2]);
+            $c->execute($a[3]);
+            $total += (int)$c->fetchColumn();
+        }
+        $sql = count($arms) === 1 ? $arms[0][0] : '(' . $arms[0][0] . ') UNION ALL (' . $arms[1][0] . ')';
+        $sql = "SELECT * FROM ($sql) cat ORDER BY $order LIMIT ? OFFSET ?";
+        $params = $arms[0][1];
+        if (count($arms) === 2) $params = array_merge($params, $arms[1][1]);
+        $st = $db->prepare($sql);
+        $i = 1;
+        foreach ($params as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
+        $st->bindValue($i++, $perPage, PDO::PARAM_INT);
+        $st->bindValue($i, $offset, PDO::PARAM_INT);
+        $st->execute();
+        return [$total, $st->fetchAll(PDO::FETCH_ASSOC)];
+    };
+
+    try { [$total, $rows] = $run(true); }
+    catch (\Throwable $e) { [$total, $rows] = $run(false); }   // fulltext index missing → LIKE
+
+    foreach ($rows as &$r) {
+        foreach (['total_size', 'files_count', 'seeders', 'leechers'] as $k) $r[$k] = $r[$k] !== null ? (int)$r[$k] : null;
+        unset($r['score']);
+    }
+    unset($r);
+    return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
+}
+
 /** Row counts + state for the admin status card / CLI. */
 function indexStatus(PDO $db, array $cfg): array {
     $counts = ['total' => 0, 'in_grace' => 0, 'protected' => 0, 'promoted' => 0, 'meta_none' => 0, 'meta_pending' => 0, 'meta_fetching' => 0, 'meta_done' => 0, 'meta_failed' => 0, 'files' => 0];

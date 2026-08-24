@@ -306,7 +306,9 @@
             tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(row.created_at) }));
             const act = el('td', { className: 'wl-actions' });
             act.appendChild(iconBtn('bi-eye', 'Details', 'btn-outline-info', () => openDetails(row.id)));
-            act.appendChild(iconBtn('bi-magnet', 'Copy magnet link', 'btn-outline-secondary', (e) => copyToClipboard(magnetFor(row.info_hash, row.name), e.currentTarget)));
+            const magOpen = el('a', { className: 'btn btn-sm btn-outline-secondary wl-act', title: 'Open magnet link in your torrent client', href: magnetFor(row.info_hash, row.name) }, el('i', { className: 'bi bi-magnet' }));
+            act.appendChild(magOpen);
+            act.appendChild(iconBtn('bi-clipboard', 'Copy magnet link', 'btn-outline-secondary', (e) => copyToClipboard(magnetFor(row.info_hash, row.name), e.currentTarget)));
             if (row.banned) act.appendChild(iconBtn('bi-unlock', 'Unban', 'btn-outline-success', () => unbanHash(row.info_hash)));
             else act.appendChild(iconBtn('bi-slash-circle', 'Ban', 'btn-outline-warning', () => banRows([row.id])));
             act.appendChild(iconBtn('bi-trash', 'Delete', 'btn-outline-danger', () => deleteRows([row.id])));

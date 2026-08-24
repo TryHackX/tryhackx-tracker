@@ -18,6 +18,7 @@ jsonResponse([
     'success' => true,
     'user' => [
         'id' => (int)$u['id'], 'username' => $u['username'], 'email' => $u['email'],
+        'email_verified' => (int)$u['email_verified'] === 1,
         'created_at' => $u['created_at'], 'last_login_at' => $u['last_login_at'],
     ],
     'groups' => $groups,

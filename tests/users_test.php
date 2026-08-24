@@ -38,9 +38,12 @@ check('index_hashes has meta_source column', schemaColumnExists($db, 'index_hash
 check('index_hashes has meta_fetched index', schemaIndexExists($db, 'index_hashes', 'idx_index_meta_fetched'));
 $guest = userGroupBySlug($db, 'guest');
 $member = userGroupBySlug($db, 'member');
+$adminG = userGroupBySlug($db, 'admin');
 check('guest group seeded (system)', $guest !== null && (int)$guest['is_system'] === 1);
 check('member group seeded (default)', $member !== null && (int)$member['is_default'] === 1);
+check('admin group seeded (system, v8)', $adminG !== null && (int)$adminG['is_system'] === 1);
 check('guest baseline keeps legacy public perms', ($p = userGroupPermissions($guest['permissions'])) && !empty($p['stats.view']) && !empty($p['whitelist.view']) && empty($p['index.view']), json_encode($p ?? null));
+check('whitelist.add is a known permission', array_key_exists('whitelist.add', userPermissionList()));
 
 // clean slate for the rest
 foreach (['users', 'user_group_members', 'user_notifications', 'user_tokens'] as $t) $db->exec("TRUNCATE TABLE `$t`");
@@ -73,16 +76,29 @@ check('legacy default: index gated, stats open', !userLegacyDefault('index.view'
 // userCan with users disabled = legacy behaviour (no session in CLI → anonymous)
 check('userCan(off): stats.view true', userCan($db, $cfgOff, 'stats.view'));
 check('userCan(off): index.view false', !userCan($db, $cfgOff, 'index.view'));
-// enabled: anonymous gets the guest baseline
+// enabled: anonymous gets the guest group
 check('userCan(on, anon): stats.view true (guest)', userCan($db, $cfgOn, 'stats.view'));
 check('userCan(on, anon): index.view false (guest)', !userCan($db, $cfgOn, 'index.view'));
-// a VIP group grants index perms to alice
+// v8 semantics: a signed-in user gets EXACTLY the union of their own groups — guest is NOT
+// inherited, so a member whose groups lack stats.view does not see stats even though guests do
+$db->exec("UPDATE user_groups SET permissions = '{}' WHERE slug = 'member'");
 $db->prepare("INSERT INTO user_groups (slug, name, priority, permissions) VALUES ('vip', 'VIP', 10, ?)")
    ->execute([json_encode(['index.view' => true, 'index.magnet' => true])]);
 $vip = userGroupBySlug($db, 'vip');
 userGrantGroup($db, (int)$alice['id'], (int)$vip['id'], null, 'test', '');
 $perms = userEffectivePermissions($db, (int)$alice['id']);
-check('effective perms = guest + groups union', !empty($perms['stats.view']) && !empty($perms['index.view']) && !empty($perms['index.magnet']) && empty($perms['index.files']), json_encode($perms));
+check('signed-in perms = union of OWN groups only (no guest)', !empty($perms['index.view']) && !empty($perms['index.magnet'])
+    && empty($perms['stats.view']) && empty($perms['index.files']), json_encode($perms));
+// a permission granted on the member group itself works (bob has member only)
+$db->exec("UPDATE user_groups SET permissions = '" . json_encode(['stats.view' => true]) . "' WHERE slug = 'member'");
+$permsBob = userEffectivePermissions($db, (int)$bob['id']);
+check('member-group permission applies to its members', !empty($permsBob['stats.view']) && empty($permsBob['index.view']), json_encode($permsBob));
+// admin group = every permission, current and future
+$r3 = userCreate($db, $cfgOn, 'carol', '', 'password123');
+$carol = $r3['user'];
+userGrantGroup($db, (int)$carol['id'], (int)userGroupBySlug($db, 'admin')['id'], null, 'test', '', false);
+$permsCarol = userEffectivePermissions($db, (int)$carol['id']);
+check('admin group grants every permission', count(array_diff_key(userPermissionList(), $permsCarol)) === 0, json_encode($permsCarol));
 check('grant created a notification', userUnreadCount($db, (int)$alice['id']) >= 1);
 
 // ── 4. timed memberships ─────────────────────────────────────────────────────
@@ -144,6 +160,45 @@ $c3 = apiClientCreate($db, 'bad', 'nonsense');
 $row3 = $db->query("SELECT scope FROM api_clients WHERE id = " . (int)$c3['id'])->fetchColumn();
 check('unknown scope falls back to whitelist', $row3 === 'whitelist', (string)$row3);
 $db->exec("DELETE FROM api_clients WHERE id IN (" . (int)$c1['id'] . ',' . (int)$c2['id'] . ',' . (int)$c3['id'] . ")");
+
+// ── 8. email verification tokens (v8) ────────────────────────────────────────
+$vt = userVerifyCreate($db, (int)$alice['id']);
+check('verify token issued (64 hex)', (bool)preg_match('/^[a-f0-9]{64}$/', $vt));
+check('user starts unverified', (int)userFindById($db, (int)$alice['id'])['email_verified'] === 0);
+check('verify consume marks the email verified', userVerifyConsume($db, $vt) === (int)$alice['id']
+    && (int)userFindById($db, (int)$alice['id'])['email_verified'] === 1);
+check('verify token is single use', userVerifyConsume($db, $vt) === null);
+check('garbage verify token rejected', userVerifyConsume($db, 'zz') === null);
+$vtOld = userVerifyCreate($db, (int)$alice['id']);
+$vtNew = userVerifyCreate($db, (int)$alice['id']);
+check('a new verify link invalidates the previous one', userVerifyConsume($db, $vtOld) === null && userVerifyConsume($db, $vtNew) === (int)$alice['id']);
+
+// ── 9. session choices + catalogue search (v8) ───────────────────────────────
+require_once $root . '/includes/index.php';
+check('session choices contain forever/1h/1d/30d', array_keys(userSessionChoices()) === ['forever', '1h', '1d', '30d']
+    && userSessionChoices()['forever'][0] === null && userSessionChoices()['1h'][0] === 3600);
+// relevance search across index + whitelist arms. Unique marker keeps this independent of other rows.
+$db->exec("DELETE FROM index_hashes WHERE name LIKE 'ZZQtest%'");
+$db->exec("DELETE FROM whitelist WHERE name LIKE 'ZZQtest%'");
+$mk = fn($i) => str_pad(dechex($i + 0xabc000), 40, 'e', STR_PAD_LEFT);
+$ins = $db->prepare("INSERT INTO index_hashes (info_hash, name, meta_status, last_seeders, total_size, files_count, last_seen) VALUES (?, ?, 'done', ?, 1000, 1, NOW())");
+$ins->execute([$mk(1), 'ZZQtest Body of Lies 2008 BluRay', 5]);     // matches body+lies+2008 → best
+$ins->execute([$mk(2), 'ZZQtest Something 2008', 50]);              // matches 2008 only
+$ins->execute([$mk(3), 'ZZQtest Body Lies extras', 100]);           // matches body+lies
+$ins->execute([$mk(4), 'YYQother unrelated torrent', 999]);         // matches nothing in the query
+$wlIns = $db->prepare("INSERT INTO whitelist (info_hash, name, meta_status, scrape_seeders, total_size, files_count) VALUES (?, ?, 'done', 7, 1000, 1)");
+$wlIns->execute([$mk(5), 'ZZQtest Body of Lies 2008 WL-Edition']);
+$res = indexSearchCatalogue($db, $cfg, ['search' => 'ZZQtest Body of Lies (2008)', 'sort' => 'relevance:desc', 'include_whitelist' => false]);
+$names = array_column($res['rows'], 'name');
+check('relevance: multi-token match outranks single-token', count($names) >= 2 && str_contains($names[0], 'Body of Lies 2008 BluRay'), json_encode($names));
+check('relevance: unrelated row not returned', !in_array('YYQother unrelated torrent', $names, true), json_encode($names));
+$resWl = indexSearchCatalogue($db, $cfg, ['search' => 'ZZQtest', 'sort' => 'seeders:desc', 'include_whitelist' => true]);
+$srcByHash = array_column($resWl['rows'], 'src', 'info_hash');
+check('whitelist arm folded in when permitted', ($srcByHash[$mk(5)] ?? '') === 'whitelist', json_encode($srcByHash));
+$resNoWl = indexSearchCatalogue($db, $cfg, ['search' => 'ZZQtest', 'sort' => 'seeders:desc', 'include_whitelist' => false]);
+check('whitelist arm excluded without permission', !in_array($mk(5), array_column($resNoWl['rows'], 'info_hash'), true));
+$db->exec("DELETE FROM index_hashes WHERE name LIKE 'ZZQtest%' OR name LIKE 'YYQother%'");
+$db->exec("DELETE FROM whitelist WHERE name LIKE 'ZZQtest%'");
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

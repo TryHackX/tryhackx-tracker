@@ -124,7 +124,7 @@
         RANGES.forEach(([key, label]) => { const b = el('button', 'tl-range-btn' + (key === range ? ' active' : ''), label); b.type = 'button'; b.dataset.range = key; ranges.appendChild(b); });
         const meta = el('div', 'tl-meta');
         const status = el('span', 'tl-status', 'Loading…');
-        const hint = el('span', 'tl-hint', 'Click a legend entry to toggle a series · drag on a chart to zoom · drag / resize the window on the mini-chart to pan · double-click to reset · shaded = OPEN hours');
+        const hint = el('span', 'tl-hint', 'Click a legend entry to toggle a series · drag on a chart to zoom (the visible span reloads at a finer resolution) · drag / resize the window on the mini-chart to pan · double-click to reset · shaded = OPEN hours');
         meta.appendChild(status);
         head.appendChild(ranges); head.appendChild(meta);
         container.appendChild(head);
@@ -164,7 +164,9 @@
         over.style.touchAction = 'none';
 
         let syncing = false;
-        function dataExt() { const t = main.data && main.data[0]; return (t && t.length > 1) ? [t[0], t[t.length - 1]] : null; }
+        // clamping/brush extent = the FULL loaded range (ranger always holds the base payload, even
+        // while the main charts show a re-fetched fine-grained zoom window)
+        function dataExt() { const t = ranger.data && ranger.data[0]; return (t && t.length > 1) ? [t[0], t[t.length - 1]] : null; }
         function updateBrush() {
             const ext = dataExt();
             if (!ext) { brush.style.display = 'none'; return; }
@@ -179,7 +181,7 @@
         /** Set the visible x window on both charts (clamped to the loaded data). */
         function applyWindow(min, max) {
             const ext = dataExt(); if (!ext) return;
-            const minSpan = Math.max((payloadRef.current && payloadRef.current.step || 60) * 3, (ext[1] - ext[0]) * 0.01);
+            const minSpan = Math.max((payloadRef.current && payloadRef.current.step || 60) * 3, 300);
             min = Math.max(ext[0], Math.min(min, ext[1] - minSpan));
             max = Math.min(ext[1], Math.max(max, min + minSpan));
             syncing = true;
@@ -187,6 +189,7 @@
             rate.setScale('x', { min, max });
             syncing = false;
             updateBrush();
+            requestWindow(false);
         }
         /** A drag-zoom / double-click reset on one chart mirrors to the other and to the brush. */
         function xScaleSync(u) {
@@ -196,6 +199,7 @@
             (u === main ? rate : main).setScale('x', { min: s.min, max: s.max });
             syncing = false;
             updateBrush();
+            requestWindow(false);
         }
         let dragMode = null, dragStartX = 0, dragWin = null;
         const startDrag = (mode) => (ev) => {
@@ -238,9 +242,86 @@
         // a drag-zoom narrows the x scale below the data extents; background refreshes must not undo it
         const isZoomed = (u) => { const d = u.data && u.data[0]; return !!d && d.length > 1 && (u.scales.x.min > d[0] || u.scales.x.max < d[d.length - 1]); };
         const put = (u, d, keepZoom) => { if (keepZoom && isZoomed(u)) { u.setData(d, false); u.redraw(); } else u.setData(d); };
-        const apply = (p, keepZoom) => {
+        const stepTxt = (s) => s >= 3600 ? (s / 3600) + ' h' : (s >= 60 ? (s / 60) + ' min' : s + ' s');
+        const statusFor = (p, zoomed) => p.points.toLocaleString() + ' points · ' + stepTxt(p.step) + ' resolution (' + p.table + (zoomed ? ' · zoom' : '') + ') · updated ' + fmtTime(p.generated_at);
+        // zoom-window refetch state: while active, main+rate show a fine-grained slice fetched with
+        // &from/&to (the server picks raw → 5m → 1h for the span); the ranger keeps the full range
+        let basePayload = null;
+        const winState = { active: false, from: 0, to: 0, step: 0, seq: 0 };
+        let winTimer = null;
+        const setCharts = (p) => {
             payloadRef.current = p;
             const t = p.t || [];
+            main.setData([t].concat(GAUGES.map(d => p[d.key] || t.map(() => null))), false);
+            rate.setData([t].concat(RATES.map(d => p[d.key] || t.map(() => null))), false);
+            main.redraw(); rate.redraw();
+        };
+        const applyBase = () => {
+            if (!basePayload) return;
+            winState.active = false; winState.seq++;
+            setCharts(basePayload);
+            status.textContent = statusFor(basePayload, false);
+        };
+        // which step could the server give us for this span? (mirror of its raw→5m→1h pick, retention aside)
+        const candidateStep = (span) => {
+            const interval = (basePayload && basePayload.interval) || 60;
+            if (span / interval <= 3000) return interval;
+            if (span / 300 <= 4500) return 300;
+            return 3600;
+        };
+        function requestWindow(force) {
+            clearTimeout(winTimer);
+            winTimer = setTimeout(() => fetchWindow(force), 350);
+        }
+        async function fetchWindow(force) {
+            const ext = dataExt();
+            if (!ext || !basePayload) return;
+            const min = main.scales.x.min, max = main.scales.x.max;
+            if (!isFinite(min) || !isFinite(max) || max <= min) return;
+            if (min <= ext[0] && max >= ext[1]) { if (winState.active) applyBase(); return; }   // back to full view
+            if (winState.active) {
+                // uPlot's built-in double-click reset snaps to the extents of the LOADED slice, not the
+                // full range — treat "scale covers every loaded point" as reset intent and zoom out fully
+                const d = main.data && main.data[0];
+                if (d && d.length > 1 && min <= d[0] && max >= d[d.length - 1]) {
+                    applyBase();
+                    applyWindow(ext[0], ext[1]);
+                    return;
+                }
+            }
+            const span = max - min;
+            const cand = candidateStep(span);
+            const curStep = winState.active ? winState.step : basePayload.step;
+            const covered = winState.active && min >= winState.from && max <= winState.to;
+            if (!force && cand >= curStep && (covered || !winState.active)) return;   // nothing finer to gain
+            const pad = span * 0.25;   // padded fetch so small pans don't refetch immediately
+            const from = Math.max(ext[0], Math.floor(min - pad));
+            const to = Math.ceil(Math.min(ext[1] + 3600, max + pad));
+            const my = ++winState.seq;
+            try {
+                const r = await fetch(api + 'stats_timeline&range=' + encodeURIComponent(range) + '&from=' + from + '&to=' + to, { credentials: 'same-origin', cache: 'no-store' });
+                const j = await r.json();
+                if (my !== winState.seq || !r.ok || !j || !j.success || !j.t) return;
+                if (!force && winState.active && j.step >= winState.step && covered) return;
+                winState.active = true; winState.from = j.from; winState.to = j.to; winState.step = j.step;
+                setCharts(j);
+                updateBrush();
+                status.textContent = statusFor(j, true);
+            } catch (e) { /* keep whatever is on screen */ }
+        }
+        const apply = (p, keepZoom) => {
+            basePayload = p;
+            const t = p.t || [];
+            if (keepZoom && winState.active) {
+                // background refresh while zoomed into a refetched window: refresh the ranger/base
+                // only, then bring the fine slice up to date too — never clobber it with coarse data
+                ranger.setData([t, p.seeds || t.map(() => null)]);
+                updateBrush();
+                requestWindow(true);
+                return;
+            }
+            winState.active = false; winState.seq++;
+            payloadRef.current = p;
             put(main, [t].concat(GAUGES.map(d => p[d.key] || t.map(() => null))), keepZoom);
             put(rate, [t].concat(RATES.map(d => p[d.key] || t.map(() => null))), keepZoom);
             ranger.setData([t, p.seeds || t.map(() => null)]);
@@ -252,8 +333,7 @@
             empty.classList.toggle('d-hidden', !none);
             mainHost.classList.toggle('d-hidden', none); rateHost.classList.toggle('d-hidden', none); rateTitle.classList.toggle('d-hidden', none);
             rangerHost.classList.toggle('d-hidden', none);
-            const stepTxt = p.step >= 3600 ? (p.step / 3600) + ' h' : (p.step >= 60 ? (p.step / 60) + ' min' : p.step + ' s');
-            status.textContent = none ? 'No data for this range yet' : (p.points.toLocaleString() + ' points · ' + stepTxt + ' resolution (' + p.table + ') · updated ' + fmtTime(p.generated_at));
+            status.textContent = none ? 'No data for this range yet' : statusFor(p, false);
         };
         // force = user action (range click / expand): always fires and resets the zoom; timer ticks never stack
         // and a response that was superseded by a newer request is dropped

@@ -16,24 +16,38 @@ if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
 if ((trackerMode($cfg) !== 'whitelist' && !scheduleEnabled($cfg)) || ($cfg['whitelist_public_enabled'] ?? '1') !== '1') {
     jsonResponse(['error' => 'registration_disabled'], 400);
 }
-if (!captchaConfigured($cfg)) {
-    // Fail closed: registration without a CAPTCHA would be a free spam sink.
-    jsonResponse(['error' => 'registration_unavailable'], 503);
-}
 
-// CAPTCHA is ALWAYS required for registration (no points/grace system here).
-$token = captchaTokenFromInput($input);
-if ($token === '' || !verifyCaptcha($token, $cfg)) {
-    jsonResponse(['error' => 'CAPTCHA verification failed', 'captcha_required' => true], 400);
+// Audience: 'public' (anyone + CAPTCHA) or 'users' (signed-in accounts with whitelist.add — no
+// CAPTCHA; accounts are the abuse gate). 'users' with the account system off falls back to public.
+$submitMode = (($cfg['whitelist_submit_mode'] ?? 'public') === 'users' && usersEnabled($cfg)) ? 'users' : 'public';
+$submitUser = null;
+if ($submitMode === 'users') {
+    $submitUser = currentUser($db);
+    if (!$submitUser) jsonResponse(['error' => 'login_required'], 401);
+    if (!userCan($db, $cfg, 'whitelist.add')) jsonResponse(['error' => 'no_permission'], 403);
+} else {
+    if (!captchaConfigured($cfg)) {
+        // Fail closed: anonymous registration without a CAPTCHA would be a free spam sink.
+        jsonResponse(['error' => 'registration_unavailable'], 503);
+    }
+    // CAPTCHA is ALWAYS required for anonymous registration (no points/grace system here).
+    $token = captchaTokenFromInput($input);
+    if ($token === '' || !verifyCaptcha($token, $cfg)) {
+        jsonResponse(['error' => 'CAPTCHA verification failed', 'captcha_required' => true], 400);
+    }
+    onCaptchaSolved();
 }
-onCaptchaSolved();
 
 $ip = getClientIp($cfg);
 $bucket = ipBucket($ip);
 
-// Submissions per hour per IP bucket (file-based sliding window; best-effort).
+// Submissions per hour (file-based sliding window; best-effort) — per IP bucket, and per ACCOUNT
+// in users mode so a member can't dodge the limit by hopping addresses.
 $perHour = (int)($cfg['rate_limit_whitelist'] ?? 10);
 if (!rateLimitAllow('whitelist', $bucket, $perHour, 3600)) {
+    jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
+}
+if ($submitUser !== null && !rateLimitAllow('whitelist', 'u' . (int)$submitUser['id'], $perHour, 3600)) {
     jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
 }
 
@@ -84,7 +98,9 @@ if ($globalDaily > 0) {
     }
 }
 
-$r = whitelistAddHashes($db, $cfg, $items, ['source' => 'web', 'ip' => $ip, 'auto_meta' => false]);
+$addCtx = ['source' => 'web', 'ip' => $ip, 'auto_meta' => false];
+if ($submitUser !== null) $addCtx['ref'] = ['user' => $submitUser['username'], 'id' => (int)$submitUser['id']];
+$r = whitelistAddHashes($db, $cfg, $items, $addCtx);
 
 $magnets = [];
 foreach ($r['results'] as $res) {

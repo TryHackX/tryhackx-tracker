@@ -4,9 +4,10 @@
  * in-app notifications, remember-me and password-reset tokens.
  *
  * Everything is OFF unless users_enabled=1. Design:
- *   - The `guest` group is the permission BASELINE for every visitor — anonymous or logged in.
- *     A logged-in user adds the permissions of every ACTIVE group they hold (union; expired
- *     memberships are ignored and reaped by usersTick()).
+ *   - The `guest` group holds the permissions of ANONYMOUS visitors only. A signed-in user has
+ *     exactly the union of their ACTIVE groups' permissions (expired memberships are ignored and
+ *     reaped by usersTick()) — guest is NOT inherited, so a group can be narrower than guest.
+ *   - Members of the system `admin` group pass every permission check.
  *   - With users_enabled=0 every check falls back to today's public behaviour: the index stays
  *     admin-only (index.* = false) and the classic public pages/stats stay visible (true). The
  *     feature toggles that already exist (tracker_stats_enabled, whitelist_public_enabled, …)
@@ -19,6 +20,17 @@
 const USER_REMEMBER_COOKIE = 'thx_remember';
 const USER_REMEMBER_DAYS   = 30;
 const USER_RESET_TTL_MIN   = 120;   // password-reset link lifetime (minutes)
+const USER_VERIFY_TTL_H    = 72;    // email-verification link lifetime (hours)
+
+/** Sign-in duration choices (login form "Stay signed in for"): code => [seconds|null (forever), label]. */
+function userSessionChoices(): array {
+    return [
+        'forever' => [null, 'Forever (until you sign out)'],
+        '1h'      => [3600, '1 hour'],
+        '1d'      => [86400, '1 day'],
+        '30d'     => [30 * 86400, '30 days'],
+    ];
+}
 
 function usersEnabled(array $cfg): bool { return (($cfg['users_enabled'] ?? '0') === '1'); }
 function usersRegistrationEnabled(array $cfg): bool { return usersEnabled($cfg) && (($cfg['users_registration_enabled'] ?? '1') === '1'); }
@@ -32,7 +44,8 @@ function userPermissionList(): array {
         'index.view'     => 'Search the observed-hash index (the public search page)',
         'index.files'    => 'See file lists in index search results',
         'index.magnet'   => 'See info hashes / copy magnet links in index search results',
-        'whitelist.view' => 'Browse the public whitelist page',
+        'whitelist.view' => 'Browse the public whitelist page (whitelisted torrents also show up in search)',
+        'whitelist.add'  => 'Register hashes on the whitelist (used when registration is set to "registered users")',
         'stats.view'     => 'View the tracker statistics page',
         'stats.timeline' => 'See the statistics timeline chart',
         'home.stats'     => 'See the live stats widget on the home page',
@@ -117,28 +130,36 @@ function userAuthenticate(PDO $db, string $login, string $password): ?array {
 // Session + remember-me
 // ─────────────────────────────────────────────────────────────────────────────
 
-function userSessionStart(PDO $db, array $user, string $ip = ''): void {
+/** $ttlSeconds bounds this sign-in (login form choice); null = no deadline ("forever"). */
+function userSessionStart(PDO $db, array $user, string $ip = '', ?int $ttlSeconds = null): void {
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int)$user['id'];
     $_SESSION['user_login_time'] = time();
+    if ($ttlSeconds !== null && $ttlSeconds > 0) $_SESSION['user_expires_at'] = time() + $ttlSeconds;
+    else unset($_SESSION['user_expires_at']);
     $db->prepare("UPDATE users SET last_login_at = NOW(), last_login_ip = ? WHERE id = ?")
        ->execute([$ip !== '' ? $ip : null, (int)$user['id']]);
 }
 
 function userSessionLogout(PDO $db): void {
     userRememberClear($db);
-    unset($_SESSION['user_id'], $_SESSION['user_login_time']);
+    unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']);
     $GLOBALS['__current_user_cache'] = null;
     $GLOBALS['__current_user_loaded'] = false;
 }
 
-/** Issue a remember-me cookie (value "<id>.<64 hex>"; only the sha256 is stored). */
-function userRememberIssue(PDO $db, int $userId): void {
+/**
+ * Issue a remember-me cookie (value "<id>.<64 hex>"; only the sha256 is stored). $expiresAt
+ * (unix) sets an absolute expiry — used by the login-duration choice and by token rotation
+ * (a rotated token keeps the original deadline); default = 30 days from now.
+ */
+function userRememberIssue(PDO $db, int $userId, ?int $expiresAt = null): void {
+    $expiresAt = $expiresAt ?? (time() + USER_REMEMBER_DAYS * 86400);
     $token = bin2hex(random_bytes(32));
-    $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'remember', ?, NOW() + INTERVAL " . USER_REMEMBER_DAYS . " DAY)")
-       ->execute([$userId, hash('sha256', $token)]);
+    $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'remember', ?, FROM_UNIXTIME(?))")
+       ->execute([$userId, hash('sha256', $token), $expiresAt]);
     setcookie(USER_REMEMBER_COOKIE, $userId . '.' . $token, [
-        'expires' => time() + USER_REMEMBER_DAYS * 86400,
+        'expires' => $expiresAt,
         'path' => '/', 'httponly' => true, 'samesite' => 'Lax',
         'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
     ]);
@@ -160,9 +181,10 @@ function userRememberClear(PDO $db): void {
 function userTryRememberLogin(PDO $db): ?array {
     $raw = (string)($_COOKIE[USER_REMEMBER_COOKIE] ?? '');
     if ($raw === '' || !preg_match('/^(\d{1,10})\.([a-f0-9]{64})$/', $raw, $m)) return null;
-    $st = $db->prepare("SELECT user_id FROM user_tokens WHERE type = 'remember' AND user_id = ? AND token_hash = ? AND expires_at >= NOW() AND used_at IS NULL");
+    $st = $db->prepare("SELECT user_id, UNIX_TIMESTAMP(expires_at) AS exp FROM user_tokens WHERE type = 'remember' AND user_id = ? AND token_hash = ? AND expires_at >= NOW() AND used_at IS NULL");
     $st->execute([(int)$m[1], hash('sha256', $m[2])]);
-    if (!$st->fetchColumn()) return null;
+    $tok = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$tok) return null;
     $u = userFindById($db, (int)$m[1]);
     if (!$u || $u['status'] !== 'active') return null;
     // rotate: burn this token, hand out a fresh one (stolen-cookie replay shows up as a failed login)
@@ -173,7 +195,9 @@ function userTryRememberLogin(PDO $db): ?array {
     if (!headers_sent() && session_status() === PHP_SESSION_ACTIVE) session_regenerate_id(true);
     $_SESSION['user_id'] = (int)$u['id'];
     $_SESSION['user_login_time'] = time();
-    if (!headers_sent()) userRememberIssue($db, (int)$u['id']);
+    unset($_SESSION['user_expires_at']);   // the remember token's own expiry is the deadline now
+    // rotation keeps the ORIGINAL absolute expiry, so a "1 day" sign-in really ends after 1 day
+    if (!headers_sent()) userRememberIssue($db, (int)$u['id'], (int)$tok['exp']);
     return $u;
 }
 
@@ -184,9 +208,13 @@ function currentUser(PDO $db): ?array {
     $GLOBALS['__current_user_cache'] = null;
     if (session_status() !== PHP_SESSION_ACTIVE) return null;
     $u = null;
+    if (!empty($_SESSION['user_expires_at']) && time() > (int)$_SESSION['user_expires_at']) {
+        // timed sign-in ("1 hour" / "1 day" / "30 days") ran out — drop the session, remember-me may take over
+        unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']);
+    }
     if (!empty($_SESSION['user_id'])) {
         $u = userFindById($db, (int)$_SESSION['user_id']);
-        if ($u && $u['status'] !== 'active') { unset($_SESSION['user_id'], $_SESSION['user_login_time']); $u = null; }
+        if ($u && $u['status'] !== 'active') { unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']); $u = null; }
     }
     if ($u === null) $u = userTryRememberLogin($db);
     $GLOBALS['__current_user_cache'] = $u;
@@ -237,25 +265,36 @@ function userGroupsAll(PDO $db, int $userId): array {
     return $rows;
 }
 
-/** Effective permission set: guest baseline + every active group of $userId (null = anonymous). */
+/**
+ * Effective permission set. Anonymous ($userId null) = the `guest` group. A signed-in user gets
+ * exactly the UNION of their active groups — guest is NOT inherited, so a logged-in user can have
+ * fewer permissions than an anonymous visitor if their groups are narrower. Membership in the
+ * system `admin` group grants every registered permission.
+ */
 function userEffectivePermissions(PDO $db, ?int $userId): array {
     static $cache = [];
     $key = (string)($userId ?? 0);
     if (isset($cache[$key])) return $cache[$key];
     $perms = [];
-    $guest = userGroupBySlug($db, 'guest');
-    if ($guest) $perms = userGroupPermissions($guest['permissions']);
     if ($userId) {
         foreach (userGroups($db, $userId) as $g) {
+            if ($g['slug'] === 'admin') {   // site admins pass every check, current and future
+                $perms = array_fill_keys(array_keys(userPermissionList()), true);
+                break;
+            }
             $perms += userGroupPermissions($g['permissions']);
         }
+    } else {
+        $guest = userGroupBySlug($db, 'guest');
+        if ($guest) $perms = userGroupPermissions($guest['permissions']);
     }
     return $cache[$key] = $perms;
 }
 
 /**
  * THE permission check. Admin panel session → always true. Users feature off → the legacy public
- * behaviour. Otherwise: guest baseline plus the current user's groups.
+ * behaviour. Otherwise: the guest group for anonymous visitors, the union of the signed-in user's
+ * groups for everyone else (see userEffectivePermissions).
  */
 function userCan(PDO $db, array $cfg, string $perm): bool {
     if (function_exists('isLoggedIn') && isLoggedIn()) return true;   // panel admin
@@ -374,6 +413,53 @@ function userResetConsume(PDO $db, string $token, bool $burn): ?int {
     if (!$row) return null;
     if ($burn) $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE id = ?")->execute([(int)$row['id']]);
     return (int)$row['user_id'];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Email verification
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Create (replacing any previous) an email-verification token for the user. Returns the raw token. */
+function userVerifyCreate(PDO $db, int $userId): string {
+    $token = bin2hex(random_bytes(32));
+    $db->prepare("DELETE FROM user_tokens WHERE type = 'verify' AND user_id = ?")->execute([$userId]);
+    $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'verify', ?, NOW() + INTERVAL " . USER_VERIFY_TTL_H . " HOUR)")
+       ->execute([$userId, hash('sha256', $token)]);
+    return $token;
+}
+
+/** Consume a verification token: marks the user's email verified. Returns the user id or null. */
+function userVerifyConsume(PDO $db, string $token): ?int {
+    if (!preg_match('/^[a-f0-9]{64}$/', $token)) return null;
+    $st = $db->prepare("SELECT id, user_id FROM user_tokens WHERE type = 'verify' AND token_hash = ? AND expires_at >= NOW() AND used_at IS NULL");
+    $st->execute([hash('sha256', $token)]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return null;
+    $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE id = ?")->execute([(int)$row['id']]);
+    $db->prepare("UPDATE users SET email_verified = 1 WHERE id = ?")->execute([(int)$row['user_id']]);
+    return (int)$row['user_id'];
+}
+
+/**
+ * Best-effort verification mail (silent no-op when the user has no address or mail is unavailable).
+ * Called after registration-with-email and after every email change. Returns true when a mail
+ * was handed to the MTA.
+ */
+function userVerifySend(PDO $db, array $cfg, array $user): bool {
+    $email = trim((string)($user['email'] ?? ''));
+    if ($email === '' || !function_exists('sendEmail')) return false;
+    $token = userVerifyCreate($db, (int)$user['id']);
+    $base = function_exists('getBaseUrl') ? rtrim(getBaseUrl(), '/') : rtrim((string)($cfg['site_url'] ?? ''), '/');
+    $link = $base . '/?action=verify&token=' . $token;
+    $site = $cfg['site_name'] ?? 'Tracker';
+    $text = "Hello {$user['username']},\n\nConfirm that this address belongs to your $site account by opening:\n$link\n\nThe link is valid for " . USER_VERIFY_TTL_H . " hours. If you did not request this, ignore this message.";
+    try {
+        $html = buildEmailHtml(['title' => 'Confirm your email address', 'greeting' => 'Hello ' . sanitize($user['username']) . ',',
+            'body' => 'Confirm that this address belongs to your ' . sanitize($site) . ' account by opening this link (valid for ' . USER_VERIFY_TTL_H . ' hours):<br><br>'
+                . '<a href="' . sanitize($link) . '" style="color:#4a9eff;">' . sanitize($link) . '</a><br><br>If you did not request this, ignore this message.',
+            'details' => []], $cfg);
+        return (bool)@sendEmail($email, $site . ' — confirm your email address', $text, $html, $cfg);
+    } catch (\Throwable $e) { return false; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

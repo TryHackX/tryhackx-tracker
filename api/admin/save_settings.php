@@ -56,6 +56,8 @@ $allowed = [
     // user accounts (includes/users.php)
     'users_enabled', 'users_registration_enabled', 'users_links_visible', 'users_default_group',
     'users_notify_expiry_days', 'rate_limit_user_login', 'rate_limit_user_register', 'rate_limit_index_search',
+    // whitelist registration audience + metadata worker concurrency (schema v8)
+    'whitelist_submit_mode', 'meta_worker_concurrency',
     // federation (includes/federation.php + worker/federation.py)
     'fed_enabled', 'fed_node_name', 'fed_export_enabled', 'fed_export_files', 'fed_export_max_batch',
     'fed_import_new', 'fed_pull_minutes',
@@ -132,6 +134,15 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
 if (isset($data['users_default_group'])) {
     $data['users_default_group'] = strtolower($data['users_default_group']);
     if (!preg_match('/^[a-z0-9_-]{2,64}$/', $data['users_default_group'])) $data['users_default_group'] = 'member';
+}
+if (isset($data['whitelist_submit_mode']) && !in_array($data['whitelist_submit_mode'], ['public', 'users'], true)) {
+    jsonResponse(['error' => 'Invalid whitelist registration audience.'], 400);
+}
+if (isset($data['meta_worker_concurrency']) && $data['meta_worker_concurrency'] !== '') {
+    // empty = keep the worker's own config; otherwise clamp to a sane 1..16
+    $n = is_numeric($data['meta_worker_concurrency']) ? (int)$data['meta_worker_concurrency'] : 0;
+    if ($n < 1) $data['meta_worker_concurrency'] = '';
+    else $data['meta_worker_concurrency'] = (string)min(16, $n);
 }
 if (isset($data['fed_node_name'])) {
     $data['fed_node_name'] = mb_substr(preg_replace('/[^\w .\-]/u', '', $data['fed_node_name']) ?? '', 0, 64);

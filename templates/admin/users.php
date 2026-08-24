@@ -67,7 +67,7 @@
                         <th class="sortable" data-sort="username">Username <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="email">Email <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="status">Status <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th>Groups</th>
+                        <th class="sortable" data-sort="group" title="Sorts by the highest-priority active group">Groups <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="created">Created <i class="bi bi-arrow-down sort-icon active"></i></th>
                         <th class="sortable" data-sort="login">Last sign-in <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="th-actions">Actions</th>
@@ -82,7 +82,7 @@
         <div class="wl-view d-hidden" id="view-groups">
             <div class="admin-toolbar-card">
                 <div class="toolbar-row">
-                    <div class="toolbar-search"><span class="text-muted wl-small">The <strong>guest</strong> group is the baseline every visitor (anonymous included) gets; every other group ADDS its permissions on top for its members.</span></div>
+                    <div class="toolbar-search"><span class="text-muted wl-small"><strong>guest</strong> = permissions of <em>anonymous</em> visitors only. A signed-in user has exactly the <em>union</em> of their own groups (guest is NOT inherited — a member can see less than a guest). <strong>admin</strong> members pass every check. Priority only orders badges, it never overrides permissions.</span></div>
                     <div class="toolbar-right">
                         <button type="button" class="btn btn-sm btn-primary" id="btn-group-new"><i class="bi bi-plus-lg"></i> New group</button>
                     </div>
@@ -118,10 +118,17 @@
                     <div class="mb-2">
                         <label class="form-label wl-label">Email <small class="text-muted">(empty = none)</small></label>
                         <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="ue-email" maxlength="190">
+                        <div class="invalid-feedback">That email address does not look valid.</div>
                     </div>
                     <div class="mb-2">
-                        <label class="form-label wl-label">New password <small class="text-muted">(empty = unchanged; signs the user out of remembered devices)</small></label>
-                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ue-password" maxlength="200" autocomplete="off">
+                        <label class="form-label wl-label">New password <small class="text-muted">(empty = unchanged; at least 8 chars; signs the user out of remembered devices)</small></label>
+                        <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ue-password" maxlength="200" autocomplete="new-password">
+                        <div class="invalid-feedback">At least 8 characters.</div>
+                    </div>
+                    <div class="mb-2 d-hidden" id="ue-password2-wrap">
+                        <label class="form-label wl-label">Repeat new password</label>
+                        <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ue-password2" maxlength="200" autocomplete="new-password">
+                        <div class="invalid-feedback">Passwords do not match.</div>
                     </div>
                     <div id="ue-alert"></div>
                     <div class="d-flex justify-content-end gap-2 mt-3">

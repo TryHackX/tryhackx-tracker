@@ -1716,23 +1716,40 @@ async function loadStatsHome(forceSync = false) {
 // === User accounts (?action=login / register / account / reset) + index search (?action=search) ===
 // All rendering uses textContent — usernames, group names, notification titles and torrent names
 // are untrusted. Endpoints: user_login/user_register/user_logout/user_me/user_update/
-// user_notifications/user_reset_request/user_reset_confirm/index_search.
+// user_notifications/user_verify_send/user_reset_request/user_reset_confirm/index_search/index_files.
 (function () {
     'use strict';
     const $id = (x) => document.getElementById(x);
     const csrfOf = (form) => (form.querySelector('[name="csrf_token"]') || $id('account-csrf') || { value: '' }).value;
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
     function showAlert(el, msg, ok) {
         el.className = 'alert show ' + (ok ? 'alert-success' : 'alert-error');
         el.textContent = msg;
     }
+    // torrent sizes are powers of 1024 — label them with the matching IEC units (KiB/MiB/GiB)
     function fmtBytesPub(n) {
         n = Number(n);
         if (!isFinite(n) || n <= 0) return '—';
-        const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
         let i = 0;
         while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
         return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2)) + ' ' + u[i];
+    }
+    /**
+     * Live per-field validation: `check` returns true when the CURRENT value is acceptable.
+     * The error only shows after the field was touched (blurred once) or a submit was attempted,
+     * so users are not yelled at while still typing their first character.
+     */
+    function liveValidate(input, check) {
+        if (!input) return () => true;
+        const group = input.closest('.form-group');
+        let touched = false;
+        const apply = () => { if (group) group.classList.toggle('has-error', touched && !check()); };
+        input.addEventListener('input', apply);
+        input.addEventListener('blur', () => { touched = true; apply(); });
+        return (forceTouch) => { if (forceTouch) touched = true; apply(); return check(); };
     }
     const fmtDatePub = (s) => {
         if (!s) return '—';
@@ -1757,15 +1774,20 @@ async function loadStatsHome(forceSync = false) {
     function initLogin() {
         const form = $id('login-form');
         if (!form) return;
+        const login = $id('login-login'), pass = $id('login-password');
+        const vLogin = liveValidate(login, () => login.value.trim() !== '');
+        const vPass = liveValidate(pass, () => pass.value !== '');
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const alert = $id('login-alert'), btn = $id('login-submit');
+            const ok = [vLogin(true), vPass(true)].every(Boolean);
+            if (!ok) return;
             btn.disabled = true;
             const json = await fetchWithCaptcha('user_login', {
                 csrf_token: csrfOf(form),
-                login: $id('login-login').value.trim(),
-                password: $id('login-password').value,
-                remember: $id('login-remember').checked ? 1 : 0,
+                login: login.value.trim(),
+                password: pass.value,
+                session: ($id('login-session') || { value: 'forever' }).value,
             });
             if (json && json.success) {
                 showAlert(alert, 'Signed in — loading your account…', true);
@@ -1781,24 +1803,25 @@ async function loadStatsHome(forceSync = false) {
     function initRegister() {
         const form = $id('register-form');
         if (!form) return;
+        const u = $id('reg-username'), em = $id('reg-email'), p1 = $id('reg-password'), p2 = $id('reg-password2');
+        // real-time validation: errors appear once a field was left (or on submit), then track typing
+        const vUser = liveValidate(u, () => /^[A-Za-z0-9_.-]{3,32}$/.test(u.value.trim()));
+        const vMail = liveValidate(em, () => em.value.trim() === '' || EMAIL_RE.test(em.value.trim()));
+        const vP1 = liveValidate(p1, () => p1.value.length >= 8);
+        const vP2 = liveValidate(p2, () => p2.value === p1.value);
+        p1.addEventListener('input', () => p2.dispatchEvent(new Event('input')));   // re-check the repeat too
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const alert = $id('register-alert'), btn = $id('register-submit');
-            const u = $id('reg-username'), em = $id('reg-email'), p1 = $id('reg-password'), p2 = $id('reg-password2');
-            let bad = false;
-            const mark = (el, isBad) => { el.closest('.form-group').classList.toggle('has-error', isBad); bad = bad || isBad; };
-            mark(u, !/^[A-Za-z0-9_.-]{3,32}$/.test(u.value.trim()));
-            mark(em, em.value.trim() !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em.value.trim()));
-            mark(p1, p1.value.length < 8);
-            mark(p2, p2.value !== p1.value);
-            if (bad) return;
+            const ok = [vUser(true), vMail(true), vP1(true), vP2(true)].every(Boolean);
+            if (!ok) return;
             btn.disabled = true;
             const json = await fetchWithCaptcha('user_register', {
                 csrf_token: csrfOf(form),
                 username: u.value.trim(), email: em.value.trim(), password: p1.value,
             });
             if (json && json.success) {
-                showAlert(alert, 'Account created — welcome!', true);
+                showAlert(alert, 'Account created — welcome!' + (json.verify_sent ? ' A confirmation link was sent to your email address.' : ''), true);
                 window.location.href = APP_BASE + '?action=account';
             } else {
                 showAlert(alert, (json && json.error) || 'Registration failed', false);
@@ -1843,11 +1866,15 @@ async function loadStatsHome(forceSync = false) {
         if (navBadge) { navBadge.textContent = String(me.unread); navBadge.hidden = me.unread <= 0; }
         if (accBadge) { accBadge.textContent = me.unread + ' unread'; accBadge.hidden = me.unread <= 0; }
     }
-    async function loadNotifications() {
+    let notifPage = 1;
+    async function loadNotifications(page) {
+        if (page) notifPage = page;
         const box = $id('acc-notifications');
-        const json = await getJson('user_notifications');
+        const pag = $id('acc-notif-pagination');
+        const json = await getJson('user_notifications&page=' + notifPage);
         if (!json || !json.success) { box.textContent = 'Could not load notifications.'; return; }
         box.textContent = '';
+        if (pag) pag.textContent = '';
         if (!json.notifications.length) {
             const none = document.createElement('span');
             none.className = 'text-muted';
@@ -1887,6 +1914,21 @@ async function loadStatsHome(forceSync = false) {
             }
             box.appendChild(item);
         });
+        if (pag && json.pages > 1) {
+            const mk = (label, target, disabled) => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.textContent = label;
+                b.disabled = !!disabled;
+                b.addEventListener('click', () => loadNotifications(target));
+                return b;
+            };
+            pag.appendChild(mk('‹ Prev', json.page - 1, json.page <= 1));
+            const info = document.createElement('span');
+            info.textContent = 'Page ' + json.page + ' of ' + json.pages + ' · ' + json.total + ' total';
+            pag.appendChild(info);
+            pag.appendChild(mk('Next ›', json.page + 1, json.page >= json.pages));
+        }
     }
     function initAccount() {
         if (!$id('account-form')) {
@@ -1899,32 +1941,66 @@ async function loadStatsHome(forceSync = false) {
             return;
         }
         loadAccount();
-        loadNotifications();
+        loadNotifications(1);
         $id('acc-mark-all').addEventListener('click', async () => {
             await postJson('user_notifications', { csrf_token: $id('account-csrf').value, all: 1 });
             loadNotifications(); loadAccount();
+        });
+        const delRead = $id('acc-delete-read');
+        if (delRead) delRead.addEventListener('click', async () => {
+            const r = await postJson('user_notifications', { csrf_token: $id('account-csrf').value, delete_read: 1 });
+            if (r && r.success) loadNotifications(1);
+        });
+        const verifyBtn = $id('acc-verify-send');
+        if (verifyBtn) verifyBtn.addEventListener('click', async () => {
+            verifyBtn.disabled = true;
+            const r = await postJson('user_verify_send', { csrf_token: $id('account-csrf').value });
+            if (r && r.success && r.sent) { verifyBtn.textContent = 'Sent ✓'; }
+            else { verifyBtn.textContent = 'Failed'; verifyBtn.title = (r && (r.message || r.error)) || 'Could not send'; setTimeout(() => { verifyBtn.textContent = 'Resend link'; verifyBtn.disabled = false; }, 4000); }
         });
         $id('account-logout').addEventListener('click', async () => {
             await postJson('user_logout', { csrf_token: $id('account-csrf').value });
             window.location.href = APP_BASE;
         });
+        // live validation: email format; password ≥ 8 with a repeat box that appears when needed
+        const emailIn = $id('acc-new-email'), passIn = $id('acc-new-pass'), pass2In = $id('acc-new-pass2');
+        const pass2Group = $id('acc-new-pass2-group');
+        const vMail = liveValidate(emailIn, () => emailIn.value.trim() === '' || EMAIL_RE.test(emailIn.value.trim()));
+        const vPass = liveValidate(passIn, () => passIn.value === '' || (passIn.value.length >= 8 && passIn.value.length <= 200));
+        const vPass2 = liveValidate(pass2In, () => passIn.value === '' || pass2In.value === passIn.value);
+        passIn.addEventListener('input', () => {
+            pass2Group.hidden = passIn.value === '';
+            if (pass2In.value !== '') pass2In.dispatchEvent(new Event('input'));
+        });
         $id('account-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const alert = $id('account-alert'), btn = $id('account-save');
-            const body = { csrf_token: $id('account-csrf').value, current_password: $id('acc-cur-pass').value };
             const curEmail = $id('acc-email').textContent.trim();
-            const newEmail = $id('acc-remove-email').checked ? '' : $id('acc-new-email').value.trim();
             const hadEmail = curEmail !== '' && curEmail !== 'none';
-            if ($id('acc-remove-email').checked ? hadEmail : (newEmail !== (hadEmail ? curEmail : ''))) body.email = newEmail;
-            if ($id('acc-new-pass').value !== '') body.new_password = $id('acc-new-pass').value;
+            const newEmail = emailIn.value.trim();
+            if (![vMail(true), vPass(true), vPass2(true)].every(Boolean)) return;
+            const body = { csrf_token: $id('account-csrf').value, current_password: $id('acc-cur-pass').value };
+            // an emptied box removes the address; anything different from the current one changes it
+            if (newEmail !== (hadEmail ? curEmail : '')) body.email = newEmail;
+            if (passIn.value !== '') body.new_password = passIn.value;
             if (body.email === undefined && body.new_password === undefined) { showAlert(alert, 'Nothing to change.', false); return; }
             btn.disabled = true;
             const json = await postJson('user_update', body);
             btn.disabled = false;
             if (json && json.success) {
-                showAlert(alert, 'Saved.' + (json.changed.includes('password') ? ' Use the new password next time you sign in.' : ''), true);
-                $id('acc-cur-pass').value = ''; $id('acc-new-pass').value = '';
-                if (body.email !== undefined) $id('acc-email').textContent = body.email || 'none';
+                let msg = 'Saved.';
+                if (json.changed.includes('password')) msg += ' Use the new password next time you sign in.';
+                if (body.email !== undefined && body.email !== '' && json.verify_sent) msg += ' A confirmation link was sent to the new address.';
+                showAlert(alert, msg, true);
+                $id('acc-cur-pass').value = ''; passIn.value = ''; pass2In.value = ''; pass2Group.hidden = true;
+                if (body.email !== undefined) {
+                    $id('acc-email').textContent = body.email || 'none';
+                    const badge = $id('acc-email-badge');
+                    if (badge) {
+                        if (body.email === '') { badge.hidden = true; }
+                        else { badge.className = 'acc-badge acc-badge-warn'; badge.textContent = 'unverified'; badge.hidden = false; }
+                    }
+                }
             } else {
                 showAlert(alert, (json && json.error) || 'Update failed', false);
             }
@@ -1971,26 +2047,33 @@ async function loadStatsHome(forceSync = false) {
         const form = $id('search-form');
         if (!form) return;
         const canMagnet = form.dataset.canMagnet === '1';
+        const canFiles = form.dataset.canFiles === '1';
         const announces = [form.dataset.announce, form.dataset.announceHttps].filter(Boolean);
+        const input = $id('search-input'), clearBtn = $id('search-clear');
         const magnetFor = (hash, name) => {
             let m = 'magnet:?xt=urn:btih:' + hash;
             if (name) m += '&dn=' + encodeURIComponent(name);
             announces.forEach(u => { m += '&tr=' + encodeURIComponent(u); });
             return m;
         };
+        let curPage = 1, seq = 0;
         async function run(page) {
+            curPage = page;
+            const my = ++seq;   // stale responses (fast typing) must not overwrite newer ones
             const alert = $id('search-alert'), table = $id('search-table'), body = $id('search-body'), note = $id('search-note');
             alert.className = 'alert';
             const qs = new URLSearchParams({ page: String(page), sort: $id('search-sort').value });
-            const q = $id('search-input').value.trim();
+            const q = input.value.trim();
             if (q) qs.set('search', q);
             const filesBox = $id('search-files');
             if (filesBox && filesBox.checked) qs.set('search_files', '1');
             const json = await getJson('index_search&' + qs.toString());
+            if (my !== seq) return;
             if (!json || !json.success) {
                 table.hidden = true;
                 note.hidden = true;
-                renderPager(1, 1);
+                $id('search-total').textContent = '';
+                renderPager(1, 1, 0);
                 const code = json && json.error;
                 showAlert(alert, code === 'rate_limit' ? 'Rate limit reached — try again later.'
                     : code === 'login_required' ? 'Please sign in to search.'
@@ -2002,21 +2085,39 @@ async function loadStatsHome(forceSync = false) {
                 const tr = document.createElement('tr');
                 const nameTd = document.createElement('td');
                 nameTd.className = 'search-name';
-                nameTd.textContent = r.name || '(no name)';
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = r.name || '(no name)';
+                nameSpan.title = r.name || '';
+                nameTd.appendChild(nameSpan);
+                if (r.src === 'whitelist') {
+                    const wb = document.createElement('span');
+                    wb.className = 'search-wl-badge';
+                    wb.title = 'Registered on this tracker (whitelisted)';
+                    wb.textContent = 'WL';
+                    nameTd.appendChild(wb);
+                }
                 if (r.files_count) {
-                    const fc = document.createElement('span');
-                    fc.className = 'text-muted';
-                    fc.textContent = ' · ' + r.files_count + (r.files_count === 1 ? ' file' : ' files');
+                    const fc = document.createElement(canFiles && r.info_hash ? 'button' : 'span');
+                    fc.className = 'search-files-chip';
+                    fc.textContent = r.files_count + (r.files_count === 1 ? ' file' : ' files');
+                    if (canFiles && r.info_hash) {
+                        fc.type = 'button';
+                        fc.title = 'Show the file list';
+                        fc.addEventListener('click', () => openFiles(r.info_hash, r.name));
+                    }
                     nameTd.appendChild(fc);
                 }
                 tr.appendChild(nameTd);
                 const sizeTd = document.createElement('td');
+                sizeTd.className = 'search-num';
                 sizeTd.textContent = fmtBytesPub(r.size);
                 tr.appendChild(sizeTd);
                 const slTd = document.createElement('td');
-                slTd.textContent = r.seeders + ' / ' + r.leechers;
+                slTd.className = 'search-num';
+                slTd.textContent = (r.seeders == null ? '—' : r.seeders) + ' / ' + (r.leechers == null ? '—' : r.leechers);
                 tr.appendChild(slTd);
                 const seenTd = document.createElement('td');
+                seenTd.className = 'search-num';
                 seenTd.textContent = fmtDatePub(r.last_seen);
                 tr.appendChild(seenTd);
                 if (canMagnet) {
@@ -2025,17 +2126,19 @@ async function loadStatsHome(forceSync = false) {
                     if (r.info_hash) {
                         const a = document.createElement('a');
                         a.href = magnetFor(r.info_hash, r.name);
-                        a.className = 'btn btn-small';
+                        a.className = 'btn btn-small search-act-btn';
+                        a.title = 'Open in your torrent client';
                         a.textContent = 'Magnet';
                         magTd.appendChild(a);
                         const copy = document.createElement('button');
                         copy.type = 'button';
-                        copy.className = 'btn btn-secondary btn-small';
+                        copy.className = 'btn btn-secondary btn-small search-act-btn';
+                        copy.title = 'Copy the magnet link';
                         copy.textContent = 'Copy';
                         copy.addEventListener('click', () => {
                             if (!navigator.clipboard) return;
                             navigator.clipboard.writeText(magnetFor(r.info_hash, r.name))
-                                .then(() => { copy.textContent = 'Copied!'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); })
+                                .then(() => { copy.textContent = '✓'; copy.classList.add('copied'); setTimeout(() => { copy.textContent = 'Copy'; copy.classList.remove('copied'); }, 1200); })
                                 .catch(() => {});
                         });
                         magTd.appendChild(copy);
@@ -2045,30 +2148,100 @@ async function loadStatsHome(forceSync = false) {
                 body.appendChild(tr);
             });
             table.hidden = json.rows.length === 0;
-            note.hidden = false;
-            note.textContent = json.total === 0 ? 'Nothing found.' : json.total.toLocaleString() + ' result' + (json.total === 1 ? '' : 's') + '.';
-            renderPager(json.page, json.pages);
+            $id('search-total').textContent = json.total === 0 ? '' : json.total.toLocaleString() + ' result' + (json.total === 1 ? '' : 's');
+            note.hidden = json.total !== 0;
+            note.textContent = json.total === 0 ? 'Nothing found.' : '';
+            renderPager(json.page, json.pages, json.total);
         }
-        function renderPager(page, pages) {
+        // « First / ‹ Prev / Page [n] of M / Next › / Last » — same pattern as the admin tables
+        function renderPager(page, pages, total) {
             const box = $id('search-pagination');
             box.textContent = '';
             if (pages <= 1) return;
-            const mk = (label, target, disabled) => {
+            const go = (p) => { p = Math.min(pages, Math.max(1, Math.round(p))); if (p !== page) run(p); };
+            const mk = (label, target, disabled, cls) => {
                 const b = document.createElement('button');
                 b.type = 'button';
                 b.textContent = label;
                 b.disabled = !!disabled;
-                b.addEventListener('click', () => run(target));
+                if (cls) b.className = cls;
+                b.addEventListener('click', () => go(target));
                 return b;
             };
+            box.appendChild(mk('« First', 1, page <= 1, 'pg-edge'));
             box.appendChild(mk('‹ Prev', page - 1, page <= 1));
-            const info = document.createElement('span');
-            info.textContent = 'Page ' + page + ' of ' + pages;
-            box.appendChild(info);
+            const jump = document.createElement('span');
+            jump.className = 'pg-jump';
+            jump.appendChild(document.createTextNode('Page '));
+            const inp = document.createElement('input');
+            inp.type = 'number'; inp.min = '1'; inp.max = String(pages); inp.value = String(page);
+            inp.className = 'pg-input'; inp.title = 'Go to page (Enter)';
+            const jumpTo = () => { const n = Number(String(inp.value).trim()); if (isFinite(n) && n >= 1) go(n); else inp.value = String(page); };
+            inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); jumpTo(); } });
+            inp.addEventListener('change', jumpTo);
+            inp.addEventListener('focus', () => inp.select());
+            jump.appendChild(inp);
+            jump.appendChild(document.createTextNode(' of ' + pages));
+            box.appendChild(jump);
             box.appendChild(mk('Next ›', page + 1, page >= pages));
+            box.appendChild(mk('Last »', pages, page >= pages, 'pg-edge'));
         }
+        // ── file-list modal (index.files permission) ──
+        const overlay = $id('files-overlay');
+        function closeFiles() { if (overlay) { overlay.hidden = true; document.removeEventListener('keydown', escFiles); } }
+        function escFiles(e) { if (e.key === 'Escape') closeFiles(); }
+        async function openFiles(hash, name) {
+            if (!overlay) return;
+            const body = $id('files-body'), title = $id('files-title');
+            title.textContent = name || 'Files';
+            body.textContent = 'Loading…';
+            overlay.hidden = false;
+            document.addEventListener('keydown', escFiles);
+            const json = await getJson('index_files&hash=' + encodeURIComponent(hash));
+            if (overlay.hidden) return;
+            body.textContent = '';
+            if (!json || !json.success) {
+                body.textContent = (json && json.error) || 'Could not load the file list.';
+                return;
+            }
+            title.textContent = (json.name || name || 'Files') + ' — ' + json.files.length + (json.truncated ? '+' : '') + ' files';
+            if (!json.files.length) { body.textContent = 'No file list stored for this entry.'; return; }
+            const ul = document.createElement('ul');
+            ul.className = 'files-list';
+            json.files.forEach(f => {
+                const li = document.createElement('li');
+                const p = document.createElement('span');
+                p.className = 'files-path';
+                p.textContent = f.path;
+                p.title = f.path;
+                const s = document.createElement('span');
+                s.className = 'files-size text-muted';
+                s.textContent = fmtBytesPub(f.size);
+                li.appendChild(p); li.appendChild(s);
+                ul.appendChild(li);
+            });
+            body.appendChild(ul);
+            if (json.truncated) {
+                const more = document.createElement('p');
+                more.className = 'text-muted';
+                more.textContent = 'List truncated — this torrent has more files.';
+                body.appendChild(more);
+            }
+        }
+        if (overlay) {
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeFiles(); });
+            $id('files-close').addEventListener('click', closeFiles);
+        }
+        // ── wiring: live search (debounced), clear-X, sort/files change, Enter = immediate ──
+        const runDebounced = debounce(() => run(1), 300);
+        const syncClear = () => { if (clearBtn) clearBtn.hidden = input.value === ''; };
+        input.addEventListener('input', () => { syncClear(); runDebounced(); });
+        if (clearBtn) clearBtn.addEventListener('click', () => { input.value = ''; syncClear(); input.focus(); run(1); });
         form.addEventListener('submit', (e) => { e.preventDefault(); run(1); });
         $id('search-sort').addEventListener('change', () => run(1));
+        const filesBox = $id('search-files');
+        if (filesBox) filesBox.addEventListener('change', () => run(1));
+        syncClear();
         run(1);
     }
 

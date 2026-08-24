@@ -9,6 +9,10 @@ $wlSched    = function_exists('scheduleEnabled') && scheduleEnabled($cfg);   // 
 $wlReg      = $wlMode || $wlSched;   // registration UI shown (whitelist mode now, or scheduled whitelist hours)
 $wlPublic   = ($cfg['whitelist_public_enabled'] ?? '1') === '1';
 $wlCaptcha  = captchaConfigured($cfg);
+// audience: 'users' = signed-in accounts with the whitelist.add permission (no CAPTCHA)
+$wlUsersMode = ($cfg['whitelist_submit_mode'] ?? 'public') === 'users' && usersEnabled($cfg);
+$wlMe        = $wlUsersMode ? currentUser($db) : null;
+$wlUserOk    = $wlUsersMode && $wlMe !== null && userCan($db, $cfg, 'whitelist.add');
 $wlMax      = max(1, (int)($cfg['whitelist_max_per_submission'] ?? 20));
 $wlUdp      = trim((string)($cfg['announce_url'] ?? ''));
 $wlHttp     = trim((string)($cfg['announce_url_https'] ?? ''));
@@ -41,7 +45,28 @@ if ($wlSched) {
 <?php if (!$wlReg): ?>
 <p>This tracker currently runs in <strong>open (blacklist) mode</strong>: every torrent is served unless it was blocked after an abuse report. There is nothing to register.</p>
 <p>See <a href="<?= $baseUrl ?>?action=info">Info</a> for the announce URLs.</p>
-<?php elseif (!$wlPublic || !$wlCaptcha): ?>
+<?php elseif ($wlPublic && $wlUsersMode && !$wlUserOk): ?>
+<?php if ($wlSchedNotice !== ''): ?><div class="wl-schedule-notice"><?= $wlSchedNotice ?></div><?php endif; ?>
+<p>This tracker serves <strong>registered torrents only</strong><?= $wlSched ? ' during whitelist hours (open mode otherwise)' : '' ?>. Torrent registration is limited to <strong>signed-in users</strong> with whitelist access.</p>
+<?php if ($wlMe === null): ?>
+<p><a class="btn" href="<?= $baseUrl ?>?action=login">Sign in</a>
+<?php if (usersRegistrationEnabled($cfg)): ?> <a class="btn btn-secondary" href="<?= $baseUrl ?>?action=register">Create an account</a><?php endif; ?></p>
+<?php else: ?>
+<p>Your account does not have whitelist access. Check <a href="<?= $baseUrl ?>?action=account">your groups</a> or contact the site admin.</p>
+<?php endif; ?>
+<?php if ($wlCount !== null): ?>
+<p class="wl-count">Currently <strong><?= number_format($wlCount) ?></strong> <?= $wlCount === 1 ? 'torrent is' : 'torrents are' ?> registered on this tracker.</p>
+<?php endif; ?>
+<div id="wl-check-block">
+    <h2 class="section-heading-spaced">Check a hash</h2>
+    <form id="wl-check-form" novalidate>
+        <div class="form-group"><label for="wl-check-input">Magnet link or info hash</label>
+        <input type="text" id="wl-check-input" name="hash" maxlength="2048" placeholder="magnet:?xt=urn:btih:… or 40 hex characters"></div>
+        <div class="form-center"><button type="submit" class="btn" id="wl-check-submit">Check</button></div>
+    </form>
+    <div id="wl-check-alert" class="alert"></div>
+</div>
+<?php elseif (!$wlPublic || (!$wlUsersMode && !$wlCaptcha)): ?>
 <?php if ($wlSchedNotice !== ''): ?><div class="wl-schedule-notice"><?= $wlSchedNotice ?></div><?php endif; ?>
 <p>This tracker serves <strong>registered torrents only</strong><?= $wlSched ? ' during whitelist hours (open mode otherwise)' : '' ?>. Public registration is currently <strong>unavailable</strong><?= !$wlCaptcha ? ' (CAPTCHA is not configured on this site)' : '' ?>. Torrents posted on the community forum are registered automatically.</p>
 <?php if ($wlCount !== null): ?>
@@ -58,7 +83,11 @@ if ($wlSched) {
 </div>
 <?php else: ?>
 <?php if ($wlSchedNotice !== ''): ?><div class="wl-schedule-notice"><?= $wlSchedNotice ?></div><?php endif; ?>
+<?php if ($wlUsersMode): ?>
+<p>This tracker serves <strong>registered torrents only</strong><?= $wlSched ? ' during whitelist hours (open mode otherwise)' : '' ?>. You are signed in as <strong><?= sanitize($wlMe['username']) ?></strong> — paste one or more magnet links (or plain 40-character info hashes) and they are added to the whitelist under your account (no CAPTCHA needed). Torrents posted on the community forum are registered automatically.</p>
+<?php else: ?>
 <p>This tracker serves <strong>registered torrents only</strong><?= $wlSched ? ' during whitelist hours (open mode otherwise)' : '' ?>. Registration is <strong>free and anonymous</strong> — paste one or more magnet links (or plain 40-character info hashes), <?= captchaProvider($cfg) === 'recaptcha_v3' ? 'pass the (invisible) CAPTCHA check' : 'solve the CAPTCHA' ?> and the hashes are added to the whitelist. Torrents posted on the community forum are registered automatically.</p>
+<?php endif; ?>
 <?php if ($wlCount !== null): ?>
 <p class="wl-count">Currently <strong><?= number_format($wlCount) ?></strong> <?= $wlCount === 1 ? 'torrent is' : 'torrents are' ?> registered on this tracker.</p>
 <?php endif; ?>
@@ -67,7 +96,7 @@ if ($wlSched) {
     <li><strong>Only magnet links that already announce to this tracker are accepted</strong> — the magnet must contain <code>&amp;tr=<?= sanitize($wlUdp ?: $wlHttp) ?></code><?= ($wlUdp && $wlHttp) ? ' (or the HTTP announce URL below)' : '' ?>. Plain hashes are refused.</li>
     <?php endif; ?>
     <li>Up to <strong><?= $wlMax ?></strong> hashes per submission, one per line.</li>
-    <li>Your IP address is stored with each registration to detect abuse. Spam and abusive submissions get the IP banned.</li>
+    <li>Your IP address<?= $wlUsersMode ? ' and account name are' : ' is' ?> stored with each registration to detect abuse. Spam and abusive submissions get the <?= $wlUsersMode ? 'account / IP' : 'IP' ?> banned.</li>
     <li>Registered hashes may be removed or banned at any time (e.g. after an abuse report). Banned hashes cannot be re-registered.</li>
     <li>Registration only tells the tracker to <em>serve</em> the swarm — we do not host, index or download any content.</li>
 </ul>

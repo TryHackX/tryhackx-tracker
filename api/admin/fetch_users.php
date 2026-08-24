@@ -4,8 +4,12 @@ $page = max(1, (int)($_GET['page'] ?? 1));
 $perPage = max(1, (int)($cfg['items_per_page'] ?? 25));
 $offset = ($page - 1) * $perPage;
 
+// 'group' sorts by the user's top group name (highest priority active membership; groupless last)
+$groupSortExpr = "(SELECT g2.name FROM user_group_members m2 JOIN user_groups g2 ON g2.id = m2.group_id
+                   WHERE m2.user_id = users.id AND m2.granted_at <= NOW() AND (m2.expires_at IS NULL OR m2.expires_at >= NOW())
+                   ORDER BY g2.priority DESC, g2.name LIMIT 1)";
 $allowedSorts = ['id' => 'id', 'username' => 'username', 'email' => 'email', 'status' => 'status',
-                 'created' => 'created_at', 'login' => 'last_login_at'];
+                 'created' => 'created_at', 'login' => 'last_login_at', 'group' => $groupSortExpr];
 $orderParts = [];
 foreach (explode(',', trim((string)($_GET['sort'] ?? 'created:desc'))) as $part) {
     $pieces = explode(':', trim($part));
