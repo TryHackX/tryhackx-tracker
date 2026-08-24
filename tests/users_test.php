@@ -36,6 +36,10 @@ foreach (['users', 'user_groups', 'user_group_members', 'user_notifications', 'u
 check('api_clients has scope column', schemaColumnExists($db, 'api_clients', 'scope'));
 check('index_hashes has meta_source column', schemaColumnExists($db, 'index_hashes', 'meta_source'));
 check('index_hashes has meta_fetched index', schemaIndexExists($db, 'index_hashes', 'idx_index_meta_fetched'));
+// deterministic start: restore the SEED permissions of the system groups (another tool/session may
+// have edited them in the shared test DB — e.g. a UI fixture granting guest everything)
+$db->exec("UPDATE user_groups SET permissions = '" . json_encode(['whitelist.view' => true, 'stats.view' => true, 'stats.timeline' => true, 'home.stats' => true]) . "' WHERE slug = 'guest'");
+$db->exec("UPDATE user_groups SET permissions = '" . json_encode(['whitelist.view' => true, 'stats.view' => true, 'stats.timeline' => true, 'home.stats' => true]) . "' WHERE slug = 'member'");
 $guest = userGroupBySlug($db, 'guest');
 $member = userGroupBySlug($db, 'member');
 $adminG = userGroupBySlug($db, 'admin');
@@ -54,20 +58,25 @@ $cfgOn = $cfg; $cfgOn['users_enabled'] = '1';
 $cfgOff = $cfg; $cfgOff['users_enabled'] = '0';
 
 // ── 2. create / authenticate ─────────────────────────────────────────────────
-$r = userCreate($db, $cfgOn, 'alice', 'alice@example.org', 'password123', '1.2.3.4');
+$r = userCreate($db, $cfgOn, 'alice', 'alice@example.org', 'Password123!', '1.2.3.4');
 check('create user ok', isset($r['user']) && $r['user']['username'] === 'alice', json_encode($r));
 $alice = $r['user'];
 check('new user got the default member group', count(userGroups($db, (int)$alice['id'])) === 1
     && userGroups($db, (int)$alice['id'])[0]['slug'] === 'member');
-check('create rejects bad username', (userCreate($db, $cfgOn, 'a b', '', 'password123')['error'] ?? '') === 'invalid_username');
+check('create rejects bad username', (userCreate($db, $cfgOn, 'a b', '', 'Password123!')['error'] ?? '') === 'invalid_username');
 check('create rejects weak password', (userCreate($db, $cfgOn, 'bob', '', 'short')['error'] ?? '') === 'weak_password');
-check('create rejects duplicate username', (userCreate($db, $cfgOn, 'alice', '', 'password123')['error'] ?? '') === 'username_taken');
-check('create rejects duplicate email', (userCreate($db, $cfgOn, 'bob', 'alice@example.org', 'password123')['error'] ?? '') === 'email_taken');
-check('authenticate ok (by username)', userAuthenticate($db, 'alice', 'password123') !== null);
-check('authenticate ok (by email)', userAuthenticate($db, 'alice@example.org', 'password123') !== null);
+// password policy (1.8.0): length + lower + upper + digit + special
+check('policy: all-lowercase rejected', (userCreate($db, $cfgOn, 'bob', '', 'password123!')['error'] ?? '') === 'weak_password');
+check('policy: no special char rejected', (userCreate($db, $cfgOn, 'bob', '', 'Password1234')['error'] ?? '') === 'weak_password');
+check('policy: issue codes reported', userPasswordIssues('abc') === ['length', 'upper', 'digit', 'special'], json_encode(userPasswordIssues('abc')));
+check('policy: compliant password passes', userValidPassword('Password123!'));
+check('create rejects duplicate username', (userCreate($db, $cfgOn, 'alice', '', 'Password123!')['error'] ?? '') === 'username_taken');
+check('create rejects duplicate email', (userCreate($db, $cfgOn, 'bob', 'alice@example.org', 'Password123!')['error'] ?? '') === 'email_taken');
+check('authenticate ok (by username)', userAuthenticate($db, 'alice', 'Password123!') !== null);
+check('authenticate ok (by email)', userAuthenticate($db, 'alice@example.org', 'Password123!') !== null);
 check('authenticate rejects wrong password', userAuthenticate($db, 'alice', 'wrong') === null);
-check('authenticate rejects unknown user', userAuthenticate($db, 'nobody', 'password123') === null);
-$r2 = userCreate($db, $cfgOn, 'bob', '', 'password123');
+check('authenticate rejects unknown user', userAuthenticate($db, 'nobody', 'Password123!') === null);
+$r2 = userCreate($db, $cfgOn, 'bob', '', 'Password123!');
 $bob = $r2['user'];
 check('email is optional', isset($r2['user']) && $r2['user']['email'] === null);
 
@@ -94,7 +103,7 @@ $db->exec("UPDATE user_groups SET permissions = '" . json_encode(['stats.view' =
 $permsBob = userEffectivePermissions($db, (int)$bob['id']);
 check('member-group permission applies to its members', !empty($permsBob['stats.view']) && empty($permsBob['index.view']), json_encode($permsBob));
 // admin group = every permission, current and future
-$r3 = userCreate($db, $cfgOn, 'carol', '', 'password123');
+$r3 = userCreate($db, $cfgOn, 'carol', '', 'Password123!');
 $carol = $r3['user'];
 userGrantGroup($db, (int)$carol['id'], (int)userGroupBySlug($db, 'admin')['id'], null, 'test', '', false);
 $permsCarol = userEffectivePermissions($db, (int)$carol['id']);

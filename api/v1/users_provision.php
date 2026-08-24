@@ -17,7 +17,9 @@ $payload = json_decode((string)$rawBody, true);
 if (!is_array($payload)) jsonResponse(['ok' => false, 'error' => 'invalid_json'], 422);
 $password = (string)($payload['password'] ?? '');
 $generated = false;
-if ($password === '') { $password = bin2hex(random_bytes(9)); $generated = true; }
+// generated passwords must satisfy the 1.8.0 policy (lower+upper+digit+special) — the fixed
+// suffix guarantees every class, the 16 random hex chars carry the entropy
+if ($password === '') { $password = bin2hex(random_bytes(8)) . 'aZ9!'; $generated = true; }
 
 $r = userCreate($db, $cfg, (string)($payload['username'] ?? ''), (string)($payload['email'] ?? ''), $password, getClientIp($cfg), 'api:' . $client['label']);
 if (isset($r['error'])) {

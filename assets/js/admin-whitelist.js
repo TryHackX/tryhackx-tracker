@@ -6,7 +6,7 @@
     'use strict';
     // Quick feedback (copies) goes through copyToClipboard → flashTip (tooltip on the clicked element);
     // showToast is reserved for real outcomes (added / banned / deleted / errors).
-    const { apiCall, el, showToast, confirmAction, promptModal, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard } = window.AdminCommon;
+    const { apiCall, el, showToast, confirmAction, promptModal, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree } = window.AdminCommon;
 
     const $ = (id) => document.getElementById(id);
     const bodyDs = document.body.dataset;
@@ -243,15 +243,20 @@
         return p.toString();
     }
 
-    async function loadWhitelist() {
+    let wlLoadSeq = 0;
+    async function loadWhitelist(silent = false) {
         const body = $('wl-body');
-        body.textContent = '';
-        body.appendChild(el('tr', null, el('td', { colspan: 11, className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' Loading…'])));
+        const my = ++wlLoadSeq;   // rapid sort/filter clicks: only the newest response may render
+        if (!silent) {
+            body.textContent = '';
+            body.appendChild(el('tr', null, el('td', { colspan: 12, className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' Loading…'])));
+        }
         let r;
         try { r = await apiCall('admin/fetch_whitelist&' + wlQuery()); } catch { r = { error: 'Network error' }; }
+        if (my !== wlLoadSeq) return;
         body.textContent = '';
         if (r.error) {
-            body.appendChild(el('tr', null, el('td', { colspan: 11, className: 'text-center text-danger py-4', text: r.error })));
+            body.appendChild(el('tr', null, el('td', { colspan: 12, className: 'text-center text-danger py-4', text: r.error })));
             return;
         }
         state.wl.rows = new Map(r.rows.map(x => [x.id, x]));
@@ -260,7 +265,7 @@
         state.wl.selected = new Set([...state.wl.selected].filter(id => state.wl.rows.has(id)));
         $('wl-total').textContent = `${r.total} entries`;
         if (!r.rows.length) {
-            body.appendChild(el('tr', null, el('td', { colspan: 11, className: 'text-center text-muted py-4', text: state.wl.search || state.wl.ip ? 'No entries match your search.' : 'The whitelist is empty. Use "Add hashes" or let the forum sync fill it.' })));
+            body.appendChild(el('tr', null, el('td', { colspan: 12, className: 'text-center text-muted py-4', text: state.wl.search || state.wl.ip ? 'No entries match your search.' : 'The whitelist is empty. Use "Add hashes" or let the forum sync fill it.' })));
         }
         let lastIp = null;
         r.rows.forEach(row => {
@@ -279,9 +284,9 @@
             tr.appendChild(hashCell);
             const nameTd = el('td', { className: 'wl-name', title: row.name || '' });
             nameTd.appendChild(el('span', { text: row.name || '—' }));
-            if (row.files_count) nameTd.appendChild(el('span', { className: 'text-muted wl-small', text: ` · ${row.files_count} file${row.files_count === 1 ? '' : 's'}` }));
             tr.appendChild(nameTd);
             tr.appendChild(el('td', { className: 'wl-size', text: row.total_size ? fmtBytes(row.total_size) : '—' }));
+            tr.appendChild(el('td', { className: 'wl-files-col', text: row.files_count != null ? String(row.files_count) : '—' }));
             const srcTd = el('td', { className: 'wl-source' }, sourceBadge(row.source));
             if (row.source_ref && isHttpUrl(row.source_ref.url)) {
                 srcTd.appendChild(document.createTextNode(' '));
@@ -310,9 +315,10 @@
             act.appendChild(magOpen);
             act.appendChild(iconBtn('bi-clipboard', 'Copy magnet link', 'btn-outline-secondary', (e) => copyToClipboard(magnetFor(row.info_hash, row.name), e.currentTarget)));
             if (row.banned) act.appendChild(iconBtn('bi-unlock', 'Unban', 'btn-outline-success', () => unbanHash(row.info_hash)));
-            else act.appendChild(iconBtn('bi-slash-circle', 'Ban', 'btn-outline-warning', () => banRows([row.id])));
+            else act.appendChild(iconBtn('bi-lock', 'Ban', 'btn-outline-warning', () => banRows([row.id])));
             act.appendChild(iconBtn('bi-trash', 'Delete', 'btn-outline-danger', () => deleteRows([row.id])));
             tr.appendChild(act);
+            tr.addEventListener('click', (e) => { if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a') || e.target.closest('.wl-hash-cell')) return; openDetails(row.id); });
             body.appendChild(tr);
             lastIp = row.ip;
         });
@@ -321,6 +327,16 @@
         $('wl-select-all').checked = r.rows.length > 0 && r.rows.every(x => state.wl.selected.has(x.id));
         renderChips();
     }
+
+    // Live view while the worker drains the queue: refresh the visible page every 5 s when the
+    // meta filter is pending/fetching OR any visible row is still pending/fetching — sort, filters,
+    // pagination and selection all survive (silent reload).
+    setInterval(() => {
+        if (document.hidden || state.view !== 'whitelist') return;
+        const busyFilter = state.wl.meta === 'pending' || state.wl.meta === 'fetching';
+        const busyRows = [...state.wl.rows.values()].some(x => x.meta_status === 'pending' || x.meta_status === 'fetching');
+        if (busyFilter || busyRows) loadWhitelist(true);
+    }, 5000);
 
     function setIpFilter(ip) {
         state.wl.ip = ip; state.wl.page = 1;
@@ -674,54 +690,13 @@
         // actions
         const actions = el('div', { className: 'd-flex justify-content-end gap-2 mt-3 flex-wrap' });
         if (it.banned) actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-success', onclick: async () => { await unbanHash(it.info_hash); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-unlock' }), ' Unban']));
-        else actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning', onclick: async () => { await banRows([it.id]); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-slash-circle' }), ' Ban']));
+        else actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning', onclick: async () => { await banRows([it.id]); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-lock' }), ' Ban']));
         actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', onclick: async () => { const before = state.wl.rows.size; await deleteRows([it.id]); if (!state.wl.rows.has(it.id) || before === 0) bootstrap.Modal.getOrCreateInstance($('wlDetailsModal')).hide(); } }, [el('i', { className: 'bi bi-trash' }), ' Delete']));
         actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-secondary', 'data-bs-dismiss': 'modal', text: 'Close' }));
         body.appendChild(actions);
     }
 
-    function buildFileTree(files) {
-        // group by top-level directory; show first 200 leaves, then a "show all" toggle
-        const root = { dirs: new Map(), files: [] };
-        files.forEach(f => {
-            const parts = String(f.path).split('/').filter(Boolean);
-            let node = root;
-            for (let i = 0; i < parts.length - 1; i++) {
-                if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
-                node = node.dirs.get(parts[i]);
-            }
-            node.files.push({ name: parts[parts.length - 1] || String(f.path), size: f.size });
-        });
-        let rendered = 0;
-        const LIMIT = 200;
-        let hidden = 0;
-        const container = el('div', { className: 'wl-tree' });
-        function renderNode(node, parent, depth) {
-            [...node.dirs.keys()].sort().forEach(name => {
-                const sub = node.dirs.get(name);
-                const det = el('details', { open: depth === 0 ? '' : null });
-                det.appendChild(el('summary', null, [el('i', { className: 'bi bi-folder2' }), ' ', name, ' ', el('span', { className: 'text-muted wl-small', text: `(${countFiles(sub)})` })]));
-                const inner = el('div', { className: 'wl-tree-children' });
-                renderNode(sub, inner, depth + 1);
-                det.appendChild(inner);
-                parent.appendChild(det);
-            });
-            node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
-                rendered++;
-                const line = el('div', { className: 'wl-tree-file' + (rendered > LIMIT ? ' wl-tree-more d-hidden' : '') }, [el('i', { className: 'bi bi-file-earmark' }), ' ', el('span', { className: 'wl-tree-name', text: f.name }), el('span', { className: 'wl-tree-size text-muted', text: fmtBytes(f.size) })]);
-                if (rendered > LIMIT) hidden++;
-                parent.appendChild(line);
-            });
-        }
-        function countFiles(n) { let c = n.files.length; n.dirs.forEach(d => { c += countFiles(d); }); return c; }
-        renderNode(root, container, 0);
-        if (hidden > 0) {
-            const more = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary mt-2', text: `Show all (${hidden} more)` });
-            more.addEventListener('click', () => { container.querySelectorAll('.wl-tree-more').forEach(x => x.classList.remove('d-hidden')); more.remove(); });
-            container.appendChild(more);
-        }
-        return container;
-    }
+    // buildFileTree lives in AdminCommon (shared with the Index modal)
 
     // ───────────────────────── add hashes modal ─────────────────────────
     function initAddModal() {
@@ -958,7 +933,8 @@
 
     // ───────────────────────── init ─────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
-        wlSort = makeSortStack({ table: $('wl-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.wl.page = 1; loadWhitelist(); } });
+        const loadWlDebounced = debounce(() => loadWhitelist(), 250);
+        wlSort = makeSortStack({ table: $('wl-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.wl.page = 1; loadWlDebounced(); } });
         bnSort = makeSortStack({ table: $('bn-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.bn.page = 1; loadBanned(); } });
         abSort = makeSortStack({ table: $('ab-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.ab.page = 1; loadApiBans(); } });
         wlSort.bindHeaders(); bnSort.bindHeaders(); abSort.bindHeaders();
@@ -978,7 +954,7 @@
         const searchInput = $('wl-search');
         const doSearch = debounce(() => { state.wl.search = searchInput.value.trim(); state.wl.page = 1; loadWhitelist(); }, 350);
         searchInput.addEventListener('input', doSearch);
-        $('wl-search-clear').addEventListener('click', () => { searchInput.value = ''; state.wl.search = ''; state.wl.page = 1; loadWhitelist(); });
+        bindSearchClear(searchInput, $('wl-search-clear'), () => { state.wl.search = ''; state.wl.page = 1; loadWhitelist(); });
         $('wl-search-files').addEventListener('change', (e) => { state.wl.searchFiles = e.target.checked; if (state.wl.search) loadWhitelist(); });
         $('wl-filter-source').addEventListener('change', (e) => { state.wl.source = e.target.value; state.wl.page = 1; loadWhitelist(); });
         $('wl-filter-meta').addEventListener('change', (e) => { state.wl.meta = e.target.value; state.wl.page = 1; loadWhitelist(); });

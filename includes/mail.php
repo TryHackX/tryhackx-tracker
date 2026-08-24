@@ -1,8 +1,20 @@
 <?php
 
+/**
+ * RFC 2047 encoded-word for header TEXT (Subject, From display name) containing non-ASCII.
+ * Raw UTF-8 in a header makes postfix flag the message as needing SMTPUTF8 — and a dovecot
+ * LMTP without SMTPUTF8 then BOUNCES it ("SMTPUTF8 is required, but was not offered"). That is
+ * exactly what ate the password-reset mails whose subject contained an em-dash.
+ */
+function mailEncodeHeaderText(string $s): string {
+    $s = str_replace(["\r", "\n"], '', $s);
+    return preg_match('/[^\x20-\x7E]/', $s) ? '=?UTF-8?B?' . base64_encode($s) . '?=' : $s;
+}
+
 function sendEmail(string $to, string $subject, string $plainText, string $htmlBody, array $cfg, string $unsubscribeUrl = ''): bool {
-    $siteName = str_replace(["\r", "\n"], '', $cfg['site_name'] ?? 'Tracker');
+    $siteName = mailEncodeHeaderText($cfg['site_name'] ?? 'Tracker');
     $siteEmail = str_replace(["\r", "\n"], '', $cfg['site_email'] ?? 'noreply@localhost');
+    $subject = mailEncodeHeaderText($subject);
     $boundary = md5(uniqid(time()));
 
     $emailDomain = substr(strrchr($siteEmail, "@"), 1);

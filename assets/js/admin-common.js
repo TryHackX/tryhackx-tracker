@@ -289,8 +289,9 @@
                     th.addEventListener('click', () => {
                         const col = th.dataset.sort;
                         const idx = stack.findIndex(s => s.col === col);
-                        if (idx === -1) stack.push({ col, dir: 'asc' });
-                        else if (stack[idx].dir === 'asc') stack[idx].dir = 'desc';
+                        // biggest-first is what people reach for on numeric columns: desc → asc → off
+                        if (idx === -1) stack.push({ col, dir: 'desc' });
+                        else if (stack[idx].dir === 'desc') stack[idx].dir = 'asc';
                         else stack.splice(idx, 1);
                         api.update();
                         if (onChange) onChange(api.get());
@@ -346,6 +347,103 @@
     }
 
     // torrent sizes are powers of 1024 — label them with the matching IEC units (KiB/MiB/GiB)
+    /**
+     * animatedClear(input, done) — empties a search box with an accelerating "held backspace"
+     * effect (each character deletes a bit faster than the last), then calls done() once. A very
+     * long value fast-forwards to its last 40 characters first so the whole thing stays snappy.
+     */
+    function animatedClear(input, done) {
+        if (!input) { if (done) done(); return; }
+        if (input.__clearing) return;
+        input.__clearing = true;
+        if (input.value.length > 40) input.value = input.value.slice(-40);
+        let delay = 55;
+        const step = () => {
+            if (!input.value.length) { input.__clearing = false; if (done) done(); return; }
+            input.value = input.value.slice(0, -1);
+            delay = Math.max(7, delay * 0.82);
+            setTimeout(step, delay);
+        };
+        step();
+    }
+
+    /**
+     * bindSearchClear(input, btn, onCleared) — the red-glow clear × next to a toolbar search box:
+     * visible only while the box has text, click empties it with the accelerating animation and
+     * then calls onCleared() once. (Only the dashboard used to toggle .visible — on the other
+     * pages the button existed but stayed at opacity 0 forever.)
+     */
+    function bindSearchClear(input, btn, onCleared) {
+        if (!input || !btn) return;
+        const sync = () => btn.classList.toggle('visible', input.value.length > 0);
+        input.addEventListener('input', sync);
+        btn.addEventListener('click', () => animatedClear(input, () => { sync(); input.focus(); if (onCleared) onCleared(); }));
+        sync();
+    }
+
+    /**
+     * buildFileTree(files, opts) — collapsible folder tree for a torrent file list
+     * ([{path,size}]). Shared by the Whitelist and Index detail modals. First 200 leaves render,
+     * the rest hide behind a "Show all" toggle. opts.mark: lowercase substring — matching parts of
+     * file names are wrapped in <mark> (used when the search matched on file names).
+     */
+    function buildFileTree(files, opts = {}) {
+        const mark = (opts.mark || '').toLowerCase();
+        const nameNode = (text) => {
+            const span = el('span', { className: 'wl-tree-name', title: text });
+            if (mark && text.toLowerCase().includes(mark)) {
+                let rest = text;
+                while (rest) {
+                    const i = rest.toLowerCase().indexOf(mark);
+                    if (i === -1) { span.appendChild(document.createTextNode(rest)); break; }
+                    if (i > 0) span.appendChild(document.createTextNode(rest.slice(0, i)));
+                    span.appendChild(el('mark', { text: rest.slice(i, i + mark.length) }));
+                    rest = rest.slice(i + mark.length);
+                }
+            } else span.textContent = text;
+            return span;
+        };
+        const root = { dirs: new Map(), files: [] };
+        files.forEach(f => {
+            const parts = String(f.path).split('/').filter(Boolean);
+            let node = root;
+            for (let i = 0; i < parts.length - 1; i++) {
+                if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
+                node = node.dirs.get(parts[i]);
+            }
+            node.files.push({ name: parts[parts.length - 1] || String(f.path), size: f.size });
+        });
+        let rendered = 0;
+        const LIMIT = 200;
+        let hidden = 0;
+        const container = el('div', { className: 'wl-tree' });
+        function countFiles(n) { let c = n.files.length; n.dirs.forEach(d => { c += countFiles(d); }); return c; }
+        function renderNode(node, parent, depth) {
+            [...node.dirs.keys()].sort().forEach(name => {
+                const sub = node.dirs.get(name);
+                const det = el('details', { open: depth === 0 ? '' : null });
+                det.appendChild(el('summary', null, [el('i', { className: 'bi bi-folder2' }), ' ', nameNode(name), ' ', el('span', { className: 'text-muted wl-small', text: `(${countFiles(sub)})` })]));
+                const inner = el('div', { className: 'wl-tree-children' });
+                renderNode(sub, inner, depth + 1);
+                det.appendChild(inner);
+                parent.appendChild(det);
+            });
+            node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
+                rendered++;
+                const line = el('div', { className: 'wl-tree-file' + (rendered > LIMIT ? ' wl-tree-more d-hidden' : '') }, [el('i', { className: 'bi bi-file-earmark' }), ' ', nameNode(f.name), el('span', { className: 'wl-tree-size text-muted', text: fmtBytes(f.size) })]);
+                if (rendered > LIMIT) hidden++;
+                parent.appendChild(line);
+            });
+        }
+        renderNode(root, container, 0);
+        if (hidden > 0) {
+            const more = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary mt-2', text: `Show all (${hidden} more)` });
+            more.addEventListener('click', () => { container.querySelectorAll('.wl-tree-more').forEach(x => x.classList.remove('d-hidden')); more.remove(); });
+            container.appendChild(more);
+        }
+        return container;
+    }
+
     function fmtBytes(n) {
         n = Number(n);
         if (!isFinite(n) || n <= 0) return '—';
@@ -394,5 +492,5 @@
         }).catch(() => flashTip(target, 'Clipboard not available', { variant: 'warning', duration: 2000 }));
     }
 
-    window.AdminCommon = { apiCall, esc, el, showToast, confirmAction, promptModal, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard };
+    window.AdminCommon = { apiCall, esc, el, showToast, confirmAction, promptModal, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree };
 })();

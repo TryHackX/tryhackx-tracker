@@ -20,11 +20,39 @@ function adminSessionValid(array $cfg): bool {
     $idleMax   = max(0, (int)($cfg['admin_session_idle_minutes'] ?? 30)) * 60;
     $absMax    = max(0, (int)($cfg['admin_session_absolute_hours'] ?? 12)) * 3600;
 
-    if ($absMax > 0 && $loginTime > 0 && ($now - $loginTime) >= $absMax) { logout(); return false; }
-    if ($idleMax > 0 && ($now - $lastSeen) >= $idleMax)                   { logout(); return false; }
+    if ($absMax > 0 && $loginTime > 0 && ($now - $loginTime) >= $absMax) { adminPanelSessionDrop(); return false; }
+    if ($idleMax > 0 && ($now - $lastSeen) >= $idleMax)                   { adminPanelSessionDrop(); return false; }
+
+    // panel session opened via the site sign-in of an admin-group user: the grant only lives as
+    // long as that user is still active AND still in the admin group (a revoke/ban takes effect
+    // on the next panel request, not at the next login). Never invalidate the classic session.
+    if (!empty($_SESSION['admin_via_user']) && function_exists('userIsAdminGroup') && function_exists('getDb')) {
+        try {
+            $db = getDb();
+            $u = userFindById($db, (int)$_SESSION['admin_via_user']);
+            if (!$u || $u['status'] !== 'active' || !userIsAdminGroup($db, (int)$u['id'])) {
+                unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+                return false;
+            }
+        } catch (\Throwable $e) { /* DB hiccup — fall through, the idle limits still guard */ }
+    }
 
     $_SESSION['last_activity'] = $now;
     return true;
+}
+
+/**
+ * End the PANEL part of the session. A panel session piggy-backing on a user sign-in
+ * (admin_via_user) must NOT destroy the whole PHP session — the owner would be logged out of the
+ * public site every time the panel idle timer fires. The classic password panel session keeps the
+ * historical full logout().
+ */
+function adminPanelSessionDrop(): void {
+    if (!empty($_SESSION['admin_via_user'])) {
+        unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+        return;
+    }
+    logout();
 }
 
 function requireAuth(?array $cfg = null): void {

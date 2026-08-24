@@ -60,6 +60,26 @@ function userLegacyDefault(string $perm): bool {
 function userValidUsername(string $u): bool { return (bool)preg_match('/^[A-Za-z0-9_.-]{3,32}$/', $u); }
 function userValidEmail(string $e): bool { return $e !== '' && strlen($e) <= 190 && filter_var($e, FILTER_VALIDATE_EMAIL) !== false; }
 
+/** Human wording of the password policy — one place, reused by every endpoint's error message. */
+const USER_PASSWORD_RULES = 'at least 8 characters with a lowercase and an uppercase letter, a digit and a special character';
+
+/**
+ * Password policy (1.8.0): min 8 / max 200 chars, at least one lowercase, uppercase, digit and
+ * special character. Returns the FAILED requirement codes (empty = acceptable) — the register /
+ * account forms mirror this list as a live checklist. Applies to NEW passwords only; existing
+ * hashes keep working.
+ */
+function userPasswordIssues(string $p): array {
+    $issues = [];
+    if (strlen($p) < 8 || strlen($p) > 200) $issues[] = 'length';
+    if (!preg_match('/[a-z]/', $p)) $issues[] = 'lower';
+    if (!preg_match('/[A-Z]/', $p)) $issues[] = 'upper';
+    if (!preg_match('/[0-9]/', $p)) $issues[] = 'digit';
+    if (!preg_match('/[^a-zA-Z0-9]/', $p)) $issues[] = 'special';
+    return $issues;
+}
+function userValidPassword(string $p): bool { return userPasswordIssues($p) === []; }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Lookup / create / authenticate
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,7 +111,7 @@ function userCreate(PDO $db, array $cfg, string $username, string $email, string
     $email = trim($email);
     if (!userValidUsername($username)) return ['error' => 'invalid_username'];
     if ($email !== '' && !userValidEmail($email)) return ['error' => 'invalid_email'];
-    if (strlen($password) < 8 || strlen($password) > 200) return ['error' => 'weak_password'];
+    if (!userValidPassword($password)) return ['error' => 'weak_password'];
     $hash = password_hash($password, PASSWORD_DEFAULT);
     try {
         $st = $db->prepare("INSERT INTO users (username, email, pass_hash, created_ip) VALUES (?, ?, ?, ?)");
@@ -144,8 +164,26 @@ function userSessionStart(PDO $db, array $user, string $ip = '', ?int $ttlSecond
 function userSessionLogout(PDO $db): void {
     userRememberClear($db);
     unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']);
+    // a panel session opened via the admin-group sign-in dies with the user session
+    if (!empty($_SESSION['admin_via_user'])) {
+        unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+    }
     $GLOBALS['__current_user_cache'] = null;
     $GLOBALS['__current_user_loaded'] = false;
+}
+
+/**
+ * Signing in on the PUBLIC site as an admin-group member also opens the ADMIN PANEL session, so
+ * the owner does not have to log in twice. The panel session keeps its OWN idle / absolute limits
+ * (admin_session_idle_minutes / admin_session_absolute_hours) — a "forever" site sign-in does NOT
+ * keep the panel open forever; after the idle window the panel asks for its login again.
+ */
+function userMaybeOpenPanelSession(PDO $db, array $user): void {
+    if (!userIsAdminGroup($db, (int)$user['id'])) return;
+    $_SESSION['loggedin'] = true;
+    $_SESSION['login_time'] = time();
+    $_SESSION['last_activity'] = time();
+    $_SESSION['admin_via_user'] = (int)$user['id'];
 }
 
 /**
@@ -289,6 +327,22 @@ function userEffectivePermissions(PDO $db, ?int $userId): array {
         if ($guest) $perms = userGroupPermissions($guest['permissions']);
     }
     return $cache[$key] = $perms;
+}
+
+/** Is this user an ACTIVE member of the system `admin` group? */
+function userIsAdminGroup(PDO $db, int $userId): bool {
+    foreach (userGroups($db, $userId) as $g) if ($g['slug'] === 'admin') return true;
+    return false;
+}
+
+/**
+ * Is this the ROOT admin — the panel admin mirrored into the user list (username matches the
+ * panel's admin_username)? The root admin can never be deleted, banned or stripped of the admin
+ * group from the user browser (that would lock the owner out of their own site).
+ */
+function userIsRootAdmin(array $user, array $cfg): bool {
+    $panel = trim((string)($cfg['admin_username'] ?? ''));
+    return $panel !== '' && hash_equals($panel, (string)($user['username'] ?? ''));
 }
 
 /**

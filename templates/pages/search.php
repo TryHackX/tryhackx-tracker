@@ -29,14 +29,7 @@ $meUser = currentUser($db);
             <input type="text" id="search-input" maxlength="200" placeholder="Name<?= $canFiles ? ' or file name' : '' ?>&hellip;" autocomplete="off">
             <button type="button" class="search-clear" id="search-clear" title="Clear search" hidden><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
-        <select id="search-sort" title="Sort order">
-            <option value="relevance:desc">Best match</option>
-            <option value="seeders:desc">Most seeders</option>
-            <option value="last:desc">Recently seen</option>
-            <option value="size:desc">Largest</option>
-            <option value="size:asc">Smallest</option>
-            <option value="name:asc">Name A&ndash;Z</option>
-        </select>
+        <label class="search-check" title="Order by how well the name matches your query (rarer and longer words weigh more); column sorts break ties"><input type="checkbox" id="search-best" checked><span class="search-check-box" aria-hidden="true"></span> Best match first</label>
         <?php if ($canFiles): ?>
         <label class="search-check" title="Also match torrent file names"><input type="checkbox" id="search-files"><span class="search-check-box" aria-hidden="true"></span> Also search file names</label>
         <?php endif; ?>
@@ -50,7 +43,10 @@ $meUser = currentUser($db);
             <col class="search-c-name"><col class="search-c-size"><col class="search-c-sl"><col class="search-c-seen"><?= $canMagnet ? '<col class="search-c-actions">' : '' ?>
         </colgroup>
         <thead><tr>
-            <th>Name</th><th>Size</th><th>S / L</th><th>Last seen</th><?= $canMagnet ? '<th></th>' : '' ?>
+            <th class="search-sortable" data-sort="name">Name <span class="search-sort-icon" aria-hidden="true"></span></th>
+            <th class="search-sortable" data-sort="size">Size <span class="search-sort-icon" aria-hidden="true"></span></th>
+            <th class="search-sortable" data-sort="seeders" title="Seeders / leechers">S / L <span class="search-sort-icon" aria-hidden="true"></span></th>
+            <th class="search-sortable" data-sort="last">Last seen <span class="search-sort-icon" aria-hidden="true"></span></th><?= $canMagnet ? '<th></th>' : '' ?>
         </tr></thead>
         <tbody id="search-body"></tbody>
     </table>

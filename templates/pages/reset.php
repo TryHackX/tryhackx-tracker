@@ -11,8 +11,9 @@ $hasToken = strlen($resetToken) === 64;
     <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
     <input type="hidden" id="resetc-token" value="<?= sanitize($resetToken) ?>">
     <div class="form-group">
-        <label for="resetc-password">New password <small class="form-hint">at least 8 characters</small></label>
+        <label for="resetc-password">New password</label>
         <input type="password" id="resetc-password" maxlength="200" autocomplete="new-password" required>
+        <div class="pw-checklist" id="resetc-pw-checklist"></div>
     </div>
     <div class="form-group">
         <label for="resetc-password2">Repeat password</label>

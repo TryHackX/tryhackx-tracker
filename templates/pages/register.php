@@ -26,9 +26,10 @@ $meUser = currentUser($db);
         <div class="error-msg">That email address does not look valid</div>
     </div>
     <div class="form-group">
-        <label for="reg-password">Password <small class="form-hint">at least 8 characters</small></label>
+        <label for="reg-password">Password</label>
         <input type="password" id="reg-password" name="password" maxlength="200" autocomplete="new-password" required>
-        <div class="error-msg">At least 8 characters</div>
+        <div class="pw-checklist" id="reg-pw-checklist"></div>
+        <div class="error-msg">The password does not meet the requirements above</div>
     </div>
     <div class="form-group">
         <label for="reg-password2">Repeat password</label>

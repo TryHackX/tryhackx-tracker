@@ -362,15 +362,23 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // guest was a baseline for signed-in users too, which is no longer true)
     $db->prepare("UPDATE `user_groups` SET description = ? WHERE slug = 'guest' AND description = ?")
        ->execute(['Permissions of anonymous (not signed-in) visitors.', 'Baseline permissions for every visitor (anonymous included).']);
-    // panel admin → users row (username from settings, hash from config/app.php)
+    // panel admin → users row (username from settings, hash from config/app.php, email = the
+    // site contact address — verified, it is the owner's own)
     $adminUser = trim((string)($cfg['admin_username'] ?? ''));
     if ($adminUser !== '' && defined('ADMIN_PASSWORD_HASH') && preg_match('/^[A-Za-z0-9_.-]{3,32}$/', $adminUser)) {
+        $adminMail = trim((string)($cfg['site_email'] ?? ''));
+        if ($adminMail === '' || strlen($adminMail) > 190 || filter_var($adminMail, FILTER_VALIDATE_EMAIL) === false) $adminMail = null;
         $st = $db->prepare("SELECT id FROM users WHERE username = ?");
         $st->execute([$adminUser]);
         $uid = (int)($st->fetchColumn() ?: 0);
         if ($uid === 0) {
-            $db->prepare("INSERT INTO users (username, email, pass_hash) VALUES (?, NULL, ?)")
-               ->execute([$adminUser, ADMIN_PASSWORD_HASH]);
+            try {
+                $db->prepare("INSERT INTO users (username, email, pass_hash, email_verified) VALUES (?, ?, ?, ?)")
+                   ->execute([$adminUser, $adminMail, ADMIN_PASSWORD_HASH, $adminMail !== null ? 1 : 0]);
+            } catch (PDOException $e) {   // site_email already used by another account
+                $db->prepare("INSERT INTO users (username, email, pass_hash) VALUES (?, NULL, ?)")
+                   ->execute([$adminUser, ADMIN_PASSWORD_HASH]);
+            }
             $uid = (int)$db->lastInsertId();
         }
         $gid = (int)($db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchColumn() ?: 0);

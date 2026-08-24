@@ -135,13 +135,14 @@
             <div class="table-responsive">
                 <table class="table table-dark table-hover dash-table wl-table" id="idx-table">
                     <colgroup>
-                        <col class="idx-c-check"><col class="idx-c-hash"><col class="idx-c-name"><col class="idx-c-size"><col class="idx-c-sl"><col class="idx-c-seen"><col class="idx-c-dates"><col class="idx-c-meta"><col class="idx-c-actions">
+                        <col class="idx-c-check"><col class="idx-c-hash"><col class="idx-c-name"><col class="idx-c-size"><col class="idx-c-files"><col class="idx-c-sl"><col class="idx-c-seen"><col class="idx-c-dates"><col class="idx-c-meta"><col class="idx-c-actions">
                     </colgroup>
                     <thead><tr>
                         <th class="idx-th-check"><input type="checkbox" id="idx-check-all" title="Select all on this page"></th>
                         <th class="sortable" data-sort="hash">Info hash <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="name">Name <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="size">Size <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="files" title="Resolved file count">Files <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="seeders">S / L <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="seen">Seen <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="last">First / last <i class="bi bi-arrow-down sort-icon active"></i></th>

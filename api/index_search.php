@@ -24,8 +24,11 @@ $canFiles = userCan($db, $cfg, 'index.files');
 $canMagnet = userCan($db, $cfg, 'index.magnet');
 $canWl = userCan($db, $cfg, 'whitelist.view');
 
+// comma-separated multi-sort stack; unknown keys are dropped by indexSearchCatalogue
 $sort = (string)($_GET['sort'] ?? 'relevance:desc');
-if (!preg_match('/^(relevance|seeders|size|last|name):(asc|desc)$/', $sort)) $sort = 'relevance:desc';
+if (!preg_match('/^(relevance|seeders|leechers|size|last|name|files)(:(asc|desc))?(,(relevance|seeders|leechers|size|last|name|files)(:(asc|desc))?)*$/', $sort)) {
+    $sort = 'relevance:desc';
+}
 
 $res = indexSearchCatalogue($db, $cfg, [
     'page'              => $_GET['page'] ?? 1,

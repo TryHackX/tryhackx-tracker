@@ -42,6 +42,8 @@ if (!array_key_exists($choice, userSessionChoices())) $choice = 'forever';
 [$ttl] = userSessionChoices()[$choice];
 
 userSessionStart($db, $user, $ip, $ttl);
+// admin-group members get the panel session opened alongside (its own idle limits still apply)
+userMaybeOpenPanelSession($db, $user);
 if ($choice === 'forever') {
     userRememberIssue($db, (int)$user['id'], time() + 3650 * 86400);
 } elseif ($ttl !== null && $ttl >= 86400) {

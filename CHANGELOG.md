@@ -4,6 +4,52 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-08-24
+
+### Fixed — the two production bugs behind "first CAPTCHA always fails" and "no reset mail"
+- **Outgoing mail bounced on non-ASCII subjects**: `sendEmail()` sent raw UTF-8 headers (the
+  em-dash in "Site — password reset"); postfix then required SMTPUTF8, dovecot-LMTP does not offer
+  it, and the message was **bounced** before ever reaching the mailbox. Subject and From name are
+  now RFC 2047 encoded — password resets / verification links / notification mails deliver.
+- **CAPTCHA verifier retry**: this host shares its uplink with the tracker swarm (measured 30-40 %
+  packet loss during OPEN hours) — a single 3 s/5 s attempt to reach the Google/Turnstile verifier
+  often timed out, failing a correctly solved CAPTCHA on the first try. The verify call now retries
+  once with longer timeouts (connect 5 s, total 8 s) and logs the transport error / rejection codes
+  to the PHP error log, so a real failure is diagnosable.
+
+### Added
+- **Panel session from the site sign-in**: signing in on the public site as a member of the
+  `admin` group also opens the ADMIN PANEL session — no second login. The panel keeps its own
+  idle/absolute limits (`admin_session_idle_minutes` / `admin_session_absolute_hours`), so a
+  "forever" site sign-in does **not** keep the panel open forever: after the idle window the panel
+  asks for its login again while the site session stays. Panel logout / revoking the admin group /
+  banning the user drops the piggy-backed panel session (checked on every panel request).
+- **Password policy** (new passwords only): min 8 chars with a lowercase, an uppercase, a digit
+  and a special character — enforced server-side everywhere a password is set (register, account
+  change, reset, admin edit, `v1/users/provision` generated passwords) and mirrored as a live
+  requirement **checklist** on the register / account / reset forms.
+- **Root-admin protection**: the mirrored panel-admin account cannot be deleted, banned or
+  stripped of the `admin` group (API guards + greyed-out controls with a shield badge); system
+  groups (guest/member/admin) stay undeletable.
+- **Search page**: multi-column sorting on the table headers with priority badges (desc → asc →
+  off, like the admin tables) plus a **Best match first** toggle; matched words are highlighted in
+  result names; the file-list modal shows a **collapsible folder tree** (matches highlighted and
+  the file-count chip glows when the query matched file names); pagination shows "· N rows".
+- **Admin lists**: sortable **Files** column on Index and Whitelist; whitelist rows open their
+  details on click (like Index); ban icon is a lock (the squeezed "…" overflow is gone — wider
+  action columns); the Index details modal uses the same folder tree as the whitelist; **live
+  view** — while rows on screen are pending/fetching (or that filter is active) the page silently
+  refreshes every 5 s without resetting sort/filters/selection; sort clicks are debounced (250 ms)
+  and stale responses can no longer overwrite newer ones; the red-glow clear × now actually shows
+  on Index/Whitelist/Users (it was permanently invisible outside the dashboard) and empties the box
+  with an accelerating "held backspace" animation (public search too).
+- **Account / users**: changing the email asks for it twice (public account + admin edit modal)
+  and the OLD address gets a heads-up mail; admin-entered addresses count as verified; notification
+  buttons show a tiny result tooltip ("Marked 23 read" / "Nothing to delete"); the admin user list
+  marks verified emails and the site owner.
+- **Timeline legend**: values align to the label text BASELINE again (the value/label line boxes
+  had different line-heights, so middle-aligning them left the digits 1-2 px low).
+
 ## [1.7.0] — 2026-08-24
 
 ### Changed — permission semantics (schema v8)

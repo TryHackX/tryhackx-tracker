@@ -13,6 +13,7 @@ $status = null;
 if (isset($input['status'])) {
     $status = (string)$input['status'];
     if (!in_array($status, ['active', 'banned'], true)) jsonResponse(['error' => 'Invalid status'], 400);
+    if ($status === 'banned' && userIsRootAdmin($u, $cfg)) jsonResponse(['error' => 'The site owner account cannot be banned.'], 400);
 }
 $email = null; $emailSet = false;
 if (array_key_exists('email', $input)) {
@@ -21,8 +22,8 @@ if (array_key_exists('email', $input)) {
     if ($email !== '' && !userValidEmail($email)) jsonResponse(['error' => 'Invalid email'], 400);
 }
 $password = (string)($input['password'] ?? '');
-if ($password !== '' && (strlen($password) < 8 || strlen($password) > 200)) {
-    jsonResponse(['error' => 'Password must be at least 8 characters'], 400);
+if ($password !== '' && !userValidPassword($password)) {
+    jsonResponse(['error' => 'Password: ' . USER_PASSWORD_RULES], 400);
 }
 if ($status === null && !$emailSet && $password === '' && !isset($input['email_verified'])) {
     jsonResponse(['error' => 'Nothing to change'], 400);
@@ -41,7 +42,9 @@ try {
         $changed[] = 'status';
     }
     if ($emailSet) {
-        $db->prepare("UPDATE users SET email = ? WHERE id = ?")->execute([$email !== '' ? $email : null, $id]);
+        // an admin-entered address counts as verified (the admin vouches for it)
+        $db->prepare("UPDATE users SET email = ?, email_verified = ? WHERE id = ?")
+           ->execute([$email !== '' ? $email : null, $email !== '' ? 1 : 0, $id]);
         $changed[] = 'email';
     }
     if ($password !== '') {

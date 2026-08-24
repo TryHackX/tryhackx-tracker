@@ -608,7 +608,7 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         'hash'      => 'info_hash', 'name' => 'name', 'size' => 'total_size',
         'seeders'   => 'last_seeders', 'leechers' => 'last_leechers', 'seen' => 'seen_count',
         'first'     => 'first_seen', 'last' => 'last_seen', 'meta' => 'meta_status',
-        'sseeders'  => 'scrape_seeders', 'peak' => 'peak_seeders',
+        'sseeders'  => 'scrape_seeders', 'peak' => 'peak_seeders', 'files' => 'files_count',
     ];
     $orderParts = [];
     foreach (explode(',', trim((string)($q['sort'] ?? 'last:desc'))) as $part) {
@@ -710,17 +710,21 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     $searchFiles = !empty($q['search_files']);
     $search = trim((string)($q['search'] ?? ''));
 
-    $sort = (string)($q['sort'] ?? 'relevance:desc');
-    if (!preg_match('/^(relevance|seeders|size|last|name):(asc|desc)$/', $sort, $sm)) { $sm = [null, 'relevance', 'desc']; }
-    $dir = strtoupper($sm[2]);
-    $orderMap = [
-        'relevance' => "score DESC, seeders DESC",   // relevance is only ever "best first"
-        'seeders'   => "seeders $dir, score DESC",
-        'size'      => "total_size $dir",
-        'last'      => "last_seen $dir",
-        'name'      => "name $dir",
-    ];
-    $order = $orderMap[$sm[1]] . ", info_hash ASC";
+    // multi-column sort stack "col:dir,col:dir" (same idea as the admin tables); 'relevance'
+    // ignores its direction (best first is the only sensible order)
+    $sortCols = ['relevance' => 'score', 'seeders' => 'seeders', 'leechers' => 'leechers',
+                 'size' => 'total_size', 'last' => 'last_seen', 'name' => 'name', 'files' => 'files_count'];
+    $orderParts = [];
+    foreach (explode(',', trim((string)($q['sort'] ?? 'relevance:desc'))) as $part) {
+        $pieces = explode(':', trim($part));
+        $col = $sortCols[$pieces[0] ?? ''] ?? null;
+        if ($col === null) continue;
+        if ($col === 'score') { $orderParts['score'] = 'score DESC'; continue; }
+        $orderParts[$col] = $col . ((strtolower($pieces[1] ?? 'desc') === 'asc') ? ' ASC' : ' DESC');
+    }
+    if (!$orderParts) $orderParts = ['score' => 'score DESC', 'seeders' => 'seeders DESC'];
+    elseif (count($orderParts) === 1 && isset($orderParts['score'])) $orderParts['seeders'] = 'seeders DESC';
+    $order = implode(', ', $orderParts) . ", info_hash ASC";
 
     $isHash = $search !== '' && preg_match('/^[a-f0-9]{6,40}$/i', $search);
     $ft = ($search !== '' && !$isHash && mb_strlen($search) >= 3) ? indexFulltextTerm($search) : '';

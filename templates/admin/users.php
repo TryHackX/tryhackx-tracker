@@ -120,10 +120,15 @@
                         <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="ue-email" maxlength="190">
                         <div class="invalid-feedback">That email address does not look valid.</div>
                     </div>
+                    <div class="mb-2 d-hidden" id="ue-email2-wrap">
+                        <label class="form-label wl-label">Repeat new email</label>
+                        <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="ue-email2" maxlength="190" autocomplete="off">
+                        <div class="invalid-feedback">Email addresses do not match.</div>
+                    </div>
                     <div class="mb-2">
-                        <label class="form-label wl-label">New password <small class="text-muted">(empty = unchanged; at least 8 chars; signs the user out of remembered devices)</small></label>
+                        <label class="form-label wl-label">New password <small class="text-muted">(empty = unchanged; signs the user out of remembered devices)</small></label>
                         <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ue-password" maxlength="200" autocomplete="new-password">
-                        <div class="invalid-feedback">At least 8 characters.</div>
+                        <div class="invalid-feedback">Min 8 characters with a lowercase, an uppercase, a digit and a special character.</div>
                     </div>
                     <div class="mb-2 d-hidden" id="ue-password2-wrap">
                         <label class="form-label wl-label">Repeat new password</label>

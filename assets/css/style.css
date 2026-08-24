@@ -1575,9 +1575,16 @@ footer p { margin: 0.25rem 0; }
 }
 
 /* === Timeline ranger (mini overview with a draggable window) + legend alignment === */
-.tl-chart .u-legend th, .tl-chart .u-legend td { vertical-align: middle; font-weight: 400; }
+/* baseline, not middle: the label and value boxes have different heights (padding), so
+   centring them left the DIGITS 1-2 px below the label text. Baseline pins the text lines. */
+.tl-chart .u-legend th, .tl-chart .u-legend td { vertical-align: baseline; font-weight: 400; }
 .tl-chart .u-legend .u-marker { vertical-align: -0.12em; }
 .tl-chart .u-legend .u-value { font-size: 0.78rem; line-height: 1.3; }
+/* label boxes inherited the page line-height (1.7) while values use 1.3 — the 2 px taller
+   label box shifted the text BASELINE even with middle-aligned cells. Same line box = same
+   baseline, numbers sit exactly on the label line again. */
+.tl-chart .u-legend .u-label { font-size: 0.78rem; line-height: 1.3; }
+.tl-chart .u-legend .u-label, .tl-chart .u-legend .u-value { vertical-align: baseline; }
 .tl-ranger { margin-top: 0.4rem; border: 1px solid #1e1e2c; border-radius: 4px; }
 .tl-ranger .u-over { cursor: crosshair; }
 .tl-brush { position: absolute; top: 0; bottom: 0; background: rgba(74, 158, 255, 0.14); border: 1px solid rgba(74, 158, 255, 0.55); border-radius: 3px; cursor: grab; box-sizing: border-box; }
@@ -1779,3 +1786,41 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
     .account-kv td:first-child { width: auto; }
     .home-stats-widget { margin-left: 0; margin-right: 0; }
 }
+
+/* === Search: clickable multi-sort headers + match highlight (1.8.0) === */
+.search-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.search-sortable:hover { color: #fff; }
+.search-sort-icon { font-size: 0.7rem; opacity: 0.45; margin-left: 0.2rem; }
+.search-sort-icon.active { opacity: 1; color: var(--accent); }
+.search-sort-priority { font-size: 0.55rem; color: var(--accent); font-weight: bold; margin-left: 1px; }
+.search-name mark, .ftree mark { background: rgba(74, 158, 255, 0.35); color: inherit; padding: 0 1px; border-radius: 2px; }
+.search-files-chip.chip-hit { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 6px rgba(74, 158, 255, 0.35); }
+
+/* === Password requirement checklist === */
+.pw-checklist { margin: 0.4rem 0 0.1rem; font-size: 0.78rem; line-height: 1.6; }
+.pw-req { color: var(--text-muted); }
+.pw-req.ok { color: var(--success); }
+.pw-req-ic { display: inline-block; width: 1.1em; text-align: center; font-weight: bold; }
+.pw-req:not(.ok) .pw-req-ic { color: var(--error); }
+
+/* === Tiny action tooltip (notification buttons) === */
+.pub-tip {
+    position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%) translateY(3px);
+    background: var(--bg-code); border: 1px solid var(--accent); color: var(--text);
+    padding: 0.15rem 0.55rem; border-radius: 4px; font-size: 0.72rem; white-space: nowrap;
+    opacity: 0; transition: opacity 0.18s, transform 0.18s; pointer-events: none; z-index: 50;
+}
+.pub-tip.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* === File tree in the search modal === */
+.ftree { font-size: 0.85rem; }
+.ftree details { margin: 0.1rem 0; }
+.ftree summary { cursor: pointer; color: var(--link); }
+.ftree summary::marker { color: var(--text-muted); }
+.ftree-dir { word-break: break-word; }
+.ftree-count { font-size: 0.75rem; }
+.ftree-children { padding-left: 1.1rem; border-left: 1px dashed var(--border); margin-left: 0.3rem; }
+.ftree-file { display: flex; justify-content: space-between; gap: 1rem; padding: 0.15rem 0; border-bottom: 1px solid var(--border); }
+.ftree-file:last-child { border-bottom: 0; }
+.ftree-name { word-break: break-word; }
+.ftree-size { white-space: nowrap; }

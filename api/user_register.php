@@ -34,7 +34,7 @@ if (isset($r['error'])) {
     $msgs = [
         'invalid_username' => 'Username: 3-32 characters, letters/digits and _ . - only.',
         'invalid_email'    => 'That email address does not look valid.',
-        'weak_password'    => 'Password must be at least 8 characters.',
+        'weak_password'    => 'Password: ' . USER_PASSWORD_RULES . '.',
         'username_taken'   => 'This username is already taken.',
         'email_taken'      => 'An account with this email already exists.',
     ];

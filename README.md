@@ -377,7 +377,13 @@ default — with it off, everything behaves exactly like the classic single-admi
   **email verification** (1.7.0): registering with an address (or changing it) sends a 72-hour
   single-use confirmation link (`?action=verify`); the account page shows the verified badge with a
   resend button and the admin list marks verified addresses — accounts work without confirming.
-  The menu links can be hidden (`users_links_visible=0`; the nav shows one **Account** entry).
+  New passwords follow a **policy** (1.8.0: min 8 chars + lowercase + uppercase + digit + special,
+  live checklist on the forms; existing hashes keep working). Changing the address asks for it
+  twice and notifies the OLD address. The menu links can be hidden (`users_links_visible=0`; the
+  nav shows one **Account** entry). Signing in as an `admin`-group member also opens the **admin
+  panel session** (no second login; the panel's own idle/absolute limits still apply, and panel
+  logout leaves the site session alone). The mirrored owner account is protected — it cannot be
+  deleted, banned or stripped of the admin group.
 - **Groups with permissions** (Admin → **Users** → *Groups*): each group carries a set of
   permissions — `index.view` / `index.files` / `index.magnet` (the member search),
   `whitelist.view` (the public whitelist page + whitelisted rows in search), `whitelist.add`

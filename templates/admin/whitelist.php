@@ -165,7 +165,7 @@
             <div class="table-responsive">
                 <table class="table table-dark table-hover wl-table" id="wl-table">
                     <colgroup>
-                        <col class="wl-c-check"><col class="wl-c-id"><col class="wl-c-hash"><col class="wl-c-flex"><col class="wl-c-size"><col class="wl-c-source"><col class="wl-c-ip"><col class="wl-c-meta"><col class="wl-c-sl"><col class="wl-c-date"><col class="wl-c-actions">
+                        <col class="wl-c-check"><col class="wl-c-id"><col class="wl-c-hash"><col class="wl-c-flex"><col class="wl-c-size"><col class="wl-c-files"><col class="wl-c-source"><col class="wl-c-ip"><col class="wl-c-meta"><col class="wl-c-sl"><col class="wl-c-date"><col class="wl-c-actions">
                     </colgroup>
                     <thead><tr>
                         <th class="wl-th-check"><input type="checkbox" class="form-check-input" id="wl-select-all" title="Select all on this page"></th>
@@ -173,6 +173,7 @@
                         <th class="sortable" data-sort="hash">Info Hash <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="name">Name <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="size">Size <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="files" title="Resolved file count">Files <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable col-badge" data-sort="source">Source <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="ip">IP <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable col-badge" data-sort="meta">Meta <i class="bi bi-arrow-down-up sort-icon"></i></th>

@@ -27,8 +27,8 @@ if (array_key_exists('email', $input)) {
     if ($email !== '' && !userValidEmail($email)) jsonResponse(['error' => 'That email address does not look valid.'], 400);
 }
 $newPass = (string)($input['new_password'] ?? '');
-if ($newPass !== '' && (strlen($newPass) < 8 || strlen($newPass) > 200)) {
-    jsonResponse(['error' => 'New password must be at least 8 characters.'], 400);
+if ($newPass !== '' && !userValidPassword($newPass)) {
+    jsonResponse(['error' => 'New password: ' . USER_PASSWORD_RULES . '.'], 400);
 }
 if (!$emailSet && $newPass === '') jsonResponse(['error' => 'Nothing to change.'], 400);
 
@@ -56,10 +56,19 @@ try {
 }
 userNotify($db, (int)$u['id'], 'account', 'Your ' . implode(' and ', $changed) . ' ' . (count($changed) > 1 ? 'were' : 'was') . ' changed',
     'If this was not you, change your password immediately.');
-// a NEW address starts unverified — send the confirmation link right away (best effort)
+// a NEW address starts unverified — send the confirmation link right away (best effort); the OLD
+// address gets a heads-up so a hijacked session can't silently steal the account's mailbox
 $verifySent = false;
-if ($emailSet && $email !== '') {
-    $fresh = userFindById($db, (int)$u['id']);
-    if ($fresh) $verifySent = userVerifySend($db, $cfg, $fresh);
+if ($emailSet) {
+    $oldEmail = trim((string)($u['email'] ?? ''));
+    if ($oldEmail !== '' && $oldEmail !== $email) {
+        userNotifyMail($db, $cfg, ['email' => $oldEmail, 'username' => $u['username']],
+            ($cfg['site_name'] ?? 'Tracker') . ' — your email address was changed',
+            'The email address on your account was just changed' . ($email !== '' ? ' to ' . $email : ' (removed)') . ".\nIf this was not you, reset your password immediately.");
+    }
+    if ($email !== '') {
+        $fresh = userFindById($db, (int)$u['id']);
+        if ($fresh) $verifySent = userVerifySend($db, $cfg, $fresh);
+    }
 }
 jsonResponse(['success' => true, 'changed' => $changed, 'verify_sent' => $verifySent]);

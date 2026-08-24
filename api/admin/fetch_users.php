@@ -64,6 +64,8 @@ foreach ($rows as &$r) {
     $r['id'] = (int)$r['id'];
     $r['email_verified'] = (int)$r['email_verified'];
     $r['groups'] = $byUser[$r['id']] ?? [];
+    // the mirrored panel admin — the UI greys out delete/ban/revoke-admin for this row
+    $r['root_admin'] = userIsRootAdmin($r, $cfg);
 }
 unset($r);
 

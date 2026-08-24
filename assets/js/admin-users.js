@@ -5,7 +5,7 @@
     'use strict';
     const A = window.AdminCommon;
     if (!A) return;
-    const { apiCall, el, showToast, confirmAction, makeSortStack, renderPagination, fmtDate } = A;
+    const { apiCall, el, showToast, confirmAction, makeSortStack, renderPagination, fmtDate, bindSearchClear } = A;
     const $ = (id) => document.getElementById(id);
 
     const state = {
@@ -71,7 +71,7 @@
         state.us.rows.forEach(u => {
             const tr = el('tr', {});
             tr.appendChild(el('td', { className: 'wl-id', text: String(u.id) }));
-            tr.appendChild(el('td', {}, el('strong', { text: u.username })));
+            tr.appendChild(el('td', {}, [el('strong', { text: u.username }), u.root_admin ? el('i', { className: 'bi bi-shield-lock-fill text-warning ms-1', title: 'Site owner (panel admin) — protected account' }) : null]));
             tr.appendChild(el('td', { className: 'wl-small', title: u.email ? (u.email_verified ? 'verified address' : 'not verified') : '' },
                 [u.email || '—', u.email && u.email_verified ? el('i', { className: 'bi bi-patch-check-fill text-success ms-1', title: 'verified' }) : null]));
             tr.appendChild(el('td', {}, badge(u.status, u.status === 'active' ? 'wl-b-ok' : 'wl-b-bad')));
@@ -99,7 +99,9 @@
             act.appendChild(mkBtn('bi-award', 'Grant group', 'btn-outline-success', () => openGrant(u)));
             act.appendChild(mkBtn('bi-pencil', 'Edit', 'btn-outline-info', () => openEdit(u)));
             act.appendChild(mkBtn('bi-bell', 'Send notification', 'btn-outline-info', () => openNotify(u)));
-            act.appendChild(mkBtn('bi-trash', 'Delete', 'btn-outline-danger', () => deleteUser(u)));
+            const delBtn = mkBtn('bi-trash', u.root_admin ? 'Site owner — cannot be deleted' : 'Delete', 'btn-outline-danger', () => deleteUser(u));
+            if (u.root_admin) delBtn.disabled = true;
+            act.appendChild(delBtn);
             tr.appendChild(act);
             // second row of group management: revoke buttons live in the grant modal instead — keep the table lean
             tb.appendChild(tr);
@@ -116,28 +118,38 @@
 
     // ── user edit modal ─────────────────────────────────────────────────────
     const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const passOk = (p) => p.length >= 8 && p.length <= 200 && /[a-z]/.test(p) && /[A-Z]/.test(p) && /[0-9]/.test(p) && /[^a-zA-Z0-9]/.test(p);
     function ueValidate() {
-        const email = $('ue-email'), p1 = $('ue-password'), p2 = $('ue-password2');
+        const email = $('ue-email'), email2 = $('ue-email2'), p1 = $('ue-password'), p2 = $('ue-password2');
+        const emailChanged = email.value.trim() !== (editUser && editUser.email ? editUser.email : '');
         const emailOk = email.value.trim() === '' || EMAIL_RE.test(email.value.trim());
-        const passOk = p1.value === '' || (p1.value.length >= 8 && p1.value.length <= 200);
+        const email2Ok = !emailChanged || email.value.trim() === '' || email2.value.trim() === email.value.trim();
+        const p1Ok = p1.value === '' || passOk(p1.value);
         const matchOk = p1.value === '' || p2.value === p1.value;
         email.classList.toggle('is-invalid', !emailOk);
-        p1.classList.toggle('is-invalid', !passOk);
+        email2.classList.toggle('is-invalid', !email2Ok);
+        p1.classList.toggle('is-invalid', !p1Ok);
         p2.classList.toggle('is-invalid', !matchOk);
-        return emailOk && passOk && matchOk;
+        return emailOk && email2Ok && p1Ok && matchOk;
     }
-    function ueSyncPass2() {
+    function ueSyncRepeats() {
         $('ue-password2-wrap').classList.toggle('d-hidden', $('ue-password').value === '');
+        const changed = $('ue-email').value.trim() !== (editUser && editUser.email ? editUser.email : '') && $('ue-email').value.trim() !== '';
+        $('ue-email2-wrap').classList.toggle('d-hidden', !changed);
     }
     function openEdit(u) {
         editUser = u;
         $('ue-name').textContent = u.username;
         $('ue-status').value = u.status;
+        // the site owner cannot be banned — grey the option out
+        const bannedOpt = $('ue-status').querySelector('option[value="banned"]');
+        if (bannedOpt) { bannedOpt.disabled = !!u.root_admin; bannedOpt.title = u.root_admin ? 'Site owner — cannot be banned' : ''; }
         $('ue-email').value = u.email || '';
+        $('ue-email2').value = '';
         $('ue-password').value = '';
         $('ue-password2').value = '';
-        ['ue-email', 'ue-password', 'ue-password2'].forEach(id => $(id).classList.remove('is-invalid'));
-        ueSyncPass2();
+        ['ue-email', 'ue-email2', 'ue-password', 'ue-password2'].forEach(id => $(id).classList.remove('is-invalid'));
+        ueSyncRepeats();
         $('ue-alert').textContent = '';
         bootstrap.Modal.getOrCreateInstance($('usEditModal')).show();
     }
@@ -184,6 +196,7 @@
                 ]);
                 const rm = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: 'Revoke' }, el('i', { className: 'bi bi-x-lg' }));
                 const gid = (state.groups.find(x => x.slug === g.slug) || {}).id;
+                if (u.root_admin && g.slug === 'admin') { rm.disabled = true; rm.title = 'Site owner — the admin group cannot be revoked'; }
                 rm.addEventListener('click', async () => {
                     if (!(await confirmAction('Revoke group', 'Remove "' + g.name + '" from ' + u.username + '?', { danger: true, okLabel: 'Revoke' }))) return;
                     const r = await apiCall('admin/user_revoke', 'POST', { id: u.id, group_id: gid });
@@ -320,16 +333,18 @@
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
     document.addEventListener('DOMContentLoaded', () => {
-        usSort = makeSortStack({ table: $('us-table'), defaultSort: [{ col: 'created', dir: 'desc' }], onChange: () => { state.us.page = 1; loadUsers(); } });
+        const loadUsersDebounced = debounce(() => loadUsers(), 250);
+        usSort = makeSortStack({ table: $('us-table'), defaultSort: [{ col: 'created', dir: 'desc' }], onChange: () => { state.us.page = 1; loadUsersDebounced(); } });
         usSort.bindHeaders();
         document.querySelectorAll('#us-tabs .source-tab').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
         $('us-search').addEventListener('input', debounce(() => { state.us.search = $('us-search').value.trim(); state.us.page = 1; loadUsers(); }, 300));
-        $('us-search-clear').addEventListener('click', () => { $('us-search').value = ''; state.us.search = ''; state.us.page = 1; loadUsers(); });
+        bindSearchClear($('us-search'), $('us-search-clear'), () => { state.us.search = ''; state.us.page = 1; loadUsers(); });
         $('us-filter-status').addEventListener('change', () => { state.us.status = $('us-filter-status').value; state.us.page = 1; loadUsers(); });
         $('us-filter-group').addEventListener('change', () => { state.us.group = $('us-filter-group').value; state.us.page = 1; loadUsers(); });
         $('ue-save').addEventListener('click', saveEdit);
-        $('ue-email').addEventListener('input', ueValidate);
-        $('ue-password').addEventListener('input', () => { ueSyncPass2(); ueValidate(); });
+        $('ue-email').addEventListener('input', () => { ueSyncRepeats(); ueValidate(); });
+        $('ue-email2').addEventListener('input', ueValidate);
+        $('ue-password').addEventListener('input', () => { ueSyncRepeats(); ueValidate(); });
         $('ue-password2').addEventListener('input', ueValidate);
         $('ug-save').addEventListener('click', saveGrant);
         $('ug-duration').addEventListener('change', () => $('ug-custom').classList.toggle('d-hidden', $('ug-duration').value !== 'custom'));

@@ -1737,6 +1737,91 @@ async function loadStatsHome(forceSync = false) {
         while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
         return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2)) + ' ' + u[i];
     }
+    // ── password policy (mirrors userPasswordIssues() server-side) + live checklist UI ──
+    const PW_REQS = [
+        ['At least 8 characters', (p) => p.length >= 8 && p.length <= 200],
+        ['A lowercase letter', (p) => /[a-z]/.test(p)],
+        ['An uppercase letter', (p) => /[A-Z]/.test(p)],
+        ['A digit', (p) => /[0-9]/.test(p)],
+        ['A special character', (p) => /[^a-zA-Z0-9]/.test(p)],
+    ];
+    const pwValid = (p) => PW_REQS.every(([, t]) => t(p));
+    /** Requirement checklist under a password box; optional=true hides it while the box is empty. */
+    function bindPwChecklist(input, box, optional) {
+        if (!input || !box) return;
+        const items = PW_REQS.map(([label]) => {
+            const li = document.createElement('div');
+            li.className = 'pw-req';
+            const ic = document.createElement('span');
+            ic.className = 'pw-req-ic';
+            ic.textContent = '✗';
+            li.appendChild(ic);
+            li.appendChild(document.createTextNode(' ' + label));
+            box.appendChild(li);
+            return li;
+        });
+        const sync = () => {
+            const p = input.value;
+            if (optional) box.hidden = p === '';
+            PW_REQS.forEach(([, test], i) => {
+                const ok = test(p);
+                items[i].classList.toggle('ok', ok);
+                items[i].querySelector('.pw-req-ic').textContent = ok ? '✓' : '✗';
+            });
+        };
+        input.addEventListener('input', sync);
+        sync();
+    }
+    /** Tiny tooltip above an element ("Marked 3 read") — auto-fades, no library. */
+    function pubTip(target, text) {
+        if (!target) return;
+        const old = target.querySelector(':scope > .pub-tip');
+        if (old) old.remove();
+        const tip = document.createElement('span');
+        tip.className = 'pub-tip';
+        tip.textContent = text;
+        target.style.position = 'relative';
+        target.appendChild(tip);
+        requestAnimationFrame(() => tip.classList.add('show'));
+        setTimeout(() => { tip.classList.remove('show'); setTimeout(() => tip.remove(), 250); }, 1800);
+    }
+    /** Accelerating "held backspace" clear (same effect as the admin toolbars). */
+    function animatedClearPub(input, done) {
+        if (!input) { if (done) done(); return; }
+        if (input.__clearing) return;
+        input.__clearing = true;
+        if (input.value.length > 40) input.value = input.value.slice(-40);
+        let delay = 55;
+        const step = () => {
+            if (!input.value.length) { input.__clearing = false; if (done) done(); return; }
+            input.value = input.value.slice(0, -1);
+            delay = Math.max(7, delay * 0.82);
+            setTimeout(step, delay);
+        };
+        step();
+    }
+    /** Append `text` to `parent`, wrapping every occurrence of any of `tokens` in <mark>. */
+    function markInto(parent, text, tokens) {
+        text = String(text == null ? '' : text);
+        if (!tokens || !tokens.length) { parent.appendChild(document.createTextNode(text)); return; }
+        let rest = text;
+        while (rest) {
+            let best = -1, bestLen = 0;
+            const low = rest.toLowerCase();
+            for (const t of tokens) {
+                const i = low.indexOf(t);
+                if (i !== -1 && (best === -1 || i < best || (i === best && t.length > bestLen))) { best = i; bestLen = t.length; }
+            }
+            if (best === -1) { parent.appendChild(document.createTextNode(rest)); break; }
+            if (best > 0) parent.appendChild(document.createTextNode(rest.slice(0, best)));
+            const m = document.createElement('mark');
+            m.textContent = rest.slice(best, best + bestLen);
+            parent.appendChild(m);
+            rest = rest.slice(best + bestLen);
+        }
+    }
+    const queryTokens = (q) => [...new Set(String(q).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 2))];
+
     /**
      * Live per-field validation: `check` returns true when the CURRENT value is acceptable.
      * The error only shows after the field was touched (blurred once) or a submit was attempted,
@@ -1807,7 +1892,8 @@ async function loadStatsHome(forceSync = false) {
         // real-time validation: errors appear once a field was left (or on submit), then track typing
         const vUser = liveValidate(u, () => /^[A-Za-z0-9_.-]{3,32}$/.test(u.value.trim()));
         const vMail = liveValidate(em, () => em.value.trim() === '' || EMAIL_RE.test(em.value.trim()));
-        const vP1 = liveValidate(p1, () => p1.value.length >= 8);
+        bindPwChecklist(p1, $id('reg-pw-checklist'), false);
+        const vP1 = liveValidate(p1, () => pwValid(p1.value));
         const vP2 = liveValidate(p2, () => p2.value === p1.value);
         p1.addEventListener('input', () => p2.dispatchEvent(new Event('input')));   // re-check the repeat too
         form.addEventListener('submit', async (e) => {
@@ -1942,13 +2028,17 @@ async function loadStatsHome(forceSync = false) {
         }
         loadAccount();
         loadNotifications(1);
-        $id('acc-mark-all').addEventListener('click', async () => {
-            await postJson('user_notifications', { csrf_token: $id('account-csrf').value, all: 1 });
+        $id('acc-mark-all').addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            const r = await postJson('user_notifications', { csrf_token: $id('account-csrf').value, all: 1 });
+            pubTip(btn, r && r.success ? (r.marked > 0 ? 'Marked ' + r.marked + ' read' : 'Nothing unread') : 'Failed');
             loadNotifications(); loadAccount();
         });
         const delRead = $id('acc-delete-read');
-        if (delRead) delRead.addEventListener('click', async () => {
+        if (delRead) delRead.addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
             const r = await postJson('user_notifications', { csrf_token: $id('account-csrf').value, delete_read: 1 });
+            pubTip(btn, r && r.success ? (r.deleted > 0 ? 'Deleted ' + r.deleted : 'Nothing to delete') : 'Failed');
             if (r && r.success) loadNotifications(1);
         });
         const verifyBtn = $id('acc-verify-send');
@@ -1962,12 +2052,23 @@ async function loadStatsHome(forceSync = false) {
             await postJson('user_logout', { csrf_token: $id('account-csrf').value });
             window.location.href = APP_BASE;
         });
-        // live validation: email format; password ≥ 8 with a repeat box that appears when needed
-        const emailIn = $id('acc-new-email'), passIn = $id('acc-new-pass'), pass2In = $id('acc-new-pass2');
-        const pass2Group = $id('acc-new-pass2-group');
+        // live validation: email format + repeat box when it changes; password policy + repeat box
+        const emailIn = $id('acc-new-email'), email2In = $id('acc-new-email2'), passIn = $id('acc-new-pass'), pass2In = $id('acc-new-pass2');
+        const pass2Group = $id('acc-new-pass2-group'), email2Group = $id('acc-new-email2-group');
+        const emailChanged = () => {
+            const curEmail = $id('acc-email').textContent.trim();
+            const had = curEmail !== '' && curEmail !== 'none';
+            return emailIn.value.trim() !== (had ? curEmail : '');
+        };
+        bindPwChecklist(passIn, $id('acc-pw-checklist'), true);
         const vMail = liveValidate(emailIn, () => emailIn.value.trim() === '' || EMAIL_RE.test(emailIn.value.trim()));
-        const vPass = liveValidate(passIn, () => passIn.value === '' || (passIn.value.length >= 8 && passIn.value.length <= 200));
+        const vMail2 = liveValidate(email2In, () => !emailChanged() || emailIn.value.trim() === '' || email2In.value.trim() === emailIn.value.trim());
+        const vPass = liveValidate(passIn, () => passIn.value === '' || pwValid(passIn.value));
         const vPass2 = liveValidate(pass2In, () => passIn.value === '' || pass2In.value === passIn.value);
+        emailIn.addEventListener('input', () => {
+            email2Group.hidden = !emailChanged() || emailIn.value.trim() === '';
+            if (email2In.value !== '') email2In.dispatchEvent(new Event('input'));
+        });
         passIn.addEventListener('input', () => {
             pass2Group.hidden = passIn.value === '';
             if (pass2In.value !== '') pass2In.dispatchEvent(new Event('input'));
@@ -1978,7 +2079,7 @@ async function loadStatsHome(forceSync = false) {
             const curEmail = $id('acc-email').textContent.trim();
             const hadEmail = curEmail !== '' && curEmail !== 'none';
             const newEmail = emailIn.value.trim();
-            if (![vMail(true), vPass(true), vPass2(true)].every(Boolean)) return;
+            if (![vMail(true), vMail2(true), vPass(true), vPass2(true)].every(Boolean)) return;
             const body = { csrf_token: $id('account-csrf').value, current_password: $id('acc-cur-pass').value };
             // an emptied box removes the address; anything different from the current one changes it
             if (newEmail !== (hadEmail ? curEmail : '')) body.email = newEmail;
@@ -1993,6 +2094,7 @@ async function loadStatsHome(forceSync = false) {
                 if (body.email !== undefined && body.email !== '' && json.verify_sent) msg += ' A confirmation link was sent to the new address.';
                 showAlert(alert, msg, true);
                 $id('acc-cur-pass').value = ''; passIn.value = ''; pass2In.value = ''; pass2Group.hidden = true;
+                email2In.value = ''; email2Group.hidden = true; $id('acc-pw-checklist').hidden = true;
                 if (body.email !== undefined) {
                     $id('acc-email').textContent = body.email || 'none';
                     const badge = $id('acc-email-badge');
@@ -2025,11 +2127,12 @@ async function loadStatsHome(forceSync = false) {
         }
         const confForm = $id('reset-confirm-form');
         if (confForm) {
+            bindPwChecklist($id('resetc-password'), $id('resetc-pw-checklist'), false);
             confForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const alert = $id('resetc-alert'), btn = $id('resetc-submit');
                 const p1 = $id('resetc-password'), p2 = $id('resetc-password2');
-                if (p1.value.length < 8) { showAlert(alert, 'Password must be at least 8 characters.', false); return; }
+                if (!pwValid(p1.value)) { showAlert(alert, 'The password does not meet the requirements.', false); return; }
                 if (p1.value !== p2.value) { showAlert(alert, 'Passwords do not match.', false); return; }
                 btn.disabled = true;
                 const json = await postJson('user_reset_confirm', { csrf_token: csrfOf(confForm), token: $id('resetc-token').value, password: p1.value });
@@ -2050,23 +2153,62 @@ async function loadStatsHome(forceSync = false) {
         const canFiles = form.dataset.canFiles === '1';
         const announces = [form.dataset.announce, form.dataset.announceHttps].filter(Boolean);
         const input = $id('search-input'), clearBtn = $id('search-clear');
+        const bestBox = $id('search-best'), filesBox = $id('search-files');
         const magnetFor = (hash, name) => {
             let m = 'magnet:?xt=urn:btih:' + hash;
             if (name) m += '&dn=' + encodeURIComponent(name);
             announces.forEach(u => { m += '&tr=' + encodeURIComponent(u); });
             return m;
         };
+        // ── multi-column sort stack on the table headers (desc → asc → off, priority badges) ──
+        const headers = [...document.querySelectorAll('#search-table th.search-sortable')];
+        const sortStack = [];
+        function serializeSort() {
+            const parts = [];
+            if (!bestBox || bestBox.checked) parts.push('relevance:desc');
+            sortStack.forEach(x => parts.push(x.col + ':' + x.dir));
+            if (!parts.length) parts.push('seeders:desc');
+            return parts.join(',');
+        }
+        function updateSortIcons() {
+            headers.forEach(th => {
+                const icon = th.querySelector('.search-sort-icon');
+                const idx = sortStack.findIndex(x => x.col === th.dataset.sort);
+                const old = th.querySelector('.search-sort-priority');
+                if (old) old.remove();
+                if (idx === -1) { icon.textContent = '↕'; icon.classList.remove('active'); return; }
+                icon.textContent = sortStack[idx].dir === 'asc' ? '▲' : '▼';
+                icon.classList.add('active');
+                if (sortStack.length > 1) {
+                    const sup = document.createElement('sup');
+                    sup.className = 'search-sort-priority';
+                    sup.textContent = String(idx + 1);
+                    icon.after(sup);
+                }
+            });
+        }
+        headers.forEach(th => th.addEventListener('click', () => {
+            const col = th.dataset.sort;
+            const idx = sortStack.findIndex(x => x.col === col);
+            if (idx === -1) sortStack.push({ col, dir: 'desc' });
+            else if (sortStack[idx].dir === 'desc') sortStack[idx].dir = 'asc';
+            else sortStack.splice(idx, 1);
+            updateSortIcons();
+            run(1);
+        }));
+        if (bestBox) bestBox.addEventListener('change', () => run(1));
         let curPage = 1, seq = 0;
+        let lastTokens = [], lastFilesSearch = false;
         async function run(page) {
             curPage = page;
             const my = ++seq;   // stale responses (fast typing) must not overwrite newer ones
             const alert = $id('search-alert'), table = $id('search-table'), body = $id('search-body'), note = $id('search-note');
             alert.className = 'alert';
-            const qs = new URLSearchParams({ page: String(page), sort: $id('search-sort').value });
+            const qs = new URLSearchParams({ page: String(page), sort: serializeSort() });
             const q = input.value.trim();
             if (q) qs.set('search', q);
-            const filesBox = $id('search-files');
-            if (filesBox && filesBox.checked) qs.set('search_files', '1');
+            const filesOn = !!(filesBox && filesBox.checked);
+            if (filesOn) qs.set('search_files', '1');
             const json = await getJson('index_search&' + qs.toString());
             if (my !== seq) return;
             if (!json || !json.success) {
@@ -2080,14 +2222,17 @@ async function loadStatsHome(forceSync = false) {
                     : code || 'Search failed.', false);
                 return;
             }
+            lastTokens = q ? queryTokens(q) : [];
+            lastFilesSearch = filesOn && !!q;
             body.textContent = '';
             json.rows.forEach(r => {
                 const tr = document.createElement('tr');
                 const nameTd = document.createElement('td');
                 nameTd.className = 'search-name';
                 const nameSpan = document.createElement('span');
-                nameSpan.textContent = r.name || '(no name)';
                 nameSpan.title = r.name || '';
+                if (lastTokens.length) markInto(nameSpan, r.name || '(no name)', lastTokens);
+                else nameSpan.textContent = r.name || '(no name)';
                 nameTd.appendChild(nameSpan);
                 if (r.src === 'whitelist') {
                     const wb = document.createElement('span');
@@ -2098,11 +2243,11 @@ async function loadStatsHome(forceSync = false) {
                 }
                 if (r.files_count) {
                     const fc = document.createElement(canFiles && r.info_hash ? 'button' : 'span');
-                    fc.className = 'search-files-chip';
+                    fc.className = 'search-files-chip' + (lastFilesSearch ? ' chip-hit' : '');
                     fc.textContent = r.files_count + (r.files_count === 1 ? ' file' : ' files');
                     if (canFiles && r.info_hash) {
                         fc.type = 'button';
-                        fc.title = 'Show the file list';
+                        fc.title = lastFilesSearch ? 'Show the file list (your query also matched file names here)' : 'Show the file list';
                         fc.addEventListener('click', () => openFiles(r.info_hash, r.name));
                     }
                     nameTd.appendChild(fc);
@@ -2153,7 +2298,7 @@ async function loadStatsHome(forceSync = false) {
             note.textContent = json.total === 0 ? 'Nothing found.' : '';
             renderPager(json.page, json.pages, json.total);
         }
-        // « First / ‹ Prev / Page [n] of M / Next › / Last » — same pattern as the admin tables
+        // « First / ‹ Prev / Page [n] of M · X rows / Next › / Last » — same pattern as the admin tables
         function renderPager(page, pages, total) {
             const box = $id('search-pagination');
             box.textContent = '';
@@ -2183,13 +2328,72 @@ async function loadStatsHome(forceSync = false) {
             jump.appendChild(inp);
             jump.appendChild(document.createTextNode(' of ' + pages));
             box.appendChild(jump);
+            if (total) {
+                const tot = document.createElement('span');
+                tot.className = 'pg-total';
+                tot.textContent = '· ' + total.toLocaleString() + ' rows';
+                box.appendChild(tot);
+            }
             box.appendChild(mk('Next ›', page + 1, page >= pages));
             box.appendChild(mk('Last »', pages, page >= pages, 'pg-edge'));
         }
-        // ── file-list modal (index.files permission) ──
+        // ── file-list modal: collapsible folder tree; matches marked when searching file names ──
         const overlay = $id('files-overlay');
         function closeFiles() { if (overlay) { overlay.hidden = true; document.removeEventListener('keydown', escFiles); } }
         function escFiles(e) { if (e.key === 'Escape') closeFiles(); }
+        function buildTreePub(files, tokens) {
+            const root = { dirs: new Map(), files: [] };
+            files.forEach(f => {
+                const parts = String(f.path).split('/').filter(Boolean);
+                let node = root;
+                for (let i = 0; i < parts.length - 1; i++) {
+                    if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
+                    node = node.dirs.get(parts[i]);
+                }
+                node.files.push({ name: parts[parts.length - 1] || String(f.path), size: f.size });
+            });
+            const container = document.createElement('div');
+            container.className = 'ftree';
+            const countFiles = (n) => { let c = n.files.length; n.dirs.forEach(d => { c += countFiles(d); }); return c; };
+            const nameEl = (cls, text) => {
+                const sp = document.createElement('span');
+                sp.className = cls;
+                sp.title = text;
+                if (tokens && tokens.length) markInto(sp, text, tokens);
+                else sp.textContent = text;
+                return sp;
+            };
+            (function render(node, parent, depth) {
+                [...node.dirs.keys()].sort().forEach(name => {
+                    const subNode = node.dirs.get(name);
+                    const det = document.createElement('details');
+                    if (depth === 0) det.open = true;
+                    const sum = document.createElement('summary');
+                    sum.appendChild(nameEl('ftree-dir', name));
+                    const cnt = document.createElement('span');
+                    cnt.className = 'text-muted ftree-count';
+                    cnt.textContent = ' (' + countFiles(subNode) + ')';
+                    sum.appendChild(cnt);
+                    det.appendChild(sum);
+                    const inner = document.createElement('div');
+                    inner.className = 'ftree-children';
+                    render(subNode, inner, depth + 1);
+                    det.appendChild(inner);
+                    parent.appendChild(det);
+                });
+                node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
+                    const line = document.createElement('div');
+                    line.className = 'ftree-file';
+                    line.appendChild(nameEl('ftree-name', f.name));
+                    const sz = document.createElement('span');
+                    sz.className = 'ftree-size text-muted';
+                    sz.textContent = fmtBytesPub(f.size);
+                    line.appendChild(sz);
+                    parent.appendChild(line);
+                });
+            })(root, container, 0);
+            return container;
+        }
         async function openFiles(hash, name) {
             if (!overlay) return;
             const body = $id('files-body'), title = $id('files-title');
@@ -2206,21 +2410,7 @@ async function loadStatsHome(forceSync = false) {
             }
             title.textContent = (json.name || name || 'Files') + ' — ' + json.files.length + (json.truncated ? '+' : '') + ' files';
             if (!json.files.length) { body.textContent = 'No file list stored for this entry.'; return; }
-            const ul = document.createElement('ul');
-            ul.className = 'files-list';
-            json.files.forEach(f => {
-                const li = document.createElement('li');
-                const p = document.createElement('span');
-                p.className = 'files-path';
-                p.textContent = f.path;
-                p.title = f.path;
-                const s = document.createElement('span');
-                s.className = 'files-size text-muted';
-                s.textContent = fmtBytesPub(f.size);
-                li.appendChild(p); li.appendChild(s);
-                ul.appendChild(li);
-            });
-            body.appendChild(ul);
+            body.appendChild(buildTreePub(json.files, lastFilesSearch ? lastTokens : []));
             if (json.truncated) {
                 const more = document.createElement('p');
                 more.className = 'text-muted';
@@ -2232,15 +2422,14 @@ async function loadStatsHome(forceSync = false) {
             overlay.addEventListener('click', (e) => { if (e.target === overlay) closeFiles(); });
             $id('files-close').addEventListener('click', closeFiles);
         }
-        // ── wiring: live search (debounced), clear-X, sort/files change, Enter = immediate ──
+        // ── wiring: live search (debounced), accelerating clear-X, checkboxes, Enter = immediate ──
         const runDebounced = debounce(() => run(1), 300);
         const syncClear = () => { if (clearBtn) clearBtn.hidden = input.value === ''; };
         input.addEventListener('input', () => { syncClear(); runDebounced(); });
-        if (clearBtn) clearBtn.addEventListener('click', () => { input.value = ''; syncClear(); input.focus(); run(1); });
+        if (clearBtn) clearBtn.addEventListener('click', () => animatedClearPub(input, () => { syncClear(); input.focus(); run(1); }));
         form.addEventListener('submit', (e) => { e.preventDefault(); run(1); });
-        $id('search-sort').addEventListener('change', () => run(1));
-        const filesBox = $id('search-files');
         if (filesBox) filesBox.addEventListener('change', () => run(1));
+        updateSortIcons();
         syncClear();
         run(1);
     }

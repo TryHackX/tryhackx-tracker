@@ -15,8 +15,8 @@ if (!rateLimitAllow('user_reset', ipBucket($ip), 10, 3600)) {
     jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
 }
 $password = (string)($input['password'] ?? '');
-if (strlen($password) < 8 || strlen($password) > 200) {
-    jsonResponse(['error' => 'Password must be at least 8 characters.'], 400);
+if (!userValidPassword($password)) {
+    jsonResponse(['error' => 'Password: ' . USER_PASSWORD_RULES . '.'], 400);
 }
 $userId = userResetConsume($db, (string)($input['token'] ?? ''), true);
 if ($userId === null) {

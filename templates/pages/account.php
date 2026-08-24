@@ -56,10 +56,16 @@
         <input type="email" id="acc-new-email" maxlength="190" autocomplete="email" value="<?= sanitize((string)($meUser['email'] ?? '')) ?>">
         <div class="error-msg">That email address does not look valid</div>
     </div>
+    <div class="form-group" id="acc-new-email2-group" hidden>
+        <label for="acc-new-email2">Repeat new email</label>
+        <input type="email" id="acc-new-email2" maxlength="190" autocomplete="off">
+        <div class="error-msg">Email addresses do not match</div>
+    </div>
     <div class="form-group">
-        <label for="acc-new-pass">New password <small class="form-hint">leave empty to keep the current one; at least 8 characters</small></label>
+        <label for="acc-new-pass">New password <small class="form-hint">leave empty to keep the current one</small></label>
         <input type="password" id="acc-new-pass" maxlength="200" autocomplete="new-password">
-        <div class="error-msg">At least 8 characters</div>
+        <div class="pw-checklist" id="acc-pw-checklist" hidden></div>
+        <div class="error-msg">The password does not meet the requirements above</div>
     </div>
     <div class="form-group" id="acc-new-pass2-group" hidden>
         <label for="acc-new-pass2">Repeat new password</label>

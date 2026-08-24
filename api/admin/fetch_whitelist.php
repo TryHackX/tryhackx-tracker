@@ -16,6 +16,7 @@ $allowedSorts = [
     'meta'     => 'meta_status',
     'seeders'  => 'scrape_seeders',
     'leechers' => 'scrape_leechers',
+    'files'    => 'files_count',
     'date'     => 'created_at',
     'banned'   => 'banned',
 ];

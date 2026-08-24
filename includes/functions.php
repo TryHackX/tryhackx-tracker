@@ -129,17 +129,34 @@ function captchaConfigured(array $cfg): bool {
  * so callers fail closed. cURL is preferred; falls back to a stream context with a timeout.
  */
 function captchaHttpPost(string $url, array $fields): ?array {
+    // Two attempts: this host shares its uplink with a large BitTorrent swarm and measured 30-40 %
+    // packet loss during OPEN hours — a first-try connect timeout to the verifier was the #1 cause
+    // of "CAPTCHA verification failed" on a correct answer. A quick retry almost always lands.
+    for ($attempt = 1; $attempt <= 2; $attempt++) {
+        $json = captchaHttpPostOnce($url, $fields, $err);
+        if ($json !== null) {
+            if ($attempt > 1) error_log('[captcha] verifier reachable on retry ' . $attempt);
+            return $json;
+        }
+        error_log('[captcha] transport attempt ' . $attempt . ' failed: ' . ($err ?: 'unknown') . ' (' . parse_url($url, PHP_URL_HOST) . ')');
+    }
+    return null;
+}
+
+/** One verifier POST. $err receives the transport error for logging. */
+function captchaHttpPostOnce(string $url, array $fields, ?string &$err = null): ?array {
+    $err = null;
     $body = http_build_query($fields);
     $result = false;
     if (function_exists('curl_init')) {
         $ch = curl_init($url);
-        if ($ch === false) return null;
+        if ($ch === false) { $err = 'curl_init failed'; return null; }
         curl_setopt_array($ch, [
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => $body,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CONNECTTIMEOUT => 3,
-            CURLOPT_TIMEOUT        => 5,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT        => 8,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_FOLLOWLOCATION => false,
@@ -147,21 +164,24 @@ function captchaHttpPost(string $url, array $fields): ?array {
         ]);
         $result = curl_exec($ch);
         $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $curlErr = curl_error($ch);
         curl_close($ch);
-        if ($result === false || $code < 200 || $code >= 300) return null;
+        if ($result === false) { $err = 'cURL: ' . $curlErr; return null; }
+        if ($code < 200 || $code >= 300) { $err = 'HTTP ' . $code; return null; }
     } else {
         $opts = ['http' => [
             'method'  => 'POST',
             'header'  => "Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\n",
             'content' => $body,
-            'timeout' => 5,
+            'timeout' => 8,
             'ignore_errors' => false,
         ], 'ssl' => ['verify_peer' => true, 'verify_peer_name' => true]];
         $result = @file_get_contents($url, false, stream_context_create($opts));
-        if ($result === false) return null;
+        if ($result === false) { $err = 'stream request failed'; return null; }
     }
     $json = json_decode((string)$result, true);
-    return is_array($json) ? $json : null;
+    if (!is_array($json)) { $err = 'invalid JSON reply'; return null; }
+    return $json;
 }
 
 /** Google reCAPTCHA v2 verification. Fail closed on missing secret / transport error. */

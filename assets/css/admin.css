@@ -1205,7 +1205,9 @@ input[type="number"] {
 .wl-c-sl       { width: 80px; }
 .wl-c-date     { width: 148px; }
 .wl-c-date-lg  { width: 176px; }
-.wl-c-actions  { width: 132px; }
+.wl-c-actions  { width: 176px; }
+.wl-c-files    { width: 54px; }
+.wl-files-col  { text-align: center; font-variant-numeric: tabular-nums; }
 .wl-c-actions-2 { width: 76px; }
 .wl-c-keyid    { width: 140px; }
 .wl-c-secret   { width: 96px; }
@@ -1227,7 +1229,7 @@ input[type="number"] {
     .wl-page #wl-table .wl-c-ip      { width: 128px; }
     .wl-page #wl-table .wl-c-meta    { width: 80px; }
     .wl-page #wl-table .wl-c-sl      { width: 70px; }
-    .wl-page #wl-table .wl-c-actions { width: 128px; }
+    .wl-page #wl-table .wl-c-actions { width: 168px; }
     .wl-page #wl-table td { padding-left: 0.4rem; padding-right: 0.4rem; }
     .wl-page #wl-table th { padding-left: 0.4rem; padding-right: 0.4rem; }
 }
@@ -1270,7 +1272,7 @@ input[type="number"] {
 .idx-c-check { width: 34px; } .idx-c-hash { width: 160px; } .idx-c-size { width: 90px; }
 #idx-table th { white-space: nowrap; }
 .idx-c-sl { width: 90px; } .idx-c-seen { width: 74px; } .idx-c-dates { width: 150px; }
-.idx-c-meta { width: 80px; } .idx-c-actions { width: 90px; }
+.idx-c-meta { width: 80px; } .idx-c-actions { width: 126px; } .idx-c-files { width: 56px; }
 .idx-th-check { text-align: center; }
 #idx-table td, #idx-table th { vertical-align: middle; }
 #idx-table .idx-dates { font-size: 0.72rem; line-height: 1.25; }
@@ -1287,9 +1289,16 @@ input[type="number"] {
 @media (max-width: 992px) { .idx-mgrid { grid-template-columns: 1fr; } }
 
 /* === Timeline ranger (mini overview with a draggable window) + legend alignment === */
-.tl-chart .u-legend th, .tl-chart .u-legend td { vertical-align: middle; font-weight: 400; }
+/* baseline, not middle: the label and value boxes have different heights (padding), so
+   centring them left the DIGITS 1-2 px below the label text. Baseline pins the text lines. */
+.tl-chart .u-legend th, .tl-chart .u-legend td { vertical-align: baseline; font-weight: 400; }
 .tl-chart .u-legend .u-marker { vertical-align: -0.12em; }
 .tl-chart .u-legend .u-value { font-size: 0.78rem; line-height: 1.3; }
+/* label boxes inherited the page line-height (1.7) while values use 1.3 — the 2 px taller
+   label box shifted the text BASELINE even with middle-aligned cells. Same line box = same
+   baseline, numbers sit exactly on the label line again. */
+.tl-chart .u-legend .u-label { font-size: 0.78rem; line-height: 1.3; }
+.tl-chart .u-legend .u-label, .tl-chart .u-legend .u-value { vertical-align: baseline; }
 .tl-ranger { margin-top: 0.4rem; border: 1px solid #1e1e2c; border-radius: 4px; }
 .tl-ranger .u-over { cursor: crosshair; }
 .tl-brush { position: absolute; top: 0; bottom: 0; background: rgba(74, 158, 255, 0.14); border: 1px solid rgba(74, 158, 255, 0.55); border-radius: 3px; cursor: grab; box-sizing: border-box; }
@@ -1305,3 +1314,6 @@ input[type="number"] {
 .ge-perms .form-check-label { font-size: 0.85rem; }
 .ge-perms code { font-size: 0.75rem; color: #8ab4ff; }
 
+
+/* matched-fragment highlight inside the file tree (search on file names) */
+.wl-tree mark { background: rgba(74, 158, 255, 0.35); color: inherit; padding: 0 1px; border-radius: 2px; }

@@ -3,7 +3,7 @@
     'use strict';
     const A = window.AdminCommon;
     if (!A) return;
-    const { apiCall, el, esc, showToast, confirmAction, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard } = A;
+    const { apiCall, el, esc, showToast, confirmAction, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree } = A;
     const $ = (id) => document.getElementById(id);
 
     const state = { page: 1, pages: 1, search: '', searchFiles: false, meta: '', life: '', sort: [{ col: 'last', dir: 'desc' }], selected: new Set(), rows: [] };
@@ -79,13 +79,16 @@
         if (state.life) qs.set('life', state.life);
         return qs;
     }
-    async function load() {
+    let loadSeq = 0;
+    async function load(silent = false) {
         const qs = listQuery(state.page);
+        const my = ++loadSeq;   // rapid sort/filter clicks: only the newest response may render
         let data;
         try { data = await apiCall('admin/fetch_index&' + qs.toString()); }
-        catch (e) { showToast('Failed to load index: ' + e.message, 'error'); return; }
+        catch (e) { if (!silent) showToast('Failed to load index: ' + e.message, 'error'); return; }
+        if (my !== loadSeq) return;
         // apiCall resolves on non-2xx too (error body carries .error) — don't render an auth/server error as "empty"
-        if (data.error) { showToast('Failed to load index: ' + data.error, 'error'); return; }
+        if (data.error) { if (!silent) showToast('Failed to load index: ' + data.error, 'error'); return; }
         state.rows = data.rows || [];
         state.pages = data.pages || 1;
         renderRows(data);
@@ -103,7 +106,7 @@
         const tb = $('idx-body');
         tb.textContent = '';
         if (!state.rows.length) {
-            tb.appendChild(el('tr', {}, el('td', { colSpan: 9, className: 'text-center text-muted py-4', text: data.enabled ? 'No observed hashes yet — the poll fills this during OPEN hours.' : 'The index is disabled.' })));
+            tb.appendChild(el('tr', {}, el('td', { colSpan: 10, className: 'text-center text-muted py-4', text: data.enabled ? 'No observed hashes yet — the poll fills this during OPEN hours.' : 'The index is disabled.' })));
             return;
         }
         state.rows.forEach(r => {
@@ -124,6 +127,7 @@
             if (r.promoted) badges.push(el('span', { className: 'status-badge-sm status-badge', title: 'Promoted to whitelist', text: '★' }));
             tr.appendChild(el('td', { className: 'wl-name-cell' }, [el('span', { text: r.name || '—', title: r.name || '' }), ...badges]));
             tr.appendChild(el('td', { className: 'font-mono', text: r.total_size ? fmtBytes(r.total_size) : '—' }));
+            tr.appendChild(el('td', { className: 'font-mono', text: r.files_count != null ? String(r.files_count) : '—' }));
             const sl = (r.scrape_seeders != null ? r.scrape_seeders : r.last_seeders) + ' / ' + (r.scrape_leechers != null ? r.scrape_leechers : r.last_leechers);
             tr.appendChild(el('td', { className: 'font-mono', title: 'peak seeders ' + (r.peak_seeders || 0) }, sl));
             tr.appendChild(el('td', { className: 'font-mono', text: String(r.seen_count || 0) }));
@@ -201,9 +205,7 @@
         // files
         if (d.files && d.files.length) {
             const list = el('div', { className: 'idx-files mt-2' }, [el('h6', { className: 'text-muted', text: 'Files (' + d.files.length + (d.files_truncated ? '+' : '') + ')' })]);
-            const ul = el('ul', { className: 'idx-file-list' });
-            d.files.forEach(f => ul.appendChild(el('li', {}, [el('span', { className: 'idx-file-path', text: f.path, title: f.path }), el('span', { className: 'idx-file-size text-muted', text: fmtBytes(f.size) })])));
-            list.appendChild(ul);
+            list.appendChild(buildFileTree(d.files));
             body.appendChild(list);
         }
     }
@@ -360,9 +362,10 @@
     // ── wiring ─────────────────────────────────────────────────────────────
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
     function init() {
-        makeSortStack({ table: $('idx-table'), defaultSort: [{ col: 'last', dir: 'desc' }], onChange: (stack) => { state.sort = stack; state.page = 1; load(); } }).bindHeaders();
+        const loadDebounced = debounce(() => load(), 250);
+        makeSortStack({ table: $('idx-table'), defaultSort: [{ col: 'last', dir: 'desc' }], onChange: (stack) => { state.sort = stack; state.page = 1; loadDebounced(); } }).bindHeaders();
         $('idx-search').addEventListener('input', debounce(() => { state.search = $('idx-search').value.trim(); state.page = 1; load(); }, 300));
-        $('idx-search-clear').addEventListener('click', () => { $('idx-search').value = ''; state.search = ''; state.page = 1; load(); });
+        bindSearchClear($('idx-search'), $('idx-search-clear'), () => { state.search = ''; state.page = 1; load(); });
         $('idx-search-files').addEventListener('change', () => { state.searchFiles = $('idx-search-files').checked; state.page = 1; load(); });
         $('idx-filter-meta').addEventListener('change', () => { state.meta = $('idx-filter-meta').value; state.page = 1; load(); });
         $('idx-filter-life').addEventListener('change', () => { state.life = $('idx-filter-life').value; state.page = 1; load(); });
@@ -394,6 +397,14 @@
         if (logout) logout.addEventListener('click', async () => { try { await apiCall('admin/logout', 'POST', {}); } catch (e) {} location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=admin'; });
         load(); loadStatus();
         setInterval(loadStatus, 30000);
+        // live view while metadata resolves: silently refresh the current page every 5 s when the
+        // meta filter is pending/fetching or any visible row still is — sort/filters/selection survive
+        setInterval(() => {
+            if (document.hidden) return;
+            const busyFilter = state.meta === 'pending' || state.meta === 'fetching';
+            const busyRows = state.rows.some(r => r.meta_status === 'pending' || r.meta_status === 'fetching');
+            if (busyFilter || busyRows) load(true);
+        }, 5000);
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
