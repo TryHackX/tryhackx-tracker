@@ -333,7 +333,7 @@
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
     document.addEventListener('DOMContentLoaded', () => {
-        const loadUsersDebounced = debounce(() => loadUsers(), 250);
+        const loadUsersDebounced = debounce(() => loadUsers(), 450);
         usSort = makeSortStack({ table: $('us-table'), defaultSort: [{ col: 'created', dir: 'desc' }], onChange: () => { state.us.page = 1; loadUsersDebounced(); } });
         usSort.bindHeaders();
         document.querySelectorAll('#us-tabs .source-tab').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));

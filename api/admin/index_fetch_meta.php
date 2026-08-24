@@ -7,7 +7,7 @@ $input = readJsonBody();
 $scope = strtolower(trim((string)($input['scope'] ?? '')));
 if ($scope === 'cancel') {
     $n = indexMetaCancel($db);
-    jsonResponse(['success' => true, 'scope' => 'cancel', 'cancelled' => $n]);
+    jsonResponse(['success' => true, 'scope' => 'cancel', 'cancelled' => $n['cancelled'], 'restored' => $n['restored']]);
 }
 if ($scope === 'date') {
     $range = parseDateRangeInput($input);

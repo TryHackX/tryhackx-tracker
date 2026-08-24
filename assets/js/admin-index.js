@@ -237,6 +237,9 @@
         try { const r = await apiCall('admin/index_fetch_meta', 'POST', { hashes }); if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; } showToast('Queued ' + r.queued + ' for metadata'); } catch (e) { showToast(e.message, 'error'); }
     }
     async function metaScope(scope) {
+        if (scope === 'all' && !(await confirmAction('Re-fetch ALL metadata',
+            'Every row goes back into the worker queue. Stored names/sizes/files stay in the DB and remain searchable, but the meta status shows "pending" until each row is re-resolved (can take a long time). "Cancel queued" restores resolved rows to done at any point. Continue?',
+            { okLabel: 'Queue all' }))) return;
         try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope }); if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; } showToast('Queued ' + r.queued + ' for metadata'); loadStatus(); } catch (e) { showToast(e.message, 'error'); }
     }
     /**
@@ -300,8 +303,8 @@
         catch (e) { showToast(e.message, 'error'); }
     }
     async function cancelMetaQueue() {
-        if (!(await confirmAction('Cancel queued metadata', 'Reset every QUEUED (pending) hash back to "no metadata"? Rows being fetched right now still finish. The janitor keeps queueing its daily budget; you can re-queue any time.', { danger: true, okLabel: 'Cancel queue' }))) return;
-        try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope: 'cancel' }); if (!r.success || r.error) { showToast(r.error || 'Cancel failed', 'error'); return; } showToast('Cancelled ' + (r.cancelled || 0).toLocaleString() + ' queued fetches'); load(); loadStatus(); }
+        if (!(await confirmAction('Cancel queued metadata', 'Empty the QUEUE: rows that already carry metadata go back to "done" (visible in search again), never-resolved rows to "none". Rows being fetched right now still finish; the janitor keeps queueing its daily budget.', { danger: true, okLabel: 'Cancel queue' }))) return;
+        try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope: 'cancel' }); if (!r.success || r.error) { showToast(r.error || 'Cancel failed', 'error'); return; } showToast('Cancelled ' + (r.cancelled || 0).toLocaleString() + ' queued fetches' + (r.restored ? ' (' + r.restored.toLocaleString() + ' restored to done)' : '')); load(); loadStatus(); }
         catch (e) { showToast(e.message, 'error'); }
     }
     let scrapeRunning = false, scrapeStop = false;
@@ -364,7 +367,7 @@
     // ── wiring ─────────────────────────────────────────────────────────────
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
     function init() {
-        const loadDebounced = debounce(() => load(), 250);
+        const loadDebounced = debounce(() => load(), 450);
         makeSortStack({ table: $('idx-table'), defaultSort: [{ col: 'last', dir: 'desc' }], onChange: (stack) => { state.sort = stack; state.page = 1; loadDebounced(); } }).bindHeaders();
         $('idx-search').addEventListener('input', debounce(() => { state.search = $('idx-search').value.trim(); state.page = 1; load(); }, 300));
         bindSearchClear($('idx-search'), $('idx-search-clear'), () => { state.search = ''; state.page = 1; load(); });

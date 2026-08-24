@@ -1752,8 +1752,8 @@ async function loadStatsHome(forceSync = false) {
         ['At least 8 characters', (p) => p.length >= 8 && p.length <= 200],
         ['A lowercase letter', (p) => /[a-z]/.test(p)],
         ['An uppercase letter', (p) => /[A-Z]/.test(p)],
-        ['A digit', (p) => /[0-9]/.test(p)],
         ['A special character', (p) => /[^a-zA-Z0-9]/.test(p)],
+        ['A digit', (p) => /[0-9]/.test(p)],
     ];
     const pwValid = (p) => PW_REQS.every(([, t]) => t(p));
     /** Requirement checklist under a password box; optional=true hides it while the box is empty. */

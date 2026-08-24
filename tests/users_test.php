@@ -206,6 +206,13 @@ $srcByHash = array_column($resWl['rows'], 'src', 'info_hash');
 check('whitelist arm folded in when permitted', ($srcByHash[$mk(5)] ?? '') === 'whitelist', json_encode($srcByHash));
 $resNoWl = indexSearchCatalogue($db, $cfg, ['search' => 'ZZQtest', 'sort' => 'seeders:desc', 'include_whitelist' => false]);
 check('whitelist arm excluded without permission', !in_array($mk(5), array_column($resNoWl['rows'], 'info_hash'), true));
+// a bulk re-fetch flips done → pending: NAMED rows must stay searchable, and cancel restores them
+$db->prepare("UPDATE index_hashes SET meta_status = 'pending' WHERE info_hash = ?")->execute([$mk(1)]);
+$resPend = indexSearchCatalogue($db, $cfg, ['search' => 'ZZQtest Body of Lies (2008)', 'sort' => 'relevance:desc', 'include_whitelist' => false]);
+check('named row stays searchable while re-queued (pending)', in_array($mk(1), array_column($resPend['rows'], 'info_hash'), true));
+$cancel = indexMetaCancel($db);
+check('cancel restores resolved rows to done', $cancel['restored'] >= 1
+    && $db->query("SELECT meta_status FROM index_hashes WHERE info_hash = '" . $mk(1) . "'")->fetchColumn() === 'done', json_encode($cancel));
 $db->exec("DELETE FROM index_hashes WHERE name LIKE 'ZZQtest%' OR name LIKE 'YYQother%'");
 $db->exec("DELETE FROM whitelist WHERE name LIKE 'ZZQtest%'");
 

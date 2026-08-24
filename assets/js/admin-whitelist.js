@@ -935,7 +935,7 @@
 
     // ───────────────────────── init ─────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
-        const loadWlDebounced = debounce(() => loadWhitelist(), 250);
+        const loadWlDebounced = debounce(() => loadWhitelist(), 450);
         wlSort = makeSortStack({ table: $('wl-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.wl.page = 1; loadWlDebounced(); } });
         bnSort = makeSortStack({ table: $('bn-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.bn.page = 1; loadBanned(); } });
         abSort = makeSortStack({ table: $('ab-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.ab.page = 1; loadApiBans(); } });

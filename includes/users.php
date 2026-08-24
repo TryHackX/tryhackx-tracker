@@ -544,7 +544,7 @@ function userVerifySend(PDO $db, array $cfg, array $user): bool {
     try {
         $unsub = function_exists('getUnsubscribeUrl') ? getUnsubscribeUrl($email, $cfg) : '';
         $html = buildEmailHtml(['title' => 'Confirm your email address', 'greeting' => 'Hello ' . sanitize($user['username']) . ',',
-            'body' => 'Confirm that this address belongs to your ' . sanitize($site) . ' account. The link is valid for ' . USER_VERIFY_TTL_H . ' hours; if you did not request this, ignore this message.',
+            'body' => 'Confirm that this address belongs to your ' . sanitize($site) . ' account. The link is valid for ' . USER_VERIFY_TTL_H . ' hours. If you did not request this, simply ignore this message.',
             'action_url' => $link, 'action_label' => 'Confirm email address',
             'details' => [], 'unsubscribe_url' => $unsub], $cfg);
         return (bool)@sendEmail($email, $site . ' — confirm your email address', $text, $html, $cfg, $unsub);
@@ -648,6 +648,10 @@ function userEmailChangeConsume(PDO $db, array $cfg, string $token): array {
     userNotify($db, (int)$u['id'], 'account', 'Your email address was changed', 'New address: ' . $pending . ' (verified).');
     userNotifyMail($db, $cfg, ['email' => (string)$u['email'], 'username' => $u['username']], ($cfg['site_name'] ?? 'Tracker') . ' — your email address was changed',
         'The email on your account is now: ' . $pending . "\nIf this was not you, reset your password immediately.");
+    // …and a written confirmation lands in the NEW mailbox too (the trail used to end with just
+    // the browser page — pkt: "na nowym tylko link, nie ma potwierdzenia")
+    userNotifyMail($db, $cfg, ['email' => $pending, 'username' => $u['username']], ($cfg['site_name'] ?? 'Tracker') . ' — email change confirmed',
+        'Done! This address is now active and verified on your account. Account notices and password resets arrive here from now on.');
     return ['stage' => 'done', 'email' => $pending];
 }
 

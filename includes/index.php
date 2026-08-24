@@ -494,13 +494,19 @@ function indexQueueMetaByDate(PDO $db, string $from, string $to): int {
 }
 
 /**
- * Cancel the index metadata queue: every 'pending' row goes back to 'none' ('fetching' rows finish on
- * their own). The daily-budget counter is NOT refunded. Returns rows reset.
+ * Cancel the index metadata queue ('fetching' rows finish on their own). A queued row that ALREADY
+ * carries resolved metadata (a re-fetch victim — name+size present) is RESTORED to 'done' so it
+ * reappears in search immediately; rows that never resolved go back to 'none'. The daily-budget
+ * counter is NOT refunded. Returns ['cancelled'=>total, 'restored'=>how many went back to done].
  */
-function indexMetaCancel(PDO $db): int {
+function indexMetaCancel(PDO $db): array {
+    $restore = $db->prepare("UPDATE index_hashes SET meta_status = 'done', meta_requested_at = NULL, meta_priority = -1
+                             WHERE meta_status = 'pending' AND name IS NOT NULL AND total_size IS NOT NULL");
+    $restore->execute();
+    $restored = $restore->rowCount();
     $st = $db->prepare("UPDATE index_hashes SET meta_status = 'none', meta_requested_at = NULL, meta_priority = -1 WHERE meta_status = 'pending'");
     $st->execute();
-    return $st->rowCount();
+    return ['cancelled' => $restored + $st->rowCount(), 'restored' => $restored];
 }
 
 /** Bulk (re)queue metadata by scope: 'missing' | 'failed' | 'missing_failed' | 'all'. Returns rows queued or null. */
@@ -737,9 +743,12 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                COALESCE(scraped_at, updated_at, created_at) AS last_seen, 'whitelist' AS src"
             : "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, last_seeders) AS seeders, COALESCE(scrape_leechers, last_leechers) AS leechers,
                last_seen, 'index' AS src";
+        // a NAMED row is searchable regardless of the queue state — a bulk re-fetch flips done →
+        // pending without touching the stored metadata, and thousands of rows must not vanish from
+        // the search until the worker gets around to re-resolving them
         $where = $wl
             ? ["banned = 0", "(meta_status = 'done' OR (name IS NOT NULL AND name <> ''))"]
-            : ["meta_status = 'done'"];
+            : ["(meta_status = 'done' OR (name IS NOT NULL AND name <> ''))"];
         $params = [];
         $scoreSql = '0';
         $scoreParams = [];
