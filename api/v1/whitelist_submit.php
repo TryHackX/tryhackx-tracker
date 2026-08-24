@@ -17,6 +17,7 @@ requirePost();
 
 $rawBody = apiReadRawBody();
 $client  = apiAuthenticate($db, $cfg, 'v1/whitelist/submit', $rawBody);
+apiRequireScope($client, 'whitelist');
 
 $payload = json_decode((string)$rawBody, true);
 if (!is_array($payload) || !isset($payload['items']) || !is_array($payload['items'])) {

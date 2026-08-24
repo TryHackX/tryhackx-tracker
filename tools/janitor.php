@@ -25,6 +25,8 @@ require_once $root . '/includes/whitelist.php';
 require_once $root . '/includes/schedule.php';
 require_once $root . '/includes/stats_timeline.php';
 require_once $root . '/includes/index.php';
+require_once $root . '/includes/mail.php';
+require_once $root . '/includes/users.php';
 
 try {
     $db  = getDb();
@@ -54,6 +56,12 @@ try {
             $ix['poll'] ? ' (entries=' . (int)$ix['poll']['entries'] . ' kept=' . (int)$ix['poll']['kept'] . ($ix['poll']['truncated'] ? ' TRUNCATED' : '') . ' ms=' . (int)$ix['poll']['ms'] . ')' : '',
             (int)$ix['meta_queued'], $ix['prune'] ? ' pruned=' . (int)$ix['prune']['expired'] . '/' . (int)$ix['prune']['capped'] : '',
             $ix['error'] !== null ? ' error=' . $ix['error'] : ''), "\n";
+    }
+    // user accounts: expire/warn timed group memberships, prune notifications + tokens (no-op when disabled)
+    $us = usersTick($db, $cfg);
+    if ($us['enabled'] && ($us['error'] !== null || $us['expired'] || $us['warned'] || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[users] expired=%d warned=%d pruned=%d%s', (int)$us['expired'], (int)$us['warned'], (int)$us['pruned'],
+            $us['error'] !== null ? ' error=' . $us['error'] : ''), "\n";
     }
     $after = whitelistStateRead();
     $msg = sprintf('mode=%s schedule=%s pending_reload=%s regen_needed=%s last_reload_ok=%s fail_count=%d count=%d',

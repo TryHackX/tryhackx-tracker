@@ -800,13 +800,14 @@
         body.textContent = '';
         let r;
         try { r = await apiCall('admin/fetch_api_clients'); } catch { r = { error: 'Network error' }; }
-        if (r.error) { body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-danger py-4', text: r.error }))); return; }
+        if (r.error) { body.appendChild(el('tr', null, el('td', { colspan: 10, className: 'text-center text-danger py-4', text: r.error }))); return; }
         state.cl.rows = new Map(r.clients.map(c => [c.id, c]));
         $('cl-total').textContent = `${r.clients.length} client${r.clients.length === 1 ? '' : 's'}` + (r.api_enabled ? '' : ' · API DISABLED in Settings');
-        if (!r.clients.length) body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-muted py-4', text: 'No API clients yet. Create one and paste its bearer token into the forum extension settings.' })));
+        if (!r.clients.length) body.appendChild(el('tr', null, el('td', { colspan: 10, className: 'text-center text-muted py-4', text: 'No API clients yet. Create one and paste its bearer token into the forum extension settings.' })));
         r.clients.forEach(c => {
             const tr = el('tr');
             tr.appendChild(el('td', { className: 'wl-cl-label', text: c.label, title: c.label }));
+            tr.appendChild(el('td', {}, badge(c.scope || 'whitelist', c.scope === 'all' ? 'wl-b-warn' : '')));
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { text: c.key_id })));
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { className: 'text-muted', text: '····' + (c.secret_hint || '') })));
             const sw = el('input', { type: 'checkbox', className: 'form-check-input', role: 'switch', title: c.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable' });
@@ -842,8 +843,12 @@
         $('btn-cl-create').addEventListener('click', async () => {
             const label = await promptModal({ title: 'Create API client', label: 'Client label', placeholder: 'e.g. Flarum forum', hint: 'The bearer token is shown once, right after creation.', okLabel: 'Create', maxlength: 100 });
             if (label === null || !label.trim()) return;
+            const scope = await promptModal({ title: 'Client scope', label: 'Scope', value: 'whitelist', hint: 'Which v1 endpoints this key may call: whitelist (forum sync), users (sales/shop API), federation (peer metadata exchange) or all.', okLabel: 'Create', maxlength: 16 });
+            if (scope === null) return;
+            const scopeVal = scope.trim().toLowerCase() || 'whitelist';
+            if (!['whitelist', 'users', 'federation', 'all'].includes(scopeVal)) { showToast('Scope must be whitelist, users, federation or all', 'warning'); return; }
             try {
-                const r = await apiCall('admin/api_client_create', 'POST', { label: label.trim() });
+                const r = await apiCall('admin/api_client_create', 'POST', { label: label.trim(), scope: scopeVal });
                 if (r.success) {
                     $('token-label').textContent = r.label;
                     $('token-keyid').textContent = r.key_id;

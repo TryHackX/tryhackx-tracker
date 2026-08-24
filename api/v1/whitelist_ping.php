@@ -8,6 +8,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET' && $_SERVER['REQUEST_METHOD'] !== 'POST
 }
 $rawBody = $_SERVER['REQUEST_METHOD'] === 'POST' ? apiReadRawBody() : '';
 $client  = apiAuthenticate($db, $cfg, 'v1/whitelist/ping', $rawBody);
+apiRequireScope($client, 'whitelist');
 
 $count = 0;
 try { $count = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 0")->fetchColumn(); } catch (\Throwable $e) {}

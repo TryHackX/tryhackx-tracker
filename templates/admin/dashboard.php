@@ -46,6 +46,7 @@
                  .source-tab click handler never binds to it. -->
             <a href="<?= $baseUrl ?>?action=admin-whitelist" class="source-tab-link" title="Open the whitelist page"><i class="bi bi-list-check"></i> Whitelist</a>
             <a href="<?= $baseUrl ?>?action=admin-index" class="source-tab-link" title="Open the observed-hash index"><i class="bi bi-collection"></i> Index</a>
+            <a href="<?= $baseUrl ?>?action=admin-users" class="source-tab-link" title="Open the user accounts page"><i class="bi bi-people"></i> Users</a>
         </div>
 
         <!-- Toolbar -->

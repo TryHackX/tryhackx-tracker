@@ -16,6 +16,7 @@
                 <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-speedometer2"></i> Dashboard</a>
                 <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
                 <a href="<?= $baseUrl ?>?action=admin-index" class="btn btn-sm btn-outline-info"><i class="bi bi-collection"></i> Index</a>
+                <a href="<?= $baseUrl ?>?action=admin-users" class="btn btn-sm btn-outline-info"><i class="bi bi-people"></i> Users</a>
                 <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
             </div>
         </div>
@@ -440,6 +441,135 @@
                         <label class="form-label">Never-ban IPs <small class="settings-hint">(comma-separated IPs or CIDRs; keep this server's own addresses here — the forum on the same host must never lock itself out)</small></label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="api_ban_exempt_ips" value="<?= sanitize($cfg['api_ban_exempt_ips'] ?? '127.0.0.1, ::1') ?>" placeholder="127.0.0.1, ::1, 203.0.113.10">
                     </div>
+                </div>
+            </div>
+
+            <!-- User accounts -->
+            <div class="settings-section" id="section-users">
+                <h5>User Accounts</h5>
+                <small class="settings-hint d-block mb-3">Optional member system: registration + login (CAPTCHA-protected), groups with per-feature permissions, timed access (sellable via the <code>v1/users/*</code> API with a <em>users</em>-scope key), in-app notifications and a member search over the Index. Users and groups are managed on the <a href="<?= $baseUrl ?>?action=admin-users">Users page</a>. The <strong>guest</strong> group defines what anonymous visitors may see — with accounts <em>disabled</em> everything behaves exactly as before (public pages public, Index admin-only).</small>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">User accounts</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="users_enabled">
+                            <option value="1" <?= ($cfg['users_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled</option>
+                            <option value="0" <?= ($cfg['users_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Public registration</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="users_registration_enabled">
+                            <option value="1" <?= ($cfg['users_registration_enabled'] ?? '1') === '1' ? 'selected' : '' ?>>Open</option>
+                            <option value="0" <?= ($cfg['users_registration_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>>Closed (admin / API only)</option>
+                        </select>
+                        <small class="settings-hint">Registration always requires a configured CAPTCHA.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Login / register links</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="users_links_visible">
+                            <option value="1" <?= ($cfg['users_links_visible'] ?? '1') === '1' ? 'selected' : '' ?>>Visible in the menu</option>
+                            <option value="0" <?= ($cfg['users_links_visible'] ?? '1') !== '1' ? 'selected' : '' ?>>Hidden (direct URL only)</option>
+                        </select>
+                        <small class="settings-hint">Hidden: <code>?action=login</code> / <code>?action=register</code> still work.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Default group (slug)</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="users_default_group" value="<?= sanitize($cfg['users_default_group'] ?? 'member') ?>" pattern="[a-z0-9_-]{2,64}">
+                        <small class="settings-hint">Granted to every new account (plus any group flagged &ldquo;default&rdquo;).</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Expiry warning (days)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="users_notify_expiry_days" value="<?= sanitize($cfg['users_notify_expiry_days'] ?? '3') ?>" min="0" max="30">
+                        <small class="settings-hint">Notify (+email when possible) this many days before a timed group ends. 0 = off.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Logins / 15 min (per IP)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_user_login" value="<?= sanitize($cfg['rate_limit_user_login'] ?? '10') ?>" min="0" max="1000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Registrations / hour (per IP)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_user_register" value="<?= sanitize($cfg['rate_limit_user_register'] ?? '5') ?>" min="0" max="1000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Searches / hour (per IP)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_index_search" value="<?= sanitize($cfg['rate_limit_index_search'] ?? '120') ?>" min="0" max="100000">
+                        <small class="settings-hint">The member Index search (<code>?action=search</code>).</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Federation / cluster -->
+            <div class="settings-section" id="section-federation">
+                <h5>Federation / Cluster</h5>
+                <small class="settings-hint d-block mb-3">Exchange resolved Index <strong>metadata</strong> with other tracker nodes so everyone builds a bigger search catalogue without re-fetching from the DHT. Pull-based: each node pulls compressed JSON pages from its peers' <code>v1/federation/export</code> (bearer key with the <em>federation</em> scope) and merges them with <code>worker/federation.py</code> (systemd timer — <strong>not</strong> PHP web time; see <code>worker/README.md</code>). By default an import only <em>fills in metadata</em> for hashes this tracker has itself observed; &ldquo;accept new hashes&rdquo; also inserts hashes never seen here. Needs the S2S API enabled above. Peers are managed below.</small>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Federation</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fed_enabled">
+                            <option value="1" <?= ($cfg['fed_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled</option>
+                            <option value="0" <?= ($cfg['fed_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Node name</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="fed_node_name" value="<?= sanitize($cfg['fed_node_name'] ?? '') ?>" maxlength="64" placeholder="my-tracker">
+                        <small class="settings-hint">Shown to peers in export replies.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Export to peers</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fed_export_enabled">
+                            <option value="1" <?= ($cfg['fed_export_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Yes</option>
+                            <option value="0" <?= ($cfg['fed_export_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>No (pull only)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Export file lists</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fed_export_files">
+                            <option value="1" <?= ($cfg['fed_export_files'] ?? '1') === '1' ? 'selected' : '' ?>>Yes</option>
+                            <option value="0" <?= ($cfg['fed_export_files'] ?? '1') !== '1' ? 'selected' : '' ?>>No (name/size only)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Rows per export page</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_export_max_batch" value="<?= sanitize($cfg['fed_export_max_batch'] ?? '2000') ?>" min="100" max="20000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Accept new hashes</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fed_import_new">
+                            <option value="1" <?= ($cfg['fed_import_new'] ?? '0') === '1' ? 'selected' : '' ?>>Yes (grow the index from peers)</option>
+                            <option value="0" <?= ($cfg['fed_import_new'] ?? '0') !== '1' ? 'selected' : '' ?>>No (only fill my observed hashes)</option>
+                        </select>
+                        <small class="settings-hint">Imported rows count against the Index row cap.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Pull interval (min)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_pull_minutes" value="<?= sanitize($cfg['fed_pull_minutes'] ?? '60') ?>" min="5" max="1440">
+                        <small class="settings-hint">Honoured by <code>federation.py</code> when run in loop mode; a systemd timer uses its own schedule.</small>
+                    </div>
+                </div>
+                <div class="mt-3" id="fed-peers-card">
+                    <label class="form-label">Peers</label>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-sm align-middle" id="fed-peers-table">
+                            <thead><tr><th>Name</th><th>Base URL</th><th>Pull</th><th>Inbound key</th><th>Last pull</th><th>Imported</th><th>Status</th><th></th></tr></thead>
+                            <tbody id="fed-peers-body"><tr><td colspan="8" class="text-muted">Loading&hellip;</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div class="row g-2 align-items-end" id="fed-peer-add">
+                        <div class="col-md-2"><label class="form-label">Name</label><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="fp-name" maxlength="64" placeholder="other-tracker"></div>
+                        <div class="col-md-3"><label class="form-label">Base URL</label><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="fp-url" maxlength="255" placeholder="https://tracker.example.org"></div>
+                        <div class="col-md-3"><label class="form-label">Their bearer <small class="settings-hint">(for pulling FROM them; optional)</small></label><input type="password" class="form-control form-control-sm bg-dark text-light border-secondary" id="fp-bearer" autocomplete="off" placeholder="key_id.secret"></div>
+                        <div class="col-md-1"><label class="form-label">Pull</label><select class="form-select form-select-sm bg-dark text-light border-secondary" id="fp-pull"><option value="1">Yes</option><option value="0" selected>No</option></select></div>
+                        <div class="col-md-3">
+                            <button type="button" class="btn btn-sm btn-outline-info" id="fp-add"><i class="bi bi-plus-lg"></i> Add peer</button>
+                            <div class="form-check form-check-inline ms-1" title="Also create an API key (scope: federation) the peer uses to pull FROM us — shown once">
+                                <input class="form-check-input" type="checkbox" id="fp-grant">
+                                <label class="form-check-label settings-hint" for="fp-grant">grant inbound access</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="fp-alert" class="mt-2"></div>
+                    <small class="settings-hint d-block mt-1">Exchange flow: each admin adds the other as a peer, ticks <em>grant inbound access</em>, and sends the generated bearer to the other side, who pastes it into <em>Their bearer</em> and enables <em>Pull</em>. Test verifies the outbound direction.</small>
                 </div>
             </div>
 
@@ -993,6 +1123,111 @@
     let currentCaptchaAttempts = '<?= sanitize($cfg['delete_captcha_attempts'] ?? '2') ?>';
     let currentLockoutAttempts = '<?= sanitize($cfg['delete_lockout_attempts'] ?? '5') ?>';
     let currentLockoutMinutes = '<?= sanitize($cfg['delete_lockout_minutes'] ?? '60') ?>';
+
+    // ── Federation peers (Settings → Federation / Cluster). All rendering via textContent —
+    //    peer names/URLs/status come from the DB and, indirectly, from remote admins. ──
+    (function () {
+        const body = document.getElementById('fed-peers-body');
+        if (!body) return;
+        const alertBox = document.getElementById('fp-alert');
+        const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined && text !== null) n.textContent = text; if (cls) n.className = cls; return n; };
+        const note = (msg, cls) => { alertBox.innerHTML = ''; const d = el('div', msg, 'alert py-2 px-3 ' + (cls || 'alert-info')); d.style.display = 'block'; alertBox.appendChild(d); };
+        const call = async (endpoint, bodyObj) => {
+            try {
+                const res = await fetch(API_BASE + endpoint, {
+                    method: bodyObj === undefined ? 'GET' : 'POST',
+                    headers: bodyObj === undefined ? { 'Accept': 'application/json' } : { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+                    body: bodyObj === undefined ? undefined : JSON.stringify(bodyObj),
+                });
+                return await res.json();
+            } catch { return { error: 'Network error' }; }
+        };
+        async function loadPeers() {
+            const json = await call('admin/fetch_fed_peers');
+            body.innerHTML = '';
+            if (json.error) { body.appendChild(el('tr')).appendChild(el('td', json.error, 'text-danger')).colSpan = 8; return; }
+            if (!json.peers.length) {
+                const td = el('td', 'No peers yet — add the first one below.', 'text-muted');
+                td.colSpan = 8;
+                body.appendChild(el('tr')).appendChild(td);
+            }
+            json.peers.forEach(p => {
+                const tr = el('tr');
+                tr.appendChild(el('td', p.name));
+                tr.appendChild(el('td', p.base_url, 'text-break'));
+                tr.appendChild(el('td', p.pull_enabled ? (p.has_bearer ? 'yes' : 'yes (no bearer!)') : 'no', p.pull_enabled && !p.has_bearer ? 'text-warning' : ''));
+                tr.appendChild(el('td', p.api_client_id ? ((p.client_key_id || '?') + (p.client_enabled === 0 ? ' (disabled)' : '')) : '—', p.client_enabled === 0 ? 'text-warning' : ''));
+                tr.appendChild(el('td', p.last_pull_at || 'never', 'text-muted'));
+                tr.appendChild(el('td', String(p.rows_imported || 0)));
+                tr.appendChild(el('td', p.last_status || '—', 'text-muted small'));
+                const act = el('td');
+                act.className = 'text-nowrap';
+                const testBtn = el('button', 'Test', 'btn btn-sm btn-outline-info me-1');
+                testBtn.type = 'button';
+                testBtn.addEventListener('click', async () => {
+                    testBtn.disabled = true;
+                    const r = await call('admin/fed_peer_test', { id: p.id });
+                    testBtn.disabled = false;
+                    if (r.success) note('Peer "' + p.name + '" answered: node "' + (r.reply.node || '?') + '", export ' + (r.reply.export_enabled ? 'ON' : 'OFF') + ', ' + (r.reply.exportable_rows || 0).toLocaleString() + ' exportable rows.', 'alert-success');
+                    else note('Test failed: ' + (r.error || '?'), 'alert-danger');
+                });
+                const togglePull = el('button', p.pull_enabled ? 'Pull off' : 'Pull on', 'btn btn-sm btn-outline-secondary me-1');
+                togglePull.type = 'button';
+                togglePull.addEventListener('click', async () => {
+                    const r = await call('admin/fed_peer_save', { id: p.id, name: p.name, base_url: p.base_url, pull_enabled: p.pull_enabled ? 0 : 1, pull_files: p.pull_files });
+                    if (r.error) note(r.error, 'alert-danger'); else loadPeers();
+                });
+                const bearerBtn = el('button', 'Bearer…', 'btn btn-sm btn-outline-secondary me-1');
+                bearerBtn.type = 'button';
+                bearerBtn.title = 'Set / replace the outbound bearer used to pull from this peer';
+                bearerBtn.addEventListener('click', async () => {
+                    const val = window.prompt('Bearer for pulling FROM "' + p.name + '" (key_id.secret, empty = remove):');
+                    if (val === null) return;
+                    const r = await call('admin/fed_peer_save', { id: p.id, name: p.name, base_url: p.base_url, pull_enabled: p.pull_enabled, pull_files: p.pull_files, bearer: val.trim() === '' ? 'CLEAR' : val.trim() });
+                    if (r.error) note(r.error, 'alert-danger'); else { note('Bearer updated.', 'alert-success'); loadPeers(); }
+                });
+                const grantBtn = el('button', 'Grant inbound', 'btn btn-sm btn-outline-secondary me-1');
+                grantBtn.type = 'button';
+                grantBtn.title = 'Create the API key (scope: federation) this peer uses to pull FROM us';
+                if (p.api_client_id) grantBtn.disabled = true;
+                grantBtn.addEventListener('click', async () => {
+                    const r = await call('admin/fed_peer_save', { id: p.id, name: p.name, base_url: p.base_url, pull_enabled: p.pull_enabled, pull_files: p.pull_files, grant_inbound: 1 });
+                    if (r.error) { note(r.error, 'alert-danger'); return; }
+                    if (r.inbound) note('Inbound bearer for "' + p.name + '" (copy it NOW — shown once): ' + r.inbound.bearer, 'alert-warning');
+                    loadPeers();
+                });
+                const delBtn = el('button', 'Delete', 'btn btn-sm btn-outline-danger');
+                delBtn.type = 'button';
+                delBtn.addEventListener('click', async () => {
+                    if (!window.confirm('Delete peer "' + p.name + '"? Its inbound API key is removed too.')) return;
+                    const r = await call('admin/fed_peer_delete', { id: p.id });
+                    if (r.error) note(r.error, 'alert-danger'); else loadPeers();
+                });
+                act.append(testBtn, togglePull, bearerBtn, grantBtn, delBtn);
+                tr.appendChild(act);
+                body.appendChild(tr);
+            });
+        }
+        document.getElementById('fp-add').addEventListener('click', async () => {
+            const r = await call('admin/fed_peer_save', {
+                name: document.getElementById('fp-name').value.trim(),
+                base_url: document.getElementById('fp-url').value.trim(),
+                bearer: document.getElementById('fp-bearer').value.trim(),
+                pull_enabled: document.getElementById('fp-pull').value === '1' ? 1 : 0,
+                pull_files: 1,
+                grant_inbound: document.getElementById('fp-grant').checked ? 1 : 0,
+            });
+            if (r.error) { note(r.error, 'alert-danger'); return; }
+            document.getElementById('fp-name').value = '';
+            document.getElementById('fp-url').value = '';
+            document.getElementById('fp-bearer').value = '';
+            document.getElementById('fp-grant').checked = false;
+            if (r.inbound) note('Peer added. Inbound bearer (copy it NOW — shown once): ' + r.inbound.bearer, 'alert-warning');
+            else note('Peer added.', 'alert-success');
+            loadPeers();
+        });
+        loadPeers();
+    })();
 
     document.getElementById('btn-test-blacklist').addEventListener('click', async () => {
         const el = document.getElementById('blacklist-result');

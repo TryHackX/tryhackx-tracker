@@ -4,12 +4,19 @@ $pageTitles = [
     'report' => 'Report', 'status' => 'Status',
     'transparency' => 'Transparency', 'unsubscribe' => 'Unsubscribe',
     'whitelist' => 'Whitelist',
+    'login' => 'Sign in', 'register' => 'Register', 'account' => 'Account',
+    'reset' => 'Password reset', 'search' => 'Search',
 ];
 $recaptchaNeeded = ($action === 'report' && isCaptchaEnabled($cfg, 'report'))
     || ($action === 'status' && (isCaptchaEnabled($cfg, 'status') || isCaptchaEnabled($cfg, 'block_check') || isCaptchaEnabled($cfg, 'appeal')))
-    || ($action === 'whitelist' && captchaConfigured($cfg));
-// swarm timeline chart (vendored uPlot) — only on the stats page when enabled and public
-$timelineNeeded = ($action === 'stats' && ($cfg['tracker_stats_enabled'] ?? '0') === '1' && statsTimelineEnabled($cfg) && statsTimelinePublic($cfg));
+    || ($action === 'whitelist' && captchaConfigured($cfg))
+    || (in_array($action, ['register', 'reset'], true) && captchaConfigured($cfg))
+    || ($action === 'login' && isCaptchaEnabled($cfg, 'login'));
+// swarm timeline chart (vendored uPlot) — only on the stats page when enabled, public and permitted
+$timelineNeeded = ($action === 'stats' && ($cfg['tracker_stats_enabled'] ?? '0') === '1' && statsTimelineEnabled($cfg) && statsTimelinePublic($cfg)
+    && userCan($db, $cfg, 'stats.timeline'));
+// the logged-in user (null when the account system is off or nobody is signed in) — nav + pages use it
+$navUser = usersEnabled($cfg) ? currentUser($db) : null;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -30,7 +37,7 @@ $timelineNeeded = ($action === 'stats' && ($cfg['tracker_stats_enabled'] ?? '0')
     <?= captchaHeadTags($cfg) ?>
     <?php endif; ?>
 </head>
-<body<?= ($action === 'transparency' || $action === 'stats') ? ' class="page-' . $action . '"' : '' ?>>
+<body<?= in_array($action, ['transparency', 'stats', 'search'], true) ? ' class="page-' . $action . '"' : '' ?>>
     <div class="container">
         <?php include __DIR__ . '/nav.php'; ?>
         <main>

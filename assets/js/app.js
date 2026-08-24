@@ -1712,3 +1712,371 @@ async function loadStatsHome(forceSync = false) {
         }
     }
 }
+
+// === User accounts (?action=login / register / account / reset) + index search (?action=search) ===
+// All rendering uses textContent — usernames, group names, notification titles and torrent names
+// are untrusted. Endpoints: user_login/user_register/user_logout/user_me/user_update/
+// user_notifications/user_reset_request/user_reset_confirm/index_search.
+(function () {
+    'use strict';
+    const $id = (x) => document.getElementById(x);
+    const csrfOf = (form) => (form.querySelector('[name="csrf_token"]') || $id('account-csrf') || { value: '' }).value;
+
+    function showAlert(el, msg, ok) {
+        el.className = 'alert show ' + (ok ? 'alert-success' : 'alert-error');
+        el.textContent = msg;
+    }
+    function fmtBytesPub(n) {
+        n = Number(n);
+        if (!isFinite(n) || n <= 0) return '—';
+        const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let i = 0;
+        while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+        return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2)) + ' ' + u[i];
+    }
+    const fmtDatePub = (s) => {
+        if (!s) return '—';
+        const d = new Date(String(s).replace(' ', 'T'));
+        return isNaN(d.getTime()) ? String(s) : d.toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    };
+    const postJson = async (endpoint, body) => {
+        try {
+            const res = await fetch(APP_API + endpoint, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            return await res.json();
+        } catch { return null; }
+    };
+    const getJson = async (endpoint) => {
+        try { return await (await fetch(APP_API + endpoint, { headers: { 'Accept': 'application/json' } })).json(); }
+        catch { return null; }
+    };
+
+    // ── sign in ──
+    function initLogin() {
+        const form = $id('login-form');
+        if (!form) return;
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alert = $id('login-alert'), btn = $id('login-submit');
+            btn.disabled = true;
+            const json = await fetchWithCaptcha('user_login', {
+                csrf_token: csrfOf(form),
+                login: $id('login-login').value.trim(),
+                password: $id('login-password').value,
+                remember: $id('login-remember').checked ? 1 : 0,
+            });
+            if (json && json.success) {
+                showAlert(alert, 'Signed in — loading your account…', true);
+                window.location.href = APP_BASE + '?action=account';
+            } else {
+                showAlert(alert, (json && json.error) || 'Sign-in failed', false);
+                btn.disabled = false;
+            }
+        });
+    }
+
+    // ── register ──
+    function initRegister() {
+        const form = $id('register-form');
+        if (!form) return;
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alert = $id('register-alert'), btn = $id('register-submit');
+            const u = $id('reg-username'), em = $id('reg-email'), p1 = $id('reg-password'), p2 = $id('reg-password2');
+            let bad = false;
+            const mark = (el, isBad) => { el.closest('.form-group').classList.toggle('has-error', isBad); bad = bad || isBad; };
+            mark(u, !/^[A-Za-z0-9_.-]{3,32}$/.test(u.value.trim()));
+            mark(em, em.value.trim() !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em.value.trim()));
+            mark(p1, p1.value.length < 8);
+            mark(p2, p2.value !== p1.value);
+            if (bad) return;
+            btn.disabled = true;
+            const json = await fetchWithCaptcha('user_register', {
+                csrf_token: csrfOf(form),
+                username: u.value.trim(), email: em.value.trim(), password: p1.value,
+            });
+            if (json && json.success) {
+                showAlert(alert, 'Account created — welcome!', true);
+                window.location.href = APP_BASE + '?action=account';
+            } else {
+                showAlert(alert, (json && json.error) || 'Registration failed', false);
+                btn.disabled = false;
+            }
+        });
+    }
+
+    // ── account page ──
+    async function loadAccount() {
+        const groupsBox = $id('acc-groups');
+        const me = await getJson('user_me');
+        if (!me || !me.success) { groupsBox.textContent = 'Could not load your groups.'; return; }
+        groupsBox.textContent = '';
+        if (!me.groups.length) {
+            const none = document.createElement('span');
+            none.className = 'text-muted';
+            none.textContent = 'No groups yet.';
+            groupsBox.appendChild(none);
+        } else {
+            me.groups.forEach(g => {
+                const div = document.createElement('div');
+                div.className = 'acc-group';
+                const name = document.createElement('strong');
+                name.textContent = g.name;
+                if (g.color && /^#[0-9a-fA-F]{3,8}$/.test(g.color)) name.style.color = g.color;
+                div.appendChild(name);
+                const until = document.createElement('span');
+                until.className = 'text-muted';
+                until.textContent = g.expires_at ? ' — until ' + fmtDatePub(g.expires_at) : ' — permanent';
+                div.appendChild(until);
+                if (g.description) {
+                    const d = document.createElement('div');
+                    d.className = 'acc-group-desc text-muted';
+                    d.textContent = g.description;
+                    div.appendChild(d);
+                }
+                groupsBox.appendChild(div);
+            });
+        }
+        const navBadge = $id('nav-unread'), accBadge = $id('acc-unread-badge');
+        if (navBadge) { navBadge.textContent = String(me.unread); navBadge.hidden = me.unread <= 0; }
+        if (accBadge) { accBadge.textContent = me.unread + ' unread'; accBadge.hidden = me.unread <= 0; }
+    }
+    async function loadNotifications() {
+        const box = $id('acc-notifications');
+        const json = await getJson('user_notifications');
+        if (!json || !json.success) { box.textContent = 'Could not load notifications.'; return; }
+        box.textContent = '';
+        if (!json.notifications.length) {
+            const none = document.createElement('span');
+            none.className = 'text-muted';
+            none.textContent = 'Nothing here yet.';
+            box.appendChild(none);
+            return;
+        }
+        json.notifications.forEach(n => {
+            const item = document.createElement('div');
+            item.className = 'acc-notif' + (n.read_at ? ' acc-notif-read' : '');
+            const head = document.createElement('div');
+            head.className = 'acc-notif-head';
+            const t = document.createElement('strong');
+            t.textContent = n.title;
+            head.appendChild(t);
+            const when = document.createElement('span');
+            when.className = 'text-muted';
+            when.textContent = fmtDatePub(n.created_at);
+            head.appendChild(when);
+            item.appendChild(head);
+            if (n.body) {
+                const b = document.createElement('div');
+                b.className = 'acc-notif-body';
+                b.textContent = n.body;
+                item.appendChild(b);
+            }
+            if (!n.read_at) {
+                const mark = document.createElement('button');
+                mark.type = 'button';
+                mark.className = 'btn btn-secondary btn-small';
+                mark.textContent = 'Mark read';
+                mark.addEventListener('click', async () => {
+                    await postJson('user_notifications', { csrf_token: $id('account-csrf').value, ids: [n.id] });
+                    loadNotifications(); loadAccount();
+                });
+                item.appendChild(mark);
+            }
+            box.appendChild(item);
+        });
+    }
+    function initAccount() {
+        if (!$id('account-form')) {
+            // not on the account page — still light up the nav badge for signed-in users
+            if ($id('nav-unread')) {
+                getJson('user_me').then(me => {
+                    if (me && me.success && me.unread > 0) { const b = $id('nav-unread'); b.textContent = String(me.unread); b.hidden = false; }
+                });
+            }
+            return;
+        }
+        loadAccount();
+        loadNotifications();
+        $id('acc-mark-all').addEventListener('click', async () => {
+            await postJson('user_notifications', { csrf_token: $id('account-csrf').value, all: 1 });
+            loadNotifications(); loadAccount();
+        });
+        $id('account-logout').addEventListener('click', async () => {
+            await postJson('user_logout', { csrf_token: $id('account-csrf').value });
+            window.location.href = APP_BASE;
+        });
+        $id('account-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alert = $id('account-alert'), btn = $id('account-save');
+            const body = { csrf_token: $id('account-csrf').value, current_password: $id('acc-cur-pass').value };
+            const curEmail = $id('acc-email').textContent.trim();
+            const newEmail = $id('acc-remove-email').checked ? '' : $id('acc-new-email').value.trim();
+            const hadEmail = curEmail !== '' && curEmail !== 'none';
+            if ($id('acc-remove-email').checked ? hadEmail : (newEmail !== (hadEmail ? curEmail : ''))) body.email = newEmail;
+            if ($id('acc-new-pass').value !== '') body.new_password = $id('acc-new-pass').value;
+            if (body.email === undefined && body.new_password === undefined) { showAlert(alert, 'Nothing to change.', false); return; }
+            btn.disabled = true;
+            const json = await postJson('user_update', body);
+            btn.disabled = false;
+            if (json && json.success) {
+                showAlert(alert, 'Saved.' + (json.changed.includes('password') ? ' Use the new password next time you sign in.' : ''), true);
+                $id('acc-cur-pass').value = ''; $id('acc-new-pass').value = '';
+                if (body.email !== undefined) $id('acc-email').textContent = body.email || 'none';
+            } else {
+                showAlert(alert, (json && json.error) || 'Update failed', false);
+            }
+        });
+    }
+
+    // ── password reset ──
+    function initReset() {
+        const reqForm = $id('reset-request-form');
+        if (reqForm) {
+            reqForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const alert = $id('reset-alert'), btn = $id('reset-submit');
+                btn.disabled = true;
+                const json = await fetchWithCaptcha('user_reset_request', {
+                    csrf_token: csrfOf(reqForm), login: $id('reset-login').value.trim(),
+                });
+                btn.disabled = false;
+                if (json && json.success) showAlert(alert, json.message || 'Check your inbox.', true);
+                else showAlert(alert, (json && json.error) || 'Request failed', false);
+            });
+        }
+        const confForm = $id('reset-confirm-form');
+        if (confForm) {
+            confForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const alert = $id('resetc-alert'), btn = $id('resetc-submit');
+                const p1 = $id('resetc-password'), p2 = $id('resetc-password2');
+                if (p1.value.length < 8) { showAlert(alert, 'Password must be at least 8 characters.', false); return; }
+                if (p1.value !== p2.value) { showAlert(alert, 'Passwords do not match.', false); return; }
+                btn.disabled = true;
+                const json = await postJson('user_reset_confirm', { csrf_token: csrfOf(confForm), token: $id('resetc-token').value, password: p1.value });
+                btn.disabled = false;
+                if (json && json.success) {
+                    showAlert(alert, 'Password changed — you can sign in now.', true);
+                    setTimeout(() => { window.location.href = APP_BASE + '?action=login'; }, 1200);
+                } else showAlert(alert, (json && json.error) || 'Reset failed', false);
+            });
+        }
+    }
+
+    // ── index search ──
+    function initSearch() {
+        const form = $id('search-form');
+        if (!form) return;
+        const canMagnet = form.dataset.canMagnet === '1';
+        const announces = [form.dataset.announce, form.dataset.announceHttps].filter(Boolean);
+        const magnetFor = (hash, name) => {
+            let m = 'magnet:?xt=urn:btih:' + hash;
+            if (name) m += '&dn=' + encodeURIComponent(name);
+            announces.forEach(u => { m += '&tr=' + encodeURIComponent(u); });
+            return m;
+        };
+        async function run(page) {
+            const alert = $id('search-alert'), table = $id('search-table'), body = $id('search-body'), note = $id('search-note');
+            alert.className = 'alert';
+            const qs = new URLSearchParams({ page: String(page), sort: $id('search-sort').value });
+            const q = $id('search-input').value.trim();
+            if (q) qs.set('search', q);
+            const filesBox = $id('search-files');
+            if (filesBox && filesBox.checked) qs.set('search_files', '1');
+            const json = await getJson('index_search&' + qs.toString());
+            if (!json || !json.success) {
+                table.hidden = true;
+                note.hidden = true;
+                renderPager(1, 1);
+                const code = json && json.error;
+                showAlert(alert, code === 'rate_limit' ? 'Rate limit reached — try again later.'
+                    : code === 'login_required' ? 'Please sign in to search.'
+                    : code || 'Search failed.', false);
+                return;
+            }
+            body.textContent = '';
+            json.rows.forEach(r => {
+                const tr = document.createElement('tr');
+                const nameTd = document.createElement('td');
+                nameTd.className = 'search-name';
+                nameTd.textContent = r.name || '(no name)';
+                if (r.files_count) {
+                    const fc = document.createElement('span');
+                    fc.className = 'text-muted';
+                    fc.textContent = ' · ' + r.files_count + (r.files_count === 1 ? ' file' : ' files');
+                    nameTd.appendChild(fc);
+                }
+                tr.appendChild(nameTd);
+                const sizeTd = document.createElement('td');
+                sizeTd.textContent = fmtBytesPub(r.size);
+                tr.appendChild(sizeTd);
+                const slTd = document.createElement('td');
+                slTd.textContent = r.seeders + ' / ' + r.leechers;
+                tr.appendChild(slTd);
+                const seenTd = document.createElement('td');
+                seenTd.textContent = fmtDatePub(r.last_seen);
+                tr.appendChild(seenTd);
+                if (canMagnet) {
+                    const magTd = document.createElement('td');
+                    magTd.className = 'search-actions';
+                    if (r.info_hash) {
+                        const a = document.createElement('a');
+                        a.href = magnetFor(r.info_hash, r.name);
+                        a.className = 'btn btn-small';
+                        a.textContent = 'Magnet';
+                        magTd.appendChild(a);
+                        const copy = document.createElement('button');
+                        copy.type = 'button';
+                        copy.className = 'btn btn-secondary btn-small';
+                        copy.textContent = 'Copy';
+                        copy.addEventListener('click', () => {
+                            if (!navigator.clipboard) return;
+                            navigator.clipboard.writeText(magnetFor(r.info_hash, r.name))
+                                .then(() => { copy.textContent = 'Copied!'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); })
+                                .catch(() => {});
+                        });
+                        magTd.appendChild(copy);
+                    }
+                    tr.appendChild(magTd);
+                }
+                body.appendChild(tr);
+            });
+            table.hidden = json.rows.length === 0;
+            note.hidden = false;
+            note.textContent = json.total === 0 ? 'Nothing found.' : json.total.toLocaleString() + ' result' + (json.total === 1 ? '' : 's') + '.';
+            renderPager(json.page, json.pages);
+        }
+        function renderPager(page, pages) {
+            const box = $id('search-pagination');
+            box.textContent = '';
+            if (pages <= 1) return;
+            const mk = (label, target, disabled) => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.textContent = label;
+                b.disabled = !!disabled;
+                b.addEventListener('click', () => run(target));
+                return b;
+            };
+            box.appendChild(mk('‹ Prev', page - 1, page <= 1));
+            const info = document.createElement('span');
+            info.textContent = 'Page ' + page + ' of ' + pages;
+            box.appendChild(info);
+            box.appendChild(mk('Next ›', page + 1, page >= pages));
+        }
+        form.addEventListener('submit', (e) => { e.preventDefault(); run(1); });
+        $id('search-sort').addEventListener('change', () => run(1));
+        run(1);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        initLogin();
+        initRegister();
+        initAccount();
+        initReset();
+        initSearch();
+    });
+})();

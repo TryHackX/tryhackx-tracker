@@ -1,7 +1,7 @@
 <h1><?= sanitize($cfg['site_name'] ?? 'BitTorrent Tracker') ?></h1>
 <p>Public BitTorrent tracker powered by OpenTracker</p>
 
-<?php if (($cfg['tracker_stats_enabled'] ?? '0') === '1' && ($cfg['tracker_stats_show_home'] ?? '1') === '1'): ?>
+<?php if (($cfg['tracker_stats_enabled'] ?? '0') === '1' && ($cfg['tracker_stats_show_home'] ?? '1') === '1' && userCan($db, $cfg, 'home.stats')): ?>
 <?php
     $cacheFile = __DIR__ . '/../../config/stats_cache.json';
     $cacheData = null;

@@ -221,7 +221,10 @@ class Worker:
                     if isinstance(p, bytes):
                         p = p.decode("utf-8", "replace")
                     files.append((p[:1000], int(fs.file_size(i))))
-                self.db.query("UPDATE %s SET name=%%s, total_size=%%s, files_count=%%s, piece_length=%%s, meta_status='done', meta_fetched_at=NOW(), meta_error=NULL, meta_claim=NULL WHERE %s=%%s AND meta_claim=%%s" % (q["table"], kc),
+                # the index table (schema v7) records where the metadata came from ('dht' vs 'fed:<peer>');
+                # the whitelist table has no such column
+                src = ", meta_source='dht'" if q["table"] == self.cfg.index_table else ""
+                self.db.query("UPDATE %s SET name=%%s, total_size=%%s, files_count=%%s, piece_length=%%s, meta_status='done', meta_fetched_at=NOW(), meta_error=NULL, meta_claim=NULL%s WHERE %s=%%s AND meta_claim=%%s" % (q["table"], src, kc),
                               (name, total, count, piece, kv, token))
                 self.db.query("DELETE FROM %s WHERE %s=%%s" % (q["files"], q["files_fk"]), (row["info_hash"] if q["files_fk"] == "info_hash" else kv,))
                 if files and keep_files:

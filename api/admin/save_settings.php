@@ -53,6 +53,12 @@ $allowed = [
     'recaptcha_v3_site_key', 'recaptcha_v3_secret', 'recaptcha_v3_min_score',
     // server-to-server API
     'api_enabled', 'api_ban_days', 'api_ban_exempt_ips',
+    // user accounts (includes/users.php)
+    'users_enabled', 'users_registration_enabled', 'users_links_visible', 'users_default_group',
+    'users_notify_expiry_days', 'rate_limit_user_login', 'rate_limit_user_register', 'rate_limit_index_search',
+    // federation (includes/federation.php + worker/federation.py)
+    'fed_enabled', 'fed_node_name', 'fed_export_enabled', 'fed_export_files', 'fed_export_max_batch',
+    'fed_import_new', 'fed_pull_minutes',
 ];
 
 $data = [];
@@ -99,6 +105,9 @@ $intClamp = [
     'index_grace_days' => [1, 90, 3], 'index_protect_days' => [1, 365, 10], 'index_meta_daily_budget' => [0, 1000000, 500],
     'index_poll_budget' => [5, 120, 45],
     'admin_near_pages' => [1, 20, 2],
+    'users_notify_expiry_days' => [0, 30, 3], 'rate_limit_user_login' => [0, 1000, 10],
+    'rate_limit_user_register' => [0, 1000, 5], 'rate_limit_index_search' => [0, 100000, 120],
+    'fed_export_max_batch' => [100, 20000, 2000], 'fed_pull_minutes' => [5, 1440, 60],
 ];
 foreach ($intClamp as $k => [$min, $max, $def]) {
     if (isset($data[$k])) {
@@ -115,8 +124,17 @@ if (isset($data['whitelist_tracker_hosts'])) {
     }
     $data['whitelist_tracker_hosts'] = implode(', ', array_unique($clean));
 }
-foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue'] as $k) {
+foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
+          'users_enabled', 'users_registration_enabled', 'users_links_visible',
+          'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
+}
+if (isset($data['users_default_group'])) {
+    $data['users_default_group'] = strtolower($data['users_default_group']);
+    if (!preg_match('/^[a-z0-9_-]{2,64}$/', $data['users_default_group'])) $data['users_default_group'] = 'member';
+}
+if (isset($data['fed_node_name'])) {
+    $data['fed_node_name'] = mb_substr(preg_replace('/[^\w .\-]/u', '', $data['fed_node_name']) ?? '', 0, 64);
 }
 if (isset($data['index_source_url']) && $data['index_source_url'] !== '' && !preg_match('#^https?://[^\s]+$#i', $data['index_source_url'])) {
     jsonResponse(['error' => 'Index source URL must be an http(s) URL.'], 400);

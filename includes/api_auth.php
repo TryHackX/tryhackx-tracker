@@ -164,7 +164,7 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
         $fail('malformed', 'Authorization header is not "Bearer <key_id>.<secret>"');
     }
     $keyId = strtolower($m[1]); $secret = strtolower($m[2]);
-    $st = $db->prepare("SELECT id, label, key_id, secret_hash, enabled FROM api_clients WHERE key_id = ? LIMIT 1");
+    $st = $db->prepare("SELECT id, label, key_id, secret_hash, scope, enabled FROM api_clients WHERE key_id = ? LIMIT 1");
     $st->execute([$keyId]);
     $client = $st->fetch();
     if (!$client) $fail('unknown_key', 'no client with this key id', $keyId);
@@ -180,12 +180,26 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
     return $client;
 }
 
+/** Valid client scopes: what family of v1 endpoints a key may call ('all' = everything). */
+function apiClientScopes(): array { return ['whitelist', 'users', 'federation', 'all']; }
+
+/**
+ * Enforce the client's scope AFTER apiAuthenticate(). A wrong scope is an admin-side configuration
+ * matter, not an attack — 403 without a ban (mirrors the disabled-key branch).
+ */
+function apiRequireScope(array $client, string $scope): void {
+    $s = (string)($client['scope'] ?? 'whitelist');
+    if ($s === 'all' || $s === $scope) return;
+    jsonResponse(['error' => 'forbidden', 'detail' => 'this key does not have the "' . $scope . '" scope'], 403);
+}
+
 /** Create a client; returns ['id','key_id','secret'] — the secret is never retrievable again. */
-function apiClientCreate(PDO $db, string $label): array {
+function apiClientCreate(PDO $db, string $label, string $scope = 'whitelist'): array {
     $label = mb_substr(trim($label), 0, 100) ?: 'client';
+    if (!in_array($scope, apiClientScopes(), true)) $scope = 'whitelist';
     $keyId = bin2hex(random_bytes(8));
     $secret = bin2hex(random_bytes(32));
-    $db->prepare("INSERT INTO api_clients (label, key_id, secret_hash, secret_hint) VALUES (?, ?, ?, ?)")
-       ->execute([$label, $keyId, hash('sha256', $secret), substr($secret, -4)]);
-    return ['id' => (int)$db->lastInsertId(), 'key_id' => $keyId, 'secret' => $secret, 'label' => $label];
+    $db->prepare("INSERT INTO api_clients (label, key_id, secret_hash, secret_hint, scope) VALUES (?, ?, ?, ?, ?)")
+       ->execute([$label, $keyId, hash('sha256', $secret), substr($secret, -4), $scope]);
+    return ['id' => (int)$db->lastInsertId(), 'key_id' => $keyId, 'secret' => $secret, 'label' => $label, 'scope' => $scope];
 }

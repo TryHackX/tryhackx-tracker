@@ -3,8 +3,8 @@
  * TryHackX Tracker - Stats Page Template
  * Displays dynamic tracker telemetry with modern dashboard layout.
  */
-if (($cfg['tracker_stats_enabled'] ?? '0') !== '1') {
-    // If stats are disabled, redirect to home page
+if (($cfg['tracker_stats_enabled'] ?? '0') !== '1' || !userCan($db, $cfg, 'stats.view')) {
+    // Stats disabled, or this visitor's groups don't include stats access
     header('Location: ' . $baseUrl);
     exit;
 }

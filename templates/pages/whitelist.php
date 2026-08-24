@@ -1,4 +1,9 @@
 <?php
+if (!userCan($db, $cfg, 'whitelist.view')) {
+    echo '<h1>Whitelist</h1><p>Browsing the whitelist requires an account with whitelist access.</p>';
+    echo '<p><a class="btn" href="' . $baseUrl . '?action=login">Sign in</a></p>';
+    return;
+}
 $wlMode     = trackerMode($cfg) === 'whitelist';
 $wlSched    = function_exists('scheduleEnabled') && scheduleEnabled($cfg);   // whitelist hours → registration always open
 $wlReg      = $wlMode || $wlSched;   // registration UI shown (whitelist mode now, or scheduled whitelist hours)

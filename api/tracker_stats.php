@@ -25,6 +25,12 @@ clearstatcache();
 // timeout is known — a hardcoded limit here could kill a slow fetch that is still within
 // the admin-configured Request Timeout (e.g. timeout=90 but limit=60).
 
+// Permission check BEFORE the session is released (userCan reads the user session; admins pass).
+// The home widget needs `home.stats`, the stats page `stats.view` — with the user system off both
+// fall back to today's public behaviour (always allowed).
+$statsPerm = (($_GET['source'] ?? '') === 'home') ? 'home.stats' : 'stats.view';
+$statsPermOk = userCan($db, $cfg, $statsPerm);
+
 // Release the session early so concurrent requests aren't blocked on session lock.
 if (session_status() === PHP_SESSION_ACTIVE) {
     session_write_close();
@@ -36,6 +42,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 
 if (($cfg['tracker_stats_enabled'] ?? '0') !== '1') {
     jsonResponse(['error' => 'Tracker statistics are disabled'], 403);
+}
+if (!$statsPermOk) {
+    jsonResponse(['error' => 'Tracker statistics are not available for your account'], 403);
 }
 
 $url = $cfg['tracker_stats_url'] ?? '';

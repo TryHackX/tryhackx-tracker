@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 6;   // 3 = scheduled tracker mode settings, 4 = reCAPTCHA v3 settings (no DDL change), 5 = stats timeline tables, 6 = observed-hash index tables
+const TRACKER_SCHEMA_VERSION = 7;   // 3 = scheduled tracker mode settings, 4 = reCAPTCHA v3 settings (no DDL change), 5 = stats timeline tables, 6 = observed-hash index tables, 7 = user accounts/groups + federation peers + api client scopes
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -84,6 +84,7 @@ function trackerSchemaStatements(): array {
             `key_id` CHAR(16) NOT NULL,
             `secret_hash` CHAR(64) NOT NULL,
             `secret_hint` CHAR(4) NOT NULL DEFAULT '',
+            `scope` VARCHAR(32) NOT NULL DEFAULT 'whitelist',
             `enabled` TINYINT(1) NOT NULL DEFAULT 1,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `last_used_at` DATETIME DEFAULT NULL,
@@ -187,6 +188,7 @@ function trackerSchemaStatements(): array {
             `meta_claim` CHAR(16) DEFAULT NULL,
             `meta_fetched_at` DATETIME DEFAULT NULL,
             `meta_error` VARCHAR(255) DEFAULT NULL,
+            `meta_source` VARCHAR(24) DEFAULT NULL,
             `total_size` BIGINT UNSIGNED DEFAULT NULL,
             `files_count` INT UNSIGNED DEFAULT NULL,
             `piece_length` INT UNSIGNED DEFAULT NULL,
@@ -194,6 +196,7 @@ function trackerSchemaStatements(): array {
             `scrape_leechers` INT UNSIGNED DEFAULT NULL,
             `scrape_completed` INT UNSIGNED DEFAULT NULL,
             `scraped_at` DATETIME DEFAULT NULL,
+            KEY `idx_index_meta_fetched` (`meta_fetched_at`),
             KEY `idx_index_last_seen` (`last_seen`),
             KEY `idx_index_grace` (`grace_until`),
             KEY `idx_index_protected` (`protected_until`),
@@ -210,7 +213,122 @@ function trackerSchemaStatements(): array {
             KEY `idx_if_hash` (`info_hash`),
             FULLTEXT KEY `ft_if_path` (`path`)
         ) $engine",
+
+        // ── User accounts (schema v7, includes/users.php): registration/login, groups with JSON
+        //    permissions, timed memberships, in-app notifications and remember/reset tokens.
+        //    All optional — nothing is used unless users_enabled=1.
+        "CREATE TABLE IF NOT EXISTS `users` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `username` VARCHAR(32) NOT NULL,
+            `email` VARCHAR(190) DEFAULT NULL,
+            `pass_hash` VARCHAR(255) NOT NULL,
+            `status` VARCHAR(16) NOT NULL DEFAULT 'active',
+            `email_verified` TINYINT(1) NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `created_ip` VARCHAR(45) DEFAULT NULL,
+            `last_login_at` DATETIME DEFAULT NULL,
+            `last_login_ip` VARCHAR(45) DEFAULT NULL,
+            UNIQUE KEY `uq_users_username` (`username`),
+            UNIQUE KEY `uq_users_email` (`email`),
+            KEY `idx_users_status` (`status`),
+            KEY `idx_users_created` (`created_at`)
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `user_groups` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `slug` VARCHAR(64) NOT NULL,
+            `name` VARCHAR(64) NOT NULL,
+            `description` VARCHAR(255) NOT NULL DEFAULT '',
+            `color` VARCHAR(16) NOT NULL DEFAULT '',
+            `priority` INT NOT NULL DEFAULT 0,
+            `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+            `is_system` TINYINT(1) NOT NULL DEFAULT 0,
+            `permissions` TEXT DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_user_groups_slug` (`slug`)
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `user_group_members` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `group_id` INT UNSIGNED NOT NULL,
+            `granted_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `expires_at` DATETIME DEFAULT NULL,
+            `granted_by` VARCHAR(64) NOT NULL DEFAULT '',
+            `note` VARCHAR(255) NOT NULL DEFAULT '',
+            `warned_at` DATETIME DEFAULT NULL,
+            UNIQUE KEY `uq_ugm_user_group` (`user_id`, `group_id`),
+            KEY `idx_ugm_group` (`group_id`),
+            KEY `idx_ugm_expires` (`expires_at`)
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `user_notifications` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `type` VARCHAR(32) NOT NULL DEFAULT 'info',
+            `title` VARCHAR(190) NOT NULL,
+            `body` TEXT DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `read_at` DATETIME DEFAULT NULL,
+            KEY `idx_un_user` (`user_id`, `read_at`),
+            KEY `idx_un_created` (`created_at`)
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `user_tokens` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `type` VARCHAR(16) NOT NULL,
+            `token_hash` CHAR(64) NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `expires_at` DATETIME NOT NULL,
+            `used_at` DATETIME DEFAULT NULL,
+            UNIQUE KEY `uq_ut_hash` (`token_hash`),
+            KEY `idx_ut_user` (`user_id`, `type`),
+            KEY `idx_ut_expires` (`expires_at`)
+        ) $engine",
+
+        // Baseline groups: `guest` = permissions every visitor has (anonymous included, the baseline
+        // every logged-in user inherits); `member` = default group granted on registration. Both are
+        // editable but cannot be deleted (is_system). INSERT IGNORE keeps admin edits.
+        "INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
+            ('guest', 'Guest', 'Baseline permissions for every visitor (anonymous included).', 0, 0, 1,
+             '{\"whitelist.view\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}'),
+            ('member', 'Member', 'Default group for newly registered users.', 1, 1, 1, '{}')",
+
+        // ── Federation peers (schema v7, includes/federation.php): other tracker nodes we exchange index
+        //    metadata with. Inbound access = an api_clients row with scope 'federation' (api_client_id);
+        //    outbound pull = their bearer stored here, consumed by worker/federation.py.
+        "CREATE TABLE IF NOT EXISTS `fed_peers` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `name` VARCHAR(64) NOT NULL,
+            `base_url` VARCHAR(255) NOT NULL,
+            `bearer` VARCHAR(100) NOT NULL DEFAULT '',
+            `api_client_id` INT UNSIGNED DEFAULT NULL,
+            `pull_enabled` TINYINT(1) NOT NULL DEFAULT 0,
+            `pull_files` TINYINT(1) NOT NULL DEFAULT 1,
+            `last_pull_at` DATETIME DEFAULT NULL,
+            `last_pull_cursor` VARCHAR(64) NOT NULL DEFAULT '',
+            `last_status` VARCHAR(255) NOT NULL DEFAULT '',
+            `rows_imported` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_fed_peers_name` (`name`)
+        ) $engine",
     ];
+}
+
+/**
+ * Column/index additions for tables that may pre-date v7 (CREATE TABLE IF NOT EXISTS never touches an
+ * existing table). Returns only the ALTERs that are actually missing; ensureSchema runs them after the
+ * CREATE list. Fresh installs get these columns from the CREATE statements directly.
+ */
+function trackerSchemaGuardedStatements(PDO $db): array {
+    $out = [];
+    if (!schemaColumnExists($db, 'api_clients', 'scope')) {
+        $out[] = "ALTER TABLE `api_clients` ADD COLUMN `scope` VARCHAR(32) NOT NULL DEFAULT 'whitelist' AFTER `secret_hint`";
+    }
+    if (!schemaColumnExists($db, 'index_hashes', 'meta_source')) {
+        $out[] = "ALTER TABLE `index_hashes` ADD COLUMN `meta_source` VARCHAR(24) DEFAULT NULL AFTER `meta_error`";
+    }
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_fetched')) {
+        $out[] = "ALTER TABLE `index_hashes` ADD KEY `idx_index_meta_fetched` (`meta_fetched_at`)";
+    }
+    return $out;
 }
 
 /**
@@ -263,6 +381,26 @@ function trackerSchemaDefaultSettings(): array {
         'index_meta_daily_budget'     => '500',
         'index_keep_files'            => '1',
         'index_poll_budget'           => '45',
+        // schema v7: index metadata auto-queue + admin near-pages radius
+        'index_meta_auto_queue'       => '0',
+        'admin_near_pages'            => '2',
+        // schema v7: user accounts (includes/users.php) — everything off/neutral by default
+        'users_enabled'               => '0',
+        'users_registration_enabled'  => '1',
+        'users_links_visible'         => '1',
+        'users_default_group'         => 'member',
+        'users_notify_expiry_days'    => '3',
+        'rate_limit_user_login'       => '10',
+        'rate_limit_user_register'    => '5',
+        'rate_limit_index_search'     => '120',
+        // schema v7: federation (includes/federation.php + worker/federation.py)
+        'fed_enabled'                 => '0',
+        'fed_node_name'               => '',
+        'fed_export_enabled'          => '0',
+        'fed_export_files'            => '1',
+        'fed_export_max_batch'        => '2000',
+        'fed_import_new'              => '0',
+        'fed_pull_minutes'            => '60',
     ];
 }
 
@@ -296,6 +434,9 @@ function ensureSchema(PDO $db, array &$cfg): void {
                 return;
             }
             foreach (trackerSchemaStatements() as $sql) {
+                try { $db->exec($sql); } catch (PDOException $e) { error_log('[tracker schema] ' . $e->getMessage()); throw $e; }
+            }
+            foreach (trackerSchemaGuardedStatements($db) as $sql) {
                 try { $db->exec($sql); } catch (PDOException $e) { error_log('[tracker schema] ' . $e->getMessage()); throw $e; }
             }
             $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");

@@ -31,6 +31,8 @@ require_once __DIR__ . '/includes/index.php';
 require_once __DIR__ . '/includes/api_auth.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/mail.php';
+require_once __DIR__ . '/includes/users.php';
+require_once __DIR__ . '/includes/federation.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -123,9 +125,40 @@ $apiRoutes = [
     'admin/fetch_api_bans'       => 'api/admin/fetch_api_bans.php',
     'admin/api_ban_lift'         => 'api/admin/api_ban_lift.php',
     'admin/api_ban_add'          => 'api/admin/api_ban_add.php',
+    // ── User accounts (public; includes/users.php) ──
+    'user_register'              => 'api/user_register.php',
+    'user_login'                 => 'api/user_login.php',
+    'user_logout'                => 'api/user_logout.php',
+    'user_me'                    => 'api/user_me.php',
+    'user_update'                => 'api/user_update.php',
+    'user_notifications'         => 'api/user_notifications.php',
+    'user_reset_request'         => 'api/user_reset_request.php',
+    'user_reset_confirm'         => 'api/user_reset_confirm.php',
+    'index_search'               => 'api/index_search.php',
+    // ── User accounts (admin) ──
+    'admin/fetch_users'          => 'api/admin/fetch_users.php',
+    'admin/user_update'          => 'api/admin/user_update.php',
+    'admin/user_delete'          => 'api/admin/user_delete.php',
+    'admin/user_grant'           => 'api/admin/user_grant.php',
+    'admin/user_revoke'          => 'api/admin/user_revoke.php',
+    'admin/user_notify'          => 'api/admin/user_notify.php',
+    'admin/fetch_groups'         => 'api/admin/fetch_groups.php',
+    'admin/group_save'           => 'api/admin/group_save.php',
+    'admin/group_delete'         => 'api/admin/group_delete.php',
+    // ── Federation peers (admin; includes/federation.php) ──
+    'admin/fetch_fed_peers'      => 'api/admin/fetch_fed_peers.php',
+    'admin/fed_peer_save'        => 'api/admin/fed_peer_save.php',
+    'admin/fed_peer_delete'      => 'api/admin/fed_peer_delete.php',
+    'admin/fed_peer_test'        => 'api/admin/fed_peer_test.php',
     // ── Server-to-server API (bearer key; see includes/api_auth.php) ──
     'v1/whitelist/submit'        => 'api/v1/whitelist_submit.php',
     'v1/whitelist/ping'          => 'api/v1/whitelist_ping.php',
+    'v1/users/lookup'            => 'api/v1/users_lookup.php',
+    'v1/users/grant'             => 'api/v1/users_grant.php',
+    'v1/users/revoke'            => 'api/v1/users_revoke.php',
+    'v1/users/provision'         => 'api/v1/users_provision.php',
+    'v1/federation/ping'         => 'api/v1/federation_ping.php',
+    'v1/federation/export'       => 'api/v1/federation_export.php',
 ];
 
 if (!isset($apiRoutes[$endpoint])) {

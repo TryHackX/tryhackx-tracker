@@ -13,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') jsonResponse(['error' => 'Method not a
 if (!statsTimelineEnabled($cfg)) jsonResponse(['error' => 'Statistics timeline is disabled'], 403);
 // Evaluate while the session is still open: adminSessionValid() enforces the idle/absolute limits and
 // refreshes last_activity. Public mode short-circuits so anonymous pollers never touch the session.
-$public = statsTimelinePublic($cfg);
+$public = statsTimelinePublic($cfg) && userCan($db, $cfg, 'stats.timeline');
 $allowed = $public || adminSessionValid($cfg);
 if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 if (!$allowed) jsonResponse(['error' => 'Statistics timeline is not public'], 403);

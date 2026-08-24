@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the tracker federation importer periodically
+
+[Timer]
+# match the panel's fed_pull_minutes (the setting also gates federation.py --loop mode;
+# with a timer, the schedule below is what actually decides the cadence)
+OnBootSec=5min
+OnUnitActiveSec=60min
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

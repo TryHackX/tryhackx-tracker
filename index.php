@@ -21,6 +21,9 @@ require_once __DIR__ . '/includes/schedule.php';
 require_once __DIR__ . '/includes/stats_timeline.php';
 require_once __DIR__ . '/includes/index.php';
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/mail.php';
+require_once __DIR__ . '/includes/users.php';
+require_once __DIR__ . '/includes/federation.php';
 
 $db = getDb();
 $cfg = getSettings($db);
@@ -44,11 +47,16 @@ $routes = [
     'unsubscribe'  => 'templates/pages/unsubscribe.php',
     'stats'        => 'templates/pages/stats.php',
     'whitelist'    => 'templates/pages/whitelist.php',
+    'login'        => 'templates/pages/login.php',
+    'register'     => 'templates/pages/register.php',
+    'account'      => 'templates/pages/account.php',
+    'reset'        => 'templates/pages/reset.php',
+    'search'       => 'templates/pages/search.php',
 ];
 
 $baseUrl = getBaseUrl();
 
-if ($action === 'admin' || $action === 'settings' || $action === 'admin-whitelist' || $action === 'admin-index') {
+if ($action === 'admin' || $action === 'settings' || $action === 'admin-whitelist' || $action === 'admin-index' || $action === 'admin-users') {
     if (adminSessionValid($cfg)) {
         if ($action === 'settings') {
             include __DIR__ . '/templates/admin/settings.php';
@@ -56,6 +64,8 @@ if ($action === 'admin' || $action === 'settings' || $action === 'admin-whitelis
             include __DIR__ . '/templates/admin/whitelist.php';
         } elseif ($action === 'admin-index') {
             include __DIR__ . '/templates/admin/index_page.php';
+        } elseif ($action === 'admin-users') {
+            include __DIR__ . '/templates/admin/users.php';
         } else {
             include __DIR__ . '/templates/admin/dashboard.php';
         }
@@ -63,6 +73,11 @@ if ($action === 'admin' || $action === 'settings' || $action === 'admin-whitelis
         include __DIR__ . '/templates/admin/login.php';
     }
     exit;
+}
+
+// user pages exist only while the account system is on (and the account page needs a session)
+if (in_array($action, ['login', 'register', 'account', 'reset', 'search'], true) && !usersEnabled($cfg)) {
+    $action = 'home';
 }
 
 if (!isset($routes[$action])) {

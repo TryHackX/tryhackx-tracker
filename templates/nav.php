@@ -17,9 +17,25 @@
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=transparency" class="<?= $action === 'transparency' ? 'active' : '' ?>">Transparency</a>
         <?php endif; ?>
-        <?php if (($cfg['tracker_stats_enabled'] ?? '0') === '1'): ?>
+        <?php if (($cfg['tracker_stats_enabled'] ?? '0') === '1' && userCan($db, $cfg, 'stats.view')): ?>
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=stats" class="<?= $action === 'stats' ? 'active' : '' ?>">Stats</a>
+        <?php endif; ?>
+        <?php if (usersEnabled($cfg) && indexEnabled($cfg) && userCan($db, $cfg, 'index.view')): ?>
+        <span class="sep">|</span>
+        <a href="<?= $baseUrl ?>?action=search" class="<?= $action === 'search' ? 'active' : '' ?>">Search</a>
+        <?php endif; ?>
+        <?php $navUser = $navUser ?? (usersEnabled($cfg) ? currentUser($db) : null); ?>
+        <?php if ($navUser !== null): ?>
+        <span class="sep">|</span>
+        <a href="<?= $baseUrl ?>?action=account" class="nav-user <?= $action === 'account' ? 'active' : '' ?>"><?= sanitize($navUser['username']) ?><span class="nav-unread" id="nav-unread" hidden></span></a>
+        <?php elseif (usersLinksVisible($cfg)): ?>
+        <span class="sep">|</span>
+        <a href="<?= $baseUrl ?>?action=login" class="<?= $action === 'login' ? 'active' : '' ?>">Sign in</a>
+        <?php if (usersRegistrationEnabled($cfg)): ?>
+        <span class="sep">|</span>
+        <a href="<?= $baseUrl ?>?action=register" class="<?= $action === 'register' ? 'active' : '' ?>">Register</a>
+        <?php endif; ?>
         <?php endif; ?>
     </div>
 </nav>

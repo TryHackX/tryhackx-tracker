@@ -19,6 +19,7 @@
             <div class="admin-header-actions">
                 <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-speedometer2"></i> Dashboard</a>
                 <a href="<?= $baseUrl ?>?action=admin-index" class="btn btn-sm btn-outline-info"><i class="bi bi-collection"></i> Index</a>
+                <a href="<?= $baseUrl ?>?action=admin-users" class="btn btn-sm btn-outline-info"><i class="bi bi-people"></i> Users</a>
                 <a href="<?= $baseUrl ?>?action=settings" class="btn btn-sm btn-outline-info"><i class="bi bi-gear"></i> Settings</a>
                 <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
             </div>
@@ -235,10 +236,11 @@
             <div class="table-responsive">
                 <table class="table table-dark table-hover wl-table" id="cl-table">
                     <colgroup>
-                        <col class="wl-c-flex"><col class="wl-c-keyid"><col class="wl-c-secret"><col class="wl-c-enabled"><col class="wl-c-date"><col class="wl-c-date"><col class="wl-c-ip"><col class="wl-c-num"><col class="wl-c-actions-2">
+                        <col class="wl-c-flex"><col class="wl-c-enabled"><col class="wl-c-keyid"><col class="wl-c-secret"><col class="wl-c-enabled"><col class="wl-c-date"><col class="wl-c-date"><col class="wl-c-ip"><col class="wl-c-num"><col class="wl-c-actions-2">
                     </colgroup>
                     <thead><tr>
                         <th>Label</th>
+                        <th title="Which v1 endpoints this key may call">Scope</th>
                         <th>Key ID</th>
                         <th>Secret</th>
                         <th class="col-badge">Enabled</th>
