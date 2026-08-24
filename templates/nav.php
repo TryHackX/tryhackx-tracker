@@ -21,7 +21,7 @@
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=stats" class="<?= $action === 'stats' ? 'active' : '' ?>">Stats</a>
         <?php endif; ?>
-        <?php if (usersEnabled($cfg) && indexEnabled($cfg) && userCan($db, $cfg, 'index.view')): ?>
+        <?php if (usersEnabled($cfg) && indexEnabled($cfg) && ($cfg['index_search_enabled'] ?? '1') === '1' && userCan($db, $cfg, 'index.view')): ?>
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=search" class="<?= $action === 'search' ? 'active' : '' ?>">Search</a>
         <?php endif; ?>

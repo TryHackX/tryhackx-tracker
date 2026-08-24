@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 8;   // …, 5 = stats timeline tables, 6 = observed-hash index tables, 7 = user accounts/groups + federation peers + api client scopes, 8 = system admin group + panel-admin user migration + whitelist submit mode + worker concurrency setting
+const TRACKER_SCHEMA_VERSION = 9;   // …, 7 = user accounts/groups + federation peers + api client scopes, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -228,6 +228,8 @@ function trackerSchemaStatements(): array {
             `created_ip` VARCHAR(45) DEFAULT NULL,
             `last_login_at` DATETIME DEFAULT NULL,
             `last_login_ip` VARCHAR(45) DEFAULT NULL,
+            `pending_email` VARCHAR(190) DEFAULT NULL,
+            `email_changed_at` DATETIME DEFAULT NULL,
             UNIQUE KEY `uq_users_username` (`username`),
             UNIQUE KEY `uq_users_email` (`email`),
             KEY `idx_users_status` (`status`),
@@ -341,6 +343,11 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         $parts[] = "ADD KEY `idx_index_meta_fetched` (`meta_fetched_at`)";
     }
     if ($parts) $out[] = "ALTER TABLE `index_hashes` " . implode(', ', $parts);
+    // v9: two-step email change scratch columns (users is tiny — instant ALTER)
+    $uparts = [];
+    if (!schemaColumnExists($db, 'users', 'pending_email')) $uparts[] = "ADD COLUMN `pending_email` VARCHAR(190) DEFAULT NULL";
+    if (!schemaColumnExists($db, 'users', 'email_changed_at')) $uparts[] = "ADD COLUMN `email_changed_at` DATETIME DEFAULT NULL";
+    if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
     return $out;
 }
 
@@ -457,6 +464,15 @@ function trackerSchemaDefaultSettings(): array {
         // schema v8: metadata worker parallel fetches (empty = keep the worker's own config file
         // value; 1-16 overrides it live — the worker re-reads this setting every ~60 s)
         'meta_worker_concurrency'     => '',
+        // schema v9: registration requires an email + only verified accounts get their groups
+        // (unverified sign-ins act as guests until the link is clicked); terms checkbox content
+        // (empty = link to ?action=tos, otherwise shown in a modal); email-change cooldown; member
+        // search master switches
+        'users_require_email_verify'  => '1',
+        'users_terms_text'            => '',
+        'users_email_change_cooldown_days' => '30',
+        'index_search_enabled'        => '1',
+        'index_search_include_whitelist' => '1',
         // schema v7: federation (includes/federation.php + worker/federation.py)
         'fed_enabled'                 => '0',
         'fed_node_name'               => '',

@@ -11,6 +11,16 @@ function mailEncodeHeaderText(string $s): string {
     return preg_match('/[^\x20-\x7E]/', $s) ? '=?UTF-8?B?' . base64_encode($s) . '?=' : $s;
 }
 
+/**
+ * Absolute URL for use INSIDE an email. getBaseUrl() only knows the request PATH ("/"), which is
+ * useless in a mail client — links must carry the scheme+host from the configured site URL.
+ */
+function mailAbsoluteUrl(array $cfg, string $pathAndQuery): string {
+    $base = rtrim(trim((string)($cfg['site_url'] ?? '')), '/');
+    if ($base === '') $base = rtrim((function_exists('getBaseUrl') ? getBaseUrl() : '/'), '/');
+    return $base . '/' . ltrim($pathAndQuery, '/');
+}
+
 function sendEmail(string $to, string $subject, string $plainText, string $htmlBody, array $cfg, string $unsubscribeUrl = ''): bool {
     $siteName = mailEncodeHeaderText($cfg['site_name'] ?? 'Tracker');
     $siteEmail = str_replace(["\r", "\n"], '', $cfg['site_email'] ?? 'noreply@localhost');
@@ -437,6 +447,28 @@ HTML;
         $footerNoteHtml = '<p style="color:#8899aa;font-size:12px;margin:16px 0 0;font-style:italic;">' . sanitize($footerNote) . '</p>';
     }
 
+    // Call-to-action: a real button plus the raw link underneath ("if the button does not work,
+    // copy this link") — mail clients mangle bare-text links, so both forms are always given.
+    $actionBlock = '';
+    $actionUrl = trim((string)($data['action_url'] ?? ''));
+    if ($actionUrl !== '' && preg_match('#^https?://#i', $actionUrl)) {
+        $actionLabel = sanitize($data['action_label'] ?? 'Open link');
+        $safeUrl = sanitize($actionUrl);
+        $actionBlock = <<<HTML
+        <div style="text-align:center;margin:22px 0 10px;">
+            <a href="{$safeUrl}" style="display:inline-block;background:#4a9eff;color:#04121f;font-weight:600;font-size:14px;padding:11px 26px;border-radius:6px;text-decoration:none;">{$actionLabel}</a>
+        </div>
+        <p style="color:#8899aa;font-size:11px;margin:0 0 14px;text-align:center;">If the button does not work, copy this link into your browser:<br>
+        <a href="{$safeUrl}" style="color:#4a9eff;font-size:11px;word-break:break-all;">{$safeUrl}</a></p>
+HTML;
+    }
+
+    // The preferences link only renders when a real URL was provided — an empty href looked like
+    // a dead link in the reset mails.
+    $unsubBlock = $unsubUrl !== ''
+        ? '<a href="' . sanitize($unsubUrl) . '" style="color:#5a6a7a;font-size:11px;text-decoration:underline;">Manage notification preferences</a>'
+        : '';
+
     return <<<HTML
 <!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#0a0a1a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,monospace,sans-serif;">
@@ -448,12 +480,13 @@ HTML;
 <div style="padding:24px;color:#e0e0e0;">
 <p style="color:#ccc;margin:0 0 16px;">{$greeting}</p>
 <p style="line-height:1.7;margin:0 0 16px;">{$bodyHtml}</p>
+{$actionBlock}
 {$customBlock}
 <table style="width:100%;border-collapse:collapse;margin:20px 0;background:#0a0a1a;border-radius:6px;overflow:hidden;">{$rows}</table>
 {$footerNoteHtml}
 </div>
 <div style="padding:16px 24px;background:#0a0a14;text-align:center;border-top:1px solid #2a2a3e;">
-<a href="{$unsubUrl}" style="color:#5a6a7a;font-size:11px;text-decoration:underline;">Manage notification preferences</a>
+{$unsubBlock}
 <p style="color:#3a3a4a;font-size:11px;margin:8px 0 0;">{$siteName} &bull; {$siteEmail}</p>
 </div>
 </div></body></html>

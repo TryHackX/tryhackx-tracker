@@ -16,7 +16,7 @@
         <div class="admin-header">
             <h2><i class="bi bi-collection"></i> Index <span class="idx-subtitle">observed hashes &mdash; not a whitelist</span></h2>
             <div class="admin-header-actions">
-                <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-flag"></i> Reports</a>
                 <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
                 <a href="<?= $baseUrl ?>?action=admin-users" class="btn btn-sm btn-outline-info"><i class="bi bi-people"></i> Users</a>
                 <a href="<?= $baseUrl ?>?action=settings#section-index" class="btn btn-sm btn-outline-info"><i class="bi bi-gear"></i> Settings</a>
@@ -74,6 +74,13 @@
                             <option value="grace">In grace</option>
                             <option value="protected">Protected</option>
                             <option value="promoted">Promoted</option>
+                        </select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="idx-perpage" title="Rows per page">
+                            <option value="15">15 / page</option>
+                            <option value="25" selected>25 / page</option>
+                            <option value="50">50 / page</option>
+                            <option value="100">100 / page</option>
+                            <option value="200">200 / page</option>
                         </select>
                     </div>
                     <div class="toolbar-right">

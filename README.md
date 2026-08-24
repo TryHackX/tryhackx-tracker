@@ -376,14 +376,22 @@ default — with it off, everything behaves exactly like the classic single-admi
   deadline, everything is invalidated on password change or ban). Email **password reset** plus
   **email verification** (1.7.0): registering with an address (or changing it) sends a 72-hour
   single-use confirmation link (`?action=verify`); the account page shows the verified badge with a
-  resend button and the admin list marks verified addresses — accounts work without confirming.
+  resend button and the admin list marks verified addresses. With the **verification gate**
+  (`users_require_email_verify`, default ON, 1.9.0) registration requires an address and group
+  permissions only apply once the link is clicked — an unverified sign-in runs at guest level
+  (admins exempt); registration also always requires accepting the **terms** (link to
+  `?action=tos`, or a modal with admin-pasted text via `users_terms_text`).
   New passwords follow a **policy** (1.8.0: min 8 chars + lowercase + uppercase + digit + special,
-  live checklist on the forms; existing hashes keep working). Changing the address asks for it
-  twice and notifies the OLD address. The menu links can be hidden (`users_links_visible=0`; the
-  nav shows one **Account** entry). Signing in as an `admin`-group member also opens the **admin
-  panel session** (no second login; the panel's own idle/absolute limits still apply, and panel
-  logout leaves the site session alone). The mirrored owner account is protected — it cannot be
-  deleted, banned or stripped of the admin group.
+  live two-column checklist on the forms; existing hashes keep working). **Changing the email is
+  two-step** (1.9.0): confirmed from the OLD mailbox first, then the NEW one (24 h links,
+  `?action=emailchange`); nothing is written until the second click, the new address arrives
+  verified, and `users_email_change_cooldown_days` (default 30) blocks rapid flip-flopping.
+  Account mails carry a CTA button + raw link and a working preferences link; the account page has
+  an **Account emails** toggle (`user_email_prefs`). The menu links can be hidden
+  (`users_links_visible=0`; the nav shows one **Account** entry). Signing in as an `admin`-group
+  member also opens the **admin panel session** (no second login; the panel's own idle/absolute
+  limits still apply, and panel logout leaves the site session alone). The mirrored owner account
+  is protected — it cannot be deleted, banned or stripped of the admin group.
 - **Groups with permissions** (Admin → **Users** → *Groups*): each group carries a set of
   permissions — `index.view` / `index.files` / `index.magnet` (the member search),
   `whitelist.view` (the public whitelist page + whitelisted rows in search), `whitelist.add`
@@ -401,11 +409,13 @@ default — with it off, everything behaves exactly like the classic single-admi
   posts in-app **notifications** (grant / revoke / expiry warning / expired; optional email copies;
   paginated on the account page with a *Delete read* button — read ones auto-prune after 90 days).
 - **Member search** (`?action=search`): search everything the tracker has *seen* (resolved index
-  metadata; with `whitelist.view` the live whitelist is folded in and badged `WL`) — ordered by
-  **Best match** relevance (fulltext score, rarer/longer words weigh more, seeders break ties) with
-  seeders/recency/size/name sorts, live-as-you-type with an admin-style toolbar and pagination,
-  per-permission columns (file counts open a **file-list modal** with `index.files`; info hashes /
-  magnet links with `index.magnet`).
+  metadata; with `whitelist.view` the live whitelist is folded in and badged `WL` — the admin can
+  exclude it globally via `index_search_include_whitelist`, or kill the whole search regardless of
+  grants via `index_search_enabled`) — ordered by **Best match** relevance (fulltext score,
+  rarer/longer words weigh more) with multi-column header sorts, live-as-you-type with a loading
+  state, match highlighting, a rows-per-page choice (15–200), and per-permission columns (file
+  counts open a **folder-tree modal** with `index.files`; info hashes / magnet links with
+  `index.magnet`).
 - **Selling group access**: create an API key with the **users** scope and call
   `v1/users/lookup | grant | revoke | provision` from your shop after a purchase — see
   [tools/api_client_example.py](tools/api_client_example.py). Grants made through the API notify the
@@ -957,6 +967,7 @@ All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` w
 | `user_update` | POST | Change own email / password (requires the current password) |
 | `user_reset_request` / `user_reset_confirm` | POST | Email password reset (CAPTCHA; token valid 2 h) |
 | `user_verify_send` | POST | (Re)send the email-verification link for the signed-in user (3/h/IP; link valid 72 h, consumed by `?action=verify`) |
+| `user_email_prefs` | GET/POST | The signed-in user's account-mail preference (expiry warnings, security notices) |
 | `index_search` | GET | Member search over the resolved index + whitelist (`search`, `search_files`, `sort` incl. `relevance`, `page`; gated by `index.*` / `whitelist.view` permissions) |
 | `index_files` | GET | File list of one catalogue entry for the search page (`hash`; needs `index.view` + `index.files`) |
 | `v1/whitelist/submit` | POST | Server-to-server registration (bearer key, scope `whitelist`; see [Whitelist mode](#whitelist-mode)) |

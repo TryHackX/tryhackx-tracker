@@ -1206,7 +1206,7 @@ input[type="number"] {
 .wl-c-date     { width: 148px; }
 .wl-c-date-lg  { width: 176px; }
 .wl-c-actions  { width: 176px; }
-.wl-c-files    { width: 54px; }
+.wl-c-files    { width: 78px; }
 .wl-files-col  { text-align: center; font-variant-numeric: tabular-nums; }
 .wl-c-actions-2 { width: 76px; }
 .wl-c-keyid    { width: 140px; }
@@ -1272,7 +1272,7 @@ input[type="number"] {
 .idx-c-check { width: 34px; } .idx-c-hash { width: 160px; } .idx-c-size { width: 90px; }
 #idx-table th { white-space: nowrap; }
 .idx-c-sl { width: 90px; } .idx-c-seen { width: 74px; } .idx-c-dates { width: 150px; }
-.idx-c-meta { width: 80px; } .idx-c-actions { width: 126px; } .idx-c-files { width: 56px; }
+.idx-c-meta { width: 80px; } .idx-c-actions { width: 126px; } .idx-c-files { width: 78px; }
 .idx-th-check { text-align: center; }
 #idx-table td, #idx-table th { vertical-align: middle; }
 #idx-table .idx-dates { font-size: 0.72rem; line-height: 1.25; }

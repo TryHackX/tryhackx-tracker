@@ -1,8 +1,11 @@
 <?php
 // Observed-hash index list: pagination, sorting, hash/name/file search, meta filter.
 // The query builder lives in includes/index.php (indexListSelect) — shared with the public search.
+$perPage = (int)($_GET['per_page'] ?? 0);
+if (!in_array($perPage, [15, 25, 50, 100, 200], true)) $perPage = (int)($cfg['items_per_page'] ?? 25);
 $res = indexListSelect($db, $cfg, [
     'page'         => $_GET['page'] ?? 1,
+    'per_page'     => $perPage,
     'sort'         => $_GET['sort'] ?? 'last:desc',
     'search'       => $_GET['search'] ?? '',
     'search_files' => ($_GET['search_files'] ?? '') === '1',

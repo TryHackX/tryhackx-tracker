@@ -21,6 +21,7 @@ const USER_REMEMBER_COOKIE = 'thx_remember';
 const USER_REMEMBER_DAYS   = 30;
 const USER_RESET_TTL_MIN   = 120;   // password-reset link lifetime (minutes)
 const USER_VERIFY_TTL_H    = 72;    // email-verification link lifetime (hours)
+const USER_ECHANGE_TTL_H   = 24;    // email-change confirmation links (old + new step)
 
 /** Sign-in duration choices (login form "Stay signed in for"): code => [seconds|null (forever), label]. */
 function userSessionChoices(): array {
@@ -33,6 +34,9 @@ function userSessionChoices(): array {
 }
 
 function usersEnabled(array $cfg): bool { return (($cfg['users_enabled'] ?? '0') === '1'); }
+/** Registration requires an email + only VERIFIED accounts get their groups (unverified = guest level). */
+function userEmailVerifyRequired(array $cfg): bool { return usersEnabled($cfg) && (($cfg['users_require_email_verify'] ?? '1') === '1'); }
+function userEmailChangeCooldownDays(array $cfg): int { return max(0, min(365, (int)($cfg['users_email_change_cooldown_days'] ?? 30))); }
 function usersRegistrationEnabled(array $cfg): bool { return usersEnabled($cfg) && (($cfg['users_registration_enabled'] ?? '1') === '1'); }
 function usersLinksVisible(array $cfg): bool { return usersEnabled($cfg) && (($cfg['users_links_visible'] ?? '1') === '1'); }
 function usersDefaultGroupSlug(array $cfg): string { return trim((string)($cfg['users_default_group'] ?? 'member')) ?: 'member'; }
@@ -309,24 +313,42 @@ function userGroupsAll(PDO $db, int $userId): array {
  * fewer permissions than an anonymous visitor if their groups are narrower. Membership in the
  * system `admin` group grants every registered permission.
  */
-function userEffectivePermissions(PDO $db, ?int $userId): array {
+function userEffectivePermissions(PDO $db, ?int $userId, ?array $cfg = null): array {
     static $cache = [];
-    $key = (string)($userId ?? 0);
+    $gate = $cfg !== null && userEmailVerifyRequired($cfg);
+    // the trusted flag is part of the cache key so verifying WITHIN a request (the ?action=verify
+    // page) immediately unlocks the groups — a plain per-user key would keep serving guest perms
+    $trusted = ($gate && $userId) ? userIsEmailTrusted($db, $userId) : true;
+    $key = (string)($userId ?? 0) . ($gate ? ($trusted ? '|vt' : '|vu') : '');
     if (isset($cache[$key])) return $cache[$key];
+    $guestPerms = function () use ($db): array {
+        $guest = userGroupBySlug($db, 'guest');
+        return $guest ? userGroupPermissions($guest['permissions']) : [];
+    };
     $perms = [];
     if ($userId) {
-        foreach (userGroups($db, $userId) as $g) {
-            if ($g['slug'] === 'admin') {   // site admins pass every check, current and future
-                $perms = array_fill_keys(array_keys(userPermissionList()), true);
-                break;
-            }
-            $perms += userGroupPermissions($g['permissions']);
+        $groups = userGroups($db, $userId);
+        $isAdmin = false;
+        foreach ($groups as $g) if ($g['slug'] === 'admin') { $isAdmin = true; break; }
+        if ($isAdmin) {   // site admins pass every check, current and future (verification gate included)
+            $perms = array_fill_keys(array_keys(userPermissionList()), true);
+        } elseif ($gate && !$trusted) {
+            // verification required but the address is missing/unconfirmed → guest level until the
+            // link in the mailbox is clicked (the account page itself stays reachable)
+            $perms = $guestPerms();
+        } else {
+            foreach ($groups as $g) $perms += userGroupPermissions($g['permissions']);
         }
     } else {
-        $guest = userGroupBySlug($db, 'guest');
-        if ($guest) $perms = userGroupPermissions($guest['permissions']);
+        $perms = $guestPerms();
     }
     return $cache[$key] = $perms;
+}
+
+/** Does this user have a verified address? (used by the email-verification gate) */
+function userIsEmailTrusted(PDO $db, int $userId): bool {
+    $u = userFindById($db, $userId);
+    return $u !== null && trim((string)($u['email'] ?? '')) !== '' && (int)$u['email_verified'] === 1;
 }
 
 /** Is this user an ACTIVE member of the system `admin` group? */
@@ -354,7 +376,7 @@ function userCan(PDO $db, array $cfg, string $perm): bool {
     if (function_exists('isLoggedIn') && isLoggedIn()) return true;   // panel admin
     if (!usersEnabled($cfg)) return userLegacyDefault($perm);
     $u = currentUser($db);
-    $perms = userEffectivePermissions($db, $u ? (int)$u['id'] : null);
+    $perms = userEffectivePermissions($db, $u ? (int)$u['id'] : null, $cfg);
     return !empty($perms[$perm]);
 }
 
@@ -427,15 +449,28 @@ function userNotify(PDO $db, int $userId, string $type, string $title, string $b
        ->execute([$userId, mb_substr($type, 0, 32), mb_substr($title, 0, 190), $body !== '' ? $body : null]);
 }
 
-/** Best-effort email copy of a notification (only when mail is set up and the user has an address). */
-function userNotifyMail(PDO $db, array $cfg, array $user, string $subject, string $bodyText): void {
+/**
+ * Best-effort email copy of a notification (only when mail is set up and the user has an address).
+ * $opts: action_url + action_label render a CTA button with the raw link underneath; title
+ * overrides the heading. Every account mail carries the recipient's unsubscribe/preferences link.
+ */
+function userNotifyMail(PDO $db, array $cfg, array $user, string $subject, string $bodyText, array $opts = []): void {
     $email = trim((string)($user['email'] ?? ''));
     if ($email === '' || !function_exists('sendEmail')) return;
     if (function_exists('isUnsubscribed') && isUnsubscribed($db, $email, 'account')) return;
     try {
         ob_start();
-        $html = buildEmailHtml(['title' => $subject, 'greeting' => 'Hello ' . $user['username'] . ',', 'body' => $bodyText, 'details' => []], $cfg);
-        @sendEmail($email, $subject, $bodyText, $html, $cfg);
+        $unsub = function_exists('getUnsubscribeUrl') ? getUnsubscribeUrl($email, $cfg) : '';
+        $plain = $bodyText . (!empty($opts['action_url']) ? "\n\n" . $opts['action_url'] : '');
+        $html = buildEmailHtml([
+            'title' => $opts['title'] ?? $subject,
+            'greeting' => 'Hello ' . sanitize($user['username'] ?? '') . ',',
+            'body' => nl2br(sanitize($bodyText)),
+            'action_url' => $opts['action_url'] ?? '',
+            'action_label' => $opts['action_label'] ?? '',
+            'details' => [], 'unsubscribe_url' => $unsub,
+        ], $cfg);
+        @sendEmail($email, $subject, $plain, $html, $cfg, $unsub);
         ob_end_clean();
     } catch (\Throwable $e) { if (ob_get_level()) ob_end_clean(); }
 }
@@ -503,17 +538,117 @@ function userVerifySend(PDO $db, array $cfg, array $user): bool {
     $email = trim((string)($user['email'] ?? ''));
     if ($email === '' || !function_exists('sendEmail')) return false;
     $token = userVerifyCreate($db, (int)$user['id']);
-    $base = function_exists('getBaseUrl') ? rtrim(getBaseUrl(), '/') : rtrim((string)($cfg['site_url'] ?? ''), '/');
-    $link = $base . '/?action=verify&token=' . $token;
+    $link = mailAbsoluteUrl($cfg, '?action=verify&token=' . $token);
     $site = $cfg['site_name'] ?? 'Tracker';
     $text = "Hello {$user['username']},\n\nConfirm that this address belongs to your $site account by opening:\n$link\n\nThe link is valid for " . USER_VERIFY_TTL_H . " hours. If you did not request this, ignore this message.";
     try {
+        $unsub = function_exists('getUnsubscribeUrl') ? getUnsubscribeUrl($email, $cfg) : '';
         $html = buildEmailHtml(['title' => 'Confirm your email address', 'greeting' => 'Hello ' . sanitize($user['username']) . ',',
-            'body' => 'Confirm that this address belongs to your ' . sanitize($site) . ' account by opening this link (valid for ' . USER_VERIFY_TTL_H . ' hours):<br><br>'
-                . '<a href="' . sanitize($link) . '" style="color:#4a9eff;">' . sanitize($link) . '</a><br><br>If you did not request this, ignore this message.',
-            'details' => []], $cfg);
-        return (bool)@sendEmail($email, $site . ' — confirm your email address', $text, $html, $cfg);
+            'body' => 'Confirm that this address belongs to your ' . sanitize($site) . ' account. The link is valid for ' . USER_VERIFY_TTL_H . ' hours; if you did not request this, ignore this message.',
+            'action_url' => $link, 'action_label' => 'Confirm email address',
+            'details' => [], 'unsubscribe_url' => $unsub], $cfg);
+        return (bool)@sendEmail($email, $site . ' — confirm your email address', $text, $html, $cfg, $unsub);
     } catch (\Throwable $e) { return false; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Email change — two-step confirmation (schema v9)
+//
+// Changing (or removing) the address is confirmed from the OLD mailbox first, then — for a change —
+// from the NEW one; only then is anything written to `email`. A cooldown
+// (users_email_change_cooldown_days, since the last COMPLETED change) blocks rapid flip-flopping,
+// so a hijacked session cannot quietly steal the mailbox and cover its tracks.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Pending-change state for the account page: null, or ['pending_email','stage' ('old'|'new')]. */
+function userEmailChangeState(PDO $db, array $user): ?array {
+    if (($user['pending_email'] ?? null) === null) return null;
+    $st = $db->prepare("SELECT type FROM user_tokens WHERE user_id = ? AND type IN ('echange_old','echange_new') AND expires_at >= NOW() AND used_at IS NULL ORDER BY id DESC LIMIT 1");
+    $st->execute([(int)$user['id']]);
+    $type = $st->fetchColumn();
+    if (!$type) return null;   // tokens expired — the pending value is dead weight
+    return ['pending_email' => (string)$user['pending_email'], 'stage' => $type === 'echange_old' ? 'old' : 'new'];
+}
+
+function userEmailChangeCancel(PDO $db, int $userId): void {
+    $db->prepare("UPDATE users SET pending_email = NULL WHERE id = ?")->execute([$userId]);
+    $db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type IN ('echange_old','echange_new')")->execute([$userId]);
+}
+
+/**
+ * Begin a change/removal ($newEmail '' = remove). Returns ['error'=>code(,'until')] or
+ * ['stage'=>'old'|'done_direct']. A user WITHOUT an old address gets the direct path (nothing to
+ * confirm from) — the standard verification mail still guards the new address.
+ */
+function userEmailChangeStart(PDO $db, array $cfg, array $user, string $newEmail): array {
+    $newEmail = trim($newEmail);
+    if ($newEmail !== '' && !userValidEmail($newEmail)) return ['error' => 'invalid_email'];
+    $old = trim((string)($user['email'] ?? ''));
+    if ($newEmail === $old) return ['error' => 'same_email'];
+    $days = userEmailChangeCooldownDays($cfg);
+    if ($days > 0 && !empty($user['email_changed_at'])) {
+        $until = strtotime((string)$user['email_changed_at']) + $days * 86400;
+        if (time() < $until) return ['error' => 'cooldown', 'until' => date('Y-m-d H:i', $until)];
+    }
+    if ($newEmail !== '') {
+        $dup = $db->prepare("SELECT 1 FROM users WHERE email = ? AND id <> ?");
+        $dup->execute([$newEmail, (int)$user['id']]);
+        if ($dup->fetchColumn()) return ['error' => 'email_taken'];
+    }
+    if ($old === '') {
+        $db->prepare("UPDATE users SET email = ?, email_verified = 0, email_changed_at = NOW() WHERE id = ?")
+           ->execute([$newEmail === '' ? null : $newEmail, (int)$user['id']]);
+        return ['stage' => 'done_direct'];
+    }
+    $db->prepare("UPDATE users SET pending_email = ? WHERE id = ?")->execute([$newEmail, (int)$user['id']]);
+    $db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type IN ('echange_old','echange_new')")->execute([(int)$user['id']]);
+    $token = bin2hex(random_bytes(32));
+    $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_old', ?, NOW() + INTERVAL " . USER_ECHANGE_TTL_H . " HOUR)")
+       ->execute([(int)$user['id'], hash('sha256', $token)]);
+    $link = mailAbsoluteUrl($cfg, '?action=emailchange&token=' . $token);
+    userNotifyMail($db, $cfg, $user, ($cfg['site_name'] ?? 'Tracker') . ' — confirm your email change',
+        'A change of your account email address was requested' . ($newEmail === '' ? ' (address REMOVAL)' : ' to: ' . $newEmail)
+        . ".\nStep 1 of 2: confirm from THIS (current) address. The link is valid for " . USER_ECHANGE_TTL_H . " hours.\nIf this was not you, change your password immediately.",
+        ['title' => 'Confirm your email change', 'action_url' => $link, 'action_label' => 'Yes, continue the change']);
+    return ['stage' => 'old'];
+}
+
+/** Consume one step link (?action=emailchange&token=…). Returns a status array for the page. */
+function userEmailChangeConsume(PDO $db, array $cfg, string $token): array {
+    if (!preg_match('/^[a-f0-9]{64}$/', $token)) return ['error' => 'invalid'];
+    $st = $db->prepare("SELECT id, user_id, type FROM user_tokens WHERE type IN ('echange_old','echange_new') AND token_hash = ? AND expires_at >= NOW() AND used_at IS NULL");
+    $st->execute([hash('sha256', $token)]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return ['error' => 'invalid'];
+    $u = userFindById($db, (int)$row['user_id']);
+    if (!$u || ($u['pending_email'] ?? null) === null) return ['error' => 'invalid'];
+    $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE id = ?")->execute([(int)$row['id']]);
+    $pending = (string)$u['pending_email'];
+    if ($row['type'] === 'echange_old') {
+        if ($pending === '') {   // removal — the old mailbox has spoken, done
+            $db->prepare("UPDATE users SET email = NULL, email_verified = 0, pending_email = NULL, email_changed_at = NOW() WHERE id = ?")->execute([(int)$u['id']]);
+            userNotify($db, (int)$u['id'], 'account', 'Your email address was removed', 'Confirmed from your previous address.');
+            return ['stage' => 'removed'];
+        }
+        $t2 = bin2hex(random_bytes(32));
+        $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_new', ?, NOW() + INTERVAL " . USER_ECHANGE_TTL_H . " HOUR)")
+           ->execute([(int)$u['id'], hash('sha256', $t2)]);
+        $link = mailAbsoluteUrl($cfg, '?action=emailchange&token=' . $t2);
+        userNotifyMail($db, $cfg, ['email' => $pending, 'username' => $u['username']], ($cfg['site_name'] ?? 'Tracker') . ' — confirm your new email address',
+            "The change was approved from the previous address.\nStep 2 of 2: confirm that THIS new address is yours. The link is valid for " . USER_ECHANGE_TTL_H . " hours.",
+            ['title' => 'Confirm your new address', 'action_url' => $link, 'action_label' => 'Confirm new address']);
+        return ['stage' => 'old_ok', 'pending' => $pending];
+    }
+    // echange_new — finalise (new address arrives already verified; cooldown clock restarts)
+    try {
+        $db->prepare("UPDATE users SET email = ?, email_verified = 1, pending_email = NULL, email_changed_at = NOW() WHERE id = ?")->execute([$pending, (int)$u['id']]);
+    } catch (PDOException $e) {
+        return ['error' => 'email_taken'];
+    }
+    userNotify($db, (int)$u['id'], 'account', 'Your email address was changed', 'New address: ' . $pending . ' (verified).');
+    userNotifyMail($db, $cfg, ['email' => (string)$u['email'], 'username' => $u['username']], ($cfg['site_name'] ?? 'Tracker') . ' — your email address was changed',
+        'The email on your account is now: ' . $pending . "\nIf this was not you, reset your password immediately.");
+    return ['stage' => 'done', 'email' => $pending];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

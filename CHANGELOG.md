@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] — 2026-08-24 (schema v9)
+
+### Added — accounts
+- **Proper transactional emails**: a real CTA button plus the raw link underneath ("if the button
+  does not work, copy this link"), absolute URLs (reset links used to arrive as a relative,
+  unclickable `/?action=reset…` path), and the footer "Manage notification preferences" link now
+  actually points at the recipient's signed preferences page (or is omitted). Applies to password
+  reset, email verification and every account notice. The account page gained an **Account
+  emails** toggle (same `email_preferences` store as the unsubscribe page, type `account`) via the
+  new `user_email_prefs` endpoint.
+- **Email verification gate** (`users_require_email_verify`, default ON): registration requires an
+  email address and group permissions only apply after the confirmation link is clicked — an
+  unverified sign-in runs at **guest level** (the account page stays reachable, `admin`-group
+  members are exempt). The account page shows a banner while restricted.
+- **Terms checkbox at registration** (always required): the link opens `?action=tos` by default,
+  or — when the admin pastes text into Settings → *Registration terms* (`users_terms_text`) — a
+  modal with that text.
+- **Two-step email change** (`users.pending_email`/`email_changed_at`): changing (or removing) the
+  address is confirmed from the **old mailbox first**, then — for a change — from the **new one**
+  (`?action=emailchange`, 24 h single-use links); only the second click writes anything, the new
+  address arrives already verified, and a **cooldown** (`users_email_change_cooldown_days`,
+  default 30, 0 = off) blocks the next change so a hijacked session cannot quietly steal the
+  mailbox and cover its tracks. The account page shows the pending step with a Cancel button;
+  accounts without an old address keep the direct path (standard verification covers the new one).
+- **Client-side CAPTCHA retry**: after a solved CAPTCHA is submitted, a "verification failed"
+  reply is retried up to 3× at 1 s intervals before the user sees an error — on a lossy uplink the
+  server's verifier call often just needs a second attempt (doubles as the usual anti-bruteforce
+  processing delay).
+
+### Added — lists & search
+- **Rows per page** (15/25/50/100/200, remembered per browser) on the admin Whitelist and Index
+  tables and the public search.
+- **Search master switches**: `index_search_enabled` (kill-switch that overrides `index.view`
+  grants) and `index_search_include_whitelist` (whether registered torrents may appear in member
+  search results).
+- The search page shows a **loading state** (dimmed table + "Searching…") so a slow reply is
+  distinguishable from a hang; the password checklist renders as a **two-column grid**; the
+  cut-off "File…" header on Index/Whitelist is fixed (wider column).
+- The admin "Dashboard" is now called **Reports** (that page manages abuse reports & appeals; the
+  tracker-status card just lives there).
+
 ## [1.8.0] — 2026-08-24
 
 ### Fixed — the two production bugs behind "first CAPTCHA always fails" and "no reset mail"

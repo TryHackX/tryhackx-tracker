@@ -5,7 +5,7 @@
  * whitelist.view (the same visibility rule as index_search). Shares the search rate-limit bucket.
  */
 if (!usersEnabled($cfg)) jsonResponse(['error' => 'accounts_disabled'], 400);
-if (!indexEnabled($cfg)) jsonResponse(['error' => 'search_disabled'], 400);
+if (!indexEnabled($cfg) || ($cfg['index_search_enabled'] ?? '1') !== '1') jsonResponse(['error' => 'search_disabled'], 400);
 if (!userCan($db, $cfg, 'index.view') || !userCan($db, $cfg, 'index.files')) {
     jsonResponse(['error' => currentUser($db) ? 'no_permission' : 'login_required'], 403);
 }
@@ -31,7 +31,7 @@ if ($idx) {
     $fs->bindValue(2, $limit + 1, PDO::PARAM_INT);
     $fs->execute();
     foreach ($fs->fetchAll(PDO::FETCH_ASSOC) as $f) $files[] = ['path' => (string)$f['path'], 'size' => (int)$f['size']];
-} elseif (userCan($db, $cfg, 'whitelist.view')) {
+} elseif (userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1') {
     $st = $db->prepare("SELECT id, name FROM whitelist WHERE info_hash = ? AND banned = 0");
     $st->execute([$hash]);
     $wl = $st->fetch(PDO::FETCH_ASSOC);

@@ -73,6 +73,8 @@
     function sortParam() { return state.sort.map(s => s.col + ':' + s.dir).join(','); }
     function listQuery(page) {
         const qs = new URLSearchParams({ page: String(page), sort: sortParam() });
+        const pp = $('idx-perpage');
+        if (pp && pp.value !== '25') qs.set('per_page', pp.value);
         if (state.search) qs.set('search', state.search);
         if (state.searchFiles) qs.set('search_files', '1');
         if (state.meta) qs.set('meta', state.meta);
@@ -369,6 +371,11 @@
         $('idx-search-files').addEventListener('change', () => { state.searchFiles = $('idx-search-files').checked; state.page = 1; load(); });
         $('idx-filter-meta').addEventListener('change', () => { state.meta = $('idx-filter-meta').value; state.page = 1; load(); });
         $('idx-filter-life').addEventListener('change', () => { state.life = $('idx-filter-life').value; state.page = 1; load(); });
+        const idxPp = $('idx-perpage');
+        if (idxPp) {
+            try { const v = localStorage.getItem('thx_idx_perpage'); if (v && [...idxPp.options].some(o => o.value === v)) idxPp.value = v; } catch (e) {}
+            idxPp.addEventListener('change', () => { try { localStorage.setItem('thx_idx_perpage', idxPp.value); } catch (e) {} state.page = 1; load(); });
+        }
         $('idx-check-all').addEventListener('change', (e) => { state.rows.forEach(r => { if (e.target.checked) state.selected.add(r.info_hash); else state.selected.delete(r.info_hash); }); renderRows({ enabled: true }); syncBulkbar(); });
         $('btn-idx-promote').addEventListener('click', () => promoteHashes([...state.selected]));
         $('btn-idx-delete').addEventListener('click', deleteSelected);

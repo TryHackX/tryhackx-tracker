@@ -28,16 +28,26 @@ async function fetchWithCaptcha(endpoint, data) {
         // Send under both names: `captcha_token` (generic) and the legacy reCAPTCHA field name.
         data['captcha_token'] = token;
         data['g-recaptcha-response'] = token;
-        try {
-            const res2 = await fetch(APP_API + endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                body: JSON.stringify(data),
-            });
-            return await res2.json();
-        } catch {
-            return { error: 'Server returned an invalid response after CAPTCHA.' };
+        // Up to 3 attempts, 1 s apart: the server's own verifier call can die on a congested
+        // uplink — retrying the SAME solved token usually succeeds a moment later, so the user
+        // is not bounced back to a fresh CAPTCHA for a network hiccup.
+        let last = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                const res2 = await fetch(APP_API + endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                last = await res2.json();
+            } catch {
+                last = { error: 'Server returned an invalid response after CAPTCHA.' };
+            }
+            const failed = last && typeof last.error === 'string' && last.error.indexOf('CAPTCHA verification failed') !== -1;
+            if (!failed) return last;
+            if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
         }
+        return last;
     }
     return json;
 }
@@ -1890,21 +1900,34 @@ async function loadStatsHome(forceSync = false) {
         if (!form) return;
         const u = $id('reg-username'), em = $id('reg-email'), p1 = $id('reg-password'), p2 = $id('reg-password2');
         // real-time validation: errors appear once a field was left (or on submit), then track typing
+        const emailRequired = form.dataset.emailRequired === '1';
         const vUser = liveValidate(u, () => /^[A-Za-z0-9_.-]{3,32}$/.test(u.value.trim()));
-        const vMail = liveValidate(em, () => em.value.trim() === '' || EMAIL_RE.test(em.value.trim()));
+        const vMail = liveValidate(em, () => (emailRequired ? em.value.trim() !== '' : true) && (em.value.trim() === '' || EMAIL_RE.test(em.value.trim())));
         bindPwChecklist(p1, $id('reg-pw-checklist'), false);
         const vP1 = liveValidate(p1, () => pwValid(p1.value));
         const vP2 = liveValidate(p2, () => p2.value === p1.value);
+        const terms = $id('reg-terms');
+        const vTerms = () => { const ok = terms.checked; terms.closest('.form-group').classList.toggle('has-error', !ok); return ok; };
+        terms.addEventListener('change', vTerms);
+        // custom terms (admin-pasted text) open in a modal instead of the tos page
+        if (form.dataset.termsCustom === '1') {
+            const overlay = $id('terms-overlay');
+            const close = () => { overlay.hidden = true; };
+            $id('reg-terms-link').addEventListener('click', (e) => { e.preventDefault(); overlay.hidden = false; });
+            $id('terms-close').addEventListener('click', close);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+        }
         p1.addEventListener('input', () => p2.dispatchEvent(new Event('input')));   // re-check the repeat too
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const alert = $id('register-alert'), btn = $id('register-submit');
-            const ok = [vUser(true), vMail(true), vP1(true), vP2(true)].every(Boolean);
+            const ok = [vUser(true), vMail(true), vP1(true), vP2(true), vTerms()].every(Boolean);
             if (!ok) return;
             btn.disabled = true;
             const json = await fetchWithCaptcha('user_register', {
                 csrf_token: csrfOf(form),
                 username: u.value.trim(), email: em.value.trim(), password: p1.value,
+                terms_accepted: 1,
             });
             if (json && json.success) {
                 showAlert(alert, 'Account created — welcome!' + (json.verify_sent ? ' A confirmation link was sent to your email address.' : ''), true);
@@ -2041,6 +2064,27 @@ async function loadStatsHome(forceSync = false) {
             pubTip(btn, r && r.success ? (r.deleted > 0 ? 'Deleted ' + r.deleted : 'Nothing to delete') : 'Failed');
             if (r && r.success) loadNotifications(1);
         });
+        const cancelEc = $id('acc-cancel-echange');
+        if (cancelEc) cancelEc.addEventListener('click', async () => {
+            cancelEc.disabled = true;
+            const r = await postJson('user_update', { csrf_token: $id('account-csrf').value, cancel_email_change: 1 });
+            if (r && r.success) location.reload();
+            else cancelEc.disabled = false;
+        });
+        const mailPref = $id('acc-mail-pref');
+        if (mailPref) {
+            const label = $id('acc-mail-pref-label');
+            getJson('user_email_prefs').then(r => {
+                if (!r || !r.success) { label.textContent = 'unavailable'; return; }
+                mailPref.checked = !!r.enabled;
+                label.textContent = r.enabled ? 'enabled' : 'disabled';
+            });
+            mailPref.addEventListener('change', async () => {
+                const r = await postJson('user_email_prefs', { csrf_token: $id('account-csrf').value, enabled: mailPref.checked ? 1 : 0 });
+                if (r && r.success) label.textContent = r.enabled ? 'enabled' : 'disabled';
+                else { mailPref.checked = !mailPref.checked; }
+            });
+        }
         const verifyBtn = $id('acc-verify-send');
         if (verifyBtn) verifyBtn.addEventListener('click', async () => {
             verifyBtn.disabled = true;
@@ -2091,17 +2135,15 @@ async function loadStatsHome(forceSync = false) {
             if (json && json.success) {
                 let msg = 'Saved.';
                 if (json.changed.includes('password')) msg += ' Use the new password next time you sign in.';
-                if (body.email !== undefined && body.email !== '' && json.verify_sent) msg += ' A confirmation link was sent to the new address.';
+                if (json.email_stage === 'old') msg += ' Email change started — confirm it from your CURRENT mailbox first (step 1 of 2), then from the new one.';
+                else if (json.email_stage === 'done_direct') msg += json.verify_sent ? ' A verification link was sent to the new address.' : ' Email saved.';
                 showAlert(alert, msg, true);
                 $id('acc-cur-pass').value = ''; passIn.value = ''; pass2In.value = ''; pass2Group.hidden = true;
                 email2In.value = ''; email2Group.hidden = true; $id('acc-pw-checklist').hidden = true;
-                if (body.email !== undefined) {
+                if (json.email_stage === 'done_direct') {
                     $id('acc-email').textContent = body.email || 'none';
-                    const badge = $id('acc-email-badge');
-                    if (badge) {
-                        if (body.email === '') { badge.hidden = true; }
-                        else { badge.className = 'acc-badge acc-badge-warn'; badge.textContent = 'unverified'; badge.hidden = false; }
-                    }
+                } else if (json.email_stage === 'old') {
+                    setTimeout(() => location.reload(), 2500);   // show the pending-change banner
                 }
             } else {
                 showAlert(alert, (json && json.error) || 'Update failed', false);
@@ -2197,20 +2239,32 @@ async function loadStatsHome(forceSync = false) {
             run(1);
         }));
         if (bestBox) bestBox.addEventListener('change', () => run(1));
+        const perPageSel = $id('search-perpage');
+        try { const saved = localStorage.getItem('thx_search_perpage'); if (saved && perPageSel && [...perPageSel.options].some(o => o.value === saved)) perPageSel.value = saved; } catch (e) {}
+        if (perPageSel) perPageSel.addEventListener('change', () => { try { localStorage.setItem('thx_search_perpage', perPageSel.value); } catch (e) {} run(1); });
         let curPage = 1, seq = 0;
         let lastTokens = [], lastFilesSearch = false;
+        function setLoading(on) {
+            const table = $id('search-table');
+            table.classList.toggle('search-loading', on);
+            const t = $id('search-total');
+            if (on) { t.dataset.prev = t.textContent; t.textContent = 'Searching…'; }
+        }
         async function run(page) {
             curPage = page;
             const my = ++seq;   // stale responses (fast typing) must not overwrite newer ones
             const alert = $id('search-alert'), table = $id('search-table'), body = $id('search-body'), note = $id('search-note');
             alert.className = 'alert';
+            setLoading(true);
             const qs = new URLSearchParams({ page: String(page), sort: serializeSort() });
+            if (perPageSel) qs.set('per_page', perPageSel.value);
             const q = input.value.trim();
             if (q) qs.set('search', q);
             const filesOn = !!(filesBox && filesBox.checked);
             if (filesOn) qs.set('search_files', '1');
             const json = await getJson('index_search&' + qs.toString());
             if (my !== seq) return;
+            setLoading(false);
             if (!json || !json.success) {
                 table.hidden = true;
                 note.hidden = true;

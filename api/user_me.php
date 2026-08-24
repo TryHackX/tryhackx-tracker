@@ -14,6 +14,8 @@ foreach (userGroups($db, (int)$u['id']) as $g) {
         'granted_at' => $g['granted_at'], 'expires_at' => $g['expires_at'], 'note' => $g['note'],
     ];
 }
+$verifyGate = userEmailVerifyRequired($cfg);
+$trusted = userIsEmailTrusted($db, (int)$u['id']);
 jsonResponse([
     'success' => true,
     'user' => [
@@ -22,6 +24,10 @@ jsonResponse([
         'created_at' => $u['created_at'], 'last_login_at' => $u['last_login_at'],
     ],
     'groups' => $groups,
-    'permissions' => array_keys(userEffectivePermissions($db, (int)$u['id'])),
+    'permissions' => array_keys(userEffectivePermissions($db, (int)$u['id'], $cfg)),
+    // verification gate: with it on, an unverified account runs at guest level (admins exempt)
+    'verify_required' => $verifyGate,
+    'verify_restricted' => $verifyGate && !$trusted && !userIsAdminGroup($db, (int)$u['id']),
+    'email_change' => userEmailChangeState($db, $u),
     'unread' => userUnreadCount($db, (int)$u['id']),
 ]);

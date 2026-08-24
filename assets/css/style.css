@@ -1797,7 +1797,20 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .search-files-chip.chip-hit { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 6px rgba(74, 158, 255, 0.35); }
 
 /* === Password requirement checklist === */
-.pw-checklist { margin: 0.4rem 0 0.1rem; font-size: 0.78rem; line-height: 1.6; }
+.pw-checklist {
+    margin: 0.4rem 0 0.1rem;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    /* two-column grid; the odd fifth item spans both columns, centred */
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.3rem 0.8rem;
+}
+.pw-checklist .pw-req:last-child { grid-column: 1 / -1; justify-self: center; }
+@media (max-width: 480px) {
+    .pw-checklist { grid-template-columns: 1fr; }
+    .pw-checklist .pw-req:last-child { grid-column: auto; justify-self: start; }
+}
 .pw-req { color: var(--text-muted); }
 .pw-req.ok { color: var(--success); }
 .pw-req-ic { display: inline-block; width: 1.1em; text-align: center; font-weight: bold; }
@@ -1824,3 +1837,10 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .ftree-file:last-child { border-bottom: 0; }
 .ftree-name { word-break: break-word; }
 .ftree-size { white-space: nowrap; }
+
+
+/* === Search loading state + terms modal body (1.9.0) === */
+.search-table.search-loading { opacity: 0.45; transition: opacity 0.15s; }
+.terms-body { white-space: normal; line-height: 1.7; font-size: 0.9rem; }
+.reg-terms { color: var(--text); }
+.acc-prefs-check { font-size: 0.85rem; }

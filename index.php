@@ -52,6 +52,7 @@ $routes = [
     'account'      => 'templates/pages/account.php',
     'reset'        => 'templates/pages/reset.php',
     'verify'       => 'templates/pages/verify.php',
+    'emailchange'  => 'templates/pages/emailchange.php',
     'search'       => 'templates/pages/search.php',
 ];
 
@@ -77,7 +78,7 @@ if ($action === 'admin' || $action === 'settings' || $action === 'admin-whitelis
 }
 
 // user pages exist only while the account system is on (and the account page needs a session)
-if (in_array($action, ['login', 'register', 'account', 'reset', 'verify', 'search'], true) && !usersEnabled($cfg)) {
+if (in_array($action, ['login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search'], true) && !usersEnabled($cfg)) {
     $action = 'home';
 }
 

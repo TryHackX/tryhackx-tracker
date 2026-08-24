@@ -17,7 +17,7 @@
         <div class="admin-header">
             <h2><i class="bi bi-list-check"></i> Whitelist</h2>
             <div class="admin-header-actions">
-                <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-flag"></i> Reports</a>
                 <a href="<?= $baseUrl ?>?action=admin-index" class="btn btn-sm btn-outline-info"><i class="bi bi-collection"></i> Index</a>
                 <a href="<?= $baseUrl ?>?action=admin-users" class="btn btn-sm btn-outline-info"><i class="bi bi-people"></i> Users</a>
                 <a href="<?= $baseUrl ?>?action=settings" class="btn btn-sm btn-outline-info"><i class="bi bi-gear"></i> Settings</a>
@@ -88,6 +88,13 @@
                             <option value="fetching">Fetching</option>
                             <option value="done">Done</option>
                             <option value="failed">Failed</option>
+                        </select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="wl-perpage" title="Rows per page">
+                            <option value="15">15 / page</option>
+                            <option value="25" selected>25 / page</option>
+                            <option value="50">50 / page</option>
+                            <option value="100">100 / page</option>
+                            <option value="200">200 / page</option>
                         </select>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="wl-filter-banned" title="Banned state">
                             <option value="active">Active</option>

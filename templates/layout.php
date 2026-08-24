@@ -5,7 +5,7 @@ $pageTitles = [
     'transparency' => 'Transparency', 'unsubscribe' => 'Unsubscribe',
     'whitelist' => 'Whitelist', 'stats' => 'Stats',
     'login' => 'Sign in', 'register' => 'Register', 'account' => 'Account',
-    'reset' => 'Password reset', 'verify' => 'Email verification', 'search' => 'Search',
+    'reset' => 'Password reset', 'verify' => 'Email verification', 'emailchange' => 'Email change', 'search' => 'Search',
 ];
 $recaptchaNeeded = ($action === 'report' && isCaptchaEnabled($cfg, 'report'))
     || ($action === 'status' && (isCaptchaEnabled($cfg, 'status') || isCaptchaEnabled($cfg, 'block_check') || isCaptchaEnabled($cfg, 'appeal')))

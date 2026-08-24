@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Panel &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
+    <title>Reports &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
@@ -16,7 +16,7 @@
     <div class="admin-container admin-wide">
         <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
         <div class="admin-header">
-            <h2><i class="bi bi-shield-lock"></i> Admin Panel</h2>
+            <h2><i class="bi bi-flag"></i> Reports <span class="idx-subtitle">abuse reports, appeals &amp; tracker status</span></h2>
             <div class="admin-header-actions">
                 <?php if ($svcName !== ''): ?>
                 <div class="tracker-svc" id="tracker-svc">

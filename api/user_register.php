@@ -29,6 +29,15 @@ if (!rateLimitAllow('user_register', ipBucket($ip), $perHour, 3600)) {
     jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
 }
 
+// terms must be accepted, and with the verification gate on an email address is REQUIRED
+// (unverified accounts act as guests until the link is clicked)
+if (empty($input['terms_accepted'])) {
+    jsonResponse(['error' => 'You must accept the terms to register.', 'code' => 'terms_required'], 400);
+}
+if (userEmailVerifyRequired($cfg) && trim((string)($input['email'] ?? '')) === '') {
+    jsonResponse(['error' => 'An email address is required — member access is activated by the confirmation link.', 'code' => 'email_required'], 400);
+}
+
 $r = userCreate($db, $cfg, (string)($input['username'] ?? ''), (string)($input['email'] ?? ''), (string)($input['password'] ?? ''), $ip);
 if (isset($r['error'])) {
     $msgs = [

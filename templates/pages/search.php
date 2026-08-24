@@ -1,14 +1,15 @@
 <?php
 // User-facing search over the observed-hash catalogue. Server-side gate mirrors api/index_search.php.
-$canSearch = indexEnabled($cfg) && userCan($db, $cfg, 'index.view');
+$searchOn = indexEnabled($cfg) && ($cfg['index_search_enabled'] ?? '1') === '1';
+$canSearch = $searchOn && userCan($db, $cfg, 'index.view');
 $canFiles = $canSearch && userCan($db, $cfg, 'index.files');
 $canMagnet = $canSearch && userCan($db, $cfg, 'index.magnet');
-$canWl = $canSearch && userCan($db, $cfg, 'whitelist.view');
+$canWl = $canSearch && userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
 $meUser = currentUser($db);
 ?>
 <h1>Search</h1>
 
-<?php if (!indexEnabled($cfg)): ?>
+<?php if (!$searchOn): ?>
 <p>The search index is currently <strong>disabled</strong> on this tracker.</p>
 <?php elseif (!$canSearch): ?>
 <?php if ($meUser === null): ?>
@@ -33,6 +34,13 @@ $meUser = currentUser($db);
         <?php if ($canFiles): ?>
         <label class="search-check" title="Also match torrent file names"><input type="checkbox" id="search-files"><span class="search-check-box" aria-hidden="true"></span> Also search file names</label>
         <?php endif; ?>
+        <select id="search-perpage" title="Results per page">
+            <option value="15">15 / page</option>
+            <option value="25" selected>25 / page</option>
+            <option value="50">50 / page</option>
+            <option value="100">100 / page</option>
+            <option value="200">200 / page</option>
+        </select>
         <span class="search-total text-muted" id="search-total"></span>
     </div>
 </form>

@@ -10,7 +10,7 @@
  * Rate limited per IP bucket; only resolved rows (meta done / named whitelist rows) are searchable.
  */
 if (!usersEnabled($cfg)) jsonResponse(['error' => 'accounts_disabled'], 400);
-if (!indexEnabled($cfg)) jsonResponse(['error' => 'search_disabled'], 400);
+if (!indexEnabled($cfg) || ($cfg['index_search_enabled'] ?? '1') !== '1') jsonResponse(['error' => 'search_disabled'], 400);
 if (!userCan($db, $cfg, 'index.view')) {
     jsonResponse(['error' => currentUser($db) ? 'no_permission' : 'login_required'], 403);
 }
@@ -22,7 +22,7 @@ if (!rateLimitAllow('idxsearch', ipBucket(getClientIp($cfg)), $perHour, 3600)) {
 
 $canFiles = userCan($db, $cfg, 'index.files');
 $canMagnet = userCan($db, $cfg, 'index.magnet');
-$canWl = userCan($db, $cfg, 'whitelist.view');
+$canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
 
 // comma-separated multi-sort stack; unknown keys are dropped by indexSearchCatalogue
 $sort = (string)($_GET['sort'] ?? 'relevance:desc');
@@ -30,9 +30,12 @@ if (!preg_match('/^(relevance|seeders|leechers|size|last|name|files)(:(asc|desc)
     $sort = 'relevance:desc';
 }
 
+$perPage = (int)($_GET['per_page'] ?? 25);
+if (!in_array($perPage, [15, 25, 50, 100, 200], true)) $perPage = 25;
+
 $res = indexSearchCatalogue($db, $cfg, [
     'page'              => $_GET['page'] ?? 1,
-    'per_page'          => 25,
+    'per_page'          => $perPage,
     'sort'              => $sort,
     'search'            => mb_substr(trim((string)($_GET['search'] ?? '')), 0, 200),
     'search_files'      => $canFiles && ($_GET['search_files'] ?? '') === '1',

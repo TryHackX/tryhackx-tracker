@@ -2,7 +2,8 @@
 // Whitelist list with pagination, multi-column sorting, smart search and filters.
 
 $page = max(1, (int)($_GET['page'] ?? 1));
-$perPage = max(1, (int)($cfg['items_per_page'] ?? 25));
+$perPage = (int)($_GET['per_page'] ?? 0);
+if (!in_array($perPage, [15, 25, 50, 100, 200], true)) $perPage = max(1, (int)($cfg['items_per_page'] ?? 25));
 $offset = ($page - 1) * $perPage;
 
 // Safe sort whitelist

@@ -13,7 +13,7 @@
         <div class="admin-header">
             <h2><i class="bi bi-gear"></i> Settings</h2>
             <div class="admin-header-actions">
-                <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-flag"></i> Reports</a>
                 <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
                 <a href="<?= $baseUrl ?>?action=admin-index" class="btn btn-sm btn-outline-info"><i class="bi bi-collection"></i> Index</a>
                 <a href="<?= $baseUrl ?>?action=admin-users" class="btn btn-sm btn-outline-info"><i class="bi bi-people"></i> Users</a>
@@ -491,6 +491,24 @@
                         <small class="settings-hint">Notify (+email when possible) this many days before a timed group ends. 0 = off.</small>
                     </div>
                     <div class="col-md-3">
+                        <label class="form-label">Require email verification</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="users_require_email_verify">
+                            <option value="1" <?= ($cfg['users_require_email_verify'] ?? '1') === '1' ? 'selected' : '' ?>>Yes — unverified accounts act as guests</option>
+                            <option value="0" <?= ($cfg['users_require_email_verify'] ?? '1') !== '1' ? 'selected' : '' ?>>No — groups apply immediately</option>
+                        </select>
+                        <small class="settings-hint">With Yes, registration requires an email and group permissions only apply after the confirmation link is clicked (the account page itself stays reachable; admins are exempt).</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Email change cooldown (days)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="users_email_change_cooldown_days" value="<?= sanitize($cfg['users_email_change_cooldown_days'] ?? '30') ?>" min="0" max="365">
+                        <small class="settings-hint">After a completed change the next one is blocked for this many days (anti-hijack). 0 = off. Changes are always confirmed from the OLD address first, then the NEW one.</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Registration terms <small class="settings-hint">(empty = the checkbox links to <code>?action=tos</code>)</small></label>
+                        <textarea class="form-control bg-dark text-light border-secondary" name="users_terms_text" rows="4" placeholder="Plain text shown in a modal when the user clicks the terms link on the registration form."><?= sanitize($cfg['users_terms_text'] ?? '') ?></textarea>
+                        <small class="settings-hint">Registration always requires ticking the &ldquo;I accept the terms&rdquo; box; this only controls what the link shows.</small>
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label">Logins / 15 min (per IP)</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_user_login" value="<?= sanitize($cfg['rate_limit_user_login'] ?? '10') ?>" min="0" max="1000">
                     </div>
@@ -501,6 +519,22 @@
                     <div class="col-md-3">
                         <label class="form-label">Searches / hour (per IP)</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_index_search" value="<?= sanitize($cfg['rate_limit_index_search'] ?? '120') ?>" min="0" max="100000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Member search</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="index_search_enabled">
+                            <option value="1" <?= ($cfg['index_search_enabled'] ?? '1') === '1' ? 'selected' : '' ?>>Enabled</option>
+                            <option value="0" <?= ($cfg['index_search_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>>Disabled (even with permissions)</option>
+                        </select>
+                        <small class="settings-hint">Master switch for <code>?action=search</code> — overrides <code>index.view</code> grants.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Whitelist in search results</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="index_search_include_whitelist">
+                            <option value="1" <?= ($cfg['index_search_include_whitelist'] ?? '1') === '1' ? 'selected' : '' ?>>Included (needs whitelist.view)</option>
+                            <option value="0" <?= ($cfg['index_search_include_whitelist'] ?? '1') !== '1' ? 'selected' : '' ?>>Never shown</option>
+                        </select>
+                        <small class="settings-hint">Whether registered (whitelisted) torrents can appear in the member search.</small>
                         <small class="settings-hint">The member Index search (<code>?action=search</code>).</small>
                     </div>
                 </div>

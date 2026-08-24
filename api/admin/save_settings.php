@@ -58,6 +58,9 @@ $allowed = [
     'users_notify_expiry_days', 'rate_limit_user_login', 'rate_limit_user_register', 'rate_limit_index_search',
     // whitelist registration audience + metadata worker concurrency (schema v8)
     'whitelist_submit_mode', 'meta_worker_concurrency',
+    // schema v9: verification gate, terms, email-change cooldown, member-search switches
+    'users_require_email_verify', 'users_terms_text', 'users_email_change_cooldown_days',
+    'index_search_enabled', 'index_search_include_whitelist',
     // federation (includes/federation.php + worker/federation.py)
     'fed_enabled', 'fed_node_name', 'fed_export_enabled', 'fed_export_files', 'fed_export_max_batch',
     'fed_import_new', 'fed_pull_minutes',
@@ -107,7 +110,8 @@ $intClamp = [
     'index_grace_days' => [1, 90, 3], 'index_protect_days' => [1, 365, 10], 'index_meta_daily_budget' => [0, 1000000, 500],
     'index_poll_budget' => [5, 120, 45],
     'admin_near_pages' => [1, 20, 2],
-    'users_notify_expiry_days' => [0, 30, 3], 'rate_limit_user_login' => [0, 1000, 10],
+    'users_notify_expiry_days' => [0, 30, 3], 'users_email_change_cooldown_days' => [0, 365, 30],
+    'rate_limit_user_login' => [0, 1000, 10],
     'rate_limit_user_register' => [0, 1000, 5], 'rate_limit_index_search' => [0, 100000, 120],
     'fed_export_max_batch' => [100, 20000, 2000], 'fed_pull_minutes' => [5, 1440, 60],
 ];
@@ -128,6 +132,7 @@ if (isset($data['whitelist_tracker_hosts'])) {
 }
 foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
+          'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist',
           'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
@@ -137,6 +142,9 @@ if (isset($data['users_default_group'])) {
 }
 if (isset($data['whitelist_submit_mode']) && !in_array($data['whitelist_submit_mode'], ['public', 'users'], true)) {
     jsonResponse(['error' => 'Invalid whitelist registration audience.'], 400);
+}
+if (isset($data['users_terms_text'])) {
+    $data['users_terms_text'] = mb_substr($data['users_terms_text'], 0, 10000);
 }
 if (isset($data['meta_worker_concurrency']) && $data['meta_worker_concurrency'] !== '') {
     // empty = keep the worker's own config; otherwise clamp to a sane 1..16

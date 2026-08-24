@@ -240,6 +240,8 @@
         p.set('banned', w.banned);
         if (w.ip) p.set('ip', w.ip);
         if (w.group) p.set('group', 'ip');
+        const pp = $('wl-perpage');
+        if (pp && pp.value !== '25') p.set('per_page', pp.value);
         return p.toString();
     }
 
@@ -958,6 +960,11 @@
         $('wl-search-files').addEventListener('change', (e) => { state.wl.searchFiles = e.target.checked; if (state.wl.search) loadWhitelist(); });
         $('wl-filter-source').addEventListener('change', (e) => { state.wl.source = e.target.value; state.wl.page = 1; loadWhitelist(); });
         $('wl-filter-meta').addEventListener('change', (e) => { state.wl.meta = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        const wlPp = $('wl-perpage');
+        if (wlPp) {
+            try { const v = localStorage.getItem('thx_wl_perpage'); if (v && [...wlPp.options].some(o => o.value === v)) wlPp.value = v; } catch (e) {}
+            wlPp.addEventListener('change', () => { try { localStorage.setItem('thx_wl_perpage', wlPp.value); } catch (e) {} state.wl.page = 1; loadWhitelist(); });
+        }
         $('wl-filter-banned').addEventListener('change', (e) => { state.wl.banned = e.target.value; state.wl.page = 1; loadWhitelist(); });
         $('wl-group-ip').addEventListener('change', (e) => {
             state.wl.group = e.target.checked; state.wl.page = 1;

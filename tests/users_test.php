@@ -209,5 +209,70 @@ check('whitelist arm excluded without permission', !in_array($mk(5), array_colum
 $db->exec("DELETE FROM index_hashes WHERE name LIKE 'ZZQtest%' OR name LIKE 'YYQother%'");
 $db->exec("DELETE FROM whitelist WHERE name LIKE 'ZZQtest%'");
 
+// ── 10. verification gate + two-step email change (schema v9) ────────────────
+check('users has pending_email column (v9)', schemaColumnExists($db, 'users', 'pending_email'));
+check('users has email_changed_at column (v9)', schemaColumnExists($db, 'users', 'email_changed_at'));
+$cfgGate = $cfgOn; $cfgGate['users_require_email_verify'] = '1';
+$cfgNoGate = $cfgOn; $cfgNoGate['users_require_email_verify'] = '0';
+// self-contained fixture: alice gets VIP back (section 5 replaced her permanent grant with an
+// expired one on purpose) and starts UNVERIFIED
+userGrantGroup($db, (int)$alice['id'], (int)$vip['id'], null, 'test', '', false);
+$db->prepare("UPDATE users SET email = 'alice@example.org', email_verified = 0 WHERE id = ?")->execute([(int)$alice['id']]);
+$permsGate = userEffectivePermissions($db, (int)$alice['id'], $cfgGate);
+check('gate ON: unverified user drops to guest level', empty($permsGate['index.view']) && !empty($permsGate['stats.view']), json_encode($permsGate));
+$permsNoGate = userEffectivePermissions($db, (int)$alice['id'], $cfgNoGate);
+check('gate OFF: groups apply as usual', !empty($permsNoGate['index.view']), json_encode($permsNoGate));
+$db->prepare("UPDATE users SET email_verified = 1 WHERE id = ?")->execute([(int)$alice['id']]);
+check('gate ON + verified: groups apply', !empty(userEffectivePermissions($db, (int)$alice['id'], $cfgGate)['index.view']));
+// carol is in the admin group and has NO email — the gate must not lock the owner out
+check('gate ON: admin group is exempt', !empty(userEffectivePermissions($db, (int)$carol['id'], $cfgGate)['index.view']));
+
+// email change: alice (verified, alice@example.org) → new@example.org, cooldown off
+$cfgEc = $cfgOn; $cfgEc['users_email_change_cooldown_days'] = '0';
+$aliceRow = userFindById($db, (int)$alice['id']);
+$r = userEmailChangeStart($db, $cfgEc, $aliceRow, 'new@example.org');
+check('email change starts at the OLD-address step', ($r['stage'] ?? '') === 'old', json_encode($r));
+$state = userEmailChangeState($db, userFindById($db, (int)$alice['id']));
+check('pending state says stage=old', $state !== null && $state['stage'] === 'old' && $state['pending_email'] === 'new@example.org', json_encode($state));
+check('email unchanged until confirmations', userFindById($db, (int)$alice['id'])['email'] === 'alice@example.org');
+// grab the raw step-1 token by regenerating it deterministically? no — pull the hash path: simulate
+// by inserting our own token (the consume path only cares about a valid row)
+$tok1 = bin2hex(random_bytes(32));
+$db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type IN ('echange_old','echange_new')")->execute([(int)$alice['id']]);
+$db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_old', ?, NOW() + INTERVAL 1 HOUR)")->execute([(int)$alice['id'], hash('sha256', $tok1)]);
+$c1 = userEmailChangeConsume($db, $cfgEc, $tok1);
+check('old-address confirmation advances to the NEW step', ($c1['stage'] ?? '') === 'old_ok' && ($c1['pending'] ?? '') === 'new@example.org', json_encode($c1));
+check('step-1 token is single use', ($e = userEmailChangeConsume($db, $cfgEc, $tok1)) && ($e['error'] ?? '') === 'invalid');
+$tok2 = bin2hex(random_bytes(32));
+$db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type = 'echange_new'")->execute([(int)$alice['id']]);
+$db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_new', ?, NOW() + INTERVAL 1 HOUR)")->execute([(int)$alice['id'], hash('sha256', $tok2)]);
+$c2 = userEmailChangeConsume($db, $cfgEc, $tok2);
+$aliceAfter = userFindById($db, (int)$alice['id']);
+check('new-address confirmation applies the change (verified)', ($c2['stage'] ?? '') === 'done' && $aliceAfter['email'] === 'new@example.org' && (int)$aliceAfter['email_verified'] === 1, json_encode($c2));
+check('cooldown stamp set', !empty($aliceAfter['email_changed_at']));
+// cooldown blocks the next change
+$cfgCd = $cfgOn; $cfgCd['users_email_change_cooldown_days'] = '30';
+$r2 = userEmailChangeStart($db, $cfgCd, $aliceAfter, 'third@example.org');
+check('cooldown blocks another change', ($r2['error'] ?? '') === 'cooldown' && !empty($r2['until']), json_encode($r2));
+// removal flow: pending '' + old confirm → email NULL
+$r3 = userEmailChangeStart($db, $cfgEc, $aliceAfter, '');
+check('removal also starts at the OLD step', ($r3['stage'] ?? '') === 'old', json_encode($r3));
+$tok3 = bin2hex(random_bytes(32));
+$db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type IN ('echange_old','echange_new')")->execute([(int)$alice['id']]);
+$db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_old', ?, NOW() + INTERVAL 1 HOUR)")->execute([(int)$alice['id'], hash('sha256', $tok3)]);
+$c3 = userEmailChangeConsume($db, $cfgEc, $tok3);
+check('removal completes on the old-address confirmation', ($c3['stage'] ?? '') === 'removed' && userFindById($db, (int)$alice['id'])['email'] === null);
+// cancel clears pending + tokens
+$bobRow = userFindById($db, (int)$bob['id']);
+$db->prepare("UPDATE users SET email = 'bob@example.org', email_changed_at = NULL WHERE id = ?")->execute([(int)$bob['id']]);
+userEmailChangeStart($db, $cfgEc, userFindById($db, (int)$bob['id']), 'bobnew@example.org');
+userEmailChangeCancel($db, (int)$bob['id']);
+check('cancel clears the pending change', userEmailChangeState($db, userFindById($db, (int)$bob['id'])) === null
+    && userFindById($db, (int)$bob['id'])['pending_email'] === null);
+// no old address → direct set (standard verification covers it)
+$db->prepare("UPDATE users SET email = NULL, email_verified = 0, email_changed_at = NULL WHERE id = ?")->execute([(int)$carol['id']]);
+$r4 = userEmailChangeStart($db, $cfgEc, userFindById($db, (int)$carol['id']), 'carol@example.org');
+check('no old address → direct set', ($r4['stage'] ?? '') === 'done_direct' && userFindById($db, (int)$carol['id'])['email'] === 'carol@example.org');
+
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

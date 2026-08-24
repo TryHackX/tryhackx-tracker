@@ -4,12 +4,25 @@
 <p>You are not signed in.</p>
 <p><a class="btn" href="<?= $baseUrl ?>?action=login">Sign in</a></p>
 <?php else: ?>
-<?php $accHasEmail = trim((string)($meUser['email'] ?? '')) !== ''; $accVerified = (int)$meUser['email_verified'] === 1; ?>
+<?php
+$accHasEmail = trim((string)($meUser['email'] ?? '')) !== '';
+$accVerified = (int)$meUser['email_verified'] === 1;
+$accRestricted = userEmailVerifyRequired($cfg) && !($accHasEmail && $accVerified) && !userIsAdminGroup($db, (int)$meUser['id']);
+$accPending = userEmailChangeState($db, $meUser);
+$accCooldownDays = userEmailChangeCooldownDays($cfg);
+?>
 <div class="account-head">
     <h1>Account &mdash; <?= sanitize($meUser['username']) ?></h1>
     <button type="button" class="btn btn-secondary" id="account-logout">Sign out</button>
 </div>
 <input type="hidden" id="account-csrf" value="<?= $csrfToken ?>">
+<?php if ($accRestricted): ?>
+<div class="alert alert-error show">Your email address is <strong>not verified</strong> — until you open the confirmation link, this account works at <strong>guest level</strong> (group permissions are paused).<?= $accHasEmail ? ' Check your inbox or use “Resend link” below.' : ' Add an email address below to receive the link.' ?></div>
+<?php endif; ?>
+<?php if ($accPending !== null): ?>
+<div class="alert alert-success show" id="acc-pending-box">Email change to <strong><?= $accPending['pending_email'] === '' ? '(removal)' : sanitize($accPending['pending_email']) ?></strong> is waiting for confirmation from the <strong><?= $accPending['stage'] === 'old' ? 'current' : 'new' ?></strong> address.
+    <button type="button" class="btn btn-secondary btn-small" id="acc-cancel-echange">Cancel the change</button></div>
+<?php endif; ?>
 
 <div class="account-grid">
     <div class="account-card">
@@ -24,6 +37,9 @@
             </td></tr>
             <tr><td>Member since</td><td><?= sanitize((string)$meUser['created_at']) ?></td></tr>
             <tr><td>Last sign-in</td><td><?= sanitize((string)($meUser['last_login_at'] ?? '—')) ?></td></tr>
+            <?php if ($accHasEmail): ?>
+            <tr><td>Account emails</td><td><label class="search-check acc-prefs-check" title="Expiry warnings, security notices and other account mail"><input type="checkbox" id="acc-mail-pref"><span class="search-check-box" aria-hidden="true"></span> <span id="acc-mail-pref-label">Loading&hellip;</span></label></td></tr>
+            <?php endif; ?>
         </table>
         <?php if ($accHasEmail && !$accVerified): ?>
         <p class="text-muted acc-verify-note">A confirmation link was sent to this address — open it to verify. Unverified addresses still receive password resets.</p>
@@ -52,7 +68,7 @@
         <input type="password" id="acc-cur-pass" autocomplete="current-password" maxlength="200" required>
     </div>
     <div class="form-group">
-        <label for="acc-new-email">Email <small class="form-hint">edit to change &middot; clear the box to remove your address</small></label>
+        <label for="acc-new-email">Email <small class="form-hint">edit to change &middot; clear the box to remove your address<?= $accHasEmail ? ' &middot; a change is confirmed from the current address first, then from the new one' . ($accCooldownDays > 0 ? '; next change possible ' . $accCooldownDays . ' days after the previous one' : '') : '' ?></small></label>
         <input type="email" id="acc-new-email" maxlength="190" autocomplete="email" value="<?= sanitize((string)($meUser['email'] ?? '')) ?>">
         <div class="error-msg">That email address does not look valid</div>
     </div>

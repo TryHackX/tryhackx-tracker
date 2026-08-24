@@ -38,8 +38,9 @@ else flush();
 
 if ($u && $u['status'] === 'active' && trim((string)$u['email']) !== '') {
     $reset = userResetCreate($db, (int)$u['id']);
-    $link = rtrim(getBaseUrl(), '/') . '/?action=reset&token=' . $reset;
+    $link = mailAbsoluteUrl($cfg, '?action=reset&token=' . $reset);
     userNotifyMail($db, $cfg, $u, ($cfg['site_name'] ?? 'Tracker') . ' — password reset',
-        "A password reset was requested for your account.\n\nOpen this link to set a new password (valid for " . USER_RESET_TTL_MIN . " minutes):\n" . $link . "\n\nIf this was not you, ignore this message.");
+        'A password reset was requested for your account. The link below sets a new password and is valid for ' . USER_RESET_TTL_MIN . " minutes.\nIf this was not you, ignore this message — your password stays unchanged.",
+        ['title' => 'Password reset', 'action_url' => $link, 'action_label' => 'Set a new password']);
 }
 exit;

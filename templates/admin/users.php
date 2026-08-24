@@ -13,7 +13,7 @@
         <div class="admin-header">
             <h2><i class="bi bi-people"></i> Users <span class="idx-subtitle">accounts, groups &amp; permissions</span></h2>
             <div class="admin-header-actions">
-                <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-flag"></i> Reports</a>
                 <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
                 <a href="<?= $baseUrl ?>?action=admin-index" class="btn btn-sm btn-outline-info"><i class="bi bi-collection"></i> Index</a>
                 <a href="<?= $baseUrl ?>?action=settings#section-users" class="btn btn-sm btn-outline-info"><i class="bi bi-gear"></i> Settings</a>
