@@ -213,6 +213,12 @@ check('named row stays searchable while re-queued (pending)', in_array($mk(1), a
 $cancel = indexMetaCancel($db);
 check('cancel restores resolved rows to done', $cancel['restored'] >= 1
     && $db->query("SELECT meta_status FROM index_hashes WHERE info_hash = '" . $mk(1) . "'")->fetchColumn() === 'done', json_encode($cancel));
+// the Rebuild button: none/failed rows that still carry metadata go straight back to done
+$db->prepare("UPDATE index_hashes SET meta_status = 'none' WHERE info_hash = ?")->execute([$mk(2)]);
+$db->prepare("UPDATE index_hashes SET meta_status = 'failed', meta_error = 'timeout' WHERE info_hash = ?")->execute([$mk(3)]);
+$restored = indexMetaRestore($db);
+check('rebuild restores named none/failed rows to done', $restored >= 2
+    && $db->query("SELECT COUNT(*) FROM index_hashes WHERE info_hash IN ('" . $mk(2) . "','" . $mk(3) . "') AND meta_status = 'done' AND meta_error IS NULL")->fetchColumn() == 2, (string)$restored);
 $db->exec("DELETE FROM index_hashes WHERE name LIKE 'ZZQtest%' OR name LIKE 'YYQother%'");
 $db->exec("DELETE FROM whitelist WHERE name LIKE 'ZZQtest%'");
 

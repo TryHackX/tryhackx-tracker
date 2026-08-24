@@ -5,7 +5,7 @@
     'use strict';
     const A = window.AdminCommon;
     if (!A) return;
-    const { apiCall, el, showToast, confirmAction, makeSortStack, renderPagination, fmtDate, bindSearchClear } = A;
+    const { apiCall, el, showToast, confirmAction, makeSortStack, renderPagination, fmtDate, bindSearchClear, busyDot } = A;
     const $ = (id) => document.getElementById(id);
 
     const state = {
@@ -53,12 +53,19 @@
     }
 
     // ── users view ──────────────────────────────────────────────────────────
+    let usLoadSeq = 0;
     async function loadUsers() {
         const qs = new URLSearchParams({ page: state.us.page, sort: usSort.serialize() });
         if (state.us.search) qs.set('search', state.us.search);
         if (state.us.status) qs.set('status', state.us.status);
         if (state.us.group) qs.set('group_id', state.us.group);
+        const my = ++usLoadSeq;
+        busyDot($('us-total'), true);
+        $('us-table').classList.add('tbl-loading');
         const r = await apiCall('admin/fetch_users&' + qs.toString());
+        if (my !== usLoadSeq) return;
+        busyDot($('us-total'), false);
+        $('us-table').classList.remove('tbl-loading');
         if (r.error) { showToast('Users: ' + r.error, 'danger'); return; }
         state.us.rows = r.rows || [];
         renderStatus(r.counts || { total: 0, active: 0, banned: 0 }, !!r.enabled);

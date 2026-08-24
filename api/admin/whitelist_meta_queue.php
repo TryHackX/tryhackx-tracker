@@ -10,7 +10,10 @@ $scope = strtolower(trim((string)($input['scope'] ?? '')));
 
 if ($scope === 'cancel') {
     $n = whitelistMetaCancel($db);
-    jsonResponse(['success' => true, 'scope' => 'cancel', 'cancelled' => $n]);
+    jsonResponse(['success' => true, 'scope' => 'cancel', 'cancelled' => $n['cancelled'], 'restored' => $n['restored']]);
+}
+if ($scope === 'restore') {
+    jsonResponse(['success' => true, 'scope' => 'restore', 'restored' => whitelistMetaRestore($db)]);
 }
 if ($scope === 'date') {
     $range = parseDateRangeInput($input);

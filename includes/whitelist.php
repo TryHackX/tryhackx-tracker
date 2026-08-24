@@ -1016,8 +1016,29 @@ function whitelistQueueMetaByDate(PDO $db, string $from, string $to): int {
  * Cancel the metadata queue: every 'pending' row goes back to 'none' (rows currently 'fetching' finish
  * on their own — the worker holds at most its concurrency count). Returns rows reset.
  */
-function whitelistMetaCancel(PDO $db): int {
+/**
+ * Empty the metadata queue. A queued row that ALREADY carries resolved metadata (name+size — a
+ * re-fetch victim) is RESTORED to 'done'; never-resolved rows go back to 'none'.
+ * Returns ['cancelled'=>total, 'restored'=>back-to-done].
+ */
+function whitelistMetaCancel(PDO $db): array {
+    $restore = $db->prepare("UPDATE whitelist SET meta_status = 'done', meta_requested_at = NULL, meta_priority = 0
+                             WHERE meta_status = 'pending' AND name IS NOT NULL AND total_size IS NOT NULL");
+    $restore->execute();
+    $restored = $restore->rowCount();
     $st = $db->prepare("UPDATE whitelist SET meta_status = 'none', meta_requested_at = NULL, meta_priority = 0 WHERE meta_status = 'pending'");
+    $st->execute();
+    return ['cancelled' => $restored + $st->rowCount(), 'restored' => $restored];
+}
+
+/**
+ * Rebuild button: every row that HAS resolved metadata (name+size) but lost its 'done' status to a
+ * bulk re-fetch / cancel goes straight back to 'done' — nothing is fetched, nothing is deleted.
+ * Returns rows restored.
+ */
+function whitelistMetaRestore(PDO $db): int {
+    $st = $db->prepare("UPDATE whitelist SET meta_status = 'done', meta_requested_at = NULL, meta_priority = 0, meta_error = NULL
+                        WHERE meta_status IN ('none', 'pending', 'failed') AND name IS NOT NULL AND total_size IS NOT NULL");
     $st->execute();
     return $st->rowCount();
 }

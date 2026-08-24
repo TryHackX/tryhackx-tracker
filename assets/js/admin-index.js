@@ -3,7 +3,7 @@
     'use strict';
     const A = window.AdminCommon;
     if (!A) return;
-    const { apiCall, el, esc, showToast, confirmAction, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree } = A;
+    const { apiCall, el, esc, showToast, confirmAction, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot } = A;
     const $ = (id) => document.getElementById(id);
 
     const state = { page: 1, pages: 1, search: '', searchFiles: false, meta: '', life: '', sort: [{ col: 'last', dir: 'desc' }], selected: new Set(), rows: [] };
@@ -85,10 +85,15 @@
     async function load(silent = false) {
         const qs = listQuery(state.page);
         const my = ++loadSeq;   // rapid sort/filter clicks: only the newest response may render
+        // visible feedback: user actions dim the table, silent live-refreshes only pulse the dot
+        busyDot($('idx-total'), true);
+        if (!silent) $('idx-table').classList.add('tbl-loading');
+        const settle = () => { if (my === loadSeq) { busyDot($('idx-total'), false); $('idx-table').classList.remove('tbl-loading'); } };
         let data;
         try { data = await apiCall('admin/fetch_index&' + qs.toString()); }
-        catch (e) { if (!silent) showToast('Failed to load index: ' + e.message, 'error'); return; }
+        catch (e) { settle(); if (!silent) showToast('Failed to load index: ' + e.message, 'error'); return; }
         if (my !== loadSeq) return;
+        settle();
         // apiCall resolves on non-2xx too (error body carries .error) — don't render an auth/server error as "empty"
         if (data.error) { if (!silent) showToast('Failed to load index: ' + data.error, 'error'); return; }
         state.rows = data.rows || [];
@@ -302,6 +307,14 @@
         try { const r = await apiCall('admin/index_fetch_meta', 'POST', body); if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; } showToast(r.queued ? 'Queued ' + r.queued.toLocaleString() + ' first seen ' + r.from + ' \u2192 ' + r.to : 'Nothing to queue in that window (missing + failed only)', r.queued ? 'success' : 'info'); loadStatus(); }
         catch (e) { showToast(e.message, 'error'); }
     }
+    async function restoreMeta() {
+        try {
+            const r = await apiCall('admin/index_fetch_meta', 'POST', { scope: 'restore' });
+            if (!r.success || r.error) { showToast(r.error || 'Rebuild failed', 'error'); return; }
+            showToast(r.restored ? 'Restored ' + r.restored.toLocaleString() + ' rows to done' : 'Nothing to restore — every resolved row is already done', r.restored ? 'success' : 'info');
+            load(); loadStatus();
+        } catch (e) { showToast(e.message, 'error'); }
+    }
     async function cancelMetaQueue() {
         if (!(await confirmAction('Cancel queued metadata', 'Empty the QUEUE: rows that already carry metadata go back to "done" (visible in search again), never-resolved rows to "none". Rows being fetched right now still finish; the janitor keeps queueing its daily budget.', { danger: true, okLabel: 'Cancel queue' }))) return;
         try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope: 'cancel' }); if (!r.success || r.error) { showToast(r.error || 'Cancel failed', 'error'); return; } showToast('Cancelled ' + (r.cancelled || 0).toLocaleString() + ' queued fetches' + (r.restored ? ' (' + r.restored.toLocaleString() + ' restored to done)' : '')); load(); loadStatus(); }
@@ -389,6 +402,7 @@
         document.querySelectorAll('#idx-meta-bulk-group [data-meta-near]').forEach(b => b.addEventListener('click', () => metaNearPages()));
         document.querySelectorAll('#idx-meta-bulk-group [data-meta-date]').forEach(b => b.addEventListener('click', () => metaDate(b.dataset.metaDate === 'custom' ? 'custom' : Number(b.dataset.metaDate))));
         document.querySelectorAll('#idx-meta-bulk-group [data-meta-cancel]').forEach(b => b.addEventListener('click', () => cancelMetaQueue()));
+        document.querySelectorAll('#idx-meta-bulk-group [data-meta-restore]').forEach(b => b.addEventListener('click', () => restoreMeta()));
         $('btn-idx-scrape-bulk').addEventListener('click', () => scrapeBulk('page'));
         document.querySelectorAll('#idx-scrape-bulk-group [data-scrape-scope]').forEach(b => b.addEventListener('click', () => scrapeBulk(b.dataset.scrapeScope)));
         document.querySelectorAll('#idx-scrape-bulk-group [data-scrape-near]').forEach(b => b.addEventListener('click', () => scrapeNearPages()));

@@ -509,6 +509,18 @@ function indexMetaCancel(PDO $db): array {
     return ['cancelled' => $restored + $st->rowCount(), 'restored' => $restored];
 }
 
+/**
+ * Rebuild button: every row that HAS resolved metadata (name+size) but lost its 'done' status to a
+ * bulk re-fetch / cancel goes straight back to 'done' — nothing is fetched, nothing is deleted.
+ * Returns rows restored.
+ */
+function indexMetaRestore(PDO $db): int {
+    $st = $db->prepare("UPDATE index_hashes SET meta_status = 'done', meta_requested_at = NULL, meta_priority = -1, meta_error = NULL
+                        WHERE meta_status IN ('none', 'pending', 'failed') AND name IS NOT NULL AND total_size IS NOT NULL");
+    $st->execute();
+    return $st->rowCount();
+}
+
 /** Bulk (re)queue metadata by scope: 'missing' | 'failed' | 'missing_failed' | 'all'. Returns rows queued or null. */
 function indexQueueMetaByScope(PDO $db, string $scope): ?int {
     $conds = [

@@ -368,6 +368,21 @@
     }
 
     /**
+     * busyDot(anchor, on) — a small pulsing dot right after `anchor` (a counter like "1 234 rows")
+     * while a list request is in flight. Silent background refreshes light it too, so the user can
+     * SEE the live updates without the table dimming/flickering every 5 s.
+     */
+    function busyDot(anchor, on) {
+        if (!anchor) return;
+        let dot = anchor.nextElementSibling;
+        if (!dot || !dot.classList || !dot.classList.contains('sync-dot')) {
+            dot = el('span', { className: 'sync-dot', title: 'Refreshing…' });
+            anchor.after(dot);
+        }
+        dot.classList.toggle('on', !!on);
+    }
+
+    /**
      * bindSearchClear(input, btn, onCleared) — the red-glow clear × next to a toolbar search box:
      * visible only while the box has text, click empties it with the accelerating animation and
      * then calls onCleared() once. (Only the dashboard used to toggle .visible — on the other
@@ -492,5 +507,5 @@
         }).catch(() => flashTip(target, 'Clipboard not available', { variant: 'warning', duration: 2000 }));
     }
 
-    window.AdminCommon = { apiCall, esc, el, showToast, confirmAction, promptModal, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree };
+    window.AdminCommon = { apiCall, esc, el, showToast, confirmAction, promptModal, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot };
 })();

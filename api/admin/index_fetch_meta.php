@@ -9,6 +9,9 @@ if ($scope === 'cancel') {
     $n = indexMetaCancel($db);
     jsonResponse(['success' => true, 'scope' => 'cancel', 'cancelled' => $n['cancelled'], 'restored' => $n['restored']]);
 }
+if ($scope === 'restore') {
+    jsonResponse(['success' => true, 'scope' => 'restore', 'restored' => indexMetaRestore($db)]);
+}
 if ($scope === 'date') {
     $range = parseDateRangeInput($input);
     if ($range === null) jsonResponse(['error' => 'Invalid date range: pass since_hours=N, or from (Y-m-d [H:i]) and optional to.'], 400);

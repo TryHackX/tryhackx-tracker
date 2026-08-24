@@ -1317,3 +1317,12 @@ input[type="number"] {
 
 /* matched-fragment highlight inside the file tree (search on file names) */
 .wl-tree mark { background: rgba(74, 158, 255, 0.35); color: inherit; padding: 0 1px; border-radius: 2px; }
+
+/* === List loading feedback (1.9.2): dim on user actions, pulsing dot on every refresh === */
+.tbl-loading { opacity: 0.45; transition: opacity 0.15s; pointer-events: none; }
+.sync-dot {
+    display: inline-block; width: 8px; height: 8px; margin-left: 7px; border-radius: 50%;
+    background: #4a9eff; vertical-align: middle; opacity: 0; transition: opacity 0.15s;
+}
+.sync-dot.on { opacity: 1; animation: sync-dot-pulse 0.9s ease-in-out infinite; }
+@keyframes sync-dot-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.55); opacity: 0.45; } }

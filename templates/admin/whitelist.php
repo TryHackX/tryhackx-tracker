@@ -133,6 +133,7 @@
                                 <li><button type="button" class="dropdown-item" data-meta-date="custom"><i class="bi bi-calendar-event"></i> Custom range&hellip;</button></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><button type="button" class="dropdown-item text-danger" data-meta-cancel><i class="bi bi-x-octagon"></i> Cancel queued (pending &rarr; none)</button></li>
+                                <li><button type="button" class="dropdown-item" data-meta-restore title="Every row that already has a name/size but lost its done status (bulk re-fetch, cancel) goes straight back to done — nothing is fetched or deleted"><i class="bi bi-arrow-counterclockwise"></i> Rebuild done (restore resolved rows)</button></li>
                                 <li><div class="dropdown-item-text wl-dd-note">Only queues the rows — the metadata worker fetches them in the background, one hash after another. Large queues take a while; <em>Cancel queued</em> stops the backlog (rows being fetched right now still finish).</div></li>
                             </ul>
                         </div>

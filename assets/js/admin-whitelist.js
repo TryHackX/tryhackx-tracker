@@ -6,7 +6,7 @@
     'use strict';
     // Quick feedback (copies) goes through copyToClipboard → flashTip (tooltip on the clicked element);
     // showToast is reserved for real outcomes (added / banned / deleted / errors).
-    const { apiCall, el, showToast, confirmAction, promptModal, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree } = window.AdminCommon;
+    const { apiCall, el, showToast, confirmAction, promptModal, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot } = window.AdminCommon;
 
     const $ = (id) => document.getElementById(id);
     const bodyDs = document.body.dataset;
@@ -249,13 +249,14 @@
     async function loadWhitelist(silent = false) {
         const body = $('wl-body');
         const my = ++wlLoadSeq;   // rapid sort/filter clicks: only the newest response may render
-        if (!silent) {
-            body.textContent = '';
-            body.appendChild(el('tr', null, el('td', { colspan: 12, className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' Loading…'])));
-        }
+        // keep the old rows on screen: user actions dim the table, silent live-refreshes pulse the dot
+        busyDot($('wl-total'), true);
+        if (!silent) $('wl-table').classList.add('tbl-loading');
         let r;
         try { r = await apiCall('admin/fetch_whitelist&' + wlQuery()); } catch { r = { error: 'Network error' }; }
         if (my !== wlLoadSeq) return;
+        busyDot($('wl-total'), false);
+        $('wl-table').classList.remove('tbl-loading');
         body.textContent = '';
         if (r.error) {
             body.appendChild(el('tr', null, el('td', { colspan: 12, className: 'text-center text-danger py-4', text: r.error })));
@@ -542,7 +543,7 @@
         if (!await confirmAction('Cancel queued metadata', 'Reset every QUEUED (pending) hash back to "no metadata"? Rows being fetched right now still finish. You can re-queue any time.', { okLabel: 'Cancel queue', danger: true })) return;
         try {
             const r = await apiCall('admin/whitelist_meta_queue', 'POST', { scope: 'cancel' });
-            if (r.success) showToast(`Cancelled ${r.cancelled} queued ${r.cancelled === 1 ? 'fetch' : 'fetches'}`);
+            if (r.success) showToast(`Cancelled ${r.cancelled} queued ${r.cancelled === 1 ? 'fetch' : 'fetches'}` + (r.restored ? ` (${r.restored} restored to done)` : ''));
             else showToast(r.error || 'Request failed', 'danger');
         } catch { showToast('Network error', 'danger'); }
         loadWhitelist();
@@ -994,6 +995,12 @@
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-scope]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); queueMetaScope(b.dataset.metaScope); }));
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-date]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); queueMetaDate(b.dataset.metaDate === 'custom' ? 'custom' : Number(b.dataset.metaDate)); }));
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-cancel]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); cancelMetaQueue(); }));
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-restore]').forEach(b => b.addEventListener('click', async () => {
+            closeMenu('btn-wl-meta-bulk');
+            const r = await apiCall('admin/whitelist_meta_queue', 'POST', { scope: 'restore' });
+            if (r.success) { showToast(r.restored ? `Restored ${r.restored} rows to done` : 'Nothing to restore — every resolved row is already done', r.restored ? 'success' : 'info'); loadWhitelist(); loadStatus(); }
+            else showToast(r.error || 'Rebuild failed', 'danger');
+        }));
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-page]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); metaRowsWl([...state.wl.rows.values()], 'this page'); }));
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-near]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); metaNearPagesWl(); }));
         document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-scope]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-scrape-caret'); scrapeBulk(b.dataset.scrapeScope); }));
