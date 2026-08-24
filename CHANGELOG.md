@@ -4,6 +4,88 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-08-24
+
+### Added
+- **User accounts** (`users_enabled`, **off by default** — with it off everything behaves exactly as
+  before): public registration + sign-in (CAPTCHA-protected; registration always requires a
+  configured CAPTCHA, login uses the smart `login` context), per-IP rate limits, remember-me
+  cookies (hashed, rotated on every use, invalidated on password change/ban), email password
+  reset, an account page (profile, groups with expiry dates, in-app notifications) and hideable
+  menu links (`users_links_visible`). Pages: `?action=login / register / account / reset`.
+- **Groups & permissions**: groups carry JSON permissions (`index.view` / `index.files` /
+  `index.magnet` / `whitelist.view` / `stats.view` / `stats.timeline` / `home.stats`). The seeded
+  **guest** group is the baseline every visitor gets (its defaults preserve the classic public
+  behaviour); the seeded **member** group is granted on registration. Gates cover the stats page +
+  API, the timeline, the home stats widget and the public whitelist page; the admin panel always
+  passes. Memberships can be permanent or timed (**1 d / 1 w / 2 w / 1 m / 3 m / 6 m / 1 y /
+  custom from–to**); duration grants **extend** an existing membership, the janitor expires them,
+  warns `users_notify_expiry_days` before the end (in-app + optional email) and notifies on grant,
+  revoke and expiry.
+- **Admin → Users page** (`?action=admin-users`): user browser (search, status/group filters,
+  sortable), edit (status/email/password), delete, grant/revoke groups, custom notifications
+  (optional email copy), and a Groups tab with a permission-matrix editor.
+- **Member search** (`?action=search`): a user-facing search over the resolved observed-hash index
+  — name (and, with `index.files`, file-name) search, seeders/size/recency sort, magnet links
+  (with `index.magnet`) built client-side; `rate_limit_index_search` per IP.
+- **Sales / shop API** (`v1/users/lookup | grant | revoke | provision`): automate selling timed
+  group access from an external shop. API keys now carry a **scope** (`whitelist` | `users` |
+  `federation` | `all`; existing keys keep `whitelist`) enforced on every v1 endpoint —
+  `tools/api_client_example.py` shows every call.
+- **Federation / cluster** (`fed_enabled`, **off by default**): tracker nodes exchange resolved
+  index **metadata** so every operator gets a bigger search catalogue without re-fetching from the
+  DHT. Pull-based: `v1/federation/export` serves cursor-paged, optionally gzip-compressed JSON
+  (only `meta done` rows; optional file lists) to peers authenticated with a federation-scope key;
+  `worker/federation.py` (systemd **timer**, not PHP) pulls from configured peers, validates
+  everything and merges — filling metadata for locally observed hashes (`meta_source
+  'fed:<peer>'`), and inserting unknown hashes only when `fed_import_new` is on (under the index
+  row cap). Peer management (add peer, one-shown inbound bearer, outbound bearer, pull toggle,
+  connection test) lives in Settings → Federation; `v1/federation/ping` verifies a link.
+- **"This page" / "Near pages ±N"** scopes for *Fetch metadata* and *Refresh S/L* on both the
+  Whitelist and Index pages: the near radius comes from the new `admin_near_pages` setting (1–20,
+  default 2) and follows the current search/filters/sort; metadata scopes skip rows that already
+  have (or are fetching) metadata; requests are chunked at 500 rows.
+- **Index metadata auto-queue** (`index_meta_auto_queue`): every observed hash without metadata is
+  queued automatically (spread over ~1 h, best-seeded first, 5000/tick) — the daily budget is
+  ignored while on; the Index status card shows the active mode.
+- `worker.py` stamps `meta_source='dht'` on index rows it resolves (schema v7 column).
+
+### Changed
+- Schema **v7**: `users`, `user_groups`, `user_group_members`, `user_notifications`,
+  `user_tokens`, `fed_peers`; `api_clients.scope`; `index_hashes.meta_source` +
+  `idx_index_meta_fetched` (guarded ALTERs on existing DBs); seeded `guest`/`member` groups.
+- The admin Index list query moved into `indexListSelect()` (`includes/index.php`), shared with
+  the member search endpoint. `whitelist_fetch_meta` accepts up to 500 ids (was 50).
+
+### Fixed
+- **Index page sorting** crashed with `state.sort.map is not a function` on any header click —
+  `makeSortStack`'s `onChange` now passes the sort stack (array) instead of a serialized string.
+
+### Security / correctness (adversarial pre-release audit — 14 findings, all fixed)
+- **Permanent membership downgrade (high)**: a duration grant (shop API / admin) on a PERMANENT
+  membership silently converted it to a timed one that later expired — `userDurationExpiry()` could
+  not distinguish "no row" from "NULL expiry"; permanent now stays permanent.
+- **Federation export cursor race (high)**: the cursor could land inside the still-open current
+  second while the worker/importer was committing rows into it — later same-second commits were
+  skipped forever. The export now serves only rows older than the current second; it also excludes
+  locally banned/whitelisted hashes immediately (previously only the next index poll purged them).
+- Remember-me auto-login now regenerates the session id (fixation hardening, same as the password
+  path); the password-reset endpoint answers before doing account-dependent work
+  (`fastcgi_finish_request`) so response timing no longer reveals whether an account exists.
+- Admin/user profile edits are validated up front and applied in one transaction — a later
+  validation failure can no longer leave an earlier field (e.g. a ban + token wipe) committed.
+- Admin custom grants reject an already-past "to" date (previously: instant bogus
+  grant + expired notifications); `fetch_users` no longer 500s on an array `sort` parameter.
+- `fed_peers` INSERT lowercases pasted bearers (a mixed-case bearer passed the connection test but
+  was silently skipped by `federation.py` forever); the importer also normalises old rows,
+  decompresses peer responses in bounded chunks (gzip-bomb cap: 64 MB wire / 512 MB expanded).
+- `worker.py` falls back to storing metadata without `meta_source` when the column/grant is not
+  there yet (a mid-deploy fetch was previously discarded as `failed`); the two v7 ALTERs on
+  `index_hashes` merged into one statement = one FULLTEXT-table rebuild instead of two.
+- Near-pages bulk flows: a click during the collection window can no longer be misread as a stop
+  request for another scrape, and the collection snapshots its search/filters/sort/page scope so
+  mid-flight UI changes cannot mix two result sets into one bulk operation.
+
 ## [1.5.2] — 2026-08-23
 
 ### Added

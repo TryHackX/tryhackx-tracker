@@ -69,6 +69,20 @@ $tie2 = fedExportRows($db, $cfgF, $tie1['next']['since'], $tie1['next']['after']
 $tieHashes = array_column($tie2['rows'], 'h');
 $firstTie = min(h(20), h(21)); $secondTie = max(h(20), h(21));
 check('same-second rows split cleanly across pages', $tie1['rows'][0]['h'] === $firstTie && in_array($secondTie, $tieHashes, true) && !in_array($firstTie, $tieHashes, true), json_encode([$tie1['rows'][0]['h'], $tieHashes]));
+// regression: the OPEN second may still receive commits — rows stamped now/future must not be
+// served yet (a cursor landing inside that second would skip later same-second commits forever)
+$ins->execute([h(30), 'Open-second row', time() + 3]);
+$fresh = fedExportRows($db, $cfgF, 0, '', 100, false);
+check('rows in the open/future second are held back', !in_array(h(30), array_column($fresh['rows'], 'h'), true), json_encode(array_column($fresh['rows'], 'h')));
+$db->exec("DELETE FROM index_hashes WHERE info_hash = '" . h(30) . "'");
+// regression: locally banned / whitelisted hashes must never leave the node, even before the next poll purge
+$db->exec("INSERT INTO banned_hashes (info_hash) VALUES ('" . h(1) . "')");
+$db->exec("INSERT INTO whitelist (info_hash) VALUES ('" . h(2) . "')");
+$clean = fedExportRows($db, $cfgF, 0, '', 100, false);
+$cleanHashes = array_column($clean['rows'], 'h');
+check('banned + whitelisted hashes are excluded from the export', !in_array(h(1), $cleanHashes, true) && !in_array(h(2), $cleanHashes, true) && count($cleanHashes) === 10, json_encode($cleanHashes));
+$db->exec("DELETE FROM banned_hashes WHERE info_hash = '" . h(1) . "'");
+$db->exec("DELETE FROM whitelist WHERE info_hash = '" . h(2) . "'");
 
 // ── 2. peers CRUD ────────────────────────────────────────────────────────────
 $r = fedPeerSave($db, null, ['name' => 'peer-one', 'base_url' => 'https://other.example.org/', 'bearer' => '', 'pull_enabled' => 1, 'pull_files' => 1]);
@@ -89,6 +103,13 @@ $db->prepare("UPDATE fed_peers SET api_client_id = ? WHERE id = ?")->execute([(i
 check('peer delete drops the inbound client too', fedPeerDelete($db, $peerId) === true
     && (int)$db->query("SELECT COUNT(*) FROM fed_peers")->fetchColumn() === 0
     && (int)$db->query("SELECT COUNT(*) FROM api_clients WHERE id = " . (int)$c['id'])->fetchColumn() === 0);
+
+// regression: the INSERT path must lowercase a pasted mixed-case bearer (federation.py matches lowercase)
+$ru = fedPeerSave($db, null, ['name' => 'peer-upper', 'base_url' => 'https://up.example.org',
+    'bearer' => strtoupper(str_repeat('a', 16)) . '.' . strtoupper(str_repeat('b', 64)), 'pull_enabled' => 0, 'pull_files' => 1]);
+$storedBearer = $db->query("SELECT bearer FROM fed_peers WHERE id = " . (int)$ru['id'])->fetchColumn();
+check('peer INSERT lowercases the bearer', $storedBearer === str_repeat('a', 16) . '.' . str_repeat('b', 64), (string)$storedBearer);
+$db->exec("TRUNCATE TABLE fed_peers");
 
 // ── 3. settings accessors ────────────────────────────────────────────────────
 check('fedExportEnabled needs both flags', !fedExportEnabled(array_merge($cfg, ['fed_enabled' => '0', 'fed_export_enabled' => '1'])) && fedExportEnabled($cfgF));

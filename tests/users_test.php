@@ -101,6 +101,9 @@ $expectMin = time() + 16 * 86400; $expectMax = time() + 18 * 86400;
 check('duration grant extends the current expiry', $ext !== null && $ext !== '' && strtotime($ext) > $expectMin && strtotime($ext) < $expectMax, (string)$ext);
 check('permanent duration maps to null', userDurationExpiry($db, (int)$bob['id'], (int)$vip['id'], 'permanent') === null);
 check('invalid duration maps to empty string', userDurationExpiry($db, (int)$bob['id'], (int)$vip['id'], '99x') === '');
+// regression: a PERMANENT membership (expires_at NULL) must never be downgraded by a duration grant
+userGrantGroup($db, (int)$bob['id'], (int)$vip['id'], null, 'test', '', false);
+check('duration grant keeps a PERMANENT membership permanent', userDurationExpiry($db, (int)$bob['id'], (int)$vip['id'], '1m') === null);
 check('revoke removes and notifies', userRevokeGroup($db, (int)$bob['id'], (int)$vip['id']) === true);
 
 // ── 5. usersTick: expiry + warning ───────────────────────────────────────────

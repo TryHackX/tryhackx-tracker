@@ -168,6 +168,9 @@ function userTryRememberLogin(PDO $db): ?array {
     // rotate: burn this token, hand out a fresh one (stolen-cookie replay shows up as a failed login)
     $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE type = 'remember' AND user_id = ? AND token_hash = ?")
        ->execute([(int)$m[1], hash('sha256', $m[2])]);
+    // privilege elevation — regenerate the session id exactly like the password login path does,
+    // so a pre-planted PHPSESSID (session fixation) never becomes an authenticated session
+    if (!headers_sent() && session_status() === PHP_SESSION_ACTIVE) session_regenerate_id(true);
     $_SESSION['user_id'] = (int)$u['id'];
     $_SESSION['user_login_time'] = time();
     if (!headers_sent()) userRememberIssue($db, (int)$u['id']);
@@ -300,17 +303,22 @@ function userRevokeGroup(PDO $db, int $userId, int $groupId, bool $notify = true
     return $st->rowCount() > 0;
 }
 
-/** Map a duration code to the new expiry, extending from the current membership when present. */
+/**
+ * Map a duration code to the new expiry, extending from the current membership when present.
+ * A membership that is already PERMANENT (expires_at NULL) stays permanent — a duration grant
+ * must never downgrade it to a timed one (repeat shop purchases would otherwise revoke access).
+ */
 function userDurationExpiry(PDO $db, int $userId, int $groupId, string $duration): ?string {
     $map = ['1d' => 'P1D', '7d' => 'P7D', '14d' => 'P14D', '1m' => 'P1M', '3m' => 'P3M', '6m' => 'P6M', '1y' => 'P1Y'];
     if ($duration === 'permanent') return null;
     if (!isset($map[$duration])) return '';   // '' = invalid (distinguish from null = permanent)
     $st = $db->prepare("SELECT expires_at FROM user_group_members WHERE user_id = ? AND group_id = ?");
     $st->execute([$userId, $groupId]);
-    $cur = $st->fetchColumn();
+    $row = $st->fetch(PDO::FETCH_ASSOC);      // fetchColumn() can't tell "no row" from "NULL expiry"
+    if ($row && $row['expires_at'] === null) return null;   // already permanent — keep it
     $base = new DateTime();
-    if ($cur) {
-        $curDt = new DateTime((string)$cur);
+    if ($row && $row['expires_at'] !== null) {
+        $curDt = new DateTime((string)$row['expires_at']);
         if ($curDt > $base) $base = $curDt;    // extend, don't restart
     }
     $base->add(new DateInterval($map[$duration]));

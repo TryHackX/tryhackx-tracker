@@ -35,6 +35,9 @@ if ($duration === 'custom') {
     $to = $parseDt((string)($input['to'] ?? ''), true);
     if ($from === '' || $to === '') jsonResponse(['error' => 'Invalid date — use YYYY-MM-DD or YYYY-MM-DD HH:MM'], 400);
     if ($from !== null && $to !== null && $to <= $from) jsonResponse(['error' => '"To" must be after "from"'], 400);
+    // an already-past expiry would be reaped by the next janitor tick a minute later (with a bogus
+    // "access expired" notification) — reject it like the v1 endpoint does
+    if ($to !== null && strtotime($to) <= time()) jsonResponse(['error' => '"To" must be in the future'], 400);
     $grantedAt = $from;    // null = now
     $expiresAt = $to;      // null = permanent
 } else {

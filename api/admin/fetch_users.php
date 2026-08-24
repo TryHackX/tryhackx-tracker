@@ -7,7 +7,7 @@ $offset = ($page - 1) * $perPage;
 $allowedSorts = ['id' => 'id', 'username' => 'username', 'email' => 'email', 'status' => 'status',
                  'created' => 'created_at', 'login' => 'last_login_at'];
 $orderParts = [];
-foreach (explode(',', trim($_GET['sort'] ?? 'created:desc')) as $part) {
+foreach (explode(',', trim((string)($_GET['sort'] ?? 'created:desc'))) as $part) {
     $pieces = explode(':', trim($part));
     $col = $allowedSorts[$pieces[0] ?? ''] ?? null;
     if (!$col) continue;
@@ -17,12 +17,12 @@ if (!$orderParts) $orderParts[] = 'created_at DESC';
 $orderParts[] = 'id DESC';
 
 $where = []; $params = [];
-$search = trim($_GET['search'] ?? '');
+$search = trim((string)($_GET['search'] ?? ''));
 if ($search !== '') {
     $where[] = "(username LIKE ? OR email LIKE ?)";
     $params[] = '%' . $search . '%'; $params[] = '%' . $search . '%';
 }
-$status = $_GET['status'] ?? '';
+$status = (string)($_GET['status'] ?? '');
 if (in_array($status, ['active', 'banned'], true)) { $where[] = "status = ?"; $params[] = $status; }
 $groupFilter = (int)($_GET['group_id'] ?? 0);
 if ($groupFilter > 0) { $where[] = "id IN (SELECT user_id FROM user_group_members WHERE group_id = ?)"; $params[] = $groupFilter; }

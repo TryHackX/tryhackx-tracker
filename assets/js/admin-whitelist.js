@@ -406,16 +406,23 @@
 
     // ── "This page" / "Near pages" helpers (near radius comes from the admin_near_pages setting) ──
     const nearRadius = () => Math.max(1, parseInt(bodyDs.nearPages || '2', 10) || 2);
-    /** Rows of the current page plus the pages around it (same search/filters/sort), deduped by id. */
+    let collectingNear = false;   // shared guard: a click during collection must not start/stop a scrape
+    /**
+     * Rows of the current page plus the pages around it (same search/filters/sort), deduped by id.
+     * The scope (query string, page, rows) is SNAPSHOTTED at entry — typing in the search box or
+     * clicking pagination while the sequential fetches run must not mix two result sets.
+     */
     async function collectNearRowsWl() {
         const radius = nearRadius();
-        const from = Math.max(1, state.wl.page - radius), to = Math.min(state.wl.pages || 1, state.wl.page + radius);
+        const curPage = state.wl.page, curRows = [...state.wl.rows.values()];
+        const baseQs = wlQuery();
+        const from = Math.max(1, curPage - radius), to = Math.min(state.wl.pages || 1, curPage + radius);
         const seen = new Set(), rows = [];
         for (let p = from; p <= to; p++) {
             let pageRows;
-            if (p === state.wl.page) pageRows = [...state.wl.rows.values()];
+            if (p === curPage) pageRows = curRows;
             else {
-                const qs = new URLSearchParams(wlQuery());
+                const qs = new URLSearchParams(baseQs);
                 qs.set('page', String(p));
                 const r = await apiCall('admin/fetch_whitelist&' + qs.toString());
                 if (r.error) throw new Error(r.error);
@@ -445,8 +452,11 @@
         loadStatus(); loadWhitelist();
     }
     async function metaNearPagesWl() {
+        if (collectingNear) return;
+        collectingNear = true;
         try { await metaRowsWl(await collectNearRowsWl(), 'near pages ±' + nearRadius()); }
         catch (e) { showToast('Near pages failed: ' + (e.message || 'error'), 'danger'); }
+        finally { collectingNear = false; }
     }
 
     // ───────────────────────── bulk tools (toolbar dropdowns) ─────────────────────────
@@ -527,6 +537,7 @@
     async function scrapeBulk(scope, dateBody, idList) {
         const btn = $('btn-wl-scrape-bulk'), caret = $('btn-wl-scrape-caret'), label = $('wl-scrape-label');
         if (scrapeRunning) { scrapeStop = true; label.textContent = 'Stopping…'; return; }   // second click = stop
+        if (collectingNear && !idList) { showToast('Near-pages collection is running — wait a moment', 'info'); return; }
         const ids = scope === 'page' ? (idList || [...state.wl.rows.keys()]) : null;
         if (scope === 'page' && !ids.length) { showToast('No rows on this page to scrape', 'info'); return; }
         // the 'page' scope takes at most 500 ids per request — near pages can exceed that, so chunk
@@ -1004,9 +1015,15 @@
         document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-near]').forEach(b => b.addEventListener('click', async () => {
             closeMenu('btn-wl-scrape-caret');
             if (scrapeRunning) { scrapeBulk('page'); return; }   // acts as the stop path
+            if (collectingNear) return;
+            collectingNear = true;                               // blocks other scrape starts during collection
+            const label = $('wl-scrape-label');
+            const orig = label.textContent;
+            label.textContent = 'Collecting…';
             let rows;
             try { rows = await collectNearRowsWl(); }
             catch (e) { showToast('Near pages failed: ' + (e.message || 'error'), 'danger'); return; }
+            finally { collectingNear = false; label.textContent = orig; }
             if (!rows.length) { showToast('No rows in the near pages', 'info'); return; }
             scrapeBulk('page', null, rows.map(r => r.id));
         }));

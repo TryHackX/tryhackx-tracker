@@ -2,6 +2,8 @@
 /**
  * POST user_update — self-service profile changes; every change requires the CURRENT password.
  * Body: {csrf_token, current_password, new_password?} and/or {email?} (empty email = remove).
+ * Everything is validated first, then written in one transaction (a bad new password must not
+ * leave a half-committed email change behind).
  */
 requirePost();
 
@@ -17,29 +19,41 @@ if (!password_verify((string)($input['current_password'] ?? ''), (string)$u['pas
     jsonResponse(['error' => 'Current password is incorrect.'], 403);
 }
 
-$changed = [];
+// ── validate everything first ──
+$email = null; $emailSet = false;
 if (array_key_exists('email', $input)) {
+    $emailSet = true;
     $email = trim((string)$input['email']);
     if ($email !== '' && !userValidEmail($email)) jsonResponse(['error' => 'That email address does not look valid.'], 400);
-    try {
-        $db->prepare("UPDATE users SET email = ?, email_verified = 0 WHERE id = ?")
-           ->execute([$email !== '' ? $email : null, (int)$u['id']]);
-    } catch (PDOException $e) {
-        if ((int)$e->errorInfo[1] === 1062) jsonResponse(['error' => 'An account with this email already exists.'], 400);
-        throw $e;
-    }
-    $changed[] = 'email';
 }
 $newPass = (string)($input['new_password'] ?? '');
-if ($newPass !== '') {
-    if (strlen($newPass) < 8 || strlen($newPass) > 200) jsonResponse(['error' => 'New password must be at least 8 characters.'], 400);
-    $db->prepare("UPDATE users SET pass_hash = ? WHERE id = ?")
-       ->execute([password_hash($newPass, PASSWORD_DEFAULT), (int)$u['id']]);
-    // a password change invalidates every remember-me token (stolen-cookie hygiene)
-    $db->prepare("DELETE FROM user_tokens WHERE type = 'remember' AND user_id = ?")->execute([(int)$u['id']]);
-    $changed[] = 'password';
+if ($newPass !== '' && (strlen($newPass) < 8 || strlen($newPass) > 200)) {
+    jsonResponse(['error' => 'New password must be at least 8 characters.'], 400);
 }
-if (!$changed) jsonResponse(['error' => 'Nothing to change.'], 400);
+if (!$emailSet && $newPass === '') jsonResponse(['error' => 'Nothing to change.'], 400);
+
+// ── apply atomically ──
+$changed = [];
+$db->beginTransaction();
+try {
+    if ($emailSet) {
+        $db->prepare("UPDATE users SET email = ?, email_verified = 0 WHERE id = ?")
+           ->execute([$email !== '' ? $email : null, (int)$u['id']]);
+        $changed[] = 'email';
+    }
+    if ($newPass !== '') {
+        $db->prepare("UPDATE users SET pass_hash = ? WHERE id = ?")
+           ->execute([password_hash($newPass, PASSWORD_DEFAULT), (int)$u['id']]);
+        // a password change invalidates every remember-me token (stolen-cookie hygiene)
+        $db->prepare("DELETE FROM user_tokens WHERE type = 'remember' AND user_id = ?")->execute([(int)$u['id']]);
+        $changed[] = 'password';
+    }
+    $db->commit();
+} catch (PDOException $e) {
+    if ($db->inTransaction()) $db->rollBack();
+    if ((int)$e->errorInfo[1] === 1062) jsonResponse(['error' => 'An account with this email already exists.'], 400);
+    throw $e;
+}
 userNotify($db, (int)$u['id'], 'account', 'Your ' . implode(' and ', $changed) . ' ' . (count($changed) > 1 ? 'were' : 'was') . ' changed',
     'If this was not you, change your password immediately.');
 jsonResponse(['success' => true, 'changed' => $changed]);

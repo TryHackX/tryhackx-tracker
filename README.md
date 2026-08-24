@@ -46,6 +46,12 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Mode-aware moderation** — in whitelist mode "block" = ban (removed from the served list, can never be re-registered) and the report/appeal flows, status page and public copy adapt automatically
 - **CAPTCHA provider** — Google reCAPTCHA v2 or Cloudflare Turnstile (one shared modal, fail-closed verification with timeouts)
 
+### User accounts & federation (1.6.0, both off by default)
+- **User accounts** — registration/login with CAPTCHA, groups with per-feature permissions (the seeded `guest` group is every visitor's baseline), timed memberships (1 d … 1 y / custom from–to, extend-on-repurchase), in-app + email notifications, an account page and an admin Users page — see [User accounts, groups & permissions](#user-accounts-groups--permissions-160)
+- **Member search** (`?action=search`) — a permission-gated search over the resolved observed-hash index with magnet links
+- **Sales API** (`v1/users/*`, key scope `users`) — automate selling timed group access from an external shop
+- **Federation** — exchange resolved index metadata with peer trackers (cursor-paged gzip export + a Python importer on a systemd timer) to build one big shared catalogue — see [Federation / cluster](#federation--cluster--a-shared-metadata-catalogue-160)
+
 ### Email System
 - **Submission Confirmation** — sent when a report is filed
 - **Under Review** — sent when an admin first opens a report
@@ -352,6 +358,57 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
 > whitelist hours the full scrape only contains the whitelisted torrents (tiny); during OPEN it is the
 > whole swarm. Poll from **localhost**, watch OpenTracker's single HTTP thread (`top`/`pidstat`), and
 > start with `index_meta_daily_budget = 0` (catalogue only, no DHT) until the CPU cost looks safe.
+
+### User accounts, groups & permissions (1.6.0)
+
+Admin → Settings → **User Accounts** turns on an optional member system (`users_enabled`, off by
+default — with it off, everything behaves exactly like the classic single-admin site). What it adds:
+
+- **Registration & sign-in** (`?action=register` / `?action=login`) — CAPTCHA-protected (registration
+  *requires* a configured CAPTCHA; login uses the smart CAPTCHA `login` context), rate limited per
+  IP, with optional 30-day *remember me* cookies (only a hash is stored; rotated on every use and
+  invalidated on password change or ban) and an email **password reset**. The menu links can be
+  hidden (`users_links_visible=0`) so only people who know the URLs can sign in.
+- **Groups with permissions** (Admin → **Users** → *Groups*): each group carries a set of
+  permissions — `index.view` / `index.files` / `index.magnet` (the member search), `whitelist.view`
+  (the public whitelist page), `stats.view` / `stats.timeline` / `home.stats` (the statistics
+  surfaces). The seeded **guest** group is the baseline *every* visitor gets (anonymous included) —
+  its defaults keep the classic public behaviour, and un-ticking something there hides it from
+  everyone without an account; the seeded **member** group is granted on registration
+  (`users_default_group`). A user's effective permissions = guest ∪ their active groups.
+- **Timed access**: grant a group permanently or for **1 d / 1 w / 2 w / 1 m / 3 m / 6 m / 1 y**, or
+  a custom **from–to** window. Duration grants *extend* an existing membership (repeat purchases
+  stack). The janitor expires memberships, warns `users_notify_expiry_days` days before the end and
+  posts in-app **notifications** (grant / revoke / expiry warning / expired; optional email copies).
+- **Member search** (`?action=search`): search everything the tracker has *seen* (resolved index
+  metadata only) — with per-permission columns (file counts, info hashes / magnet links).
+- **Selling group access**: create an API key with the **users** scope and call
+  `v1/users/lookup | grant | revoke | provision` from your shop after a purchase — see
+  [tools/api_client_example.py](tools/api_client_example.py). Grants made through the API notify the
+  user in-app (and optionally by email) and extend like admin grants.
+
+### Federation / cluster — a shared metadata catalogue (1.6.0)
+
+Multiple tracker operators can **exchange resolved index metadata** (Settings → *Federation /
+Cluster*, `fed_enabled`, off by default) so each node builds a big searchable catalogue without
+re-fetching everything from the DHT — any OpenTracker + this web app can join. The exchange is
+**pull-based and additive**:
+
+- **Export** — `v1/federation/export` serves cursor-paged (optionally gzip-compressed) JSON with
+  only *resolved* rows (name, size, S/L, seen dates, optional file lists), authenticated with an
+  API key carrying the **federation** scope and inheriting the whole S2S ban machinery.
+  `fed_export_enabled` and `fed_export_files` control what leaves the node; `v1/federation/ping`
+  lets a peer sanity-check its key.
+- **Import** — [`worker/federation.py`](worker/README.md) (a systemd **timer**, not PHP web time)
+  pulls from every peer with *Pull* enabled, validates everything (hashes, sizes, sanitized file
+  paths) and merges: a hash this tracker has **observed** but not resolved gets the peer's metadata
+  (`meta_source 'fed:<peer>'` — no second DHT fetch); an unknown hash is inserted only when
+  **Accept new hashes** (`fed_import_new`) is on, under the index row cap. Locally resolved rows
+  and whitelisted/banned hashes are never touched.
+- **Peering flow** — each admin adds the other as a peer, clicks **grant inbound access** (creates
+  a federation-scope API key shown once) and sends that bearer to the other side, who pastes it
+  into *Their bearer* and enables *Pull*. **Test** verifies the outbound direction; per-peer status,
+  cursor and imported-row counters are visible in the peers table.
 
 ### OpenTracker service reload & restart
 
@@ -817,8 +874,14 @@ The installer creates the following tables:
 | `api_bans` | IP bans issued by the API auth layer (with request snapshot) or manually |
 | `stats_samples` | Statistics timeline: raw samples (UNIX `ts`, gauges + cumulative counters + mode) — schema v5 |
 | `stats_samples_5m` / `stats_samples_1h` | 5-minute / hourly roll-ups (avg/min/max, last counter value, whitelist share) |
-| `index_hashes` | Observed-hash index: hashes seen on the tracker (S/L, seen count, grace/protect, metadata) — schema v6 |
+| `index_hashes` | Observed-hash index: hashes seen on the tracker (S/L, seen count, grace/protect, metadata, `meta_source`) — schema v6/v7 |
 | `index_files` | File lists for indexed hashes (keyed by info_hash, FULLTEXT searchable) |
+| `users` | User accounts (username, optional email, password hash, status) — schema v7 |
+| `user_groups` | Groups with JSON permissions (seeded: `guest` = every visitor's baseline, `member` = granted on registration) |
+| `user_group_members` | Timed memberships (`granted_at`/`expires_at`, expiry warnings) |
+| `user_notifications` | In-app notifications (grants, expiry warnings, admin messages) |
+| `user_tokens` | Remember-me + password-reset tokens (sha256 only) |
+| `fed_peers` | Federation peers (base URL, outbound bearer, inbound API client, pull cursor/status) |
 
 Schema upgrades are applied automatically on the first request (`includes/schema.php`,
 `settings.schema_version`); fresh installs get the same tables from `install.php`.
@@ -834,6 +897,7 @@ Schema upgrades are applied automatically on the first request (`includes/schema
 - **Icons:** Bootstrap Icons (CDN, admin panel only)
 - **CAPTCHA:** Google reCAPTCHA v2 or Cloudflare Turnstile (explicit render mode, one shared modal — `assets/js/captcha.js`)
 - **Metadata worker (optional):** Python 3 + `python3-libtorrent` (see `worker/`)
+- **Federation importer (optional):** Python 3 + `python3-pymysql`, systemd timer (`worker/federation.py`)
 
 ---
 
@@ -857,8 +921,15 @@ All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` w
 | `admin/fetch_index`, `admin/index_*` | GET/POST | Observed-hash index list / item / poll / scrape / meta / promote / delete (admin) |
 | `whitelist_submit` | POST | Register magnet links / hashes (CSRF + CAPTCHA + rate limits) |
 | `whitelist_check` | GET/POST | Is a hash registered / banned? |
-| `v1/whitelist/submit` | POST | Server-to-server registration (bearer key, see [Whitelist mode](#whitelist-mode)) |
-| `v1/whitelist/ping` | GET | Server-to-server health check |
+| `user_register` / `user_login` / `user_logout` | POST | Account registration / sign-in / sign-out (CSRF + CAPTCHA + rate limits; 1.6.0) |
+| `user_me` / `user_notifications` | GET/POST | Profile + groups + permissions / notification list & mark-read (session) |
+| `user_update` | POST | Change own email / password (requires the current password) |
+| `user_reset_request` / `user_reset_confirm` | POST | Email password reset (CAPTCHA; token valid 2 h) |
+| `index_search` | GET | Member search over the resolved index (`search`, `search_files`, `sort`, `page`; gated by `index.*` permissions) |
+| `v1/whitelist/submit` | POST | Server-to-server registration (bearer key, scope `whitelist`; see [Whitelist mode](#whitelist-mode)) |
+| `v1/whitelist/ping` | GET | Server-to-server health check (scope `whitelist`) |
+| `v1/users/lookup` / `grant` / `revoke` / `provision` | POST | Sales/shop integration (scope `users`): look up a user, grant/extend or revoke a timed group, create an account |
+| `v1/federation/ping` / `export` | GET / POST | Federation peers (scope `federation`): health check / cursor-paged metadata export |
 
 ### Admin Endpoints
 
@@ -889,8 +960,11 @@ All require active admin session. Prefix: `admin/`
 | `admin/whitelist_fetch_meta` / `whitelist_scrape` | POST | Queue metadata fetch / live scrape |
 | `admin/whitelist_regenerate` / `whitelist_import_blacklist` | POST | Rewrite the file (+ reload) / import the legacy blacklist as bans |
 | `admin/fetch_banned` / `banned_add` | GET / POST | Banned hashes |
-| `admin/fetch_api_clients` / `api_client_create` / `api_client_update` / `api_client_delete` | GET / POST | API clients (secret shown once) |
+| `admin/fetch_api_clients` / `api_client_create` / `api_client_update` / `api_client_delete` | GET / POST | API clients (secret shown once; `scope` = `whitelist` \| `users` \| `federation` \| `all`) |
 | `admin/fetch_api_bans` / `api_ban_lift` / `api_ban_add` | GET / POST | API bans (`&id=` returns the request snapshot) |
+| `admin/fetch_users` / `user_update` / `user_delete` / `user_grant` / `user_revoke` / `user_notify` | GET / POST | User browser + edits, timed group grants, custom notifications (1.6.0) |
+| `admin/fetch_groups` / `group_save` / `group_delete` | GET / POST | Group CRUD with the permission matrix |
+| `admin/fetch_fed_peers` / `fed_peer_save` / `fed_peer_delete` / `fed_peer_test` | GET / POST | Federation peers (inbound bearer shown once; test = outbound ping) |
 
 ---
 

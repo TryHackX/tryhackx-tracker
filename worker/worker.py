@@ -222,10 +222,19 @@ class Worker:
                         p = p.decode("utf-8", "replace")
                     files.append((p[:1000], int(fs.file_size(i))))
                 # the index table (schema v7) records where the metadata came from ('dht' vs 'fed:<peer>');
-                # the whitelist table has no such column
-                src = ", meta_source='dht'" if q["table"] == self.cfg.index_table else ""
-                self.db.query("UPDATE %s SET name=%%s, total_size=%%s, files_count=%%s, piece_length=%%s, meta_status='done', meta_fetched_at=NOW(), meta_error=NULL, meta_claim=NULL%s WHERE %s=%%s AND meta_claim=%%s" % (q["table"], src, kc),
-                              (name, total, count, piece, kv, token))
+                # the whitelist table has no such column. Against a not-yet-migrated DB (or a grant that
+                # doesn't cover the new column yet) the stamped UPDATE fails — fall back WITHOUT the
+                # stamp instead of throwing the fetched metadata away as 'failed'.
+                src = ", meta_source='dht'" if (q["table"] == self.cfg.index_table and getattr(self, "_meta_source_ok", True)) else ""
+                sql = "UPDATE %s SET name=%%s, total_size=%%s, files_count=%%s, piece_length=%%s, meta_status='done', meta_fetched_at=NOW(), meta_error=NULL, meta_claim=NULL%s WHERE %s=%%s AND meta_claim=%%s"
+                try:
+                    self.db.query(sql % (q["table"], src, kc), (name, total, count, piece, kv, token))
+                except Exception as e:
+                    if not src:
+                        raise
+                    log.warning("meta_source column unavailable (%s) — storing without it from now on", e)
+                    self._meta_source_ok = False
+                    self.db.query(sql % (q["table"], "", kc), (name, total, count, piece, kv, token))
                 self.db.query("DELETE FROM %s WHERE %s=%%s" % (q["files"], q["files_fk"]), (row["info_hash"] if q["files_fk"] == "info_hash" else kv,))
                 if files and keep_files:
                     conn = self.db._connect()

@@ -320,14 +320,21 @@ function trackerSchemaStatements(): array {
 function trackerSchemaGuardedStatements(PDO $db): array {
     $out = [];
     if (!schemaColumnExists($db, 'api_clients', 'scope')) {
-        $out[] = "ALTER TABLE `api_clients` ADD COLUMN `scope` VARCHAR(32) NOT NULL DEFAULT 'whitelist' AFTER `secret_hint`";
+        $out[] = "ALTER TABLE `api_clients` ADD COLUMN `scope` VARCHAR(32) NOT NULL DEFAULT 'whitelist'";
     }
+    // index_hashes carries a FULLTEXT index, so ADD COLUMN cannot be INSTANT — it is a full table
+    // rebuild on a live 200k-row table. Do BOTH changes in ONE ALTER (one rebuild, not two), no
+    // AFTER clause (column position doesn't matter, and AFTER also blocks INSTANT on newer MySQL).
+    // Tip for big deployments: run `sudo -u www-data php tools/janitor.php` right after upload so
+    // the rebuild happens off the web request path.
+    $parts = [];
     if (!schemaColumnExists($db, 'index_hashes', 'meta_source')) {
-        $out[] = "ALTER TABLE `index_hashes` ADD COLUMN `meta_source` VARCHAR(24) DEFAULT NULL AFTER `meta_error`";
+        $parts[] = "ADD COLUMN `meta_source` VARCHAR(24) DEFAULT NULL";
     }
     if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_fetched')) {
-        $out[] = "ALTER TABLE `index_hashes` ADD KEY `idx_index_meta_fetched` (`meta_fetched_at`)";
+        $parts[] = "ADD KEY `idx_index_meta_fetched` (`meta_fetched_at`)";
     }
+    if ($parts) $out[] = "ALTER TABLE `index_hashes` " . implode(', ', $parts);
     return $out;
 }
 

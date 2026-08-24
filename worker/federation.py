@@ -36,6 +36,8 @@ DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 MAX_FILES_PER_ROW = 5000
 MAX_PAGES_PER_RUN = 200          # bound one run; the cursor continues next time
 HTTP_TIMEOUT = 60
+MAX_COMPRESSED_BYTES = 64 * 1024 * 1024     # per page on the wire
+MAX_EXPANDED_BYTES = 512 * 1024 * 1024      # per page after gzip — a bomb from a compromised peer must not OOM the host
 
 
 # ── validation (pure — covered by --self-test) ──────────────────────────────────
@@ -180,9 +182,21 @@ def fetch_page(peer, since, after, limit, want_files):
         "User-Agent": "tryhackx-tracker/1.6 federation.py",
     })
     with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as res:
-        raw = res.read(256 * 1024 * 1024)
+        raw = res.read(MAX_COMPRESSED_BYTES + 1)
+        if len(raw) > MAX_COMPRESSED_BYTES:
+            raise RuntimeError("peer response exceeds %d compressed bytes" % MAX_COMPRESSED_BYTES)
         if (res.headers.get("Content-Encoding") or "").lower() == "gzip":
-            raw = gzip.GzipFile(fileobj=io.BytesIO(raw)).read()
+            # decompress in bounded chunks — never trust the peer's compression ratio (gzip bombs)
+            gz = gzip.GzipFile(fileobj=io.BytesIO(raw))
+            out = bytearray()
+            while True:
+                chunk = gz.read(1 << 20)
+                if not chunk:
+                    break
+                out += chunk
+                if len(out) > MAX_EXPANDED_BYTES:
+                    raise RuntimeError("peer response exceeds %d bytes after decompression" % MAX_EXPANDED_BYTES)
+            raw = bytes(out)
     data = json.loads(raw.decode("utf-8", "replace"))
     if not isinstance(data, dict) or not data.get("ok"):
         raise RuntimeError("peer error: %s" % (data.get("error") if isinstance(data, dict) else "not json"))
@@ -298,10 +312,11 @@ def run_once(db, only_peer=None, force=False):
             continue
         if not force and int(p.get("pull_enabled") or 0) != 1:
             continue
-        if not BEARER_RE.match((p.get("bearer") or "").strip()):
+        bearer = (p.get("bearer") or "").strip().lower()   # hex either case; PHP normalises new rows, this covers old ones
+        if not BEARER_RE.match(bearer):
             log.info("[%s] skipped: no outbound bearer configured", p["name"])
             continue
-        p["bearer"] = p["bearer"].strip()
+        p["bearer"] = bearer
         total += sync_peer(db, p, cfg)
     return total
 

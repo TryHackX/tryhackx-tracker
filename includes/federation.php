@@ -35,12 +35,21 @@ function fedPullMinutes(array $cfg): int { return max(5, min(1440, (int)($cfg['f
 function fedExportRows(PDO $db, array $cfg, int $since, string $afterHash, int $limit, bool $withFiles): array {
     $limit = max(1, min(fedExportMaxBatch($cfg), $limit));
     $afterHash = preg_match('/^[a-f0-9]{40}$/', $afterHash) ? $afterHash : '';
+    // Two invariants keep the cursor sound and the export clean:
+    //  - meta_fetched_at < the CURRENT second: the open second may still receive commits (the DHT
+    //    worker and a running import both stamp NOW() row by row) — if the cursor landed inside it,
+    //    rows committed a moment later with a smaller hash would be skipped forever.
+    //  - never export hashes that are locally whitelisted/banned: the index poll purges them, but
+    //    only when it runs — a ban must stop leaving the node immediately.
     $st = $db->prepare(
         "SELECT info_hash, name, total_size, files_count, piece_length, last_seeders, last_leechers,
                 first_seen, last_seen, seen_count, UNIX_TIMESTAMP(meta_fetched_at) AS mf
-         FROM index_hashes
+         FROM index_hashes i
          WHERE meta_status = 'done' AND meta_fetched_at IS NOT NULL
+           AND meta_fetched_at < FROM_UNIXTIME(UNIX_TIMESTAMP())
            AND (meta_fetched_at > FROM_UNIXTIME(?) OR (meta_fetched_at = FROM_UNIXTIME(?) AND info_hash > ?))
+           AND NOT EXISTS (SELECT 1 FROM banned_hashes b WHERE b.info_hash = i.info_hash)
+           AND NOT EXISTS (SELECT 1 FROM whitelist w WHERE w.info_hash = i.info_hash)
          ORDER BY meta_fetched_at, info_hash
          LIMIT " . ($limit + 1));
     $st->execute([$since, $since, $afterHash]);
@@ -118,7 +127,7 @@ function fedPeerSave(PDO $db, ?int $id, array $data): array {
     try {
         if ($id === null) {
             $db->prepare("INSERT INTO fed_peers (name, base_url, bearer, pull_enabled, pull_files) VALUES (?, ?, ?, ?, ?)")
-               ->execute([$name, $url, $bearer === 'CLEAR' ? '' : $bearer, $pull, $pullFiles]);
+               ->execute([$name, $url, $bearer === 'CLEAR' ? '' : strtolower($bearer), $pull, $pullFiles]);
             return ['id' => (int)$db->lastInsertId()];
         }
         $sets = "name = ?, base_url = ?, pull_enabled = ?, pull_files = ?";

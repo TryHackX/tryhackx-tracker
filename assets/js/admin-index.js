@@ -226,16 +226,25 @@
     async function metaScope(scope) {
         try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope }); if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; } showToast('Queued ' + r.queued + ' for metadata'); loadStatus(); } catch (e) { showToast(e.message, 'error'); }
     }
-    /** Rows of the current page plus the pages around it (same search/filters/sort), deduped by hash. */
+    /**
+     * Rows of the current page plus the pages around it (same search/filters/sort), deduped by hash.
+     * The scope (query params, page, rows) is SNAPSHOTTED at entry — typing in the search box or
+     * clicking pagination while the sequential fetches run must not mix two result sets.
+     */
+    let collectingNear = false;   // shared guard: a click during collection must not start/stop a scrape
     async function collectNearRows() {
         const radius = nearRadius();
-        const from = Math.max(1, state.page - radius), to = Math.min(state.pages || 1, state.page + radius);
+        const curPage = state.page, curRows = state.rows;
+        const baseQs = listQuery(curPage).toString();
+        const from = Math.max(1, curPage - radius), to = Math.min(state.pages || 1, curPage + radius);
         const seen = new Set(), rows = [];
         for (let p = from; p <= to; p++) {
             let pageRows;
-            if (p === state.page) pageRows = state.rows;
+            if (p === curPage) pageRows = curRows;
             else {
-                const data = await apiCall('admin/fetch_index&' + listQuery(p).toString());
+                const qs = new URLSearchParams(baseQs);
+                qs.set('page', String(p));
+                const data = await apiCall('admin/fetch_index&' + qs.toString());
                 if (data.error) throw new Error(data.error);
                 pageRows = data.rows || [];
             }
@@ -257,8 +266,11 @@
         load(); loadStatus();
     }
     async function metaNearPages() {
+        if (collectingNear) return;
+        collectingNear = true;
         try { await metaRows(await collectNearRows(), 'near pages ±' + nearRadius()); }
         catch (e) { showToast('Near pages failed: ' + e.message, 'error'); }
+        finally { collectingNear = false; }
     }
     async function promptDateRange() {
         const from = await A.promptModal({ title: 'Custom date range', label: 'From (YYYY-MM-DD or YYYY-MM-DD HH:MM)', placeholder: '2026-08-20' });
@@ -285,6 +297,7 @@
         const label = $('idx-scrape-label');
         const btn = $('btn-idx-scrape-bulk'), caret = $('btn-idx-scrape-caret');
         if (scrapeRunning) { scrapeStop = true; label.textContent = 'Stopping\u2026'; return; }   // second click = stop
+        if (collectingNear && !hashList) { showToast('Near-pages collection is running \u2014 wait a moment', 'info'); return; }
         scrapeRunning = true; scrapeStop = false;
         const orig = label.textContent;
         const origTitle = btn.title;
@@ -322,9 +335,15 @@
     }
     async function scrapeNearPages() {
         if (scrapeRunning) { scrapeBulk('page'); return; }   // acts as the stop path
+        if (collectingNear) return;
+        collectingNear = true;                               // blocks other scrape starts during collection
+        const label = $('idx-scrape-label');
+        const orig = label.textContent;
+        label.textContent = 'Collecting…';
         let rows;
         try { rows = await collectNearRows(); }
         catch (e) { showToast('Near pages failed: ' + e.message, 'error'); return; }
+        finally { collectingNear = false; label.textContent = orig; }
         if (!rows.length) { showToast('No rows in the near pages', 'info'); return; }
         scrapeBulk('page', null, rows.map(r => r.info_hash));
     }

@@ -24,11 +24,22 @@ if (!rateLimitAllow('user_reset', ipBucket($ip), 5, 3600)) {
 }
 
 $u = userFindByLogin($db, (string)($input['login'] ?? ''));
+
+// Identical reply whether or not the account exists — and to keep the RESPONSE TIME identical too,
+// answer FIRST and only then do the account-dependent work (token insert + synchronous mail());
+// under php-fpm fastcgi_finish_request() hands the reply to the client before the mail is sent.
+ignore_user_abort(true);
+while (ob_get_level()) ob_end_clean();
+header('Content-Type: application/json; charset=utf-8');
+echo json_encode(['success' => true, 'message' => 'If that account exists and has an email address, a reset link is on its way.']);
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+else flush();
+
 if ($u && $u['status'] === 'active' && trim((string)$u['email']) !== '') {
     $reset = userResetCreate($db, (int)$u['id']);
     $link = rtrim(getBaseUrl(), '/') . '/?action=reset&token=' . $reset;
     userNotifyMail($db, $cfg, $u, ($cfg['site_name'] ?? 'Tracker') . ' — password reset',
         "A password reset was requested for your account.\n\nOpen this link to set a new password (valid for " . USER_RESET_TTL_MIN . " minutes):\n" . $link . "\n\nIf this was not you, ignore this message.");
 }
-// identical reply whether or not the account exists
-jsonResponse(['success' => true, 'message' => 'If that account exists and has an email address, a reset link is on its way.']);
+exit;
