@@ -143,6 +143,25 @@ check('same-day budget exhausted → 0 more', $q2 === 0, (string)$q2);
 $q3 = indexQueueMetaBudget($db, $cfg, 1000400 + 86400 + 10); // next day
 check('next day → budget resets, queues more', $q3 === 5, (string)$q3);
 
+// ── 6b. auto-queue mode: every 'none' row queued, budget ignored ──────────────
+$remainingNone = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status = 'none'")->fetchColumn();
+check('auto-queue precondition: some rows still none', $remainingNone === 10, (string)$remainingNone);
+$cfgAuto = $cfg; $cfgAuto['index_meta_auto_queue'] = '1';
+check('indexMetaAutoQueue accessor', indexMetaAutoQueue($cfgAuto) && !indexMetaAutoQueue($cfg));
+$noneHashes = $db->query("SELECT info_hash FROM index_hashes WHERE meta_status = 'none'")->fetchAll(PDO::FETCH_COLUMN);
+$qa = indexQueueMetaAuto($db);
+check('auto-queue queues ALL remaining none rows (no budget)', $qa === 10, (string)$qa);
+check('auto-queue leaves no none rows', (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status = 'none'")->fetchColumn() === 0);
+$inNone = "'" . implode("','", $noneHashes) . "'";
+$badSpread = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE info_hash IN ($inNone) AND meta_requested_at > NOW() + INTERVAL 3601 SECOND")->fetchColumn();
+check('auto-queue spread stays within ~1 h', $badSpread === 0, (string)$badSpread);
+check('auto-queue rows carry janitor priority -1', (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE info_hash IN ($inNone) AND (meta_status <> 'pending' OR meta_priority <> -1)")->fetchColumn() === 0);
+check('auto-queue idempotent → 0 when nothing is none', indexQueueMetaAuto($db) === 0);
+// indexTick routes to auto-queue when the setting is on (fresh 'none' row + a poll that is not due)
+$db->exec("INSERT INTO index_hashes (info_hash, first_seen, last_seen, seen_count, grace_until) VALUES ('" . h(9001) . "', NOW(), NOW(), 1, NOW() + INTERVAL 3 DAY)");
+$tk = indexTick($db, $cfgAuto, function () { return ['file' => null, 'error' => 'no poll in this test']; }, 1000500);
+check('indexTick (auto mode) queues the new none row', $tk['meta_queued'] === 1, json_encode($tk));
+
 // ── 7. protected_until extension on poll for done rows ────────────────────────
 $db->exec("UPDATE index_hashes SET meta_status='done', protected_until=NOW() + INTERVAL 1 DAY WHERE info_hash='" . h(2001) . "'");
 $before = $db->query("SELECT protected_until FROM index_hashes WHERE info_hash='" . h(2001) . "'")->fetchColumn();

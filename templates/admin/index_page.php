@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/vendor/uplot/uPlot.min.css<?= assetVer('assets/vendor/uplot/uPlot.min.css') ?>">
     <?php endif; ?>
 </head>
-<body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>">
+<body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-near-pages="<?= max(1, min(20, (int)($cfg['admin_near_pages'] ?? 2))) ?>">
     <div class="admin-container admin-wide wl-page">
         <div class="admin-header">
             <h2><i class="bi bi-collection"></i> Index <span class="idx-subtitle">observed hashes &mdash; not a whitelist</span></h2>
@@ -89,6 +89,9 @@
                                 <li><button type="button" class="dropdown-item" data-meta-scope="failed"><i class="bi bi-x-circle"></i> Failed</button></li>
                                 <li><button type="button" class="dropdown-item" data-meta-scope="missing_failed"><i class="bi bi-plus-slash-minus"></i> Missing + failed</button></li>
                                 <li><hr class="dropdown-divider"></li>
+                                <li><button type="button" class="dropdown-item" data-meta-page><i class="bi bi-file-earmark"></i> This page (missing + failed)</button></li>
+                                <li><button type="button" class="dropdown-item" data-meta-near><i class="bi bi-files"></i> Near pages &plusmn;<?= max(1, min(20, (int)($cfg['admin_near_pages'] ?? 2))) ?> (missing + failed)</button></li>
+                                <li><hr class="dropdown-divider"></li>
                                 <li><button type="button" class="dropdown-item" data-meta-scope="all"><i class="bi bi-arrow-repeat"></i> All rows (re-fetch)</button></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><h6 class="dropdown-header">First seen within&hellip; (missing + failed)</h6></li>
@@ -106,6 +109,7 @@
                             <ul class="dropdown-menu dropdown-menu-end wl-dd-menu">
                                 <li><h6 class="dropdown-header">Scrape seeders / leechers for&hellip;</h6></li>
                                 <li><button type="button" class="dropdown-item" data-scrape-scope="page"><i class="bi bi-file-earmark"></i> This page</button></li>
+                                <li><button type="button" class="dropdown-item" data-scrape-near><i class="bi bi-files"></i> Near pages &plusmn;<?= max(1, min(20, (int)($cfg['admin_near_pages'] ?? 2))) ?></button></li>
                                 <li><button type="button" class="dropdown-item" data-scrape-scope="stale"><i class="bi bi-hourglass-split"></i> Stale (not scraped in 10 min)</button></li>
                                 <li><button type="button" class="dropdown-item" data-scrape-scope="all"><i class="bi bi-collection"></i> All rows</button></li>
                                 <li><hr class="dropdown-divider"></li>

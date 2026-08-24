@@ -35,6 +35,7 @@ function indexMaxRows(array $cfg): int { return max(10, min(5000000, (int)($cfg[
 function indexGraceDays(array $cfg): int { return max(1, min(90, (int)($cfg['index_grace_days'] ?? 3) ?: 3)); }
 function indexProtectDays(array $cfg): int { return max(1, min(365, (int)($cfg['index_protect_days'] ?? 10) ?: 10)); }
 function indexMetaDailyBudget(array $cfg): int { return max(0, min(1000000, (int)($cfg['index_meta_daily_budget'] ?? 500))); }
+function indexMetaAutoQueue(array $cfg): bool { return (($cfg['index_meta_auto_queue'] ?? '0') === '1'); }
 function indexKeepFiles(array $cfg): bool { return (($cfg['index_keep_files'] ?? '1') === '1'); }
 function indexPollBudget(array $cfg): int { return max(5, min(120, (int)($cfg['index_poll_budget'] ?? 45) ?: 45)); }
 
@@ -322,6 +323,19 @@ function indexQueueMetaBudget(PDO $db, array $cfg, ?int $now = null): int {
 }
 
 /**
+ * Auto-queue mode (index_meta_auto_queue=1): EVERY 'none' row goes to 'pending' — no daily budget.
+ * Bounded per tick and spread over the next hour so a huge poll doesn't hand the worker (and the DHT)
+ * everything at once; the janitor tick keeps draining until no 'none' rows remain. Returns rows queued.
+ */
+function indexQueueMetaAuto(PDO $db): int {
+    $st = $db->prepare("UPDATE index_hashes SET meta_status = 'pending', meta_priority = -1,
+                            meta_requested_at = NOW() + INTERVAL FLOOR(RAND() * 3600) SECOND, meta_error = NULL, meta_claim = NULL
+                        WHERE meta_status = 'none' ORDER BY last_seeders DESC, last_seen DESC LIMIT 5000");
+    $st->execute();
+    return $st->rowCount();
+}
+
+/**
  * Hourly pruner: drop expired rows (grace elapsed without metadata, or protection elapsed for done rows),
  * cap the table at index_max_rows (oldest last_seen without protection), and clean orphaned index_files.
  * Returns ['expired'=>int,'capped'=>int,'orphan_files'=>int] or null when throttled.
@@ -396,7 +410,7 @@ function indexTick(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
             $out['polled'] = $out['poll']['ok'];
             if ($out['poll']['error'] !== null) $out['error'] = $out['poll']['error'];
         }
-        $out['meta_queued'] = indexQueueMetaBudget($db, $cfg, $now);
+        $out['meta_queued'] = indexMetaAutoQueue($cfg) ? indexQueueMetaAuto($db) : indexQueueMetaBudget($db, $cfg, $now);
         // a big OPEN-hours poll can overshoot the cap by tens of thousands — don't wait for the hourly
         // prune, trim right away when we're more than 5 % over
         $force = indexRowsCount($db) > (int)(indexMaxRows($cfg) * 1.05);
@@ -580,7 +594,7 @@ function indexStatus(PDO $db, array $cfg): array {
     return [
         'enabled' => indexEnabled($cfg), 'source_url' => indexSourceUrl($cfg), 'poll_minutes' => indexPollMinutes($cfg),
         'min_seeders' => indexMinSeeders($cfg), 'max_rows' => indexMaxRows($cfg), 'grace_days' => indexGraceDays($cfg),
-        'protect_days' => indexProtectDays($cfg), 'meta_daily_budget' => indexMetaDailyBudget($cfg), 'poll_budget' => indexPollBudget($cfg),
+        'protect_days' => indexProtectDays($cfg), 'meta_daily_budget' => indexMetaDailyBudget($cfg), 'meta_auto_queue' => indexMetaAutoQueue($cfg), 'poll_budget' => indexPollBudget($cfg),
         'counts' => $counts, 'state' => indexStateRead(),
     ];
 }

@@ -11,8 +11,8 @@ $refresh = !empty($input['refresh']) && $input['refresh'] !== '0' && $input['ref
 if (!$ids) {
     jsonResponse(['error' => 'No IDs provided'], 400);
 }
-if (count($ids) > 50) {
-    jsonResponse(['error' => 'Too many IDs (max 50)'], 400);
+if (count($ids) > 500) {
+    jsonResponse(['error' => 'Too many IDs (max 500)'], 400);
 }
 
 $queued = whitelistRequestMeta($db, $ids, 10, $refresh);

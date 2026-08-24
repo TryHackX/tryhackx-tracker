@@ -14,7 +14,7 @@
     // ───────────────────────── state ─────────────────────────
     const state = {
         view: 'whitelist',
-        wl: { page: 1, search: '', searchFiles: false, source: '', meta: '', banned: 'active', ip: '', group: false, rows: new Map(), selected: new Set(), ipCounts: {} },
+        wl: { page: 1, pages: 1, search: '', searchFiles: false, source: '', meta: '', banned: 'active', ip: '', group: false, rows: new Map(), selected: new Set(), ipCounts: {} },
         bn: { page: 1, search: '', rows: new Map() },
         ab: { page: 1, search: '', status: 'active', rows: new Map() },
         cl: { rows: new Map() },
@@ -255,6 +255,7 @@
             return;
         }
         state.wl.rows = new Map(r.rows.map(x => [x.id, x]));
+        state.wl.pages = r.pages || 1;
         state.wl.ipCounts = r.ip_counts || {};
         state.wl.selected = new Set([...state.wl.selected].filter(id => state.wl.rows.has(id)));
         $('wl-total').textContent = `${r.total} entries`;
@@ -388,16 +389,64 @@
 
     async function fetchMeta(ids, refresh) {
         if (!ids.length) return;
-        if (ids.length > 50) { showToast('Max 50 rows per metadata request', 'warning'); ids = ids.slice(0, 50); }
         try {
-            const r = await apiCall('admin/whitelist_fetch_meta', 'POST', { ids, refresh: !!refresh });
-            if (r.success) {
-                let msg = `Queued ${r.queued} of ${ids.length}`;
-                if (r.worker_heartbeat_age === null || r.worker_heartbeat_age === undefined) msg += ' — warning: the metadata worker seems to be down (no heartbeat)';
-                else if (r.worker_heartbeat_age > 120) msg += ` — warning: worker heartbeat is ${fmtAgo(r.worker_heartbeat_age)} old`;
-                showToast(msg, r.worker_heartbeat_age === null || r.worker_heartbeat_age > 120 ? 'warning' : 'success');
-            } else showToast(r.error || 'Request failed', 'danger');
+            let queued = 0, hb;
+            for (let i = 0; i < ids.length; i += 500) {
+                const r = await apiCall('admin/whitelist_fetch_meta', 'POST', { ids: ids.slice(i, i + 500), refresh: !!refresh });
+                if (!r.success) { showToast(r.error || 'Request failed', 'danger'); return; }
+                queued += Number(r.queued) || 0;
+                hb = r.worker_heartbeat_age;
+            }
+            let msg = `Queued ${queued} of ${ids.length}`;
+            if (hb === null || hb === undefined) msg += ' — warning: the metadata worker seems to be down (no heartbeat)';
+            else if (hb > 120) msg += ` — warning: worker heartbeat is ${fmtAgo(hb)} old`;
+            showToast(msg, hb === null || hb === undefined || hb > 120 ? 'warning' : 'success');
         } catch { showToast('Network error', 'danger'); }
+    }
+
+    // ── "This page" / "Near pages" helpers (near radius comes from the admin_near_pages setting) ──
+    const nearRadius = () => Math.max(1, parseInt(bodyDs.nearPages || '2', 10) || 2);
+    /** Rows of the current page plus the pages around it (same search/filters/sort), deduped by id. */
+    async function collectNearRowsWl() {
+        const radius = nearRadius();
+        const from = Math.max(1, state.wl.page - radius), to = Math.min(state.wl.pages || 1, state.wl.page + radius);
+        const seen = new Set(), rows = [];
+        for (let p = from; p <= to; p++) {
+            let pageRows;
+            if (p === state.wl.page) pageRows = [...state.wl.rows.values()];
+            else {
+                const qs = new URLSearchParams(wlQuery());
+                qs.set('page', String(p));
+                const r = await apiCall('admin/fetch_whitelist&' + qs.toString());
+                if (r.error) throw new Error(r.error);
+                pageRows = r.rows || [];
+            }
+            for (const row of pageRows) { if (!seen.has(row.id)) { seen.add(row.id); rows.push(row); } }
+        }
+        return rows;
+    }
+    /** Queue metadata for the given rows, skipping everything that already has (or is fetching) it. */
+    async function metaRowsWl(rows, what) {
+        const ids = rows.filter(r => r.meta_status === 'none' || r.meta_status === 'failed').map(r => r.id);
+        if (!ids.length) { showToast('Nothing to queue — no missing/failed rows in ' + what, 'info'); return; }
+        try {
+            let queued = 0, hb;
+            for (let i = 0; i < ids.length; i += 500) {
+                const r = await apiCall('admin/whitelist_fetch_meta', 'POST', { ids: ids.slice(i, i + 500), refresh: false });
+                if (!r.success) { showToast(r.error || 'Request failed', 'danger'); return; }
+                queued += Number(r.queued) || 0;
+                hb = r.worker_heartbeat_age;
+            }
+            let msg = `Queued ${queued} of ${ids.length} missing/failed (${what})`;
+            if (hb === null || hb === undefined) msg += ' — warning: the metadata worker seems to be down (no heartbeat)';
+            else if (hb > 120) msg += ` — warning: worker heartbeat is ${fmtAgo(hb)} old`;
+            showToast(msg, hb === null || hb === undefined || hb > 120 ? 'warning' : 'success');
+        } catch { showToast('Network error', 'danger'); return; }
+        loadStatus(); loadWhitelist();
+    }
+    async function metaNearPagesWl() {
+        try { await metaRowsWl(await collectNearRowsWl(), 'near pages ±' + nearRadius()); }
+        catch (e) { showToast('Near pages failed: ' + (e.message || 'error'), 'danger'); }
     }
 
     // ───────────────────────── bulk tools (toolbar dropdowns) ─────────────────────────
@@ -475,11 +524,13 @@
      * Bulk "Refresh S/L": the server scrapes 50 hashes per tracker request within a time budget and answers
      * truncated=true + a cursor while rows remain — loop until done, showing progress in the button label.
      */
-    async function scrapeBulk(scope, dateBody) {
+    async function scrapeBulk(scope, dateBody, idList) {
         const btn = $('btn-wl-scrape-bulk'), caret = $('btn-wl-scrape-caret'), label = $('wl-scrape-label');
         if (scrapeRunning) { scrapeStop = true; label.textContent = 'Stopping…'; return; }   // second click = stop
-        const ids = scope === 'page' ? [...state.wl.rows.keys()] : null;
+        const ids = scope === 'page' ? (idList || [...state.wl.rows.keys()]) : null;
         if (scope === 'page' && !ids.length) { showToast('No rows on this page to scrape', 'info'); return; }
+        // the 'page' scope takes at most 500 ids per request — near pages can exceed that, so chunk
+        const chunks = ids ? Array.from({ length: Math.ceil(ids.length / 500) }, (_, i) => ids.slice(i * 500, i * 500 + 500)) : [null];
         scrapeRunning = true; scrapeStop = false;
         const origLabel = label.textContent;
         const origTitle = btn.title;
@@ -487,24 +538,29 @@
         btn.classList.add('wl-busy');
         btn.title = 'Click to stop after the current batch';
         const progress = (t) => { label.textContent = t; };
-        let scraped = 0, requests = 0, failed = 0, afterId = 0, rounds = 0, warning = null, aborted = false, stopped = false;
+        let scraped = 0, requests = 0, failed = 0, rounds = 0, warning = null, aborted = false, stopped = false;
         progress('Stop · scraping…');
         try {
-            for (;;) {
-                rounds++;
-                const body = { scope, after_id: afterId };
-                if (ids) body.ids = ids;
-                if (dateBody) Object.assign(body, dateBody);
-                const r = await apiCall('admin/whitelist_scrape_bulk', 'POST', body);
-                if (!r.success) { showToast(r.error || 'Scrape failed', 'danger'); aborted = true; break; }
-                scraped += Number(r.scraped) || 0;
-                requests += Number(r.requests) || 0;
-                failed += Number(r.failed) || 0;
-                if (r.after_id) afterId = r.after_id;
-                if (r.warning) warning = r.warning;
-                progress(`Stop · scraped ${scraped}…` + (r.remaining ? ` (${r.remaining} left)` : ''));
-                if (scrapeStop) { stopped = true; break; }
-                if (!r.truncated || rounds >= 200) break;
+            outer:
+            for (const chunk of chunks) {
+                let afterId = 0;
+                for (;;) {
+                    rounds++;
+                    const body = { scope, after_id: afterId };
+                    if (chunk) body.ids = chunk;
+                    if (dateBody) Object.assign(body, dateBody);
+                    const r = await apiCall('admin/whitelist_scrape_bulk', 'POST', body);
+                    if (!r.success) { showToast(r.error || 'Scrape failed', 'danger'); aborted = true; break outer; }
+                    scraped += Number(r.scraped) || 0;
+                    requests += Number(r.requests) || 0;
+                    failed += Number(r.failed) || 0;
+                    if (r.after_id) afterId = r.after_id;
+                    if (r.warning) warning = r.warning;
+                    progress(`Stop · scraped ${scraped}…` + (r.remaining ? ` (${r.remaining} left)` : ''));
+                    if (scrapeStop) { stopped = true; break outer; }
+                    if (!r.truncated || rounds >= 200) break;
+                }
+                if (rounds >= 200) break;
             }
         } catch { showToast('Network error', 'danger'); aborted = true; }
         if (stopped) showToast(`Stopped — scraped ${scraped} before stopping`, 'info');
@@ -937,7 +993,18 @@
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-scope]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); queueMetaScope(b.dataset.metaScope); }));
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-date]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); queueMetaDate(b.dataset.metaDate === 'custom' ? 'custom' : Number(b.dataset.metaDate)); }));
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-cancel]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); cancelMetaQueue(); }));
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-page]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); metaRowsWl([...state.wl.rows.values()], 'this page'); }));
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-near]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); metaNearPagesWl(); }));
         document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-scope]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-scrape-caret'); scrapeBulk(b.dataset.scrapeScope); }));
+        document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-near]').forEach(b => b.addEventListener('click', async () => {
+            closeMenu('btn-wl-scrape-caret');
+            if (scrapeRunning) { scrapeBulk('page'); return; }   // acts as the stop path
+            let rows;
+            try { rows = await collectNearRowsWl(); }
+            catch (e) { showToast('Near pages failed: ' + (e.message || 'error'), 'danger'); return; }
+            if (!rows.length) { showToast('No rows in the near pages', 'info'); return; }
+            scrapeBulk('page', null, rows.map(r => r.id));
+        }));
         document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-date]').forEach(b => b.addEventListener('click', async () => {
             closeMenu('btn-wl-scrape-caret');
             if (b.dataset.scrapeDate === 'custom') { const r = await promptDateRange(); if (!r) return; scrapeBulk('date', r.to ? { from: r.from, to: r.to } : { from: r.from }); }

@@ -6,7 +6,8 @@
     const { apiCall, el, esc, showToast, confirmAction, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard } = A;
     const $ = (id) => document.getElementById(id);
 
-    const state = { page: 1, search: '', searchFiles: false, meta: '', life: '', sort: [{ col: 'last', dir: 'desc' }], selected: new Set(), rows: [] };
+    const state = { page: 1, pages: 1, search: '', searchFiles: false, meta: '', life: '', sort: [{ col: 'last', dir: 'desc' }], selected: new Set(), rows: [] };
+    const nearRadius = () => Math.max(1, parseInt(document.body.dataset.nearPages || '2', 10) || 2);
     let modal = null;
 
     // ── status card ──────────────────────────────────────────────────────────
@@ -46,7 +47,7 @@
             el('span', { text: `${num(c.meta_done)} done` }), ' · ',
             el('span', { text: `${num((c.meta_pending || 0) + (c.meta_fetching || 0))} queued` }), ' · ',
             el('span', { text: `${num(c.meta_failed)} failed` }),
-            el('div', { className: 'wl-small text-muted', text: `budget ${num(st.meta_budget_used)} / ${num(s.meta_daily_budget)} today · ${num(c.files)} file entries` }),
+            el('div', { className: 'wl-small text-muted', text: (s.meta_auto_queue ? 'auto-queue ON (budget ignored)' : `budget ${num(st.meta_budget_used)} / ${num(s.meta_daily_budget)} today`) + ` · ${num(c.files)} file entries` }),
         ]));
         const lp = st.last_poll;
         grid.appendChild(kv('Poll', [
@@ -62,18 +63,23 @@
 
     // ── list ─────────────────────────────────────────────────────────────────
     function sortParam() { return state.sort.map(s => s.col + ':' + s.dir).join(','); }
-    async function load() {
-        const qs = new URLSearchParams({ page: state.page, sort: sortParam() });
+    function listQuery(page) {
+        const qs = new URLSearchParams({ page: String(page), sort: sortParam() });
         if (state.search) qs.set('search', state.search);
         if (state.searchFiles) qs.set('search_files', '1');
         if (state.meta) qs.set('meta', state.meta);
         if (state.life) qs.set('life', state.life);
+        return qs;
+    }
+    async function load() {
+        const qs = listQuery(state.page);
         let data;
         try { data = await apiCall('admin/fetch_index&' + qs.toString()); }
         catch (e) { showToast('Failed to load index: ' + e.message, 'error'); return; }
         // apiCall resolves on non-2xx too (error body carries .error) — don't render an auth/server error as "empty"
         if (data.error) { showToast('Failed to load index: ' + data.error, 'error'); return; }
         state.rows = data.rows || [];
+        state.pages = data.pages || 1;
         renderRows(data);
         $('idx-total').textContent = (data.total || 0).toLocaleString() + ' rows';
         renderPagination($('idx-pagination'), { total: data.total, page: data.page, pages: data.pages, onPage: (p) => { state.page = p; load(); } });
@@ -220,6 +226,40 @@
     async function metaScope(scope) {
         try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope }); if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; } showToast('Queued ' + r.queued + ' for metadata'); loadStatus(); } catch (e) { showToast(e.message, 'error'); }
     }
+    /** Rows of the current page plus the pages around it (same search/filters/sort), deduped by hash. */
+    async function collectNearRows() {
+        const radius = nearRadius();
+        const from = Math.max(1, state.page - radius), to = Math.min(state.pages || 1, state.page + radius);
+        const seen = new Set(), rows = [];
+        for (let p = from; p <= to; p++) {
+            let pageRows;
+            if (p === state.page) pageRows = state.rows;
+            else {
+                const data = await apiCall('admin/fetch_index&' + listQuery(p).toString());
+                if (data.error) throw new Error(data.error);
+                pageRows = data.rows || [];
+            }
+            for (const r of pageRows) { if (!seen.has(r.info_hash)) { seen.add(r.info_hash); rows.push(r); } }
+        }
+        return rows;
+    }
+    /** Queue metadata for the given rows, skipping everything that already has (or is fetching) it. */
+    async function metaRows(rows, what) {
+        const targets = rows.filter(r => r.meta_status === 'none' || r.meta_status === 'failed').map(r => r.info_hash);
+        if (!targets.length) { showToast('Nothing to queue — no missing/failed rows in ' + what, 'info'); return; }
+        let queued = 0;
+        for (let i = 0; i < targets.length; i += 500) {
+            const r = await apiCall('admin/index_fetch_meta', 'POST', { hashes: targets.slice(i, i + 500) });
+            if (!r.success || r.error) { showToast(r.error || 'Queue failed', 'error'); return; }
+            queued += Number(r.queued) || 0;
+        }
+        showToast('Queued ' + queued + ' of ' + targets.length + ' missing/failed (' + what + ')');
+        load(); loadStatus();
+    }
+    async function metaNearPages() {
+        try { await metaRows(await collectNearRows(), 'near pages ±' + nearRadius()); }
+        catch (e) { showToast('Near pages failed: ' + e.message, 'error'); }
+    }
     async function promptDateRange() {
         const from = await A.promptModal({ title: 'Custom date range', label: 'From (YYYY-MM-DD or YYYY-MM-DD HH:MM)', placeholder: '2026-08-20' });
         if (from === null || !from.trim()) return null;
@@ -240,7 +280,8 @@
         catch (e) { showToast(e.message, 'error'); }
     }
     let scrapeRunning = false, scrapeStop = false;
-    async function scrapeBulk(scope, dateBody) {
+    /** scope 'page' scrapes hashList (default: the rows on screen) in chunks of 500; other scopes are server-driven. */
+    async function scrapeBulk(scope, dateBody, hashList) {
         const label = $('idx-scrape-label');
         const btn = $('btn-idx-scrape-bulk'), caret = $('btn-idx-scrape-caret');
         if (scrapeRunning) { scrapeStop = true; label.textContent = 'Stopping\u2026'; return; }   // second click = stop
@@ -249,25 +290,43 @@
         const origTitle = btn.title;
         caret.disabled = true;
         btn.title = 'Click to stop after the current batch';
-        let after = '', total = 0, guard = 0, stopped = false;
+        let total = 0, guard = 0, stopped = false, broke = false;
         label.textContent = 'Stop \u00b7 scraping\u2026';
+        const chunks = [];
+        if (scope === 'page') {
+            const src = hashList || state.rows.map(r => r.info_hash);
+            for (let i = 0; i < src.length; i += 500) chunks.push(src.slice(i, i + 500));
+            if (!chunks.length) chunks.push([]);
+        } else chunks.push(null);   // server-driven scope: one chunk, cursor does the walking
         try {
-            do {
-                const body = scope === 'page' ? { scope, hashes: state.rows.map(r => r.info_hash), after } : { scope, after };
-                if (dateBody) Object.assign(body, dateBody);
-                const r = await apiCall('admin/index_scrape_bulk', 'POST', body);
-                if (!r.success || r.error) { showToast(r.error || 'Scrape failed', 'error'); break; }
-                total += r.scraped || 0;
-                after = r.after || '';
-                label.textContent = 'Stop \u00b7 scraped ' + total + (r.remaining ? ' (' + r.remaining + ' left)' : '');
-                if (r.warning) { showToast(r.warning, 'warning'); break; }
-                if (scrapeStop) { stopped = true; break; }
-                if (!r.truncated) break;
-            } while (++guard < 500);
-            showToast(stopped ? 'Stopped \u2014 refreshed ' + total + ' before stopping' : 'Refreshed S/L for ' + total + ' hashes', stopped ? 'info' : 'success');
+            outer:
+            for (const chunk of chunks) {
+                let after = '';
+                do {
+                    const body = chunk !== null ? { scope, hashes: chunk, after } : { scope, after };
+                    if (dateBody) Object.assign(body, dateBody);
+                    const r = await apiCall('admin/index_scrape_bulk', 'POST', body);
+                    if (!r.success || r.error) { showToast(r.error || 'Scrape failed', 'error'); broke = true; break outer; }
+                    total += r.scraped || 0;
+                    after = r.after || '';
+                    label.textContent = 'Stop \u00b7 scraped ' + total + (r.remaining ? ' (' + r.remaining + ' left)' : '');
+                    if (r.warning) { showToast(r.warning, 'warning'); broke = true; break outer; }
+                    if (scrapeStop) { stopped = true; break outer; }
+                    if (!r.truncated) break;
+                } while (++guard < 500);
+            }
+            if (!broke) showToast(stopped ? 'Stopped \u2014 refreshed ' + total + ' before stopping' : 'Refreshed S/L for ' + total + ' hashes', stopped ? 'info' : 'success');
             load();
         } catch (e) { showToast(e.message, 'error'); }
         finally { label.textContent = orig; btn.title = origTitle; caret.disabled = false; scrapeRunning = false; scrapeStop = false; }
+    }
+    async function scrapeNearPages() {
+        if (scrapeRunning) { scrapeBulk('page'); return; }   // acts as the stop path
+        let rows;
+        try { rows = await collectNearRows(); }
+        catch (e) { showToast('Near pages failed: ' + e.message, 'error'); return; }
+        if (!rows.length) { showToast('No rows in the near pages', 'info'); return; }
+        scrapeBulk('page', null, rows.map(r => r.info_hash));
     }
 
     // ── wiring ─────────────────────────────────────────────────────────────
@@ -285,10 +344,13 @@
         $('btn-idx-meta-sel').addEventListener('click', metaSelected);
         $('btn-idx-clearsel').addEventListener('click', () => { state.selected.clear(); renderRows({ enabled: true }); syncBulkbar(); });
         document.querySelectorAll('#idx-meta-bulk-group [data-meta-scope]').forEach(b => b.addEventListener('click', () => metaScope(b.dataset.metaScope)));
+        document.querySelectorAll('#idx-meta-bulk-group [data-meta-page]').forEach(b => b.addEventListener('click', () => metaRows(state.rows, 'this page')));
+        document.querySelectorAll('#idx-meta-bulk-group [data-meta-near]').forEach(b => b.addEventListener('click', () => metaNearPages()));
         document.querySelectorAll('#idx-meta-bulk-group [data-meta-date]').forEach(b => b.addEventListener('click', () => metaDate(b.dataset.metaDate === 'custom' ? 'custom' : Number(b.dataset.metaDate))));
         document.querySelectorAll('#idx-meta-bulk-group [data-meta-cancel]').forEach(b => b.addEventListener('click', () => cancelMetaQueue()));
         $('btn-idx-scrape-bulk').addEventListener('click', () => scrapeBulk('page'));
         document.querySelectorAll('#idx-scrape-bulk-group [data-scrape-scope]').forEach(b => b.addEventListener('click', () => scrapeBulk(b.dataset.scrapeScope)));
+        document.querySelectorAll('#idx-scrape-bulk-group [data-scrape-near]').forEach(b => b.addEventListener('click', () => scrapeNearPages()));
         document.querySelectorAll('#idx-scrape-bulk-group [data-scrape-date]').forEach(b => b.addEventListener('click', async () => {
             if (b.dataset.scrapeDate === 'custom') { const r = await promptDateRange(); if (!r) return; scrapeBulk('date', r.to ? { from: r.from, to: r.to } : { from: r.from }); }
             else scrapeBulk('date', { since_hours: Number(b.dataset.scrapeDate) });

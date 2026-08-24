@@ -293,7 +293,7 @@
                         else if (stack[idx].dir === 'asc') stack[idx].dir = 'desc';
                         else stack.splice(idx, 1);
                         api.update();
-                        if (onChange) onChange(api.serialize());
+                        if (onChange) onChange(api.get());
                     });
                 });
                 api.update();

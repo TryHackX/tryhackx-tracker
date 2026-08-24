@@ -22,7 +22,7 @@ $allowed = [
     'rate_limit', 'rate_limit_status', 'rate_limit_block_check', 'rate_limit_appeal',
     'admin_session_idle_minutes', 'admin_session_absolute_hours',
     'trusted_proxy_ips', 'client_ip_header',
-    'items_per_page', 'blacklist_path',
+    'items_per_page', 'admin_near_pages', 'blacklist_path',
     'max_magnet_link_length',
     'donations_enabled', 'wallet_btc', 'wallet_eth', 'wallet_xmr', 'donation_fields',
     'transparency_enabled', 'transparency_per_page',
@@ -32,6 +32,7 @@ $allowed = [
     // observed-hash index (includes/index.php)
     'index_enabled', 'index_source_url', 'index_poll_minutes', 'index_min_seeders', 'index_max_rows',
     'index_grace_days', 'index_protect_days', 'index_meta_daily_budget', 'index_keep_files', 'index_poll_budget',
+    'index_meta_auto_queue',
     'opentracker_service_name', 'opentracker_restart_use_sudo', 'opentracker_auto_reload',
     'tracker_uptime_warn_days', 'tracker_uptime_danger_days',
     'tracker_blacklist_warn_count', 'tracker_blacklist_danger_count',
@@ -97,6 +98,7 @@ $intClamp = [
     'index_poll_minutes' => [5, 1440, 30], 'index_min_seeders' => [0, 100000, 1], 'index_max_rows' => [1000, 5000000, 200000],
     'index_grace_days' => [1, 90, 3], 'index_protect_days' => [1, 365, 10], 'index_meta_daily_budget' => [0, 1000000, 500],
     'index_poll_budget' => [5, 120, 45],
+    'admin_near_pages' => [1, 20, 2],
 ];
 foreach ($intClamp as $k => [$min, $max, $def]) {
     if (isset($data[$k])) {
@@ -113,7 +115,7 @@ if (isset($data['whitelist_tracker_hosts'])) {
     }
     $data['whitelist_tracker_hosts'] = implode(', ', array_unique($clean));
 }
-foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'index_enabled', 'index_keep_files'] as $k) {
+foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
 if (isset($data['index_source_url']) && $data['index_source_url'] !== '' && !preg_match('#^https?://[^\s]+$#i', $data['index_source_url'])) {

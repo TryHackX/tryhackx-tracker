@@ -468,6 +468,11 @@
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="items_per_page" value="<?= sanitize($cfg['items_per_page'] ?? '25') ?>" min="5" max="200">
                     </div>
                     <div class="col-md-4">
+                        <label class="form-label">&ldquo;Near pages&rdquo; radius (admin)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="admin_near_pages" value="<?= sanitize($cfg['admin_near_pages'] ?? '2') ?>" min="1" max="20">
+                        <small class="settings-hint">Whitelist / Index bulk tools: <em>Near pages</em> covers the current page &plusmn; this many pages (same search, filters and sort).</small>
+                    </div>
+                    <div class="col-md-4">
                         <label class="form-label">Max message length</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="max_message_length" value="<?= sanitize($cfg['max_message_length'] ?? '2000') ?>" min="100" max="10000">
                     </div>
@@ -747,6 +752,14 @@
                         <label class="form-label">Metadata Budget (per day)</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="index_meta_daily_budget" value="<?= sanitize($cfg['index_meta_daily_budget'] ?? '500') ?>" min="0" max="1000000">
                         <small class="settings-hint">Rows queued for metadata per day, spread across 24&nbsp;h. 0 = never auto-fetch.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Auto-queue Metadata</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="index_meta_auto_queue">
+                            <option value="1" <?= ($cfg['index_meta_auto_queue'] ?? '0') === '1' ? 'selected' : '' ?>>Yes (queue every new hash)</option>
+                            <option value="0" <?= ($cfg['index_meta_auto_queue'] ?? '0') === '0' ? 'selected' : '' ?>>No (daily budget only)</option>
+                        </select>
+                        <small class="settings-hint">When on, every observed hash without metadata is queued automatically (spread over ~1&nbsp;h, best seeded first) and the daily budget is <strong>ignored</strong>. Mind the DHT load on a big index.</small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Keep File Lists</label>
