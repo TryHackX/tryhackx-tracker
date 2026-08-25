@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.3] — 2026-08-25
+
+### Added
+- **Separate sender address** (`mail_from_email`, Settings → Contact & Email, also in the
+  installer): all outgoing mail (resets, verifications, notices) is sent FROM this address (From:
+  header, envelope sender, Message-ID domain) while replies and the public contact stay on
+  **Site Email** (Reply-To). The sender domain is validated to be the Site-URL host or one of its
+  parent domains (e.g. site https://tracker.example.com allows `…@tracker.example.com` and
+  `…@example.com`) — anything else would break SPF/DKIM/DMARC alignment and land in spam. Empty =
+  classic behaviour (send from Site Email).
+
 ## [1.9.2] — 2026-08-24
 
 ### Added

@@ -222,6 +222,15 @@ check('rebuild restores named none/failed rows to done', $restored >= 2
 $db->exec("DELETE FROM index_hashes WHERE name LIKE 'ZZQtest%' OR name LIKE 'YYQother%'");
 $db->exec("DELETE FROM whitelist WHERE name LIKE 'ZZQtest%'");
 
+// ── 9b. sender address (mail_from_email, 1.9.3) ──────────────────────────────
+$cfgMail = ['site_url' => 'https://tracker.example.com', 'site_email' => 'contact@example.com'];
+check('allowed From hosts = site host + parents', mailFromAllowedHosts($cfgMail) === ['tracker.example.com', 'example.com'], json_encode(mailFromAllowedHosts($cfgMail)));
+check('no site_url → no restriction', mailFromAllowedHosts(['site_url' => '']) === []);
+check('IP site_url → no restriction', mailFromAllowedHosts(['site_url' => 'http://135.125.236.64']) === []);
+check('sender falls back to site_email', mailSenderAddress($cfgMail) === 'contact@example.com');
+check('sender uses mail_from_email when set', mailSenderAddress($cfgMail + ['mail_from_email' => 'noreply@example.com']) === 'noreply@example.com');
+check('invalid mail_from_email ignored', mailSenderAddress(['mail_from_email' => 'not-an-email', 'site_email' => 'c@example.com']) === 'c@example.com');
+
 // ── 10. verification gate + two-step email change (schema v9) ────────────────
 check('users has pending_email column (v9)', schemaColumnExists($db, 'users', 'pending_email'));
 check('users has email_changed_at column (v9)', schemaColumnExists($db, 'users', 'email_changed_at'));

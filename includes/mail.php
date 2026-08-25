@@ -12,6 +12,33 @@ function mailEncodeHeaderText(string $s): string {
 }
 
 /**
+ * Hosts the SENDER address may live on: the site_url host and each of its parent domains down to
+ * the registrable one (site_url https://tracker.example.com → tracker.example.com, example.com).
+ * Keeping the From on the site's own domain is what makes SPF/DKIM/DMARC align — a foreign domain
+ * in From is the fastest way into the spam folder. Empty/IP site_url → no restriction ([]).
+ */
+function mailFromAllowedHosts(array $cfg): array {
+    $host = strtolower((string)parse_url(trim((string)($cfg['site_url'] ?? '')), PHP_URL_HOST));
+    if ($host === '' || filter_var($host, FILTER_VALIDATE_IP)) return [];
+    $labels = explode('.', $host);
+    $out = [];
+    for ($i = 0; count($labels) - $i >= 2; $i++) $out[] = implode('.', array_slice($labels, $i));
+    return $out;
+}
+
+/**
+ * The address mails are SENT from (From: header + envelope sender): `mail_from_email` when set
+ * and valid, otherwise the contact `site_email` (classic behaviour). Replies still go to the
+ * contact address via Reply-To.
+ */
+function mailSenderAddress(array $cfg): string {
+    $from = str_replace(["\r", "\n"], '', trim((string)($cfg['mail_from_email'] ?? '')));
+    if ($from !== '' && filter_var($from, FILTER_VALIDATE_EMAIL)) return $from;
+    $contact = str_replace(["\r", "\n"], '', (string)($cfg['site_email'] ?? 'noreply@localhost'));
+    return filter_var($contact, FILTER_VALIDATE_EMAIL) ? $contact : 'noreply@localhost';
+}
+
+/**
  * Absolute URL for use INSIDE an email. getBaseUrl() only knows the request PATH ("/"), which is
  * useless in a mail client — links must carry the scheme+host from the configured site URL.
  */
@@ -23,25 +50,29 @@ function mailAbsoluteUrl(array $cfg, string $pathAndQuery): string {
 
 function sendEmail(string $to, string $subject, string $plainText, string $htmlBody, array $cfg, string $unsubscribeUrl = ''): bool {
     $siteName = mailEncodeHeaderText($cfg['site_name'] ?? 'Tracker');
-    $siteEmail = str_replace(["\r", "\n"], '', $cfg['site_email'] ?? 'noreply@localhost');
+    // sender (From + envelope) and contact (Reply-To) are separate: mails go out as e.g.
+    // noreply@example.com while replies and the public contact stay on the site_email address
+    $fromEmail = mailSenderAddress($cfg);
+    $contactEmail = str_replace(["\r", "\n"], '', $cfg['site_email'] ?? '');
+    if (!filter_var($contactEmail, FILTER_VALIDATE_EMAIL)) $contactEmail = $fromEmail;
     $subject = mailEncodeHeaderText($subject);
     $boundary = md5(uniqid(time()));
 
-    $emailDomain = substr(strrchr($siteEmail, "@"), 1);
+    $emailDomain = substr(strrchr($fromEmail, "@"), 1);
     if (!$emailDomain) {
         $emailDomain = 'localhost';
     }
     $msgId = "<" . bin2hex(random_bytes(16)) . "@" . $emailDomain . ">";
 
     $headers = "Date: " . date('r') . "\r\n";
-    $headers .= "From: $siteName <$siteEmail>\r\n";
-    $headers .= "Reply-To: $siteEmail\r\n";
+    $headers .= "From: $siteName <$fromEmail>\r\n";
+    $headers .= "Reply-To: $contactEmail\r\n";
     $headers .= "Message-ID: $msgId\r\n";
     $headers .= "X-Mailer: Tracker\r\n";
     $headers .= "MIME-Version: 1.0\r\n";
     $headers .= "Content-Type: multipart/alternative; boundary=\"$boundary\"\r\n";
     if ($unsubscribeUrl) {
-        $headers .= "List-Unsubscribe: <$unsubscribeUrl>, <mailto:$siteEmail>\r\n";
+        $headers .= "List-Unsubscribe: <$unsubscribeUrl>, <mailto:$contactEmail>\r\n";
         $headers .= "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n";
     }
 
@@ -53,8 +84,8 @@ function sendEmail(string $to, string $subject, string $plainText, string $htmlB
     $body .= chunk_split(base64_encode($htmlBody)) . "\r\n";
     $body .= "--$boundary--";
 
-    $envelopeEmail = filter_var($siteEmail, FILTER_VALIDATE_EMAIL) ? $siteEmail : 'noreply@localhost';
-    return @mail($to, $subject, $body, $headers, "-f" . $envelopeEmail);
+    // envelope sender = the From address (SPF alignment; bounces go back to the sender mailbox)
+    return @mail($to, $subject, $body, $headers, "-f" . $fromEmail);
 }
 
 function isUnsubscribed(PDO $db, string $email, string $type = ''): bool {

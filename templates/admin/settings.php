@@ -54,8 +54,13 @@
                 <h5>Contact &amp; Email</h5>
                 <div class="row g-3">
                     <div class="col-md-6">
-                        <label class="form-label">Site Email</label>
+                        <label class="form-label">Site Email <small class="settings-hint">(public contact; replies go here)</small></label>
                         <input type="email" class="form-control bg-dark text-light border-secondary" name="site_email" value="<?= sanitize($cfg['site_email'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Sender address (From) <small class="settings-hint">(empty = Site Email)</small></label>
+                        <input type="email" class="form-control bg-dark text-light border-secondary" name="mail_from_email" value="<?= sanitize($cfg['mail_from_email'] ?? '') ?>" placeholder="noreply@<?= sanitize(mailFromAllowedHosts($cfg)[count(mailFromAllowedHosts($cfg)) - 1] ?? 'example.com') ?>">
+                        <small class="settings-hint">All outgoing mail (resets, verifications, notices) is sent FROM this address; replies still go to Site Email. Allowed domains<?php $mfah = mailFromAllowedHosts($cfg); ?><?= $mfah ? ': <code>' . implode('</code>, <code>', array_map('sanitize', $mfah)) . '</code>' : ' follow the Site URL' ?>. Best deliverability: the apex domain (matches this server's DKIM signature and SPF record).</small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Show Contact</label>

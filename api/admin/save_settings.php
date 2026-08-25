@@ -8,7 +8,7 @@ if (!$input || !is_array($input)) {
 
 // Whitelist of allowed setting keys
 $allowed = [
-    'site_name', 'site_url', 'site_email',
+    'site_name', 'site_url', 'site_email', 'mail_from_email',
     'announce_url', 'announce_url_https', 'github_url',
     'contact_visible', 'contact_obfuscate', 'hmac_secret',
     'recaptcha_enabled', 'recaptcha_site_key', 'recaptcha_secret',
@@ -145,6 +145,19 @@ if (isset($data['whitelist_submit_mode']) && !in_array($data['whitelist_submit_m
 }
 if (isset($data['users_terms_text'])) {
     $data['users_terms_text'] = mb_substr($data['users_terms_text'], 0, 10000);
+}
+if (isset($data['mail_from_email']) && $data['mail_from_email'] !== '') {
+    if (!filter_var($data['mail_from_email'], FILTER_VALIDATE_EMAIL)) {
+        jsonResponse(['error' => 'Sender address is not a valid email.'], 400);
+    }
+    // From must live on the site's own domain (or a parent of it) — anything else breaks
+    // SPF/DKIM/DMARC alignment and lands in spam. The check uses the site_url being saved
+    // alongside, falling back to the stored one.
+    $allowed = mailFromAllowedHosts(['site_url' => $data['site_url'] ?? ($cfg['site_url'] ?? '')]);
+    $fromHost = strtolower(substr(strrchr($data['mail_from_email'], '@'), 1));
+    if ($allowed && !in_array($fromHost, $allowed, true)) {
+        jsonResponse(['error' => 'Sender domain must be the site domain or its parent (' . implode(', ', $allowed) . ').'], 400);
+    }
 }
 if (isset($data['meta_worker_concurrency']) && $data['meta_worker_concurrency'] !== '') {
     // empty = keep the worker's own config; otherwise clamp to a sane 1..16

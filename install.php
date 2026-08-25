@@ -242,6 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
     $adminPass2 = $_POST['admin_pass2'] ?? '';
     $siteUrl = rtrim(trim($_POST['site_url'] ?? ''), '/');
     $siteEmail = trim($_POST['site_email'] ?? '');
+    $mailFrom = trim($_POST['mail_from_email'] ?? '');
     $siteName = trim($_POST['site_name'] ?? 'My Tracker');
     $announceUrl = trim($_POST['announce_url'] ?? '');
     $announceUrlHttps = trim($_POST['announce_url_https'] ?? '');
@@ -258,6 +259,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
     elseif ($adminPass !== $adminPass2) { $error = 'Passwords do not match.'; }
     elseif (!$siteUrl) { $error = 'Site URL is required.'; }
     elseif (!$siteEmail) { $error = 'Contact email is required.'; }
+    elseif ($mailFrom !== '' && !filter_var($mailFrom, FILTER_VALIDATE_EMAIL)) { $error = 'Sender (From) address is not a valid email.'; }
+    elseif ($mailFrom !== '' && ($mfHost = strtolower((string)parse_url($siteUrl, PHP_URL_HOST))) !== '' && !filter_var($mfHost, FILTER_VALIDATE_IP)
+            && !in_array(strtolower(substr(strrchr($mailFrom, '@'), 1)),
+                         (function ($h) { $l = explode('.', $h); $o = []; for ($i = 0; count($l) - $i >= 2; $i++) $o[] = implode('.', array_slice($l, $i)); return $o; })($mfHost), true)) {
+        $error = 'Sender (From) domain must match the Site URL domain or its parent (e.g. noreply@' . $mfHost . ').';
+    }
     else {
         $db = $_SESSION['install_db'] ?? null;
         if (!$db) { header('Location: install.php?step=2'); exit; }
@@ -286,6 +293,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
             $defaults = [
                 'site_name' => $siteName,
                 'site_email' => $siteEmail,
+                'mail_from_email' => $mailFrom,
                 'site_url' => $siteUrl,
                 'admin_username' => $adminUser,
                 'recaptcha_site_key' => $recaptchaSite,
@@ -550,6 +558,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                     <label>Contact Email</label>
                     <input type="email" name="site_email" value="<?= htmlspecialchars($_POST['site_email'] ?? '') ?>" placeholder="tracker@example.com" required>
                 </div>
+            </div>
+            <div class="form-group">
+                <label>Sender (From) Email <small>(optional — mails are sent FROM this address, replies go to the contact email; must be on the Site URL domain or its parent, e.g. noreply@example.com)</small></label>
+                <input type="email" name="mail_from_email" value="<?= htmlspecialchars($_POST['mail_from_email'] ?? '') ?>" placeholder="noreply@example.com">
             </div>
 
             <hr>

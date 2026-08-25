@@ -464,6 +464,8 @@ function trackerSchemaDefaultSettings(): array {
         // schema v8: metadata worker parallel fetches (empty = keep the worker's own config file
         // value; 1-16 overrides it live — the worker re-reads this setting every ~60 s)
         'meta_worker_concurrency'     => '',
+        // sender address for outgoing mail (empty = use site_email); domain-validated on save
+        'mail_from_email'             => '',
         // schema v9: registration requires an email + only verified accounts get their groups
         // (unverified sign-ins act as guests until the link is clicked); terms checkbox content
         // (empty = link to ?action=tos, otherwise shown in a modal); email-change cooldown; member
