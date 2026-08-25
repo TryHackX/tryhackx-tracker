@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.4] — 2026-08-25
+
+### Changed
+- The sender-address hint in Settings no longer hardcodes claims about "this server's" DKIM/SPF —
+  it now gives universal guidance (pick the domain your mail server signs DKIM for and has an SPF
+  record on, usually the root domain). The allowed-domain list was always computed dynamically
+  from the Site URL.
+
 ## [1.9.3] — 2026-08-25
 
 ### Added
