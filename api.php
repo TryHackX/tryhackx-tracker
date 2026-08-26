@@ -75,6 +75,7 @@ $apiRoutes = [
     'admin/save_settings'   => 'api/admin/save_settings.php',
     'admin/settings_catalog' => 'api/admin/settings_catalog.php',
     'admin/change_password' => 'api/admin/change_password.php',
+    'admin/account_email'   => 'api/admin/account_email.php',
     'admin/check_blacklist' => 'api/admin/check_blacklist.php',
     'admin/notify_review'   => 'api/admin/notify_review.php',
     'admin/restore_report'  => 'api/admin/restore_report.php',

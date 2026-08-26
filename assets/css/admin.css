@@ -1277,6 +1277,10 @@ input[type="number"] {
 .settings-groups-muted .settings-group-btn { opacity: 0.5; }
 .settings-empty { background: #1e1e1e; border: 1px dashed #3a3a3a; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; color: #9aa4b2; }
 .settings-empty .settings-hint { display: block; margin-top: 0.3rem; }
+/* CAPTCHA: only the selected provider's keys are on screen (templates/admin/settings.php); a search
+   hit still reveals a hidden one, so looking for "turnstile" finds its fields whatever is selected */
+.captcha-prov-hidden { display: none; }
+.captcha-prov-hidden.settings-hit { display: block; }
 /* a matched setting (search) / a section reached by #anchor or matched as a whole group */
 .settings-hit { box-shadow: inset 2px 0 0 rgba(74, 158, 255, 0.55); }
 .settings-section-hit { box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.45); }

@@ -226,7 +226,7 @@ $db->exec("DELETE FROM whitelist WHERE name LIKE 'ZZQtest%'");
 $cfgMail = ['site_url' => 'https://tracker.example.com', 'site_email' => 'contact@example.com'];
 check('allowed From hosts = site host + parents', mailFromAllowedHosts($cfgMail) === ['tracker.example.com', 'example.com'], json_encode(mailFromAllowedHosts($cfgMail)));
 check('no site_url → no restriction', mailFromAllowedHosts(['site_url' => '']) === []);
-check('IP site_url → no restriction', mailFromAllowedHosts(['site_url' => 'http://135.125.236.64']) === []);
+check('IP site_url → no restriction', mailFromAllowedHosts(['site_url' => 'http://192.0.2.10']) === []);   // RFC 5737 documentation range
 check('sender falls back to site_email', mailSenderAddress($cfgMail) === 'contact@example.com');
 check('sender uses mail_from_email when set', mailSenderAddress($cfgMail + ['mail_from_email' => 'noreply@example.com']) === 'noreply@example.com');
 check('invalid mail_from_email ignored', mailSenderAddress(['mail_from_email' => 'not-an-email', 'site_email' => 'c@example.com']) === 'c@example.com');

@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.10.1] — 2026-08-26
+
+### Added
+- **The admin's own email address is managed in Settings → Security & Credentials.** The panel login
+  is mirrored into `users`, so this is the same address a member has — and it changes the same way:
+  confirm from the current mailbox first, then from the new one (nothing is written until both links
+  are opened), with the verified badge, the pending-change banner and a Cancel button in the same
+  block. The panel password is the gate. Clearing the box removes the address; a login with no linked
+  account row says so instead of offering a field.
+
+### Changed
+- **Settings → CAPTCHA shows only the selected provider's keys.** The other providers' fields stay in
+  the form (their values are never lost when switching back) but are out of the way — and a search for
+  e.g. "turnstile" still reveals them.
+- **The sender address is no longer free text**: a local part plus a domain picked from the Site-URL
+  host and its parent domains, which is exactly the set that can align with SPF/DKIM/DMARC. Pasting a
+  whole address keeps only its local part; an empty box still means "send from Site Email". A Site URL
+  without a domain (an IP) falls back to the old free-text field with a hint.
+- The **GitHub URL** field says what it is for: the footer link should point at the project
+  repository, not at an account page.
+- A test fixture no longer carries a real server IP address.
+
 ## [1.10.0] — 2026-08-26 (schema v10)
 
 ### Added

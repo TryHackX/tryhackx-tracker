@@ -214,6 +214,7 @@ function settingsCatalogKeywords(): array {
 
         // ── Admin credentials ──
         'admin_username'           => 'admin login name panel user rename',
+        'admin_email'              => 'admin account email address own mailbox notices verification password reset two-step change confirm',
         'current_password'         => 'current password confirm verify identity',
         'new_password'             => 'change admin password new set strong',
         'confirm_password'         => 'repeat new password confirmation match',

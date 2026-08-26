@@ -214,9 +214,9 @@ anywhere on the page to jump into it.
 
 | Section | Settings |
 |---------|----------|
-| **Site Configuration** | Site name, URL, announce URLs (HTTP/S + UDP), GitHub URL |
-| **Contact & Email** | Site email, contact visibility, email obfuscation, HMAC secret |
-| **CAPTCHA** | Provider (reCAPTCHA v2 / reCAPTCHA v3 / Turnstile / hCaptcha), keys, enable globally and per-context (report, login, status, appeals, block check); the whitelist registration page always requires a CAPTCHA |
+| **Site Configuration** | Site name, URL, announce URLs (HTTP/S + UDP), GitHub URL (point it at the project **repository** — it is the footer's GitHub link) |
+| **Contact & Email** | Site email, **sender address** (local part + a domain picked from the Site-URL host and its parents — nothing else can align with SPF/DKIM/DMARC), contact visibility, email obfuscation, HMAC secret |
+| **CAPTCHA** | Provider (reCAPTCHA v2 / reCAPTCHA v3 / Turnstile / hCaptcha) — **only the selected provider's keys are shown** (the others keep their values and reappear when selected, or when the search matches them), enable globally and per-context (report, login, status, appeals, block check); the whitelist registration page always requires a CAPTCHA |
 | **Tracker Mode & Whitelist** | `blacklist` / `whitelist`, whitelist file path (+ Test), public registration on/off, max hashes per submission, submissions per hour, per-IP and global daily caps, minimum seconds between tracker reloads, OpenTracker scrape URL, **require our tracker** (public registration accepts only magnets whose `tr=` list includes one of *Our tracker hosts* / the announce hosts; bare hashes refused) — see [Whitelist mode](#whitelist-mode) |
 | **Server-to-server API** | Enable, ban length (days), exempt IPs — clients and bans are managed on the Whitelist page |
 | **Smart CAPTCHA** | Point threshold, grace period, points per action type |
@@ -229,7 +229,7 @@ anywhere on the page to jump into it.
 | **Statistics Timeline** | Enable, sample interval, retention (raw / 5-min roll-ups), public or admins-only, **which range buttons the chart offers**, **which range opens by default** and an optional **free "Custom" span slider** — see [Statistics timeline](#statistics-timeline--the-swarm-chart-150) |
 | **OpenTracker Service** | systemd unit name, sudo toggle, blacklist auto-reload (SIGHUP), permission test buttons, restart-recommendation thresholds — see [OpenTracker service reload & restart](#opentracker-service-reload--restart) |
 | **Footer** | Copyright year, brand/tracker software/OS elements with names and URLs |
-| **Security & Credentials** | Admin username, password change (separate form) |
+| **Security & Credentials** | Admin username, password change, and the **email address of the admin's own account** — changed through the same two-step confirmation a member gets (current mailbox first, then the new one), with the pending change cancellable from the same block (separate form; the panel password is the gate) |
 
 ### Smart CAPTCHA
 

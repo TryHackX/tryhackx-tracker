@@ -67,8 +67,9 @@
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="announce_url" value="<?= sanitize($cfg['announce_url'] ?? '') ?>" placeholder="udp://tracker.example.com:6969/announce">
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">GitHub URL</label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="github_url" value="<?= sanitize($cfg['github_url'] ?? '') ?>" placeholder="https://github.com/YourOrg">
+                        <label class="form-label">GitHub URL <small class="settings-hint">(the project repository)</small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="github_url" value="<?= sanitize($cfg['github_url'] ?? '') ?>" placeholder="https://github.com/YourOrg/your-tracker">
+                        <small class="settings-hint">Shown as the <strong>GitHub</strong> link in the footer. Point it at the <em>repository</em> of this tracker (so a visitor lands on the source, not on an account page); leave empty to hide the link.</small>
                     </div>
                 </div>
             </div>
@@ -81,10 +82,40 @@
                         <label class="form-label">Site Email <small class="settings-hint">(public contact; replies go here)</small></label>
                         <input type="email" class="form-control bg-dark text-light border-secondary" name="site_email" value="<?= sanitize($cfg['site_email'] ?? '') ?>">
                     </div>
+                    <?php
+                    // Only the site's own domain (and its parents) can be used as the sender, or SPF/
+                    // DKIM/DMARC alignment breaks and the mail lands in spam — so the domain is a
+                    // fixed list, not free text; the admin only types the local part.
+                    $mfah = mailFromAllowedHosts($cfg);
+                    $mfCur = trim((string)($cfg['mail_from_email'] ?? ''));
+                    $mfLocal = ''; $mfDomain = $mfah[0] ?? '';
+                    if ($mfCur !== '' && str_contains($mfCur, '@')) {
+                        [$mfLocal, $mfDomain] = explode('@', $mfCur, 2);
+                        $mfDomain = strtolower($mfDomain);
+                    }
+                    $mfDomains = $mfah;
+                    // a stored domain that is no longer allowed (Site URL changed) stays selectable so
+                    // saving something else does not silently rewrite it
+                    if ($mfDomain !== '' && !in_array($mfDomain, $mfDomains, true)) array_unshift($mfDomains, $mfDomain);
+                    ?>
                     <div class="col-md-6">
                         <label class="form-label">Sender address (From) <small class="settings-hint">(empty = Site Email)</small></label>
-                        <input type="email" class="form-control bg-dark text-light border-secondary" name="mail_from_email" value="<?= sanitize($cfg['mail_from_email'] ?? '') ?>" placeholder="noreply@<?= sanitize(mailFromAllowedHosts($cfg)[count(mailFromAllowedHosts($cfg)) - 1] ?? 'example.com') ?>">
-                        <small class="settings-hint">All outgoing mail (resets, verifications, notices) is sent FROM this address; replies still go to Site Email. Allowed domains<?php $mfah = mailFromAllowedHosts($cfg); ?><?= $mfah ? ': <code>' . implode('</code>, <code>', array_map('sanitize', $mfah)) . '</code>' : ' follow the Site URL' ?>. Best deliverability: pick the domain your mail server signs DKIM for and has an SPF record on (usually the root domain).</small>
+                        <?php if ($mfDomains): ?>
+                        <div class="input-group">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" id="mail-from-local" value="<?= sanitize($mfLocal) ?>" placeholder="noreply" maxlength="64" autocomplete="off" spellcheck="false">
+                            <span class="input-group-text bg-dark text-secondary border-secondary">@</span>
+                            <select class="form-select bg-dark text-light border-secondary" id="mail-from-domain" style="max-width:16rem;">
+                                <?php foreach ($mfDomains as $d): ?>
+                                <option value="<?= sanitize($d) ?>" <?= $d === $mfDomain ? 'selected' : '' ?>><?= sanitize($d) ?><?= in_array($d, $mfah, true) ? '' : ' (not allowed any more)' ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <input type="hidden" name="mail_from_email" id="mail-from-email" value="<?= sanitize($mfCur) ?>">
+                        <small class="settings-hint">All outgoing mail (resets, verifications, notices) is sent FROM this address; replies still go to Site Email. Leave the left box empty to send from Site Email. The domain list is fixed to the Site URL host and its parent domains &mdash; anything else breaks SPF/DKIM/DMARC alignment. Best deliverability: the domain your mail server signs DKIM for and has an SPF record on (usually the root domain).</small>
+                        <?php else: ?>
+                        <input type="email" class="form-control bg-dark text-light border-secondary" name="mail_from_email" value="<?= sanitize($mfCur) ?>" placeholder="noreply@example.com">
+                        <small class="settings-hint">Set a proper <strong>Site URL</strong> (a domain, not an IP) first &mdash; the sender domain is then picked from that domain and its parents. Until then this is a free-text field and the value is not domain-checked.</small>
+                        <?php endif; ?>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Show Contact</label>
@@ -130,40 +161,40 @@
                         </select>
                     </div>
                     <div class="col-md-4"></div>
-                    <div class="col-md-6">
+                    <div class="col-md-6" data-captcha-provider="recaptcha">
                         <label class="form-label">reCAPTCHA v2 Site Key</label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="recaptcha_site_key" value="<?= sanitize($cfg['recaptcha_site_key'] ?? '') ?>">
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-6" data-captcha-provider="recaptcha">
                         <label class="form-label">reCAPTCHA v2 Secret Key</label>
                         <input type="password" autocomplete="off" class="form-control bg-dark text-light border-secondary" name="recaptcha_secret" value="<?= sanitize($cfg['recaptcha_secret'] ?? '') ?>">
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-4" data-captcha-provider="recaptcha_v3">
                         <label class="form-label">reCAPTCHA v3 Site Key</label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="recaptcha_v3_site_key" value="<?= sanitize($cfg['recaptcha_v3_site_key'] ?? '') ?>">
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-4" data-captcha-provider="recaptcha_v3">
                         <label class="form-label">reCAPTCHA v3 Secret Key</label>
                         <input type="password" autocomplete="off" class="form-control bg-dark text-light border-secondary" name="recaptcha_v3_secret" value="<?= sanitize($cfg['recaptcha_v3_secret'] ?? '') ?>">
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-4" data-captcha-provider="recaptcha_v3">
                         <label class="form-label">reCAPTCHA v3 Min Score</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="recaptcha_v3_min_score" value="<?= sanitize($cfg['recaptcha_v3_min_score'] ?? '0.5') ?>" min="0" max="1" step="0.1">
                         <small class="settings-hint">Score below this &rarr; CAPTCHA failed; 0.5 is Google's suggested start. v3 has no widget &mdash; users are scored silently (a "protected by reCAPTCHA" notice is shown under the forms instead of the badge).</small>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-6" data-captcha-provider="turnstile">
                         <label class="form-label">Turnstile Site Key</label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="turnstile_site_key" value="<?= sanitize($cfg['turnstile_site_key'] ?? '') ?>" placeholder="0x4AAAAAAA...">
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-6" data-captcha-provider="turnstile">
                         <label class="form-label">Turnstile Secret Key</label>
                         <input type="password" autocomplete="off" class="form-control bg-dark text-light border-secondary" name="turnstile_secret" value="<?= sanitize($cfg['turnstile_secret'] ?? '') ?>">
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-6" data-captcha-provider="hcaptcha">
                         <label class="form-label">hCaptcha Site Key</label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="hcaptcha_site_key" value="<?= sanitize($cfg['hcaptcha_site_key'] ?? '') ?>" placeholder="00000000-0000-0000-0000-000000000000">
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-6" data-captcha-provider="hcaptcha">
                         <label class="form-label">hCaptcha Secret Key</label>
                         <input type="password" autocomplete="off" class="form-control bg-dark text-light border-secondary" name="hcaptcha_secret" value="<?= sanitize($cfg['hcaptcha_secret'] ?? '') ?>" placeholder="ES_...">
                     </div>
@@ -1192,8 +1223,25 @@
         <hr class="border-secondary" id="settings-rule">
 
         <!-- Security -->
+        <?php
+        // The panel login is mirrored into `users` (schema v8), so the admin's own account — and its
+        // email address — is managed right here, with the same two-step confirmation a member gets.
+        $adminAccount = userFindByLogin($db, (string)($cfg['admin_username'] ?? 'admin'));
+        $adminEmail = $adminAccount ? trim((string)($adminAccount['email'] ?? '')) : '';
+        $adminEmailVerified = $adminAccount && (int)$adminAccount['email_verified'] === 1;
+        $adminEmailPending = $adminAccount ? userEmailChangeState($db, $adminAccount) : null;
+        $adminEmailCooldown = userEmailChangeCooldownDays($cfg);
+        ?>
         <div class="settings-section" id="section-credentials" data-group="credentials" data-title="Security &amp; Credentials">
             <h5>Security &amp; Credentials</h5>
+            <?php if ($adminEmailPending): ?>
+            <div class="alert alert-info py-2 px-3" id="admin-email-pending">
+                <i class="bi bi-hourglass-split"></i> Email change to
+                <strong><?= $adminEmailPending['pending_email'] === '' ? '(removal)' : sanitize($adminEmailPending['pending_email']) ?></strong>
+                is waiting for confirmation from the <strong><?= $adminEmailPending['stage'] === 'old' ? 'current' : 'new' ?></strong> address.
+                <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="btn-admin-email-cancel">Cancel change</button>
+            </div>
+            <?php endif; ?>
             <form id="password-form">
                 <div class="row g-3">
                     <div class="col-md-6">
@@ -1204,6 +1252,23 @@
                     <div class="col-md-6">
                         <label class="form-label">Current Password *</label>
                         <input type="password" class="form-control bg-dark text-light border-secondary" name="current_password" required>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Admin Email
+                            <?php if ($adminAccount): ?><span class="badge <?= $adminEmailVerified ? 'text-bg-success' : 'text-bg-warning' ?>"><?= $adminEmailVerified ? 'verified' : 'unverified' ?></span><?php endif; ?>
+                        </label>
+                        <input type="email" class="form-control bg-dark text-light border-secondary" name="admin_email" maxlength="190" autocomplete="off"
+                               value="<?= sanitize($adminEmail) ?>" placeholder="<?= $adminAccount ? 'none — add one' : 'no account linked to this login' ?>" <?= $adminAccount ? '' : 'disabled' ?>>
+                        <small class="settings-hint">
+                            <?php if ($adminAccount): ?>
+                            The address of <strong>your own account</strong> (<?= sanitize($adminAccount['username']) ?>) &mdash; account notices, the verification link and site password resets go here.
+                            This is <em>not</em> the public contact address (Site Email) nor the sender (From) &mdash; both live under Contact &amp; Email.
+                            Editing it starts the same two-step change a member gets: confirm from the <strong>current</strong> mailbox first, then from the new one; clear the box to remove the address.
+                            <?= $adminEmailCooldown > 0 ? 'The next change is possible ' . (int)$adminEmailCooldown . ' days after the previous one.' : '' ?>
+                            <?php else: ?>
+                            This panel login has no account row in <code>users</code>, so there is no address to manage. Create a user with the same username on the Users page to link one.
+                            <?php endif; ?>
+                        </small>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">New Password <small style="color: #a0a0b0;">(min. 10 chars, a-Z, 0-9, special)</small></label>
@@ -1257,9 +1322,42 @@
     <script>
     const API_BASE = document.body.dataset.apiBase;
     const CSRF = document.body.dataset.csrf || '';
+    // the credentials block compares against these before deciding which endpoint to call
+    let ADMIN_USERNAME_CURRENT = <?= json_encode((string)($cfg['admin_username'] ?? 'admin')) ?>;
+    let ADMIN_EMAIL_CURRENT = <?= json_encode($adminEmail) ?>;
     let currentCaptchaAttempts = '<?= sanitize($cfg['delete_captcha_attempts'] ?? '2') ?>';
     let currentLockoutAttempts = '<?= sanitize($cfg['delete_lockout_attempts'] ?? '5') ?>';
     let currentLockoutMinutes = '<?= sanitize($cfg['delete_lockout_minutes'] ?? '60') ?>';
+
+    // ── CAPTCHA: show only the keys of the selected provider ──
+    // The other providers' fields stay in the DOM (and are still submitted, so switching back never
+    // loses a key) — they are only hidden. A search hit reveals one anyway, see .settings-hit in
+    // assets/css/admin.css, so looking for "turnstile" still finds its keys.
+    (function () {
+        const sel = document.querySelector('[name="captcha_provider"]');
+        if (!sel) return;
+        const cells = [...document.querySelectorAll('[data-captcha-provider]')];
+        const sync = () => cells.forEach(c => c.classList.toggle('captcha-prov-hidden', c.dataset.captchaProvider !== sel.value));
+        sel.addEventListener('change', sync);
+        sync();
+    })();
+
+    // ── Sender address: local part + a domain from the allowed list, joined into the hidden field ──
+    (function () {
+        const local = document.getElementById('mail-from-local');
+        const domain = document.getElementById('mail-from-domain');
+        const hidden = document.getElementById('mail-from-email');
+        if (!local || !domain || !hidden) return;
+        const sync = () => {
+            const l = local.value.trim().replace(/@.*$/, '');   // pasting a full address keeps the local part
+            if (local.value !== l) local.value = l;
+            hidden.value = l ? l + '@' + domain.value : '';
+        };
+        local.addEventListener('input', sync);
+        local.addEventListener('change', sync);
+        domain.addEventListener('change', sync);
+        document.getElementById('settings-form').addEventListener('submit', sync, true);   // belt and braces
+    })();
 
     // ── Federation peers (Settings → Federation / Cluster). All rendering via textContent —
     //    peer names/URLs/status come from the DB and, indirectly, from remote admins. ──
@@ -1714,26 +1812,90 @@
             }
         }
 
-        const payload = { current_password: current, admin_username: username };
-        if (newPass) payload.new_password = newPass;
+        // The email lives on the admin's own account row and moves through the same two-step
+        // confirmation a member gets, so it goes to its own endpoint — but shares this password gate.
+        const emailField = form.admin_email;
+        const emailNow = (emailField && !emailField.disabled) ? emailField.value.trim() : null;
+        const wantEmail = emailNow !== null && emailNow !== ADMIN_EMAIL_CURRENT;
+        const wantCreds = username !== ADMIN_USERNAME_CURRENT || !!newPass;
+        if (!wantCreds && !wantEmail) {
+            showToast('error', 'Nothing to change.');
+            return;
+        }
 
-        try {
-            const res = await fetch(API_BASE + 'admin/change_password', {
+        const post = async (endpoint, payload) => {
+            const res = await fetch(API_BASE + endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
                 body: JSON.stringify(payload),
             });
-            const json = await res.json();
-            if (json.success) {
-                showToast('success', json.message || 'Saved successfully.');
+            return await res.json();
+        };
+
+        const saveBtn = form.querySelector('button[type="submit"]');
+        const btnHtml = saveBtn ? saveBtn.innerHTML : '';
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving…'; }
+        try {
+            let ok = true;
+            if (wantCreds) {
+                const payload = { current_password: current, admin_username: username };
+                if (newPass) payload.new_password = newPass;
+                const json = await post('admin/change_password', payload);
+                if (json.success) {
+                    showToast('success', json.message || 'Saved successfully.');
+                    ADMIN_USERNAME_CURRENT = username;
+                } else {
+                    ok = false;
+                    showToast('error', json.error || 'Error');
+                }
+            }
+            if (ok && wantEmail) {
+                const json = await post('admin/account_email', { current_password: current, email: emailNow });
+                if (json.success) {
+                    showToast('success', json.message || 'Email change started.');
+                    // the address only really moves once the mailboxes confirm it, so keep showing
+                    // the stored one until then
+                    if (json.stage === 'done_direct') ADMIN_EMAIL_CURRENT = emailNow;
+                    else emailField.value = ADMIN_EMAIL_CURRENT;
+                } else {
+                    ok = false;
+                    showToast('error', json.error || 'Error');
+                    emailField.value = ADMIN_EMAIL_CURRENT;
+                }
+            }
+            if (ok) {
                 form.current_password.value = '';
                 form.new_password.value = '';
                 form.confirm_password.value = '';
-            } else {
-                showToast('error', json.error || 'Error');
             }
         } catch {
             showToast('error', 'Network error.');
+        } finally {
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = btnHtml; }
+        }
+    });
+
+    // "Cancel change" on the pending-email banner (no password needed — it only undoes a request)
+    document.getElementById('btn-admin-email-cancel')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+            const res = await fetch(API_BASE + 'admin/account_email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+                body: JSON.stringify({ cancel: 1 }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                showToast('success', json.message || 'Cancelled.');
+                document.getElementById('admin-email-pending')?.remove();
+            } else {
+                showToast('error', json.error || 'Error');
+                btn.disabled = false;
+            }
+        } catch {
+            showToast('error', 'Network error.');
+            btn.disabled = false;
         }
     });
     </script>
