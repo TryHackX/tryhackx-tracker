@@ -80,7 +80,7 @@ function verifyCsrfHeader(): bool {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CAPTCHA (provider-agnostic: Google reCAPTCHA v2 / v3 or Cloudflare Turnstile)
+// CAPTCHA (provider-agnostic: reCAPTCHA v2 / v3, Cloudflare Turnstile or hCaptcha)
 // ─────────────────────────────────────────────────────────────────────────────
 // Setting `captcha_provider` selects the widget/verifier; `recaptcha_enabled` remains the master
 // "CAPTCHA enabled" switch and `recaptcha_on_<ctx>` the per-context toggles (legacy names kept so
@@ -91,13 +91,19 @@ function verifyCsrfHeader(): bool {
 //   recaptcha     Google reCAPTCHA v2 checkbox      recaptcha_site_key / recaptcha_secret
 //   recaptcha_v3  Google reCAPTCHA v3 (invisible)   recaptcha_v3_site_key / recaptcha_v3_secret + recaptcha_v3_min_score
 //   turnstile     Cloudflare Turnstile              turnstile_site_key / turnstile_secret
+//   hcaptcha      hCaptcha checkbox                 hcaptcha_site_key / hcaptcha_secret
 // v3 shows no widget: the browser fetches a token silently (grecaptcha.execute) and the siteverify
 // answer carries a 0.0–1.0 score; anything below `recaptcha_v3_min_score` counts as a failed CAPTCHA.
 
-/** Active provider: 'recaptcha' (v2 checkbox, default), 'recaptcha_v3' (invisible, score based) or 'turnstile'. */
+/** Every provider id understood here, in the order shown in Settings. */
+function captchaProviders(): array {
+    return ['recaptcha', 'recaptcha_v3', 'turnstile', 'hcaptcha'];
+}
+
+/** Active provider: 'recaptcha' (v2 checkbox, default), 'recaptcha_v3', 'turnstile' or 'hcaptcha'. */
 function captchaProvider(array $cfg): string {
     $p = (string)($cfg['captcha_provider'] ?? 'recaptcha');
-    return in_array($p, ['turnstile', 'recaptcha_v3'], true) ? $p : 'recaptcha';
+    return in_array($p, captchaProviders(), true) ? $p : 'recaptcha';
 }
 
 /** Public site key of the active provider ('' when missing). */
@@ -212,6 +218,28 @@ function verifyTurnstile(string $token, array $cfg): bool {
 }
 
 /**
+ * hCaptcha verification (https://docs.hcaptcha.com/#verify-the-user-response-server-side).
+ * Same request/answer shape as reCAPTCHA v2 — success plus optional error-codes. Fail closed.
+ */
+function verifyHcaptcha(string $token, array $cfg): bool {
+    $secret = trim((string)($cfg['hcaptcha_secret'] ?? ''));
+    if ($secret === '' || $token === '') return false;
+    $json = captchaHttpPost('https://api.hcaptcha.com/siteverify', [
+        'secret'   => $secret,
+        'response' => $token,
+        'remoteip' => getClientIp($cfg),
+        'sitekey'  => trim((string)($cfg['hcaptcha_site_key'] ?? '')),
+    ]);
+    if ($json === null) return false;
+    if (($json['success'] ?? false) !== true) {
+        $codes = isset($json['error-codes']) && is_array($json['error-codes']) ? implode(',', $json['error-codes']) : '';
+        if ($codes !== '') error_log('[captcha] hcaptcha rejected: ' . $codes);
+        return false;
+    }
+    return true;
+}
+
+/**
  * Google reCAPTCHA v3 verification (same siteverify endpoint as v2, but the answer is scored).
  * Passes only when success === true AND score >= recaptcha_v3_min_score. When $expectedAction is
  * given and the answer carries an `action`, it must match (callers without a context pass null and
@@ -241,6 +269,7 @@ function verifyCaptcha(string $token, array $cfg, ?string $expectedAction = null
     if ($token === '') return false;
     switch (captchaProvider($cfg)) {
         case 'turnstile':    return verifyTurnstile($token, $cfg);
+        case 'hcaptcha':     return verifyHcaptcha($token, $cfg);
         case 'recaptcha_v3': return verifyRecaptchaV3($token, $cfg, $expectedAction);
         default:             return verifyRecaptcha($token, $cfg);
     }
@@ -248,7 +277,7 @@ function verifyCaptcha(string $token, array $cfg, ?string $expectedAction = null
 
 /** Pull the CAPTCHA token out of a decoded request body (new generic name first, legacy names after). */
 function captchaTokenFromInput(array $input): string {
-    foreach (['captcha_token', 'g-recaptcha-response', 'cf-turnstile-response'] as $k) {
+    foreach (['captcha_token', 'g-recaptcha-response', 'cf-turnstile-response', 'h-captcha-response'] as $k) {
         if (isset($input[$k]) && is_string($input[$k]) && $input[$k] !== '') return $input[$k];
     }
     return '';
@@ -267,9 +296,15 @@ function isRecaptchaEnabled(array $cfg, string $context = 'report'): bool {
 }
 
 /**
- * <head> tags for the active provider: the widget script plus an inline script exposing
- * CAPTCHA_PROVIDER / CAPTCHA_SITEKEY (and RECAPTCHA_SITEKEY for backwards compatibility) to
- * assets/js/captcha.js. Emits nothing when CAPTCHA is not configured.
+ * <head> tags for the active provider: an inline script exposing CAPTCHA_PROVIDER / CAPTCHA_SITEKEY
+ * (and RECAPTCHA_SITEKEY for backwards compatibility) plus the loader callback to
+ * assets/js/captcha.js, followed by the widget script itself. Emits nothing when CAPTCHA is not
+ * configured. Remember: every host used here must also be allowed by the CSP in .htaccess.
+ *
+ * The onCaptchaApiLoad callback is defined in the inline script ABOVE the async loader on purpose —
+ * defining it in captcha.js (which loads at the end of <body>) would race the vendor script and the
+ * "API ready" signal could be missed. hCaptcha in particular documents that its global appears
+ * before the SDK is set up, so the callback is the only reliable readiness signal.
  */
 function captchaHeadTags(array $cfg): string {
     if (!captchaConfigured($cfg)) return '';
@@ -277,7 +312,11 @@ function captchaHeadTags(array $cfg): string {
     $siteKey = captchaSiteKey($cfg);
     switch ($provider) {
         case 'turnstile':
-            $src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+            $src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onCaptchaApiLoad&render=explicit';
+            break;
+        case 'hcaptcha':
+            // explicit render, same handshake as the other widget providers (assets/js/captcha.js)
+            $src = 'https://js.hcaptcha.com/1/api.js?onload=onCaptchaApiLoad&render=explicit';
             break;
         case 'recaptcha_v3':
             // v3: no widget — the loader is bound to the site key and tokens come from grecaptcha.execute().
@@ -285,13 +324,20 @@ function captchaHeadTags(array $cfg): string {
             $src = 'https://www.google.com/recaptcha/api.js?render=' . rawurlencode($siteKey);
             break;
         default:
-            $src = 'https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit';
+            $src = 'https://www.google.com/recaptcha/api.js?onload=onCaptchaApiLoad&render=explicit';
     }
     $keyJs = json_encode($siteKey, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $html  = "<script>\n";
     $html .= "    const CAPTCHA_PROVIDER = '" . $provider . "';\n";
     $html .= "    const CAPTCHA_SITEKEY = " . $keyJs . ";\n";
     $html .= "    const RECAPTCHA_SITEKEY = CAPTCHA_SITEKEY;\n";
+    if ($provider !== 'recaptcha_v3') {
+        // widget providers only: they are loaded with ?onload=onCaptchaApiLoad. v3 has no widget to
+        // render and its own grecaptcha.ready() is the readiness signal, so it needs no callback.
+        $html .= "    window.captchaApiReady = false;\n";
+        $html .= "    window.onCaptchaApiLoad = function () { window.captchaApiReady = true; };\n";
+        $html .= "    window.onRecaptchaLoad = window.onCaptchaApiLoad;\n";
+    }
     $html .= "    </script>\n";
     $html .= '    <script src="' . $src . '" async defer></script>' . "\n";
     return $html;

@@ -246,8 +246,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
     $siteName = trim($_POST['site_name'] ?? 'My Tracker');
     $announceUrl = trim($_POST['announce_url'] ?? '');
     $announceUrlHttps = trim($_POST['announce_url_https'] ?? '');
-    $recaptchaSite = trim($_POST['recaptcha_site'] ?? '');
-    $recaptchaSecret = trim($_POST['recaptcha_secret'] ?? '');
+    // CAPTCHA: one provider, one key pair. The keys are stored under the provider's own setting names
+    // (see the CAPTCHA section of includes/functions.php) so switching providers later in Settings
+    // never loses the ones already entered here.
+    $captchaProviders = ['recaptcha', 'recaptcha_v3', 'turnstile', 'hcaptcha'];
+    $captchaProvider = in_array($_POST['captcha_provider'] ?? '', $captchaProviders, true) ? $_POST['captcha_provider'] : 'recaptcha';
+    $captchaSiteKey = trim($_POST['captcha_site_key'] ?? '');
+    $captchaSecret = trim($_POST['captcha_secret'] ?? '');
+    $captchaKeys = [
+        'recaptcha'    => ['recaptcha_site_key', 'recaptcha_secret'],
+        'recaptcha_v3' => ['recaptcha_v3_site_key', 'recaptcha_v3_secret'],
+        'turnstile'    => ['turnstile_site_key', 'turnstile_secret'],
+        'hcaptcha'     => ['hcaptcha_site_key', 'hcaptcha_secret'],
+    ][$captchaProvider];
     $blacklistPath = trim($_POST['blacklist_path'] ?? '/home/tracker/blacklist');
 
     if (strlen($adminUser) < 3) { $error = 'Username must be at least 3 characters.'; }
@@ -296,9 +307,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 'mail_from_email' => $mailFrom,
                 'site_url' => $siteUrl,
                 'admin_username' => $adminUser,
-                'recaptcha_site_key' => $recaptchaSite,
-                'recaptcha_secret' => $recaptchaSecret,
-                'recaptcha_enabled' => $recaptchaSite ? '1' : '0',
+                'captcha_provider' => $captchaProvider,
+                $captchaKeys[0] => $captchaSiteKey,
+                $captchaKeys[1] => $captchaSecret,
+                'recaptcha_enabled' => ($captchaSiteKey !== '' && $captchaSecret !== '') ? '1' : '0',
                 'recaptcha_on_report' => '1',
                 'recaptcha_on_login' => '1',
                 'recaptcha_on_status' => '0',
@@ -578,17 +590,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
             </div>
 
             <hr>
-            <h3 style="color:#4a9eff;margin-bottom:0.5rem;font-size:0.95rem;">reCAPTCHA v2 <small style="color:#666;">(optional)</small></h3>
+            <?php $cpSel = $_POST['captcha_provider'] ?? 'recaptcha'; ?>
+            <h3 style="color:#4a9eff;margin-bottom:0.5rem;font-size:0.95rem;">CAPTCHA <small style="color:#666;">(optional &mdash; leave the keys empty to set it up later)</small></h3>
+            <div class="form-group">
+                <label>Provider</label>
+                <select name="captcha_provider">
+                    <option value="recaptcha" <?= $cpSel === 'recaptcha' ? 'selected' : '' ?>>Google reCAPTCHA v2 (checkbox)</option>
+                    <option value="recaptcha_v3" <?= $cpSel === 'recaptcha_v3' ? 'selected' : '' ?>>Google reCAPTCHA v3 (invisible, score)</option>
+                    <option value="turnstile" <?= $cpSel === 'turnstile' ? 'selected' : '' ?>>Cloudflare Turnstile</option>
+                    <option value="hcaptcha" <?= $cpSel === 'hcaptcha' ? 'selected' : '' ?>>hCaptcha</option>
+                </select>
+            </div>
             <div class="two-col">
                 <div class="form-group">
                     <label>Site Key</label>
-                    <input type="text" name="recaptcha_site" value="<?= htmlspecialchars($_POST['recaptcha_site'] ?? '') ?>">
+                    <input type="text" name="captcha_site_key" value="<?= htmlspecialchars($_POST['captcha_site_key'] ?? '') ?>">
                 </div>
                 <div class="form-group">
                     <label>Secret Key</label>
-                    <input type="password" name="recaptcha_secret" value="<?= htmlspecialchars($_POST['recaptcha_secret'] ?? '') ?>" autocomplete="off">
+                    <input type="password" name="captcha_secret" value="<?= htmlspecialchars($_POST['captcha_secret'] ?? '') ?>" autocomplete="off">
                 </div>
             </div>
+            <p style="color:#666;font-size:0.8rem;margin:-0.4rem 0 0;">The keys of the other providers can be added later in Admin &rarr; Settings &rarr; CAPTCHA. If your site sits behind a strict Content-Security-Policy of your own, remember to allow the provider's script host.</p>
 
             <hr>
             <h3 style="color:#4a9eff;margin-bottom:0.5rem;font-size:0.95rem;">Blacklist File <small style="color:#666;">(newline-separated hash list)</small></h3>

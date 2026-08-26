@@ -22,6 +22,11 @@
  * stats_timeline_interval (seconds, 30–600), stats_timeline_raw_days (1–30),
  * stats_timeline_keep_days (5-minute roll-ups, 7–3650; hourly roll-ups are kept forever),
  * stats_timeline_public (0/1: the public stats page shows the chart / the API answers anonymous calls).
+ * Schema v10 added the chart's own controls: stats_timeline_ranges (which range buttons exist),
+ * stats_timeline_default_range (which one opens) and stats_timeline_custom_range (0/1: a free span
+ * slider; its spans are snapped to statsTimelineCustomStops() so each one caches like a named range).
+ * The chart is mounted by statsTimelineMountAttrs() on the public stats page and on the admin Index
+ * and Whitelist pages.
  */
 
 const ST_INTERVAL_MIN   = 30;
@@ -42,14 +47,67 @@ function statsTimelineRanges(): array {
             '90d' => 90 * 86400, '3m' => 90 * 86400, 'all' => 20 * 365 * 86400];
 }
 
-function statsTimelineSettingDefaults(): array {
-    return [
-        'stats_timeline_enabled'   => '0',
-        'stats_timeline_interval'  => '60',
-        'stats_timeline_raw_days'  => '7',
-        'stats_timeline_keep_days' => '60',
-        'stats_timeline_public'    => '1',
-    ];
+/**
+ * Range buttons offered by the chart, in display order: key => button label. Mirrors the RANGES
+ * table in assets/js/stats-timeline.js (the JS builds its buttons from data-ranges, this list is
+ * what Settings shows and validates against).
+ */
+function statsTimelineRangeButtons(): array {
+    return ['24h' => '24h', '7d' => '7d', '14d' => '2w', '30d' => '1m', '90d' => '3m', 'all' => 'All'];
+}
+
+/** Enabled range buttons (always at least one; unknown keys dropped, display order kept). */
+function statsTimelineEnabledRanges(array $cfg): array {
+    $all = array_keys(statsTimelineRangeButtons());
+    $raw = trim((string)($cfg['stats_timeline_ranges'] ?? ''));
+    if ($raw === '') return $all;
+    $want = array_filter(array_map('trim', explode(',', strtolower($raw))));
+    $keep = array_values(array_intersect($all, $want));   // intersect keeps $all's order
+    return $keep ?: $all;
+}
+
+/** Range the chart opens on (falls back to the first enabled button when misconfigured). */
+function statsTimelineDefaultRange(array $cfg): string {
+    $enabled = statsTimelineEnabledRanges($cfg);
+    $def = strtolower(trim((string)($cfg['stats_timeline_default_range'] ?? '24h')));
+    return in_array($def, $enabled, true) ? $def : $enabled[0];
+}
+
+/** Free "Custom" span control (slider) next to the range buttons. */
+function statsTimelineCustomRange(array $cfg): bool { return (($cfg['stats_timeline_custom_range'] ?? '0') === '1'); }
+
+/**
+ * Spans the "Custom" slider can produce, in seconds (1 h … 5 years). MIRRORS CUSTOM_STOPS in
+ * assets/js/stats-timeline.js — keep the two lists identical. Server-side the list matters for more
+ * than validation: a custom reply is cached per span like a named range, so a bounded list means a
+ * bounded number of cache files in config/ no matter what a crafted URL asks for.
+ */
+function statsTimelineCustomStops(): array {
+    return [3600, 7200, 10800, 21600, 43200, 86400, 172800, 259200, 432000, 604800,
+            864000, 1209600, 1814400, 2592000, 3888000, 5184000, 7776000, 10368000, 15552000, 23328000,
+            31536000, 47304000, 63072000, 94608000, 157680000];
+}
+
+/** Snap any requested custom span to the nearest slider stop (bounds the cache key space). */
+function statsTimelineSnapSpan(int $seconds): int {
+    $best = statsTimelineCustomStops()[0];
+    foreach (statsTimelineCustomStops() as $stop) {
+        if (abs($stop - $seconds) < abs($best - $seconds)) $best = $stop;
+    }
+    return $best;
+}
+
+/**
+ * data-* attributes for a [data-timeline] mount point, so every page (public stats, admin Index,
+ * admin Whitelist) offers exactly the ranges the admin configured. $compact adds data-compact="1".
+ */
+function statsTimelineMountAttrs(array $cfg, bool $compact = false): string {
+    $attrs = ' data-timeline'
+        . ' data-range="' . htmlspecialchars(statsTimelineDefaultRange($cfg), ENT_QUOTES, 'UTF-8') . '"'
+        . ' data-ranges="' . htmlspecialchars(implode(',', statsTimelineEnabledRanges($cfg)), ENT_QUOTES, 'UTF-8') . '"'
+        . ' data-custom="' . (statsTimelineCustomRange($cfg) ? '1' : '0') . '"';
+    if ($compact) $attrs .= ' data-compact="1"';
+    return $attrs;
 }
 
 function statsTimelineEnabled(array $cfg): bool { return (($cfg['stats_timeline_enabled'] ?? '0') === '1'); }
@@ -485,7 +543,16 @@ function statsTimelineSeries(PDO $db, array $cfg, int $rangeSec, ?int $now = nul
     if ($windowed) {
         $span = $to - $from;
         $interval = max(1, statsTimelineInterval($cfg));
+        $rawOk = false;
         if ($from >= $now - statsTimelineRawDays($cfg) * 86400 && intdiv($span, $interval) <= ST_MAX_RAW_POINTS) {
+            // Same confirmation statsTimelineChooseTable() makes: the configured interval may have
+            // been raised long after these rows were sampled, so the estimate above can be several
+            // times short. Count what the window really holds before promising raw resolution.
+            $cs = $db->prepare("SELECT COUNT(*) FROM `" . ST_RAW_TABLE . "` WHERE ts >= ? AND ts <= ?");
+            $cs->execute([$from, $to]);
+            $rawOk = (int)$cs->fetchColumn() <= ST_MAX_RAW_POINTS;
+        }
+        if ($rawOk) {
             [$table, $step, $kind] = [ST_RAW_TABLE, $interval, 'raw'];
         } elseif ($from >= $now - statsTimelineKeepDays($cfg) * 86400 && intdiv($span, 300) <= ST_MAX_5M_POINTS) {
             [$table, $step, $kind] = [ST_5M_TABLE, 300, '5m'];
@@ -557,8 +624,12 @@ function statsTimelineSeries(PDO $db, array $cfg, int $rangeSec, ?int $now = nul
                  'scrapes' => (int)$r['scrapes'], 'connects' => (int)$r['connects']];
         $rows++;
     }
+    // raw_days / keep_days travel with the payload so the chart can mirror the server's table choice
+    // (assets/js/stats-timeline.js candidateStep()) instead of guessing from the point count alone.
     return ['success' => true, 'range_seconds' => $rangeSec, 'from' => $from, 'to' => $to, 'step' => $step, 'table' => $kind,
-            'windowed' => $windowed, 'points' => $rows, 'interval' => statsTimelineInterval($cfg), 'generated_at' => $now] + $out;
+            'windowed' => $windowed, 'points' => $rows, 'interval' => statsTimelineInterval($cfg),
+            'raw_days' => statsTimelineRawDays($cfg), 'keep_days' => statsTimelineKeepDays($cfg),
+            'generated_at' => $now] + $out;
 }
 
 /** Row counts + state for the admin status card / CLI. */

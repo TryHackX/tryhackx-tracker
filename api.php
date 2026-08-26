@@ -73,6 +73,7 @@ $apiRoutes = [
     'admin/delete_report'   => 'api/admin/delete_report.php',
     'admin/delete_all'      => 'api/admin/delete_all.php',
     'admin/save_settings'   => 'api/admin/save_settings.php',
+    'admin/settings_catalog' => 'api/admin/settings_catalog.php',
     'admin/change_password' => 'api/admin/change_password.php',
     'admin/check_blacklist' => 'api/admin/check_blacklist.php',
     'admin/notify_review'   => 'api/admin/notify_review.php',

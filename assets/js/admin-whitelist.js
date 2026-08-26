@@ -944,7 +944,7 @@
 
         document.querySelectorAll('#wl-tabs .source-tab').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
 
-        $('btn-logout').addEventListener('click', async () => { await apiCall('admin/logout', 'POST', {}); window.location.reload(); });
+        $('btn-logout').addEventListener('click', async () => { await apiCall('admin/logout', 'POST', {}); window.location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin'); });
         $('btn-wl-regen').addEventListener('click', regenerate);
         $('btn-wl-import').addEventListener('click', importBlacklist);
         initReloadModal();

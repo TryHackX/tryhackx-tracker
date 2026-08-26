@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/vendor/uplot/uPlot.min.css<?= assetVer('assets/vendor/uplot/uPlot.min.css') ?>">
     <?php endif; ?>
 </head>
-<body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-near-pages="<?= max(1, min(20, (int)($cfg['admin_near_pages'] ?? 2))) ?>">
+<body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-near-pages="<?= max(1, min(20, (int)($cfg['admin_near_pages'] ?? 2))) ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
     <div class="admin-container admin-wide wl-page">
         <div class="admin-header">
             <h2><i class="bi bi-collection"></i> Index <span class="idx-subtitle">observed hashes &mdash; not a whitelist</span></h2>
@@ -48,7 +48,7 @@
                     <button type="button" class="btn btn-sm btn-outline-info" data-tl-collapse="idx-timeline" aria-expanded="true" aria-controls="idx-timeline"><i class="bi bi-chevron-up"></i> <span>Collapse</span></button>
                 </div>
             </div>
-            <div id="idx-timeline" data-timeline data-range="24h" data-compact="1"></div>
+            <div id="idx-timeline"<?= statsTimelineMountAttrs($cfg, true) ?>></div>
         </div>
         <?php endif; ?>
 

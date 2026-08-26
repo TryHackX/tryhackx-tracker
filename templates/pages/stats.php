@@ -221,7 +221,7 @@ $tcpPct = 100 - $udpPct;
         <div class="card tl-card mt-4">
             <h3 class="card-title font-mono"><i class="bi bi-graph-up"></i> Swarm Timeline</h3>
             <p class="text-muted" style="font-size:0.8rem;margin:-0.25rem 0 0.75rem;">Seeds, leechers, peers and tracked torrents over time (one sample every <?= (int)statsTimelineInterval($cfg) ?> s, averaged for longer ranges). Shaded spans are hours in OPEN mode (every torrent served); unshaded = whitelist-only hours.</p>
-            <div id="stats-timeline" data-timeline data-range="24h"></div>
+            <div id="stats-timeline"<?= statsTimelineMountAttrs($cfg) ?>></div>
         </div>
         <?php endif; ?>
 

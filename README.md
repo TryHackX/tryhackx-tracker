@@ -44,7 +44,7 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Admin Whitelist page** — status card (mode, file health, DB counts, pending reload, last reload, worker heartbeat, warnings), table with multi-column sort, hash-prefix / IP / name / file-name search (FULLTEXT), source & metadata filters, **Group by IP**, bulk delete/ban/fetch-metadata, details modal (magnet generator, name/size/file tree, seeders/leechers via live scrape, source & forum reference), Banned hashes, API clients, API bans (pretty-printed request snapshot)
 - **Metadata worker** — optional `python3-libtorrent` daemon (systemd, unprivileged, column-level MySQL grants) that resolves name / size / file list through DHT + trackers in upload mode; the panel queues rows and polls
 - **Mode-aware moderation** — in whitelist mode "block" = ban (removed from the served list, can never be re-registered) and the report/appeal flows, status page and public copy adapt automatically
-- **CAPTCHA provider** — Google reCAPTCHA v2 or Cloudflare Turnstile (one shared modal, fail-closed verification with timeouts)
+- **CAPTCHA provider** — Google reCAPTCHA v2 or v3, Cloudflare Turnstile or hCaptcha (one shared modal, fail-closed verification with timeouts)
 
 ### User accounts & federation (1.6.0, both off by default)
 - **User accounts** — registration/login with CAPTCHA (selectable sign-in duration, email verification), groups with per-feature permissions (`guest` = anonymous visitors; a signed-in user gets exactly the union of their own groups; system `admin` group passes everything — 1.7.0 semantics), timed memberships (1 d … 1 y / custom from–to, extend-on-repurchase), in-app + email notifications, an account page and an admin Users page — see [User accounts, groups & permissions](#user-accounts-groups--permissions-160)
@@ -204,22 +204,29 @@ The application writes one info hash per line (lowercase hex, 40 characters). Wh
 
 ## Configuration
 
-All settings are managed through **Admin Panel → Settings** (`/?action=admin` → Settings icon):
+All settings are managed through **Admin Panel → Settings** (`/?action=admin` → Settings icon).
+Since 1.10.0 the page has a **group sub-menu** (Site & pages, Security & CAPTCHA, User accounts, …)
+and a **search box** that ranks matching settings first and whole groups after them — it also matches
+hidden synonyms ("bot", "smtp", "cron", "hidden url") kept in `includes/settings_catalog.php` and
+served through `admin/settings_catalog`, so they never appear in the page text. Press `/` or `Ctrl+K`
+anywhere on the page to jump into it.
+
 
 | Section | Settings |
 |---------|----------|
 | **Site Configuration** | Site name, URL, announce URLs (HTTP/S + UDP), GitHub URL |
 | **Contact & Email** | Site email, contact visibility, email obfuscation, HMAC secret |
-| **CAPTCHA** | Provider (reCAPTCHA v2 / Turnstile), keys, enable globally and per-context (report, login, status, appeals, block check); the whitelist registration page always requires a CAPTCHA |
+| **CAPTCHA** | Provider (reCAPTCHA v2 / reCAPTCHA v3 / Turnstile / hCaptcha), keys, enable globally and per-context (report, login, status, appeals, block check); the whitelist registration page always requires a CAPTCHA |
 | **Tracker Mode & Whitelist** | `blacklist` / `whitelist`, whitelist file path (+ Test), public registration on/off, max hashes per submission, submissions per hour, per-IP and global daily caps, minimum seconds between tracker reloads, OpenTracker scrape URL, **require our tracker** (public registration accepts only magnets whose `tr=` list includes one of *Our tracker hosts* / the announce hosts; bare hashes refused) — see [Whitelist mode](#whitelist-mode) |
 | **Server-to-server API** | Enable, ban length (days), exempt IPs — clients and bans are managed on the Whitelist page |
 | **Smart CAPTCHA** | Point threshold, grace period, points per action type |
 | **Public Pages** | Auto-archive days for reports and appeals |
 | **Rate Limits & Blacklist** | Reports/status-checks/block-lookups/appeals per hour (per IP), items per page, message length limits, blacklist file path with test |
-| **Admin Sessions & Proxy** | Session idle timeout, absolute session cap, login lockout attempts/window, trusted proxy IPs, client IP header |
+| **Admin Access & Sessions** | **Admin sign-in address** (the `?action=` value that shows the sign-in form &mdash; move it off `admin` to keep bots off the form), **what other admin URLs answer when signed out** (redirect to the front page / show the form / 404), session idle timeout, absolute session cap, login lockout attempts/window, trusted proxy IPs, client IP header &mdash; see [Moving the admin sign-in address](#moving-the-admin-sign-in-address-1100) |
 | **Donation Fields** | Enable/disable, custom label+value fields (max 15), auto-detects URLs vs addresses |
 | **Transparency** | Enable/disable, results per page |
 | **Tracker Statistics** | Enable, source URL, home/page refresh intervals, **cache lifetime (TTL)**, request timeout, loading delays, peer-label style — see [Tracker statistics & caching](#tracker-statistics--caching) |
+| **Statistics Timeline** | Enable, sample interval, retention (raw / 5-min roll-ups), public or admins-only, **which range buttons the chart offers**, **which range opens by default** and an optional **free "Custom" span slider** — see [Statistics timeline](#statistics-timeline--the-swarm-chart-150) |
 | **OpenTracker Service** | systemd unit name, sudo toggle, blacklist auto-reload (SIGHUP), permission test buttons, restart-recommendation thresholds — see [OpenTracker service reload & restart](#opentracker-service-reload--restart) |
 | **Footer** | Copyright year, brand/tracker software/OS elements with names and URLs |
 | **Security & Credentials** | Admin username, password change (separate form) |
@@ -287,10 +294,14 @@ no CDN) on the public `/?action=stats` page (under the counters) and on the admi
 torrents and whitelisted torrents (right axis), and request rates (UDP / HTTP announces, connects,
 scrapes per second, derived from OpenTracker's cumulative counters; `null` across a restart or a gap).
 Hours in OPEN (blacklist) mode are shaded, so a [scheduled mode](#5b-scheduled-mode--whitelist-hours-optional-140)
-shows up as day/night bands. Ranges **24h / 7d / 2w / 1m / 3m / All** (All = the whole recorded
-history, hourly rows thinned to ≤ ~5000 points); a Binance-style **ranger** under the panes pans /
-narrows the visible window within the loaded range; click a legend entry to hide a series, drag to zoom
-(both panes + the ranger stay in sync), double-click to reset; the chart refreshes itself every minute.
+shows up as day/night bands. The same chart is mounted on the admin **Index** page. Ranges
+**24h / 7d / 2w / 1m / 3m / All** (All = the whole recorded history, hourly rows thinned to
+≤ ~5000 points) — since 1.10.0 the admin picks **which of those buttons exist** and **which one
+opens by default** (Settings → Statistics Timeline), and can add a free **Custom** span slider
+(1 h … 5 years; each stop is cached like a named range). A Binance-style **ranger** under the panes
+pans / narrows the visible window within the loaded range; click a legend entry to hide a series,
+drag to zoom (both panes + the ranger stay in sync), double-click to reset; the chart refreshes
+itself every minute.
 
 How it works (`includes/stats_timeline.php`):
 
@@ -761,6 +772,30 @@ torrent keeps sending `connect` + `announce` (measured on tryhackx.org: **90–2
   to speed that up is a UDP reply that makes them back off (long `interval`), which is a policy /
   patch decision, not a config one.
 
+### Moving the admin sign-in address (1.10.0)
+
+By default the panel's sign-in form lives at `/?action=admin`, and that is the **only** address that
+shows it. **Admin → Settings → Admin Access & Sessions** can move it anywhere
+(`admin_login_path`, e.g. `/?action=admin123yzxadminxxx` — letters, digits, `-` and `_`; a value that
+collides with a public page falls back to `admin`), and decides what a signed-out visitor gets on the
+*other* panel URLs (`admin_hidden_behavior`):
+
+| Mode | A signed-out visit to `?action=settings`, `?action=admin-users`, … |
+|------|-------------------------------------------------------------------|
+| `home` *(default)* | 302 redirect to the front page — no login form anywhere but your own address |
+| `login` | the sign-in form, on every panel URL (the behaviour before 1.10.0) |
+| `404` | a site-styled **404 Not Found** page with a 404 status |
+
+Once signed in, the panel keeps its classic addresses (`?action=admin`, `?action=settings`,
+`?action=admin-index`, `?action=admin-users`, `?action=admin-whitelist`), so bookmarks, in-panel links
+and the **Logout** button keep working; the sign-in address itself just redirects to the dashboard.
+
+What this does and does not buy you: it keeps crawlers and drive-by bots away from the form, and while
+a custom address is set the (unmovable) `api.php?endpoint=admin/login` endpoint additionally refuses
+any sign-in from a session that never opened the sign-in page. It is **not** a replacement for a strong
+password: brute-force protection is the lockout (*Login lockout attempts / window*) plus
+*CAPTCHA → On Admin Login*. **Write the new address down before saving it.**
+
 ### Reverse proxy / Nginx notes
 
 The bundled `.htaccess` files (URL rewriting, directory `deny`, security headers) are **Apache only**.
@@ -781,7 +816,7 @@ Also port the security headers from `.htaccess` into an `add_header` block, and 
 
 **Behind Cloudflare / a reverse proxy:** by default the app uses the raw connection IP
 (`REMOTE_ADDR`), which will be the proxy — so all visitors would share one IP for rate limiting. Set
-**Admin → Settings → Admin Sessions & Proxy → Trusted proxy IPs** to your proxy addresses and
+**Admin → Settings → Admin Access & Sessions → Trusted proxy IPs** to your proxy addresses and
 **Client IP header** to the header it sets (e.g. `CF-Connecting-IP` or `X-Forwarded-For`). The
 forwarded header is trusted **only** when the request actually originates from a listed proxy, and a
 comma-separated `X-Forwarded-For` is read from the **right** (skipping listed proxies) — the left-most
@@ -879,10 +914,11 @@ tracker/
     ├── nav.php                # Navigation bar
     ├── admin/
     │   ├── dashboard.php      # Admin dashboard (reports/appeals tables)
-    │   ├── login.php          # Admin login form
-    │   └── settings.php       # Admin settings page
+    │   └── settings.php       # Admin settings page (group sub-menu + search)
     ├── pages/
     │   ├── home.php           # Homepage (announce URLs, features, donations, contact)
+    │   ├── adminlogin.php     # Admin sign-in form (site look; address configurable)
+    │   ├── notfound.php       # 404 page (hidden-panel mode)
     │   ├── report.php         # Report submission form
     │   ├── status.php         # Report status check + block check + appeal forms
     │   ├── transparency.php   # Public transparency report
@@ -936,7 +972,7 @@ Schema upgrades are applied automatically on the first request (`includes/schema
 - **Frontend:** Vanilla JavaScript (no build step), Bootstrap 5 (CDN) for admin panel, custom dark theme CSS for public pages
 - **Email:** PHP `mail()` with multipart MIME (HTML + plain text), dark-themed templates
 - **Icons:** Bootstrap Icons (CDN, admin panel only)
-- **CAPTCHA:** Google reCAPTCHA v2 or Cloudflare Turnstile (explicit render mode, one shared modal — `assets/js/captcha.js`)
+- **CAPTCHA:** Google reCAPTCHA v2 / v3, Cloudflare Turnstile or hCaptcha (explicit render mode, one shared modal — `assets/js/captcha.js`; every provider host must stay allow-listed in the CSP in `.htaccess`)
 - **Metadata worker (optional):** Python 3 + `python3-libtorrent` (see `worker/`)
 - **Federation importer (optional):** Python 3 + `python3-pymysql`, systemd timer (`worker/federation.py`)
 
@@ -1062,10 +1098,16 @@ permission** to confirm the sudoers rule, and make sure the unit defines
 - Ensure all required PHP extensions are installed: `php -m | grep -E "pdo_mysql|json|openssl|mbstring"`
 - Verify `config/database.php` exists and contains valid credentials
 
-### reCAPTCHA not appearing
-- Ensure both Site Key and Secret Key are set in admin settings
-- The reCAPTCHA widget is loaded in a modal overlay — it appears only when the Smart CAPTCHA threshold is reached
-- Check browser console for loading errors
+### CAPTCHA not appearing
+- Ensure both Site Key and Secret Key of the **selected provider** are set in admin settings
+  (each provider has its own pair; switching provider does not move the keys)
+- The widget is loaded in a modal overlay — it appears only when the Smart CAPTCHA threshold is reached
+- Check the browser console. `Refused to load … because it violates the Content-Security-Policy`
+  means the provider's host is missing from the CSP header in `.htaccess` (or from your own Nginx
+  copy of it) — the shipped list covers Google, Cloudflare and hCaptcha
+- Provider errors in the console are almost always the site key: Turnstile `110200` and hCaptcha
+  `invalid-site-key` both mean *this hostname is not on the key's allowed-domain list*. The widget
+  retries once and then gives up with "CAPTCHA could not load" instead of looping
 
 ---
 

@@ -5,67 +5,7 @@
     min-height: 100vh;
 }
 
-.login-container {
-    max-width: 400px;
-    margin: 100px auto;
-    padding: 2rem;
-    background: #1e1e1e;
-    border-radius: 8px;
-    border: 1px solid #333;
-}
-
-.login-container h2 {
-    color: #4a9eff;
-    margin-bottom: 0.25rem;
-}
-
-.login-container .text-muted {
-    color: #888 !important;
-    margin-bottom: 1.5rem;
-    display: block;
-}
-
-.login-container .form-control {
-    background: #2a2a2a;
-    border-color: #444;
-    color: #e0e0e0;
-}
-
-.login-container .form-control:focus {
-    background: #2a2a2a;
-    border-color: #4a9eff;
-    color: #e0e0e0;
-    box-shadow: 0 0 0 0.2rem rgba(74, 158, 255, 0.25);
-}
-
-.login-container .form-label {
-    color: #bbb;
-    font-size: 0.9rem;
-}
-
-.alert-box {
-    padding: 0.5rem 0.75rem;
-    border-radius: 4px;
-    margin-bottom: 1rem;
-    font-size: 0.85rem;
-    display: none;
-}
-
-.alert-box.error {
-    display: block;
-    background: rgba(244, 67, 54, 0.15);
-    border: 1px solid #f44336;
-    color: #f44336;
-}
-
-.alert-box.success {
-    display: block;
-    background: rgba(76, 175, 80, 0.15);
-    border: 1px solid #4caf50;
-    color: #4caf50;
-}
-
-/* === CAPTCHA modal (admin login + dashboard; markup built by templates, driven by assets/js/captcha.js) ===
+/* === CAPTCHA modal (admin dashboard; markup built by the template, driven by assets/js/captcha.js) ===
    Same placement as the public site (assets/css/style.css): a little above the vertical centre on desktop,
    near the top and (almost) full width on phones, always centred horizontally. The overlay is the backdrop
    (click / Esc / Cancel = cancel); the box keeps the rendered widget so a cancelled prompt keeps its state. */
@@ -1082,7 +1022,9 @@ input[type="number"] {
 /* Settings: header spans the wide container, the long form (and the Security & Credentials block below it,
    which is its own form) stays at a readable width. */
 .admin-wide #settings-form,
-.admin-wide .settings-narrow { max-width: 1300px; margin: 0 auto; }
+.admin-wide .settings-toolbar,
+.admin-wide .settings-empty,
+.admin-wide .settings-narrow { max-width: 1300px; margin-left: auto; margin-right: auto; }
 .admin-hc .text-muted,
 .admin-hc .text-secondary { color: #9aa4b2 !important; }
 .admin-hc .modal-content.bg-dark .text-muted { color: #a0a8b4 !important; }
@@ -1253,6 +1195,10 @@ input[type="number"] {
 .tl-chart { width: 100%; }
 .tl-chart .u-legend { font-size: 0.78rem; color: #bbb; text-align: left; padding: 0.25rem 0 0; }
 .tl-chart .u-legend .u-series { padding: 0 0.6rem 0.15rem 0; }
+/* Wrapped legend rows line up under the first series (assets/js/stats-timeline.js measures the
+   indent and sets padding-left/text-indent on the tbody). text-indent inherits, so the rows
+   themselves must reset it — otherwise every entry indents its own contents and collapses. */
+.tl-chart .u-legend .u-series { text-indent: 0; }
 .tl-chart .u-legend .u-series > * { padding: 0.1rem 0.25rem 0.1rem 0; }
 .tl-chart .u-legend .u-marker { border-radius: 2px; width: 0.9em; height: 0.9em; margin-right: 0.15rem; }
 .tl-chart .u-legend .u-series.u-off > * { opacity: 0.35; }
@@ -1306,6 +1252,39 @@ input[type="number"] {
 .tl-brush-h { position: absolute; top: 0; bottom: 0; width: 10px; cursor: ew-resize; }
 .tl-brush-l { left: -5px; } .tl-brush-r { right: -5px; }
 .tl-brush-h::after { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 3px; height: 55%; border-radius: 2px; background: rgba(74, 158, 255, 0.9); }
+
+/* Custom range slider (shown when the "Custom" range button is active; Settings -> Statistics Timeline) */
+.tl-custom:not(.d-hidden) { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.5rem; font-size: 0.78rem; color: #9aa; flex-wrap: wrap; }
+.tl-custom-cap { white-space: nowrap; }
+.tl-custom-slider { flex: 1 1 12rem; max-width: 26rem; height: 1.1rem; accent-color: #4a9eff; cursor: pointer; background: transparent; }
+.tl-custom-label { font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace; color: #dfe; min-width: 4.5em; }
+
+/* === Settings: group sub-menu + ranked search (assets/js/admin-settings.js) === */
+.settings-toolbar { position: sticky; top: 0; z-index: 6; background: #121212; border-bottom: 1px solid #2a2a2a; padding: 0.6rem 0 0.7rem; margin-bottom: 1rem; }
+.settings-search-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.settings-search-box { position: relative; flex: 1 1 22rem; max-width: 34rem; }
+.settings-search-box .form-control { padding-left: 2.1rem; padding-right: 2.2rem; }
+.settings-search-box .form-control::-webkit-search-cancel-button { display: none; }
+.settings-search-icon { position: absolute; left: 0.7rem; top: 50%; transform: translateY(-50%); color: #6b7280; pointer-events: none; }
+.settings-search-clear { position: absolute; right: 0.3rem; top: 50%; transform: translateY(-50%); background: transparent; border: 0; color: #9aa4b2; padding: 0.2rem 0.4rem; line-height: 1; border-radius: 4px; cursor: pointer; }
+.settings-search-clear:hover { color: #ff6b6b; background: rgba(255, 107, 107, 0.12); }
+.settings-search-count { font-size: 0.8rem; color: #9aa4b2; }
+.settings-groups { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.6rem; }
+.settings-group-btn { display: inline-flex; align-items: center; gap: 0.35rem; background: #1b1b1b; border: 1px solid #333; color: #9aa4b2; border-radius: 999px; padding: 0.25rem 0.8rem; font-size: 0.82rem; cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+.settings-group-btn:hover { background: #23262b; color: #dfe6ee; }
+.settings-group-btn.active { background: rgba(74, 158, 255, 0.18); border-color: #3d6ea8; color: #cfe4ff; }
+.settings-group-count { font-size: 0.72rem; color: #6b7280; }
+.settings-groups-muted .settings-group-btn { opacity: 0.5; }
+.settings-empty { background: #1e1e1e; border: 1px dashed #3a3a3a; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; color: #9aa4b2; }
+.settings-empty .settings-hint { display: block; margin-top: 0.3rem; }
+/* a matched setting (search) / a section reached by #anchor or matched as a whole group */
+.settings-hit { box-shadow: inset 2px 0 0 rgba(74, 158, 255, 0.55); }
+.settings-section-hit { box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.45); }
+/* the sticky toolbar covers the top of the page: #section-... deep links must clear it */
+.settings-section { scroll-margin-top: 9.5rem; }
+/* search results: precise hits first, then whole sections that only match the group name */
+.settings-divider { margin: 0 0 0.75rem; padding: 0.35rem 0.1rem; border-top: 1px dashed #333; color: #6b7280; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+@media (max-width: 767px) { .settings-toolbar { position: static; } }
 
 /* === Admin › Users page === */
 .us-group-badge { display: inline-block; padding: 0.1em 0.55em; margin: 0.1em 0.25em 0.1em 0; border-radius: 999px; border: 1px solid #3a3a4c; background: #23232f; font-size: 0.72rem; white-space: nowrap; }

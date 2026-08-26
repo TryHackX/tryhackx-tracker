@@ -6,12 +6,13 @@ $pageTitles = [
     'whitelist' => 'Whitelist', 'stats' => 'Stats',
     'login' => 'Sign in', 'register' => 'Register', 'account' => 'Account',
     'reset' => 'Password reset', 'verify' => 'Email verification', 'emailchange' => 'Email change', 'search' => 'Search',
+    'adminlogin' => 'Admin sign in', 'notfound' => 'Not found',
 ];
 $recaptchaNeeded = ($action === 'report' && isCaptchaEnabled($cfg, 'report'))
     || ($action === 'status' && (isCaptchaEnabled($cfg, 'status') || isCaptchaEnabled($cfg, 'block_check') || isCaptchaEnabled($cfg, 'appeal')))
     || ($action === 'whitelist' && captchaConfigured($cfg))
     || (in_array($action, ['register', 'reset'], true) && captchaConfigured($cfg))
-    || ($action === 'login' && isCaptchaEnabled($cfg, 'login'));
+    || (in_array($action, ['login', 'adminlogin'], true) && isCaptchaEnabled($cfg, 'login'));
 // swarm timeline chart (vendored uPlot) — only on the stats page when enabled, public and permitted
 $timelineNeeded = ($action === 'stats' && ($cfg['tracker_stats_enabled'] ?? '0') === '1' && statsTimelineEnabled($cfg) && statsTimelinePublic($cfg)
     && userCan($db, $cfg, 'stats.timeline'));

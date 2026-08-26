@@ -7,6 +7,11 @@ function requestCaptchaToken(action) {
     return window.showCaptchaModal({ action: action || 'submit' }).then((t) => t || '');
 }
 
+/** True when the last prompt failed on the widget/loader instead of being cancelled by the admin. */
+function captchaUnavailable() {
+    return typeof window.captchaWasUnavailable === 'function' && window.captchaWasUnavailable();
+}
+
 let currentPage = 1;
 let sortStack = [{ col: 'date', dir: 'desc' }];
 let currentReport = null;
@@ -427,9 +432,19 @@ async function handleArchiveAll() {
     }
 }
 
+/**
+ * Where to send the browser after logging out: the configured admin sign-in address. A plain
+ * reload (or a hardcoded ?action=admin) dead-ends on the public front page — a signed-out visitor
+ * only gets the form at admin_login_path (Settings -> Admin Access & Sessions).
+ */
+function adminLoginUrl() {
+    const base = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '');
+    return base + '?action=' + (document.body.dataset.loginPath || 'admin');
+}
+
 async function handleLogout() {
     await apiCall('admin/logout', 'POST');
-    window.location.reload();
+    window.location.href = adminLoginUrl();
 }
 
 function showModalAlert(type, msg) {
@@ -970,7 +985,11 @@ async function handleDeletePermSubmit(e) {
         if (json.captcha_required) {
             const token = await requestCaptchaToken('delete_permanently');
             if (!token) {
-                alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">CAPTCHA verification required.</div>`;
+                // a widget/loader failure needs different advice than "you cancelled it"
+                const msg = captchaUnavailable()
+                    ? 'CAPTCHA could not load — reload the page or check the site key.'
+                    : 'CAPTCHA verification required.';
+                alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(msg)}</div>`;
                 setTimeout(() => {
                     const alertDiv = alertEl.querySelector('.modal-alert-sm');
                     if (alertDiv) alertDiv.classList.add('alert-fade');

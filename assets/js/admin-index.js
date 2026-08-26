@@ -418,7 +418,7 @@
             finally { btn.disabled = false; btn.innerHTML = orig; }
         });
         const logout = $('btn-logout');
-        if (logout) logout.addEventListener('click', async () => { try { await apiCall('admin/logout', 'POST', {}); } catch (e) {} location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=admin'; });
+        if (logout) logout.addEventListener('click', async () => { try { await apiCall('admin/logout', 'POST', {}); } catch (e) {} location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin'); });
         load(); loadStatus();
         setInterval(loadStatus, 30000);
         // live view while metadata resolves: silently refresh the current page every 5 s when the

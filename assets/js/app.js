@@ -1,11 +1,16 @@
 // === CAPTCHA ===
 // The modal itself lives in assets/js/captcha.js (window.showCaptchaModal / window.captchaReset),
-// shared with the admin panel and provider-agnostic (reCAPTCHA v2 / reCAPTCHA v3 / Turnstile).
+// shared with the admin panel and provider-agnostic (reCAPTCHA v2 / v3, Turnstile, hCaptcha).
 // `action` is only used by reCAPTCHA v3 (invisible: no modal, a score token is fetched silently);
 // fetchWithCaptcha() derives it from the endpoint name (e.g. 'submit_report').
 function requestCaptchaToken(action) {
     if (typeof window.showCaptchaModal !== 'function') return Promise.resolve(null);
     return window.showCaptchaModal({ action: action || 'submit' });
+}
+
+/** True when the last prompt failed on the widget/loader instead of being cancelled by the user. */
+function captchaUnavailable() {
+    return typeof window.captchaWasUnavailable === 'function' && window.captchaWasUnavailable();
 }
 
 async function fetchWithCaptcha(endpoint, data) {
@@ -24,7 +29,9 @@ async function fetchWithCaptcha(endpoint, data) {
 
     if (json.captcha_required) {
         const token = await requestCaptchaToken(endpoint);
-        if (!token) return { error: 'CAPTCHA cancelled' };
+        // No token: either the visitor closed the box, or the widget itself failed (bad site key,
+        // domain not allow-listed, provider blocked) — those two need different advice.
+        if (!token) return { error: captchaUnavailable() ? 'CAPTCHA could not load — reload the page or try again later.' : 'CAPTCHA cancelled' };
         // Send under both names: `captcha_token` (generic) and the legacy reCAPTCHA field name.
         data['captcha_token'] = token;
         data['g-recaptcha-response'] = token;

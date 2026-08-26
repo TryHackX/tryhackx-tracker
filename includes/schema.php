@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 9;   // …, 7 = user accounts/groups + federation peers + api client scopes, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles
+const TRACKER_SCHEMA_VERSION = 10;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons)
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -421,6 +421,9 @@ function trackerSchemaDefaultSettings(): array {
         'recaptcha_v3_site_key'       => '',
         'recaptcha_v3_secret'         => '',
         'recaptcha_v3_min_score'      => '0.5',
+        // schema v10: hCaptcha as a fourth provider
+        'hcaptcha_site_key'           => '',
+        'hcaptcha_secret'             => '',
         'api_enabled'                 => '0',
         'api_ban_days'                => '30',
         'api_ban_exempt_ips'          => implode(', ', array_unique($selfIps)),
@@ -435,6 +438,10 @@ function trackerSchemaDefaultSettings(): array {
         'stats_timeline_raw_days'     => '7',
         'stats_timeline_keep_days'    => '60',
         'stats_timeline_public'       => '1',
+        // schema v10: which range buttons the chart offers, which one opens, free span slider
+        'stats_timeline_ranges'       => '24h,7d,14d,30d,90d,all',
+        'stats_timeline_default_range' => '24h',
+        'stats_timeline_custom_range' => '0',
         // schema v6: observed-hash index (includes/index.php)
         'index_enabled'               => '0',
         'index_source_url'            => 'http://127.0.0.1:6969/scrape',
@@ -483,6 +490,10 @@ function trackerSchemaDefaultSettings(): array {
         'fed_export_max_batch'        => '2000',
         'fed_import_new'              => '0',
         'fed_pull_minutes'            => '60',
+        // schema v10: the admin sign-in address and what other panel URLs answer when signed out
+        // (defaults = the classic behaviour of ?action=admin, with the login form nowhere else)
+        'admin_login_path'            => 'admin',
+        'admin_hidden_behavior'       => 'home',
     ];
 }
 

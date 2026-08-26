@@ -21,6 +21,8 @@ $allowed = [
     'login_lockout_attempts', 'login_lockout_minutes',
     'rate_limit', 'rate_limit_status', 'rate_limit_block_check', 'rate_limit_appeal',
     'admin_session_idle_minutes', 'admin_session_absolute_hours',
+    // where the panel lives (includes/auth.php)
+    'admin_login_path', 'admin_hidden_behavior',
     'trusted_proxy_ips', 'client_ip_header',
     'items_per_page', 'admin_near_pages', 'blacklist_path',
     'max_magnet_link_length',
@@ -29,6 +31,7 @@ $allowed = [
     'tracker_stats_enabled', 'tracker_stats_url', 'tracker_stats_interval', 'tracker_stats_page_interval', 'tracker_stats_cache_ttl', 'tracker_stats_show_home', 'tracker_stats_timeout', 'tracker_stats_min_loading', 'tracker_stats_max_loading', 'tracker_stats_peer_label_style', 'tracker_stats_livesync_mode',
     // statistics timeline (includes/stats_timeline.php)
     'stats_timeline_enabled', 'stats_timeline_interval', 'stats_timeline_raw_days', 'stats_timeline_keep_days', 'stats_timeline_public',
+    'stats_timeline_ranges', 'stats_timeline_default_range', 'stats_timeline_custom_range',
     // observed-hash index (includes/index.php)
     'index_enabled', 'index_source_url', 'index_poll_minutes', 'index_min_seeders', 'index_max_rows',
     'index_grace_days', 'index_protect_days', 'index_meta_daily_budget', 'index_keep_files', 'index_poll_budget',
@@ -51,6 +54,7 @@ $allowed = [
     // captcha provider (reCAPTCHA v2 keys are the legacy recaptcha_* entries above)
     'captcha_provider', 'turnstile_site_key', 'turnstile_secret',
     'recaptcha_v3_site_key', 'recaptcha_v3_secret', 'recaptcha_v3_min_score',
+    'hcaptcha_site_key', 'hcaptcha_secret',
     // server-to-server API
     'api_enabled', 'api_ban_days', 'api_ban_exempt_ips',
     // user accounts (includes/users.php)
@@ -88,8 +92,33 @@ if (isset($data['whitelist_path'])) {
         if (!$v['ok']) jsonResponse(['error' => 'Whitelist path rejected: ' . $v['error']], 400);
     }
 }
-if (isset($data['captcha_provider']) && !in_array($data['captcha_provider'], ['recaptcha', 'recaptcha_v3', 'turnstile'], true)) {
+if (isset($data['captcha_provider']) && !in_array($data['captcha_provider'], captchaProviders(), true)) {
     jsonResponse(['error' => 'Invalid CAPTCHA provider.'], 400);
+}
+// ── Where the admin panel lives ──
+if (isset($data['admin_login_path'])) {
+    $path = preg_replace('/[^a-z0-9_-]/', '', strtolower(trim($data['admin_login_path'])));
+    if ($path === '' || $path === null) $path = 'admin';
+    if (strlen($path) > 64) jsonResponse(['error' => 'Admin sign-in address is too long (max 64 characters).'], 400);
+    if ($path !== 'admin' && in_array($path, adminReservedActions(), true)) {
+        jsonResponse(['error' => 'That admin sign-in address is already used by another page. Pick a different one.'], 400);
+    }
+    $data['admin_login_path'] = $path;
+}
+if (isset($data['admin_hidden_behavior']) && !in_array($data['admin_hidden_behavior'], ['home', 'login', '404'], true)) {
+    $data['admin_hidden_behavior'] = 'home';
+}
+// ── Timeline range buttons ──
+if (isset($data['stats_timeline_ranges'])) {
+    $known = array_keys(statsTimelineRangeButtons());
+    $want = array_filter(array_map('trim', explode(',', strtolower($data['stats_timeline_ranges']))));
+    $keep = array_values(array_intersect($known, $want));   // intersect keeps the display order
+    $data['stats_timeline_ranges'] = implode(',', $keep ?: $known);
+}
+if (isset($data['stats_timeline_default_range'])) {
+    $known = array_keys(statsTimelineRangeButtons());
+    $def = strtolower(trim($data['stats_timeline_default_range']));
+    $data['stats_timeline_default_range'] = in_array($def, $known, true) ? $def : '24h';
 }
 if (isset($data['recaptcha_v3_min_score'])) {
     // 0.0–1.0, one decimal; blank/garbage falls back to Google's suggested 0.5
@@ -130,7 +159,7 @@ if (isset($data['whitelist_tracker_hosts'])) {
     }
     $data['whitelist_tracker_hosts'] = implode(', ', array_unique($clean));
 }
-foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
+foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
           'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist',
           'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new'] as $k) {
@@ -240,4 +269,10 @@ if ($limitsChanged) {
 
 setSettings($db, $data);
 
-jsonResponse(['success' => true]);
+// The panel bakes the sign-in address into <body data-login-path> at render time and the Logout
+// buttons read it from there; saving is pure AJAX, so hand the applied value back and let the page
+// refresh it — otherwise Logout would keep pointing at the address that was just replaced.
+$applied = [];
+if (array_key_exists('admin_login_path', $data)) $applied['admin_login_path'] = adminLoginPath($data + $cfg);
+
+jsonResponse(['success' => true] + ($applied ? ['applied' => $applied] : []));

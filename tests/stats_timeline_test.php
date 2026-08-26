@@ -220,6 +220,50 @@ check('rollup cursor jumped past the pruned history', $cur >= $far + 61 * 86400 
 $status = statsTimelineStatus($db, $modeCfg);
 check('status: counts + state', isset($status['counts']['raw'], $status['state']['last_sample_at']) && $status['enabled']);
 
+// ── 9. chart range controls (schema v10) ─────────────────────────────────────
+$buttons = statsTimelineRangeButtons();
+check('range buttons: known set', array_keys($buttons) === ['24h', '7d', '14d', '30d', '90d', 'all']);
+// every button must be a range the API accepts, or the chart would ask for something that 400s
+foreach (array_keys($buttons) as $key) {
+    check("range button '$key' is a valid API range", statsTimelineRangeSeconds($key) !== null);
+}
+check('enabled ranges: empty setting = all buttons', statsTimelineEnabledRanges([]) === array_keys($buttons));
+check('enabled ranges: subset kept in display order', statsTimelineEnabledRanges(['stats_timeline_ranges' => 'all,24h']) === ['24h', 'all']);
+check('enabled ranges: unknown keys dropped', statsTimelineEnabledRanges(['stats_timeline_ranges' => '7d,bogus']) === ['7d']);
+check('enabled ranges: nothing valid falls back to all', statsTimelineEnabledRanges(['stats_timeline_ranges' => 'bogus,nope']) === array_keys($buttons));
+check('default range: 24h out of the box', statsTimelineDefaultRange([]) === '24h');
+check('default range: honoured when enabled', statsTimelineDefaultRange(['stats_timeline_ranges' => '24h,7d,all', 'stats_timeline_default_range' => '7d']) === '7d');
+check('default range: falls back to the first enabled button when switched off',
+    statsTimelineDefaultRange(['stats_timeline_ranges' => '7d,all', 'stats_timeline_default_range' => '24h']) === '7d');
+check('custom slider off by default', statsTimelineCustomRange([]) === false);
+check('custom slider on', statsTimelineCustomRange(['stats_timeline_custom_range' => '1']) === true);
+
+// custom spans are snapped to a fixed list: the API caches one file per stop, so an arbitrary
+// ?span= must never create a new cache key
+$stops = statsTimelineCustomStops();
+check('custom stops: sorted, 1 h … 5 years', $stops[0] === 3600 && $stops === array_values(array_unique($stops)) && $stops[count($stops) - 1] === 157680000);
+check('snap: exact stop kept', statsTimelineSnapSpan(86400) === 86400);
+check('snap: nearest stop wins', statsTimelineSnapSpan(80000) === 86400, (string)statsTimelineSnapSpan(80000));
+check('snap: below the floor', statsTimelineSnapSpan(1) === 3600);
+check('snap: above the ceiling', statsTimelineSnapSpan(PHP_INT_MAX >> 4) === 157680000);
+check('snap: negative', statsTimelineSnapSpan(-99) === 3600);
+
+// mount attributes drive all three chart pages
+$attrs = statsTimelineMountAttrs(['stats_timeline_ranges' => '24h,all', 'stats_timeline_default_range' => 'all', 'stats_timeline_custom_range' => '1'], true);
+check('mount attrs: range + ranges + custom + compact',
+    str_contains($attrs, 'data-timeline') && str_contains($attrs, 'data-range="all"')
+    && str_contains($attrs, 'data-ranges="24h,all"') && str_contains($attrs, 'data-custom="1"')
+    && str_contains($attrs, 'data-compact="1"'), $attrs);
+check('mount attrs: not compact by default', !str_contains(statsTimelineMountAttrs([]), 'data-compact'));
+check('mount attrs: html-escaped', !str_contains(statsTimelineMountAttrs(['stats_timeline_default_range' => '"><b>']), '<b>'));
+
+// the JS mirrors both tables — a drift here is a silent feature break
+$js = (string)@file_get_contents(dirname(__DIR__) . '/assets/js/stats-timeline.js');
+check('JS RANGES mirrors the PHP button list', (bool)preg_match('/const RANGES = \[(.+?)\];/s', $js, $mm)
+    && count(array_intersect(array_keys($buttons), preg_split('/\W+/', $mm[1], -1, PREG_SPLIT_NO_EMPTY))) === count($buttons));
+check('JS CUSTOM_STOPS mirrors the PHP stop list', (bool)preg_match('/const CUSTOM_STOPS = \[(.+?)\];/s', $js, $ms2)
+    && array_map('intval', preg_split('/[^0-9]+/', $ms2[1], -1, PREG_SPLIT_NO_EMPTY)) === $stops);
+
 // cleanup
 foreach ([ST_RAW_TABLE, ST_5M_TABLE, ST_1H_TABLE] as $t) $db->exec("TRUNCATE TABLE `$t`");
 @unlink(statsTimelineStateFile());

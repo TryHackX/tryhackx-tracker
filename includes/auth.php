@@ -4,6 +4,49 @@ function isLoggedIn(): bool {
     return !empty($_SESSION['loggedin']);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Where the panel lives (Settings → Admin Access & Sessions)
+// ─────────────────────────────────────────────────────────────────────────────
+// `admin_login_path` is the ?action= value that shows the sign-in form — 'admin' by default, but it
+// can be moved to something unguessable (?action=admin123yzx). The panel pages themselves keep their
+// classic actions (admin / settings / admin-index / admin-users / admin-whitelist) so every internal
+// link and bookmark still works once signed in; for a signed-out visitor those URLs answer according
+// to `admin_hidden_behavior` instead of handing out a login form.
+
+/** ?action= values a custom sign-in path must not shadow (public pages + the panel's own actions). */
+function adminReservedActions(): array {
+    return ['home', 'info', 'tos', 'report', 'status', 'transparency', 'unsubscribe', 'stats',
+            'whitelist', 'login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search',
+            'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'notfound'];
+}
+
+/** The panel actions that exist regardless of where the sign-in form lives. */
+function adminPanelActions(): array {
+    return ['admin', 'settings', 'admin-whitelist', 'admin-index', 'admin-users'];
+}
+
+/** The ?action= value that opens the admin sign-in form (default 'admin'; garbage falls back). */
+function adminLoginPath(array $cfg): string {
+    $p = preg_replace('/[^a-z0-9_-]/', '', strtolower(trim((string)($cfg['admin_login_path'] ?? 'admin'))));
+    if ($p === null || $p === '' || strlen($p) > 64) return 'admin';
+    if (in_array($p, adminReservedActions(), true)) return 'admin';
+    return $p;
+}
+
+/** True when the panel has been moved off the default ?action=admin address. */
+function adminLoginPathCustom(array $cfg): bool { return adminLoginPath($cfg) !== 'admin'; }
+
+/**
+ * What a signed-out visitor gets on a panel URL that is NOT the sign-in path:
+ *   'home'  redirect to the front page (default — the panel leaves no trace)
+ *   'login' show the sign-in form on every panel URL (classic behaviour)
+ *   '404'   a site-styled 404 page with a 404 status
+ */
+function adminHiddenBehavior(array $cfg): string {
+    $m = (string)($cfg['admin_hidden_behavior'] ?? 'home');
+    return in_array($m, ['home', 'login', '404'], true) ? $m : 'home';
+}
+
 /**
  * Full admin-session check: logged in AND within the idle + absolute lifetime limits. An expired
  * session is destroyed here so a stolen/forgotten session cookie can't be used indefinitely.
@@ -20,8 +63,8 @@ function adminSessionValid(array $cfg): bool {
     $idleMax   = max(0, (int)($cfg['admin_session_idle_minutes'] ?? 30)) * 60;
     $absMax    = max(0, (int)($cfg['admin_session_absolute_hours'] ?? 12)) * 3600;
 
-    if ($absMax > 0 && $loginTime > 0 && ($now - $loginTime) >= $absMax) { adminPanelSessionDrop(); return false; }
-    if ($idleMax > 0 && ($now - $lastSeen) >= $idleMax)                   { adminPanelSessionDrop(); return false; }
+    if ($absMax > 0 && $loginTime > 0 && ($now - $loginTime) >= $absMax) { adminPanelSessionExpire(); return false; }
+    if ($idleMax > 0 && ($now - $lastSeen) >= $idleMax)                   { adminPanelSessionExpire(); return false; }
 
     // panel session opened via the site sign-in of an admin-group user: the grant only lives as
     // long as that user is still active AND still in the admin group (a revoke/ban takes effect
@@ -42,10 +85,10 @@ function adminSessionValid(array $cfg): bool {
 }
 
 /**
- * End the PANEL part of the session. A panel session piggy-backing on a user sign-in
- * (admin_via_user) must NOT destroy the whole PHP session — the owner would be logged out of the
- * public site every time the panel idle timer fires. The classic password panel session keeps the
- * historical full logout().
+ * End the PANEL part of the session on an EXPLICIT logout (api/admin/logout.php). A panel session
+ * piggy-backing on a user sign-in (admin_via_user) must NOT destroy the whole PHP session — the owner
+ * would be logged out of the public site too. The classic password panel session keeps the historical
+ * full logout().
  */
 function adminPanelSessionDrop(): void {
     if (!empty($_SESSION['admin_via_user'])) {
@@ -53,6 +96,20 @@ function adminPanelSessionDrop(): void {
         return;
     }
     logout();
+}
+
+/**
+ * The panel session TIMED OUT (idle / absolute cap). Unlike an explicit logout this must NOT destroy
+ * the session: index.php renders the sign-in form in the very same request, and a destroyed session
+ * throws away both the CSRF token that form prints and the sign-in marker it stores — the admin's
+ * first attempt would then fail with "this login page had expired". Dropping the panel keys and
+ * rotating the id gives the same security property (a stolen pre-timeout cookie is worthless).
+ */
+function adminPanelSessionExpire(): void {
+    unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+    if (session_status() === PHP_SESSION_ACTIVE && !headers_sent()) {
+        session_regenerate_id(true);
+    }
 }
 
 function requireAuth(?array $cfg = null): void {

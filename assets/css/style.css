@@ -1561,6 +1561,10 @@ footer p { margin: 0.25rem 0; }
 .tl-chart { width: 100%; }
 .tl-chart .u-legend { font-size: 0.78rem; color: #bbb; text-align: left; padding: 0.25rem 0 0; }
 .tl-chart .u-legend .u-series { padding: 0 0.6rem 0.15rem 0; }
+/* Wrapped legend rows line up under the first series (assets/js/stats-timeline.js measures the
+   indent and sets padding-left/text-indent on the tbody). text-indent inherits, so the rows
+   themselves must reset it — otherwise every entry indents its own contents and collapses. */
+.tl-chart .u-legend .u-series { text-indent: 0; }
 .tl-chart .u-legend .u-series > * { padding: 0.1rem 0.25rem 0.1rem 0; }
 .tl-chart .u-legend .u-marker { border-radius: 2px; width: 0.9em; height: 0.9em; margin-right: 0.15rem; }
 .tl-chart .u-legend .u-series.u-off > * { opacity: 0.35; }
@@ -1592,6 +1596,12 @@ footer p { margin: 0.25rem 0; }
 .tl-brush-h { position: absolute; top: 0; bottom: 0; width: 10px; cursor: ew-resize; }
 .tl-brush-l { left: -5px; } .tl-brush-r { right: -5px; }
 .tl-brush-h::after { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 3px; height: 55%; border-radius: 2px; background: rgba(74, 158, 255, 0.9); }
+
+/* Custom range slider (shown when the "Custom" range button is active; Settings -> Statistics Timeline) */
+.tl-custom:not(.d-hidden) { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.5rem; font-size: 0.78rem; color: #9aa; flex-wrap: wrap; }
+.tl-custom-cap { white-space: nowrap; }
+.tl-custom-slider { flex: 1 1 12rem; max-width: 26rem; height: 1.1rem; accent-color: #4a9eff; cursor: pointer; background: transparent; }
+.tl-custom-label { font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace; color: #dfe; min-width: 4.5em; }
 
 /* === User accounts (login / register / account / reset) + index search === */
 .text-muted { color: var(--text-muted); }

@@ -1,6 +1,7 @@
 <?php
 /**
  * GET stats_timeline&range=24h|7d|14d|30d|60d|90d   (aliases 2w / 1m / 2m / 3m)
+ * GET stats_timeline&range=custom&span=<seconds>    (the "Custom" slider; span snapped to a stop)
  *
  * Series for the swarm timeline chart (includes/stats_timeline.php). Public when
  * stats_timeline_public=1, otherwise admins only (full session check, like the other admin pollers).
@@ -8,6 +9,10 @@
  * regeneration under flock) so pollers never hit the database; a cache hit is served straight from the
  * file (gzip via ob_gzhandler when the client accepts it) without decoding. Optional `series=a,b,c`
  * trims the payload to the named series (t/mode always included). 60 requests / minute / IP.
+ *
+ * A custom span is just another range: it takes the same cached path (one file per slider stop, so at
+ * most as many files as the slider has stops) instead of the uncached &from/&to window below — that
+ * window exists for interactive zooming, where every visitor asks for something different anyway.
  */
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') jsonResponse(['error' => 'Method not allowed'], 405);
 if (!statsTimelineEnabled($cfg)) jsonResponse(['error' => 'Statistics timeline is disabled'], 403);
@@ -20,9 +25,16 @@ if (!$allowed) jsonResponse(['error' => 'Statistics timeline is not public'], 40
 if (!rateLimitAllow('timeline', ipBucket(getClientIp($cfg)), 60, 60)) jsonResponse(['error' => 'Too many requests'], 429);
 
 $range = (string)($_GET['range'] ?? '24h');
-$rangeSec = statsTimelineRangeSeconds($range);
-if ($rangeSec === null) jsonResponse(['error' => 'Unknown range. Use 24h, 7d, 14d, 30d, 60d or 90d.'], 400);
-$rangeKey = statsTimelineRangeKey($range);
+if ($range === 'custom') {
+    $spanRaw = isset($_GET['span']) && is_numeric($_GET['span']) ? (int)$_GET['span'] : 0;
+    if ($spanRaw <= 0) jsonResponse(['error' => 'A custom range needs a span in seconds.'], 400);
+    $rangeSec = statsTimelineSnapSpan($spanRaw);
+    $rangeKey = 'custom' . $rangeSec;   // its own cache file, one per slider stop
+} else {
+    $rangeSec = statsTimelineRangeSeconds($range);
+    if ($rangeSec === null) jsonResponse(['error' => 'Unknown range. Use 24h, 7d, 14d, 30d, 60d, 90d, all or custom+span.'], 400);
+    $rangeKey = statsTimelineRangeKey($range);
+}
 
 $wanted = null;
 if (isset($_GET['series']) && trim((string)$_GET['series']) !== '') {
@@ -44,7 +56,7 @@ if ($winFrom !== null && $winTo !== null && $winTo > $winFrom && ($winTo - $winF
     $payload['range'] = $rangeKey;
     $payload['cache_age'] = 0;
     if ($wanted !== null) {
-        $keep = array_flip(array_merge(['success', 'range', 'range_seconds', 'from', 'to', 'step', 'table', 'windowed', 'points', 'interval', 'generated_at', 'cache_age', 't', 'mode'], $wanted));
+        $keep = array_flip(array_merge(['success', 'range', 'range_seconds', 'from', 'to', 'step', 'table', 'windowed', 'points', 'interval', 'raw_days', 'keep_days', 'generated_at', 'cache_age', 't', 'mode'], $wanted));
         $payload = array_intersect_key($payload, $keep);
     }
     while (ob_get_level()) ob_end_clean();
@@ -118,7 +130,7 @@ if ($payload === null) {
 $payload['cache_age'] = $age === PHP_INT_MAX ? 0 : $age;
 $payload['range'] = $rangeKey;
 if ($wanted !== null) {
-    $keep = array_flip(array_merge(['success', 'range', 'range_seconds', 'from', 'to', 'step', 'table', 'points', 'interval', 'generated_at', 'cache_age', 't', 'mode'], $wanted));
+    $keep = array_flip(array_merge(['success', 'range', 'range_seconds', 'from', 'to', 'step', 'table', 'points', 'interval', 'raw_days', 'keep_days', 'generated_at', 'cache_age', 't', 'mode'], $wanted));
     $payload = array_intersect_key($payload, $keep);
 }
 $emit(json_encode($payload), $payload['cache_age']);

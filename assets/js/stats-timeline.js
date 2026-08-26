@@ -2,8 +2,10 @@
  * Swarm timeline chart (uPlot) — shared by the public stats page and the admin Whitelist page.
  *
  * Mount points: any element with [data-timeline]; attributes:
- *   data-api   = api base (".../api.php?endpoint=")   (falls back to APP_API / body[data-api-base])
- *   data-range = initial range (24h|7d|14d|30d|90d)    (localStorage remembers the last choice)
+ *   data-api    = api base (".../api.php?endpoint=")  (falls back to APP_API / body[data-api-base])
+ *   data-range  = initial range (24h|7d|14d|30d|90d|all)  (localStorage remembers the last choice)
+ *   data-ranges = comma list of the range buttons to offer (default: all of them)
+ *   data-custom = "1" → offer the free "Custom" span slider next to the buttons
  *   data-compact = "1" → shorter charts (admin card)
  *
  * Three panes: swarm gauges (seeds / leechers / peers on the left axis, torrents + whitelisted
@@ -33,6 +35,10 @@
     ];
     const OPEN_FILL = 'rgba(255, 152, 0, 0.075)';
     const STORE_KEY = 'tracker_timeline_range';
+    // "Custom" slider stops — smooth enough to feel continuous, but every stop is a round span
+    const CUSTOM_STOPS = [3600, 7200, 10800, 21600, 43200, 86400, 172800, 259200, 432000, 604800,
+        864000, 1209600, 1814400, 2592000, 3888000, 5184000, 7776000, 10368000, 15552000, 23328000,
+        31536000, 47304000, 63072000, 94608000, 157680000];
 
     const fmtInt = (v) => (v == null || isNaN(v)) ? '—' : Math.round(v).toLocaleString();
     const fmtRate = (v) => (v == null || isNaN(v)) ? '—' : (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(v >= 10 ? 1 : 2));
@@ -47,6 +53,49 @@
     const pad2 = (n) => (n < 10 ? '0' : '') + n;
     const fmtTime = (ts) => { const d = new Date(ts * 1000); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    /** Round label for a custom span: hours below a day, days below two months, then months / years. */
+    const fmtSpan = (sec) => {
+        if (sec < 86400) return (Math.round(sec / 360) / 10) + ' h';
+        const d = sec / 86400;
+        if (d < 61) return (Math.round(d * 10) / 10) + ' d';
+        if (d < 365) return Math.round(d / 30.44) + ' mo';
+        return (Math.round((d / 365.25) * 10) / 10) + ' y';
+    };
+
+    /**
+     * Hanging indent for the wrapped legend. uPlot lays the entries out as inline blocks, so on a
+     * narrow window the last ones ("Indexed hashes"…) fell to a second line hard against the left
+     * edge, far left of every entry above them. Measure where the FIRST series sits (right after the
+     * "Time: …" cell) and indent the wrapped lines by exactly that much, so a second row starts under
+     * the first series on any monitor width. Pure layout maths — has to happen in JS.
+     */
+    function alignLegend(u) {
+        const legend = u && u.root && u.root.querySelector('.u-legend');
+        if (!legend) return;
+        const body = legend.querySelector('tbody') || legend;
+        const rows = legend.querySelectorAll('.u-series');
+        if (rows.length < 2) return;
+        // 1. pin the width of the "Time" value. It shrinks to "—" whenever the cursor leaves the
+        //    chart, and without a floor every entry behind it slides left and right on hover.
+        const val = rows[0].querySelector('.u-value');
+        if (val) {
+            const prev = val.textContent;
+            val.style.minWidth = '';
+            val.textContent = '0000-00-00 00:00';           // widest stamp fmtTime() can produce
+            const w = Math.ceil(val.getBoundingClientRect().width);
+            val.textContent = prev;
+            if (w > 0) val.style.minWidth = w + 'px';
+        }
+        // 2. hanging indent, so a wrapped entry starts under the first series instead of the far left
+        body.style.display = 'block';
+        body.style.paddingLeft = '0px';
+        body.style.textIndent = '0px';
+        let indent = (rows[1].offsetTop === rows[0].offsetTop) ? rows[1].offsetLeft - rows[0].offsetLeft : 0;
+        const width = legend.clientWidth || 0;
+        if (!(indent > 0) || (width && indent > width * 0.45)) indent = 0;   // phones: keep the full width
+        body.style.paddingLeft = indent + 'px';
+        body.style.textIndent = (-indent) + 'px';
+    }
 
     /** Fill the canvas under OPEN-mode spans (mode 0). Runs before series are drawn. */
     function drawOpenSpans(u, data) {
@@ -114,20 +163,58 @@
         if (container.__timelineMounted) return; container.__timelineMounted = true;
         const api = container.dataset.api || (typeof APP_API !== 'undefined' ? APP_API : (document.body.dataset.apiBase || 'api.php?endpoint='));
         const compact = container.dataset.compact === '1';
-        let range = container.dataset.range || '';
-        try { range = localStorage.getItem(STORE_KEY) || range; } catch (e) {}
-        if (!RANGES.some(r => r[0] === range)) range = '24h';
+        // which buttons this install offers (Settings → Statistics Timeline), and the one that opens
+        const wanted = (container.dataset.ranges || '').split(',').map(s => s.trim()).filter(Boolean);
+        let rangeDefs = wanted.length ? RANGES.filter(r => wanted.indexOf(r[0]) !== -1) : RANGES.slice();
+        if (!rangeDefs.length) rangeDefs = RANGES.slice();
+        const customOn = container.dataset.custom === '1';
+        const nearestStop = (sec) => CUSTOM_STOPS.reduce((a, b) => Math.abs(b - sec) < Math.abs(a - sec) ? b : a, CUSTOM_STOPS[0]);
+        const dflt = container.dataset.range || '';
+        let range = rangeDefs.some(r => r[0] === dflt) ? dflt : rangeDefs[0][0];
+        let customSpan = 3 * 86400;
+        // localStorage remembers the visitor's last choice ('custom:<seconds>' for the slider), but a
+        // range the admin has since switched off falls back to the configured default
+        try {
+            const saved = localStorage.getItem(STORE_KEY) || '';
+            if (saved.indexOf('custom:') === 0) {
+                const n = parseInt(saved.slice(7), 10);
+                if (customOn && n > 0) { customSpan = nearestStop(n); range = 'custom'; }
+            } else if (rangeDefs.some(r => r[0] === saved)) range = saved;
+        } catch (e) {}
+        const rememberRange = () => { try { localStorage.setItem(STORE_KEY, range === 'custom' ? 'custom:' + customSpan : range); } catch (e) {} };
+        // A custom span is a first-class range for the API (&range=custom&span=<seconds>): it takes the
+        // same 30 s file cache as the named ones, and the server anchors it on ITS clock — building a
+        // &from/&to window from the browser clock instead would turn any skew into a full-history query.
+        const rangeQuery = () => (range === 'custom'
+            ? 'range=custom&span=' + customSpan
+            : 'range=' + encodeURIComponent(range));
 
         // skeleton
         const head = el('div', 'tl-head');
         const ranges = el('div', 'tl-ranges');
-        RANGES.forEach(([key, label]) => { const b = el('button', 'tl-range-btn' + (key === range ? ' active' : ''), label); b.type = 'button'; b.dataset.range = key; ranges.appendChild(b); });
+        rangeDefs.forEach(([key, label]) => { const b = el('button', 'tl-range-btn' + (key === range ? ' active' : ''), label); b.type = 'button'; b.dataset.range = key; ranges.appendChild(b); });
+        if (customOn) {
+            const b = el('button', 'tl-range-btn' + (range === 'custom' ? ' active' : ''), 'Custom');
+            b.type = 'button'; b.dataset.range = 'custom'; b.title = 'Pick any span with the slider';
+            ranges.appendChild(b);
+        }
         const meta = el('div', 'tl-meta');
         const status = el('span', 'tl-status', 'Loading…');
         const hint = el('span', 'tl-hint', 'Click a legend entry to toggle a series · drag on a chart to zoom (the visible span reloads at a finer resolution) · drag / resize the window on the mini-chart to pan · double-click to reset · shaded = OPEN hours');
         meta.appendChild(status);
         head.appendChild(ranges); head.appendChild(meta);
         container.appendChild(head);
+        // free span slider (hidden unless "Custom" is the active button)
+        const customRow = el('div', 'tl-custom' + (range === 'custom' ? '' : ' d-hidden'));
+        const slider = el('input', 'tl-custom-slider');
+        slider.type = 'range'; slider.min = '0'; slider.max = String(CUSTOM_STOPS.length - 1); slider.step = '1';
+        slider.value = String(Math.max(0, CUSTOM_STOPS.indexOf(customSpan)));
+        slider.setAttribute('aria-label', 'Custom range span');
+        const customLabel = el('span', 'tl-custom-label', fmtSpan(customSpan));
+        customRow.appendChild(el('span', 'tl-custom-cap', 'Last'));
+        customRow.appendChild(slider);
+        customRow.appendChild(customLabel);
+        if (customOn) container.appendChild(customRow);
         const mainHost = el('div', 'tl-chart tl-chart-main');
         const rateTitle = el('div', 'tl-subtitle', 'Requests per second (derived from the tracker counters)');
         const rateHost = el('div', 'tl-chart tl-chart-rate');
@@ -247,7 +334,8 @@
         // zoom-window refetch state: while active, main+rate show a fine-grained slice fetched with
         // &from/&to (the server picks raw → 5m → 1h for the span); the ranger keeps the full range
         let basePayload = null;
-        const winState = { active: false, from: 0, to: 0, step: 0, seq: 0 };
+        // floor/floorSpan: the finest step the server actually granted for a window of that width
+        const winState = { active: false, from: 0, to: 0, step: 0, seq: 0, floor: 0, floorSpan: 0 };
         let winTimer = null;
         const setCharts = (p) => {
             payloadRef.current = p;
@@ -255,18 +343,27 @@
             main.setData([t].concat(GAUGES.map(d => p[d.key] || t.map(() => null))), false);
             rate.setData([t].concat(RATES.map(d => p[d.key] || t.map(() => null))), false);
             main.redraw(); rate.redraw();
+            alignLegend(main); alignLegend(rate);
         };
         const applyBase = () => {
             if (!basePayload) return;
             winState.active = false; winState.seq++;
+            winState.floor = 0; winState.floorSpan = 0;
             setCharts(basePayload);
             status.textContent = statusFor(basePayload, false);
         };
-        // which step could the server give us for this span? (mirror of its raw→5m→1h pick, retention aside)
-        const candidateStep = (span) => {
-            const interval = (basePayload && basePayload.interval) || 60;
-            if (span / interval <= 3000) return interval;
-            if (span / 300 <= 4500) return 300;
+        // Which step could the server give us for this window? Mirrors its raw→5m→1h pick INCLUDING the
+        // retention horizons (statsTimelineSeries()): without them the guard below kept re-requesting a
+        // finer step the server can never serve for an old window, refetching the same coarse rows on
+        // every pan. raw_days/keep_days ride along in the payload for exactly this.
+        // (Math.floor, not plain division: the server counts points with intdiv(), and a step estimate
+        // one bucket off at the band edge is exactly what used to send a pointless request.)
+        const candidateStep = (span, from) => {
+            const p = basePayload || {};
+            const interval = p.interval || 60;
+            const now = p.generated_at || Math.floor(Date.now() / 1000);
+            if (from >= now - (p.raw_days || 7) * 86400 && Math.floor(span / interval) <= 3000) return interval;
+            if (from >= now - (p.keep_days || 60) * 86400 && Math.floor(span / 300) <= 4500) return 300;
             return 3600;
         };
         function requestWindow(force) {
@@ -290,20 +387,29 @@
                 }
             }
             const span = max - min;
-            const cand = candidateStep(span);
-            const curStep = winState.active ? winState.step : basePayload.step;
-            const covered = winState.active && min >= winState.from && max <= winState.to;
-            if (!force && cand >= curStep && (covered || !winState.active)) return;   // nothing finer to gain
             const pad = span * 0.25;   // padded fetch so small pans don't refetch immediately
             const from = Math.max(ext[0], Math.floor(min - pad));
             const to = Math.ceil(Math.min(ext[1] + 3600, max + pad));
+            const cand = candidateStep(to - from, from);
+            const curStep = winState.active ? winState.step : basePayload.step;
+            const covered = winState.active && min >= winState.from && max <= winState.to;
+            // The server can also refuse a finer step for reasons the client cannot compute (it counts
+            // the rows that really exist in the window). Whatever it last answered is remembered as a
+            // floor, together with the span it applied to: a window at least that wide can never do
+            // better, so panning inside it stops asking. A narrower (deeper) zoom still may.
+            const floored = covered && winState.floor && cand < winState.floor && (to - from) >= winState.floorSpan;
+            if (!force && (cand >= curStep || floored) && (covered || !winState.active)) return;   // nothing finer to gain
             const my = ++winState.seq;
             try {
-                const r = await fetch(api + 'stats_timeline&range=' + encodeURIComponent(range) + '&from=' + from + '&to=' + to, { credentials: 'same-origin', cache: 'no-store' });
+                const r = await fetch(api + 'stats_timeline&' + rangeQuery() + '&from=' + from + '&to=' + to, { credentials: 'same-origin', cache: 'no-store' });
                 const j = await r.json();
                 if (my !== winState.seq || !r.ok || !j || !j.success || !j.t) return;
-                if (!force && winState.active && j.step >= winState.step && covered) return;
+                if (!force && winState.active && j.step >= winState.step && covered) {
+                    winState.floor = j.step; winState.floorSpan = to - from;   // it said no — remember why
+                    return;
+                }
                 winState.active = true; winState.from = j.from; winState.to = j.to; winState.step = j.step;
+                winState.floor = j.step; winState.floorSpan = j.to - j.from;
                 setCharts(j);
                 updateBrush();
                 status.textContent = statusFor(j, true);
@@ -321,6 +427,7 @@
                 return;
             }
             winState.active = false; winState.seq++;
+            winState.floor = 0; winState.floorSpan = 0;   // a new base payload invalidates the floor
             payloadRef.current = p;
             put(main, [t].concat(GAUGES.map(d => p[d.key] || t.map(() => null))), keepZoom);
             put(rate, [t].concat(RATES.map(d => p[d.key] || t.map(() => null))), keepZoom);
@@ -334,6 +441,8 @@
             mainHost.classList.toggle('d-hidden', none); rateHost.classList.toggle('d-hidden', none); rateTitle.classList.toggle('d-hidden', none);
             rangerHost.classList.toggle('d-hidden', none);
             status.textContent = none ? 'No data for this range yet' : statusFor(p, false);
+            alignLegend(main); alignLegend(rate);
+            setTimeout(() => { alignLegend(main); alignLegend(rate); }, 0);
         };
         // force = user action (range click / expand): always fires and resets the zoom; timer ticks never stack
         // and a response that was superseded by a newer request is dropped
@@ -341,7 +450,9 @@
             if (pending && !force) return;
             const my = ++seq; pending = true;
             status.textContent = 'Loading…';
-            fetch(api + 'stats_timeline&range=' + encodeURIComponent(range) + (force ? '&_=' + Date.now() : ''), { credentials: 'same-origin', cache: 'no-store' })
+            let url = api + 'stats_timeline&' + rangeQuery();
+            if (force) url += '&_=' + Date.now();
+            fetch(url, { credentials: 'same-origin', cache: 'no-store' })
                 .then(r => r.json().then(j => ({ ok: r.ok, j })))
                 .then(({ ok, j }) => {
                     if (my !== seq) return;
@@ -355,9 +466,19 @@
         ranges.addEventListener('click', (ev) => {
             const b = ev.target.closest('.tl-range-btn'); if (!b) return;
             range = b.dataset.range;
-            try { localStorage.setItem(STORE_KEY, range); } catch (e) {}
+            customRow.classList.toggle('d-hidden', range !== 'custom');
+            rememberRange();
             ranges.querySelectorAll('.tl-range-btn').forEach(x => x.classList.toggle('active', x === b));
             load(true);
+        });
+        // slider: live label, debounced reload — dragging it sweeps the span smoothly
+        let customTimer = null;
+        slider.addEventListener('input', () => {
+            customSpan = CUSTOM_STOPS[+slider.value] || customSpan;
+            customLabel.textContent = fmtSpan(customSpan);
+            if (range !== 'custom') return;
+            clearTimeout(customTimer);
+            customTimer = setTimeout(() => { rememberRange(); load(true); }, 400);
         });
         // auto-refresh every 60 s while visible
         const schedule = () => { clearInterval(timer); timer = setInterval(() => { if (document.visibilityState === 'visible') load(false); }, 60000); };
@@ -365,7 +486,7 @@
         // responsive width
         if (typeof ResizeObserver !== 'undefined') {
             let raf = null;
-            new ResizeObserver(() => { if (raf) return; raf = requestAnimationFrame(() => { raf = null; const cw = Math.max(MIN_W, container.clientWidth || w); main.setSize({ width: cw, height: mainH }); rate.setSize({ width: cw, height: rateH }); ranger.setSize({ width: cw, height: rangerH }); updateBrush(); }); }).observe(container);
+            new ResizeObserver(() => { if (raf) return; raf = requestAnimationFrame(() => { raf = null; const cw = Math.max(MIN_W, container.clientWidth || w); main.setSize({ width: cw, height: mainH }); rate.setSize({ width: cw, height: rateH }); ranger.setSize({ width: cw, height: rangerH }); updateBrush(); alignLegend(main); alignLegend(rate); }); }).observe(container);
         }
         load(false); schedule();
         container.__timeline = { main, rate, ranger, setWindow: applyWindow, reload: () => load(true) };

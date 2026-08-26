@@ -1,3 +1,4 @@
+<?php require_once __DIR__ . '/../../includes/settings_catalog.php'; ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,7 +9,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
 </head>
-<body class="admin-body admin-hc" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>">
+<body class="admin-body admin-hc" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
     <div class="admin-container admin-wide">
         <div class="admin-header">
             <h2><i class="bi bi-gear"></i> Settings</h2>
@@ -21,9 +22,32 @@
             </div>
         </div>
 
+        <!-- Sub-menu + search. The visible labels/hints below are indexed by the browser; the hidden
+             synonyms come from api.php?endpoint=admin/settings_catalog and are never printed here. -->
+        <div class="settings-toolbar" id="settings-toolbar">
+            <div class="settings-search-row">
+                <div class="settings-search-box">
+                    <i class="bi bi-search settings-search-icon"></i>
+                    <input type="search" id="settings-search" class="form-control bg-dark text-light border-secondary" placeholder="Search settings &mdash; try captcha, sender, timeout, whitelist&hellip;" autocomplete="off" spellcheck="false" aria-label="Search settings" aria-describedby="settings-search-count">
+                    <button type="button" class="settings-search-clear d-hidden" id="settings-search-clear" title="Clear search" aria-label="Clear search"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <span class="settings-search-count" id="settings-search-count" role="status" aria-live="polite"></span>
+            </div>
+            <div class="settings-groups" id="settings-groups" role="group" aria-label="Settings groups">
+                <button type="button" class="settings-group-btn active" data-group="all" aria-pressed="true"><i class="bi bi-ui-checks-grid"></i> All settings</button>
+                <?php foreach (settingsCatalogGroups() as $g): ?>
+                <button type="button" class="settings-group-btn" data-group="<?= sanitize($g['id']) ?>" aria-pressed="false"><i class="bi <?= sanitize($g['icon']) ?>"></i> <?= sanitize($g['title']) ?><span class="settings-group-count" data-count-for="<?= sanitize($g['id']) ?>"></span></button>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <div class="settings-empty d-hidden" id="settings-empty">
+            <i class="bi bi-search"></i> No setting matches <strong id="settings-empty-q"></strong>.
+            <span class="settings-hint">Try a shorter word &mdash; the search also knows synonyms (e.g. <em>bot</em>, <em>smtp</em>, <em>cron</em>, <em>hidden url</em>).</span>
+        </div>
+
         <form id="settings-form">
             <!-- Site Configuration -->
-            <div class="settings-section">
+            <div class="settings-section" id="section-site" data-group="general" data-title="Site Configuration">
                 <h5>Site Configuration</h5>
                 <div class="row g-3">
                     <div class="col-md-6">
@@ -50,7 +74,7 @@
             </div>
 
             <!-- Contact & Email -->
-            <div class="settings-section">
+            <div class="settings-section" id="section-mail" data-group="mail" data-title="Contact &amp; Email">
                 <h5>Contact &amp; Email</h5>
                 <div class="row g-3">
                     <div class="col-md-6">
@@ -85,7 +109,7 @@
 
             <!-- CAPTCHA (reCAPTCHA v2 / reCAPTCHA v3 / Cloudflare Turnstile) -->
             <?php $captchaProviderSel = captchaProvider($cfg); ?>
-            <div class="settings-section">
+            <div class="settings-section" id="section-captcha" data-group="security" data-title="CAPTCHA">
                 <h5>CAPTCHA</h5>
                 <p class="settings-hint mb-2">Pick a provider and fill its keys. The switches below decide where a CAPTCHA is asked; the public whitelist registration page always requires one (it is disabled when CAPTCHA is not configured).</p>
                 <div class="row g-3">
@@ -102,6 +126,7 @@
                             <option value="recaptcha" <?= $captchaProviderSel === 'recaptcha' ? 'selected' : '' ?>>Google reCAPTCHA v2 (checkbox)</option>
                             <option value="recaptcha_v3" <?= $captchaProviderSel === 'recaptcha_v3' ? 'selected' : '' ?>>Google reCAPTCHA v3 (invisible, score)</option>
                             <option value="turnstile" <?= $captchaProviderSel === 'turnstile' ? 'selected' : '' ?>>Cloudflare Turnstile</option>
+                            <option value="hcaptcha" <?= $captchaProviderSel === 'hcaptcha' ? 'selected' : '' ?>>hCaptcha (checkbox)</option>
                         </select>
                     </div>
                     <div class="col-md-4"></div>
@@ -133,6 +158,14 @@
                     <div class="col-md-6">
                         <label class="form-label">Turnstile Secret Key</label>
                         <input type="password" autocomplete="off" class="form-control bg-dark text-light border-secondary" name="turnstile_secret" value="<?= sanitize($cfg['turnstile_secret'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">hCaptcha Site Key</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="hcaptcha_site_key" value="<?= sanitize($cfg['hcaptcha_site_key'] ?? '') ?>" placeholder="00000000-0000-0000-0000-000000000000">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">hCaptcha Secret Key</label>
+                        <input type="password" autocomplete="off" class="form-control bg-dark text-light border-secondary" name="hcaptcha_secret" value="<?= sanitize($cfg['hcaptcha_secret'] ?? '') ?>" placeholder="ES_...">
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">On Report Form</label>
@@ -173,7 +206,7 @@
             </div>
 
             <!-- Smart CAPTCHA -->
-            <div class="settings-section">
+            <div class="settings-section" id="section-captcha-smart" data-group="security" data-title="Smart CAPTCHA">
                 <h5>Smart CAPTCHA</h5>
                 <small class="settings-hint d-block mb-3">CAPTCHA only appears after a user accumulates enough activity points. Solving it grants a grace period where no CAPTCHA is required. Failed admin logins always reset the grace period.</small>
                 <div class="row g-3">
@@ -232,7 +265,7 @@
             </div>
 
             <!-- Public Pages -->
-            <div class="settings-section">
+            <div class="settings-section" id="section-public-pages" data-group="general" data-title="Public Pages">
                 <h5>Public Pages</h5>
                 <div class="row g-3">
                     <div class="col-md-4">
@@ -254,7 +287,7 @@
             </div>
 
             <!-- Tracker mode & whitelist -->
-            <div class="settings-section" id="section-whitelist">
+            <div class="settings-section" id="section-whitelist" data-group="tracker" data-title="Tracker Mode &amp; Whitelist">
                 <h5>Tracker Mode &amp; Whitelist</h5>
                 <p class="settings-hint mb-2">
                     <strong>Blacklist</strong> = OpenTracker built with <code>-DWANT_ACCESSLIST_BLACK</code>: everything is served except blocked hashes.
@@ -430,7 +463,7 @@
             </div>
 
             <!-- Server-to-server API -->
-            <div class="settings-section" id="section-api">
+            <div class="settings-section" id="section-api" data-group="integrations" data-title="Server-to-server API">
                 <h5>Server-to-server API</h5>
                 <p class="settings-hint mb-2">
                     <code>POST v1/whitelist/submit</code> / <code>GET v1/whitelist/ping</code> with <code>Authorization: Bearer key_id.secret</code>
@@ -458,7 +491,7 @@
             </div>
 
             <!-- User accounts -->
-            <div class="settings-section" id="section-users">
+            <div class="settings-section" id="section-users" data-group="users" data-title="User Accounts">
                 <h5>User Accounts</h5>
                 <small class="settings-hint d-block mb-3">Optional member system: registration + login (CAPTCHA-protected), groups with per-feature permissions, timed access (sellable via the <code>v1/users/*</code> API with a <em>users</em>-scope key), in-app notifications and a member search over the Index. Users and groups are managed on the <a href="<?= $baseUrl ?>?action=admin-users">Users page</a>. The <strong>guest</strong> group defines what anonymous visitors may see — with accounts <em>disabled</em> everything behaves exactly as before (public pages public, Index admin-only).</small>
                 <div class="row g-3">
@@ -487,7 +520,7 @@
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Default group (slug)</label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="users_default_group" value="<?= sanitize($cfg['users_default_group'] ?? 'member') ?>" pattern="[a-z0-9_-]{2,64}">
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="users_default_group" value="<?= sanitize($cfg['users_default_group'] ?? 'member') ?>" pattern="[a-z0-9_\-]{2,64}">
                         <small class="settings-hint">Granted to every new account (plus any group flagged &ldquo;default&rdquo;).</small>
                     </div>
                     <div class="col-md-3">
@@ -546,7 +579,7 @@
             </div>
 
             <!-- Federation / cluster -->
-            <div class="settings-section" id="section-federation">
+            <div class="settings-section" id="section-federation" data-group="integrations" data-title="Federation / Cluster">
                 <h5>Federation / Cluster</h5>
                 <small class="settings-hint d-block mb-3">Exchange resolved Index <strong>metadata</strong> with other tracker nodes so everyone builds a bigger search catalogue without re-fetching from the DHT. Pull-based: each node pulls compressed JSON pages from its peers' <code>v1/federation/export</code> (bearer key with the <em>federation</em> scope) and merges them with <code>worker/federation.py</code> (systemd timer — <strong>not</strong> PHP web time; see <code>worker/README.md</code>). By default an import only <em>fills in metadata</em> for hashes this tracker has itself observed; &ldquo;accept new hashes&rdquo; also inserts hashes never seen here. Needs the S2S API enabled above. Peers are managed below.</small>
                 <div class="row g-3">
@@ -621,7 +654,7 @@
             </div>
 
             <!-- Rate Limits & Blacklist -->
-            <div class="settings-section">
+            <div class="settings-section" id="section-limits" data-group="security" data-title="Rate Limits &amp; Blacklist">
                 <h5>Rate Limits &amp; Blacklist</h5>
                 <div class="row g-3">
                     <div class="col-md-4">
@@ -674,10 +707,28 @@
                 </div>
             </div>
 
-            <!-- Admin Sessions, Login Lockout & Proxy -->
-            <div class="settings-section">
-                <h5>Admin Sessions &amp; Proxy</h5>
+            <!-- Admin address, Sessions, Login Lockout & Proxy -->
+            <div class="settings-section" id="section-admin-access" data-group="security" data-title="Admin Access &amp; Sessions">
+                <h5>Admin Access &amp; Sessions</h5>
+                <?php $adminPathNow = adminLoginPath($cfg); $adminHiddenNow = adminHiddenBehavior($cfg); ?>
                 <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Admin sign-in address</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-dark text-secondary border-secondary">?action=</span>
+                            <input type="text" class="form-control bg-dark text-light border-secondary" name="admin_login_path" value="<?= sanitize($adminPathNow) ?>" maxlength="64" pattern="[A-Za-z0-9_\-]+" placeholder="admin">
+                        </div>
+                        <small class="settings-hint">The only address that shows this sign-in form. Moving it somewhere unguessable (e.g. <code>admin123yzxadminxxx</code>) keeps crawlers and drive-by bots off the form &mdash; it is <em>not</em> a substitute for a strong password: the login API lives at a fixed address and the real brute-force protection is the lockout below (plus <em>On Admin Login</em> in the CAPTCHA section). While a custom address is set, that API additionally refuses any sign-in from a session that never opened this page. Letters, digits, <code>-</code> and <code>_</code>; empty, or a name already used by another page, falls back to <code>admin</code>. The panel pages keep their normal addresses (<code>?action=admin</code>, <code>?action=settings</code>, &hellip;) once you are signed in, so bookmarks, links and the Logout button keep working. <strong>Write the new address down before saving.</strong></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Other admin URLs when signed out</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="admin_hidden_behavior">
+                            <option value="home" <?= $adminHiddenNow === 'home' ? 'selected' : '' ?>>Redirect to the front page (default)</option>
+                            <option value="login" <?= $adminHiddenNow === 'login' ? 'selected' : '' ?>>Show the sign-in form (classic)</option>
+                            <option value="404" <?= $adminHiddenNow === '404' ? 'selected' : '' ?>>Answer 404 Not Found</option>
+                        </select>
+                        <small class="settings-hint">What a visitor who is not signed in gets on a panel URL other than the sign-in address above. The default shows no login form anywhere except at your own address (the API still answers <code>401</code> to admin calls, so this hides the panel from browsing, not from a determined scan).</small>
+                    </div>
                     <div class="col-md-3">
                         <label class="form-label">Session idle timeout (min) <small class="settings-hint">(0 = off)</small></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="admin_session_idle_minutes" value="<?= sanitize($cfg['admin_session_idle_minutes'] ?? '30') ?>" min="0" max="1440">
@@ -710,7 +761,7 @@
             </div>
 
             <!-- Donation Fields -->
-            <div class="settings-section">
+            <div class="settings-section" id="section-donations" data-group="general" data-title="Donation Fields">
                 <h5>Donation Fields</h5>
                 <div class="row g-3">
                     <div class="col-md-3">
@@ -728,7 +779,7 @@
                     $donationFields = json_decode($cfg['donation_fields'] ?? '[]', true);
                     if (!is_array($donationFields)) $donationFields = [];
                 ?>
-                <div id="donation-fields-list" class="mt-2">
+                <div id="donation-fields-list" class="mt-2" data-setting="donation_fields">
                     <?php foreach ($donationFields as $i => $field): ?>
                     <div class="row g-2 mb-2 donation-field-row">
                         <div class="col-md-3">
@@ -743,11 +794,11 @@
                     </div>
                     <?php endforeach; ?>
                 </div>
-                <button type="button" class="btn btn-sm btn-outline-info mt-1" id="donation-field-add"><i class="bi bi-plus-lg"></i> Add Field</button>
+                <button type="button" class="btn btn-sm btn-outline-info mt-1" id="donation-field-add" data-setting="donation_fields"><i class="bi bi-plus-lg"></i> Add Field</button>
             </div>
 
             <!-- Transparency Page -->
-            <div class="settings-section">
+            <div class="settings-section" id="section-transparency" data-group="general" data-title="Transparency Page">
                 <h5>Transparency Page</h5>
                 <div class="row g-3">
                     <div class="col-md-4">
@@ -765,7 +816,7 @@
             </div>
 
             <!-- Tracker Statistics -->
-            <div class="settings-section">
+            <div class="settings-section" id="section-stats" data-group="stats" data-title="Tracker Statistics">
                 <h5>Tracker Statistics</h5>
                 <div class="row g-3">
                     <div class="col-md-3">
@@ -841,7 +892,7 @@
             </div>
 
             <!-- Statistics Timeline -->
-            <div class="settings-section" id="section-timeline">
+            <div class="settings-section" id="section-timeline" data-group="stats" data-title="Statistics Timeline">
                 <h5>Statistics Timeline</h5>
                 <small class="settings-hint d-block mb-3">Records the tracker statistics over time (seeds, leechers, peers, torrents, announce rates, tracker mode) and draws a stock-style chart on the public <strong>/?action=stats</strong> page and on the admin Whitelist page. Samples are taken by the <strong>janitor timer</strong> (<code>tools/janitor.php</code>, every minute — see README) and, for free, by every upstream refresh the stats page makes; roll-ups (5 min / 1 h) and retention run from the same timer. Requires <em>Tracker Statistics</em> above to be enabled with a valid Stats Source URL.</small>
                 <div class="row g-3">
@@ -876,10 +927,43 @@
                         <small class="settings-hint">When off, the chart and the <code>stats_timeline</code> API answer only logged-in admins.</small>
                     </div>
                 </div>
+                <?php $tlEnabledRanges = statsTimelineEnabledRanges($cfg); $tlDefaultRange = statsTimelineDefaultRange($cfg); ?>
+                <div class="row g-3 mt-1">
+                    <div class="col-12"><small class="text-info">Range buttons</small></div>
+                    <div class="col-md-3">
+                        <label class="form-label">Default range</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="stats_timeline_default_range">
+                            <?php foreach (statsTimelineRangeButtons() as $rKey => $rLabel): ?>
+                            <option value="<?= $rKey ?>" <?= $tlDefaultRange === $rKey ? 'selected' : '' ?>><?= sanitize($rLabel) ?> (<?= $rKey ?>)</option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint">The range a visitor's first view opens on (their own last pick is then remembered in the browser). A short default is the cheapest one to serve.</small>
+                    </div>
+                    <div class="col-md-6" data-setting="stats_timeline_ranges">
+                        <label class="form-label">Buttons offered</label>
+                        <div class="tl-range-picker">
+                            <?php foreach (statsTimelineRangeButtons() as $rKey => $rLabel): ?>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input tl-range-check" type="checkbox" id="tlr-<?= $rKey ?>" value="<?= $rKey ?>" <?= in_array($rKey, $tlEnabledRanges, true) ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="tlr-<?= $rKey ?>"><?= sanitize($rLabel) ?></label>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <small class="settings-hint">Unchecked ranges disappear from the chart everywhere (stats page, Index, Whitelist). Clearing them all falls back to the full set; the default range must stay checked or the first remaining button wins.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Custom span slider</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="stats_timeline_custom_range">
+                            <option value="0" <?= statsTimelineCustomRange($cfg) ? '' : 'selected' ?>>No</option>
+                            <option value="1" <?= statsTimelineCustomRange($cfg) ? 'selected' : '' ?>>Yes &mdash; add a "Custom" button</option>
+                        </select>
+                        <small class="settings-hint">Adds a slider that sweeps any span from 1 h to 5 years. These replies are computed per request (the fixed ranges are served from a 30 s file cache), so leave it off on a busy public page.</small>
+                    </div>
+                </div>
             </div>
 
             <!-- Observed-hash Index -->
-            <div class="settings-section" id="section-index">
+            <div class="settings-section" id="section-index" data-group="index" data-title="Index (observed hashes)">
                 <h5>Index (observed hashes)</h5>
                 <small class="settings-hint d-block mb-3">A catalogue of info hashes <strong>seen on the tracker</strong> (mostly during OPEN hours, when the whole swarm is served), browsable at <a href="<?= $baseUrl ?>?action=admin-index">Index</a>. <strong>This is not a whitelist</strong> &mdash; nothing here is served or written to the accesslist; it is a read-only catalogue with metadata, S/L, search and a <em>Promote &rarr; whitelist</em> action. The janitor polls a full scrape (<code>GET&nbsp;/scrape</code>) every <em>Poll interval</em>, keeps hashes with at least <em>Min seeders</em>, and the metadata worker resolves names in the background (second queue, below the whitelist &mdash; needs DB grants, see <code>worker/README.md</code>). <strong>Measure the full-scrape cost during OPEN hours before enabling on a busy tracker.</strong></small>
                 <div class="row g-3">
@@ -955,13 +1039,13 @@
             </div>
 
             <!-- OpenTracker Service -->
-            <div class="settings-section">
+            <div class="settings-section" id="section-service" data-group="tracker" data-title="OpenTracker Service">
                 <h5>OpenTracker Service</h5>
                 <small class="settings-hint d-block mb-3">Define the systemd unit of your tracker (e.g. <code>opentracker</code> or <code>opentracker.service</code>). When set, <strong>Reload</strong> and <strong>Restart tracker</strong> buttons appear on the Dashboard, together with smart recommendations that turn <span class="text-warning">orange</span> or <span class="text-danger">red</span> when a restart is advisable (after blacklist changes, or a long uptime). <strong>Reload</strong> runs <code>systemctl reload &lt;name&gt;</code> &mdash; a <strong>SIGHUP</strong> that makes OpenTracker re-read its white/blacklist with <em>no downtime</em>; <strong>Restart</strong> runs <code>systemctl restart &lt;name&gt;</code> (brief downtime). The web/PHP user must be allowed to run those commands &mdash; use the <strong>Test</strong> buttons below and see the README (sudoers). Leave the name empty to hide the buttons entirely.</small>
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label class="form-label">Service name <small class="settings-hint">(empty = disabled)</small></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="opentracker_service_name" value="<?= sanitize($cfg['opentracker_service_name'] ?? '') ?>" placeholder="opentracker" pattern="[A-Za-z0-9._@-]+" maxlength="128">
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="opentracker_service_name" value="<?= sanitize($cfg['opentracker_service_name'] ?? '') ?>" placeholder="opentracker" pattern="[A-Za-z0-9._@\-]+" maxlength="128">
                         <small class="settings-hint">Only letters, digits and <code>. _ @ -</code> are allowed.</small>
                     </div>
                     <div class="col-md-3">
@@ -1018,7 +1102,7 @@
             </div>
 
             <!-- Footer -->
-            <div class="settings-section">
+            <div class="settings-section" id="section-footer" data-group="general" data-title="Footer">
                 <h5>Footer</h5>
                 <div class="row g-3">
                     <div class="col-md-3">
@@ -1098,17 +1182,17 @@
             </div>
 
             <div id="settings-alert" class="mt-2 mb-2"></div>
-            <div class="mt-3 mb-4">
+            <div class="mt-3 mb-4" id="settings-save-row">
                 <button type="submit" class="btn btn-primary">Save Settings</button>
             </div>
         </form>
 
         <!-- Security & Credentials lives outside #settings-form (own endpoint) but must share its width cap. -->
         <div class="settings-narrow">
-        <hr class="border-secondary">
+        <hr class="border-secondary" id="settings-rule">
 
         <!-- Security -->
-        <div class="settings-section">
+        <div class="settings-section" id="section-credentials" data-group="credentials" data-title="Security &amp; Credentials">
             <h5>Security &amp; Credentials</h5>
             <form id="password-form">
                 <div class="row g-3">
@@ -1169,6 +1253,7 @@
     <div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3" id="toast-container" style="z-index: 1080;"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-settings.js<?= assetVer('assets/js/admin-settings.js') ?>"></script>
     <script>
     const API_BASE = document.body.dataset.apiBase;
     const CSRF = document.body.dataset.csrf || '';
@@ -1376,7 +1461,8 @@
 
     document.getElementById('btn-logout').addEventListener('click', async () => {
         await fetch(API_BASE + 'admin/logout', { method: 'POST', headers: { 'X-CSRF-Token': CSRF } });
-        window.location.reload();
+        // back to the configured sign-in address — a reload would land on the public front page
+        window.location.href = API_BASE.replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin');
     });
 
     // Donation fields management
@@ -1464,6 +1550,8 @@
             });
             const json = await res.json();
             if (json.success) {
+                // keep the Logout target in sync when the sign-in address was just changed
+                if (json.applied && json.applied.admin_login_path) document.body.dataset.loginPath = json.applied.admin_login_path;
                 showToast('success', 'Settings saved successfully.');
                 return true;
             } else {
@@ -1529,6 +1617,9 @@
         new FormData(form).forEach((v, k) => data[k] = v);
         data.donation_fields = collectDonationFields();
         if (schedRows.length) data.tracker_schedule = collectSchedule();
+        // timeline range buttons: checkboxes carry no name, so FormData skips them
+        const tlChecks = document.querySelectorAll('.tl-range-check');
+        if (tlChecks.length) data.stats_timeline_ranges = Array.from(tlChecks).filter(c => c.checked).map(c => c.value).join(',');
 
         const limitsChanged = data.delete_captcha_attempts !== currentCaptchaAttempts ||
                               data.delete_lockout_attempts !== currentLockoutAttempts ||

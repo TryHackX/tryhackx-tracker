@@ -34,9 +34,14 @@ RewriteBase /tracker/
     Header set Referrer-Policy "strict-origin-when-cross-origin"
     Header set Permissions-Policy "geolocation=(), microphone=(), camera=()"
     # Content-Security-Policy. 'unsafe-inline'/'unsafe-eval' are needed by the inline
-    # scripts / onclick handlers and Google reCAPTCHA. Remote hosts allowed: jsDelivr
-    # (Bootstrap + icons) and Google/Gstatic (reCAPTCHA). Tighten if you self-host these.
-    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com https://www.recaptcha.net https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https://www.google.com https://www.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net; frame-src https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+    # scripts / onclick handlers and the CAPTCHA widgets. Remote hosts allowed: jsDelivr
+    # (Bootstrap + icons) and one host set per CAPTCHA provider — Google/Gstatic/reCAPTCHA.net
+    # (reCAPTCHA v2 + v3), challenges.cloudflare.com (Turnstile) and hcaptcha.com (hCaptcha).
+    # Keep this list in sync with captchaProviders() / captchaHeadTags() in includes/functions.php:
+    # a provider missing here loads no script, so its widget never appears and every protected form
+    # fails with "CAPTCHA unavailable". The apex hcaptcha.com is listed next to the wildcard because
+    # a CSP wildcard does not match the bare domain. Tighten if you self-host these.
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com https://www.recaptcha.net https://challenges.cloudflare.com https://js.hcaptcha.com https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://hcaptcha.com https://*.hcaptcha.com; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https://www.google.com https://www.gstatic.com https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://cdn.jsdelivr.net https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; frame-src https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
 </IfModule>
 
 # Prevent directory listings

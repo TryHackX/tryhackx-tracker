@@ -12,7 +12,7 @@
     <?= captchaHeadTags($cfg) ?>
     <?php endif; ?>
 </head>
-<body class="admin-body admin-hc" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>">
+<body class="admin-body admin-hc" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
     <div class="admin-container admin-wide">
         <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
         <div class="admin-header">
@@ -209,6 +209,10 @@
         </div>
     </div>
     <?php endif; ?>
+    <!-- reCAPTCHA v3 has no widget and admin.css hides the floating badge, so Google's terms require
+         this notice wherever a token is minted (the report-deletion dialog does). Empty for the
+         other providers. -->
+    <?= captchaNoticeHtml($cfg, 'captcha-notice text-secondary text-center') ?>
 
     <?php if ($svcName !== ''): ?>
     <!-- Restart Tracker Modal -->

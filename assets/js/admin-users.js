@@ -359,7 +359,7 @@
         $('btn-group-new').addEventListener('click', () => openGroupEditor(null));
         $('ge-save').addEventListener('click', saveGroup);
         const logout = $('btn-logout');
-        if (logout) logout.addEventListener('click', async () => { try { await apiCall('admin/logout', 'POST', {}); } catch (e) {} location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=admin'; });
+        if (logout) logout.addEventListener('click', async () => { try { await apiCall('admin/logout', 'POST', {}); } catch (e) {} location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin'); });
         loadGroups().then(loadUsers);
     });
 })();

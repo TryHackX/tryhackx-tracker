@@ -4,6 +4,62 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] — 2026-08-26 (schema v10)
+
+### Added
+- **hCaptcha** as a fourth CAPTCHA provider (`hcaptcha_site_key` / `hcaptcha_secret`, Settings →
+  CAPTCHA), verified against `api.hcaptcha.com/siteverify` with the site key sent along; the shared
+  modal renders its widget exactly like reCAPTCHA v2 / Turnstile and the installer now asks which
+  provider to set up instead of assuming reCAPTCHA v2. **The CSP in `.htaccess` gained the hCaptcha
+  hosts** — a provider whose script host is not allow-listed there can never load (Turnstile's and
+  reCAPTCHA's XHR hosts were missing from `connect-src` too, and are now listed).
+- **Movable admin sign-in address** (`admin_login_path`, Settings → Admin Access & Sessions): the
+  form that used to answer on every panel URL now lives at exactly one `?action=` value — leave it at
+  `admin` or move it to something unguessable. What a signed-out visitor gets on the *other* panel
+  URLs is a second setting (`admin_hidden_behavior`): **redirect to the front page** (new default),
+  the sign-in form (the old behaviour) or a **404** page. Signed in, the panel keeps its classic
+  addresses, so links, bookmarks and Logout are unaffected (the Logout buttons now return to the
+  configured address instead of reloading a URL that no longer shows a form). While a custom address
+  is set, `admin/login` also refuses sign-ins from sessions that never opened the form, since the API
+  endpoint itself cannot move.
+- **Admin sign-in screen restyled** to the public site's look (`templates/pages/adminlogin.php`,
+  rendered through the normal layout: same nav, footer, fonts, CAPTCHA overlay and notice).
+- **Timeline range controls** (Settings → Statistics Timeline): choose **which range buttons** the
+  chart offers (`stats_timeline_ranges`), **which one opens by default** (`stats_timeline_default_range`,
+  default 24h — a visitor's own last pick still wins on their next visit) and an optional free
+  **Custom span slider** from 1 h to 5 years (`stats_timeline_custom_range`, off by default). A custom
+  span is a first-class range for the API (`&range=custom&span=…`, snapped to the slider's stops) so it
+  takes the same 30 s file cache and the same server-side clock as the named ranges.
+- **Settings page: group sub-menu + ranked search.** The ~150 settings are filed under nine groups
+  (Site & pages, Contact & email, Security & CAPTCHA, User accounts, Tracker & whitelist, Statistics,
+  Index, API & federation, Admin credentials) with a chip per group, and a search box that shows the
+  best-matching settings first (their section reduced to the matching fields), then whole sections
+  whose name matches, then the rest of any matching group under a divider. Matching also uses hidden
+  synonyms per setting (`includes/settings_catalog.php`, served by `admin/settings_catalog`) that are
+  never rendered into the page — searching "bot", "smtp", "cron" or "hidden url" finds the right
+  switch. `/` or `Ctrl+K` focuses the box; `#section-…` deep links from the other admin pages still
+  work and now open the right group.
+
+### Fixed
+- **Swarm timeline legend wrapping**: entries that fall onto a second line (e.g. *Indexed hashes*)
+  now start under the first series instead of the far left, on any window width — the indent is
+  measured from the live layout and the "Time" value keeps a fixed width so nothing shifts on hover.
+  Applies everywhere the chart is mounted (public stats, admin Index, admin Whitelist).
+- **CAPTCHA modal robustness**: the widget is rendered only after the box is open (rendering into a
+  `display:none` overlay produced a zero-sized, invisible checkbox), a click that beats the async
+  provider script now waits for it instead of failing instantly with "CAPTCHA cancelled", a second
+  prompt can no longer leave the first caller's promise hanging, and a widget that keeps erroring
+  (wrong site key, host not on the key's allowed-domain list — Turnstile `110200`) is retried once and
+  then reported as "CAPTCHA could not load" instead of looping forever with the box stuck open.
+- reCAPTCHA v3 tokens for the admin sign-in are now verified against their `admin_login` action, and
+  the admin dashboard prints the required "protected by reCAPTCHA" notice (the badge is hidden there).
+- A zoom window that reaches beyond the raw-sample retention no longer promises raw resolution it
+  cannot deliver (the same row-count confirmation the fixed ranges already made), and the chart stops
+  re-requesting a finer step the server can never serve for an old window.
+- Three `pattern=` attributes in Settings were invalid under the stricter regex mode browsers now
+  compile them with, so their client-side validation silently did nothing.
+- Dead CSS from the removed admin login template (`.login-container`, `.alert-box`) dropped.
+
 ## [1.9.4] — 2026-08-25
 
 ### Changed
