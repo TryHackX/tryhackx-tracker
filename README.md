@@ -1026,6 +1026,8 @@ All require active admin session. Prefix: `admin/`
 | `admin/unblock_hash` | POST | Unblock an info hash |
 | `admin/resolve_appeal` | POST | Accept or reject an appeal |
 | `admin/save_settings` | POST | Save site settings |
+| `admin/settings_catalog` | GET | Search catalogue for the Settings page (groups + hidden keywords; 1.10.0) |
+| `admin/account_email` | POST | Change/remove the admin account's email (two-step confirmation) or cancel a pending one (1.10.1) |
 | `admin/send_email` | POST | Send custom email to reporter |
 | `admin/check_blacklist` | GET | Test blacklist file permissions |
 | `admin/tracker_service_status` | GET | Restart recommendations + service status for the dashboard |
