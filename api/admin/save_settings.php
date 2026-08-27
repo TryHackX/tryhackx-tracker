@@ -83,7 +83,7 @@ $allowed = [
     'fed_enabled', 'fed_node_name', 'fed_export_enabled', 'fed_export_files', 'fed_export_max_batch',
     'fed_export_max_bytes', 'fed_export_max_files',
     'fed_import_batch_rows', 'fed_import_batch_bytes', 'fed_import_max_seconds', 'fed_worker_mem_mb',
-    'fed_import_new', 'fed_pull_minutes',
+    'fed_import_new', 'fed_import_mode', 'fed_pull_minutes',
 ];
 
 $data = [];
@@ -190,6 +190,7 @@ if (isset($data['whitelist_tracker_hosts'])) {
     }
     $data['whitelist_tracker_hosts'] = implode(', ', array_unique($clean));
 }
+if (isset($data['fed_import_mode'])) $data['fed_import_mode'] = $data['fed_import_mode'] === 'review' ? 'review' : 'fill';
 foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
           'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist',

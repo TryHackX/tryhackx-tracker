@@ -25,6 +25,9 @@ $since = max(0, (int)($payload['since'] ?? 0));
 $after = strtolower(trim((string)($payload['after'] ?? '')));
 $limit = (int)($payload['limit'] ?? fedExportMaxBatch($cfg));
 $withFiles = fedExportFiles($cfg) && (!isset($payload['files']) || !empty($payload['files']));
+// Which peer is asking. Knowing that lets the export leave out whatever this same peer gave us,
+// which is the difference between a steady exchange and two nodes trading the same rows for ever.
+$callerPeer = fedPeerNameForClient($db, (int)($client['id'] ?? 0));
 
 // ── NDJSON: one JSON object per line, sent as it is built ────────────────────────────────────
 // The buffered reply below assembles the whole page — rows AND every file record of every row — in
@@ -72,7 +75,7 @@ if (($payload['format'] ?? '') === 'ndjson') {
                      'bytes' => fedExportMaxBytes($cfg), 'files' => fedExportMaxFiles($cfg)],
     ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
 
-    $res = fedExportStream($db, $cfg, $since, $after, $limit, $withFiles, $put);
+    $res = fedExportStream($db, $cfg, $since, $after, $limit, $withFiles, $put, $callerPeer);
 
     $put(json_encode([
         'end' => true, 'rows' => $res['rows'], 'files' => $res['files'],
@@ -83,7 +86,7 @@ if (($payload['format'] ?? '') === 'ndjson') {
     exit;
 }
 
-$res = fedExportRows($db, $cfg, $since, $after, $limit, $withFiles);
+$res = fedExportRows($db, $cfg, $since, $after, $limit, $withFiles, $callerPeer);
 
 $out = [
     'ok' => true, 'node' => fedNodeName($cfg), 'server_time' => time(),

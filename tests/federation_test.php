@@ -319,6 +319,145 @@ check('export budget accessors: negatives clamp to 0', fedExportMaxFiles(['fed_e
 $db->exec("TRUNCATE TABLE index_hashes");
 $db->exec("TRUNCATE TABLE index_files");
 
+// ── 5. federation P1 (E5): origin time, split horizon, quarantine, undo ──────
+//
+// The three failures these guard against all look like success from the outside: rows that keep
+// circulating between nodes for ever, a peer quietly publishing into the catalogue, and a parting
+// that can only be undone with hand-written SQL at two in the morning.
+
+check('schema: index_hashes carries meta_origin_at', schemaColumnExists($db, 'index_hashes', 'meta_origin_at'));
+check('schema: the quarantine table exists',
+      (bool)$db->query("SHOW TABLES LIKE 'fed_review'")->fetchColumn());
+check('schema: a page view is not allowed to rebuild index_hashes',
+      schemaHeavyAllowed() === true, 'this suite IS the CLI, so it must be allowed here');
+check('schema: nothing was deferred during this run', schemaDeferHeavy() === []);
+
+check('import mode: fill is the default and anything unknown means fill',
+      fedImportMode([]) === 'fill' && fedImportMode(['fed_import_mode' => 'nonsense']) === 'fill');
+check('import mode: review is honoured', fedImportMode(['fed_import_mode' => 'review']) === 'review');
+
+// A row that came from "alpha", resolved a week ago at the origin.
+$origin = date('Y-m-d H:i:s', time() - 7 * 86400);
+$db->exec("INSERT INTO index_hashes (info_hash, name, total_size, files_count, first_seen, last_seen,
+                                     seen_count, meta_status, meta_fetched_at, meta_origin_at, meta_source)
+           VALUES ('" . h(901) . "', 'from alpha', 123, 1, NOW(), NOW(), 1, 'done', NOW() - INTERVAL 1 MINUTE,
+                   '$origin', 'fed:alpha')");
+// …and one this node resolved itself.
+$db->exec("INSERT INTO index_hashes (info_hash, name, total_size, files_count, first_seen, last_seen,
+                                     seen_count, meta_status, meta_fetched_at, meta_origin_at, meta_source)
+           VALUES ('" . h(902) . "', 'mine', 456, 1, NOW(), NOW(), 1, 'done', NOW() - INTERVAL 1 MINUTE, NULL, NULL)");
+$db->exec("INSERT INTO index_files (info_hash, path, size) VALUES ('" . h(901) . "', 'a/b.iso', 123)");
+
+$exportCfg = ['fed_enabled' => '1', 'fed_export_enabled' => '1', 'fed_export_files' => '1'];
+$all = fedExportRows($db, $exportCfg, 0, '', 50, true);
+$hashes = array_column($all['rows'], 'h');
+check('export: both rows leave when nobody in particular is asking', count($hashes) === 2, implode(',', $hashes));
+
+$row901 = null;
+foreach ($all['rows'] as $r) if ($r['h'] === h(901)) $row901 = $r;
+check('export: every row carries the origin time as well as the cursor time',
+      $row901 !== null && isset($row901['mo']) && isset($row901['mf']),
+      json_encode($row901));
+check('export: the origin time is the ORIGINAL one, not the moment it arrived here',
+      $row901 !== null && (int)$row901['mo'] === strtotime($origin),
+      $row901 ? ($row901['mo'] . ' vs ' . strtotime($origin)) : 'no row');
+check('export: a locally resolved row falls back to its own fetch time rather than reporting 0',
+      (function ($rows) { foreach ($rows as $r) if ($r['h'] === h(902)) return (int)$r['mo'] > 0; return false; })($all['rows']));
+
+// Split horizon: alpha must not be handed back the rows alpha gave us.
+$toAlpha = fedExportRows($db, $exportCfg, 0, '', 50, true, 'alpha');
+$alphaHashes = array_column($toAlpha['rows'], 'h');
+check('split horizon: a peer is not handed back its own contribution',
+      $alphaHashes === [h(902)], implode(',', $alphaHashes));
+$toBeta = fedExportRows($db, $exportCfg, 0, '', 50, true, 'beta');
+check('split horizon: a different peer still receives everything', count($toBeta['rows']) === 2);
+
+// …and the streaming exporter must agree with the buffered one, or the two modes would disagree
+// about what a peer is allowed to see depending on which one it asked for.
+$lines = [];
+fedExportStream($db, $exportCfg, 0, '', 50, true, function ($chunk) use (&$lines) { $lines[] = $chunk; return strlen($chunk); }, 'alpha');
+$streamed = [];
+foreach ($lines as $l) { $j = json_decode(trim($l), true); if (is_array($j) && isset($j['h'])) $streamed[] = $j['h']; }
+check('split horizon: the streaming exporter applies the same rule', $streamed === [h(902)], implode(',', $streamed));
+$streamedRow = null;
+foreach ($lines as $l) { $j = json_decode(trim($l), true); if (is_array($j) && ($j['h'] ?? '') === h(902)) $streamedRow = $j; }
+check('streaming exporter: also carries mo', is_array($streamedRow) && isset($streamedRow['mo']));
+
+// ── the quarantine ──────────────────────────────────────────────────────────
+$db->exec("DELETE FROM fed_review");
+$db->exec("INSERT INTO index_hashes (info_hash, first_seen, last_seen, seen_count, meta_status)
+           VALUES ('" . h(903) . "', NOW(), NOW(), 1, 'none')");
+$ins = $db->prepare("INSERT INTO fed_review (info_hash, peer_name, name, total_size, files_count, piece_length, origin_at, files_json)
+                     VALUES (?, 'alpha', ?, ?, ?, ?, ?, ?)");
+$ins->execute([h(903), 'quarantined package', 999, 2, 16384, $origin, json_encode([['x/one.bin', 500], ['x/two.bin', 499]])]);
+$c = fedReviewCounts($db);
+check('quarantine: the queue counts what is waiting, per peer',
+      $c['pending'] === 1 && ($c['peers']['alpha']['pending'] ?? 0) === 1, json_encode($c));
+$list = fedReviewList($db, 'alpha', 'pending', 10, 0);
+check('quarantine: the queue lists the package with everything needed to judge it',
+      count($list) === 1 && $list[0]['name'] === 'quarantined package' && $list[0]['files_count'] === 2);
+
+$before = (string)$db->query("SELECT meta_status FROM index_hashes WHERE info_hash='" . h(903) . "'")->fetchColumn();
+check('quarantine: nothing reached the catalogue while it waited', $before === 'none', $before);
+
+$t = fedReviewAccept($db, [], 'alpha');
+check('quarantine: accepting merges the package', $t['accepted'] === 1 && $t['files'] === 2, json_encode($t));
+$after = $db->query("SELECT meta_status, name, total_size, meta_source, UNIX_TIMESTAMP(meta_origin_at) mo
+                     FROM index_hashes WHERE info_hash='" . h(903) . "'")->fetch(PDO::FETCH_ASSOC);
+check('quarantine: … as a normal import, source tag and all',
+      $after['meta_status'] === 'done' && $after['name'] === 'quarantined package'
+      && $after['meta_source'] === 'fed:alpha', json_encode($after));
+check('quarantine: … keeping the ORIGINAL resolve time, not the moment somebody clicked Accept',
+      (int)$after['mo'] === strtotime($origin), $after['mo'] . ' vs ' . strtotime($origin));
+check('quarantine: the file list comes with it',
+      (int)$db->query("SELECT COUNT(*) FROM index_files WHERE info_hash='" . h(903) . "'")->fetchColumn() === 2);
+check('quarantine: an accepted row leaves the queue', fedReviewCounts($db)['pending'] === 0);
+
+// Rejection has to outlive the row it refused, or the peer offers the same package on every pull.
+$ins->execute([h(903), 'refused package', 1, 1, 16384, $origin, null]);
+$n2 = fedReviewReject($db, [], 'alpha');
+check('quarantine: rejecting marks rather than deletes', $n2 === 1 && fedReviewCounts($db)['rejected'] === 1);
+$ins2 = $db->prepare("INSERT IGNORE INTO fed_review (info_hash, peer_name, name) VALUES (?, 'alpha', 'offered again')");
+$ins2->execute([h(903)]);
+check('quarantine: a rejected package cannot be re-offered by the next pull',
+      fedReviewCounts($db)['pending'] === 0 && fedReviewCounts($db)['rejected'] === 1);
+check('quarantine: … until the decision is explicitly withdrawn',
+      fedReviewUnreject($db, [], 'alpha') === 1 && fedReviewCounts($db)['rejected'] === 0);
+
+// ── undoing an import ───────────────────────────────────────────────────────
+$cnt = fedPurgeCount($db, 'alpha');
+check('undo: counts exactly what carries the peer tag',
+      $cnt['rows'] === 2 && $cnt['source'] === 'fed:alpha', json_encode($cnt));
+$moved = fedPurgeBatch($db, 'alpha', 500);
+check('undo: one batch clears them', $moved === 2 && fedPurgeCount($db, 'alpha')['rows'] === 0);
+$gone = $db->query("SELECT meta_status, name, meta_source, meta_origin_at
+                    FROM index_hashes WHERE info_hash='" . h(901) . "'")->fetch(PDO::FETCH_ASSOC);
+check('undo: the description goes',
+      $gone['meta_status'] === 'none' && $gone['name'] === null && $gone['meta_source'] === null
+      && $gone['meta_origin_at'] === null, json_encode($gone));
+check('undo: the hash and its local history stay — they were never the peer\'s',
+      (int)$db->query("SELECT seen_count FROM index_hashes WHERE info_hash='" . h(901) . "'")->fetchColumn() === 1);
+check('undo: the peer\'s file records go with it',
+      (int)$db->query("SELECT COUNT(*) FROM index_files WHERE info_hash='" . h(901) . "'")->fetchColumn() === 0);
+check('undo: rows this node resolved itself are untouched',
+      (string)$db->query("SELECT meta_status FROM index_hashes WHERE info_hash='" . h(902) . "'")->fetchColumn() === 'done');
+check('undo: an unknown peer is a no-op, not an error', fedPurgeBatch($db, 'nobody-here', 500) === 0);
+
+// ── the setting is registered in all four places, which is where this usually goes wrong ────
+$sv = file_get_contents($root . '/api/admin/save_settings.php');
+check('registration: fed_import_mode is in the save allow-list', str_contains($sv, "'fed_import_mode'"));
+check('registration: … and is normalised rather than trusted',
+      str_contains($sv, "\$data['fed_import_mode'] = \$data['fed_import_mode'] === 'review'"));
+check('registration: … has a schema default', array_key_exists('fed_import_mode', trackerSchemaDefaultSettings()));
+check('registration: … is findable in the settings search',
+      str_contains(file_get_contents($root . '/includes/settings_catalog.php'), "'fed_import_mode'"));
+check('registration: … and has a control on the settings page',
+      str_contains(file_get_contents($root . '/templates/admin/settings.php'), 'name="fed_import_mode"'));
+
+$db->exec("DELETE FROM fed_review");
+$db->exec("TRUNCATE TABLE index_hashes");
+$db->exec("TRUNCATE TABLE index_files");
+
 echo "
 $n checks, $fails failed" . ($skips ? ", $skips skipped" : '') . "
 ";

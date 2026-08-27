@@ -750,6 +750,14 @@
                         <small class="settings-hint">Imported rows count against the Index row cap.</small>
                     </div>
                     <div class="col-md-3">
+                        <label class="form-label">Trust incoming metadata</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fed_import_mode">
+                            <option value="fill" <?= ($cfg['fed_import_mode'] ?? 'fill') !== 'review' ? 'selected' : '' ?>>Straight in (fill)</option>
+                            <option value="review" <?= ($cfg['fed_import_mode'] ?? 'fill') === 'review' ? 'selected' : '' ?>>Hold for review (quarantine)</option>
+                        </select>
+                        <small class="settings-hint">In review mode nothing a peer sends reaches the catalogue until you accept it &mdash; it waits in the queue below. Names are rendered as text, never as markup, so this is about <em>what you publish</em>, not about script injection. The first sync of a large peer can park tens of thousands of rows, so accept per peer rather than one at a time.</small>
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label">Pull interval (min)</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_pull_minutes" value="<?= sanitize($cfg['fed_pull_minutes'] ?? '60') ?>" min="5" max="1440">
                         <small class="settings-hint">Honoured by <code>federation.py</code> when run in loop mode; a systemd timer uses its own schedule.</small>
@@ -777,7 +785,33 @@
                         </div>
                     </div>
                     <div id="fp-alert" class="mt-2"></div>
-                    <small class="settings-hint d-block mt-1">Exchange flow: each admin adds the other as a peer, ticks <em>grant inbound access</em>, and sends the generated bearer to the other side, who pastes it into <em>Their bearer</em> and enables <em>Pull</em>. Test verifies the outbound direction.</small>
+                    <small class="settings-hint d-block mt-1">Exchange flow: each admin adds the other as a peer, ticks <em>grant inbound access</em>, and sends the generated bearer to the other side, who pastes it into <em>Their bearer</em> and enables <em>Pull</em>. Test verifies the outbound direction. <em>Undo import</em> returns everything a peer contributed to unresolved &mdash; the hashes and their local history stay, only the borrowed descriptions go.</small>
+                </div>
+
+                <!-- The quarantine queue. Hidden while it is empty AND review mode is off, because a
+                     node that trusts its peers should not have to look at a control it never uses. -->
+                <div class="mt-4 d-hidden" id="fed-review-card">
+                    <label class="form-label">Waiting for review <span class="badge bg-warning text-dark" id="fr-count">0</span></label>
+                    <small class="settings-hint d-block mb-2">Everything below arrived from a peer while <em>Trust incoming metadata</em> was set to review. Nothing here is in the catalogue or in search. Accepting merges a package exactly as a normal import would; rejecting keeps a note so the peer does not offer it again on every pull.</small>
+                    <div class="d-flex gap-2 align-items-center flex-wrap mb-2">
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="fr-peer" style="max-width:14rem;"><option value="">All peers</option></select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="fr-state" style="max-width:11rem;">
+                            <option value="pending">Waiting</option>
+                            <option value="rejected">Rejected</option>
+                        </select>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="fr-refresh"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                        <span class="flex-grow-1"></span>
+                        <button type="button" class="btn btn-sm btn-outline-success" id="fr-accept-sel" disabled><i class="bi bi-check2"></i> Accept selected</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="fr-reject-sel" disabled><i class="bi bi-x"></i> Reject selected</button>
+                        <button type="button" class="btn btn-sm btn-outline-warning" id="fr-accept-peer" disabled title="Accept everything still waiting from the peer selected on the left"><i class="bi bi-check2-all"></i> Accept whole peer&hellip;</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-sm align-middle" id="fed-review-table">
+                            <thead><tr><th style="width:2rem;"><input type="checkbox" class="form-check-input" id="fr-all"></th><th>Name</th><th>Size</th><th>Files</th><th>Peer</th><th>Resolved</th><th></th></tr></thead>
+                            <tbody id="fed-review-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="fr-alert" class="mt-2"></div>
                 </div>
             </div>
 
@@ -1845,10 +1879,49 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                     const r = await call('admin/fed_peer_delete', { id: p.id });
                     if (r.error) note(r.error, 'alert-danger'); else loadPeers();
                 });
-                act.append(testBtn, togglePull, bearerBtn, grantBtn, delBtn);
+                // Undo import: count first, then slice. A peer that has fed this node for a month
+                // can own a million rows, so the browser walks it in bounded pieces instead of
+                // asking MariaDB — shared with mail, the forum and the tracker — for one huge
+                // statement. The endpoint offers the CLI equivalent for the genuinely large cases.
+                const undoBtn = el('button', 'Undo import', 'btn btn-sm btn-outline-warning me-1');
+                undoBtn.type = 'button';
+                undoBtn.title = 'Return everything this peer contributed to unresolved';
+                undoBtn.addEventListener('click', async () => {
+                    const c = await call('admin/fed_purge', { op: 'count', peer: p.name });
+                    if (c.error) { note(c.error, 'alert-danger'); return; }
+                    if (!c.rows) { note('Nothing in the index came from "' + p.name + '".', 'alert-info'); return; }
+                    if (!window.confirm('Undo the import from "' + p.name + '"?\n\n'
+                        + c.rows.toLocaleString() + ' package(s) and ' + c.files.toLocaleString() + ' file record(s) go back to unresolved.\n'
+                        + 'The hashes stay, with their local history — only the descriptions this peer supplied are removed.\n'
+                        + 'They can be fetched again from the DHT, or re-imported if you keep the peer.')) return;
+                    const pw = window.prompt('Admin password to confirm:');
+                    if (!pw) return;
+                    undoBtn.disabled = true;
+                    let total = 0;
+                    for (;;) {
+                        const r = await call('admin/fed_purge', { op: 'run', peer: p.name, password: pw });
+                        if (r.error) { note(r.error, 'alert-danger'); break; }
+                        total += r.done;
+                        note('Undoing "' + p.name + '": ' + total.toLocaleString() + ' done, '
+                             + r.remaining.toLocaleString() + ' left…', 'alert-info');
+                        if (!r.remaining || !r.done) { note(r.message, 'alert-success'); break; }
+                    }
+                    undoBtn.disabled = false;
+                    loadPeers();
+                    if (window.fedReviewReload) window.fedReviewReload();
+                });
+                act.append(testBtn, togglePull, bearerBtn, grantBtn, undoBtn, delBtn);
                 tr.appendChild(act);
                 body.appendChild(tr);
             });
+            const sel = document.getElementById('fr-peer');
+            if (sel) {
+                const keep = sel.value;
+                sel.innerHTML = '';
+                sel.appendChild(el('option', 'All peers')).value = '';
+                json.peers.forEach(p => { sel.appendChild(el('option', p.name)).value = p.name; });
+                sel.value = keep;
+            }
         }
         document.getElementById('fp-add').addEventListener('click', async () => {
             const r = await call('admin/fed_peer_save', {
@@ -1869,6 +1942,113 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             loadPeers();
         });
         loadPeers();
+
+        /* ── the quarantine queue ──────────────────────────────────────────
+         * Rendered with textContent throughout: these names came from another machine, and the one
+         * place they must never become is markup. (The catalogue renders them the same way, which is
+         * why review mode is about what you publish rather than about script injection.)
+         */
+        const card = document.getElementById('fed-review-card');
+        const rbody = document.getElementById('fed-review-body');
+        const ralert = document.getElementById('fr-alert');
+        const rnote = (msg, cls) => { ralert.innerHTML = ''; const d = el('div', msg, 'alert py-2 px-3 ' + (cls || 'alert-info')); d.style.display = 'block'; ralert.appendChild(d); };
+        const bytes = (n) => {
+            if (n === null || n === undefined) return '—';
+            const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let i = 0, v = Number(n);
+            while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+            return v.toFixed(v >= 100 || i === 0 ? 0 : 1) + ' ' + u[i];
+        };
+        function selectedIds() {
+            return Array.from(rbody.querySelectorAll('input.fr-pick:checked')).map(c => parseInt(c.value, 10));
+        }
+        function syncButtons() {
+            const n = selectedIds().length;
+            document.getElementById('fr-accept-sel').disabled = !n;
+            document.getElementById('fr-reject-sel').disabled = !n;
+            document.getElementById('fr-accept-peer').disabled = !document.getElementById('fr-peer').value;
+        }
+        async function loadReview() {
+            const peer = document.getElementById('fr-peer').value;
+            const state = document.getElementById('fr-state').value;
+            const r = await call('admin/fed_review', { op: 'list', peer: peer, state: state, limit: 200 });
+            if (r.error) { rnote(r.error, 'alert-danger'); return; }
+            const pending = (r.counts && r.counts.pending) || 0;
+            const rejected = (r.counts && r.counts.rejected) || 0;
+            document.getElementById('fr-count').textContent = pending.toLocaleString();
+            // Visible when there is something to decide, or when review mode is on and the operator
+            // is entitled to see that the queue is empty.
+            const reviewOn = (document.querySelector('[name="fed_import_mode"]') || {}).value === 'review';
+            card.classList.toggle('d-hidden', !(pending || rejected || reviewOn));
+            rbody.innerHTML = '';
+            if (!r.rows.length) {
+                const td = el('td', state === 'rejected' ? 'Nothing has been rejected.' : 'Nothing is waiting.', 'text-muted');
+                td.colSpan = 7;
+                rbody.appendChild(el('tr')).appendChild(td);
+                syncButtons();
+                return;
+            }
+            r.rows.forEach(row => {
+                const tr = el('tr');
+                const pick = document.createElement('input');
+                pick.type = 'checkbox'; pick.className = 'form-check-input fr-pick'; pick.value = String(row.id);
+                pick.addEventListener('change', syncButtons);
+                tr.appendChild(el('td')).appendChild(pick);
+                const nameTd = el('td', row.name || '(no name)', 'text-break');
+                nameTd.title = row.info_hash;
+                tr.appendChild(nameTd);
+                tr.appendChild(el('td', bytes(row.total_size), 'text-nowrap'));
+                tr.appendChild(el('td', (row.files_count || 0).toLocaleString() + (row.files_truncated ? ' (list capped)' : ''), 'text-nowrap'));
+                tr.appendChild(el('td', row.peer_name, 'text-muted'));
+                tr.appendChild(el('td', row.origin_at || '—', 'text-muted small text-nowrap'));
+                const act = el('td', undefined, 'text-nowrap');
+                if (state === 'pending') {
+                    const yes = el('button', 'Accept', 'btn btn-sm btn-outline-success me-1');
+                    yes.type = 'button';
+                    yes.addEventListener('click', () => decide('accept', [row.id]));
+                    const no = el('button', 'Reject', 'btn btn-sm btn-outline-danger');
+                    no.type = 'button';
+                    no.addEventListener('click', () => decide('reject', [row.id]));
+                    act.append(yes, no);
+                } else {
+                    const un = el('button', 'Allow again', 'btn btn-sm btn-outline-secondary');
+                    un.type = 'button';
+                    un.addEventListener('click', () => decide('unreject', [row.id]));
+                    act.appendChild(un);
+                }
+                tr.appendChild(act);
+                rbody.appendChild(tr);
+            });
+            syncButtons();
+        }
+        async function decide(op, ids, peer, password) {
+            const r = await call('admin/fed_review', { op: op, ids: ids || [], peer: peer || '', password: password || '' });
+            if (r.error) { rnote(r.error, 'alert-danger'); return; }
+            rnote(r.message, 'alert-success');
+            loadReview();
+        }
+        window.fedReviewReload = loadReview;
+        document.getElementById('fr-refresh').addEventListener('click', loadReview);
+        document.getElementById('fr-peer').addEventListener('change', loadReview);
+        document.getElementById('fr-state').addEventListener('change', loadReview);
+        document.getElementById('fr-all').addEventListener('change', (e) => {
+            rbody.querySelectorAll('input.fr-pick').forEach(c => { c.checked = e.target.checked; });
+            syncButtons();
+        });
+        document.getElementById('fr-accept-sel').addEventListener('click', () => decide('accept', selectedIds()));
+        document.getElementById('fr-reject-sel').addEventListener('click', () => decide('reject', selectedIds()));
+        document.getElementById('fr-accept-peer').addEventListener('click', () => {
+            const peer = document.getElementById('fr-peer').value;
+            if (!peer) return;
+            if (!window.confirm('Accept EVERYTHING still waiting from "' + peer + '"?\n\n'
+                + 'Every package it sent becomes visible in the catalogue and in search, including the ones nobody has read.')) return;
+            const pw = window.prompt('Admin password to confirm:');
+            if (!pw) return;
+            decide('accept', [], peer, pw);
+        });
+        const modeSel = document.querySelector('[name="fed_import_mode"]');
+        if (modeSel) modeSel.addEventListener('change', loadReview);
+        loadReview();
     })();
 
     document.getElementById('btn-test-blacklist').addEventListener('click', async () => {

@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 14;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling, 14 = settings only (OpenTracker performance knobs: ot_*)
+const TRACKER_SCHEMA_VERSION = 15;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling, 14 = settings only (OpenTracker performance knobs: ot_*), 15 = federation P1: index_hashes.meta_origin_at (when the metadata was FIRST resolved anywhere, so it stops circulating between three or more nodes) + the fed_review quarantine table
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -217,6 +217,13 @@ function trackerSchemaStatements(): array {
             `meta_claimed_at` DATETIME DEFAULT NULL,
             `meta_claim` CHAR(16) DEFAULT NULL,
             `meta_fetched_at` DATETIME DEFAULT NULL,
+            -- When this metadata was first resolved ANYWHERE, as opposed to when it arrived here.
+            -- With two nodes the difference is cosmetic; with three it is the whole game. A row
+            -- imported from B and re-stamped NOW() looks brand new to C, which sends it back to A,
+            -- which sends it on again: the same rows circulate for ever and every pass rewrites
+            -- them. Carrying the original time means the second cycle recognises the row, changes
+            -- nothing, and therefore never re-enters anyone's export window.
+            `meta_origin_at` DATETIME DEFAULT NULL,
             `meta_error` VARCHAR(255) DEFAULT NULL,
             `meta_source` VARCHAR(24) DEFAULT NULL,
             `total_size` BIGINT UNSIGNED DEFAULT NULL,
@@ -332,6 +339,38 @@ function trackerSchemaStatements(): array {
         // ── Federation peers (schema v7, includes/federation.php): other tracker nodes we exchange index
         //    metadata with. Inbound access = an api_clients row with scope 'federation' (api_client_id);
         //    outbound pull = their bearer stored here, consumed by worker/federation.py.
+        // Quarantine for `fed_import_mode = review`. A peer you do not fully trust must not be able to
+        // put names into the public catalogue merely by answering an HTTP request, so in review mode
+        // nothing it sends reaches index_hashes at all -- it lands here until an admin accepts it.
+        //
+        // Deliberately a separate table rather than an extra meta_status value: index_hashes carries a
+        // FULLTEXT index and millions of rows, so widening its ENUM means a full rebuild, and every
+        // query that lists the catalogue would have to learn the new state or start leaking unreviewed
+        // names. A holding pen has neither problem, and dropping it undoes the feature completely.
+        //
+        // `files_json` is the file list as it arrived, capped (FED_REVIEW_FILES_MAX) -- past the cap the
+        // row is still reviewable and still acceptable, just without per-file paths.
+        "CREATE TABLE IF NOT EXISTS `fed_review` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `info_hash` CHAR(40) NOT NULL,
+            `peer_id` INT UNSIGNED DEFAULT NULL,
+            `peer_name` VARCHAR(64) NOT NULL DEFAULT '',
+            `name` VARCHAR(512) DEFAULT NULL,
+            `total_size` BIGINT UNSIGNED DEFAULT NULL,
+            `files_count` INT UNSIGNED DEFAULT NULL,
+            `piece_length` INT UNSIGNED DEFAULT NULL,
+            `origin_at` DATETIME DEFAULT NULL,
+            `files_json` MEDIUMTEXT DEFAULT NULL,
+            `files_truncated` TINYINT(1) NOT NULL DEFAULT 0,
+            `state` ENUM('pending','rejected') NOT NULL DEFAULT 'pending',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `decided_at` DATETIME DEFAULT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_fed_review` (`info_hash`, `peer_name`),
+            KEY `idx_fed_review_state` (`state`, `id`),
+            KEY `idx_fed_review_peer` (`peer_name`, `state`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
         "CREATE TABLE IF NOT EXISTS `fed_peers` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             `name` VARCHAR(64) NOT NULL,
@@ -395,10 +434,31 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'index_hashes', 'meta_source')) {
         $parts[] = "ADD COLUMN `meta_source` VARCHAR(24) DEFAULT NULL";
     }
+    if (!schemaColumnExists($db, 'index_hashes', 'meta_origin_at')) {
+        $parts[] = "ADD COLUMN `meta_origin_at` DATETIME DEFAULT NULL";
+    }
     if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_fetched')) {
         $parts[] = "ADD KEY `idx_index_meta_fetched` (`meta_fetched_at`)";
     }
-    if ($parts) $out[] = "ALTER TABLE `index_hashes` " . implode(', ', $parts);
+    if ($parts) {
+        // ...and it must not happen inside a page view. On a real catalogue that rebuild runs for
+        // minutes and holds a SHARED lock (InnoDB does not permit concurrent DML while it rebuilds a
+        // FULLTEXT table), so a browser request would occupy one of five php-fpm children while every
+        // write on the site queued behind it. The janitor is an ordinary CLI job running every minute,
+        // so the web declines and the next tick performs it -- the version simply stays put until
+        // then. Fresh installs never reach here: the columns are already in CREATE TABLE.
+        if (schemaHeavyAllowed()) {
+            // Candidates, cheapest first. INSTANT is metadata only — sub-second on any size, and on
+            // this table it is usually available because the columns go on the end. It is offered
+            // rather than assumed: the restrictions vary by server version and row format, and the
+            // wrong guess would abort the whole upgrade over a column that could have been added
+            // the slow way. The bare statement last is the one that always works.
+            $alter = "ALTER TABLE `index_hashes` " . implode(', ', $parts);
+            $out[] = [$alter . ", ALGORITHM=INSTANT", $alter . ", ALGORITHM=INPLACE", $alter];
+        } else {
+            schemaDeferHeavy('index_hashes: ' . implode(', ', $parts));
+        }
+    }
     // v9: two-step email change scratch columns (users is tiny — instant ALTER)
     $uparts = [];
     if (!schemaColumnExists($db, 'users', 'pending_email')) $uparts[] = "ADD COLUMN `pending_email` VARCHAR(190) DEFAULT NULL";
@@ -561,6 +621,7 @@ function trackerSchemaDefaultSettings(): array {
         'fed_export_max_bytes'        => '8388608',    // 8 MB on the wire
         'fed_export_max_files'        => '200000',
         'fed_import_new'              => '0',
+        'fed_import_mode'             => 'fill',       // fill = merge straight in; review = quarantine first
         // The importer's own ceilings. It runs as a separate process precisely so a big exchange
         // cannot burn web-request time; these keep it from burning the machine's RAM either.
         'fed_import_batch_rows'       => '500',
@@ -622,6 +683,29 @@ function schemaIndexExists(PDO $db, string $table, string $index): bool {
 }
 
 /**
+ * Is this a context that may spend minutes rebuilding a large table? Only the CLI is.
+ *
+ * Every migration in this file is cheap except the ones that rebuild index_hashes, and those are
+ * worth deferring by a minute rather than risking the site for them. Define
+ * TRACKER_SCHEMA_FORCE_HEAVY before bootstrapping to override.
+ */
+function schemaHeavyAllowed(): bool {
+    return PHP_SAPI === 'cli' || defined('TRACKER_SCHEMA_FORCE_HEAVY');
+}
+
+/**
+ * Remember that a migration was declined, so ensureSchema does NOT record the new version -- the
+ * schema really is not at that version, and writing the number anyway would strand the missing
+ * column for ever. Static rather than a stored flag: it lasts exactly one process, which is exactly
+ * as long as the question is open.
+ */
+function schemaDeferHeavy(?string $what = null): array {
+    static $deferred = [];
+    if ($what !== null) $deferred[] = $what;
+    return $deferred;
+}
+
+/**
  * Bring the database up to TRACKER_SCHEMA_VERSION. Cheap when current (one array lookup).
  * Never throws — a failure leaves the version untouched so the next request retries, and the
  * error is logged. $cfg is refreshed in place so callers see the seeded defaults immediately.
@@ -642,15 +726,31 @@ function ensureSchema(PDO $db, array &$cfg): void {
                 try { $db->exec($sql); } catch (PDOException $e) { error_log('[tracker schema] ' . $e->getMessage()); throw $e; }
             }
             foreach (trackerSchemaGuardedStatements($db) as $sql) {
-                try { $db->exec($sql); } catch (PDOException $e) { error_log('[tracker schema] ' . $e->getMessage()); throw $e; }
+                // A guarded statement may be a list of equivalent candidates, cheapest first (see the
+                // index_hashes ALTER). Only the last failure is fatal — the earlier ones are a server
+                // saying "not that way", which is information, not an error.
+                $tries = is_array($sql) ? $sql : [$sql];
+                $lastErr = null;
+                foreach ($tries as $i => $one) {
+                    try { $db->exec($one); $lastErr = null; break; }
+                    catch (PDOException $e) {
+                        $lastErr = $e;
+                        if ($i < count($tries) - 1) error_log('[tracker schema] retrying without: ' . $e->getMessage());
+                    }
+                }
+                if ($lastErr !== null) { error_log('[tracker schema] ' . $lastErr->getMessage()); throw $lastErr; }
             }
             try { trackerSchemaDataMigrations($db, $cfg); } catch (\Throwable $e) { error_log('[tracker schema] data migration: ' . $e->getMessage()); }
             $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
             foreach (trackerSchemaDefaultSettings() as $k => $v) {
                 $ins->execute([$k, $v]);
             }
-            $db->prepare("INSERT INTO settings (`key`, `value`) VALUES ('schema_version', ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)")
-               ->execute([(string)TRACKER_SCHEMA_VERSION]);
+            // Only claim the version if everything actually ran. A deferred rebuild means the schema
+            // is not at this version, and recording the number anyway would strand the missing column.
+            if (!schemaDeferHeavy()) {
+                $db->prepare("INSERT INTO settings (`key`, `value`) VALUES ('schema_version', ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)")
+                   ->execute([(string)TRACKER_SCHEMA_VERSION]);
+            }
             $cfg = getSettings($db, true);
         } finally {
             $db->query("SELECT RELEASE_LOCK('tracker_schema')");

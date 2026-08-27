@@ -184,6 +184,8 @@ $apiRoutes = [
     'admin/fed_peer_save'        => 'api/admin/fed_peer_save.php',
     'admin/fed_peer_delete'      => 'api/admin/fed_peer_delete.php',
     'admin/fed_peer_test'        => 'api/admin/fed_peer_test.php',
+    'admin/fed_review'           => 'api/admin/fed_review.php',
+    'admin/fed_purge'            => 'api/admin/fed_purge.php',
     // ── Server-to-server API (bearer key; see includes/api_auth.php) ──
     'v1/whitelist/submit'        => 'api/v1/whitelist_submit.php',
     'v1/whitelist/ping'          => 'api/v1/whitelist_ping.php',

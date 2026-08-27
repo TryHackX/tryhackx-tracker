@@ -25,6 +25,15 @@ function fedExportFiles(array $cfg): bool { return (($cfg['fed_export_files'] ??
 function fedExportMaxBatch(array $cfg): int { return max(100, min(20000, (int)($cfg['fed_export_max_batch'] ?? 2000) ?: 2000)); }
 function fedImportNew(array $cfg): bool { return (($cfg['fed_import_new'] ?? '0') === '1'); }
 /**
+ * fill = a peer's answer goes straight into the catalogue. review = it goes into fed_review and
+ * nothing is visible until somebody accepts it. The difference matters the moment a peer is someone
+ * else's machine: in fill mode "trusted" is decided once, when you add the peer, and every row it
+ * ever sends inherits that decision.
+ */
+function fedImportMode(array $cfg): string { return (($cfg['fed_import_mode'] ?? 'fill') === 'review') ? 'review' : 'fill'; }
+/** Per row. A pathological package must not turn one quarantined row into a megabyte of MEDIUMTEXT. */
+const FED_REVIEW_FILES_MAX = 2000;
+/**
  * Budgets that end an export page. `fed_export_max_batch` (rows) has always existed and is the one
  * that does NOT bound the work: a page of 20 000 rows can carry millions of file records, because
  * it counts torrents rather than what a torrent contains. These two count the things that actually
@@ -43,7 +52,25 @@ function fedPullMinutes(array $cfg): int { return max(5, min(1440, (int)($cfg['f
  * Row shape (short keys — packages are large): h, n (name), s (size), fc (files count),
  * pl (piece length), sl [seeders, leechers], seen {f,l,c}, mf (meta_fetched_at ts), files [[p,sz]..].
  */
-function fedExportRows(PDO $db, array $cfg, int $since, string $afterHash, int $limit, bool $withFiles): array {
+/**
+ * The name of the peer this inbound API client belongs to, or '' if the key is not a peer's.
+ *
+ * Used for split horizon (below). A key with the federation scope that no peer row claims is a
+ * perfectly ordinary thing — someone testing with curl — and simply gets the unfiltered export.
+ */
+function fedPeerNameForClient(PDO $db, int $clientId): string {
+    if ($clientId <= 0) return '';
+    try {
+        $st = $db->prepare("SELECT name FROM fed_peers WHERE api_client_id = ? LIMIT 1");
+        $st->execute([$clientId]);
+        $n = $st->fetchColumn();
+    } catch (PDOException $e) {
+        return '';
+    }
+    return $n === false ? '' : (string)$n;
+}
+
+function fedExportRows(PDO $db, array $cfg, int $since, string $afterHash, int $limit, bool $withFiles, string $excludeSource = ''): array {
     $limit = max(1, min(fedExportMaxBatch($cfg), $limit));
     $afterHash = preg_match('/^[a-f0-9]{40}$/', $afterHash) ? $afterHash : '';
     // Two invariants keep the cursor sound and the export clean:
@@ -54,7 +81,13 @@ function fedExportRows(PDO $db, array $cfg, int $since, string $afterHash, int $
     //    only when it runs — a ban must stop leaving the node immediately.
     $st = $db->prepare(
         "SELECT info_hash, name, total_size, files_count, piece_length, last_seeders, last_leechers,
-                first_seen, last_seen, seen_count, UNIX_TIMESTAMP(meta_fetched_at) AS mf
+                first_seen, last_seen, seen_count, UNIX_TIMESTAMP(meta_fetched_at) AS mf,
+                -- `mf` paginates (it is when the row arrived HERE, and it only ever moves
+                -- forward, so it makes a sound cursor); `mo` is when the metadata was first
+                -- resolved anywhere, and it is what the far side compares against to decide
+                -- whether it already knows this. Older nodes send no `mo`; the importer then
+                -- falls back to `mf`, which is what they have always effectively meant.
+                UNIX_TIMESTAMP(COALESCE(meta_origin_at, meta_fetched_at)) AS mo
          FROM index_hashes i
          WHERE meta_status = 'done' AND meta_fetched_at IS NOT NULL
            AND meta_fetched_at < FROM_UNIXTIME(UNIX_TIMESTAMP())
@@ -67,9 +100,16 @@ function fedExportRows(PDO $db, array $cfg, int $since, string $afterHash, int $
                 OR (meta_fetched_at = FROM_UNIXTIME(GREATEST(1, ?)) AND info_hash > ?))
            AND NOT EXISTS (SELECT 1 FROM banned_hashes b WHERE b.info_hash = i.info_hash)
            AND NOT EXISTS (SELECT 1 FROM whitelist w WHERE w.info_hash = i.info_hash)
+           -- Split horizon: never hand a peer back the rows it gave us. Importing re-stamps
+           -- meta_fetched_at, which puts every borrowed row into OUR export window, so without this
+           -- two nodes spend every cycle shipping each other's own catalogue back and forth --
+           -- megabytes of transfer for zero writes, for ever. The exclusion is by source tag, so it
+           -- costs one string comparison and needs no extra state.
+           AND (? = '' OR meta_source IS NULL OR meta_source <> ?)
          ORDER BY meta_fetched_at, info_hash
          LIMIT " . ($limit + 1));
-    $st->execute([$since, $since, $afterHash]);
+    $ex = $excludeSource === '' ? '' : fedPurgeSource($excludeSource);
+    $st->execute([$since, $since, $afterHash, $ex, $ex]);
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     $hasMore = count($rows) > $limit;
     if ($hasMore) array_pop($rows);
@@ -84,6 +124,7 @@ function fedExportRows(PDO $db, array $cfg, int $since, string $afterHash, int $
             'sl' => [(int)$r['last_seeders'], (int)$r['last_leechers']],
             'seen' => ['f' => $r['first_seen'], 'l' => $r['last_seen'], 'c' => (int)$r['seen_count']],
             'mf' => (int)$r['mf'],
+            'mo' => (int)($r['mo'] ?: $r['mf']),
         ];
     }
     if ($withFiles && $hashes) {
@@ -123,7 +164,7 @@ function fedExportRows(PDO $db, array $cfg, int $since, string $afterHash, int $
  * Returns ['rows'=>int, 'files'=>int, 'bytes'=>int, 'next'=>['since'=>int,'after'=>string]|null,
  *          'has_more'=>bool, 'stopped_by'=>'rows'|'bytes'|'files'|'end'].
  */
-function fedExportStream(PDO $db, array $cfg, int $since, string $afterHash, int $limit, bool $withFiles, callable $emit): array {
+function fedExportStream(PDO $db, array $cfg, int $since, string $afterHash, int $limit, bool $withFiles, callable $emit, string $excludeSource = ''): array {
     $limit    = max(1, min(fedExportMaxBatch($cfg), $limit));
     $maxBytes = fedExportMaxBytes($cfg);
     $maxFiles = fedExportMaxFiles($cfg);
@@ -134,7 +175,13 @@ function fedExportStream(PDO $db, array $cfg, int $since, string $afterHash, int
     // export a hash that is locally whitelisted or banned.
     $sql =
         "SELECT info_hash, name, total_size, files_count, piece_length, last_seeders, last_leechers,
-                first_seen, last_seen, seen_count, UNIX_TIMESTAMP(meta_fetched_at) AS mf
+                first_seen, last_seen, seen_count, UNIX_TIMESTAMP(meta_fetched_at) AS mf,
+                -- `mf` paginates (it is when the row arrived HERE, and it only ever moves
+                -- forward, so it makes a sound cursor); `mo` is when the metadata was first
+                -- resolved anywhere, and it is what the far side compares against to decide
+                -- whether it already knows this. Older nodes send no `mo`; the importer then
+                -- falls back to `mf`, which is what they have always effectively meant.
+                UNIX_TIMESTAMP(COALESCE(meta_origin_at, meta_fetched_at)) AS mo
          FROM index_hashes i
          WHERE meta_status = 'done' AND meta_fetched_at IS NOT NULL
            AND meta_fetched_at < FROM_UNIXTIME(UNIX_TIMESTAMP())
@@ -147,16 +194,23 @@ function fedExportStream(PDO $db, array $cfg, int $since, string $afterHash, int
                 OR (meta_fetched_at = FROM_UNIXTIME(GREATEST(1, ?)) AND info_hash > ?))
            AND NOT EXISTS (SELECT 1 FROM banned_hashes b WHERE b.info_hash = i.info_hash)
            AND NOT EXISTS (SELECT 1 FROM whitelist w WHERE w.info_hash = i.info_hash)
+           -- Split horizon: never hand a peer back the rows it gave us. Importing re-stamps
+           -- meta_fetched_at, which puts every borrowed row into OUR export window, so without this
+           -- two nodes spend every cycle shipping each other's own catalogue back and forth --
+           -- megabytes of transfer for zero writes, for ever. The exclusion is by source tag, so it
+           -- costs one string comparison and needs no extra state.
+           AND (? = '' OR meta_source IS NULL OR meta_source <> ?)
          ORDER BY meta_fetched_at, info_hash
          LIMIT ";
     $st = $db->prepare($sql . (FED_STREAM_CHUNK + 1));
 
+    $ex = $excludeSource === '' ? '' : fedPurgeSource($excludeSource);
     $curSince = $since; $curAfter = $afterHash;
     $rowsOut = 0; $filesOut = 0; $bytesOut = 0;
     $next = null; $hasMore = false; $stoppedBy = 'end';
 
     while (true) {
-        $st->execute([$curSince, $curSince, $curAfter]);
+        $st->execute([$curSince, $curSince, $curAfter, $ex, $ex]);
         $chunk = $st->fetchAll(PDO::FETCH_ASSOC);
         $st->closeCursor();
         if (!$chunk) break;
@@ -187,6 +241,7 @@ function fedExportStream(PDO $db, array $cfg, int $since, string $afterHash, int
                 'sl' => [(int)$r['last_seeders'], (int)$r['last_leechers']],
                 'seen' => ['f' => $r['first_seen'], 'l' => $r['last_seen'], 'c' => (int)$r['seen_count']],
                 'mf' => (int)$r['mf'],
+                'mo' => (int)($r['mo'] ?: $r['mf']),
             ];
             $rowFiles = $files[$h] ?? [];
             if ($rowFiles) $row['files'] = $rowFiles;
@@ -214,7 +269,7 @@ function fedExportStream(PDO $db, array $cfg, int $since, string $afterHash, int
         // has_more when the page happened to land on the last row would cost the peer one pointless
         // request every cycle, forever.
         $probe = $db->prepare($sql . '1');
-        $probe->execute([$curSince, $curSince, $curAfter]);
+        $probe->execute([$curSince, $curSince, $curAfter, $ex, $ex]);
         $hasMore = $probe->fetchColumn(0) !== false;
         $probe->closeCursor();
     }
@@ -297,4 +352,210 @@ function fedPeerDelete(PDO $db, int $id, bool $dropClient = true): bool {
         $db->prepare("DELETE FROM api_clients WHERE id = ? AND scope = 'federation'")->execute([(int)$clientId]);
     }
     return true;
+}
+
+/* ───────────────────────── quarantine (fed_import_mode = review) ─────────────────────────
+ *
+ * The panel half. The importer writes rows here; everything below is what an admin does with them.
+ * Accepting is deliberately the same merge the fill path performs, so review mode changes WHEN a row
+ * is trusted and never HOW it is stored — one code path, one set of guarantees.
+ */
+
+/** How much is waiting, per peer. Cheap enough to put on the settings page. */
+function fedReviewCounts(PDO $db): array {
+    $out = ['pending' => 0, 'rejected' => 0, 'peers' => []];
+    try {
+        $st = $db->query("SELECT peer_name, state, COUNT(*) c FROM fed_review GROUP BY peer_name, state");
+    } catch (PDOException $e) {
+        return $out;   // table not migrated yet — a count is never worth an exception
+    }
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $n = (int)$r['c'];
+        $state = (string)$r['state'];
+        $out[$state] = ($out[$state] ?? 0) + $n;
+        $peer = (string)$r['peer_name'];
+        if (!isset($out['peers'][$peer])) $out['peers'][$peer] = ['pending' => 0, 'rejected' => 0];
+        $out['peers'][$peer][$state] = $n;
+    }
+    return $out;
+}
+
+/** One page of the queue, newest first. */
+function fedReviewList(PDO $db, string $peer = '', string $state = 'pending', int $limit = 50, int $offset = 0): array {
+    $limit = max(1, min(500, $limit));
+    $offset = max(0, $offset);
+    $where = ["state = ?"];
+    $args = [$state === 'rejected' ? 'rejected' : 'pending'];
+    if ($peer !== '') { $where[] = "peer_name = ?"; $args[] = $peer; }
+    $sql = "SELECT id, info_hash, peer_name, name, total_size, files_count, piece_length, origin_at,
+                   files_truncated, state, created_at
+            FROM fed_review WHERE " . implode(' AND ', $where) . "
+            ORDER BY id DESC LIMIT $limit OFFSET $offset";
+    $st = $db->prepare($sql);
+    $st->execute($args);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as &$r) {
+        foreach (['id', 'total_size', 'files_count', 'piece_length', 'files_truncated'] as $k) {
+            if ($r[$k] !== null) $r[$k] = (int)$r[$k];
+        }
+    }
+    return $rows;
+}
+
+/**
+ * Accept quarantined rows into the catalogue.
+ *
+ * $ids empty + $peer set = accept everything still pending from that peer (the only workable move
+ * when a first sync parks twenty thousand rows). Returns a per-outcome tally rather than a bare
+ * count, because "accepted 900 of 1000" is a different fact from "accepted 1000" and the 100 that
+ * were skipped were skipped for a reason worth seeing.
+ */
+function fedReviewAccept(PDO $db, array $ids = [], string $peer = '', int $max = 5000): array {
+    $tally = ['accepted' => 0, 'skipped' => 0, 'files' => 0];
+    $rows = fedReviewFetchForDecision($db, $ids, $peer, $max);
+    if (!$rows) return $tally;
+
+    $upd = $db->prepare(
+        "UPDATE index_hashes
+            SET name = ?, total_size = ?, files_count = ?, piece_length = ?,
+                meta_status = 'done', meta_source = ?, meta_fetched_at = NOW(),
+                meta_origin_at = COALESCE(?, meta_origin_at, NOW()),
+                meta_error = NULL, meta_claim = NULL, meta_priority = -1
+          WHERE info_hash = ? AND meta_status NOT IN ('done', 'fetching')");
+    $delFiles = $db->prepare("DELETE FROM index_files WHERE info_hash = ?");
+    $insFile  = $db->prepare("INSERT INTO index_files (info_hash, path, size) VALUES (?, ?, ?)");
+    $done     = $db->prepare("DELETE FROM fed_review WHERE id = ?");
+
+    foreach ($rows as $r) {
+        $db->beginTransaction();
+        try {
+            $upd->execute([
+                $r['name'], $r['total_size'], $r['files_count'], $r['piece_length'],
+                'fed:' . mb_substr((string)$r['peer_name'], 0, 20), $r['origin_at'], $r['info_hash'],
+            ]);
+            if ($upd->rowCount() > 0) {
+                $tally['accepted']++;
+                $files = $r['files_json'] ? json_decode((string)$r['files_json'], true) : null;
+                if (is_array($files) && $files) {
+                    $delFiles->execute([$r['info_hash']]);
+                    foreach ($files as $f) {
+                        if (!is_array($f) || count($f) < 2) continue;
+                        $insFile->execute([$r['info_hash'], mb_substr((string)$f[0], 0, 512), max(0, (int)$f[1])]);
+                        $tally['files']++;
+                    }
+                }
+            } else {
+                // The hash was resolved locally (or is not in the index at all) while it sat in the
+                // queue. Local always wins — the same rule the fill path follows.
+                $tally['skipped']++;
+            }
+            $done->execute([$r['id']]);
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+            throw $e;
+        }
+    }
+    return $tally;
+}
+
+/**
+ * Reject: keep the row, marked, so the next pull does not offer it again. Rejections are the record
+ * of a decision — deleting them would make the peer re-send the same package for ever.
+ */
+function fedReviewReject(PDO $db, array $ids = [], string $peer = '', int $max = 20000): int {
+    $rows = fedReviewFetchForDecision($db, $ids, $peer, $max);
+    if (!$rows) return 0;
+    $n = 0;
+    $st = $db->prepare("UPDATE fed_review SET state = 'rejected', decided_at = NOW(), files_json = NULL WHERE id = ? AND state = 'pending'");
+    foreach (array_chunk($rows, 500) as $chunk) {
+        $db->beginTransaction();
+        foreach ($chunk as $r) { $st->execute([$r['id']]); $n += $st->rowCount(); }
+        $db->commit();
+    }
+    return $n;
+}
+
+/** Forget a rejection, so the peer may offer the package again on the next pull. */
+function fedReviewUnreject(PDO $db, array $ids = [], string $peer = ''): int {
+    $rows = fedReviewFetchForDecision($db, $ids, $peer, 20000, 'rejected');
+    if (!$rows) return 0;
+    $st = $db->prepare("DELETE FROM fed_review WHERE id = ? AND state = 'rejected'");
+    $n = 0;
+    foreach (array_chunk($rows, 500) as $chunk) {
+        $db->beginTransaction();
+        foreach ($chunk as $r) { $st->execute([$r['id']]); $n += $st->rowCount(); }
+        $db->commit();
+    }
+    return $n;
+}
+
+function fedReviewFetchForDecision(PDO $db, array $ids, string $peer, int $max, string $state = 'pending'): array {
+    $max = max(1, min(50000, $max));
+    if ($ids) {
+        $ids = array_values(array_filter(array_map('intval', $ids), fn($i) => $i > 0));
+        if (!$ids) return [];
+        $ids = array_slice($ids, 0, $max);
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $st = $db->prepare("SELECT * FROM fed_review WHERE id IN ($in) AND state = ?");
+        $st->execute(array_merge($ids, [$state]));
+        return $st->fetchAll(PDO::FETCH_ASSOC);
+    }
+    if ($peer === '') return [];
+    $st = $db->prepare("SELECT * FROM fed_review WHERE peer_name = ? AND state = ? ORDER BY id LIMIT $max");
+    $st->execute([$peer, $state]);
+    return $st->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/* ───────────────────────── undoing an import (F7) ─────────────────────────
+ *
+ * Parting with a partner should not mean writing SQL by hand at two in the morning. Everything a
+ * peer contributed is tagged `meta_source = 'fed:<name>'`, so it can be found again exactly.
+ *
+ * Undo means putting each row back to unresolved — NOT deleting it. The hash itself was observed by
+ * this tracker's own swarm; only the description came from the peer. Deleting the row would throw
+ * away local history (first_seen, seen_count, the seeder peaks) that was never theirs to take.
+ */
+function fedPurgeSource(string $peerName): string { return 'fed:' . mb_substr(trim($peerName), 0, 20); }
+
+/** What an undo would touch, without touching it. */
+function fedPurgeCount(PDO $db, string $peerName): array {
+    $src = fedPurgeSource($peerName);
+    $st = $db->prepare("SELECT COUNT(*) FROM index_hashes WHERE meta_source = ?");
+    $st->execute([$src]);
+    $rows = (int)$st->fetchColumn();
+    $st = $db->prepare("SELECT COUNT(*) FROM index_files f JOIN index_hashes i ON i.info_hash = f.info_hash WHERE i.meta_source = ?");
+    $st->execute([$src]);
+    return ['source' => $src, 'rows' => $rows, 'files' => (int)$st->fetchColumn()];
+}
+
+/**
+ * One batch of the undo. Batched and resumable on purpose: a peer that has been feeding this node
+ * for a month can easily own a million rows, and a single statement over a million rows on a shared
+ * MariaDB is how you take a mail server down as a side effect. Call until it returns 0.
+ */
+function fedPurgeBatch(PDO $db, string $peerName, int $limit = 500): int {
+    $limit = max(1, min(5000, $limit));
+    $src = fedPurgeSource($peerName);
+    $st = $db->prepare("SELECT info_hash FROM index_hashes WHERE meta_source = ? LIMIT $limit");
+    $st->execute([$src]);
+    $hashes = $st->fetchAll(PDO::FETCH_COLUMN);
+    if (!$hashes) return 0;
+    $in = implode(',', array_fill(0, count($hashes), '?'));
+    $db->beginTransaction();
+    try {
+        $db->prepare("DELETE FROM index_files WHERE info_hash IN ($in)")->execute($hashes);
+        $db->prepare(
+            "UPDATE index_hashes
+                SET name = NULL, total_size = NULL, files_count = NULL, piece_length = NULL,
+                    meta_status = 'none', meta_source = NULL, meta_fetched_at = NULL,
+                    meta_origin_at = NULL, meta_error = NULL, meta_claim = NULL,
+                    meta_priority = -1, meta_requested_at = NULL, meta_claimed_at = NULL
+              WHERE info_hash IN ($in)")->execute($hashes);
+        $db->commit();
+    } catch (\Throwable $e) {
+        $db->rollBack();
+        throw $e;
+    }
+    return count($hashes);
 }

@@ -43,6 +43,11 @@ MAX_EXPANDED_BYTES = 512 * 1024 * 1024      # per page after gzip — a bomb fro
 
 # ── validation (pure — covered by --self-test) ──────────────────────────────────
 
+# One quarantined row must not become a megabyte of MEDIUMTEXT. Past this the package is still
+# reviewable and still acceptable — it just arrives without per-file paths. Mirrors the PHP constant.
+FED_REVIEW_FILES_MAX = 2000
+
+
 def sanitize_path(p):
     """One relative, printable file path or None. Mirrors what the local worker would store."""
     if not isinstance(p, str):
@@ -105,9 +110,18 @@ def valid_row(r):
     # batch got to, so it has to survive validation; without it a committed batch could not say what
     # it had covered, and the next run would fetch the same rows for ever.
     mf = nn_int(r.get("mf"), 0, 2**31 - 1) or 0
+    # `mo` is when this description was first resolved ANYWHERE, as opposed to when it reached the
+    # node we are talking to. Nodes older than this field send only `mf`, which has always meant
+    # exactly that on a two-node exchange, so falling back to it is not a guess. Clamped to now,
+    # because a peer with a wrong clock must not be able to make its rows permanently newer than
+    # everybody else's.
+    mo = nn_int(r.get("mo"), 0, 2**31 - 1) or mf
+    now = int(time.time())
+    if mo > now:
+        mo = now
     return {"h": h, "name": name, "size": size, "fc": fc, "pl": pl,
             "seeders": seeders, "leechers": leechers,
-            "first": first, "last": last, "count": count, "files": files, "mf": mf}
+            "first": first, "last": last, "count": count, "files": files, "mf": mf, "mo": mo}
 
 
 def parse_cursor(raw):
@@ -306,7 +320,7 @@ def merge_batch(db, rows, peer_name, cfg, counters, peer_id=None, cursor=None):
     The cursor moves inside the same transaction, so an interrupted run costs exactly one batch:
     whatever was committed was also recorded as fetched, and whatever was not is fetched again.
 
-    `counters` is a dict updated in place: filled / inserted / skipped / files.
+    `counters` is a dict updated in place: filled / inserted / skipped / queued / files.
     """
     if not rows:
         return
@@ -315,6 +329,7 @@ def merge_batch(db, rows, peer_name, cfg, counters, peer_id=None, cursor=None):
     keep_files = str(cfg.get("index_keep_files", "1")) == "1"
     grace_days = setting_int(cfg, "index_grace_days", 3, 1, 90)
     max_rows = setting_int(cfg, "index_max_rows", 200000, 10, 5000000)
+    review = str(cfg.get("fed_import_mode", "fill")) == "review"
     source = ("fed:" + peer_name)[:24]
     hashes = [r["h"] for r in rows]
     marks = ",".join(["%s"] * len(hashes))
@@ -324,8 +339,9 @@ def merge_batch(db, rows, peer_name, cfg, counters, peer_id=None, cursor=None):
     try:
         with conn.cursor(pymysql.cursors.DictCursor) as cur:
             # 1. what we already know about these hashes
-            cur.execute("SELECT info_hash, meta_status FROM index_hashes WHERE info_hash IN (%s)" % marks, hashes)
-            known = {r["info_hash"]: r["meta_status"] for r in cur.fetchall()}
+            cur.execute("SELECT info_hash, meta_status, UNIX_TIMESTAMP(meta_origin_at) AS mo"
+                        " FROM index_hashes WHERE info_hash IN (%s)" % marks, hashes)
+            known = {r["info_hash"]: r for r in cur.fetchall()}
 
             # 2. what is off limits — whitelisted or banned, on either side
             cur.execute(
@@ -346,8 +362,16 @@ def merge_batch(db, rows, peer_name, cfg, counters, peer_id=None, cursor=None):
                     counters["skipped"] += 1
                     continue
                 if h in known:
-                    if known[h] in ("done", "fetching"):
+                    if known[h]["meta_status"] in ("done", "fetching"):
                         counters["skipped"] += 1     # resolved locally — ours wins, always
+                        continue
+                    # Same description, arriving by a different route. With three or more nodes this
+                    # is most of what a pull contains: A tells B, B tells C, C offers it back to A.
+                    # Comparing the ORIGIN rather than the arrival time is what recognises it; the
+                    # arrival time was reset at every hop and says only "recently, to somebody".
+                    mine = known[h]["mo"]
+                    if mine is not None and r["mo"] and int(mine) >= r["mo"]:
+                        counters["skipped"] += 1
                         continue
                     fill.append(r)
                 elif import_new and room:
@@ -357,6 +381,31 @@ def merge_batch(db, rows, peer_name, cfg, counters, peer_id=None, cursor=None):
                     counters["skipped"] += 1
 
             todo = fill + add
+
+            # ── quarantine ───────────────────────────────────────────────────
+            # In review mode nothing the peer sent reaches the catalogue. It is parked, complete,
+            # in fed_review and an admin decides. INSERT IGNORE on (info_hash, peer_name) means a
+            # row already waiting is not duplicated AND one already rejected is not offered again —
+            # the rejection is the record of a decision, so it has to outlive the row it refused.
+            if review and todo:
+                qargs = []
+                for r in todo:
+                    files_json = None
+                    truncated = 0
+                    if r["files"]:
+                        keep = r["files"][:FED_REVIEW_FILES_MAX]
+                        truncated = 1 if len(r["files"]) > FED_REVIEW_FILES_MAX else 0
+                        files_json = json.dumps([[p, sz] for p, sz in keep], separators=(",", ":"))
+                    qargs.append((r["h"], peer_id, peer_name[:64], r["name"], r["size"], r["fc"],
+                                  r["pl"], r["mo"] or None, files_json, truncated))
+                cur.executemany(
+                    "INSERT IGNORE INTO fed_review"
+                    " (info_hash, peer_id, peer_name, name, total_size, files_count, piece_length,"
+                    "  origin_at, files_json, files_truncated)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, FROM_UNIXTIME(%s), %s, %s)", qargs)
+                counters["queued"] += len(qargs)
+                todo = []
+
             if todo:
                 # One statement for both cases. The ON DUPLICATE guard repeats the policy check
                 # because a row can turn 'done' between the SELECT above and this INSERT — the local
@@ -366,13 +415,14 @@ def merge_batch(db, rows, peer_name, cfg, counters, peer_id=None, cursor=None):
                 # written LAST. Put it first and every IF() below would read the value this very
                 # statement just set, and the guard would protect nothing.
                 cols = ("info_hash, name, first_seen, last_seen, seen_count, last_seeders, last_leechers,"
-                        " grace_until, meta_status, meta_fetched_at, meta_source, total_size, files_count, piece_length")
+                        " grace_until, meta_status, meta_fetched_at, meta_origin_at, meta_source,"
+                        " total_size, files_count, piece_length")
                 tpl = ("(%s, %s, COALESCE(%s, NOW()), COALESCE(%s, NOW()), %s, %s, %s,"
-                       " NOW() + INTERVAL %s DAY, 'done', NOW(), %s, %s, %s, %s)")
+                       " NOW() + INTERVAL %s DAY, 'done', NOW(), COALESCE(FROM_UNIXTIME(%s), NOW()), %s, %s, %s, %s)")
                 args = []
                 for r in todo:
                     args += [r["h"], r["name"], r["first"], r["last"], r["count"], r["seeders"],
-                             r["leechers"], grace_days, source, r["size"], r["fc"], r["pl"]]
+                             r["leechers"], grace_days, (r["mo"] or None), source, r["size"], r["fc"], r["pl"]]
                 sql = ("INSERT INTO index_hashes (" + cols + ") VALUES " + ",".join([tpl] * len(todo)) +
                        " ON DUPLICATE KEY UPDATE"
                        "  name = IF(meta_status IN ('done','fetching'), name, VALUES(name)),"
@@ -381,6 +431,7 @@ def merge_batch(db, rows, peer_name, cfg, counters, peer_id=None, cursor=None):
                        "  piece_length = IF(meta_status IN ('done','fetching'), piece_length, VALUES(piece_length)),"
                        "  meta_source = IF(meta_status IN ('done','fetching'), meta_source, VALUES(meta_source)),"
                        "  meta_fetched_at = IF(meta_status IN ('done','fetching'), meta_fetched_at, NOW()),"
+                       "  meta_origin_at = IF(meta_status IN ('done','fetching'), meta_origin_at, VALUES(meta_origin_at)),"
                        "  meta_error = IF(meta_status IN ('done','fetching'), meta_error, NULL),"
                        "  meta_claim = IF(meta_status IN ('done','fetching'), meta_claim, NULL),"
                        "  meta_status = IF(meta_status IN ('done','fetching'), meta_status, 'done')")
@@ -486,7 +537,7 @@ def sync_peer(db, peer, cfg, deadline=None):
     batch = setting_int(cfg, "fed_export_max_batch", 2000, 100, 20000)
     batch_rows = setting_int(cfg, "fed_import_batch_rows", 500, 25, 5000)
     batch_bytes = setting_int(cfg, "fed_import_batch_bytes", 33554432, 1048576, 268435456)
-    counters = {"filled": 0, "inserted": 0, "skipped": 0, "files": 0}
+    counters = {"filled": 0, "inserted": 0, "skipped": 0, "queued": 0, "files": 0}
     pages = 0
     status = "ok"
     streamed = True
@@ -554,15 +605,17 @@ def sync_peer(db, peer, cfg, deadline=None):
     except Exception as e:
         status = ("error: %s" % e)[:255]
 
-    summary = "%s: +%d filled, +%d new, %d skipped, %d files, %d page(s)%s" % (
+    summary = "%s: +%d filled, +%d new, %d skipped, %d files, %d page(s)%s%s" % (
         status, counters["filled"], counters["inserted"], counters["skipped"],
-        counters["files"], pages, "" if streamed else " [buffered]")
+        counters["files"], pages, "" if streamed else " [buffered]",
+        (", %d awaiting review" % counters["queued"]) if counters["queued"] else "")
     log.info("[%s] %s", name, summary)
     db.query(
         "UPDATE fed_peers SET last_pull_at=NOW(), last_pull_cursor=%s, last_status=%s,"
         " rows_imported=rows_imported+%s WHERE id=%s",
-        ("%d:%s" % (since, after), summary[:255], counters["filled"] + counters["inserted"], peer["id"]))
-    return counters["filled"] + counters["inserted"]
+        ("%d:%s" % (since, after), summary[:255],
+         counters["filled"] + counters["inserted"] + counters["queued"], peer["id"]))
+    return counters["filled"] + counters["inserted"] + counters["queued"]
 
 
 def run_once(db, only_peer=None, force=False, max_seconds=None):
@@ -714,6 +767,65 @@ def cap_memory(mb):
         return None
 
 
+def purge_peer(db, peer_name, dry_run=False, batch=500):
+    """
+    Undo everything one peer ever contributed (F7).
+
+    Undo means putting each row back to unresolved, NOT deleting it: the hash was observed by this
+    tracker's own swarm and carries local history — first_seen, seen_count, the seeder peaks — that
+    the peer never provided and has no claim on. Only the description came from them, so only the
+    description goes.
+
+    Batched because a peer that has fed this node for a month can own a million rows, and one
+    statement over a million rows on a MariaDB shared with mail and a forum is how you cause an
+    outage somewhere you were not even working.
+    """
+    source = ("fed:" + peer_name)[:24]
+    rows = db.query("SELECT COUNT(*) AS c FROM index_hashes WHERE meta_source=%s", (source,), fetch=True)
+    total = int(rows[0]["c"]) if rows else 0
+    log.info("purge %s: %d row(s) carry %s", peer_name, total, source)
+    if dry_run:
+        log.info("dry run — nothing written")
+        return total
+    if not total:
+        return 0
+    import pymysql
+    done = 0
+    conn = db._connect()
+    while True:
+        with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            cur.execute("SELECT info_hash FROM index_hashes WHERE meta_source=%s LIMIT %s", (source, batch))
+            hashes = [r["info_hash"] for r in cur.fetchall()]
+        if not hashes:
+            break
+        marks = ",".join(["%s"] * len(hashes))
+        conn.begin()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM index_files WHERE info_hash IN (%s)" % marks, hashes)
+                cur.execute(
+                    "UPDATE index_hashes SET name=NULL, total_size=NULL, files_count=NULL,"
+                    " piece_length=NULL, meta_status='none', meta_source=NULL, meta_fetched_at=NULL,"
+                    " meta_origin_at=NULL, meta_error=NULL, meta_claim=NULL, meta_priority=-1,"
+                    " meta_requested_at=NULL, meta_claimed_at=NULL"
+                    " WHERE info_hash IN (%s)" % marks, hashes)
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        done += len(hashes)
+        if done % 5000 < batch:
+            log.info("purge %s: %d/%d", peer_name, done, total)
+    # The quarantine queue is theirs too, rejections included: the peer is gone, and so is the
+    # record of what was refused from it.
+    db.query("DELETE FROM fed_review WHERE peer_name=%s", (peer_name,))
+    log.info("purge %s: done, %d row(s) returned to unresolved", peer_name, done)
+    return done
+
+
 def main():
     ap = argparse.ArgumentParser(description="Federation metadata importer")
     ap.add_argument("conf", nargs="?", help="path to tracker-metadata.conf (its [db] section is used)")
@@ -721,6 +833,10 @@ def main():
     ap.add_argument("--peer", help="sync only the peer with this name")
     ap.add_argument("--force", action="store_true", help="ignore fed_enabled / pull_enabled flags")
     ap.add_argument("--self-test", action="store_true", help="run offline validation tests and exit")
+    ap.add_argument("--purge", metavar="PEER",
+                    help="undo everything imported from PEER: its rows go back to unresolved (the hashes "
+                         "and their local history stay). Combine with --dry-run to only count.")
+    ap.add_argument("--dry-run", action="store_true", help="with --purge: count, change nothing")
     ap.add_argument("--max-seconds", type=int, default=None,
                     help="time budget for one pass (default: the fed_import_max_seconds setting)")
     ap.add_argument("--mem-mb", type=int, default=None,
@@ -750,6 +866,9 @@ def main():
     if capped:
         log.info("address space capped at %d MB", capped // (1024 * 1024))
 
+    if args.purge:
+        purge_peer(db, args.purge, args.dry_run)
+        return
     if not args.loop:
         run_once(db, args.peer, args.force, args.max_seconds)
         return
