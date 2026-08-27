@@ -136,7 +136,7 @@ function netlimitStateDefaults(): array {
         'panic'         => ['until' => 0, 'restore_pps' => 0, 'restore_enabled' => 0],
         'status'        => null, 'status_at' => 0,
         'manual_rules'  => null, 'manual_at' => 0,   // foreign rate-limit rules on the port (scanned rarely)
-        'last_error'    => null, 'last_error_at' => 0,
+        'last_error'    => null, 'last_error_at' => 0, 'last_ok_at' => 0,
         'last_apply_at' => 0, 'last_apply_pps' => 0, 'last_apply_source' => '',
         'last_prune_at' => 0, 'last_tick_at' => 0,
     ];
@@ -243,6 +243,11 @@ function netlimitStatus(array $cfg, bool $fresh = false, ?int $now = null): arra
     $status = $r['json'];
     if (!array_key_exists('manual_rules', $status)) $status['manual_rules'] = (array)($state['manual_rules'] ?? []);
     netlimitStateUpdate(function (array &$s) use ($status, $now, $startedAt, $brief) {
+        // When the helper answers cleanly, an older failure describes a condition that no longer
+        // holds. Keeping the record but stamping the success lets the card stop shouting about it
+        // without pretending it never happened — an intermittent fault still shows, because its
+        // timestamp would be the newer one.
+        $s['last_ok_at'] = $now;
         if (!$brief) { $s['manual_rules'] = $status['manual_rules']; $s['manual_at'] = $now; }
         // A poll that started before an apply must not park its stale answer in the cache with a
         // fresh timestamp: the write happens after the apply cleared it, so it would win. The

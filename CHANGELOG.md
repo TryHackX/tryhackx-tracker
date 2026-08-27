@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format is loosely b
   was spliced into the middle of the reply — right after `"file_pps":40000` — and nothing could
   parse it. The probe is silenced properly now, and each reply is written in a single `printf`, so a
   stray line can only ever land on a line of its own, which the panel already skips.
+- **A failure the helper had recovered from sat on the card in red for ever.** Nothing ever cleared
+  `last_error`, so a fault fixed minutes ago still read as live. The status now stamps `last_ok_at`
+  on every clean answer and the card shows a failure only while it is newer than that — the record
+  is kept, and an intermittent fault still surfaces, because its timestamp would be the newer one.
 - **The median / P95 / peak marks under the slider collapsed into a smudge.** On a saturated port
   they sit within a fraction of a percent of each other, which on the logarithmic track is the same
   pixel. Colliding labels now take a row of their own, with their tick extended down to meet them —

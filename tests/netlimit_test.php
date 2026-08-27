@@ -406,6 +406,28 @@ STUB);
     $r = $run('egress 10');
     check('helper: egress rate is validated too', $r['rc'] !== 0);
 
+    // ── a failure the helper has recovered from must stop being news ─────────
+    // A one-off used to sit on the card in red for ever: nothing ever cleared last_error, so a
+    // fault that was fixed minutes ago still looked live.
+    netlimitStateUpdate(function (array &$st) {
+        $st['last_error'] = 'something went wrong once';
+        $st['last_error_at'] = time() - 60;
+        $st['last_ok_at'] = 0;
+        return true;
+    });
+    $st = netlimitStateRead();
+    check('state: a failure newer than the last clean answer is still shown',
+          (int)$st['last_error_at'] > (int)($st['last_ok_at'] ?? 0));
+    netlimitStateUpdate(function (array &$st) { $st['last_ok_at'] = time(); return true; });
+    $st = netlimitStateRead();
+    check('state: … and is hidden once the helper answers cleanly again',
+          (int)$st['last_error_at'] <= (int)$st['last_ok_at']);
+    check('state: … but the record itself is kept, not erased',
+          $st['last_error'] === 'something went wrong once');
+    netlimitStateUpdate(function (array &$st) {
+        $st['last_error'] = null; $st['last_error_at'] = 0; $st['last_ok_at'] = 0; return true;
+    });
+
     // ── stray stderr must never land inside the JSON ─────────────────────────
     // This is what broke a healthy firewall in production: dir_writable() probed the directory with
     // `: >"$probe" 2>/dev/null`, bash applies redirections left to right, so the "Read-only file

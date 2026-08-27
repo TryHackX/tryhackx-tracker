@@ -87,8 +87,13 @@ if ((int)($state['last_apply_at'] ?? 0) > 0) {
 // admin's decision without a word.
 $out['persist_deferred'] = !empty($state['persist_deferred']);
 $out['last_persist_at'] = (int)($state['last_persist_at'] ?? 0);
-$out['last_error'] = $state['last_error'] ?? null;
-$out['last_error_at'] = (int)($state['last_error_at'] ?? 0);
+// A failure the helper has since recovered from is history, not news: show it only while it is
+// newer than the last clean answer. Otherwise a one-off sat on the card in red for ever.
+$lastErrAt = (int)($state['last_error_at'] ?? 0);
+$lastOkAt  = (int)($state['last_ok_at'] ?? 0);
+$out['last_error'] = $lastErrAt > $lastOkAt ? ($state['last_error'] ?? null) : null;
+$out['last_error_at'] = $lastErrAt;
+$out['last_ok_at'] = $lastOkAt;
 $out['last_tick_at'] = (int)($state['last_tick_at'] ?? 0);
 
 // The measured advice. Cheap (one indexed range scan over at most a few 10 000 rows) and it is what
