@@ -50,7 +50,15 @@
         let out = null;
         // A restart resets every counter, so a negative delta means "different process" and the
         // honest answer is to start again rather than to draw a chart of nonsense.
-        if (prev && clk > 0 && now > prev.at) {
+        //
+        // MIN_WINDOW is not arbitrary. The kernel counts thread time in 10 ms ticks, so over a one
+        // second window a single tick of rounding is a ten per cent error, and two forced refreshes
+        // in quick succession can produce a thread apparently running at several hundred per cent.
+        // Three seconds puts the quantisation under half a per cent. There is no maximum: a
+        // background tab has its timers throttled to minutes, but the wall clock is still right, so
+        // a long gap gives a longer average rather than a wrong one.
+        const MIN_WINDOW = 3;
+        if (prev && clk > 0 && now > prev.at && (now - prev.at) >= MIN_WINDOW * 1000) {
             const secs = (now - prev.at) / 1000;
             const cpuTicks = (cur.busy + cur.idle) - (prev.busy + prev.idle);
             const busyTicks = cur.busy - prev.busy;
@@ -67,6 +75,11 @@
                 threads.push({ tid: t.tid, name: t.name, pct: pct });
             });
             const dropDelta = cur.drops - prev.drops;
+            // One thread cannot exceed one core. If it appears to, the counters and the clock
+            // disagree about something — a suspended tab, a corrected clock — and the reading is
+            // discarded rather than shown, because a bar at 600% teaches the reader nothing except
+            // to distrust the panel.
+            if (hottest > 105) restarted = true;
             if (!restarted && threads.length) {
                 threads.sort((a, b) => b.pct - a.pct);
                 out = {
@@ -76,6 +89,9 @@
                 };
             }
         }
+        // The baseline always advances, including when the reading above was discarded: the next
+        // poll then measures against something recent rather than against a stale sample whose
+        // window has grown to an hour.
         prev = cur;
         return out;
     }
