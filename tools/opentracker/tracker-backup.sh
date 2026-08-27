@@ -493,11 +493,20 @@ action_worker() {
         archive="$d/$id.sql.gz"
         write_state "$d" running id="$id" mode="$mode" profile="$profile" items="$items" \
             started_at="$started" pid="$$" step="dumping database $dbname" bytes=0 archive="" error="" encrypted=false verified=null
+        # The profile has to mean the same thing here as it does with the toolkit: "light" leaves out
+        # the two index tables (on a real install they are by far the biggest and they rebuild
+        # themselves from the swarm). Ignoring the profile would make the panel's own description of
+        # what it is doing false.
+        local dumpargs=()
+        case "$items" in
+            *tracker-db-lekka*) dumpargs+=(--ignore-table="$dbname.index_hashes" --ignore-table="$dbname.index_files")
+                                note "light profile: skipping $dbname.index_hashes and $dbname.index_files" ;;
+        esac
         note "builtin dump of database $dbname -> $archive"
         install -m 0600 /dev/null "$archive"
         # --single-transaction keeps InnoDB consistent WITHOUT locking the tables the tracker is
         # writing to; the shared MariaDB serves several other sites on this box.
-        if ! ( set -o pipefail; "$MARIADB_DUMP" --single-transaction --routines --triggers --quick "$dbname" | gzip -c >"$archive" ) 2>>"$(log_file "$d")"; then
+        if ! ( set -o pipefail; "$MARIADB_DUMP" --single-transaction --routines --triggers --quick "${dumpargs[@]}" "$dbname" | gzip -c >"$archive" ) 2>>"$(log_file "$d")"; then
             rm -f -- "$archive"
             write_state "$d" failed id="$id" mode="$mode" profile="$profile" items="$items" \
                 started_at="$started" finished_at="$(date +%s)" pid=0 step="failed" bytes=0 archive="" \

@@ -219,7 +219,8 @@ fi
 echo "stub: nothing to do" >&2; exit 1
 STUB);
     // Stub MariaDB clients: the dump prints SQL, the client swallows it into a file we can inspect.
-    file_put_contents($tmp . '/bin/mariadb-dump', "#!/bin/bash\nprintf -- '-- builtin dump of %s\\nCREATE TABLE x (id INT);\\n' \"\${!#}\"\nexit 0\n");
+    // records the arguments it was handed, so a test can prove the profile reached the dump client
+    file_put_contents($tmp . '/bin/mariadb-dump', "#!/bin/bash\nprintf '%s\\n' \"\$*\" > \"\$DUMPARGS_TO\"\nprintf -- '-- builtin dump of %s\\nCREATE TABLE x (id INT);\\n' \"\${!#}\"\nexit 0\n");
     file_put_contents($tmp . '/bin/mariadb', "#!/bin/bash\nfor a in \"\$@\"; do case \"\$a\" in -e) exit 0 ;; esac; done\ncat > \"\$IMPORTED_TO\"\nexit 0\n");
     // the helper refuses to touch anything unless it is root, which no test runner is
     file_put_contents($tmp . '/bin/id', "#!/bin/bash\n[ \"\$1\" = \"-u\" ] && { echo 0; exit 0; }\nexec /usr/bin/id \"\$@\"\n");
@@ -231,6 +232,7 @@ STUB);
     putenv('MARIADB_DUMP_BIN=' . $posix($tmp . '/bin/mariadb-dump'));
     putenv('MARIADB_BIN=' . $posix($tmp . '/bin/mariadb'));
     putenv('IMPORTED_TO=' . $posix($tmp . '/imported.sql'));
+    putenv('DUMPARGS_TO=' . $posix($tmp . '/dumpargs.txt'));
     $pathBefore = (string)getenv('PATH');
     putenv('PATH=' . $tmp . DIRECTORY_SEPARATOR . 'bin' . PATH_SEPARATOR . $pathBefore);
 
@@ -431,6 +433,22 @@ STUB);
     $r = $run('verify ' . $q($dir) . ' ' . $q((string)$st4['id']));
     check('helper: the built-in dump verifies as a gzip stream', ($r['json']['ok'] ?? null) === true
           && str_contains((string)($r['json']['message'] ?? ''), 'gzip'), $r['out']);
+    $args = (string)@file_get_contents($tmp . '/dumpargs.txt');
+    check('helper: the database-only profile dumps everything', !str_contains($args, '--ignore-table'), $args);
+
+    // The profile has to mean the same thing without the toolkit as with it: "light" leaves out the
+    // two index tables, and saying so in the UI while dumping them anyway would be a lie.
+    @unlink($tmp . '/dumpargs.txt');
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-lekki --db tracker');
+    check('helper: the built-in light run starts', ($r['json']['started'] ?? null) === true, $r['out']);
+    $st5 = $waitDone($dir, $t0);
+    check('helper: the built-in light run finishes', ($st5['state'] ?? '') === 'done', json_encode($st5));
+    $args = (string)@file_get_contents($tmp . '/dumpargs.txt');
+    check('helper: the light profile skips index_hashes', str_contains($args, '--ignore-table=tracker.index_hashes'), $args);
+    check('helper: the light profile skips index_files', str_contains($args, '--ignore-table=tracker.index_files'), $args);
+    check('helper: … and says so in the log', str_contains((string)($st5['log_tail'] ?? ''), 'light profile: skipping'), (string)($st5['log_tail'] ?? ''));
+    $run('delete ' . $q($dir) . ' ' . $q((string)$st5['id']));
     $r = $run('restore ' . $q($dir) . ' ' . $q((string)$st4['id']) . ' --items tracker-config');
     check('helper: restoring FILES from a plain dump is refused', $r['rc'] !== 0, $r['out']);
 
@@ -445,9 +463,10 @@ STUB);
     foreach (glob($tmp . '/dir/.*') ?: [] as $f) { if (is_file($f)) @unlink($f); elseif (is_dir($f) && !in_array(basename($f), ['.', '..'], true)) { foreach (glob($f . '/*') ?: [] as $g) @unlink($g); @rmdir($f); } }
     foreach (glob($tmp . '/bin/*') ?: [] as $f) @unlink($f);
     @unlink($tmp . '/imported.sql');
+    @unlink($tmp . '/dumpargs.txt');
     @rmdir($tmp . '/dir'); @rmdir($tmp . '/bin'); @rmdir($tmp);
     putenv('PATH=' . $pathBefore);
-    foreach (['BACKUP_ALLOW_ANY_DIR', 'BACKUP_SCRIPT', 'MARIADB_DUMP_BIN', 'MARIADB_BIN', 'IMPORTED_TO'] as $v) putenv($v);
+    foreach (['BACKUP_ALLOW_ANY_DIR', 'BACKUP_SCRIPT', 'MARIADB_DUMP_BIN', 'MARIADB_BIN', 'IMPORTED_TO', 'DUMPARGS_TO'] as $v) putenv($v);
 }
 
 echo "\n$n checks, $fails failed" . ($skips ? ", $skips skipped" : '') . "\n";
