@@ -15,14 +15,7 @@
     <div class="admin-container admin-wide wl-page">
         <div class="admin-header">
             <h2><i class="bi bi-archive"></i> Backups <span class="idx-subtitle">database &amp; configuration archives</span></h2>
-            <div class="admin-header-actions">
-                <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-flag"></i> Reports</a>
-                <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
-                <a href="<?= $baseUrl ?>?action=admin-index" class="btn btn-sm btn-outline-info"><i class="bi bi-collection"></i> Index</a>
-                <a href="<?= $baseUrl ?>?action=admin-users" class="btn btn-sm btn-outline-info"><i class="bi bi-people"></i> Users</a>
-                <a href="<?= $baseUrl ?>?action=settings#section-backups" class="btn btn-sm btn-outline-info"><i class="bi bi-gear"></i> Settings</a>
-                <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
-            </div>
+            <?php $current = 'admin-backups'; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
         <!-- What this machine can do, what the last run did, and what the schedule will do next -->
@@ -71,7 +64,7 @@
                         <th>Size</th>
                         <th>Contents</th>
                         <th>Integrity</th>
-                        <th class="wl-col-actions">Actions</th>
+                        <th class="th-actions">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="bk-rows">

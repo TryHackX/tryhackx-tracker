@@ -83,6 +83,8 @@ if (in_array($action, $adminPanelActions, true) || $action === $adminLoginAction
             include __DIR__ . '/templates/admin/users.php';
         } elseif ($action === 'admin-backups') {
             include __DIR__ . '/templates/admin/backups.php';
+        } elseif ($action === 'admin-traffic') {
+            include __DIR__ . '/templates/admin/traffic.php';
         } else {
             include __DIR__ . '/templates/admin/dashboard.php';
         }

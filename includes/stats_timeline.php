@@ -26,7 +26,7 @@
  * stats_timeline_default_range (which one opens) and stats_timeline_custom_range (0/1: a free span
  * slider; its spans are snapped to statsTimelineCustomStops() so each one caches like a named range).
  * The chart is mounted by statsTimelineMountAttrs() on the public stats page and on the admin Index
- * and Whitelist pages.
+ * and Traffic pages.
  */
 
 const ST_INTERVAL_MIN   = 30;

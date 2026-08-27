@@ -297,7 +297,7 @@
         if (n) el.textContent = n;
     });
 
-    /** #section-… links (e.g. from the Whitelist page's "Timeline settings" button) still work. */
+    /** #section-… links (e.g. from the Traffic page's "Timeline settings" button) still work. */
     function openHash() {
         const id = (location.hash || '').replace('#', '');
         if (!id) return;

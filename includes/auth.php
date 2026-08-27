@@ -17,12 +17,34 @@ function isLoggedIn(): bool {
 function adminReservedActions(): array {
     return ['home', 'info', 'tos', 'report', 'status', 'transparency', 'unsubscribe', 'stats',
             'whitelist', 'login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search',
-            'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-backups', 'notfound'];
+            'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-backups',
+            'admin-traffic', 'notfound'];
 }
 
 /** The panel actions that exist regardless of where the sign-in form lives. */
 function adminPanelActions(): array {
-    return ['admin', 'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-backups'];
+    return ['admin', 'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-backups',
+            'admin-traffic'];
+}
+
+/**
+ * The panel's navigation bar, in the order it is shown. Every page renders the WHOLE list through
+ * templates/admin/_header_actions.php, current page included and marked active — each template used
+ * to carry its own hand-edited copy with its own link simply deleted, which is why you could not see
+ * where you were, and why the dashboard linked to no sub-page at all.
+ *
+ * `anchor` is the Settings deep link to use while that page is open, so "Settings" still lands on
+ * the section you were just looking at.
+ */
+function adminNavItems(): array {
+    return [
+        ['action' => 'admin',           'label' => 'Reports',   'icon' => 'bi-flag',        'anchor' => ''],
+        ['action' => 'admin-whitelist', 'label' => 'Whitelist', 'icon' => 'bi-list-check',  'anchor' => ''],
+        ['action' => 'admin-index',     'label' => 'Index',     'icon' => 'bi-collection',  'anchor' => '#section-index'],
+        ['action' => 'admin-traffic',   'label' => 'Traffic',   'icon' => 'bi-speedometer2','anchor' => '#section-netlimit'],
+        ['action' => 'admin-users',     'label' => 'Users',     'icon' => 'bi-people',      'anchor' => '#section-users'],
+        ['action' => 'admin-backups',   'label' => 'Backups',   'icon' => 'bi-archive',     'anchor' => '#section-backups'],
+    ];
 }
 
 /** The ?action= value that opens the admin sign-in form (default 'admin'; garbage falls back). */

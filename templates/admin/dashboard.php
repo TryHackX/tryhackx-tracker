@@ -17,23 +17,7 @@
         <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
         <div class="admin-header">
             <h2><i class="bi bi-flag"></i> Reports <span class="idx-subtitle">abuse reports, appeals &amp; tracker status</span></h2>
-            <div class="admin-header-actions">
-                <?php if ($svcName !== ''): ?>
-                <div class="tracker-svc" id="tracker-svc">
-                    <button type="button" class="tracker-warn-badge d-hidden" id="tracker-warn-badge" tabindex="0" aria-label="Tracker restart recommendations">
-                        <i class="bi bi-exclamation-triangle-fill"></i><span id="tracker-warn-count" class="tracker-warn-count"></span>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-outline-info tracker-reload-btn" id="btn-reload-tracker" title="Reload the tracker blacklist (SIGHUP, no downtime) — <?= sanitize($svcName) ?>">
-                        <i class="bi bi-arrow-clockwise"></i> Reload
-                    </button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary tracker-restart-btn" id="btn-restart-tracker" title="Restart the tracker service (<?= sanitize($svcName) ?>)">
-                        <i class="bi bi-bootstrap-reboot"></i> Restart tracker
-                    </button>
-                </div>
-                <?php endif; ?>
-                <a href="<?= $baseUrl ?>?action=settings" class="btn btn-sm btn-outline-info"><i class="bi bi-gear"></i> Settings</a>
-                <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
-            </div>
+            <?php $current = 'admin'; $navExtra = $svcName !== '' ? __DIR__ . '/_tracker_service.php' : null; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
         <!-- Source Tabs -->
@@ -42,12 +26,14 @@
             <button class="source-tab" data-source="archives"><i class="bi bi-archive"></i> Archives <span id="archives-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="appeals"><i class="bi bi-megaphone"></i> Appeals <span id="appeals-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="appeal_archives"><i class="bi bi-archive"></i> Appeal Archives</button>
-            <!-- Plain link, not a data-source tab: no data-source attr and a separate class so admin.js's
-                 .source-tab click handler never binds to it. -->
-            <a href="<?= $baseUrl ?>?action=admin-whitelist" class="source-tab-link" title="Open the whitelist page"><i class="bi bi-list-check"></i> Whitelist</a>
-            <a href="<?= $baseUrl ?>?action=admin-index" class="source-tab-link" title="Open the observed-hash index"><i class="bi bi-collection"></i> Index</a>
-            <a href="<?= $baseUrl ?>?action=admin-users" class="source-tab-link" title="Open the user accounts page"><i class="bi bi-people"></i> Users</a>
-            <a href="<?= $baseUrl ?>?action=admin-backups" class="source-tab-link" title="Open the backups page"><i class="bi bi-archive"></i> Backups</a>
+            <!-- Plain links, not data-source tabs: no data-source attr and a separate class so admin.js's
+                 .source-tab click handler never binds to them. The header bar above now lists every page
+                 too; these stay because they are where this dashboard has always kept them, and they are
+                 built from the same list so a new page cannot be forgotten in one place and not the other. -->
+            <?php foreach (adminNavItems() as $navItem): ?>
+                <?php if ($navItem['action'] === 'admin') continue; ?>
+                <a href="<?= $baseUrl ?>?action=<?= $navItem['action'] ?>" class="source-tab-link" title="Open the <?= strtolower($navItem['label']) ?> page"><i class="bi <?= $navItem['icon'] ?>"></i> <?= $navItem['label'] ?></a>
+            <?php endforeach; ?>
         </div>
 
         <!-- Toolbar -->

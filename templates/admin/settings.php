@@ -13,14 +13,7 @@
     <div class="admin-container admin-wide">
         <div class="admin-header">
             <h2><i class="bi bi-gear"></i> Settings</h2>
-            <div class="admin-header-actions">
-                <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-flag"></i> Reports</a>
-                <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
-                <a href="<?= $baseUrl ?>?action=admin-index" class="btn btn-sm btn-outline-info"><i class="bi bi-collection"></i> Index</a>
-                <a href="<?= $baseUrl ?>?action=admin-users" class="btn btn-sm btn-outline-info"><i class="bi bi-people"></i> Users</a>
-                <a href="<?= $baseUrl ?>?action=admin-backups" class="btn btn-sm btn-outline-info"><i class="bi bi-archive"></i> Backups</a>
-                <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
-            </div>
+            <?php $current = 'settings'; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
         <!-- Sub-menu + search. The visible labels/hints below are indexed by the browser; the hidden
@@ -926,7 +919,7 @@
             <!-- Statistics Timeline -->
             <div class="settings-section" id="section-timeline" data-group="stats" data-title="Statistics Timeline">
                 <h5>Statistics Timeline</h5>
-                <small class="settings-hint d-block mb-3">Records the tracker statistics over time (seeds, leechers, peers, torrents, announce rates, tracker mode) and draws a stock-style chart on the public <strong>/?action=stats</strong> page and on the admin Whitelist page. Samples are taken by the <strong>janitor timer</strong> (<code>tools/janitor.php</code>, every minute — see README) and, for free, by every upstream refresh the stats page makes; roll-ups (5 min / 1 h) and retention run from the same timer. Requires <em>Tracker Statistics</em> above to be enabled with a valid Stats Source URL.</small>
+                <small class="settings-hint d-block mb-3">Records the tracker statistics over time (seeds, leechers, peers, torrents, announce rates, tracker mode) and draws a stock-style chart on the public <strong>/?action=stats</strong> page and on the admin Traffic page. Samples are taken by the <strong>janitor timer</strong> (<code>tools/janitor.php</code>, every minute — see README) and, for free, by every upstream refresh the stats page makes; roll-ups (5 min / 1 h) and retention run from the same timer. Requires <em>Tracker Statistics</em> above to be enabled with a valid Stats Source URL.</small>
                 <div class="row g-3">
                     <div class="col-md-3">
                         <label class="form-label">Enable Timeline</label>
@@ -1141,7 +1134,7 @@
                     <strong>Inbound</strong> (this section): packets dropped by the firewall never reach OpenTracker, so a swarm that keeps
                     hammering the port costs no CPU. <strong>Outbound</strong> (<code>tools/opentracker/egress-budget/ottrack.nft</code>):
                     capping what the tracker <em>answers</em> is what keeps the rest of the machine reachable. The panel drives the first and
-                    shows the second side by side on the <a href="<?= $baseUrl ?>?action=admin-whitelist#net-card">Whitelist page</a>.
+                    shows the second side by side on the <a href="<?= $baseUrl ?>?action=admin-traffic#net-card">Traffic page</a>.
                     <br>
                     Everything here is applied through the root helper <code>tools/opentracker/tracker-netlimit.sh</code>, which writes
                     <strong>one file</strong> (<code>/etc/nftables.d/ottrack-in.nft</code>) in <strong>its own nftables table</strong>
@@ -1157,7 +1150,7 @@
                         </select>
                         <small class="settings-hint">
                             Turn it on <em>first</em>: the suggested threshold is computed from what was measured, not guessed.
-                            The counters live in the firewall, so the Whitelist page offers <strong>Start counting</strong> &mdash; the same table with
+                            The counters live in the firewall, so the Traffic page offers <strong>Start counting</strong> &mdash; the same table with
                             <strong>no drop rule at all</strong>, which measures without throttling anything.
                         </small>
                     </div>
@@ -1181,7 +1174,7 @@
                 <h6 class="mt-4 mb-1" id="section-netlimit-throttle">Inbound limit <small class="settings-hint fw-normal">(the throttle)</small></h6>
                 <p class="settings-hint mb-2">
                     Saving here records what the panel <em>should</em> load &mdash; it does not touch the firewall. Loading, previewing and
-                    removing the rule live on the <a href="<?= $baseUrl ?>?action=admin-whitelist#net-card">Whitelist page</a>, behind the
+                    removing the rule live on the <a href="<?= $baseUrl ?>?action=admin-traffic#net-card">Traffic page</a>, behind the
                     admin password, with the measured median / P95 / peak drawn on the slider.
                 </p>
                 <div class="row g-3">

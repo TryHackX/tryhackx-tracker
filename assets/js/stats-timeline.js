@@ -1,5 +1,5 @@
 /**
- * Swarm timeline chart (uPlot) — shared by the public stats page and the admin Whitelist page.
+ * Swarm timeline chart (uPlot) — shared by the public stats page and the admin Traffic page.
  *
  * Mount points: any element with [data-timeline]; attributes:
  *   data-api    = api base (".../api.php?endpoint=")  (falls back to APP_API / body[data-api-base])
