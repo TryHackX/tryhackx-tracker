@@ -231,6 +231,10 @@ function settingsCatalogKeywords(): array {
         'fed_export_max_bytes'     => 'federation export page byte budget size limit streaming ndjson memory',
         'fed_export_max_files'     => 'federation export page file records budget limit streaming ndjson memory',
         'fed_import_new'           => 'federation import add new hashes from peers incoming',
+        'fed_import_batch_rows'    => 'federation import micro batch rows per transaction memory streaming',
+        'fed_import_batch_bytes'   => 'federation import micro batch bytes memory ceiling ram streaming',
+        'fed_import_max_seconds'   => 'federation import time budget per pass worker timer seconds',
+        'fed_worker_mem_mb'        => 'federation import worker memory limit rlimit ram megabytes hard cap',
         'fed_pull_minutes'         => 'federation pull interval minutes sync frequency',
 
         // ── Backups (includes/backup.php) ──

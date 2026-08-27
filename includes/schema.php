@@ -553,6 +553,12 @@ function trackerSchemaDefaultSettings(): array {
         'fed_export_max_bytes'        => '8388608',    // 8 MB on the wire
         'fed_export_max_files'        => '200000',
         'fed_import_new'              => '0',
+        // The importer's own ceilings. It runs as a separate process precisely so a big exchange
+        // cannot burn web-request time; these keep it from burning the machine's RAM either.
+        'fed_import_batch_rows'       => '500',
+        'fed_import_batch_bytes'      => '33554432',   // 32 MB held at most, then commit
+        'fed_import_max_seconds'      => '600',        // one pass; the cursor continues next time
+        'fed_worker_mem_mb'           => '256',        // hard RLIMIT_AS — it dies rather than the box
         'fed_pull_minutes'            => '60',
         // schema v10: the admin sign-in address and what other panel URLs answer when signed out
         // (defaults = the classic behaviour of ?action=admin, with the login form nowhere else)

@@ -81,6 +81,7 @@ $allowed = [
     'api_rate_limit_per_min', 'api_rate_limit_bytes_day',
     'fed_enabled', 'fed_node_name', 'fed_export_enabled', 'fed_export_files', 'fed_export_max_batch',
     'fed_export_max_bytes', 'fed_export_max_files',
+    'fed_import_batch_rows', 'fed_import_batch_bytes', 'fed_import_max_seconds', 'fed_worker_mem_mb',
     'fed_import_new', 'fed_pull_minutes',
 ];
 
@@ -160,6 +161,8 @@ $intClamp = [
     // 0 on either budget switches that half off; the ceilings are only a guard against typos
     'api_rate_limit_per_min' => [0, 100000, 60],
     'fed_export_max_bytes' => [0, 1073741824, 8388608], 'fed_export_max_files' => [0, 50000000, 200000],
+    'fed_import_batch_rows' => [25, 5000, 500], 'fed_import_batch_bytes' => [1048576, 268435456, 33554432],
+    'fed_import_max_seconds' => [30, 21600, 600], 'fed_worker_mem_mb' => [64, 4096, 256],
     // UDP monitor + rate limit (includes/netlimit.php)
     'net_sample_seconds' => [NET_SAMPLE_MIN, NET_SAMPLE_MAX, 60], 'net_keep_days' => [NET_KEEP_MIN, NET_KEEP_MAX, 14],
     'net_limit_pps' => [NET_PPS_MIN, NET_PPS_MAX, 30000], 'net_limit_burst' => [NET_BURST_MIN, NET_BURST_MAX, 100],

@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — E3c: the federation importer stops doing four queries per row
+
+### Changed
+- **`worker/federation.py` reads NDJSON and merges in micro-batches.** The old importer issued two
+  to four queries *per row* — on a full 2.17-million-row exchange that is about 6.5 million round
+  trips, which is hours. Rows now accumulate into a batch (500 rows or 32 MB, whichever fills first)
+  and each batch is **one transaction with four bulk statements**: what we already know, what is off
+  limits, one `INSERT … ON DUPLICATE KEY UPDATE` for the lot, and the file lists.
+  - The **cursor moves inside that transaction**, so an interrupted run — a kill, a reboot, a
+    dropped connection — costs at most one batch and leaves nothing to repair.
+  - The upsert repeats the "never overwrite a locally resolved row" policy in its `ON DUPLICATE`
+    guard, because the local worker runs at the same time and its result must win. The assignments
+    are ordered so `meta_status` is written **last**: MariaDB evaluates them left to right, and any
+    other order would have every guard read the value the same statement had just set.
+  - A **hard `RLIMIT_AS`** (`fed_worker_mem_mb`, default 256 MB) sits under all of it. Every other
+    guard is a promise about arithmetic; this one is what makes the process die instead of the
+    machine, and the timer restarts it from the last committed batch.
+  - `--max-seconds` bounds a pass so a one-minute timer cannot stack copies of itself on a slow peer.
+  - A peer whose export predates NDJSON is detected from its `Content-Type` and served by the old
+    buffered path — through the same merge, so only our memory profile differs.
+  - Measured against the live catalogue (the server importing from itself): **36 741 rows, 19 pages,
+    35 s, 50 MB peak RSS**, and a second run took 0 s because the cursor had nothing left to fetch.
+
+### Fixed
+- `valid_row()` dropped the `mf` field, so a committed batch could not say what it had covered and
+  the cursor never advanced — every run would have re-fetched the same page for ever. Caught by
+  running it against the real catalogue rather than a fixture.
+
 ## [Unreleased] — the outbound budget did not survive a reboot
 
 ### Fixed

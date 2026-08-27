@@ -665,6 +665,26 @@
                         <small class="settings-hint">0 = no limit. 8388608 = 8 MB, measured on the wire.</small>
                     </div>
                     <div class="col-md-3">
+                        <label class="form-label">Import batch (rows)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_import_batch_rows" value="<?= sanitize($cfg['fed_import_batch_rows'] ?? '500') ?>" min="25" max="5000">
+                        <small class="settings-hint">Rows the importer holds before it commits. The cursor moves with the batch, so an interrupted run costs at most this many rows &mdash; never a repair job.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Import batch (bytes)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_import_batch_bytes" value="<?= sanitize($cfg['fed_import_batch_bytes'] ?? '33554432') ?>" min="1048576" max="268435456" step="1048576">
+                        <small class="settings-hint">Whichever fills first ends the batch. 33554432 = 32 MB.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Import time budget (s)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_import_max_seconds" value="<?= sanitize($cfg['fed_import_max_seconds'] ?? '600') ?>" min="30" max="21600">
+                        <small class="settings-hint">One pass. What is left is picked up next time &mdash; the cursor makes that free.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Importer memory ceiling (MB)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_worker_mem_mb" value="<?= sanitize($cfg['fed_worker_mem_mb'] ?? '256') ?>" min="64" max="4096">
+                        <small class="settings-hint">A hard <code>RLIMIT_AS</code> on the importer process. Every other guard is a promise about arithmetic; this one is the floor under them &mdash; the process dies rather than the machine, and the timer restarts it from the last committed batch.</small>
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label">File records per export page</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_export_max_files" value="<?= sanitize($cfg['fed_export_max_files'] ?? '200000') ?>" min="0" max="50000000" step="10000">
                         <small class="settings-hint">0 = no limit. A page ends on whichever of the three runs out first, and hands back the cursor &mdash; so a heavy catalogue produces smaller pages on its own.</small>
