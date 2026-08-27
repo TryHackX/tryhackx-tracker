@@ -623,6 +623,58 @@
                 </div>
             </div>
 
+            <!-- OpenTracker performance -->
+            <div class="settings-section" id="section-ot-perf" data-group="tracker" data-title="OpenTracker Performance">
+                <h5>OpenTracker &mdash; performance</h5>
+                <p class="settings-hint mb-2">
+                    The knobs that already exist on any systemd machine, and they are worth nearly all of the
+                    available gain at nearly none of the risk. Everything the panel writes goes into
+                    <strong>one file it owns</strong> &mdash; <code>90-tracker-panel.conf</code> in the unit's drop-in
+                    directory. <code>override.conf</code> and <code>limits.conf</code> were put there by the installer
+                    or by hand and are <strong>never touched</strong>; undo is deleting the panel's one file, which is
+                    what <em>Reset</em> does. <strong>Saving here changes nothing by itself</strong> &mdash; these values
+                    describe what you want, and the Apply button on the
+                    <a href="<?= $baseUrl ?>?action=admin-traffic#ot-card">Traffic page</a> (admin password) is what
+                    puts them in force.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Helper command</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_perf_cmd" value="<?= sanitize($cfg['ot_perf_cmd'] ?? '') ?>" placeholder="sudo -n /usr/local/sbin/tracker-instance.sh">
+                            <button class="btn btn-outline-info" type="button" id="btn-ot-test"><i class="bi bi-clipboard-check"></i> Test</button>
+                        </div>
+                        <small class="settings-hint">Needs a sudoers rule: <code>www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-instance.sh</code>. Empty = the panel can only read, never change.</small>
+                        <div id="ot-test-result" class="mt-2"></div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Nice</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_nice" value="<?= sanitize($cfg['ot_nice'] ?? '-2') ?>" min="-20" max="19">
+                        <small class="settings-hint">Lower = more CPU when the box is busy. &minus;2 is what the install notes recommend; below &minus;5 you start competing with the kernel's own threads.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">CPU weight</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_cpu_weight" value="<?= sanitize($cfg['ot_cpu_weight'] ?? '100') ?>" min="1" max="10000">
+                        <small class="settings-hint">Share of CPU against other services under contention. 100 is the default for everything, so 200 means &ldquo;twice the forum's&rdquo;.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">CPU affinity</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_cpu_affinity" value="<?= sanitize($cfg['ot_cpu_affinity'] ?? '') ?>" placeholder="e.g. 2-5">
+                        <small class="settings-hint">Empty = every core. Pinning helps only when something else on this machine needs cores kept free for it. <strong>Needs a restart.</strong></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Open file limit</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_limit_nofile" value="<?= sanitize($cfg['ot_limit_nofile'] ?? '65536') ?>" min="1024" max="1048576">
+                        <small class="settings-hint"><code>LimitNOFILE</code>. <strong>Needs a restart.</strong></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">UDP workers</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_udp_workers" value="<?= sanitize($cfg['ot_udp_workers'] ?? '') ?>" placeholder="leave empty to keep">
+                        <small class="settings-hint"><code>listen.udp.workers</code> in opentracker's own config &mdash; written to <strong>both</strong> mode files so it cannot change when the tracker switches white/black. Empty leaves it alone. <strong>Read only at start-up: needs a restart.</strong></small>
+                    </div>
+                </div>
+            </div>
+
             <!-- Federation / cluster -->
             <div class="settings-section" id="section-federation" data-group="integrations" data-title="Federation / Cluster">
                 <h5>Federation / Cluster</h5>
@@ -2025,6 +2077,39 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             }
         } catch {
             el.innerHTML = '<span class="text-danger">Network error</span>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
+    });
+
+    // Same shape as the firewall's Test: say what works, and when it does not, say exactly what is
+    // missing rather than a generic failure.
+    document.getElementById('btn-ot-test')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const box = document.getElementById('ot-test-result');
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
+        box.innerHTML = '<span class="text-info">Asking the helper&hellip;</span>';
+        try {
+            const res = await fetch(API_BASE + 'admin/ot_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
+            const j = await res.json();
+            const meta = '<br><small style="color:#a0a0b0;">'
+                + (j.unit ? 'Unit: <code>' + esc(j.unit) + '</code> | ' : '')
+                + (j.cpus ? 'cores: ' + esc(String(j.cpus)) + ' | ' : '')
+                + 'drop-in dir: <code>' + esc(j.dropin_dir || '?') + '</code>'
+                + (j.dropin_writable === false ? ' <span class="text-warning">(read-only for this process)</span>' : '')
+                + '</small>';
+            if (j.ok) {
+                box.innerHTML = '<span class="text-success">&#10003; The panel can read the unit and write its own drop-in.</span>'
+                    + (j.hint ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + esc(j.hint) + '</small>' : '') + meta;
+            } else {
+                box.innerHTML = '<span class="text-danger">&#10007; ' + esc(j.error || 'Test failed') + '</span>'
+                    + (j.hint ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + esc(j.hint) + '</small>' : '') + meta;
+            }
+        } catch {
+            box.innerHTML = '<span class="text-danger">Network error</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;

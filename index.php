@@ -26,6 +26,7 @@ require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/federation.php';
 require_once __DIR__ . '/includes/netlimit.php';
 require_once __DIR__ . '/includes/backup.php';
+require_once __DIR__ . '/includes/opentracker.php';
 
 $db = getDb();
 // A ceiling on how long ONE query may run inside a web request. Not a substitute for writing the

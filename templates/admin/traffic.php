@@ -161,7 +161,76 @@
         </div>
         <?php endif; ?>
 
-        <?php if (!$tlOn && !$netOn): ?>
+        <?php if (otPerfCommand($cfg) !== ''): ?>
+        <!-- How the tracker itself is tuned to handle what the two cards above measure. The knobs
+             live in Settings; this card shows what is IN FORCE, which is not the same thing, and is
+             where the difference between the two becomes visible. -->
+        <div class="wl-status-card nl-card" id="ot-card">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-cpu"></i> OpenTracker &mdash; performance <span class="wl-status-updated" id="ot-updated"></span></h6>
+                <div class="wl-status-actions">
+                    <a href="<?= $baseUrl ?>?action=settings#section-ot-perf" class="btn btn-sm btn-outline-secondary" title="Performance settings"><i class="bi bi-gear"></i> Settings</a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-ot-preview" title="Render the drop-in without writing it"><i class="bi bi-eye"></i> Preview drop-in</button>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="btn-ot-apply"><i class="bi bi-check2-circle"></i> Apply&hellip;</button>
+                    <button type="button" class="btn btn-sm btn-outline-warning" id="btn-ot-workers"><i class="bi bi-diagram-3"></i> Set workers&hellip;</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="btn-ot-restart" title="Restart the tracker service"><i class="bi bi-bootstrap-reboot"></i> Restart&hellip;</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-ot-reset" title="Delete the panel's drop-in"><i class="bi bi-arrow-counterclockwise"></i> Reset&hellip;</button>
+                </div>
+            </div>
+            <div class="wl-status-grid" id="ot-grid">
+                <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading the service&hellip;</div>
+            </div>
+            <div id="ot-notes"></div>
+        </div>
+
+        <!-- One password gate for every operation here, exactly like the firewall's -->
+        <div class="modal fade" id="otConfirmModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content bg-dark">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title"><i class="bi bi-shield-lock text-warning"></i> <span id="ot-modal-title">Change how the tracker runs</span></h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="text-light mb-2" style="font-size:0.9rem;" id="ot-modal-text"></p>
+                        <div class="nl-undo" id="ot-modal-undo"></div>
+                        <form id="ot-confirm-form">
+                            <div class="mb-2 d-hidden" id="ot-workers-row">
+                                <label class="form-label" style="font-size:0.85rem;color:#bbb;">UDP worker threads</label>
+                                <input type="number" class="form-control bg-dark text-light border-secondary" id="ot-workers-input" min="1" max="64" value="4">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label" style="font-size:0.85rem;color:#bbb;">Admin Password *</label>
+                                <input type="password" class="form-control bg-dark text-light border-secondary" id="ot-confirm-password" autocomplete="current-password" required>
+                            </div>
+                            <div class="d-flex justify-content-end gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><i class="bi bi-x-lg"></i> Cancel</button>
+                                <button type="submit" class="btn btn-sm btn-outline-success" id="ot-confirm-ok"><i class="bi bi-check-lg"></i> Confirm</button>
+                            </div>
+                        </form>
+                        <div id="ot-confirm-alert" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- What would be written, before anyone types a password -->
+        <div class="modal fade" id="otPreviewModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content bg-dark">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title"><i class="bi bi-file-earmark-code"></i> <span id="ot-preview-title">Drop-in preview</span></h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <pre class="nl-preview" id="ot-preview-body"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <?php if (!$tlOn && !$netOn && otPerfCommand($cfg) === ''): ?>
         <!-- Both halves are off. An empty page would just look broken, so say which switch turns
              each one on — same shape as the "index disabled" note on the Index page. -->
         <div class="wl-status-card">
@@ -193,6 +262,9 @@
     <?php endif; ?>
     <?php if ($netOn): ?>
     <script src="<?= $baseUrl ?>assets/js/admin-netlimit.js<?= assetVer('assets/js/admin-netlimit.js') ?>"></script>
+    <?php endif; ?>
+    <?php if (otPerfCommand($cfg) !== ''): ?>
+    <script src="<?= $baseUrl ?>assets/js/admin-otperf.js<?= assetVer('assets/js/admin-otperf.js') ?>"></script>
     <?php endif; ?>
 </body>
 </html>

@@ -79,6 +79,7 @@ $allowed = [
     'index_search_enabled', 'index_search_include_whitelist',
     // federation (includes/federation.php + worker/federation.py)
     'api_rate_limit_per_min', 'api_rate_limit_bytes_day',
+    'ot_perf_cmd', 'ot_nice', 'ot_cpu_weight', 'ot_cpu_affinity', 'ot_limit_nofile', 'ot_udp_workers',
     'fed_enabled', 'fed_node_name', 'fed_export_enabled', 'fed_export_files', 'fed_export_max_batch',
     'fed_export_max_bytes', 'fed_export_max_files',
     'fed_import_batch_rows', 'fed_import_batch_bytes', 'fed_import_max_seconds', 'fed_worker_mem_mb',
@@ -160,6 +161,7 @@ $intClamp = [
     'fed_export_max_batch' => [100, 20000, 2000], 'fed_pull_minutes' => [5, 1440, 60],
     // 0 on either budget switches that half off; the ceilings are only a guard against typos
     'api_rate_limit_per_min' => [0, 100000, 60],
+    'ot_nice' => [-20, 19, -2], 'ot_cpu_weight' => [1, 10000, 100], 'ot_limit_nofile' => [1024, 1048576, 65536],
     'fed_export_max_bytes' => [0, 1073741824, 8388608], 'fed_export_max_files' => [0, 50000000, 200000],
     'fed_import_batch_rows' => [25, 5000, 500], 'fed_import_batch_bytes' => [1048576, 268435456, 33554432],
     'fed_import_max_seconds' => [30, 21600, 600], 'fed_worker_mem_mb' => [64, 4096, 256],
@@ -273,6 +275,28 @@ if (isset($data['meta_worker_concurrency']) && $data['meta_worker_concurrency'] 
     $n = is_numeric($data['meta_worker_concurrency']) ? (int)$data['meta_worker_concurrency'] : 0;
     if ($n < 1) $data['meta_worker_concurrency'] = '';
     else $data['meta_worker_concurrency'] = (string)min(16, $n);
+}
+if (isset($data['ot_perf_cmd']) && $data['ot_perf_cmd'] !== '' && !otValidCommand($data['ot_perf_cmd'])) {
+    jsonResponse(['error' => 'The OpenTracker helper command may contain only letters, digits, spaces, dots, slashes, dashes and underscores.'], 400);
+}
+if (isset($data['ot_cpu_affinity'])) {
+    // systemd refuses to START a unit whose CPUAffinity it cannot parse, so a typo saved here would
+    // take the tracker down at the next restart rather than at the moment of the mistake.
+    $data['ot_cpu_affinity'] = trim((string)$data['ot_cpu_affinity']);
+    if ($data['ot_cpu_affinity'] !== '' && !otValidAffinity($data['ot_cpu_affinity'])) {
+        jsonResponse(['error' => 'CPU affinity must look like "2-5" or "0 2 4" — a list systemd understands.'], 400);
+    }
+}
+if (isset($data['ot_udp_workers'])) {
+    // Empty is a real answer: it means "do not touch opentracker's own config".
+    $v = trim((string)$data['ot_udp_workers']);
+    if ($v !== '') {
+        if (!ctype_digit($v) || (int)$v < 1 || (int)$v > OT_WORKERS_MAX) {
+            jsonResponse(['error' => 'UDP workers must be empty (leave alone) or a number from 1 to ' . OT_WORKERS_MAX . '.'], 400);
+        }
+        $v = (string)(int)$v;
+    }
+    $data['ot_udp_workers'] = $v;
 }
 if (isset($data['api_rate_limit_bytes_day'])) {
     // A day's transfer budget is measured in gigabytes, so it does not belong in the shared small-int

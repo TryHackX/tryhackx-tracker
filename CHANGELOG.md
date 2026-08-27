@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — E4: OpenTracker's performance knobs, from the panel (schema v14)
+
+### Added
+- **Settings → OpenTracker performance** and a card on the Traffic page: UDP worker threads, `Nice`,
+  `CPUWeight`, `CPUAffinity` and `LimitNOFILE`. These are the knobs that already exist on any systemd
+  box, and they are worth nearly all of the available gain at nearly none of the risk — which is
+  precisely why they come before extra tracker instances rather than after.
+  - Everything the panel writes goes into **one file it owns**, `90-tracker-panel.conf`.
+    `override.conf` and `limits.conf` were put there by the installer or by hand and are never
+    touched; **Reset** deletes the panel's one file and nothing else. The suite asserts that.
+  - The worker count is different: it lives in opentracker's own config, so it is written to **both**
+    mode files — otherwise the thread count would change when the tracker switched white/black — and
+    the card says plainly that opentracker only reads it at start-up.
+  - A `CPUAffinity` systemd cannot parse makes the unit refuse to *start*. It is therefore rejected
+    when it is typed, not at the next restart.
+  - **Saving a setting changes nothing.** These values say what the admin wants; a password-gated
+    Apply puts them in force, with a preview of the exact file first. A fresh install writes no
+    drop-in at all.
+  - The card shows what is **in force**, read from `systemctl show` and the config files — not the
+    saved settings read back. Where the two differ it says so.
+- **The receive-buffer diagnosis**, which is not a knob and is the thing that actually explains lost
+  announces. opentracker asks the kernel for a socket buffer; the kernel clamps it to
+  `net.core.rmem_max`, and when that fills the packet is discarded *after* the machine has paid to
+  receive it — the worst place to lose it, unlike a firewall drop, which costs nothing. Measured on
+  this server: a 208 KB cap and 555 378 packets already discarded there. The panel reports the number
+  and gives the command; it does not write sysctls, because those are system-wide and belong to
+  whoever owns the machine.
+
 ## [Unreleased] — E3c: the federation importer stops doing four queries per row
 
 ### Changed

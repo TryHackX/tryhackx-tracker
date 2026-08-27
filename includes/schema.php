@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 13;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling
+const TRACKER_SCHEMA_VERSION = 14;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling, 14 = settings only (OpenTracker performance knobs: ot_*)
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -544,6 +544,14 @@ function trackerSchemaDefaultSettings(): array {
         // exactly the shape of traffic that needs a ceiling. 0 = no limit.
         'api_rate_limit_per_min'      => '60',
         'api_rate_limit_bytes_day'    => '5368709120',   // 5 GB
+        // OpenTracker performance knobs. These describe what the admin WANTS; nothing is written
+        // to the unit until Apply is pressed, so a fresh install has no drop-in and behaves as before.
+        'ot_perf_cmd'                 => 'sudo -n /usr/local/sbin/tracker-instance.sh',
+        'ot_nice'                     => '-2',
+        'ot_cpu_weight'               => '100',
+        'ot_cpu_affinity'             => '',
+        'ot_limit_nofile'             => '65536',
+        'ot_udp_workers'              => '',      // empty = leave opentracker's own config alone
         'fed_enabled'                 => '0',
         'fed_node_name'               => '',
         'fed_export_enabled'          => '0',
