@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — "search inside file lists" could take the whole site off the air
+
+### Fixed
+- **One search held every PHP worker for 24 minutes.** Searching inside file lists built the clause
+  `MATCH(name) AGAINST(?) OR info_hash IN (SELECT info_hash FROM index_files WHERE MATCH(path) …)`.
+  MariaDB cannot serve an OR of a fulltext match and a subquery from indexes, so it scans
+  `index_hashes` end to end — 2.5 million rows here — evaluating the subquery as it goes. Each such
+  request occupies a php-fpm child, the pool has five, and every retry started another: the tracker
+  stopped answering entirely while the database sat at 100 % CPU. The file half is now resolved
+  first, on its own FULLTEXT index and with a hard cap, and handed to the main query as a literal
+  key list — two cheap indexed reads instead of one impossible plan. Both the public catalogue
+  search and the admin index search carried the same clause; both are fixed.
+- **A safety net for the next bad plan.** Web requests now set a session `max_statement_time`, so a
+  pathological query costs one visitor an error instead of the site. CLI stays untouched — the
+  janitor, the metadata worker and `mariadb-dump` all run legitimately long statements.
+
 ## [Unreleased] — federation exported nothing at all on MariaDB 11.8
 
 ### Fixed

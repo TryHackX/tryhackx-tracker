@@ -39,6 +39,19 @@ require_once __DIR__ . '/includes/backup.php';
 header('Content-Type: application/json; charset=utf-8');
 
 $db = getDb();
+// A ceiling on how long ONE query may run inside a web request. Not a substitute for writing the
+// query properly — a bad plan is still a bug — but the difference between a bad plan costing one
+// visitor an error page and it holding a php-fpm child until the whole site stops answering. The
+// pool here has five children; one search that ran for twenty-four minutes was enough to take
+// every page down, and each retry started another.
+//
+// SESSION only, and only for requests served over the web: the janitor, the metadata worker and
+// mariadb-dump all run legitimately long statements from the CLI and must not be touched. MariaDB
+// applies it to SELECTs; anything it cannot apply to is left alone.
+if (PHP_SAPI !== 'cli') {
+    try { $db->exec('SET SESSION max_statement_time = 20'); } catch (\Throwable $e) { /* older server: no such variable */ }
+}
+
 $cfg = getSettings($db);
 ensureSchema($db, $cfg);
 

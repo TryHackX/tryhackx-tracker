@@ -650,11 +650,30 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
             $params[] = strtolower($search) . '%';
         } else {
             $likeClause = ['sql' => "name LIKE ?", 'params' => ['%' . $search . '%']];
-            if ($searchFiles) $likeClause = ['sql' => "(name LIKE ? OR info_hash IN (SELECT info_hash FROM index_files WHERE path LIKE ?))", 'params' => ['%' . $search . '%', '%' . $search . '%']];
             $ft = mb_strlen($search) >= 3 ? indexFulltextTerm($search) : '';
+            // Resolve the file half into a bounded list of hashes first, exactly as the public
+            // catalogue search does, and for the same reason: `name … OR info_hash IN (SELECT …)`
+            // cannot be served from indexes, so MariaDB scans index_hashes end to end. That is what
+            // ran for twenty-four minutes and took every php-fpm child with it.
+            $fileHashes = [];
+            if ($searchFiles) {
+                try {
+                    if ($ft !== '') {
+                        $fs = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE) LIMIT " . INDEX_FILE_MATCH_CAP);
+                        $fs->execute([$ft]);
+                    } else {
+                        $fs = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE path LIKE ? LIMIT " . INDEX_FILE_MATCH_CAP);
+                        $fs->execute(['%' . $search . '%']);
+                    }
+                    $fileHashes = $fs->fetchAll(PDO::FETCH_COLUMN);
+                    $fs->closeCursor();
+                } catch (\Throwable $e) { $fileHashes = []; }
+            }
+            $inFiles = $fileHashes ? ('info_hash IN (' . implode(',', array_fill(0, count($fileHashes), '?')) . ')') : '';
+            if ($inFiles) $likeClause = ['sql' => "(name LIKE ? OR $inFiles)", 'params' => array_merge(['%' . $search . '%'], $fileHashes)];
             if ($ft !== '') {
                 $fulltextClause = ['sql' => "MATCH(name) AGAINST(? IN BOOLEAN MODE)", 'params' => [$ft]];
-                if ($searchFiles) $fulltextClause = ['sql' => "(MATCH(name) AGAINST(? IN BOOLEAN MODE) OR info_hash IN (SELECT info_hash FROM index_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE)))", 'params' => [$ft, $ft]];
+                if ($inFiles) $fulltextClause = ['sql' => "(MATCH(name) AGAINST(? IN BOOLEAN MODE) OR $inFiles)", 'params' => array_merge([$ft], $fileHashes)];
             }
         }
     }
@@ -720,6 +739,13 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
  *     include_whitelist (bool). Returns ['rows','total','page','pages','per_page']; each row:
  *     info_hash, name, total_size, files_count, seeders, leechers, last_seen, src ('index'|'whitelist').
  */
+/**
+ * How many hashes a file-list search may pull out of the file index before it stops looking.
+ * The point is not the exact number, it is that there IS one: an unbounded file match on a
+ * million-row table is what took this server off the air for twenty-four minutes.
+ */
+const INDEX_FILE_MATCH_CAP = 5000;
+
 function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     $page = max(1, (int)($q['page'] ?? 1));
     $perPage = max(1, min(100, (int)($q['per_page'] ?? 25)));
@@ -747,8 +773,58 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     $isHash = $search !== '' && preg_match('/^[a-f0-9]{6,40}$/i', $search);
     $ft = ($search !== '' && !$isHash && mb_strlen($search) >= 3) ? indexFulltextTerm($search) : '';
 
+    // ── "search inside file lists": resolve the file half FIRST, and bound it ────────────────
+    //
+    // This used to be one clause: `MATCH(name) AGAINST(?) OR info_hash IN (SELECT … FROM index_files
+    // WHERE MATCH(path) AGAINST(?))`. MariaDB cannot serve an OR of a fulltext match and a subquery
+    // from indexes — it falls back to scanning `index_hashes` end to end (2.5 million rows here) and
+    // evaluating the subquery as it goes. On this server one such search ran for 24 MINUTES at 100 %
+    // CPU, and because every request holds a php-fpm child and the pool has five, the whole site
+    // stopped answering. Each retry started another one.
+    //
+    // Two cheap indexed queries instead of one impossible plan: pull the matching hashes out of the
+    // file index first (its own FULLTEXT, ordered by nothing, hard LIMIT), then hand the main query a
+    // literal list. The cap is the point — a search for "a" must not be allowed to drag a million
+    // rows into an IN list, and a bounded answer beats an unbounded wait.
+    $fileHashes = [];
+    $fileIds = [];
+    if ($searchFiles && $search !== '' && !$isHash) {
+        $capped = false;
+        try {
+            if ($ft !== '') {
+                $st = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE) LIMIT " . (INDEX_FILE_MATCH_CAP + 1));
+                $st->execute([$ft]);
+            } else {
+                // A LIKE with a leading wildcard cannot use an index either, so it is capped harder:
+                // this branch only runs for a search too short for fulltext.
+                $st = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE path LIKE ? LIMIT " . (INDEX_FILE_MATCH_CAP + 1));
+                $st->execute(['%' . $search . '%']);
+            }
+            $fileHashes = $st->fetchAll(PDO::FETCH_COLUMN);
+            $st->closeCursor();
+            if (count($fileHashes) > INDEX_FILE_MATCH_CAP) { array_pop($fileHashes); $capped = true; }
+
+            if ($withWl) {
+                if ($ft !== '') {
+                    $st = $db->prepare("SELECT DISTINCT whitelist_id FROM whitelist_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE) LIMIT " . (INDEX_FILE_MATCH_CAP + 1));
+                    $st->execute([$ft]);
+                } else {
+                    $st = $db->prepare("SELECT DISTINCT whitelist_id FROM whitelist_files WHERE path LIKE ? LIMIT " . (INDEX_FILE_MATCH_CAP + 1));
+                    $st->execute(['%' . $search . '%']);
+                }
+                $fileIds = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+                $st->closeCursor();
+                if (count($fileIds) > INDEX_FILE_MATCH_CAP) { array_pop($fileIds); $capped = true; }
+            }
+        } catch (\Throwable $e) {
+            // A file index that is missing or mid-rebuild must degrade to a name search, not a 500.
+            $fileHashes = []; $fileIds = [];
+        }
+        $q['__files_capped'] = $capped;
+    }
+
     // one arm = [select SQL, params, count SQL, params]; built for fulltext first, LIKE fallback
-    $buildArm = function (bool $wl, bool $useFt) use ($search, $isHash, $ft, $searchFiles): array {
+    $buildArm = function (bool $wl, bool $useFt) use ($search, $isHash, $ft, $searchFiles, $fileHashes, $fileIds): array {
         $tbl = $wl ? 'whitelist' : 'index_hashes';
         $cols = $wl
             ? "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, 0) AS seeders, COALESCE(scrape_leechers, 0) AS leechers,
@@ -772,22 +848,28 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                 $scoreSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
                 $scoreParams = [$ft];
                 $match = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
-                if ($searchFiles) {
-                    $sub = $wl ? "id IN (SELECT whitelist_id FROM whitelist_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE))"
-                               : "info_hash IN (SELECT info_hash FROM index_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE))";
-                    $where[] = "($match OR $sub)";
-                    $params[] = $ft; $params[] = $ft;
+                // The file half was already resolved to a bounded list of keys above, so this is a
+                // primary-key lookup rather than a correlated subquery the optimiser cannot index.
+                $keys = $wl ? $fileIds : $fileHashes;
+                if ($searchFiles && $keys) {
+                    $in = implode(',', array_fill(0, count($keys), '?'));
+                    $col = $wl ? 'id' : 'info_hash';
+                    $where[] = "($match OR $col IN ($in))";
+                    $params[] = $ft;
+                    foreach ($keys as $k) $params[] = $k;
                 } else {
                     $where[] = $match;
                     $params[] = $ft;
                 }
             } else {
                 $like = "name LIKE ?";
-                if ($searchFiles) {
-                    $sub = $wl ? "id IN (SELECT whitelist_id FROM whitelist_files WHERE path LIKE ?)"
-                               : "info_hash IN (SELECT info_hash FROM index_files WHERE path LIKE ?)";
-                    $where[] = "($like OR $sub)";
-                    $params[] = '%' . $search . '%'; $params[] = '%' . $search . '%';
+                $keys = $wl ? $fileIds : $fileHashes;
+                if ($searchFiles && $keys) {
+                    $in = implode(',', array_fill(0, count($keys), '?'));
+                    $col = $wl ? 'id' : 'info_hash';
+                    $where[] = "($like OR $col IN ($in))";
+                    $params[] = '%' . $search . '%';
+                    foreach ($keys as $k) $params[] = $k;
                 } else {
                     $where[] = $like;
                     $params[] = '%' . $search . '%';
