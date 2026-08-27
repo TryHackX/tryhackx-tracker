@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — the panel measures where THIS machine starts to struggle (schema v13)
+
+### Added
+- **A load study.** A packets-per-second number means nothing on its own — 40 000 is trivial on one
+  box and fatal on another. The janitor now records the load average per core beside every traffic
+  sample, and the card turns the pair into the only question worth asking: *at what traffic level did
+  this particular machine stop coping?* Samples are bucketed by the rate that got through, each
+  bucket keeps the **median** load (so one backup run cannot move it), and the answer is the lowest
+  bucket at or above 0.85 per core. It appears as a **`busy` mark on the slider** and as a sentence
+  when the chosen limit sits above it: *a limit the box will never reach is not protection.*
+  What it refuses to do matters more: with fewer than 120 readings, with traffic that barely varied,
+  or with a single unlucky spike, it says **"I do not know"** and explains why in words — a threshold
+  nobody measured would send an admin to throttle a tracker that was coping fine. It also never
+  claims causation: this box runs mail, a forum and a file host too, and the wording says so.
+- **The slider's danger zones now colour both ends.** Red below the rate that is genuinely flowing
+  (a budget under it cuts real traffic), amber for the 30 % of headroom above, and — once the load
+  study has something to say — amber and then red past the point where the machine was already
+  struggling. Both sliders share the ceiling, because they share the machine.
+
+### Fixed
+- **The measurement labels were drawn through by their own tick marks.** Centring each label on its
+  mark put the text directly under the coloured bar; once the bar was lengthened to reach a stacked
+  row it ran straight through the words. Labels now sit beside their tick and flip to the other side
+  near the right-hand end of the track.
+- **A migration referenced a constant from a file it does not load.** The v13 ALTER used
+  `NET_SAMPLE_TABLE`, which lives in `includes/netlimit.php`; any caller loading `schema.php` on its
+  own threw, and since `ensureSchema()` is what writes `schema_version`, the whole migration stopped
+  happening silently. Caught by a test that had been passing only because another suite migrated the
+  database first — that check no longer depends on the order suites run in.
+
 ## [Unreleased] — "search inside file lists" could take the whole site off the air
 
 ### Fixed

@@ -22,6 +22,10 @@ function check(string $name, bool $ok, string $info = ''): void {
 }
 
 $db = getDb(); $cfg = getSettings($db); ensureSchema($db, $cfg);
+// Re-read: ensureSchema() is what WRITES schema_version, so the copy fetched a line above predates
+// it. On a database that some other suite had already migrated this passed by luck; on a genuinely
+// fresh one it read 'none' and failed. Ordering between suites is not something a check should rely on.
+$cfg = getSettings($db, true);
 check('schema version >= 6', (int)($cfg['schema_version'] ?? 0) >= 6, (string)($cfg['schema_version'] ?? 'none'));
 foreach (['index_hashes', 'index_files', 'whitelist', 'whitelist_files', 'banned_hashes'] as $t) $db->exec("TRUNCATE TABLE `$t`");
 @unlink(indexStateFile());

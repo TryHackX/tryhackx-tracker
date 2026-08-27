@@ -30,6 +30,8 @@
     const PPS_MAX = parseInt(card.dataset.max, 10) || 1000000;
     const SLIDER_STEPS = 1000;
 
+    // Mirrors NET_LOAD_BUSY in includes/netlimit.php — shown in the sentences, so it must not drift.
+    const NL_BUSY_LOAD = 0.85;
     const RANGES = [['1h', '1h'], ['6h', '6h'], ['24h', '24h'], ['7d', '7d'], ['14d', '2w'], ['30d', '1m']];
     const SERIES = [
         { key: 'pps_total',  label: 'Arriving',  color: '#4a9eff', on: true },
@@ -399,9 +401,29 @@
             d.row = row;
         });
 
+        // Where the machine itself started to struggle. It belongs on the SAME ruler as the traffic
+        // marks, because that is the comparison being made: this much traffic, that much load.
+        const lc = (state.status && state.status.load_curve) || null;
+        if (lc && lc.busy_pps) {
+            const pctB = ppsToPct(lc.busy_pps);
+            const b = el('span', { className: 'nl-mark nl-mark-busy' + (pctB > 72 ? ' nl-mark-flip' : ''),
+                title: 'Median load reached ' + NL_BUSY_LOAD + ' per core around ' + num(lc.busy_pps) + ' pps' });
+            b.style.left = pctB + '%';
+            b.style.setProperty('--nl-tick-h', '2.6rem');
+            b.appendChild(el('span', { className: 'nl-mark-label', text: 'busy' }));
+            b.querySelector('.nl-mark-label').style.top = (0.15 + 3 * MARK_ROW_REM) + 'rem';
+            marks.appendChild(b);
+        }
+
         defs.forEach(d => {
-            const m = el('span', { className: 'nl-mark ' + d.cls, title: d.title + ': ' + num(d.value) + ' pps' });
+            // Past ~72 % of the track a label placed to the right would hang off the card, so it
+            // swaps to the left of its own tick.
+            const flip = d.pct > 72;
+            const m = el('span', { className: 'nl-mark ' + d.cls + (flip ? ' nl-mark-flip' : ''),
+                                   title: d.title + ': ' + num(d.value) + ' pps' });
             m.style.left = d.pct + '%';
+            // The tick reaches down to its own row so you can tell which label belongs to which
+            // mark; the label sits BESIDE it, so the bar never crosses the text.
             m.style.setProperty('--nl-tick-h', (0.5 + d.row * MARK_ROW_REM) + 'rem');
             const lab = el('span', { className: 'nl-mark-label', text: d.label });
             if (d.row) lab.style.top = (0.15 + d.row * MARK_ROW_REM) + 'rem';
@@ -422,6 +444,18 @@
             // tracker serves, so warning "you would be dropping traffic the tracker normally serves"
             // against it was simply false: here it fired at 48 000 pps while only 39 800 pps was
             // getting through. When a live rate exists, judge against THAT.
+            // A limit ABOVE the point where the machine was already struggling is not protection,
+            // it is a number that will never fire before the box does. Say so — that is the whole
+            // reason for measuring load next to traffic.
+            const lc2 = (state.status && state.status.load_curve) || null;
+            if (lc2 && lc2.busy_pps && cur > lc2.busy_pps) {
+                box.appendChild(el('div', { className: 'text-warning wl-small', text:
+                    'This machine was already at ' + NL_BUSY_LOAD + ' load per core around ' + num(lc2.busy_pps)
+                    + ' pps, so a limit of ' + num(cur) + ' pps would let it get there before the rule ever fires.'
+                    + ' (Load is the whole box — mail and the forum live here too — so treat it as a ceiling, not a verdict.)' }));
+            } else if (lc2 && !lc2.busy_pps && lc2.why) {
+                box.appendChild(el('div', { className: 'wl-small text-muted', text: 'Load study: ' + lc2.why }));
+            }
             const ref = inboundReference();
             if (ref > 0) {
                 if (cur < ref) {
@@ -448,25 +482,58 @@
     // The reference rate is measured, never guessed — with nothing measured yet the zones simply do
     // not appear, because inventing a threshold would be worse than showing none.
     const ZONE_HEADROOM = 1.3;   // amber up to 30 % over the measured rate: no room for a spike
-    function zoneCss(reference) {
-        if (!reference || reference <= 0) return '';
-        const red = ppsToPct(reference);
-        const amber = ppsToPct(Math.min(PPS_MAX, reference * ZONE_HEADROOM));
-        return 'linear-gradient(90deg,'
-            + ' rgba(255,82,82,0.42) 0%, rgba(255,82,82,0.42) ' + red + '%,'
-            + ' rgba(255,183,77,0.34) ' + red + '%, rgba(255,183,77,0.34) ' + amber + '%,'
-            + ' #1c232b ' + amber + '%, #1c232b 100%)';
+    const ZONE_CEILING_SLACK = 1.15;   // amber just over the machine's ceiling, red past that
+
+    // Two different dangers, one track:
+    //   LOW end  — a budget under what is genuinely flowing cuts into traffic that is really there;
+    //   HIGH end — a budget above the rate at which THIS machine was already struggling is not
+    //              protection at all, because the box gives out before the rule ever fires.
+    // The high end only appears once the load study has something to say. Colouring it from a guess
+    // would be worse than leaving it grey, which is exactly what happens with no measurement.
+    function zoneCss(low, ceiling) {
+        const stops = [];
+        const put = (colour, fromPct, toPct) => {
+            if (toPct <= fromPct) return;
+            stops.push(colour + ' ' + fromPct + '%', colour + ' ' + toPct + '%');
+        };
+        const RED = 'rgba(255,82,82,0.42)', AMBER = 'rgba(255,183,77,0.34)', PLAIN = '#1c232b';
+        let cursor = 0;
+        if (low && low > 0) {
+            const red = ppsToPct(low);
+            const amber = ppsToPct(Math.min(PPS_MAX, low * ZONE_HEADROOM));
+            put(RED, 0, red); put(AMBER, red, amber); cursor = amber;
+        }
+        let hiAmber = 100, hiRed = 100;
+        if (ceiling && ceiling > 0) {
+            hiAmber = ppsToPct(ceiling);
+            hiRed = ppsToPct(Math.min(PPS_MAX, ceiling * ZONE_CEILING_SLACK));
+        }
+        put(PLAIN, cursor, Math.max(cursor, hiAmber));
+        if (ceiling && ceiling > 0) { put(AMBER, Math.max(cursor, hiAmber), hiRed); put(RED, hiRed, 100); }
+        if (!stops.length) return '';
+        return 'linear-gradient(90deg, ' + stops.join(', ') + ')';
     }
-    function paintSlider(rangeEl, pps, reference) {
+
+    function paintSlider(rangeEl, pps, reference, ceiling) {
         if (!rangeEl) return;
         rangeEl.style.setProperty('--nl-fill', ppsToPct(pps) + '%');
-        const zones = zoneCss(reference);
+        const zones = zoneCss(reference, ceiling);
         if (zones) rangeEl.style.setProperty('--nl-zones', zones);
         else rangeEl.style.removeProperty('--nl-zones');
         // The thumb takes the colour of the zone it is standing in, so the state is readable at a
         // glance without reading the sentence underneath.
-        rangeEl.classList.toggle('nl-in-danger', !!reference && pps < reference);
-        rangeEl.classList.toggle('nl-in-caution', !!reference && pps >= reference && pps < reference * ZONE_HEADROOM);
+        const tooLow  = !!reference && pps < reference;
+        const tight   = !!reference && pps >= reference && pps < reference * ZONE_HEADROOM;
+        const overTop = !!ceiling && pps > ceiling * ZONE_CEILING_SLACK;
+        const nearTop = !!ceiling && !overTop && pps > ceiling;
+        rangeEl.classList.toggle('nl-in-danger', tooLow || overTop);
+        rangeEl.classList.toggle('nl-in-caution', !tooLow && !overTop && (tight || nearTop));
+    }
+
+    /** The rate at which this machine was measured to be struggling, or 0 when the study has none. */
+    function machineCeiling() {
+        const lc = (state.status && state.status.load_curve) || null;
+        return (lc && lc.busy_pps) ? lc.busy_pps : 0;
     }
 
     // ── outbound budget (table inet ottrack) ─────────────────────────────────
@@ -492,7 +559,7 @@
         wrap.classList.remove('d-hidden');
         eState.ref = egressMeasured(j);
         if (!eState.loaded && eg.pps) { eState.pps = parseInt(eg.pps, 10) || 50000; eState.loaded = true; setEpps(eState.pps); }
-        else paintSlider($('net-epps-range'), eState.pps, eState.ref);
+        else paintSlider($('net-epps-range'), eState.pps, eState.ref, machineCeiling());
         renderEgressScale();
         renderEgressAdvice(eg);
     }
@@ -514,8 +581,10 @@
         if (!marks) return;
         marks.textContent = '';
         if (!eState.ref) return;
-        const m = el('span', { className: 'nl-mark nl-mark-median', title: 'Measured outbound rate: ' + num(eState.ref) + ' pps' });
-        m.style.left = ppsToPct(eState.ref) + '%';
+        const pctE = ppsToPct(eState.ref);
+        const m = el('span', { className: 'nl-mark nl-mark-median' + (pctE > 72 ? ' nl-mark-flip' : ''),
+                               title: 'Measured outbound rate: ' + num(eState.ref) + ' pps' });
+        m.style.left = pctE + '%';
         m.style.setProperty('--nl-tick-h', '0.5rem');
         m.appendChild(el('span', { className: 'nl-mark-label', text: 'sending now' }));
         marks.appendChild(m);
@@ -546,7 +615,7 @@
         eState.pps = Math.max(PPS_MIN, Math.min(PPS_MAX, parseInt(v, 10) || PPS_MIN));
         if (!fromInput) $('net-epps-input').value = eState.pps;
         $('net-epps-range').value = ppsToPos(eState.pps);
-        paintSlider($('net-epps-range'), eState.pps, eState.ref);
+        paintSlider($('net-epps-range'), eState.pps, eState.ref, machineCeiling());
         const eg = (state.status && state.status.firewall && state.status.firewall.egress) || {};
         renderEgressAdvice(eg);
     }
@@ -567,7 +636,7 @@
         range.value = ppsToPos(state.pps);
         // WebKit cannot fill the rail up to the thumb on its own (Gecko has ::-moz-range-progress);
         // the CSS reads --nl-fill as a gradient stop and --nl-zones as the layer beneath it.
-        paintSlider(range, state.pps, inboundReference());
+        paintSlider(range, state.pps, inboundReference(), machineCeiling());
         renderAdvice();
     }
 

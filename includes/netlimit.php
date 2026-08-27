@@ -112,6 +112,16 @@ function netlimitCpuCount(): int {
 }
 
 /** 1-minute load average divided by the core count, or null when it cannot be measured. */
+/**
+ * The load study's thresholds. NET_LOAD_BUSY is "this box is working hard": at 1.0 per core the run
+ * queue matches the cores, so 0.85 is the point where headroom is nearly gone but the machine is
+ * still answering. The three minimums exist so the panel says "I do not know" instead of guessing.
+ */
+const NET_LOAD_BUSY = 0.85;
+const NET_LOAD_MIN_SAMPLES = 120;    // two hours of minute samples before the study says anything
+const NET_LOAD_MIN_BUCKET = 5;       // a busy bucket needs more than one unlucky minute behind it
+const NET_LOAD_MIN_SPREAD = 0.25;    // the rate has to have varied by a quarter of its peak
+
 function netlimitLoadPerCore(): ?float {
     if (!function_exists('sys_getloadavg')) return null;
     $la = @sys_getloadavg();
@@ -651,12 +661,13 @@ function netlimitStoreSample(PDO $db, array $cfg, array $status, int $now): arra
 
     $sql = "INSERT INTO `" . NET_SAMPLE_TABLE . "`
                 (ts, span, in_total, in_passed, in_capped, out_ok, out_capped,
-                 pps_total, pps_passed, pps_capped, epps_ok, epps_capped, limit_pps)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 pps_total, pps_passed, pps_capped, epps_ok, epps_capped, limit_pps, load_x100)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON DUPLICATE KEY UPDATE span = VALUES(span), in_total = VALUES(in_total), in_passed = VALUES(in_passed),
                  in_capped = VALUES(in_capped), out_ok = VALUES(out_ok), out_capped = VALUES(out_capped),
                  pps_total = VALUES(pps_total), pps_passed = VALUES(pps_passed), pps_capped = VALUES(pps_capped),
-                 epps_ok = VALUES(epps_ok), epps_capped = VALUES(epps_capped), limit_pps = VALUES(limit_pps)";
+                 epps_ok = VALUES(epps_ok), epps_capped = VALUES(epps_capped), limit_pps = VALUES(limit_pps),
+                 load_x100 = VALUES(load_x100)";
     $db->prepare($sql)->execute([
         $now, $span,
         $in['in_total'], $in['in_passed'], $in['in_capped'],
@@ -665,8 +676,99 @@ function netlimitStoreSample(PDO $db, array $cfg, array $status, int $now): arra
         $erates === null ? 0 : ($erates['announce_ok'] + $erates['passed_good']),
         $erates === null ? 0 : $erates['capped'],
         (int)($status['pps'] ?? 0),
+        // The load at the moment of the sample. Recorded next to the rate so the panel can later
+        // say at what traffic level THIS machine started struggling, instead of the admin guessing.
+        (function () { $l = netlimitLoadPerCore(); return $l === null ? null : (int)round($l * 100); })(),
     ]);
     return ['stored' => true, 'reason' => '', 'pps' => $rates];
+}
+
+/**
+ * Where does THIS machine start to struggle?
+ *
+ * A packets-per-second number means nothing on its own — 40 000 is trivial on one box and fatal on
+ * another. The panel already records the rate every minute; recording the load average beside it
+ * turns the pair into something an admin can actually act on: at what traffic level did this
+ * particular machine stop coping?
+ *
+ * The method is deliberately dull, because anything cleverer would be pretending to a precision the
+ * data cannot support. Samples are bucketed by the rate that got THROUGH (what the tracker really
+ * handled), each bucket keeps the MEDIAN load per core (a median, so one backup run does not move
+ * it), and the answer is the lowest bucket whose median sits at or above NET_LOAD_BUSY.
+ *
+ * What it refuses to do matters more than what it does:
+ *   · fewer than NET_LOAD_MIN_SAMPLES readings with a load recorded → no answer at all;
+ *   · a rate that barely varied (the observed range is under NET_LOAD_MIN_SPREAD of the peak) →
+ *     no answer, because you cannot tell a busy machine from a busy hour without variety;
+ *   · a busy bucket with fewer than NET_LOAD_MIN_BUCKET readings behind it → not reported.
+ * And it never claims causation: this box also runs mail, a forum and a file host. The wording says
+ * "was busy at", not "was made busy by".
+ *
+ * Returns:
+ *   ['samples'=>int, 'buckets'=>[['pps'=>int,'load'=>float,'n'=>int], …],
+ *    'busy_pps'=>int|null,     the lowest rate whose bucket is at or above the busy threshold
+ *    'peak_load'=>float|null, 'quiet_load'=>float|null,
+ *    'confident'=>bool, 'why'=>string]   'why' explains a null in words the card can print
+ */
+function netlimitLoadCurve(PDO $db, array $cfg, int $days = 7, ?int $now = null): array {
+    $now = $now ?? time();
+    $days = max(1, min(netlimitKeepDays($cfg), $days));
+    $out = ['samples' => 0, 'buckets' => [], 'busy_pps' => null, 'peak_load' => null,
+            'quiet_load' => null, 'confident' => false, 'why' => ''];
+
+    $st = $db->prepare("SELECT pps_passed, load_x100 FROM `" . NET_SAMPLE_TABLE . "`
+                        WHERE ts >= ? AND load_x100 IS NOT NULL AND pps_passed > 0");
+    $st->execute([$now - $days * 86400]);
+    $rows = $st->fetchAll(PDO::FETCH_NUM);
+    $st->closeCursor();
+
+    $out['samples'] = count($rows);
+    if ($out['samples'] < NET_LOAD_MIN_SAMPLES) {
+        $out['why'] = 'not enough readings yet — the load study needs at least ' . NET_LOAD_MIN_SAMPLES
+                    . ' samples with a load recorded, and there are ' . $out['samples'] . '.';
+        return $out;
+    }
+
+    $rates = array_map(static fn($r) => (int)$r[0], $rows);
+    $lo = min($rates); $hi = max($rates);
+    if ($hi <= 0 || ($hi - $lo) < $hi * NET_LOAD_MIN_SPREAD) {
+        $out['why'] = 'the traffic barely varied over this window (' . number_format($lo) . '–'
+                    . number_format($hi) . ' pps), so there is nothing to compare a busy machine against.';
+        return $out;
+    }
+
+    // Ten buckets across the observed range. Fixed-width rather than deciles: an admin reads the
+    // answer as "around N pps", and equal-width buckets keep that sentence honest.
+    $step = max(1, (int)ceil(($hi - $lo) / 10));
+    $bins = [];
+    foreach ($rows as [$pps, $load]) {
+        $b = (int)floor(((int)$pps - $lo) / $step);
+        $bins[$b][] = (int)$load / 100;
+    }
+    ksort($bins);
+    foreach ($bins as $b => $loads) {
+        sort($loads);
+        $mid = count($loads) >> 1;
+        $median = count($loads) % 2 ? $loads[$mid] : ($loads[$mid - 1] + $loads[$mid]) / 2;
+        $out['buckets'][] = ['pps' => $lo + $b * $step + intdiv($step, 2),
+                             'load' => round($median, 2), 'n' => count($loads)];
+    }
+    $loadsAll = array_map(static fn($r) => (int)$r[1] / 100, $rows);
+    $out['peak_load'] = round(max($loadsAll), 2);
+    $out['quiet_load'] = round(min($loadsAll), 2);
+
+    foreach ($out['buckets'] as $bkt) {
+        if ($bkt['load'] >= NET_LOAD_BUSY && $bkt['n'] >= NET_LOAD_MIN_BUCKET) {
+            $out['busy_pps'] = $bkt['pps'];
+            break;
+        }
+    }
+    if ($out['busy_pps'] === null) {
+        $out['why'] = 'this machine never reached a load of ' . NET_LOAD_BUSY . ' per core at any rate seen so far'
+                    . ' (busiest median ' . number_format(max(array_column($out['buckets'], 'load')), 2) . ') — there is no ceiling to warn about yet.';
+    }
+    $out['confident'] = $out['busy_pps'] !== null;
+    return $out;
 }
 
 /** Drop samples older than the retention window. */

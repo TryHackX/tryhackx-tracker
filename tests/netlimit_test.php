@@ -684,6 +684,71 @@ if ($db !== null) {
     $after = (int)$db->query('SELECT COUNT(*) FROM `' . NET_SAMPLE_TABLE . '`')->fetchColumn();
     check('prune: only the row past the retention is dropped', $pruned === 1 && $after === $before - 1, "$pruned / $before → $after");
 
+    // ── the load study: where does THIS machine start to struggle ────────────
+    // A packets-per-second number means nothing on its own. The value of this feature is entirely in
+    // when it REFUSES to answer, so that is most of what is checked here: a threshold nobody
+    // measured would send an admin to throttle a tracker that was coping fine.
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+    $seedLoad = static function (PDO $db, int $t0, int $n, callable $pps, callable $load) {
+        $ins = $db->prepare("INSERT INTO `" . NET_SAMPLE_TABLE . "`
+            (ts,span,in_total,in_passed,in_capped,out_ok,out_capped,pps_total,pps_passed,pps_capped,epps_ok,epps_capped,limit_pps,load_x100)
+            VALUES (?,60,0,0,0,0,0,?,?,0,0,0,0,?)");
+        for ($i = 0; $i < $n; $i++) {
+            $p = (int)$pps($i);
+            $l = $load($i, $p);
+            $ins->execute([$t0 + $i * 60, $p + 1000, $p, $l === null ? null : (int)round($l * 100)]);
+        }
+    };
+    $t0 = time() - 400 * 60;
+
+    // too few readings
+    $seedLoad($db, $t0, 30, static fn($i) => 10000 + $i * 1000, static fn($i, $p) => 0.2 + $i * 0.05);
+    $lc = netlimitLoadCurve($db, $cfgS, 7);
+    check('load study: refuses with too few samples', $lc['busy_pps'] === null && $lc['confident'] === false);
+    check('load study: … and says why in words', str_contains($lc['why'], 'not enough readings'), $lc['why']);
+
+    // plenty of readings but the rate never varied — a busy hour is not a busy machine
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+    $seedLoad($db, $t0, 200, static fn($i) => 40000 + ($i % 3) * 10, static fn($i, $p) => 1.4);
+    $lc = netlimitLoadCurve($db, $cfgS, 7);
+    check('load study: refuses when the traffic barely varied', $lc['busy_pps'] === null, json_encode($lc['busy_pps']));
+    check('load study: … and names the range it saw', str_contains($lc['why'], 'barely varied'), $lc['why']);
+
+    // a machine that never breaks a sweat gets no ceiling invented for it
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+    $seedLoad($db, $t0, 200, static fn($i) => 10000 + $i * 400, static fn($i, $p) => 0.10 + $p / 900000);
+    $lc = netlimitLoadCurve($db, $cfgS, 7);
+    check('load study: an idle machine gets no invented ceiling', $lc['busy_pps'] === null, json_encode($lc['busy_pps']));
+    check('load study: … and says the box never got busy', str_contains($lc['why'], 'never reached'), $lc['why']);
+
+    // and the case it exists for: load that climbs with traffic
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+    $seedLoad($db, $t0, 200, static fn($i) => 10000 + $i * 400,
+              static fn($i, $p) => $p < 50000 ? 0.30 + $p / 200000 : 0.60 + ($p - 50000) / 70000);
+    $lc = netlimitLoadCurve($db, $cfgS, 7);
+    check('load study: finds the rate where the box got busy', is_int($lc['busy_pps']) && $lc['busy_pps'] > 50000 && $lc['busy_pps'] < 90000, json_encode($lc['busy_pps']));
+    check('load study: … is confident about it', $lc['confident'] === true);
+    check('load study: … and the curve rises with the traffic',
+          count($lc['buckets']) >= 8 && $lc['buckets'][0]['load'] < $lc['buckets'][count($lc['buckets']) - 1]['load'],
+          json_encode(array_column($lc['buckets'], 'load')));
+    check('load study: every bucket says how many readings are behind it',
+          count(array_filter($lc['buckets'], static fn($b) => $b['n'] >= 1)) === count($lc['buckets']));
+    check('load study: peak and quiet load are reported', $lc['peak_load'] > $lc['quiet_load']);
+
+    // one unlucky minute must not become a ceiling
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+    $seedLoad($db, $t0, 200, static fn($i) => 10000 + $i * 400,
+              static fn($i, $p) => $i === 7 ? 4.0 : 0.20);   // a single spike, low everywhere else
+    $lc = netlimitLoadCurve($db, $cfgS, 7);
+    check('load study: a single spike is not a ceiling', $lc['busy_pps'] === null, json_encode($lc['busy_pps']));
+
+    // rows without a load reading are skipped, not counted as zero
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+    $seedLoad($db, $t0, 200, static fn($i) => 10000 + $i * 400, static fn($i, $p) => $i % 2 ? null : 1.5);
+    $lc = netlimitLoadCurve($db, $cfgS, 7);
+    check('load study: readings with no load recorded are skipped', $lc['samples'] === 100, (string)$lc['samples']);
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+
     // the janitor tick must not fork anything at all while everything is off
     $offCfg = ['net_monitor_enabled' => '0', 'net_auto_enabled' => '0', 'net_limit_cmd' => '/nonexistent/should-never-run.sh'];
     $tick = netlimitTick($db, $offCfg, $t0);

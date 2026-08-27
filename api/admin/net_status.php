@@ -85,6 +85,10 @@ if ((int)($state['last_apply_at'] ?? 0) > 0) {
 // Applied but not yet written to /etc: php-fpm's mount namespace makes /etc read-only, so the
 // janitor saves it on its next tick. The card has to say so — until then a reboot undoes the
 // admin's decision without a word.
+// Where this machine started struggling, derived from the samples rather than assumed. Cheap:
+// one indexed range scan over the same rows the recommendation already reads.
+try { $out['load_curve'] = netlimitLoadCurve($db, $cfg, (int)($_GET['days'] ?? 7), $now); }
+catch (\Throwable $e) { $out['load_curve'] = null; }
 $out['persist_deferred'] = !empty($state['persist_deferred']);
 $out['last_persist_at'] = (int)($state['last_persist_at'] ?? 0);
 // A failure the helper has since recovered from is history, not news: show it only while it is

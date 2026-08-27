@@ -1333,7 +1333,7 @@ input[type="number"] {
 .nl-tune-value input { width: 8.5rem; text-align: right; }
 /* Room under the track for two rows: the fixed scale, then the measured marks. Both are absolutely
    positioned inside this box. */
-.nl-slider-wrap { position: relative; padding: 0.6rem 0 4.5rem; }
+.nl-slider-wrap { position: relative; padding: 0.6rem 0 5.6rem; }
 
 /* The only input[type=range] in the project. Bootstrap draws it in its LIGHT palette — a near-white
    rail and its own blue thumb — which on a #10161d card reads as a stray element from another page.
@@ -1394,14 +1394,20 @@ input[type="number"] {
 
 /* Three rows deep: the median, P95 and peak of a saturated port sit at the same x, so their labels
    are staggered downwards rather than drawn on top of each other. */
-.nl-marks { position: absolute; left: 0; right: 0; bottom: 0; height: 3.4rem; pointer-events: none; }
+.nl-marks { position: absolute; left: 0; right: 0; bottom: 0; height: 4.5rem; pointer-events: none; }
 .nl-mark { position: absolute; top: 0; width: 0; }
 /* the tick grows down to meet whichever row its own label ended up on */
 .nl-mark::before { content: ''; position: absolute; left: 0; top: -0.55rem; width: 2px; height: var(--nl-tick-h, 0.5rem); background: currentColor; border-radius: 1px; }
-.nl-mark-label { position: absolute; left: 0; top: 0.15rem; transform: translateX(-50%); font-size: 0.68rem; white-space: nowrap; color: inherit; }
+/* Beside the tick, not centred on it. Centring put the text directly under the 2px coloured bar,
+   and once the bar was lengthened to reach a stacked row it drew straight through the words. */
+.nl-mark-label { position: absolute; left: 0.35rem; top: 0.15rem; font-size: 0.68rem; white-space: nowrap; color: inherit; }
+/* …and on the right-hand end of the track it goes to the other side, or it would hang off the card */
+.nl-mark-flip .nl-mark-label { left: auto; right: 0.35rem; }
 .nl-mark-median { color: #66bb6a; }
 .nl-mark-p95 { color: #ffb74d; }
 .nl-mark-peak { color: #ff5252; }
+/* The machine's own limit, not the traffic's — a different kind of fact, so a different colour. */
+.nl-mark-busy { color: #b07cff; }
 .nl-advice { margin-top: 0.2rem; color: #9aa4b2; font-size: 0.8rem; line-height: 1.45; }
 .nl-tune-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.7rem; }
 

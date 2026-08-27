@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 12;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*)
+const TRACKER_SCHEMA_VERSION = 13;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -188,7 +188,11 @@ function trackerSchemaStatements(): array {
             `pps_capped` INT UNSIGNED NOT NULL DEFAULT 0,
             `epps_ok` INT UNSIGNED NOT NULL DEFAULT 0,
             `epps_capped` INT UNSIGNED NOT NULL DEFAULT 0,
-            `limit_pps` INT UNSIGNED NOT NULL DEFAULT 0
+            `limit_pps` INT UNSIGNED NOT NULL DEFAULT 0,
+            -- Load average per core when the sample was taken, x100 (1.25 -> 125). NULL when the
+            -- platform cannot report it: the study skips those rows rather than inventing a zero,
+            -- because a load of nothing and an unknown load are different claims.
+            `load_x100` SMALLINT UNSIGNED DEFAULT NULL
         ) $engine",
 
         // ── Observed-hash index (schema v6, includes/index.php): a catalogue of info hashes seen on the
@@ -355,6 +359,18 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     $out = [];
     if (!schemaColumnExists($db, 'api_clients', 'scope')) {
         $out[] = "ALTER TABLE `api_clients` ADD COLUMN `scope` VARCHAR(32) NOT NULL DEFAULT 'whitelist'";
+    }
+    // v13: machine load next to each traffic sample. net_samples is small (one row a minute,
+    // 14 days by default) so this ALTER is quick even on a busy box.
+    // net_samples is created by the CREATE list above, so by the time the guarded ALTERs run it
+    // always exists — schemaColumnExists() answers false for a missing table anyway.
+    // The literal name, deliberately: NET_SAMPLE_TABLE lives in includes/netlimit.php, and schema.php
+    // is loaded on its own by callers that do not need it. Referencing the constant here made
+    // ensureSchema() throw for them — and since ensureSchema is what writes schema_version, the whole
+    // migration silently stopped happening. The CREATE statement above uses the literal for the same
+    // reason; this must match it.
+    if (!schemaColumnExists($db, 'net_samples', 'load_x100')) {
+        $out[] = "ALTER TABLE `net_samples` ADD COLUMN `load_x100` SMALLINT UNSIGNED DEFAULT NULL";
     }
     // v12: the rate-limit counters live on the client row, so the budget is per key rather than per
     // IP — a federation peer pulls from one address and would otherwise share a bucket with anyone
