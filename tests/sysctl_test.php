@@ -393,6 +393,24 @@ if ($bash === null || !trackerExecAvailable() || !is_file($helper)) {
     check('helper: … while still restoring the values that are sane',
           trim((string)@file_get_contents($tmp . '/proc/net/ipv4/udp_rmem_min')) === '8192');
 
+    // The watchdog revert must not cancel the unit it is running inside. A transient unit that stops
+    // itself never reaches its next command, so the machine keeps the change and the journal shows a
+    // watchdog that "ran" -- found on the live server, not in review.
+    $sh = file_get_contents($root . '/tools/opentracker/tracker-sysctl.sh');
+    check('helper: the scheduled revert is invoked with --watchdog',
+          str_contains($sh, '"$SELF" revert --watchdog'));
+    check('helper: … and that path skips cancelling units, because it is one of them',
+          str_contains($sh, '[ "$from_watchdog" = 1 ] || cancel_reverts'));
+    file_put_contents($tmp . '/proc/net/ipv4/udp_rmem_min', "16384
+");
+    file_put_contents($tmp . '/state/sysctl-baseline.json',
+        '{"captured_at":1,"page_size":4096,"values":{"udp_rmem_min":"4096"}}');
+    $wd = $run('revert --watchdog');
+    check('helper: a watchdog revert still restores the captured value',
+          ($wd['json']['ok'] ?? false) === true
+          && trim((string)@file_get_contents($tmp . '/proc/net/ipv4/udp_rmem_min')) === '4096', $wd['out']);
+    check('helper: … and says which kind of revert it was', ($wd['json']['watchdog'] ?? null) === true);
+
     $chk = $run('check');
     check('helper: check answers with JSON and reports its version',
           is_array($chk['json']) && is_int($chk['json']['version'] ?? null), $chk['out']);

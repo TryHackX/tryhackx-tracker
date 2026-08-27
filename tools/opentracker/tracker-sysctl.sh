@@ -288,11 +288,16 @@ schedule_revert() {
     local secs="$1" nonce="$2"
     command -v "$SYSTEMD_RUN" >/dev/null 2>&1 || return 1
     cancel_reverts
+    # --watchdog matters. Without it the scheduled revert calls cancel_reverts(), which stops every
+    # unit matching the prefix -- including the one it is running inside. systemd kills the process
+    # before it restores anything, the unit is --collect'ed, and the machine is left with the change
+    # in force and a journal that shows a watchdog which "ran". Proven on the server: a transient
+    # unit that stops itself never reaches its next command.
     "$SYSTEMD_RUN" --quiet --collect \
         --unit="$REVERT_UNIT_PREFIX-$nonce" \
         --on-active="${secs}s" \
         --description="Undo the tracker panel's kernel buffer change unless it is confirmed" \
-        "$SELF" revert >/dev/null 2>&1
+        "$SELF" revert --watchdog >/dev/null 2>&1
 }
 cancel_reverts() {
     local u
@@ -506,8 +511,12 @@ action_confirm() {
 }
 
 action_revert() {
+    local from_watchdog=0
+    [ "${1:-}" = "--watchdog" ] && from_watchdog=1
     is_root || fail "revert: must run as root" 2
-    cancel_reverts
+    # The watchdog IS one of those units. Cancelling them from inside one is suicide -- and a
+    # suicide that reads in the journal as a completed revert.
+    [ "$from_watchdog" = 1 ] || cancel_reverts
     local k v restored=0 first=1 out="" removed=0 deferred=0
     if [ -r "$BASELINE_FILE" ]; then
         for k in $ALL_KEYS; do
@@ -526,8 +535,8 @@ action_revert() {
         if rm -f "$CONF_FILE" 2>/dev/null && [ ! -f "$CONF_FILE" ]; then removed=1; else deferred=1; fi
     fi
     rm -f "$ARM_FILE" 2>/dev/null
-    printf '{"ok":true,"reverted":true,"restored":%s,"file_removed":%s,"unpersist_deferred":%s,"values":{%s}}\n' \
-        "$restored" "$(jbool "$removed")" "$(jbool "$deferred")" "$out"
+    printf '{"ok":true,"reverted":true,"watchdog":%s,"restored":%s,"file_removed":%s,"unpersist_deferred":%s,"values":{%s}}\n' \
+        "$(jbool "$from_watchdog")" "$restored" "$(jbool "$removed")" "$(jbool "$deferred")" "$out"
 }
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
@@ -544,7 +553,7 @@ main() {
         preview) reply="$(action_preview "$@")" || rc=$? ;;
         arm)     reply="$(action_arm "$@")" || rc=$? ;;
         confirm) reply="$(action_confirm "${1:-}")" || rc=$? ;;
-        revert)  reply="$(action_revert)" || rc=$? ;;
+        revert)  reply="$(action_revert "${1:-}")" || rc=$? ;;
         --help|-h|help)
             sed -n '2,30p' "$0"; exit 0 ;;
         *)
