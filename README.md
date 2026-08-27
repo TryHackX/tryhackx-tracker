@@ -508,6 +508,63 @@ Two numbers on this card are diagnoses rather than knobs, and both are easy to m
 - **the socket's own drop counter** (`ss -ulnpm`, the `d<N>` in skmem) — how many announces were
   thrown away for exactly that reason.
 
+### Kernel network buffers — the eight knobs, armed rather than applied (1.13.0)
+
+**Admin → Traffic → Kernel network buffers** (helper and window in Settings → *Kernel network
+buffers*; both **off** by default). The card above it can prove that announces are being thrown away
+because the UDP socket's queue was full; this is the only thing in the panel that can do something
+about it, and the only thing that changes a setting belonging to the whole machine rather than to the
+tracker.
+
+Eight keys, named literally in the helper, nothing else reachable:
+`net.core.{rmem_max,wmem_max,rmem_default,wmem_default,netdev_max_backlog}` and
+`net.ipv4.{udp_mem,udp_rmem_min,udp_wmem_min}`.
+
+**Units are the way this breaks a machine**, so they are never the operator's problem: the four
+buffers are a number plus a `B / KiB / MiB` selector, the queue is packets *per CPU* with the
+multiplication shown, and `udp_mem` is typed in MiB and displayed in pages, bytes and share of RAM at
+once. Pages are shown everywhere and typed nowhere — a `3145728` copied from a tuning guide is 3 MB
+if you think it is bytes and **12 GB** because the kernel reads it as pages.
+
+**A change is armed, not applied.**
+
+1. **Apply for a while** (admin password) — the values take effect and a countdown starts. Nothing is
+   written to `/etc`, so a reboot is also a complete undo.
+2. **Keep it** (admin password) — writes `/etc/sysctl.d/99-tracker-panel.conf` and cancels the undo.
+   It asks for the password because it destroys the escape hatch, not because it changes anything.
+3. **Put it back** (no password) — restores the captured values. Deliberately ungated: demanding a
+   password over a session that is already stuttering is the failure the protocol exists to prevent.
+
+If nobody confirms, **the machine repairs itself**. The undo is scheduled through `systemd-run`
+*before* the change is made, so it needs neither this panel, nor PHP, nor MariaDB, nor an
+administrator who can still open a session; the janitor is a second, coarser layer behind it. Both
+were verified end to end on the reference deployment.
+
+**The panel writes nothing.** php-fpm here runs with `ProtectKernelTunables=yes`, which makes
+`/proc/sys` read-only inside its mount namespace — for root too, `sudo` included, because it is a
+namespace and not a permission bit. The endpoint records what was asked for and the janitor performs
+it, which also means the process that will undo a change is the one that made it.
+
+**Nothing is suggested that a counter on the machine does not support.** The queue length is not
+offered while `/proc/net/softnet_stat`'s dropped column is flat; `udp_mem` is not offered while the
+pool is nowhere near its pressure threshold; the send side says outright that no measurement points
+at it. And the card makes the comparison nobody makes by hand: the kernel stores
+`sk_rcvbuf = 2 × min(request, rmem_max)`, so a socket sitting at exactly `rmem_default` never called
+`setsockopt(SO_RCVBUF)` — **opentracker does not** — which means raising the *ceiling* alone changes
+nothing at all, and only the *default* reaches that socket.
+
+```bash
+sudo install -m 0755 tools/opentracker/tracker-sysctl.sh /usr/local/sbin/tracker-sysctl.sh
+echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-sysctl.sh' | sudo tee /etc/sudoers.d/tracker-sysctl
+sudo chmod 0440 /etc/sudoers.d/tracker-sysctl && sudo visudo -c -f /etc/sudoers.d/tracker-sysctl
+
+sudo /usr/local/sbin/tracker-sysctl.sh check     # can the panel reach the kernel from here
+sudo /usr/local/sbin/tracker-sysctl.sh status    # every value, the counters, and what else sets them
+sudo /usr/local/sbin/tracker-sysctl.sh revert    # undo everything the panel ever changed
+```
+
+Undo without the panel and without the script: `sudo rm /etc/sysctl.d/99-tracker-panel.conf && sudo reboot`.
+
 ### OpenTracker service reload & restart
 
 OpenTracker reads its blacklist file **only at startup**, so a blocked/unblocked hash doesn't take

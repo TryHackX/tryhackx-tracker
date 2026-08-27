@@ -4,6 +4,66 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] — 2026-08-27 (schema v16)
+
+### Added — the kernel's network buffers, from the panel
+
+- **Admin → Traffic → Kernel network buffers.** Eight keys, off by default. The page could already
+  prove that announces were being discarded because the UDP socket's queue was full, and could only
+  print "run this sysctl yourself" — correct, unexplained, and handing an operator a machine-wide
+  change with no measurement behind it and no way back.
+  - **Units are chosen in the panel, never typed as the kernel counts them.** Bytes with a
+    `B/KiB/MiB` selector, packets *per CPU* with the multiplication shown, and `udp_mem` typed in MiB
+    while pages, bytes and share of RAM are displayed at once. The value that started this — a
+    `net.ipv4.udp_mem = 3145728 4194304 6291456` from a tuning guide — is **12/16/24 GiB on a machine
+    with 11.4 GiB of memory**, and it is refused with that arithmetic quoted back.
+  - **Armed, not applied.** The change takes effect, and puts itself back unless a human confirms.
+    Nothing reaches `/etc` until they do, so until then a reboot is also a complete undo. The undo is
+    scheduled through systemd *before* the change is made: it needs neither the panel, nor PHP, nor
+    MariaDB, nor an administrator who can still log in. The janitor is a second layer behind it, and
+    the countdown shows the worst case rather than the nominal window.
+  - **The panel writes nothing.** php-fpm runs with `ProtectKernelTunables=yes`, so `/proc/sys` is
+    read-only inside its mount namespace — for root as well, because it is a namespace and not a
+    permission bit. The endpoint records the request; the janitor performs it. Which also means the
+    process that will undo a change is the one that made it.
+  - **Nothing is suggested that a counter does not support.** The queue is not offered while
+    softnet's dropped column is flat — on the reference machine it has never moved, and lengthening
+    that queue is the change most likely to make an interactive SSH session stutter, which is exactly
+    what the operator had been bitten by. `udp_mem` is not offered while the pool sits at a few
+    hundred pages of 277,407. The send side states plainly that no local measurement points at it.
+  - **The comparison nobody makes by hand:** the kernel stores `sk_rcvbuf = 2 × min(request,
+    rmem_max)`, so a socket at exactly `rmem_default` never called `setsockopt(SO_RCVBUF)`.
+    opentracker does not — measured, `rb = 212992 = rmem_default`, where twice the ceiling would be
+    425984 — so **raising the ceiling alone changes nothing on this machine**, and the card says so
+    instead of letting an operator conclude the cap was the problem.
+  - Confirm is password-gated because it destroys the escape hatch; revert is not, because demanding
+    a password over a session that is already stuttering is the failure being guarded against. The
+    baseline is captured once, before the first write, and re-validated key by key on the way back
+    rather than replayed as a root-owned file. `udp_mem`'s bounds are relative to what the kernel
+    itself chose, because this machine's factory setting is already 9% of RAM and a flat rule would
+    have refused it.
+
+### Fixed
+
+- **The automatic undo was killing itself before it undid anything.** Found by running it on the
+  live server rather than by reading it: the scheduled unit fired on time, the journal recorded it
+  starting and deactivating successfully, and the value was still changed. `action_revert` begins by
+  cancelling every pending revert unit — right when a human presses the button, fatal when systemd is
+  the caller, because the transient unit's own name matches the pattern and stopping it kills the
+  process mid-flight. Proven with a probe unit that stops itself and then tries to write a file: the
+  file is never written. The scheduled command now carries `--watchdog`, and that path does not
+  cancel, because it is one of the units it would cancel.
+- **`jesc()` did not escape newlines**, so any multi-line content in a helper's JSON reply was
+  invalid JSON — the file preview among them. `tracker-instance.sh` already had the two-pass form.
+- **Reports listed its navigation twice.** The page links in its tab bar predate the shared header
+  bar, which now carries every page; Reports was the only page showing both rows. Every other tab bar
+  switches views and nothing else, and this one now matches.
+- **The outbound budget appeared a second after the page did**, because the block stayed hidden until
+  the firewall answered — so a whole section grew under the reader's cursor, and a budget that had
+  merely not loaded looked like a feature that comes and goes. It now holds its place from the first
+  paint, disabled, saying what it waits for. Its input was also hardcoded to `value="50000"`: a
+  real-looking number that was never read from anything, and the same 50k once reported as stuck.
+
 ## [1.12.0] — 2026-08-27 (schema v15)
 
 Federation you can undo, hold back and stop paying for twice; the tracker's own threads measured

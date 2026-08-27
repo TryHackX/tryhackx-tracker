@@ -43,7 +43,10 @@
         const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
         let i = 0, v = b;
         while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-        return (v >= 100 || i === 0 ? Math.round(v).toLocaleString() : v.toFixed(2)) + ' ' + u[i];
+        if (v >= 100 || i === 0) return Math.round(v).toLocaleString() + ' ' + u[i];
+        // "8.00 MiB" and "8 MiB" are the same number and look like different ones. The operator is
+        // checking this against what they meant to type, so the zeros go.
+        return String(parseFloat(v.toFixed(2))) + ' ' + u[i];
     }
     const num = (v) => (v === null || v === undefined || isNaN(v)) ? '—' : Math.round(v).toLocaleString();
 
