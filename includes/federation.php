@@ -58,7 +58,13 @@ function fedExportRows(PDO $db, array $cfg, int $since, string $afterHash, int $
          FROM index_hashes i
          WHERE meta_status = 'done' AND meta_fetched_at IS NOT NULL
            AND meta_fetched_at < FROM_UNIXTIME(UNIX_TIMESTAMP())
-           AND (meta_fetched_at > FROM_UNIXTIME(?) OR (meta_fetched_at = FROM_UNIXTIME(?) AND info_hash > ?))
+           -- GREATEST(1, ?) is not decoration. MariaDB 11.8 returns NULL for FROM_UNIXTIME(0)
+           -- (unix time 0 is outside the TIMESTAMP range), NULL poisons the comparison, and the
+           -- whole clause becomes unknown — so a peer starting from a cold cursor of 0 received
+           -- an EMPTY page, every time, for ever. MariaDB 11.4 happens to return a value, which
+           -- is why every local test passed while production exported nothing at all.
+           AND (meta_fetched_at > FROM_UNIXTIME(GREATEST(1, ?))
+                OR (meta_fetched_at = FROM_UNIXTIME(GREATEST(1, ?)) AND info_hash > ?))
            AND NOT EXISTS (SELECT 1 FROM banned_hashes b WHERE b.info_hash = i.info_hash)
            AND NOT EXISTS (SELECT 1 FROM whitelist w WHERE w.info_hash = i.info_hash)
          ORDER BY meta_fetched_at, info_hash
@@ -132,7 +138,13 @@ function fedExportStream(PDO $db, array $cfg, int $since, string $afterHash, int
          FROM index_hashes i
          WHERE meta_status = 'done' AND meta_fetched_at IS NOT NULL
            AND meta_fetched_at < FROM_UNIXTIME(UNIX_TIMESTAMP())
-           AND (meta_fetched_at > FROM_UNIXTIME(?) OR (meta_fetched_at = FROM_UNIXTIME(?) AND info_hash > ?))
+           -- GREATEST(1, ?) is not decoration. MariaDB 11.8 returns NULL for FROM_UNIXTIME(0)
+           -- (unix time 0 is outside the TIMESTAMP range), NULL poisons the comparison, and the
+           -- whole clause becomes unknown — so a peer starting from a cold cursor of 0 received
+           -- an EMPTY page, every time, for ever. MariaDB 11.4 happens to return a value, which
+           -- is why every local test passed while production exported nothing at all.
+           AND (meta_fetched_at > FROM_UNIXTIME(GREATEST(1, ?))
+                OR (meta_fetched_at = FROM_UNIXTIME(GREATEST(1, ?)) AND info_hash > ?))
            AND NOT EXISTS (SELECT 1 FROM banned_hashes b WHERE b.info_hash = i.info_hash)
            AND NOT EXISTS (SELECT 1 FROM whitelist w WHERE w.info_hash = i.info_hash)
          ORDER BY meta_fetched_at, info_hash

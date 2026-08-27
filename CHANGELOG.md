@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — federation exported nothing at all on MariaDB 11.8
+
+### Fixed
+- **A peer starting from a cold cursor received an empty page, every time, for ever.** The export
+  cursor compared `meta_fetched_at` against `FROM_UNIXTIME(?)`, and MariaDB **11.8 returns NULL** for
+  `FROM_UNIXTIME(0)` — unix time 0 is outside the TIMESTAMP range. NULL poisons the comparison, the
+  whole clause becomes unknown, and not a single row matches. Found by pointing the export at the
+  real catalogue: 36 862 exportable rows, 0 exported. MariaDB **11.4** — the local test database —
+  returns a value instead, which is exactly why every test passed while production federated
+  nothing. The queries now clamp the cursor away from the epoch, and the suite carries a check that
+  runs for real on a database exhibiting the NULL and skips with a reason on one that does not.
+
 ## [Unreleased] — the panel stops giving advice it cannot back up
 
 ### Added

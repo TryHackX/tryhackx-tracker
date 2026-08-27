@@ -23,6 +23,12 @@ function check(string $name, bool $ok, string $info = ''): void {
     echo ($ok ? 'PASS ' : 'FAIL ') . $name . ($ok || $info === '' ? '' : '  -> ' . $info) . "\n";
     if (!$ok) $fails++;
 }
+$skips = 0;
+function skip(string $name, string $why): void {
+    global $skips; $skips++;
+    echo 'SKIP ' . $name . '  -> ' . $why . "
+";
+}
 function h(int $i): string { return substr(sprintf('%040x', $i * 0x9E3779B1 + 7), -40); }
 
 $db = getDb(); $cfg = getSettings($db); ensureSchema($db, $cfg);
@@ -152,6 +158,35 @@ $cleanHashes = array_column($clean['rows'], 'h');
 check('banned + whitelisted hashes are excluded from the export', !in_array(h(1), $cleanHashes, true) && !in_array(h(2), $cleanHashes, true) && count($cleanHashes) === 10, json_encode($cleanHashes));
 $db->exec("DELETE FROM banned_hashes WHERE info_hash = '" . h(1) . "'");
 $db->exec("DELETE FROM whitelist WHERE info_hash = '" . h(2) . "'");
+
+// ── a cold cursor (since = 0) has to export from the beginning ──────────────
+// This one only ever bit on the server. MariaDB 11.8 returns NULL for FROM_UNIXTIME(0) — unix time
+// 0 is outside the TIMESTAMP range — NULL poisons the comparison, the whole cursor clause becomes
+// unknown, and a peer starting cold received an EMPTY page every single time. MariaDB 11.4 (the
+// local test database) returns a value instead, so every test here passed while production had
+// 36 862 exportable rows and exported none of them. The clamp makes the query independent of it;
+// these checks make sure nobody quietly takes the clamp out again.
+$epochNull = $db->query('SELECT FROM_UNIXTIME(0)')->fetchColumn() === null;
+check('cold cursor and since=1 return the same first page',
+      array_column(fedExportRows($db, $cfgF, 0, '', 5, false)['rows'], 'h')
+      === array_column(fedExportRows($db, $cfgF, 1, '', 5, false)['rows'], 'h'));
+check('cold cursor exports rows at all', count(fedExportRows($db, $cfgF, 0, '', 5, false)['rows']) > 0);
+check('the streaming path agrees with it', (function () use ($db, $cfgF) {
+    $seen = [];
+    fedExportStream($db, $cfgF, 0, '', 5, false, function ($l) use (&$seen) { $seen[] = $l; return strlen($l); });
+    return count($seen) > 0;
+})());
+if ($epochNull) {
+    // We are on a server that actually exhibits it — so this is the real regression test.
+    check('… on a database where FROM_UNIXTIME(0) IS NULL, the export still works',
+          count(fedExportRows($db, $cfgF, 0, '', 5, false)['rows']) > 0);
+} else {
+    skip('cold cursor against a NULL FROM_UNIXTIME(0)',
+         'this MariaDB returns a value for FROM_UNIXTIME(0) (11.4 does, 11.8 does not) — run the suite on the server for this half');
+}
+// The clamp itself, so removing it fails here rather than silently on somebody else's server.
+$sqlHasClamp = str_contains((string)@file_get_contents($root . '/includes/federation.php'), 'FROM_UNIXTIME(GREATEST(1, ?))');
+check('the export queries clamp the cursor away from unix time 0', $sqlHasClamp);
 
 // ── 2. peers CRUD ────────────────────────────────────────────────────────────
 $r = fedPeerSave($db, null, ['name' => 'peer-one', 'base_url' => 'https://other.example.org/', 'bearer' => '', 'pull_enabled' => 1, 'pull_files' => 1]);
@@ -284,5 +319,7 @@ check('export budget accessors: negatives clamp to 0', fedExportMaxFiles(['fed_e
 $db->exec("TRUNCATE TABLE index_hashes");
 $db->exec("TRUNCATE TABLE index_files");
 
-echo "\n$n checks, $fails failed\n";
+echo "
+$n checks, $fails failed" . ($skips ? ", $skips skipped" : '') . "
+";
 exit($fails > 0 ? 1 : 0);
