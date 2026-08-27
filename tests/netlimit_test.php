@@ -462,7 +462,7 @@ if ($db !== null) {
     $t0 = 1800000000;
     $mkStatus = static function (int $total, int $passed, int $capped, int $limit = 30000, int $eOk = 0, int $eGood = 0, int $eCap = 0): array {
         return [
-            'ok' => true, 'pps' => $limit,
+            'ok' => true, 'pps' => $limit, 'table' => true,
             'counters' => ['in_total' => ['packets' => $total], 'in_passed' => ['packets' => $passed], 'in_capped' => ['packets' => $capped]],
             'egress' => ['counters' => ['announce_ok' => ['packets' => $eOk], 'passed_good' => ['packets' => $eGood], 'capped' => ['packets' => $eCap]]],
         ];
@@ -492,6 +492,18 @@ if ($db !== null) {
     // …but the reading after the reset measures normally again
     $r = netlimitStoreSample($db, $cfgS, $mkStatus(600005, 600004, 1), $t0 + 180);
     check('storage: measuring resumes after a reset', $r['stored'] === true && (int)$r['pps']['in_total'] === 10000, json_encode($r['pps'] ?? null));
+
+    // Nothing loaded means nothing is being measured. Storing the zeros it would otherwise read is
+    // how a week of "median 0 pps" happens, and the suggestion built on it is worthless. It also
+    // drops the cursor, because a table that comes back has counters that restarted.
+    $noTable = ['ok' => true, 'pps' => 0, 'table' => false, 'counters' => [], 'egress' => ['counters' => []]];
+    $before = (int)$db->query('SELECT COUNT(*) FROM `' . NET_SAMPLE_TABLE . '`')->fetchColumn();
+    $r = netlimitStoreSample($db, $cfgS, $noTable, $t0 + 240);
+    check('storage: no table loaded means no sample at all', $r['stored'] === false && str_contains($r['reason'], 'nothing is counting'), $r['reason']);
+    check('storage: … and no zero row was written', (int)$db->query('SELECT COUNT(*) FROM `' . NET_SAMPLE_TABLE . '`')->fetchColumn() === $before
+          && (int)$db->query('SELECT COUNT(*) FROM `' . NET_SAMPLE_TABLE . '` WHERE pps_total = 0')->fetchColumn() === 0);
+    check('storage: … and the next reading starts from scratch',
+          netlimitStoreSample($db, $cfgS, $mkStatus(10, 10, 0), $t0 + 300)['reason'] === 'first reading');
 
     // the series the chart reads
     $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');

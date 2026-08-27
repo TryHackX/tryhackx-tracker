@@ -587,6 +587,13 @@ function netlimitSampleDue(array $state, array $cfg, int $now): bool {
  * the chart is independent of how often somebody has the panel open.
  */
 function netlimitStoreSample(PDO $db, array $cfg, array $status, int $now): array {
+    // With no table of ours loaded there are no counters, so every field would be a legitimate-looking
+    // zero — and a run of zeros drags the median to nothing and makes the recommendation a lie. A
+    // missing measurement has to stay missing.
+    if (empty($status['table'])) {
+        netlimitStateUpdate(function (array &$s) { $s['sample'] = ['ts' => 0, 'counters' => []]; return true; });
+        return ['stored' => false, 'reason' => 'nothing is counting — no rules of ours are loaded', 'pps' => null];
+    }
     $in  = netlimitCounterPackets((array)($status['counters'] ?? []), NET_IN_COUNTERS);
     $out = netlimitCounterPackets((array)($status['egress']['counters'] ?? []), NET_OUT_COUNTERS);
     $state = netlimitStateRead();

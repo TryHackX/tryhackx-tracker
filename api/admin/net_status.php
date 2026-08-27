@@ -96,6 +96,7 @@ try {
     // In that state the measured peak is the swarm, not demand, and the wording has to say so.
     $fw = $out['firewall'] ?? [];
     $flood = is_array($fw) && (($fw['mode'] ?? '') === 'count' || !empty($fw['manual_rules']));
+    $out['recommend_days'] = $days;
     $rec['text'] = netlimitRecommendText($rec, $flood);
     $rec['flood'] = $flood;
     $out['recommend'] = $rec;
