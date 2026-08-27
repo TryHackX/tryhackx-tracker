@@ -1928,7 +1928,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 facts.push('mode ' + esc(json.mode || '?') + ', owner ' + esc(json.owner || '?'));
                 if (json.archives !== undefined) facts.push(esc(String(json.archives)) + ' archive(s)');
             } else { facts.push('does not exist yet'); }
-            if (json.free_bytes) facts.push(Math.round(json.free_bytes / 1073741824) + ' GB free');
+            if (json.free_bytes) facts.push(Math.round(json.free_bytes / 1073741824) + ' GiB free');
             if (c.mode) facts.push('mode: ' + esc(c.mode === 'script' ? 'full (Backup-serwera.sh)' : 'built-in (database only)'));
             const meta = '<br><small style="color:#a0a0b0;">' + facts.join(' | ')
                 + '<br>OS: ' + esc(json.os || '') + ' | PHP user: ' + esc(json.php_user || '') + '</small>';

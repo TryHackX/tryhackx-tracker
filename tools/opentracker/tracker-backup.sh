@@ -194,7 +194,11 @@ archive_path() {  # archive_path <dir> <id>
 # Written only by the worker (as root) and read by every action. The panel never writes it.
 write_state() {  # write_state <dir> <state> <key=value>...
     local d="$1" st="$2"; shift 2
-    local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/tbstate.XXXXXX")" || return 1
+    # The temp file lives in the TARGET directory so the final step can be a rename, which is
+    # atomic: `install`/`cp` write into the destination, and the panel polls this file every couple
+    # of seconds — a reader that catches a half-written copy sees "running" with no pid and would
+    # conclude the worker had died.
+    local tmp; tmp="$(mktemp "$d/.tbstate.XXXXXX")" || return 1
     {
         printf '{"state":%s' "$(jstr "$st")"
         local kv k v
@@ -210,8 +214,8 @@ write_state() {  # write_state <dir> <state> <key=value>...
         printf ',"log_tail":%s' "$(jstr "$(tail -n $LOG_TAIL_LINES "$(log_file "$d")" 2>/dev/null || true)")"
         printf ',"ts":%s}\n' "$(date +%s)"
     } >"$tmp"
-    install -m 0600 "$tmp" "$(state_file "$d")" 2>/dev/null || cp "$tmp" "$(state_file "$d")"
-    rm -f "$tmp"
+    chmod 0600 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$(state_file "$d")" || { cp "$tmp" "$(state_file "$d")"; rm -f "$tmp"; }
 }
 
 note() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >>"$(log_file "$WORK_DIR")"; }
@@ -256,7 +260,8 @@ emit_test_path() {
         [ -w "$d" ] && writable=1
         mode="$(stat -c '%a' "$d" 2>/dev/null || true)"
         owner="$(stat -c '%U:%G' "$d" 2>/dev/null || true)"
-        count="$(find "$d" -maxdepth 1 -type f -name 'backup-tryhackx-*' -o -maxdepth 1 -type f -name 'tracker-db-*' 2>/dev/null | grep -c . || true)"
+        # archives only — the sidecars share the prefix, and counting them would double the number
+        count="$(find "$d" -maxdepth 1 -type f \( -name 'backup-tryhackx-*' -o -name 'tracker-db-*' \) ! -name '*.meta.json' 2>/dev/null | grep -c . || true)"
         used="$(du -sb "$d" 2>/dev/null | awk '{print $1+0}')"
         [ "$writable" = "1" ] || { errs="The directory exists but is not writable by root — check the mount and its permissions."; }
         case "$mode" in
@@ -345,8 +350,11 @@ emit_status() {
         state="$(read_state_str "$sf" state)"
         if is_uint "$pid" && [ "$pid" -gt 0 ] && kill -0 "$pid" 2>/dev/null; then running=true; fi
         # A worker that was OOM-killed, or lost to a reboot, never wrote its final state. A card that
-        # says "running" for ever is worse than one that says what actually happened.
-        if [ "$state" = "running" ] && [ "$running" = "false" ]; then
+        # says "running" for ever is worse than one that says what actually happened. This needs a
+        # PID we could actually read, though: a state file we failed to parse is not evidence that
+        # anything died, and declaring the run lost on that basis would be a lie the panel then
+        # keeps repeating.
+        if [ "$state" = "running" ] && [ "$running" = "false" ] && is_uint "$pid" && [ "$pid" -gt 0 ]; then
             write_state "$d" failed id="$(read_state_str "$sf" id)" mode="$(read_state_str "$sf" mode)" \
                 profile="$(read_state_str "$sf" profile)" items="$(read_state_str "$sf" items)" \
                 started_at="$(read_state_num "$sf" started_at)" finished_at="$(date +%s)" pid=0 step="lost" \
