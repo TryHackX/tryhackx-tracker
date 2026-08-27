@@ -14,6 +14,17 @@ function captchaUnavailable() {
 
 let currentPage = 1;
 let sortStack = [{ col: 'date', dir: 'desc' }];
+// The dashboard fired a request on the click itself. The header row is rebuilt whenever the source
+// changes, so this timer has to live out here — one created inside the forEach would give every
+// column its own, and debounce nothing at all.
+const SORT_DEBOUNCE_MS = 900;
+let sortTimer = null;
+function reloadAfterSort() {
+    clearTimeout(sortTimer);
+    sortTimer = setTimeout(() => {
+        (source === 'appeals' || source === 'appeal_archives') ? loadAppeals() : loadReports();
+    }, SORT_DEBOUNCE_MS);
+}
 let currentReport = null;
 let searchTerm = '';
 let filterStatus = 'all';
@@ -80,7 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 sortStack.splice(idx, 1);
             }
             updateSortIcons();
-            (source === 'appeals' || source === 'appeal_archives') ? loadAppeals() : loadReports();
+            reloadAfterSort();
         });
     });
 
@@ -554,7 +565,7 @@ function updateTableHeaders(src) {
                 sortStack.splice(idx, 1);
             }
             updateSortIcons();
-            (source === 'appeals' || source === 'appeal_archives') ? loadAppeals() : loadReports();
+            reloadAfterSort();
         });
     });
 

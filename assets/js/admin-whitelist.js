@@ -46,6 +46,11 @@
         return `hsl(${h % 360} 60% 45%)`;
     }
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+    // Clicking a column header redraws the arrows immediately; only the fetch waits. The wait has to
+    // cover a whole DECISION, not a single click — the direction cycles desc → asc → off, so picking
+    // a column and then its direction is two or three clicks, and at 450 ms the first one had already
+    // fired a request (and, with several sort keys, a wrong one).
+    const SORT_DEBOUNCE_MS = 900;
     function magnetFor(hash, name) {
         let m = 'magnet:?xt=urn:btih:' + hash;
         if (name) m += '&dn=' + encodeURIComponent(name);
@@ -936,10 +941,14 @@
 
     // ───────────────────────── init ─────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
-        const loadWlDebounced = debounce(() => loadWhitelist(), 450);
+        // Same wait on all three tabs: Banned and API bans used to fire on the click itself, which is
+        // the same complaint as a too-short debounce, only worse.
+        const loadWlDebounced = debounce(() => loadWhitelist(), SORT_DEBOUNCE_MS);
+        const loadBnDebounced = debounce(() => loadBanned(), SORT_DEBOUNCE_MS);
+        const loadAbDebounced = debounce(() => loadApiBans(), SORT_DEBOUNCE_MS);
         wlSort = makeSortStack({ table: $('wl-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.wl.page = 1; loadWlDebounced(); } });
-        bnSort = makeSortStack({ table: $('bn-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.bn.page = 1; loadBanned(); } });
-        abSort = makeSortStack({ table: $('ab-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.ab.page = 1; loadApiBans(); } });
+        bnSort = makeSortStack({ table: $('bn-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.bn.page = 1; loadBnDebounced(); } });
+        abSort = makeSortStack({ table: $('ab-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.ab.page = 1; loadAbDebounced(); } });
         wlSort.bindHeaders(); bnSort.bindHeaders(); abSort.bindHeaders();
 
         document.querySelectorAll('#wl-tabs .source-tab').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));

@@ -379,8 +379,13 @@
 
     // ── wiring ─────────────────────────────────────────────────────────────
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+    // Clicking a column header redraws the arrows immediately; only the fetch waits. The wait has to
+    // cover a whole DECISION, not a single click — the direction cycles desc → asc → off, so picking
+    // a column and then its direction is two or three clicks, and at 450 ms the first one had already
+    // fired a request (and, with several sort keys, a wrong one).
+    const SORT_DEBOUNCE_MS = 900;
     function init() {
-        const loadDebounced = debounce(() => load(), 450);
+        const loadDebounced = debounce(() => load(), SORT_DEBOUNCE_MS);
         makeSortStack({ table: $('idx-table'), defaultSort: [{ col: 'last', dir: 'desc' }], onChange: (stack) => { state.sort = stack; state.page = 1; loadDebounced(); } }).bindHeaders();
         $('idx-search').addEventListener('input', debounce(() => { state.search = $('idx-search').value.trim(); state.page = 1; load(); }, 300));
         bindSearchClear($('idx-search'), $('idx-search-clear'), () => { state.search = ''; state.page = 1; load(); });

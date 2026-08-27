@@ -338,9 +338,14 @@
         if (view === 'groups') renderGroups();
     }
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+    // Clicking a column header redraws the arrows immediately; only the fetch waits. The wait has to
+    // cover a whole DECISION, not a single click — the direction cycles desc → asc → off, so picking
+    // a column and then its direction is two or three clicks, and at 450 ms the first one had already
+    // fired a request (and, with several sort keys, a wrong one).
+    const SORT_DEBOUNCE_MS = 900;
 
     document.addEventListener('DOMContentLoaded', () => {
-        const loadUsersDebounced = debounce(() => loadUsers(), 450);
+        const loadUsersDebounced = debounce(() => loadUsers(), SORT_DEBOUNCE_MS);
         usSort = makeSortStack({ table: $('us-table'), defaultSort: [{ col: 'created', dir: 'desc' }], onChange: () => { state.us.page = 1; loadUsersDebounced(); } });
         usSort.bindHeaders();
         document.querySelectorAll('#us-tabs .source-tab').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
