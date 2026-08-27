@@ -26,14 +26,10 @@
             <button class="source-tab" data-source="archives"><i class="bi bi-archive"></i> Archives <span id="archives-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="appeals"><i class="bi bi-megaphone"></i> Appeals <span id="appeals-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="appeal_archives"><i class="bi bi-archive"></i> Appeal Archives</button>
-            <!-- Plain links, not data-source tabs: no data-source attr and a separate class so admin.js's
-                 .source-tab click handler never binds to them. The header bar above now lists every page
-                 too; these stay because they are where this dashboard has always kept them, and they are
-                 built from the same list so a new page cannot be forgotten in one place and not the other. -->
-            <?php foreach (adminNavItems() as $navItem): ?>
-                <?php if ($navItem['action'] === 'admin') continue; ?>
-                <a href="<?= $baseUrl ?>?action=<?= $navItem['action'] ?>" class="source-tab-link" title="Open the <?= strtolower($navItem['label']) ?> page"><i class="bi <?= $navItem['icon'] ?>"></i> <?= $navItem['label'] ?></a>
-            <?php endforeach; ?>
+            <!-- The page links that used to sit here are gone. They predate the shared header bar, which
+                 now lists every page from the same adminNavItems() list; keeping both meant Reports was
+                 the only page showing its navigation twice, once in each row. Every other page's tab bar
+                 switches VIEWS and nothing else, and this one now matches them. -->
         </div>
 
         <!-- Toolbar -->

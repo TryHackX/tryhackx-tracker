@@ -551,14 +551,40 @@
         return (e.announce_ok || 0) + (e.passed_good || 0) + (e.capped || 0);
     }
 
+    function egressEnabled(on) {
+        const ids = ['net-epps-input', 'net-epps-range', 'btn-net-esuggest', 'btn-net-eapply'];
+        ids.forEach(id => { const n = $(id); if (n) n.disabled = !on; });
+    }
+
     function renderEgressTune(j) {
         const wrap = $('net-egress-tune');
         if (!wrap) return;
         const eg = (j.firewall && j.firewall.egress) || {};
-        if (!eg.table) { wrap.classList.add('d-hidden'); return; }
-        wrap.classList.remove('d-hidden');
+        // The block is in the page from the first paint, so "no rule yet" is a state it renders
+        // rather than a reason to vanish: a section that appears a second after the reader arrives
+        // moves everything under their cursor, and one that never appears looks like a missing
+        // feature instead of an absent rule.
+        wrap.classList.remove('nl-tune-pending');
+        if (!eg.table) {
+            egressEnabled(false);
+            const adv = $('net-eadvice');
+            if (adv) {
+                adv.textContent = '';
+                adv.appendChild(el('div', { className: 'nl-note nl-note-info', text:
+                    'There is no outbound rule to tune yet. The panel creates the table inet ottrack the '
+                    + 'first time a budget is applied, or the firewall helper does when it sets one — until '
+                    + 'then the tracker answers at whatever rate it likes, which is the default behaviour.' }));
+            }
+            return;
+        }
+        egressEnabled(true);
         eState.ref = egressMeasured(j);
-        if (!eState.loaded && eg.pps) { eState.pps = parseInt(eg.pps, 10) || 50000; eState.loaded = true; setEpps(eState.pps); }
+        // No invented fallback here either. If the helper reports a budget that does not parse, the
+        // honest state is "we do not know what is in force", which is the disabled state — not 50000,
+        // a real-looking number that was never read from anything.
+        const epps = parseInt(eg.pps, 10);
+        if (!eState.loaded && epps > 0) { eState.pps = epps; eState.loaded = true; setEpps(eState.pps); }
+        else if (!eState.loaded) { egressEnabled(false); }
         else paintSlider($('net-epps-range'), eState.pps, eState.ref, machineCeiling());
         renderEgressScale();
         renderEgressAdvice(eg);

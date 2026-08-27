@@ -91,20 +91,29 @@
                      budget on the way out matters exactly as much as the one on the way in — and it
                      is the one that decides whether the rest of the machine stays reachable. It was
                      read-only here while the helper could already set it. -->
-                <div class="nl-tune d-hidden" id="net-egress-tune">
+                <!-- Present from the first paint, unlike before. The inbound half above is rendered by
+                     PHP from a saved setting, so it is complete the moment the page arrives; this one's
+                     only source of truth is the live nft rule, which takes a helper call to read. Hiding
+                     it until then made the page grow a whole section under the reader's cursor a second
+                     after they got there, and made the outbound budget look like a feature that comes
+                     and goes. It now occupies its space immediately, disabled and saying so.
+                     The input starts EMPTY on purpose: it used to be hardcoded to 50000, which is a real
+                     number that was simply not true, and it was read as the setting for as long as it
+                     took the helper to answer. -->
+                <div class="nl-tune nl-tune-pending" id="net-egress-tune">
                     <div class="nl-tune-head">
                         <span class="nl-tune-title">Outbound budget <span class="nl-unit">(replies the tracker sends)</span></span>
-                        <span class="nl-tune-value"><input type="number" id="net-epps-input" class="form-control form-control-sm bg-dark text-light border-secondary" value="50000" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000" aria-label="Outbound packets per second"> <span class="nl-unit">pps</span></span>
+                        <span class="nl-tune-value"><input type="number" id="net-epps-input" class="form-control form-control-sm bg-dark text-light border-secondary" value="" placeholder="&mdash;" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000" aria-label="Outbound packets per second" disabled> <span class="nl-unit">pps</span></span>
                     </div>
                     <div class="nl-slider-wrap">
-                        <input type="range" class="form-range nl-slider" id="net-epps-range" min="0" max="1000" value="0" aria-label="Outbound packets/second budget">
+                        <input type="range" class="form-range nl-slider" id="net-epps-range" min="0" max="1000" value="0" aria-label="Outbound packets/second budget" disabled>
                         <div class="nl-scale" id="net-escale" aria-hidden="true"></div>
                         <div class="nl-marks" id="net-emarks" aria-hidden="true"></div>
                     </div>
-                    <div class="nl-advice" id="net-eadvice"></div>
+                    <div class="nl-advice" id="net-eadvice"><span class="nl-tune-waiting">Reading the outbound rule from the firewall&hellip;</span></div>
                     <div class="nl-tune-actions">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-net-esuggest" title="Set the slider to a value with headroom over what was measured"><i class="bi bi-magic"></i> Use suggested</button>
-                        <button type="button" class="btn btn-sm btn-outline-success" id="btn-net-eapply"><i class="bi bi-check2-circle"></i> Apply budget&hellip;</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-net-esuggest" title="Set the slider to a value with headroom over what was measured" disabled><i class="bi bi-magic"></i> Use suggested</button>
+                        <button type="button" class="btn btn-sm btn-outline-success" id="btn-net-eapply" disabled><i class="bi bi-check2-circle"></i> Apply budget&hellip;</button>
                     </div>
                 </div>
 

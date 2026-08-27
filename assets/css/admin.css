@@ -1488,3 +1488,8 @@ input[type="number"] {
 .ot-thread-fill { display: block; height: 100%; background: #2f8f5b; transition: width 0.4s ease; }
 .ot-thread-fill.ot-thread-hot { background: #c9663a; }
 .ot-thread-pct { color: #9aa7b4; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* The outbound budget block before the firewall has answered (assets/js/admin-netlimit.js).
+   It holds its place instead of appearing a second late, so nothing moves under the reader. */
+.nl-tune-pending { opacity: 0.55; }
+.nl-tune-waiting { font-size: 0.82rem; color: #6c7a89; font-style: italic; }
