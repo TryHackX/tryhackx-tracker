@@ -34,7 +34,8 @@
      * the previous one gives a true fifteen-second average for nothing, and the very number that
      * decides whether a second tracker instance would help.
      */
-    let prev = null;
+    let prev = null;        // the sample the next reading is measured against
+    let lastGood = null;    // the last reading that was long enough to mean something
 
     function measure(s) {
         const clk = Number(s.clk_tck || 0);
@@ -57,8 +58,13 @@
         // Three seconds puts the quantisation under half a per cent. There is no maximum: a
         // background tab has its timers throttled to minutes, but the wall clock is still right, so
         // a long gap gives a longer average rather than a wrong one.
+        //
+        // MAX_BASELINE is the other end: a laptop that slept for an hour would otherwise produce one
+        // reading averaged over that hour, which is true and useless.
         const MIN_WINDOW = 3;
-        if (prev && clk > 0 && now > prev.at && (now - prev.at) >= MIN_WINDOW * 1000) {
+        const MAX_BASELINE = 600;
+        const age = prev ? (now - prev.at) / 1000 : null;
+        if (prev && clk > 0 && age !== null && age >= MIN_WINDOW && age <= MAX_BASELINE) {
             const secs = (now - prev.at) / 1000;
             const cpuTicks = (cur.busy + cur.idle) - (prev.busy + prev.idle);
             const busyTicks = cur.busy - prev.busy;
@@ -89,10 +95,16 @@
                 };
             }
         }
-        // The baseline always advances, including when the reading above was discarded: the next
-        // poll then measures against something recent rather than against a stale sample whose
-        // window has grown to an hour.
-        prev = cur;
+        // The baseline moves only when it was USED, or when it has become too old to use.
+        //
+        // Advancing it on every poll seemed tidier and was wrong: the card reloads whenever the tab
+        // becomes visible, and a window manager, a screen recorder or a user flicking between tabs
+        // can fire that every second or two. Each of those polls would have reset the baseline, the
+        // window would never have reached three seconds, and the card would have sat on "measuring"
+        // for ever while looking perfectly healthy. Keeping the old baseline means the gap simply
+        // grows until it is wide enough, whatever the polling happens to be doing.
+        if (out || !prev || age === null || age > MAX_BASELINE) prev = cur;
+        if (out) lastGood = out;
         return out;
     }
 
@@ -148,9 +160,16 @@
     // ── status ───────────────────────────────────────────────────────────────
     let seq = 0, painted = 0, busy = 0, busyAt = 0, watchdog = null;
 
+    // Every call runs the helper on the server: pgrep, several systemctl reads, ss. Cheap once, not
+    // cheap thirty times a minute, and a tab whose visibility flaps would ask for exactly that.
+    const MIN_GAP_MS = 2500;
+    let lastLoadAt = 0;
+
     async function load(force) {
         if (busy && (Date.now() - busyAt) < 30000) return;
         if (!force && document.hidden) return;
+        if (painted && (Date.now() - lastLoadAt) < MIN_GAP_MS) return;
+        lastLoadAt = Date.now();
         const my = ++seq;
         busy = my; busyAt = Date.now();
         arm();
@@ -235,7 +254,9 @@
         g.appendChild(kv('Panel drop-in', dparts));
 
         // Load, measured rather than guessed. Absent on the first poll: one sample is not a rate.
-        const m = measure(s);
+        // A poll that lands too soon after the last one keeps showing the previous reading, which is
+        // a few seconds stale, rather than blanking a working display back to "measuring".
+        const m = measure(s) || lastGood;
         if (m) {
             const box = el('div', { className: 'wl-kv-v' });
             box.appendChild(el('div', { className: 'wl-small text-muted',
