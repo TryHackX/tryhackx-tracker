@@ -190,6 +190,9 @@ if ($bash === null || !trackerExecAvailable()) {
     file_put_contents($tmp . '/bin/nft', <<<'STUB'
 #!/bin/bash
 S="${STUB_STATE:?}"
+# On request, write a line to stderr on every call. The helper is invoked with 2>&1, so this is how
+# a stray shell/kernel message reaches the panel -- and it must never end up INSIDE the JSON.
+[ -n "${STUB_NOISE:-}" ] && printf 'nft: warning: something on stderr\n' >&2
 case "$1" in
   -c) shift; [ "$1" = "-f" ] && shift
       grep -q 'SYNTAX_ERROR' "$1" && { echo "syntax error" >&2; exit 1; }; exit 0 ;;
@@ -403,6 +406,26 @@ STUB);
     $r = $run('egress 10');
     check('helper: egress rate is validated too', $r['rc'] !== 0);
 
+    // ── stray stderr must never land inside the JSON ─────────────────────────
+    // This is what broke a healthy firewall in production: dir_writable() probed the directory with
+    // `: >"$probe" 2>/dev/null`, bash applies redirections left to right, so the "Read-only file
+    // system" message went to the REAL stderr before 2>/dev/null existed -- from inside a command
+    // substitution in the middle of building the reply. The line was spliced into the JSON, PHP
+    // could not parse it, and the card reported the firewall as unavailable while it was fine.
+    putenv('STUB_NOISE=1');
+    $r = $run('status');
+    check('helper: a line on stderr does not corrupt the status JSON',
+          is_array($r['json']) && ($r['json']['ok'] ?? null) === true, $r['out']);
+    // The helper silences nft's own stderr per command, so it never reaches the reply in the first
+    // place. Worth pinning down: that is a deliberate property, not an accident.
+    check('helper: … and nft stderr never reaches the reply', !str_contains($r['out'], 'something on stderr'), $r['out']);
+    check('helper: … and the JSON itself is one unbroken line',
+          count(array_filter(preg_split('/\R/', $r['out']), static fn($l) => str_starts_with(trim($l), '{'))) === 1, $r['out']);
+    check('helper: check survives stderr noise too', is_array($r['json']) && isset($r['json']['nft']), $r['out']);
+    putenv('STUB_NOISE');
+    $r = $run('status');
+    check('helper: back to a clean run', is_array($r['json']) && !str_contains($r['out'], 'something on stderr'), $r['out']);
+
     // ── does the file on disk actually describe what is loaded? ──────────────
     // This is the production failure that motivated the check: the rule reached the kernel, the
     // file never got written, and `persistent` still said true because a file happened to exist.
@@ -470,6 +493,16 @@ exit 1
         check('helper: check flags the directory before anyone applies anything',
               ($c['json']['dir_writable'] ?? null) === false && str_contains((string)($c['json']['hint'] ?? ''), 'read-only'), $c['out']);
         check('helper: … but does not call it a failure', ($c['json']['ok'] ?? null) === true, $c['out']);
+        // THE production failure: probing an unwritable directory made the SHELL print "Read-only
+        // file system", from inside a command substitution in the middle of building the reply. The
+        // line was spliced into the JSON and the card reported the firewall as unavailable.
+        $st = $run('status');
+        check('helper: probing an unwritable directory does not corrupt the status JSON',
+              is_array($st['json']) && ($st['json']['ok'] ?? null) === true, $st['out']);
+        check('helper: … the reply is still exactly one JSON line',
+              count(array_filter(preg_split('/\R/', $st['out']), static fn($l) => str_starts_with(trim($l), '{'))) === 1, $st['out']);
+        check('helper: … and nothing leaked about the write probe',
+              !str_contains($st['out'], '.wtest') && !str_contains($st['out'], 'Read-only file system'), $st['out']);
         @chmod($tmp . '/nftd', 0777);
         $r = $run('persist');
         check('helper: the janitor finishes the save afterwards', $r['rc'] === 0 && ($r['json']['saved'] ?? null) === true, $r['out']);
@@ -509,7 +542,7 @@ exit 1
     foreach (['/bin/nft', '/bin/id', '/nftables.conf', '/nftd/ottrack-in.nft', '/state/loaded', '/state/t_in', '/state/t_out', '/state/manual', '/state/epps'] as $f) @unlink($tmp . $f);
     foreach (['/bin', '/nftd', '/state', ''] as $d) @rmdir($tmp . $d);
     putenv('PATH=' . $pathBefore);
-    foreach (['STUB_STATE', 'NFT_BIN', 'NFT_DIR', 'NFT_CONF'] as $v) putenv($v);
+    foreach (['STUB_STATE', 'STUB_NOISE', 'NFT_BIN', 'NFT_DIR', 'NFT_CONF'] as $v) putenv($v);
 }
 
 // ── 8. storage: sampling, retention and the series the chart reads ───────────

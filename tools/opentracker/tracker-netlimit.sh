@@ -152,7 +152,12 @@ include_ok() {
 dir_writable() {
     [ -d "$NFT_DIR" ] || return 1
     local probe="$NFT_DIR/.wtest.$$"
-    if : >"$probe" 2>/dev/null; then rm -f "$probe" 2>/dev/null; return 0; fi
+    # The redirection must happen inside a subshell whose stderr is ALREADY /dev/null. Bash applies
+    # redirections left to right, so `: >"$probe" 2>/dev/null` reports "Read-only file system" on the
+    # real stderr before the 2>/dev/null is ever set up — and this runs inside a command substitution
+    # in the middle of building the status JSON, so that line landed inside the JSON and made the
+    # whole reply unparseable. The card then said the firewall was unavailable while it was fine.
+    if ( : >"$probe" ) 2>/dev/null; then rm -f "$probe" 2>/dev/null; return 0; fi
     return 1
 }
 
@@ -526,9 +531,14 @@ action_egress() {
     printf '{"ok":true,"applied":true,"pps":%s,"handle":%s,"file_updated":%s}\n' "$pps" "$handle" "$saved"
 }
 
+# Every reply is captured first and written in a single printf. A command substitution that leaks a
+# line to stderr can then only produce a SEPARATE line — never one spliced into the middle of the
+# JSON, which is what made a healthy firewall report itself as unavailable.
 case "${1:-status}" in
-    status)  shift || true; emit_status "${1-}" ;;
-    check)   emit_check ;;
+    status)  shift || true; _out="$(emit_status "${1-}")"; printf '%s
+' "$_out" ;;
+    check)   _out="$(emit_check)"; _rc=$?; printf '%s
+' "$_out"; exit "$_rc" ;;
     set)     shift; action_set "${1-}" "${2-100}" "${3-6969}" "${4-}" ;;
     monitor) shift || true; action_monitor "${1-6969}" "${2-}" ;;
     off)     shift; action_off "${1-}" ;;

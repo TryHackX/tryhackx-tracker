@@ -1321,7 +1321,7 @@ input[type="number"] {
 .nl-tune-value input { width: 8.5rem; text-align: right; }
 /* Room under the track for two rows: the fixed scale, then the measured marks. Both are absolutely
    positioned inside this box. */
-.nl-slider-wrap { position: relative; padding: 0.6rem 0 2.7rem; }
+.nl-slider-wrap { position: relative; padding: 0.6rem 0 4.5rem; }
 
 /* The only input[type=range] in the project. Bootstrap draws it in its LIGHT palette — a near-white
    rail and its own blue thumb — which on a #10161d card reads as a stray element from another page.
@@ -1363,9 +1363,12 @@ input[type="number"] {
 .nl-scale-tick.nl-scale-first .nl-scale-label { transform: none; }
 .nl-scale-tick.nl-scale-last .nl-scale-label { transform: translateX(-100%); }
 
-.nl-marks { position: absolute; left: 0; right: 0; bottom: 0; height: 1.4rem; pointer-events: none; }
+/* Three rows deep: the median, P95 and peak of a saturated port sit at the same x, so their labels
+   are staggered downwards rather than drawn on top of each other. */
+.nl-marks { position: absolute; left: 0; right: 0; bottom: 0; height: 3.4rem; pointer-events: none; }
 .nl-mark { position: absolute; top: 0; width: 0; }
-.nl-mark::before { content: ''; position: absolute; left: 0; top: -0.55rem; width: 2px; height: 0.5rem; background: currentColor; border-radius: 1px; }
+/* the tick grows down to meet whichever row its own label ended up on */
+.nl-mark::before { content: ''; position: absolute; left: 0; top: -0.55rem; width: 2px; height: var(--nl-tick-h, 0.5rem); background: currentColor; border-radius: 1px; }
 .nl-mark-label { position: absolute; left: 0; top: 0.15rem; transform: translateX(-50%); font-size: 0.68rem; white-space: nowrap; color: inherit; }
 .nl-mark-median { color: #66bb6a; }
 .nl-mark-p95 { color: #ffb74d; }

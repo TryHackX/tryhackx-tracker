@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.11.2] — 2026-08-27
+
+### Fixed
+- **A healthy firewall reported itself as unavailable.** The new directory-writability probe used
+  `: >"$probe" 2>/dev/null`, and bash applies redirections left to right: the redirection fails
+  first, so "Read-only file system" went to the *real* stderr before `2>/dev/null` existed. The
+  probe runs inside a command substitution while the status JSON is being assembled, so that line
+  was spliced into the middle of the reply — right after `"file_pps":40000` — and nothing could
+  parse it. The probe is silenced properly now, and each reply is written in a single `printf`, so a
+  stray line can only ever land on a line of its own, which the panel already skips.
+- **The median / P95 / peak marks under the slider collapsed into a smudge.** On a saturated port
+  they sit within a fraction of a percent of each other, which on the logarithmic track is the same
+  pixel. Colliding labels now take a row of their own, with their tick extended down to meet them —
+  no value is dropped, all three still read cleanly.
+
 ## [1.11.1] — 2026-08-27
 
 ### Fixed

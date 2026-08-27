@@ -378,13 +378,32 @@
             ['median', r.median, 'nl-mark-median', 'Median — the ordinary rate'],
             ['P95', r.p95, 'nl-mark-p95', 'P95 — busier than 95 % of the time'],
             ['peak', r.peak, 'nl-mark-peak', 'Peak — the busiest sample recorded'],
-        ];
-        defs.forEach(([label, value, cls, title]) => {
-            if (!value) return;
-            const pct = ppsToPct(value);
-            const m = el('span', { className: 'nl-mark ' + cls, title: title + ': ' + num(value) + ' pps' });
-            m.style.left = pct + '%';
-            m.appendChild(el('span', { className: 'nl-mark-label', text: label }));
+        ].filter(d => d[1]).map(([label, value, cls, title]) => ({
+            label, value, cls, title, pct: ppsToPct(value),
+        })).sort((a, b) => a.pct - b.pct);
+
+        // On a saturated port these three land within a fraction of a percent of each other — here
+        // the median is 169 919, P95 172 407 and the peak 173 423, which on a logarithmic track is
+        // the same pixel. Three labels at one x drew an unreadable smudge, so anything that would
+        // collide with the mark to its left gets a row of its own, and its tick grows down to meet
+        // it. Nothing is dropped: all three values still matter when picking a limit.
+        const LABEL_GAP_PCT = 7;
+        const MARK_ROW_REM = 1.05;   // taller than the 0.68rem label's own line box, or rows clip
+        const rowEnds = [];
+        defs.forEach(d => {
+            let row = 0;
+            while (rowEnds[row] !== undefined && d.pct - rowEnds[row] < LABEL_GAP_PCT) row++;
+            rowEnds[row] = d.pct;
+            d.row = row;
+        });
+
+        defs.forEach(d => {
+            const m = el('span', { className: 'nl-mark ' + d.cls, title: d.title + ': ' + num(d.value) + ' pps' });
+            m.style.left = d.pct + '%';
+            m.style.setProperty('--nl-tick-h', (0.5 + d.row * MARK_ROW_REM) + 'rem');
+            const lab = el('span', { className: 'nl-mark-label', text: d.label });
+            if (d.row) lab.style.top = (0.15 + d.row * MARK_ROW_REM) + 'rem';
+            m.appendChild(lab);
             marks.appendChild(m);
         });
     }
