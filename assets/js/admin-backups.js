@@ -191,13 +191,13 @@
         }
         list.forEach(a => {
             const acts = el('div', { className: 'wl-actions' });
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-info', type: 'button', title: 'Check the archive is intact',
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-info wl-act', type: 'button', title: 'Check the archive is intact',
                 onclick: () => ask('verify', { id: a.id }) }, [el('i', { className: 'bi bi-patch-check' })]));
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-secondary', type: 'button', title: 'Download (single-use link)',
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-secondary wl-act', type: 'button', title: 'Download (single-use link)',
                 onclick: () => ask('token', { id: a.id }) }, [el('i', { className: 'bi bi-download' })]));
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-warning', type: 'button', title: 'Restore from this archive',
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-warning wl-act', type: 'button', title: 'Restore from this archive',
                 onclick: () => openRestore(a) }, [el('i', { className: 'bi bi-arrow-counterclockwise' })]));
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-danger', type: 'button', title: 'Delete this archive',
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-danger wl-act', type: 'button', title: 'Delete this archive',
                 onclick: () => ask('delete', { id: a.id }) }, [el('i', { className: 'bi bi-trash' })]));
 
             const integrity = a.verified === true ? [badge('verified', 'wl-b-ok')]
@@ -213,7 +213,7 @@
                 el('td', { text: bytes(a.size || 0) }),
                 el('td', {}, [el('span', { className: 'wl-small text-muted', text: a.items || (a.mode === 'builtin' ? 'tracker database' : '—') })]),
                 el('td', {}, integrity),
-                el('td', { className: 'wl-col-actions' }, [acts]),
+                el('td', { className: 'th-actions' }, [acts]),
             ]));
         });
     }
