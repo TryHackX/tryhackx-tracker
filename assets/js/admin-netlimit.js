@@ -157,13 +157,22 @@
         // 2. the three numbers this whole card exists for
         const hasLive = Object.keys(pps).length > 0;
         const stale = live.stale ? ' (last known)' : '';
+        // "Arriving" is the honest word for it: our chain runs before everything else on this port,
+        // so this is the raw arrival rate, whatever anybody else drops afterwards.
         grid.appendChild(kv('Arriving' + stale, hasLive
             ? [el('strong', { text: num(pps.in_total) }), el('span', { className: 'nl-unit', text: ' pps' }),
                el('div', { className: 'wl-small text-muted', text: 'measured over the last ' + (live.span || 0) + ' s' })]
             : [el('span', { className: 'text-muted', text: 'measuring…' })]));
-        grid.appendChild(kv('Served to the tracker', hasLive
+        // Our chain sits at `priority filter - 5`, i.e. BEFORE the distribution's filter table. So this
+        // is what got past OUR rules — if somebody else's rule limits the same port downstream, the
+        // tracker receives less than this, and saying "served to the tracker" would overstate it.
+        const foreign = (fw.manual_rules || []).length > 0;
+        const passedParts = hasLive
             ? [el('strong', { text: num(pps.in_passed) }), el('span', { className: 'nl-unit', text: ' pps' })]
-            : [el('span', { className: 'text-muted', text: '—' })]));
+            : [el('span', { className: 'text-muted', text: '—' })];
+        if (hasLive && foreign) passedParts.push(el('div', { className: 'wl-small text-warning', text:
+            'Another rule further down the chain limits this port as well, so the tracker actually receives less than this. See the note below.' }));
+        grid.appendChild(kv(foreign ? 'Past our rules' : 'Served to the tracker', passedParts));
         const dropped = hasLive ? (pps.in_capped || 0) : null;
         grid.appendChild(kv('Dropped by the limit', hasLive
             ? [el('strong', { className: dropped > 0 ? 'text-warning' : '', text: num(dropped) }), el('span', { className: 'nl-unit', text: ' pps' }),

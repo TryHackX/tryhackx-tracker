@@ -794,7 +794,10 @@ sudo /usr/local/sbin/tracker-netlimit.sh status | head -c 400
 ```
 
 Everything the panel writes lives in **one file** (`/etc/nftables.d/ottrack-in.nft`) inside **its own
-nftables table** (`inet ottrack_in`, hook `input`, `priority filter - 5`, `policy accept`). Your
+nftables table** (`inet ottrack_in`, hook `input`, `priority filter - 5`, `policy accept`). That priority puts it
+**before** the distribution's filter table, so what it counts is the raw arrival rate on the port —
+if another rule limits the same port further down the chain, the tracker receives less than the
+"past our rules" figure, and the card says so. Your
 distribution's `inet filter` table is never read for writing and never flushed, so a rule you added
 there by hand keeps working — the card lists any such rule it finds on the same port, together with
 the exact `nft delete rule …` line to remove it yourself once you no longer want it. The ruleset is
