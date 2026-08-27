@@ -1319,9 +1319,50 @@ input[type="number"] {
 .nl-tune-title { color: #ddd; font-weight: 600; font-size: 0.9rem; }
 .nl-tune-value { display: flex; align-items: center; gap: 0.35rem; }
 .nl-tune-value input { width: 8.5rem; text-align: right; }
-/* room under the track for the labels; the marks are absolutely positioned inside it */
-.nl-slider-wrap { position: relative; padding: 0.6rem 0 1.5rem; }
-.nl-slider { width: 100%; margin: 0; }
+/* Room under the track for two rows: the fixed scale, then the measured marks. Both are absolutely
+   positioned inside this box. */
+.nl-slider-wrap { position: relative; padding: 0.6rem 0 2.7rem; }
+
+/* The only input[type=range] in the project. Bootstrap draws it in its LIGHT palette — a near-white
+   rail and its own blue thumb — which on a #10161d card reads as a stray element from another page.
+   Every pseudo-element needs its own rule: browsers drop a whole selector list over one they do not
+   recognise, so the WebKit and Gecko halves can never be merged. */
+.nl-slider { -webkit-appearance: none; appearance: none; width: 100%; margin: 0; height: 1.1rem; background: transparent; }
+.nl-slider:focus { outline: none; }
+/* `--nl-fill` is set from setPps() in admin-netlimit.js: WebKit has no ::-moz-range-progress
+   equivalent, so the filled part of the rail is a hard-stop gradient on the track itself. */
+.nl-slider::-webkit-slider-runnable-track {
+    height: 6px; border-radius: 999px; border: 1px solid #2a2a3a;
+    background: linear-gradient(90deg, rgba(74, 158, 255, 0.55) var(--nl-fill, 0%), #1c232b var(--nl-fill, 0%));
+}
+.nl-slider::-moz-range-track { height: 6px; border-radius: 999px; border: 1px solid #2a2a3a; background: #1c232b; }
+.nl-slider::-moz-range-progress { height: 6px; border-radius: 999px; background: rgba(74, 158, 255, 0.55); }
+.nl-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 15px; height: 15px; margin-top: -6px;
+    border-radius: 50%; background: #4a9eff; border: 2px solid #0d1319; box-shadow: 0 0 0 1px #2a2a3a;
+    cursor: grab; transition: box-shadow 0.12s ease;
+}
+.nl-slider::-moz-range-thumb {
+    width: 15px; height: 15px; border-radius: 50%; background: #4a9eff; border: 2px solid #0d1319;
+    box-shadow: 0 0 0 1px #2a2a3a; cursor: grab;
+}
+.nl-slider:hover::-webkit-slider-thumb, .nl-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 0.2rem rgba(74, 158, 255, 0.25); }
+.nl-slider:hover::-moz-range-thumb, .nl-slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 0.2rem rgba(74, 158, 255, 0.25); }
+.nl-slider:active::-webkit-slider-thumb { cursor: grabbing; }
+.nl-slider:active::-moz-range-thumb { cursor: grabbing; }
+
+/* The ruler. The track is logarithmic, so a linear scale would misplace every number on it: a limit
+   of 100 000 sits two thirds of the way across, not near the end. Ticks are drawn by the same
+   mapping the thumb uses, so what you read under the thumb is where the thumb actually is. */
+.nl-scale { position: absolute; left: 0; right: 0; top: 1.45rem; height: 1.1rem; pointer-events: none; }
+.nl-scale-tick { position: absolute; top: 0; width: 0; }
+.nl-scale-tick::before { content: ''; position: absolute; left: 0; top: 0; width: 1px; height: 0.28rem; background: rgba(255, 255, 255, 0.16); }
+.nl-scale-tick.nl-scale-major::before { width: 2px; height: 0.45rem; background: rgba(255, 255, 255, 0.34); }
+.nl-scale-label { position: absolute; left: 0; top: 0.5rem; transform: translateX(-50%); font-size: 0.64rem; color: #7c8794; white-space: nowrap; }
+/* the two ends would hang off the card otherwise */
+.nl-scale-tick.nl-scale-first .nl-scale-label { transform: none; }
+.nl-scale-tick.nl-scale-last .nl-scale-label { transform: translateX(-100%); }
+
 .nl-marks { position: absolute; left: 0; right: 0; bottom: 0; height: 1.4rem; pointer-events: none; }
 .nl-mark { position: absolute; top: 0; width: 0; }
 .nl-mark::before { content: ''; position: absolute; left: 0; top: -0.55rem; width: 2px; height: 0.5rem; background: currentColor; border-radius: 1px; }

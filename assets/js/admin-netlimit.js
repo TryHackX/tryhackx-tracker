@@ -1,5 +1,5 @@
 /**
- * "UDP traffic" card on the admin Whitelist page — includes/netlimit.php on the server.
+ * "UDP traffic" card on the admin Traffic page — includes/netlimit.php on the server.
  *
  * What it has to make understandable: an admin who has never typed "packets per second" in their
  * life must be able to pick a sensible threshold. So the card never asks for a bare number:
@@ -95,16 +95,40 @@
     // `force` is the difference between "the admin just opened/expanded this" and "the 5-second
     // timer fired": a background tab must not keep forking a helper process on the server, but a
     // deliberate load has to happen even in an embedded pane that always reports itself as hidden.
-    let statusSeq = 0;
+    let statusSeq = 0;      // requests started
+    let statusPainted = 0;  // the newest answer already on screen
+    let statusBusy = 0;     // seq of the request in flight, 0 when idle
+    let statusBusyAt = 0;   // when it started, so a connection that never settles cannot wedge us
+    let watchdog = null;
+
     async function loadStatus(force) {
         if (state.collapsed) return;
         if (!force && document.hidden) return;
+        // One request at a time. This endpoint forks a helper, and PHP serialises requests that
+        // share a session, so firing a new one every POLL_MS against a slower answer only builds a
+        // queue — and with the old "is this still the newest request?" guard EVERY answer in that
+        // queue was thrown away as stale, so the card sat on "Reading the firewall…" forever while
+        // the server was answering perfectly well.
+        if (statusBusy && (Date.now() - statusBusyAt) < 30000) return;
         const seq = ++statusSeq;
+        statusBusy = seq; statusBusyAt = Date.now();
+        armWatchdog();
         let j;
-        try { j = await apiCall('admin/net_status'); } catch { return; }
-        // a slow poll must never repaint over a newer answer (pressing Apply triggers one immediately)
-        if (seq !== statusSeq) return;
-        if (!j || j.error && !j.configured) { renderFatal(j && j.error); return; }
+        try {
+            j = await apiCall('admin/net_status');
+        } catch (e) {
+            // Returning quietly here is indistinguishable, on screen, from a server that never
+            // answers: the loading state stays up and the admin has no idea anything went wrong.
+            if (seq > statusPainted) { statusPainted = seq; renderFatal('The panel could not reach the status endpoint (' + (e && e.message ? e.message : 'network error') + ').', true); }
+            return;
+        } finally {
+            if (statusBusy === seq) { statusBusy = 0; clearWatchdog(); }
+        }
+        // Repaint only with an answer NEWER than what is on screen. Comparing against statusSeq
+        // (requests started) instead of statusPainted (answers shown) is what caused the hang.
+        if (seq <= statusPainted) return;
+        statusPainted = seq;
+        if (!j || j.error && !j.configured) { renderFatal(j && j.error, true); return; }
         state.status = j;
         if (j.recommend) state.recommend = j.recommend;
         renderStatus(j);
@@ -112,11 +136,60 @@
         renderAdvice();
     }
 
-    function renderFatal(msg) {
+    // A fetch that never settles runs neither the try nor the catch above, so nothing would ever
+    // replace the loading state. This is the only branch left that can do it.
+    function armWatchdog() {
+        clearWatchdog();
+        if (statusPainted) return;   // something real is already on screen; leave it there
+        watchdog = setTimeout(() => {
+            watchdog = null;
+            if (statusPainted) return;
+            renderFatal('The status endpoint has not answered for 15 seconds. The server may be out of PHP workers.', true);
+        }, 15000);
+    }
+    function clearWatchdog() { if (watchdog) { clearTimeout(watchdog); watchdog = null; } }
+
+    function renderFatal(msg, retry) {
         const grid = $('net-grid');
         grid.textContent = '';
-        grid.appendChild(kv('Firewall', [badge('unavailable', 'wl-b-bad'), ' ',
-            el('span', { className: 'wl-small text-muted', text: msg || 'The status endpoint did not answer.' })]));
+        const parts = [badge('unavailable', 'wl-b-bad'), ' ',
+            el('span', { className: 'wl-small text-muted', text: msg || 'The status endpoint did not answer.' })];
+        if (retry) parts.push(el('div', {}, [el('button', {
+            className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button',
+            onclick: () => { statusPainted = 0; statusBusy = 0; renderLoading(); loadStatus(true); },
+        }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' Try again'])]));
+        grid.appendChild(kv('Firewall', parts));
+    }
+
+    function renderLoading() {
+        const grid = $('net-grid');
+        grid.textContent = '';
+        grid.appendChild(el('div', { className: 'wl-status-loading' }, [
+            el('span', { className: 'spinner-border spinner-border-sm', role: 'status' }), ' Reading the firewall…']));
+    }
+
+    // "Not persistent" has three different causes and only one of them is the admin's to fix, so
+    // the card says which one it is. The common one on a hardened box is not a fault at all: the
+    // panel's PHP runs under systemd ProtectSystem, /etc is read-only inside that mount namespace,
+    // and the janitor — an ordinary unit — writes the file within a minute instead.
+    function persistNote(fw, j) {
+        if (fw.dir_writable === false || j.persist_deferred) {
+            return el('div', { className: 'wl-small text-muted' }, [
+                el('i', { className: 'bi bi-clock-history' }),
+                ' Live, not saved yet — the panel’s PHP cannot write ' + (fw.file_path || '/etc/nftables.d') +
+                ' (systemd ProtectSystem). The janitor saves it within a minute; until then a reboot would undo it.']);
+        }
+        if (fw.include_ok === false) {
+            return el('div', { className: 'wl-small text-warning', text:
+                'Loaded, but nftables.conf does not include the directory, so it will be gone after a reboot. Run the availability test in Settings for the one line to add.' });
+        }
+        if (fw.file_matches === false && fw.file_present) {
+            return el('div', { className: 'wl-small text-warning', text:
+                'Loaded, but the saved copy is a DIFFERENT ruleset (' + (fw.file_mode === 'count' ? 'counting only' : num(fw.file_pps) + ' pps') +
+                ') — after a reboot that one comes back, not this one.' });
+        }
+        return el('div', { className: 'wl-small text-warning', text:
+            'Loaded, but NOT saved — it will be gone after a reboot. Run the availability test in Settings.' });
     }
 
     function renderStatus(j) {
@@ -140,12 +213,12 @@
             const parts = [badge('counting only', 'wl-b-pending'), ' ',
                 el('span', { className: 'text-muted', text: 'port ' + fw.port + ' · nothing is dropped' }),
                 el('div', { className: 'wl-small text-muted', text: 'The rules in force contain no drop at all — they exist to measure. Pick a limit below once there are enough samples.' })];
-            if (!fw.persistent) parts.push(el('div', { className: 'wl-small text-warning', text: 'Loaded, but NOT persistent — it will be gone after a reboot. Run the availability test in Settings for the one line to add.' }));
+            if (!fw.persistent) parts.push(persistNote(fw, j));
             grid.appendChild(kv('Inbound limit', parts));
         } else if (fw.table) {
             const parts = [badge(num(fw.pps) + ' pps', 'wl-b-ok'), ' ',
                 el('span', { className: 'text-muted', text: 'burst ' + num(fw.burst) + ' · port ' + fw.port })];
-            if (!fw.persistent) parts.push(el('div', { className: 'wl-small text-warning', text: 'Loaded, but NOT persistent — it will be gone after a reboot. Run the availability test in Settings for the one line to add.' }));
+            if (!fw.persistent) parts.push(persistNote(fw, j));
             const src = j.last_apply && j.last_apply.source;
             if (src) parts.push(el('div', { className: 'wl-small text-muted', text: 'set by ' + src + ' ' + (j.last_apply.at ? fmtAgo(Math.floor(j.server_time - j.last_apply.at)) + ' ago' : '') }));
             grid.appendChild(kv('Inbound limit', parts));
@@ -273,6 +346,29 @@
     }
 
     // ── slider, marks, advice ────────────────────────────────────────────────
+    // A ruler for the track. Decades every 1/3 of the way (three decades, 1 000 … 1 000 000) with
+    // 2/3/5 in between, so a value can be read off the slider instead of guessed from the thumb.
+    // Drawn once — it never changes.
+    const SCALE_TICKS = [1000, 2000, 3000, 5000, 10000, 20000, 30000, 50000,
+                         100000, 200000, 300000, 500000, 1000000];
+    const SCALE_MAJOR = [1000, 10000, 100000, 1000000];
+    const scaleLabel = (v) => v >= 1e6 ? (v / 1e6) + 'M' : (v / 1e3) + 'k';
+
+    function renderScale() {
+        const host = $('net-scale');
+        if (!host) return;
+        host.textContent = '';
+        const inRange = SCALE_TICKS.filter(v => v >= PPS_MIN && v <= PPS_MAX);
+        inRange.forEach((v, i) => {
+            const major = SCALE_MAJOR.includes(v);
+            const t = el('span', { className: 'nl-scale-tick' + (major ? ' nl-scale-major' : '')
+                + (i === 0 ? ' nl-scale-first' : '') + (i === inRange.length - 1 ? ' nl-scale-last' : '') });
+            t.style.left = ppsToPct(v) + '%';
+            if (major) t.appendChild(el('span', { className: 'nl-scale-label', text: scaleLabel(v) }));
+            host.appendChild(t);
+        });
+    }
+
     function renderMarks() {
         const marks = $('net-marks');
         marks.textContent = '';
@@ -312,7 +408,11 @@
     function setPps(v, fromInput) {
         state.pps = Math.max(PPS_MIN, Math.min(PPS_MAX, parseInt(v, 10) || PPS_MIN));
         if (!fromInput) $('net-pps-input').value = state.pps;
-        $('net-pps-range').value = ppsToPos(state.pps);
+        const range = $('net-pps-range');
+        range.value = ppsToPos(state.pps);
+        // WebKit cannot fill the rail up to the thumb on its own (Gecko has ::-moz-range-progress);
+        // the CSS reads this as a gradient stop.
+        range.style.setProperty('--nl-fill', ppsToPct(state.pps) + '%');
         renderAdvice();
     }
 
@@ -496,6 +596,10 @@
     }
 
     // ── wiring ───────────────────────────────────────────────────────────────
+    // `booting` keeps the first setCollapsed(false) from firing a load that init() is about to fire
+    // anyway: two identical requests left the starting line together, and the guard below discarded
+    // whichever answered first.
+    let booting = true;
     function setCollapsed(v) {
         state.collapsed = v;
         $('net-body').classList.toggle('d-hidden', v);
@@ -505,11 +609,12 @@
         if (label) label.textContent = v ? 'Expand' : 'Collapse';
         if (icon) icon.className = v ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
         try { localStorage.setItem(STORE_COLLAPSE, v ? '1' : '0'); } catch (e) {}
-        if (!v) { loadStatus(true); loadChart(true); }
+        if (!v && !booting) { loadStatus(true); loadChart(true); }
     }
 
     function init() {
         setPps(state.pps);
+        renderScale();
         renderRanges();
         setCollapsed(state.collapsed);
 
@@ -546,6 +651,7 @@
         });
         document.addEventListener('visibilitychange', () => { if (!document.hidden) { loadStatus(true); loadChart(true); } });
 
+        booting = false;
         loadStatus(true);
         loadChart(true);
         state.pollTimer = setInterval(loadStatus, POLL_MS);
