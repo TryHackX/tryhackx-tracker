@@ -129,7 +129,60 @@ udp_rcv_errors() {
 }
 socket_drops() {
     # `d<N>` in ss's skmem is this socket's own drop counter — per socket, unlike the global one.
-    num_or_zero "$(ss -ulnpm 2>/dev/null | grep -A1 ':6969' | sed -n 's/.*,d\([0-9][0-9]*\).*//p' | head -1)"
+    # awk, not sed: the field is pulled out by splitting on the literal ",d", which needs no
+    # backreference at all. The sed form this replaces carried a stray control byte where its
+    # backreference should have been, so it matched, substituted rubbish, failed is_uint and reported a
+    # confident 0 for ever -- a broken measurement that looks exactly like a healthy one.
+    num_or_zero "$(ss -ulnpm 2>/dev/null | grep -A1 ':6969' | awk -F',d' 'NF>1 {n=$2; sub(/[^0-9].*/, "", n); if (n != "") { print n; exit }}')"
+}
+
+# --- how hard the threads are actually working -------------------------------
+#
+# This is the measurement that decides whether a second tracker instance is worth building at all.
+# opentracker runs its UDP workers as threads, so "is the tracker CPU-bound?" is a question about
+# threads, not about the process: four threads at 25% each and one thread pinned at 100% look like
+# the same 100% in top and mean completely different things.
+#
+# Reported as raw counters, never as a percentage. A percentage needs two samples, and taking the
+# second one would mean this helper sleeping inside a web request. The panel already polls every
+# fifteen seconds, so it subtracts consecutive samples itself and gets a true fifteen-second average
+# for nothing.
+tracker_pid() { pgrep -x opentracker 2>/dev/null | head -1; }
+
+# utime+stime in clock ticks, per thread. A thread that exits between the listing and the read is
+# ordinary rather than an error, and is simply left out.
+emit_threads() {
+    local pid; pid="$(tracker_pid)"
+    printf '['
+    if [ -z "$pid" ] || [ ! -d "/proc/$pid/task" ]; then printf ']'; return 0; fi
+    local first=1 t tid line name ticks
+    for t in "/proc/$pid/task"/*; do
+        [ -r "$t/stat" ] || continue
+        line="$(cat "$t/stat" 2>/dev/null)" || continue
+        [ -n "$line" ] || continue
+        tid="$(basename "$t")"
+        # The comm field is parenthesised and may contain spaces and brackets of its own, so the
+        # fields are counted from the LAST ')' rather than from the start of the line.
+        name="$(printf %s "$line" | awk -F'[()]' '{print $2}')"
+        ticks="$(printf %s "$line" | sed 's/.*)//' | awk '{print $12+$13}')"
+        is_uint "$ticks" || continue
+        [ "$first" = 1 ] || printf ','
+        first=0
+        printf '{"tid":%s,"name":%s,"ticks":%s}' "$tid" "$(jstr "$name")" "$ticks"
+    done
+    printf ']'
+}
+
+# Busy and idle ticks across every core, from the same clock as the thread counters, so the panel can
+# express the tracker's share of the WHOLE machine -- which is the number that answers "is there
+# room for another one of these", rather than its share of a single core.
+cpu_busy_ticks() {
+    [ -r /proc/stat ] || { printf 0; return 0; }
+    num_or_zero "$(awk '/^cpu /{print $2+$3+$4+$6+$7+$8}' /proc/stat)"
+}
+cpu_idle_ticks() {
+    [ -r /proc/stat ] || { printf 0; return 0; }
+    num_or_zero "$(awk '/^cpu /{print $5+$6}' /proc/stat)"
 }
 
 emit_status() {
@@ -170,6 +223,10 @@ emit_status() {
     printf ',"netdev_backlog":%s' "$(backlog)"
     printf ',"socket_drops":%s' "$drops"
     printf ',"udp_rcv_errors":%s' "$(udp_rcv_errors)"
+    printf ',"clk_tck":%s' "$(num_or_zero "$(getconf CLK_TCK 2>/dev/null)")"
+    printf ',"cpu_busy_ticks":%s' "$(cpu_busy_ticks)"
+    printf ',"cpu_idle_ticks":%s' "$(cpu_idle_ticks)"
+    printf ',"threads":%s' "$(emit_threads)"
     printf ',"confs":['
     first=1
     for f in $CONFS; do

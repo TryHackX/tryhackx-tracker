@@ -25,6 +25,97 @@
     const num = (v) => (v == null || isNaN(v)) ? '—' : Math.round(v).toLocaleString();
     const state = { pending: null, status: null, cfg: null };
 
+    /*
+     * Two samples make a measurement.
+     *
+     * The helper reports raw counters — clock ticks per thread, busy and idle ticks for the whole
+     * machine — and never a percentage, because a percentage would mean the helper sleeping inside
+     * a web request to take a second reading. This card already polls; subtracting one poll from
+     * the previous one gives a true fifteen-second average for nothing, and the very number that
+     * decides whether a second tracker instance would help.
+     */
+    let prev = null;
+
+    function measure(s) {
+        const clk = Number(s.clk_tck || 0);
+        const now = Date.now();
+        const cur = {
+            at: now, clk: clk,
+            busy: Number(s.cpu_busy_ticks || 0), idle: Number(s.cpu_idle_ticks || 0),
+            drops: Number(s.socket_drops || 0),
+            threads: {},
+        };
+        (s.threads || []).forEach(t => { cur.threads[t.tid] = Number(t.ticks || 0); });
+
+        let out = null;
+        // A restart resets every counter, so a negative delta means "different process" and the
+        // honest answer is to start again rather than to draw a chart of nonsense.
+        if (prev && clk > 0 && now > prev.at) {
+            const secs = (now - prev.at) / 1000;
+            const cpuTicks = (cur.busy + cur.idle) - (prev.busy + prev.idle);
+            const busyTicks = cur.busy - prev.busy;
+            const threads = [];
+            let total = 0, hottest = 0, restarted = false;
+            (s.threads || []).forEach(t => {
+                const before = prev.threads[t.tid];
+                if (before === undefined) return;               // a thread that did not exist before
+                const d = Number(t.ticks || 0) - before;
+                if (d < 0) { restarted = true; return; }
+                const pct = (d * 100) / (clk * secs);
+                total += pct;
+                if (pct > hottest) hottest = pct;
+                threads.push({ tid: t.tid, name: t.name, pct: pct });
+            });
+            const dropDelta = cur.drops - prev.drops;
+            if (!restarted && threads.length) {
+                threads.sort((a, b) => b.pct - a.pct);
+                out = {
+                    secs: secs, threads: threads, total: total, hottest: hottest,
+                    machine: cpuTicks > 0 ? (busyTicks * 100) / cpuTicks : null,
+                    dropsPerSec: dropDelta >= 0 ? dropDelta / secs : null,
+                };
+            }
+        }
+        prev = cur;
+        return out;
+    }
+
+    /*
+     * The verdict. The plan gates "add a second tracker instance" on measurement precisely because
+     * it is the most expensive and most dangerous thing in it — white/black switching, the schedule,
+     * the whitelist SIGHUP, the stats endpoint and the announce URL all have to learn about N
+     * instances. So the card answers the question rather than leaving it to a feeling about `top`.
+     *
+     * The threads are what decide it. A tracker whose busiest UDP worker sits at a quarter of a core
+     * is not short of tracker; it is being fed less than it could eat, and a second copy of it would
+     * change nothing at all.
+     */
+    function verdict(m, s) {
+        const cpus = Math.max(1, Number(s.cpus || 1));
+        const workers = Number(s.workers || 0);
+        const share = (m.total / (cpus * 100)) * 100;
+        const head = 'One instance is using ' + m.total.toFixed(0) + '% of the ' + (cpus * 100)
+            + '% this machine has (' + share.toFixed(0) + '% of the box), busiest thread '
+            + m.hottest.toFixed(0) + '%.';
+
+        if (m.hottest >= 85 && workers > 0 && workers >= cpus) {
+            return { level: 'warn', text: head + ' The busiest UDP worker is at the ceiling and there is already '
+                + 'one per core — this is the case where a second instance is the next step, and the only one.' };
+        }
+        if (m.hottest >= 85) {
+            return { level: 'warn', text: head + ' The busiest UDP worker is at the ceiling but there are only '
+                + workers + ' of them on ' + cpus + ' cores. Raise the worker count first: it is one setting and a '
+                + 'restart, against a second instance, which means teaching white/black switching, the schedule, '
+                + 'the whitelist reload and the stats page to work with more than one tracker.' };
+        }
+        const why = (m.dropsPerSec !== null && m.dropsPerSec > 1)
+            ? ' Packets are being lost, but not for want of CPU — look at the receive buffer and the inbound '
+              + 'firewall budget on this page, which is where they are actually going.'
+            : ' Nothing is being dropped either.';
+        return { level: 'info', text: head + ' Nowhere near the limit.' + why
+            + ' A second instance would add tracker capacity, which is not what is short.' };
+    }
+
     function badge(text, cls) { return el('span', { className: 'wl-badge ' + (cls || ''), text: text }); }
     function kv(label, children) {
         const box = el('div', { className: 'wl-kv-item' });
@@ -127,8 +218,40 @@
         }
         g.appendChild(kv('Panel drop-in', dparts));
 
+        // Load, measured rather than guessed. Absent on the first poll: one sample is not a rate.
+        const m = measure(s);
+        if (m) {
+            const box = el('div', { className: 'wl-kv-v' });
+            box.appendChild(el('div', { className: 'wl-small text-muted',
+                text: 'over the last ' + Math.round(m.secs) + ' s'
+                      + (m.machine !== null ? ' · whole machine ' + m.machine.toFixed(0) + '% busy' : '') }));
+            m.threads.slice(0, 12).forEach(t => {
+                const row = el('div', { className: 'ot-thread' });
+                row.appendChild(el('span', { className: 'ot-thread-tid', text: String(t.tid) }));
+                const track = el('span', { className: 'ot-thread-track' });
+                const fill = el('span', { className: 'ot-thread-fill' });
+                fill.style.width = Math.min(100, t.pct).toFixed(1) + '%';
+                if (t.pct >= 85) fill.classList.add('ot-thread-hot');
+                track.appendChild(fill);
+                row.appendChild(track);
+                row.appendChild(el('span', { className: 'ot-thread-pct', text: t.pct.toFixed(0) + '%' }));
+                box.appendChild(row);
+            });
+            const wrap = el('div', { className: 'wl-kv-item' });
+            wrap.appendChild(el('div', { className: 'wl-kv-k', text: 'Load per thread' }));
+            wrap.appendChild(box);
+            g.appendChild(wrap);
+        } else if (s.threads) {
+            g.appendChild(kv('Load per thread', el('span', { className: 'wl-small text-muted',
+                text: 'measuring — a rate needs two readings, so this fills in on the next poll.' })));
+        }
+
         const notes = $('ot-notes');
         notes.textContent = '';
+        if (m) {
+            const v = verdict(m, s);
+            notes.appendChild(el('div', { className: 'nl-note ' + (v.level === 'warn' ? 'nl-note-warn' : 'nl-note-info'), text: v.text }));
+        }
         (j.advice || []).forEach(a => {
             notes.appendChild(el('div', {
                 className: 'nl-note ' + (a.level === 'warn' ? 'nl-note-warn' : 'nl-note-info'),
@@ -246,6 +369,9 @@
         $('ot-confirm-form').addEventListener('submit', run);
         document.addEventListener('visibilitychange', () => { if (!document.hidden) load(true); });
         load(true);
+        // The second reading is what turns counters into a rate, so take it soon rather than after a
+        // full polling interval — otherwise the most useful row on the card is blank for 15 seconds.
+        setTimeout(() => load(true), 4000);
         setInterval(load, POLL_MS);
     }
 

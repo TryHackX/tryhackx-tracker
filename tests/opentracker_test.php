@@ -181,6 +181,52 @@ STUB);
           is_int($r['json']['rmem_max'] ?? null) && is_int($r['json']['socket_drops'] ?? null)
           && is_int($r['json']['udp_rcv_errors'] ?? null), json_encode($r['json']));
 
+    // ── the measurement that decides whether a second instance is worth building ──
+    //
+    // The plan gates extra tracker instances on evidence, so the evidence has to be trustworthy: raw
+    // counters, one entry per thread, from the same clock as the machine-wide figures. The panel
+    // subtracts consecutive polls to get a rate — which means a missing or mistyped field here does
+    // not fail loudly, it silently produces a plausible wrong percentage.
+    check('helper: reports the clock ticks a second, or the panel cannot convert anything',
+          is_int($r['json']['clk_tck'] ?? null), json_encode($r['json']['clk_tck'] ?? null));
+    check('helper: reports machine-wide busy and idle ticks from the same clock',
+          is_int($r['json']['cpu_busy_ticks'] ?? null) && is_int($r['json']['cpu_idle_ticks'] ?? null),
+          json_encode([$r['json']['cpu_busy_ticks'] ?? null, $r['json']['cpu_idle_ticks'] ?? null]));
+    check('helper: threads is always a list, even where there is no tracker to look at',
+          is_array($r['json']['threads'] ?? null), json_encode($r['json']['threads'] ?? null));
+    foreach ((array)($r['json']['threads'] ?? []) as $t) {
+        check('helper: a thread entry carries tid, name and ticks, all of the right type',
+              is_int($t['tid'] ?? null) && is_string($t['name'] ?? null) && is_int($t['ticks'] ?? null),
+              json_encode($t));
+        break;   // one is enough — they come from the same loop
+    }
+
+    // The per-socket drop counter is buried in ss's skmem blob as `,d<N>`. It used to be pulled out
+    // with a sed backreference that had been mangled into a stray control byte: the pattern still
+    // matched, the substitution produced rubbish, the uint guard rejected it and the helper reported
+    // a confident zero for ever. A measurement that fails by reading "healthy" is worse than one
+    // that fails loudly, so this drives the real helper against a stub `ss` on PATH.
+    $ssStub = "#!/bin/bash
+cat <<'OUT'
+UNCONN 1280   5376   *:6969   *:*
+	 skmem:(r1280,rb212992,t5376,tb212992,f2816,w0,o0,bl0,d618712)
+OUT
+";
+    file_put_contents($tmp . '/bin/ss', $ssStub);
+    @chmod($tmp . '/bin/ss', 0755);
+    $r2 = $run('status');
+    check('helper: the socket drop counter is really parsed out of ss output',
+          (int)($r2['json']['socket_drops'] ?? -1) === 618712, json_encode($r2['json']['socket_drops'] ?? null));
+
+    file_put_contents($tmp . '/bin/ss', "#!/bin/bash
+echo 'UNCONN 0 0 *:6969 *:*'
+");
+    @chmod($tmp . '/bin/ss', 0755);
+    $r3 = $run('status');
+    check('helper: a socket with no drop counter reads 0 rather than breaking the JSON',
+          ($r3['json']['ok'] ?? null) === true && (int)($r3['json']['socket_drops'] ?? -1) === 0,
+          json_encode($r3['json']['socket_drops'] ?? null));
+
     // validation happens before anything is written
     foreach (['apply 99 100 "" 65536' => 'nice out of range',
               'apply -2 0 "" 65536' => 'weight out of range',
