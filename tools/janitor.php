@@ -66,10 +66,11 @@ try {
     // inbound UDP traffic: sample the nftables counters, expire a panic window, move the automatic
     // limit (no-op — not even a fork — while the monitor and the automatic mode are both off)
     $nl = netlimitTick($db, $cfg);
-    if ($nl['enabled'] && ($nl['error'] !== null || $nl['auto'] !== null || $nl['panic'] !== null || in_array('-v', $argv ?? [], true))) {
-        echo sprintf('[netlimit] sampled=%s%s%s pruned=%d%s', $nl['sampled'] ? 'yes' : 'no',
+    if ($nl['enabled'] && ($nl['error'] !== null || $nl['auto'] !== null || $nl['panic'] !== null || $nl['persisted'] || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[netlimit] sampled=%s%s%s%s pruned=%d%s', $nl['sampled'] ? 'yes' : 'no',
             $nl['auto'] ? ' auto=' . $nl['auto']['action'] . '→' . (int)$nl['auto']['pps'] . 'pps (' . $nl['auto']['reason'] . ')' : '',
-            $nl['panic'] ? ' panic=restored' : '', (int)$nl['pruned'],
+            $nl['panic'] ? ' panic=restored' : '',
+            $nl['persisted'] ? ' saved=ruleset' : '', (int)$nl['pruned'],
             $nl['error'] !== null ? ' error=' . $nl['error'] : ''), "\n";
     }
     // scheduled backups: fire when a slot is due (no-op — not even a fork — while backups are off)

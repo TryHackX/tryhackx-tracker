@@ -189,6 +189,17 @@ if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login') {
     if ($_SERVER['REQUEST_METHOD'] !== 'GET' && !verifyCsrfHeader()) {
         jsonResponse(['error' => 'Invalid CSRF token'], 403);
     }
+    // PHP's file session handler holds an EXCLUSIVE lock for the whole request, so two requests from
+    // the same admin never overlap — they queue. The panel's pages poll several of these endpoints at
+    // once, and one of them forks a firewall helper: without this, a single slow poll stalls every
+    // other request the page makes, and with only a handful of php-fpm children that is how a card
+    // ends up stuck on "loading" while the server is answering fine. These endpoints only read, and
+    // they are past the auth check, so nothing below needs the session open any more.
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && in_array($endpoint, [
+            'admin/net_status', 'admin/net_samples', 'admin/backup_status',
+            'admin/whitelist_status', 'admin/index_status', 'admin/tracker_service_status'], true)) {
+        session_write_close();
+    }
 }
 
 require_once __DIR__ . '/' . $apiRoutes[$endpoint];

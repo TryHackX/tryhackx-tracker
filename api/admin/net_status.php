@@ -82,6 +82,11 @@ if ((int)($state['last_apply_at'] ?? 0) > 0) {
     $out['last_apply'] = ['at' => (int)$state['last_apply_at'], 'pps' => (int)($state['last_apply_pps'] ?? 0),
                           'source' => (string)($state['last_apply_source'] ?? '')];
 }
+// Applied but not yet written to /etc: php-fpm's mount namespace makes /etc read-only, so the
+// janitor saves it on its next tick. The card has to say so — until then a reboot undoes the
+// admin's decision without a word.
+$out['persist_deferred'] = !empty($state['persist_deferred']);
+$out['last_persist_at'] = (int)($state['last_persist_at'] ?? 0);
 $out['last_error'] = $state['last_error'] ?? null;
 $out['last_error_at'] = (int)($state['last_error_at'] ?? 0);
 $out['last_tick_at'] = (int)($state['last_tick_at'] ?? 0);

@@ -403,6 +403,87 @@ STUB);
     $r = $run('egress 10');
     check('helper: egress rate is validated too', $r['rc'] !== 0);
 
+    // ── does the file on disk actually describe what is loaded? ──────────────
+    // This is the production failure that motivated the check: the rule reached the kernel, the
+    // file never got written, and `persistent` still said true because a file happened to exist.
+    // A reboot would then have quietly restored a completely different ruleset.
+    $r = $run('status');
+    check('helper: a file matching what is loaded counts as persistent',
+          ($r['json']['persistent'] ?? null) === true && ($r['json']['file_matches'] ?? null) === true, $r['out']);
+
+    $goodFile = (string)@file_get_contents($tmp . '/nftd/ottrack-in.nft');
+    file_put_contents($tmp . '/nftd/ottrack-in.nft',
+        "#!/usr/sbin/nft -f
+# tracker-netlimit: pps=0 burst=0 port=6969 mode=count generated=x
+table inet ottrack_in {}
+");
+    $r = $run('status');
+    check('helper: a saved ruleset that differs from the loaded one is NOT persistent',
+          ($r['json']['persistent'] ?? null) === false, json_encode($r['json']['persistent'] ?? null));
+    check('helper: … the file is still reported as present', ($r['json']['file_present'] ?? null) === true);
+    check('helper: … and the mismatch is named', ($r['json']['file_matches'] ?? null) === false && ($r['json']['file_mode'] ?? '') === 'count',
+          json_encode([$r['json']['file_matches'] ?? null, $r['json']['file_mode'] ?? null]));
+
+    $r = $run('persist');
+    check('helper: persist rewrites the file from what is loaded', $r['rc'] === 0 && ($r['json']['saved'] ?? null) === true, $r['out']);
+    check('helper: … with the rate that is actually in force',
+          str_contains((string)@file_get_contents($tmp . '/nftd/ottrack-in.nft'), 'limit rate over 40000/second burst 200 packets'),
+          (string)@file_get_contents($tmp . '/nftd/ottrack-in.nft'));
+    $r = $run('status');
+    check('helper: persistence reads true again', ($r['json']['persistent'] ?? null) === true, $r['out']);
+    $r = $run('persist');
+    check('helper: persist is a no-op when the file already matches',
+          $r['rc'] === 0 && ($r['json']['saved'] ?? null) === false && ($r['json']['in_sync'] ?? null) === true, $r['out']);
+
+    // a different RATE on disk is a mismatch too, not just a different mode
+    file_put_contents($tmp . '/nftd/ottrack-in.nft',
+        str_replace('pps=40000', 'pps=12345', (string)@file_get_contents($tmp . '/nftd/ottrack-in.nft')));
+    $r = $run('status');
+    check('helper: a saved rate that differs from the loaded one is a mismatch',
+          ($r['json']['file_matches'] ?? null) === false && (int)($r['json']['file_pps'] ?? 0) === 12345, $r['out']);
+    $run('persist');
+
+    // a save that fails for a REAL reason is still an error — the deferred path below is only for a
+    // directory this process cannot write at all
+    file_put_contents($tmp . '/bin/install', "#!/bin/bash
+exit 1
+");
+    @chmod($tmp . '/bin/install', 0755);
+    $r = $run('set 41000 200 6969');
+    check('helper: a save that fails for a real reason is reported as an error',
+          $r['rc'] !== 0 && str_contains((string)($r['json']['error'] ?? ''), 'could not be saved'), $r['out']);
+    @unlink($tmp . '/bin/install');
+
+    // The panel's PHP runs under systemd ProtectSystem on a hardened box: /etc is read-only inside
+    // that mount namespace, root included. That is not a failed apply and must not be reported as one.
+    @chmod($tmp . '/nftd', 0555);
+    clearstatcache();
+    $writable = @file_put_contents($tmp . '/nftd/.probe', 'x');
+    if ($writable === false) {
+        $r = $run('set 42000 200 6969');
+        check('helper: a read-only directory defers the save instead of failing the apply',
+              $r['rc'] === 0 && ($r['json']['applied'] ?? null) === true && ($r['json']['persist_deferred'] ?? null) === true, $r['out']);
+        check('helper: … and says plainly that it is not saved yet',
+              ($r['json']['saved'] ?? null) === false && ($r['json']['persistent'] ?? null) === false
+              && str_contains((string)($r['json']['persist_hint'] ?? ''), 'janitor'), $r['out']);
+        $c = $run('check');
+        check('helper: check flags the directory before anyone applies anything',
+              ($c['json']['dir_writable'] ?? null) === false && str_contains((string)($c['json']['hint'] ?? ''), 'read-only'), $c['out']);
+        check('helper: … but does not call it a failure', ($c['json']['ok'] ?? null) === true, $c['out']);
+        @chmod($tmp . '/nftd', 0777);
+        $r = $run('persist');
+        check('helper: the janitor finishes the save afterwards', $r['rc'] === 0 && ($r['json']['saved'] ?? null) === true, $r['out']);
+        check('helper: … with the rate that was actually applied',
+              str_contains((string)@file_get_contents($tmp . '/nftd/ottrack-in.nft'), 'limit rate over 42000/second'));
+    } else {
+        @unlink($tmp . '/nftd/.probe');
+        @chmod($tmp . '/nftd', 0777);
+        skip('helper: a read-only directory defers the save',
+             'this filesystem ignores chmod on directories (Windows, or running as root) — run the suite on the server for this half');
+    }
+    $run('set 40000 200 6969');
+    if (!is_file($tmp . '/nftd/ottrack-in.nft')) file_put_contents($tmp . '/nftd/ottrack-in.nft', $goodFile);
+
     // off — table and file both gone, nothing else disturbed
     $r = $run('off --dry-run');
     check('helper: off --dry-run changes nothing', $r['rc'] === 0 && is_file($tmp . '/nftd/ottrack-in.nft') && is_file($tmp . '/state/t_in'));

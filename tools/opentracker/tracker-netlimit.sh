@@ -144,6 +144,48 @@ include_ok() {
     grep -Eq '^[[:space:]]*include[[:space:]]+"?'"$(printf '%s' "$NFT_DIR" | sed 's/[.[\*^$]/\\&/g')"'/' "$NFT_CONF"
 }
 
+# Can we actually SAVE there? systemd's ProtectSystem=full — which php-fpm runs with on this class
+# of box — mounts /etc read-only for the service AND for everything it starts, root included: it is
+# a mount namespace, not a permission bit. A helper invoked from PHP can therefore load a ruleset
+# into the kernel (a syscall, unaffected) and still be unable to write the file that would bring it
+# back after a reboot. The janitor is a separate unit without that sandbox, so it can.
+dir_writable() {
+    [ -d "$NFT_DIR" ] || return 1
+    local probe="$NFT_DIR/.wtest.$$"
+    if : >"$probe" 2>/dev/null; then rm -f "$probe" 2>/dev/null; return 0; fi
+    return 1
+}
+
+# Does the file on disk describe what is actually loaded? "A file exists" is not the question the
+# admin is asking when the card says persistent — they are asking whether the limit survives a
+# reboot, and a stale file answers no.
+file_matches() {
+    [ -f "$RULES_FILE" ] || return 1
+    local live; live="$(read_mode)"
+    [ "$live" = none ] && return 1
+    local fmode; fmode="$(read_header mode)"; [ -n "$fmode" ] || fmode=limit
+    [ "$fmode" = "$live" ] || return 1
+    local fport lport; fport="$(read_header port)"; lport="$(read_port)"
+    [ -n "$lport" ] && [ "$fport" = "$lport" ] || return 1
+    [ "$live" = count ] && return 0
+    local fpps lpps fburst lburst
+    fpps="$(read_header pps)"; lpps="$(read_limit)"
+    [ "$fpps" = "$lpps" ] || return 1
+    # nft omits `burst N packets` from its own output when the burst is its default of 5
+    fburst="$(read_header burst)"; lburst="$(read_burst)"; [ -n "$lburst" ] || lburst=5
+    [ "$fburst" = "$lburst" ] || return 1
+    return 0
+}
+
+# Save the generated ruleset next to the others.
+#   0 = saved   1 = deferred (read-only mount namespace — the janitor finishes it)   2 = failed
+save_rules() {  # save_rules <tmpfile>
+    install -m 0644 "$1" "$RULES_FILE" 2>/dev/null && return 0
+    dir_writable && return 2
+    return 1
+}
+PERSIST_HINT="this process cannot write $NFT_DIR (systemd ProtectSystem); the janitor saves it within a minute"
+
 # Is the loaded table counting only, enforcing a limit, or absent? The panel needs to be able to say
 # which, because "monitoring" and "throttling" are different promises.
 read_mode() {
@@ -237,7 +279,14 @@ emit_status() {
     printf ',"table":%s' "$([ "$tbl" = yes ] && echo true || echo false)"
     printf ',"file":%s' "$([ -f "$RULES_FILE" ] && echo true || echo false)"
     printf ',"file_path":%s' "$(jstr "$RULES_FILE")"
-    printf ',"persistent":%s' "$([ -f "$RULES_FILE" ] && include_ok && echo true || echo false)"
+    # `persistent` answers "will what is loaded still be here after a reboot?", so a file holding a
+    # DIFFERENT ruleset — applied live but never saved — has to make it false, not true.
+    printf ',"persistent":%s' "$([ -f "$RULES_FILE" ] && include_ok && file_matches && echo true || echo false)"
+    printf ',"file_present":%s' "$([ -f "$RULES_FILE" ] && echo true || echo false)"
+    printf ',"file_matches":%s' "$(file_matches && echo true || echo false)"
+    printf ',"file_mode":%s' "$(jstr "$(fm="$(read_header mode)"; [ -f "$RULES_FILE" ] && { [ -n "$fm" ] && printf '%s' "$fm" || printf 'limit'; })")"
+    printf ',"file_pps":%s' "$(fp="$(read_header pps)"; is_uint "$fp" && printf '%s' "$fp" || printf '0')"
+    printf ',"dir_writable":%s' "$(dir_writable && echo true || echo false)"
     printf ',"include_ok":%s' "$(include_ok && echo true || echo false)"
     printf ',"mode":%s' "$(jstr "$(read_mode)")"
     printf ',"pps":%s' "$limit"
@@ -303,12 +352,16 @@ emit_check() {
         [ -d "$NFT_DIR" ] || { errs="${errs:+$errs | }$NFT_DIR does not exist."; hints="${hints:+$hints | }sudo install -d -m 0755 $NFT_DIR"; }
         include_ok || { errs="${errs:+$errs | }$NFT_CONF does not include $NFT_DIR — the limit would be lost on reboot."
                         hints="${hints:+$hints | }Append one line to $NFT_CONF:  include \"$NFT_DIR/*.nft\""; }
+        # Not an error: the janitor runs outside the web server's sandbox and saves the file there.
+        # Worth saying out loud though — it is the difference between "saved" and "saved in a minute".
+        dir_writable || hints="${hints:+$hints | }$NFT_DIR is read-only for this process (systemd ProtectSystem), so rules applied from the panel are written by the janitor instead, within a minute. To make it immediate: sudo systemctl edit php-fpm, add ReadWritePaths=-$NFT_DIR"
     fi
-    printf '{"ok":%s,"nft":%s,"nft_path":%s,"root":%s,"dir":%s,"include_ok":%s,"conf":%s,"error":%s,"hint":%s}\n' \
+    printf '{"ok":%s,"nft":%s,"nft_path":%s,"root":%s,"dir":%s,"dir_writable":%s,"include_ok":%s,"conf":%s,"error":%s,"hint":%s}\n' \
         "$([ -z "$errs" ] && echo true || echo false)" \
         "$(have_nft && echo true || echo false)" "$(jstr "$NFT")" \
         "$(is_root && echo true || echo false)" \
         "$([ -d "$NFT_DIR" ] && echo true || echo false)" \
+        "$(dir_writable && echo true || echo false)" \
         "$(include_ok && echo true || echo false)" "$(jstr "$NFT_CONF")" \
         "$(jstr "$errs")" "$(jstr "$hints")"
     [ -z "$errs" ]
@@ -353,10 +406,16 @@ action_set() {
     if [ "$mode" = reload ]; then
         out="$("$NFT" -f "$tmp" 2>&1)" || fail "nft failed to load the ruleset: $out" 3
     fi
-    install -m 0644 "$tmp" "$RULES_FILE" || fail "ruleset is live but could not be saved to $RULES_FILE (it will be lost on reboot)" 4
+    # The rule is in the kernel from here on. Saving it can still fail for a reason that is NOT a
+    # failed apply and NOT the admin's doing: see dir_writable().
+    local rc=0; save_rules "$tmp" || rc=$?
+    [ "$rc" = 2 ] && fail "ruleset is live but could not be saved to $RULES_FILE (it will be lost on reboot)" 4
 
-    printf '{"ok":true,"applied":true,"mode":%s,"pps":%s,"burst":%s,"port":%s,"file":%s,"persistent":%s}\n' \
-        "$(jstr "$mode")" "$pps" "$burst" "$port" "$(jstr "$RULES_FILE")" "$(include_ok && echo true || echo false)"
+    printf '{"ok":true,"applied":true,"mode":%s,"pps":%s,"burst":%s,"port":%s,"file":%s,"saved":%s,"persist_deferred":%s,"persist_hint":%s,"persistent":%s}\n' \
+        "$(jstr "$mode")" "$pps" "$burst" "$port" "$(jstr "$RULES_FILE")" \
+        "$([ "$rc" = 0 ] && echo true || echo false)" "$([ "$rc" = 1 ] && echo true || echo false)" \
+        "$(jstr "$([ "$rc" = 1 ] && printf '%s' "$PERSIST_HINT")")" \
+        "$([ "$rc" = 0 ] && include_ok && echo true || echo false)"
 }
 
 # Load the counting-only table. Same atomic transaction as `set`, and it never uses the targeted
@@ -380,10 +439,43 @@ action_monitor() {
     is_root || fail "must run as root to change the firewall"
     [ -d "$NFT_DIR" ] || mkdir -p "$NFT_DIR" || fail "cannot create $NFT_DIR"
     local out; out="$("$NFT" -f "$tmp" 2>&1)" || fail "nft failed to load the ruleset: $out" 3
-    install -m 0644 "$tmp" "$RULES_FILE" || fail "ruleset is live but could not be saved to $RULES_FILE (it will be lost on reboot)" 4
+    local rc=0; save_rules "$tmp" || rc=$?
+    [ "$rc" = 2 ] && fail "ruleset is live but could not be saved to $RULES_FILE (it will be lost on reboot)" 4
 
-    printf '{"ok":true,"applied":true,"mode":"count","port":%s,"file":%s,"persistent":%s}\n' \
-        "$port" "$(jstr "$RULES_FILE")" "$(include_ok && echo true || echo false)"
+    printf '{"ok":true,"applied":true,"mode":"count","port":%s,"file":%s,"saved":%s,"persist_deferred":%s,"persist_hint":%s,"persistent":%s}\n' \
+        "$port" "$(jstr "$RULES_FILE")" \
+        "$([ "$rc" = 0 ] && echo true || echo false)" "$([ "$rc" = 1 ] && echo true || echo false)" \
+        "$(jstr "$([ "$rc" = 1 ] && printf '%s' "$PERSIST_HINT")")" \
+        "$([ "$rc" = 0 ] && include_ok && echo true || echo false)"
+}
+
+# Write the file so it describes what is CURRENTLY loaded, and nothing else. This exists because a
+# limit applied from the panel travels through php-fpm, whose mount namespace makes /etc read-only:
+# the rule reaches the kernel, but the file that would restore it after a reboot never gets written.
+# The janitor is a plain systemd unit without that sandbox, so it can finish the job a minute later.
+# Idempotent by design: it does nothing at all when the file already matches.
+action_persist() {
+    have_nft || fail "nftables (nft) is not installed."
+    table_exists "$TABLE" || { printf '{"ok":true,"saved":false,"reason":"no table is loaded"}\n'; return 0; }
+    if file_matches; then printf '{"ok":true,"saved":false,"in_sync":true}\n'; return 0; fi
+    is_root || fail "must run as root to save the ruleset"
+    [ -d "$NFT_DIR" ] || mkdir -p "$NFT_DIR" || fail "cannot create $NFT_DIR"
+
+    local m port; m="$(read_mode)"; port="$(read_port)"; is_uint "$port" || port=6969
+    tmp="$(mktemp "${TMPDIR:-/tmp}/ottrack-in.XXXXXX")" || fail "cannot create a temporary file"
+    trap 'rm -f "${tmp:-}"' EXIT
+    if [ "$m" = count ]; then
+        render_monitor "$port" >"$tmp"
+    else
+        local pps burst; pps="$(read_limit)"; burst="$(read_burst)"; [ -n "$burst" ] || burst=5
+        is_uint "$pps" || fail "cannot read the live limit back from the ruleset"
+        render "$pps" "$burst" "$port" >"$tmp"
+    fi
+    local rc=0; save_rules "$tmp" || rc=$?
+    [ "$rc" = 0 ] || fail "could not save $RULES_FILE — $([ "$rc" = 1 ] && printf '%s' "$PERSIST_HINT" || printf 'the write failed')" 4
+
+    printf '{"ok":true,"saved":true,"mode":%s,"file":%s,"persistent":%s}\n' \
+        "$(jstr "$m")" "$(jstr "$RULES_FILE")" "$(include_ok && echo true || echo false)"
 }
 
 action_off() {
@@ -440,8 +532,9 @@ case "${1:-status}" in
     set)     shift; action_set "${1-}" "${2-100}" "${3-6969}" "${4-}" ;;
     monitor) shift || true; action_monitor "${1-6969}" "${2-}" ;;
     off)     shift; action_off "${1-}" ;;
+    persist) action_persist ;;
     egress)  shift; action_egress "${1-}" "${2-}" ;;
     -h|--help|help)
         sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//' ; exit 0 ;;
-    *) fail "unknown action '${1:-}' — use: status | check | monitor [port] | set <pps> [burst] [port] | off | egress <pps>" 1 ;;
+    *) fail "unknown action '${1:-}' — use: status | check | monitor [port] | set <pps> [burst] [port] | persist | off | egress <pps>" 1 ;;
 esac

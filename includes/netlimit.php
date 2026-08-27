@@ -425,12 +425,46 @@ function netlimitApply(array $cfg, int $pps, int $burst, int $port, bool $dryRun
                 $s['sample'] = ['ts' => 0, 'counters' => []];
             }
             $s['last_error'] = null;
+            // The rule is live but the file could not be written from inside php-fpm's mount
+            // namespace. Not an error — the janitor saves it — but the card has to say so, because
+            // until then a reboot would silently undo what the admin just decided.
+            $s['persist_deferred'] = !empty($r['json']['persist_deferred']);
             return true;
         });
     } elseif (!$r['ok']) {
         $err = $r['error'] ?? 'apply failed';
         netlimitStateUpdate(function (array &$s) use ($err) { $s['last_error'] = $err; $s['last_error_at'] = time(); return true; });
     }
+    return $r;
+}
+
+/**
+ * Save the loaded ruleset to /etc/nftables.d so that it comes back after a reboot.
+ *
+ * An apply from the panel runs inside php-fpm, and this class of box runs php-fpm with systemd's
+ * ProtectSystem=full: /etc is mounted read-only for the service and for every process it starts,
+ * root included — it is a mount namespace, not a permission bit. So the rule reaches the kernel
+ * (a syscall, unaffected) while the file that would restore it never gets written, and the panel
+ * used to report that as a hard failure while the limit was in fact running.
+ *
+ * The janitor is an ordinary systemd unit with no such sandbox, so it can finish the job. This is
+ * a no-op when the file already describes what is loaded.
+ */
+function netlimitPersist(array $cfg): array {
+    $r = netlimitRun($cfg, ['persist']);
+    netlimitStateUpdate(function (array &$s) use ($r) {
+        if ($r['ok']) {
+            $s['persist_deferred'] = false;
+            if (!empty($r['json']['saved'])) {
+                $s['last_persist_at'] = time();
+                $s['status'] = null; $s['status_at'] = 0;   // `persistent` just changed
+            }
+        } else {
+            $s['last_error'] = $r['error'] ?? 'could not save the ruleset';
+            $s['last_error_at'] = time();
+        }
+        return true;
+    });
     return $r;
 }
 
@@ -646,7 +680,7 @@ function netlimitTick(PDO $db, array &$cfg, ?int $now = null): array {
     $now = $now ?? time();
     $state = netlimitStateRead();
     $panicPending = (int)($state['panic']['until'] ?? 0) > 0;
-    $out = ['enabled' => false, 'sampled' => false, 'auto' => null, 'panic' => null, 'pruned' => 0, 'error' => null];
+    $out = ['enabled' => false, 'sampled' => false, 'auto' => null, 'panic' => null, 'pruned' => 0, 'persisted' => false, 'error' => null];
     if (!netlimitMonitorEnabled($cfg) && !netlimitAutoEnabled($cfg) && !$panicPending) return $out;
     $out['enabled'] = true;
 
@@ -675,6 +709,14 @@ function netlimitTick(PDO $db, array &$cfg, ?int $now = null): array {
             $s = netlimitStoreSample($db, $cfg, $status, $now);
             $out['sampled'] = $s['stored'];
             $rates = $s['pps'];
+        }
+
+        // 2b. finish a save the panel could not do itself. `file_matches` is absent on an older
+        // helper, and then this does nothing at all.
+        if (!empty($status['table']) && array_key_exists('file_matches', $status) && !$status['file_matches']) {
+            $pr = netlimitPersist($cfg);
+            $out['persisted'] = $pr['ok'] && !empty($pr['json']['saved']);
+            if (!$pr['ok']) $out['error'] = $pr['error'] ?? 'could not save the ruleset';
         }
 
         // 3. retention
