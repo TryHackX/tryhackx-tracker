@@ -324,6 +324,15 @@
         });
         g.appendChild(box);
 
+        const restore = $('btn-sy-restore');
+        if (restore) {
+            const can = restorable();
+            restore.disabled = !can;
+            restore.title = can
+                ? 'Put back the values this machine had before the panel first touched them, and delete the panel’s file'
+                : 'Nothing to undo: the panel has never changed any of these, so what you see is this machine’s own configuration';
+        }
+
         renderArmed();
 
         const notes = $('sy-notes');
@@ -493,8 +502,24 @@
         }
     }
 
+    /**
+     * "Restore defaults" means the values THIS MACHINE had before the panel first touched them, and
+     * not the distribution's defaults. Those are different things: the operator may have tuned this
+     * box years ago, and handing them a vendor default while calling it an undo would be a change
+     * dressed as a restoration. When the panel has never altered anything there is nothing captured,
+     * so the button says so rather than doing nothing quietly.
+     */
+    function restorable() {
+        const st = state.status || {};
+        return !!(st.baseline && st.baseline.values && Object.keys(st.baseline.values).length) || !!st.file_present;
+    }
+
     async function revert() {
-        if (!window.confirm('Put the captured values back?\n\nThis restores what the machine had before the panel first touched these settings, and removes the panel’s file. It never asks for a password, on purpose.')) return;
+        if (!restorable()) {
+            showToast('The panel has never changed any of these, so there is nothing of its doing to undo — what you see IS this machine’s own configuration.', 'info');
+            return;
+        }
+        if (!window.confirm('Put the captured values back?\n\nThis restores what the machine had before the panel first touched these settings, and removes the panel’s file. It is NOT the distribution’s defaults — it is what your machine had. It never asks for a password, on purpose.')) return;
         try {
             const r = await apiCall('admin/sysctl_apply', 'POST', { op: 'revert' });
             showToast(r.success ? (r.message || 'Queued.') : (r.error || 'Failed.'), r.success ? 'success' : 'error');
@@ -531,6 +556,7 @@
         $('btn-sy-confirm').addEventListener('click', () => ask('confirm'));
         $('btn-sy-revert').addEventListener('click', revert);
         $('btn-sy-preview').addEventListener('click', preview);
+        $('btn-sy-restore').addEventListener('click', revert);
         $('btn-sy-suggest').addEventListener('click', useSuggested);
         $('sy-confirm-form').addEventListener('submit', run);
         document.addEventListener('visibilitychange', () => { if (!document.hidden) load(true); });

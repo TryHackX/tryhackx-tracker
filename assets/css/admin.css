@@ -1497,10 +1497,15 @@ input[type="number"] {
 /* Kernel network buffers card (assets/js/admin-sysctl.js).
    Three columns per key: what it is, what is in force, what you are asking for — because the middle
    one is the number people forget to look at before typing the third. */
+.sy-body { display: block; }
 .sy-rows { display: flex; flex-direction: column; gap: 0.5rem; }
-.sy-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.2fr); gap: 0.9rem;
-          padding: 0.6rem 0.7rem; background: #10161d; border: 1px solid #1c232b; border-radius: 6px; align-items: start; }
-.sy-row-wide { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.6fr); }
+/* Three real columns with floors under them: what the key is (wide enough for a sentence), what is in
+   force, and what you are asking for. minmax(0, …) alone let the description column collapse to a
+   word per line inside a narrow parent. */
+.sy-row { display: grid; grid-template-columns: minmax(20rem, 2.2fr) minmax(9rem, 0.9fr) minmax(15rem, 1.3fr);
+          gap: 1rem; padding: 0.7rem 0.8rem; background: #10161d; border: 1px solid #1c232b;
+          border-radius: 6px; align-items: start; }
+.sy-row-wide { grid-template-columns: minmax(20rem, 2fr) minmax(11rem, 1fr) minmax(21rem, 1.6fr); }
 .sy-key-label { font-size: 0.86rem; color: #dfe6ee; font-weight: 500; }
 .sy-key-name { display: block; font-size: 0.74rem; color: #6c7a89; margin: 0.1rem 0 0.25rem; }
 .sy-key-what { font-size: 0.76rem; color: #8b98a6; line-height: 1.45; }
@@ -1514,8 +1519,10 @@ input[type="number"] {
 .sy-echo { font-size: 0.75rem; color: #8b98a6; margin-top: 0.25rem; line-height: 1.45; }
 .sy-echo-warn { color: #d9a441; }
 .sy-sugg { font-size: 0.75rem; color: #4f9d69; margin-top: 0.2rem; }
-.sy-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.35rem; }
-.sy-three-label { font-size: 0.7rem; color: #6c7a89; display: block; }
+.sy-three { display: grid; grid-template-columns: repeat(3, minmax(5rem, 1fr)); gap: 0.4rem; }
+.sy-three-cell { min-width: 0; }
+.sy-three-cell input { width: 100%; }
+.sy-three-label { font-size: 0.7rem; color: #6c7a89; display: block; margin-bottom: 0.1rem; }
 
 /* The armed banner. Keep and Put-it-back are pushed apart deliberately: one of them makes the change
    survive a reboot, and it gets read on a page that may be stuttering at the time. */
@@ -1528,6 +1535,9 @@ input[type="number"] {
 .sy-armed-actions { margin-top: 0.6rem; display: flex; align-items: center; }
 .sy-armed-gap { flex: 1 1 auto; min-width: 2.5rem; }
 
-@media (max-width: 900px) {
-  .sy-row, .sy-row-wide { grid-template-columns: minmax(0, 1fr); }
+/* The verdict and the machine facts sit above the rows and want the whole width. */
+.sy-body > .nl-note { margin-bottom: 0.6rem; }
+@media (max-width: 1100px) {
+  .sy-row, .sy-row-wide { grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
+  .sy-input { max-width: 10rem; }
 }

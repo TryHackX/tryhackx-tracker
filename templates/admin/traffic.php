@@ -272,6 +272,9 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-sy-suggest" title="Fill in what the measurements above actually support"><i class="bi bi-magic"></i> Use suggested</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-sy-preview" title="Render the file without writing it"><i class="bi bi-eye"></i> Preview file</button>
                     <button type="button" class="btn btn-sm btn-outline-success" id="btn-sy-arm"><i class="bi bi-stopwatch"></i> Apply for a while&hellip;</button>
+                    <!-- Always here, not only inside the armed banner. Once a change is confirmed the
+                         banner is gone, and the way back went with it. -->
+                    <button type="button" class="btn btn-sm btn-outline-warning" id="btn-sy-restore" disabled><i class="bi bi-arrow-counterclockwise"></i> Restore defaults</button>
                 </div>
             </div>
 
@@ -292,7 +295,10 @@
                 </div>
             </div>
 
-            <div class="wl-status-grid" id="sy-grid">
+            <!-- NOT .wl-status-grid: that is repeat(auto-fill, minmax(250px, 1fr)), so every row here
+                 landed inside one 250-pixel column and every sentence wrapped one word per line. These
+                 rows want the full width of the card and lay themselves out. -->
+            <div class="sy-body" id="sy-grid">
                 <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading the kernel&hellip;</div>
             </div>
             <div id="sy-notes"></div>
