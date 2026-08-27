@@ -345,6 +345,77 @@
             </div>
         </div>
         <?php endif; ?>
+
+        <?php if (otClusterEnabled($cfg)): ?>
+        <!-- Extra opentracker instances. Last card on the page on purpose: everything above measures
+             whether this is needed, and on most machines the answer is no. The installer's own unit is
+             shown here but is never managed from here -- it is listed so the roster is the whole truth
+             rather than only the part the panel created. -->
+        <div class="wl-status-card nl-card" id="cluster-card">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-diagram-3"></i> OpenTracker instances <span class="wl-status-updated" id="cl-updated"></span></h6>
+                <div class="wl-status-actions">
+                    <a href="<?= $baseUrl ?>?action=settings#section-cluster" class="btn btn-sm btn-outline-secondary"><i class="bi bi-gear"></i> Settings</a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-cl-reload" title="SIGHUP every instance so it re-reads the shared accesslist"><i class="bi bi-arrow-repeat"></i> Reload all</button>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="btn-cl-add"><i class="bi bi-plus-lg"></i> Add instance&hellip;</button>
+                </div>
+            </div>
+            <div class="sy-body" id="cl-body">
+                <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading the roster&hellip;</div>
+            </div>
+            <div id="cl-notes"></div>
+        </div>
+
+        <div class="modal fade" id="clAddModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content bg-dark">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title"><i class="bi bi-plus-circle text-success"></i> Add a tracker instance</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="text-light mb-2" style="font-size:0.9rem;">A new instance starts answering announces as soon as it exists. It shares this tracker&rsquo;s accesslist and its white/black mode, and runs the same binary &mdash; only the ports differ. Clients reach it only if you publish the extra announce URL below.</p>
+                        <form id="cl-add-form">
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;">Name</label>
+                                    <input type="text" class="form-control bg-dark text-light border-secondary" id="cl-name" maxlength="16" placeholder="edge-a" required>
+                                    <small class="settings-hint">a&ndash;z, 0&ndash;9 and -, up to 16.</small>
+                                </div>
+                                <div class="col-3">
+                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;">UDP port</label>
+                                    <input type="number" class="form-control bg-dark text-light border-secondary" id="cl-udp" min="1024" max="65535" required>
+                                </div>
+                                <div class="col-3">
+                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;">TCP port</label>
+                                    <input type="number" class="form-control bg-dark text-light border-secondary" id="cl-tcp" min="1024" max="65535" required>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;">CPU affinity <small class="settings-hint">(optional)</small></label>
+                                    <input type="text" class="form-control bg-dark text-light border-secondary" id="cl-affinity" placeholder="e.g. 2-3">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;">UDP workers <small class="settings-hint">(0 = copy the primary&rsquo;s)</small></label>
+                                    <input type="number" class="form-control bg-dark text-light border-secondary" id="cl-workers" min="0" max="64" value="0">
+                                </div>
+                            </div>
+                            <div id="cl-plan" class="mt-2"></div>
+                            <div class="mb-3 mt-2">
+                                <label class="form-label" style="font-size:0.85rem;color:#bbb;">Admin Password *</label>
+                                <input type="password" class="form-control bg-dark text-light border-secondary" id="cl-password" autocomplete="current-password" required>
+                            </div>
+                            <div class="d-flex justify-content-end gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><i class="bi bi-x-lg"></i> Cancel</button>
+                                <button type="button" class="btn btn-sm btn-outline-info" id="btn-cl-plan"><i class="bi bi-search"></i> Check the ports</button>
+                                <button type="submit" class="btn btn-sm btn-outline-success" id="cl-add-ok"><i class="bi bi-check-lg"></i> Create</button>
+                            </div>
+                        </form>
+                        <div id="cl-add-alert" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
@@ -365,6 +436,9 @@
     <script src="<?= $baseUrl ?>assets/js/admin-otperf.js<?= assetVer('assets/js/admin-otperf.js') ?>"></script>
     <?php if (sysctlEnabled($cfg)): ?>
     <script src="<?= $baseUrl ?>assets/js/admin-sysctl.js<?= assetVer('assets/js/admin-sysctl.js') ?>"></script>
+    <?php endif; ?>
+    <?php if (otClusterEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/js/admin-cluster.js<?= assetVer('assets/js/admin-cluster.js') ?>"></script>
     <?php endif; ?>
     <?php endif; ?>
 </body>

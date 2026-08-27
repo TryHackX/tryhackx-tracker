@@ -89,6 +89,7 @@ $allowed = [
     // deliberately no key here that could rewrite the record of what the machine looked like
     // before the panel first touched it.
     'sysctl_cmd', 'sysctl_enabled', 'sysctl_confirm_seconds',
+    'ot_cluster_cmd', 'ot_cluster_enabled', 'ot_cluster_port_base',
 ];
 
 $data = [];
@@ -200,13 +201,20 @@ if (isset($data['whitelist_tracker_hosts'])) {
     $data['whitelist_tracker_hosts'] = implode(', ', array_unique($clean));
 }
 if (isset($data['fed_import_mode'])) $data['fed_import_mode'] = $data['fed_import_mode'] === 'review' ? 'review' : 'fill';
+if (isset($data['ot_cluster_cmd']) && !otClusterValidCommand((string)$data['ot_cluster_cmd'])) {
+    jsonResponse(['error' => 'The instance helper command may only contain letters, digits, spaces and _ . / -'], 400);
+}
+if (isset($data['ot_cluster_port_base']) && trim((string)$data['ot_cluster_port_base']) !== ''
+    && ((int)$data['ot_cluster_port_base'] < 1024 || (int)$data['ot_cluster_port_base'] > 65500)) {
+    jsonResponse(['error' => 'The first instance port must be between 1024 and 65500 (below 1024 belongs to things that were here first).'], 400);
+}
 if (isset($data['sysctl_cmd']) && !sysctlValidCommand((string)$data['sysctl_cmd'])) {
     jsonResponse(['error' => 'The kernel-buffer helper command may only contain letters, digits, spaces and _ . / -'], 400);
 }
 foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
           'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist',
-          'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled',
+          'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled', 'ot_cluster_enabled',
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'backup_enabled', 'backup_verify_after'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';

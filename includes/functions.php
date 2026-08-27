@@ -907,6 +907,17 @@ function getTrackerServiceWarnings(array $cfg): array {
     } else {
         $res = classifyTrackerWarnings($adds, $dels, $uptime, $cfg);
     }
+    // Extra instances, if any. Reads the CACHED roster only and never forks: this function is called
+    // from api/admin/tracker_service_status.php, which the dashboard polls, so anything expensive here
+    // would be paid on every poll by every open panel.
+    if (function_exists('otClusterWarnings')) {
+        foreach (otClusterWarnings($cfg) as $w) {
+            $res['items'][] = $w;
+            if ($w['level'] === 'danger') $res['level'] = 'danger';
+            elseif ($w['level'] === 'warning' && $res['level'] === 'none') $res['level'] = 'warn';
+        }
+        $res['count'] = count($res['items']);
+    }
     $res['mode']           = function_exists('trackerMode') ? trackerMode($cfg) : 'blacklist';
     $res['pending_adds']   = $adds;
     $res['pending_dels']   = $dels;
@@ -955,7 +966,48 @@ function runTrackerServiceCommand(string $verb, array $cfg): array {
     $output = [];
     $ret    = null;
     @exec($cmd, $output, $ret);
-    return ['ok' => $ret === 0, 'output' => trim(implode("\n", $output)), 'code' => (int)$ret, 'cmd' => $cmd];
+    $ok = $ret === 0;
+    // `systemctl reload` returns 0 as soon as the signal is delivered. On an opentracker built
+    // without the SIGHUP-with-UDP-workers patch that signal can KILL the process a moment later, so a
+    // zero exit code alone would report a reload that emptied the swarm as a success -- and clear the
+    // pending-reload bookkeeping while it did. One cheap question closes a hole that predates the
+    // cluster work entirely.
+    if ($ok && $verb === 'reload') {
+        $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
+        if ($service !== '' && isServiceNameValid($service)) {
+            $chk = []; $crc = null;
+            @exec('systemctl is-active --quiet ' . escapeshellarg($service) . ' 2>&1', $chk, $crc);
+            if ($crc !== 0) {
+                $ok = false;
+                $output[] = 'the unit is not active after the reload (a SIGHUP can kill an unpatched build)';
+            }
+        }
+    }
+    return ['ok' => $ok, 'output' => trim(implode("\n", $output)), 'code' => (int)$ret, 'cmd' => $cmd];
+}
+
+/**
+ * The same verb across the installer's unit AND every extra instance.
+ *
+ * `ok` follows the PRIMARY alone, and that is deliberate. The primary's result drives the panel's
+ * pending-reload bookkeeping; letting a permanently broken extra pull it down would mean the
+ * bookkeeping never clears, the whitelist is never marked as applied, and submitters are told
+ * "active in N seconds" for ever -- while the primary, which reloaded correctly every single time, is
+ * recorded as having failed. Extras get their own entry and their own warning instead.
+ */
+function runTrackerServiceCommandAll(string $verb, array $cfg): array {
+    $primary = runTrackerServiceCommand($verb, $cfg);
+    $out = ['ok' => $primary['ok'], 'primary' => $primary, 'extras' => [], 'extras_failed' => 0];
+    if (!function_exists('otClusterEnabled') || !otClusterEnabled($cfg)) return $out;
+    if ($verb !== 'reload') return $out;      // restarting every instance at once is never implicit
+
+    $r = otClusterRun($cfg, ['reload', '--all']);
+    foreach ((array)($r['json']['reloaded'] ?? []) as $x) {
+        $out['extras'][] = $x;
+        if (empty($x['ok'])) $out['extras_failed']++;
+    }
+    if (!$r['ok'] && !$out['extras']) $out['extras_failed'] = 1;
+    return $out;
 }
 
 /**

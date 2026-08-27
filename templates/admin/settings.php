@@ -676,6 +676,38 @@
             </div>
 
             <!-- Kernel network buffers -->
+            <!-- Extra opentracker instances -->
+            <div class="settings-section" id="section-cluster" data-group="tracker" data-title="OpenTracker instances">
+                <h5>OpenTracker instances</h5>
+                <small class="settings-hint d-block mb-3">Run <strong>more than one</strong> opentracker on this machine, on extra UDP ports, when one has genuinely run out of CPU. Check the <a href="<?= $baseUrl ?>?action=admin-traffic#ot-card">performance card</a> first: it says outright whether this would help, and on most machines it will not &mdash; the cheap knobs (worker count, priority, socket buffers) are worth nearly all of the available gain at nearly none of the risk. The installer&rsquo;s own <code>opentracker.service</code> is <strong>never touched</strong>; extras are added beside it, share the same accesslist and the same white/black mode, and removing them removes every trace. Off by default.</small>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Helper command</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_cluster_cmd" value="<?= sanitize($cfg['ot_cluster_cmd'] ?? '') ?>" maxlength="255" placeholder="sudo -n /usr/local/sbin/tracker-cluster.sh">
+                        <small class="settings-hint">Empty = the feature does not exist: no card, no polling, no <code>sudo</code>.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Enabled</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="ot_cluster_enabled">
+                            <option value="0" <?= ($cfg['ot_cluster_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>No</option>
+                            <option value="1" <?= ($cfg['ot_cluster_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Yes</option>
+                        </select>
+                        <small class="settings-hint">Turning it on only shows the card; it creates nothing.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">First extra port</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_cluster_port_base" value="<?= sanitize($cfg['ot_cluster_port_base'] ?? '') ?>" min="1024" max="65500" placeholder="(next to the primary&rsquo;s)">
+                        <small class="settings-hint">Empty = the panel proposes the first free port next to the tracker&rsquo;s own. Ports below 1024 are refused.</small>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-cluster-test"><i class="bi bi-plug"></i> Test</button>
+                    <div id="cluster-test-result" class="mt-2"></div>
+                    <small class="settings-hint d-block mt-2">The Test button also checks something the panel cannot see by itself: whether the <em>installed</em> <code>/usr/local/sbin/tracker-mode.sh</code> understands <code>--all</code>. No deploy updates that file, and if the nightly schedule calls a flag the installed copy does not know, the scheduled whitelist hours simply never begin &mdash; silently, every night.</small>
+                </div>
+            </div>
+
+
             <div class="settings-section" id="section-sysctl" data-group="tracker" data-title="Kernel network buffers">
                 <h5>Kernel network buffers</h5>
                 <small class="settings-hint d-block mb-3">The eight kernel settings that decide how many announces survive a burst &mdash; the socket buffers, the per-CPU packet queue and the machine-wide UDP memory pool. This is the first thing the panel touches that is <strong>not</strong> the tracker&rsquo;s own: these belong to the whole machine, which here also runs mail, the forum, the file service and the database they share. So nothing is applied by saving. A change is <em>armed</em>, takes effect while you watch it, and <strong>puts itself back automatically unless you confirm</strong> &mdash; the undo is scheduled through systemd before the change is made, so it does not need this panel, the database, or an administrator who can still log in. Nothing is written to <code>/etc</code> until you confirm either, so until then a reboot also undoes it. The values live on the <a href="<?= $baseUrl ?>?action=admin-traffic#sysctl-card">Traffic page</a>, next to the counters that say which of them is worth touching at all.</small>
@@ -2319,6 +2351,43 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 box.innerHTML = '<span class="text-danger">&#10007; ' + esc(j.error || 'Test failed') + '</span>'
                     + (j.hint ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + esc(j.hint) + '</small>' : '') + meta;
             }
+        } catch {
+            box.innerHTML = '<span class="text-danger">Network error</span>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
+    });
+
+    // The instances Test button. Shares the renderer with the kernel-buffer one because the two
+    // endpoints answer in the same shape, and the interesting half is the same: some checks are
+    // expected to be false and are rendered as information rather than as failures.
+    document.getElementById('btn-cluster-test')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const box = document.getElementById('cluster-test-result');
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
+        box.innerHTML = '<span class="text-info">Asking the helper&hellip;</span>';
+        try {
+            const res = await fetch(API_BASE + 'admin/ot_cluster_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
+            const j = await res.json();
+            let html = j.ok
+                ? '<span class="text-success">&#10003; The panel can manage extra instances from here.</span>'
+                : '<span class="text-danger">&#10007; Something on the path is missing.</span>';
+            html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
+            (j.checks || []).forEach(c => {
+                const mark = c.ok ? '<span class="text-success">&#10003;</span>'
+                                  : (c.info ? '<span style="color:#a0a0b0;">&#8226;</span>' : '<span class="text-danger">&#10007;</span>');
+                html += '<li>' + mark + ' ' + esc(c.name)
+                     + (c.detail ? ' <small style="color:#a0a0b0;">&mdash; ' + esc(c.detail) + '</small>' : '') + '</li>';
+            });
+            html += '</ul>';
+            (j.errors || []).forEach(x => { html += '<div class="text-warning" style="font-size:.85rem;">' + esc(x) + '</div>'; });
+            if ((j.suggestions || []).length) {
+                html += '<pre class="nl-preview mt-2" style="white-space:pre-wrap;">' + esc(j.suggestions.join(String.fromCharCode(10))) + '</pre>';
+            }
+            box.innerHTML = html;
         } catch {
             box.innerHTML = '<span class="text-danger">Network error</span>';
         } finally {

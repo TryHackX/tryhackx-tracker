@@ -1541,3 +1541,17 @@ input[type="number"] {
   .sy-row, .sy-row-wide { grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
   .sy-input { max-width: 10rem; }
 }
+
+/* A disabled action in a status card must LOOK unavailable and say why on hover. Bootstrap kills
+   pointer-events on a disabled button, which takes the not-allowed cursor and the title tooltip with
+   it — so the reason the button cannot be used becomes unreachable exactly when it is needed. The
+   button element is still disabled, so nothing is clickable; only the feedback comes back. */
+.wl-status-actions .btn:disabled,
+.wl-status-actions .btn[disabled] {
+    opacity: 0.34;
+    filter: grayscale(0.85);
+    cursor: not-allowed;
+    pointer-events: auto;
+}
+.wl-status-actions .btn:disabled:hover,
+.wl-status-actions .btn[disabled]:hover { background: transparent; }

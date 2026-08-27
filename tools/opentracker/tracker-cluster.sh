@@ -158,7 +158,7 @@ port_in_use_conf() {
     local p="$1" f
     for f in "$TRACKER_HOME"/opentracker.conf.* "$INSTANCES_DIR"/*/opentracker.conf.*; do
         [ -f "$f" ] || continue
-        grep -qE "^[[:space:]]*listen\.(udp|tcp)[^0-9]*:$p([[:space:]]|$)" "$f" 2>/dev/null && { printf '%s' "$f"; return 0; }
+        grep -qE "^[[:space:]]*listen\.(udp|tcp)[[:space:]].*:$p([[:space:]]|$)" "$f" 2>/dev/null && { printf '%s' "$f"; return 0; }
     done
     return 1
 }

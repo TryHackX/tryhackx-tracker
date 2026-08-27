@@ -34,6 +34,7 @@ require_once $root . '/includes/users.php';
 require_once $root . '/includes/netlimit.php';
 require_once $root . '/includes/opentracker.php';
 require_once $root . '/includes/sysctl.php';
+require_once $root . '/includes/cluster.php';
 require_once $root . '/includes/backup.php';
 
 try {
@@ -92,6 +93,19 @@ try {
             $sy['reverted'] ? ' reverted=yes' : '',
             $sy['error'] !== null ? ' error=' . $sy['error'] : ''), "
 ";
+    }
+
+    // Extra opentracker instances: SIGHUP them when the accesslist has changed under them.
+    //
+    // Driven by the file's modification time rather than by hooking into whitelistJanitor(), for two
+    // reasons. That function runs on EVERY API request by design, so a loop of `systemctl reload` in
+    // it would let one visitor stall five php-fpm children. And it returns immediately in blacklist
+    // mode -- where an extra would otherwise keep serving a hash that was banned an hour ago, which
+    // on a takedown tracker is the failure with legal weight.
+    $cl = otClusterTick($cfg);
+    if ($cl['did'] !== null) {
+        echo sprintf('[cluster] %s reloaded=%d failed=%d%s', $cl['did'], $cl['reloaded'], $cl['failed'],
+            $cl['error'] !== null ? ' error=' . $cl['error'] : ''), "\n";
     }
     // scheduled backups: fire when a slot is due (no-op — not even a fork — while backups are off)
     $bk = backupTick($db, $cfg);
