@@ -1789,6 +1789,19 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             </form>
             <div id="password-alert" class="mt-2"></div>
         </div>
+
+            <!-- Two-factor authentication -->
+            <div class="settings-section" id="section-2fa" data-group="credentials" data-title="Two-factor authentication">
+                <h5>Two-factor authentication</h5>
+                <small class="settings-hint d-block mb-3">A six-digit code from an authenticator app (TOTP, RFC&nbsp;6238 &mdash; Google Authenticator, Aegis, 1Password, anything) on top of the password. <strong>Off by default.</strong> The secret lives in <code>config/admin_2fa.json</code>, beside the password hash and away from the settings table that every backup dumps. Turning it <em>off</em> needs the password <strong>and</strong> a current code: this exists for the case where somebody else has the password, so the password alone must not be able to switch it off.</small>
+                <!-- data-setting marks a setting the search should find even though this block is
+                     rendered by JavaScript rather than being a form field: admin_2fa_enabled is a
+                     mirror of config/admin_2fa.json and no form post may change it. -->
+                <div id="tf-panel" data-setting="admin_2fa_enabled">
+                    <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading&hellip;</div>
+                </div>
+            </div>
+
         </div><!-- /.settings-narrow -->
     </div>
 
@@ -1823,6 +1836,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-settings.js<?= assetVer('assets/js/admin-settings.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-twofa.js<?= assetVer('assets/js/admin-twofa.js') ?>"></script>
     <script>
     const API_BASE = document.body.dataset.apiBase;
     const CSRF = document.body.dataset.csrf || '';

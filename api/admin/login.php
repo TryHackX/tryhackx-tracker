@@ -36,7 +36,18 @@ if (isCaptchaRequired($cfg, 'login')) {
 $username = trim($input['username'] ?? '');
 $password = $input['password'] ?? '';
 
-if (attemptLogin($username, $password, $cfg)) {
+if (adminCredentialsValid($username, $password, $cfg)) {
+    // The password was right. With two-factor authentication on, that is only the first half: no
+    // session is created here, so a stolen password on its own reaches nothing. The failure counter
+    // is NOT cleared yet either -- clearing it here would let an attacker with the password reset the
+    // lockout at will and then take unlimited guesses at the six-digit code.
+    if (twofaEnabled()) {
+        twofaPendingStart();
+        jsonResponse(['success' => false, 'needs_2fa' => true,
+                      'recovery_left' => twofaRecoveryLeft(),
+                      'message' => 'Enter the six-digit code from your authenticator app.']);
+    }
+    adminGrantSession();
     clearLoginFailures($ip);
     jsonResponse(['success' => true]);
 } else {

@@ -244,6 +244,7 @@ function settingsCatalogKeywords(): array {
         'ot_cluster_cmd'           => 'opentracker instances cluster multiple extra second instance helper command scale cores ports',
         'ot_cluster_enabled'       => 'opentracker instances cluster enable multiple extra second instance scale saturated workers',
         'ot_cluster_port_base'     => 'opentracker instance port base first extra port udp tcp allocation',
+        'admin_2fa_enabled'        => 'two factor authentication 2fa totp authenticator app google authy aegis one time code recovery codes admin login security mfa',
         'fed_import_batch_rows'    => 'federation import micro batch rows per transaction memory streaming',
         'fed_import_batch_bytes'   => 'federation import micro batch bytes memory ceiling ram streaming',
         'fed_import_max_seconds'   => 'federation import time budget per pass worker timer seconds',

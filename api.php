@@ -30,6 +30,7 @@ require_once __DIR__ . '/includes/stats_timeline.php';
 require_once __DIR__ . '/includes/index.php';
 require_once __DIR__ . '/includes/api_auth.php';
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/twofa.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/federation.php';
@@ -82,6 +83,8 @@ $apiRoutes = [
     'tracker_stats'         => 'api/tracker_stats.php',
     'stats_timeline'        => 'api/stats_timeline.php',
     'admin/login'           => 'api/admin/login.php',
+    'admin/login_2fa'       => 'api/admin/login_2fa.php',
+    'admin/twofa'           => 'api/admin/twofa.php',
     'admin/logout'          => 'api/admin/logout.php',
     'admin/fetch_reports'   => 'api/admin/fetch_reports.php',
     'admin/change_status'   => 'api/admin/change_status.php',
@@ -211,7 +214,11 @@ if (!isset($apiRoutes[$endpoint])) {
     jsonResponse(['error' => 'Unknown endpoint'], 404);
 }
 
-if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login') {
+// admin/login_2fa is the second half of a sign-in, so by definition there is no session yet. It has
+// its own gate instead: it only works from a session that has just passed the password step, only
+// for five minutes, it carries its own CSRF token in the body like admin/login, and every failure
+// counts against the same brute-force lockout.
+if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login' && $endpoint !== 'admin/login_2fa') {
     requireAuth($cfg);
     // CSRF: every admin write (non-GET) must carry a valid X-CSRF-Token header.
     // Reads (GET: fetch_reports/fetch_appeals) are exempt. Login uses its own body token.

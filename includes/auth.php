@@ -141,20 +141,51 @@ function requireAuth(?array $cfg = null): void {
     }
 }
 
-function attemptLogin(string $username, string $password, array $cfg): bool {
+/**
+ * Are these the right credentials? Grants nothing.
+ *
+ * Split out because with two-factor authentication the password is only the first half: the session
+ * must not exist until the second half is done, or a stolen password would be enough to reach the
+ * panel for as long as it took to notice.
+ */
+function adminCredentialsValid(string $username, string $password, array $cfg): bool {
     $adminUser = $cfg['admin_username'] ?? 'admin';
     // Always run password_verify (even on a wrong username) and compare both fields with
     // constant-time functions so response timing can't be used to enumerate the username.
     $passOk = password_verify($password, ADMIN_PASSWORD_HASH);
     $userOk = hash_equals($adminUser, $username);
-    if ($userOk && $passOk) {
-        session_regenerate_id(true);
-        $_SESSION['loggedin'] = true;
-        $_SESSION['login_time'] = time();
-        $_SESSION['last_activity'] = time();
-        return true;
-    }
-    return false;
+    return $userOk && $passOk;
+}
+
+/** Actually sign in. Call only once every factor has been satisfied. */
+function adminGrantSession(): void {
+    session_regenerate_id(true);
+    unset($_SESSION['2fa_pending']);
+    $_SESSION['loggedin'] = true;
+    $_SESSION['login_time'] = time();
+    $_SESSION['last_activity'] = time();
+}
+
+function attemptLogin(string $username, string $password, array $cfg): bool {
+    if (!adminCredentialsValid($username, $password, $cfg)) return false;
+    adminGrantSession();
+    return true;
+}
+
+/** How long the half-finished login may sit waiting for a code. */
+const TWOFA_PENDING_TTL = 300;
+
+function twofaPendingStart(): void {
+    // Regenerated here too: the id that carried the password must not be the one that carries the
+    // session afterwards, and an attacker who fixed the id before the login gets nothing from it.
+    session_regenerate_id(true);
+    $_SESSION['2fa_pending'] = time();
+}
+function twofaPendingActive(): bool {
+    $at = (int)($_SESSION['2fa_pending'] ?? 0);
+    if ($at <= 0) return false;
+    if (time() - $at > TWOFA_PENDING_TTL) { unset($_SESSION['2fa_pending']); return false; }
+    return true;
 }
 
 // --- Brute-force throttle (file-based, per client IP) -----------------------

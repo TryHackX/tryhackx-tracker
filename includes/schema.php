@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 17;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling, 14 = settings only (OpenTracker performance knobs: ot_*), 15 = federation P1: index_hashes.meta_origin_at (when the metadata was FIRST resolved anywhere, so it stops circulating between three or more nodes) + the fed_review quarantine table, 16 = settings only (curated kernel network buffers: sysctl_*), 17 = settings only (extra opentracker instances: ot_cluster_*)
+const TRACKER_SCHEMA_VERSION = 18;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling, 14 = settings only (OpenTracker performance knobs: ot_*), 15 = federation P1: index_hashes.meta_origin_at (when the metadata was FIRST resolved anywhere, so it stops circulating between three or more nodes) + the fed_review quarantine table, 16 = settings only (curated kernel network buffers: sysctl_*), 17 = settings only (extra opentracker instances: ot_cluster_*), 18 = settings only (admin_2fa_enabled: a MIRROR of config/admin_2fa.json, which is authoritative)
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -629,6 +629,13 @@ function trackerSchemaDefaultSettings(): array {
         'ot_cluster_enabled'          => '0',
         'ot_cluster_cmd'              => '',
         'ot_cluster_port_base'        => '',      // empty = derive from the primary's own port
+
+        // Two-factor authentication (v18). This row is a MIRROR so the settings search can find the
+        // section and a cheap check does not have to read a file; config/admin_2fa.json is
+        // authoritative and holds the secret, because a TOTP secret is a credential and the settings
+        // table is dumped by every backup. Deliberately absent from the save allow-list: no form post
+        // may switch this, only the endpoint that also demands a password and a code.
+        'admin_2fa_enabled'           => '0',
         'fed_enabled'                 => '0',
         'fed_node_name'               => '',
         'fed_export_enabled'          => '0',
