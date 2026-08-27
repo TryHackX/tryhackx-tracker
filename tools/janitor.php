@@ -32,6 +32,7 @@ require_once $root . '/includes/index.php';
 require_once $root . '/includes/mail.php';
 require_once $root . '/includes/users.php';
 require_once $root . '/includes/netlimit.php';
+require_once $root . '/includes/opentracker.php';
 require_once $root . '/includes/backup.php';
 
 try {
@@ -72,6 +73,13 @@ try {
             $nl['panic'] ? ' panic=restored' : '',
             $nl['persisted'] ? ' saved=ruleset' : '', (int)$nl['pruned'],
             $nl['error'] !== null ? ' error=' . $nl['error'] : ''), "\n";
+    }
+    // an OpenTracker drop-in the panel could not write itself (php-fpm cannot write /etc)
+    $ot = otTick($cfg);
+    if ($ot['pending'] || $ot['error'] !== null) {
+        echo sprintf('[opentracker] pending=yes applied=%s%s', $ot['applied'] ? 'yes' : 'no',
+            $ot['error'] !== null ? ' error=' . $ot['error'] : ''), "
+";
     }
     // scheduled backups: fire when a slot is due (no-op — not even a fork — while backups are off)
     $bk = backupTick($db, $cfg);

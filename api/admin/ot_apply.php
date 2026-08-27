@@ -33,6 +33,15 @@ switch ($op) {
     case 'apply':
         $r = otApply($cfg, false);
         if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? 'Could not write the drop-in.', 'output' => $r['output']], 500);
+        if (!empty($r['json']['deferred'])) {
+            // Not a failure: /etc is read-only inside php-fpm's mount namespace. Record it and let
+            // the janitor finish, rather than telling the admin their button does not work.
+            otMarkPending(true);
+            jsonResponse(['success' => true, 'applied' => $r['json'], 'deferred' => true,
+                          'message' => 'Queued: the panel’s PHP cannot write ' . ($r['json']['file'] ?? 'the drop-in')
+                                       . ' (systemd ProtectSystem), so the janitor writes it within a minute.']);
+        }
+        otMarkPending(false);
         jsonResponse(['success' => true, 'applied' => $r['json'],
                       'message' => 'Written to ' . ($r['json']['file'] ?? 'the drop-in')
                                    . '. Nice and CPUWeight are live; CPUAffinity and the file limit need a restart.']);

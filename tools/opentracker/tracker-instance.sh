@@ -244,7 +244,18 @@ action_apply() {
     tmp="$(mktemp "${TMPDIR:-/tmp}/ot-dropin.XXXXXX")" || fail "cannot create a temporary file"
     trap 'rm -f "${tmp:-}"' EXIT
     render_dropin "$nice" "$weight" "$aff" "$nofile" >"$tmp"
-    install -m 0644 "$tmp" "$DROPIN" 2>/dev/null || fail "cannot write $DROPIN (is /etc read-only for this process?)" 4
+    # Same distinction the firewall helper makes, and for the same reason: when the panel calls this
+    # from php-fpm, /etc is read-only inside that service's mount namespace — even for root, because
+    # it is a namespace and not a permission bit. That is not a failed apply, it is an apply that has
+    # to be finished by the janitor, which runs outside the sandbox.
+    if ! install -m 0644 "$tmp" "$DROPIN" 2>/dev/null; then
+        if dir_writable; then
+            fail "cannot write $DROPIN" 4
+        fi
+        printf '{"ok":true,"applied":false,"deferred":true,"file":%s,"hint":%s}
+'             "$(jstr "$DROPIN")"             "$(jstr "this process cannot write $DROPIN_DIR (systemd ProtectSystem); the janitor writes it within a minute")"
+        return 0
+    fi
     local out; out="$("$SYSTEMCTL" daemon-reload 2>&1)" || fail "daemon-reload failed: $out" 3
 
     # Nice and CPUWeight are applied to a running unit by daemon-reload; CPUAffinity and LimitNOFILE

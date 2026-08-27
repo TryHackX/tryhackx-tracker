@@ -130,6 +130,34 @@ function otReset(array $cfg, bool $dryRun = false): array {
 function otRestart(array $cfg): array { return otRun($cfg, ['restart']); }
 
 /**
+ * A deferred apply, remembered in the same state file the firewall uses.
+ *
+ * The panel's PHP cannot write /etc (systemd ProtectSystem on php-fpm), so an Apply pressed in the
+ * browser records what was wanted and the janitor — an ordinary unit with no such sandbox — writes
+ * the drop-in on its next visit. Without this the button would simply fail on any hardened box,
+ * which is exactly the class of machine most likely to want the knobs.
+ */
+function otMarkPending(bool $pending): void {
+    netlimitStateUpdate(function (array &$s) use ($pending) { $s['ot_apply_pending'] = $pending; return true; });
+}
+function otPending(): bool { return !empty(netlimitStateRead()['ot_apply_pending']); }
+
+/** Called from the janitor. Forks nothing unless there is genuinely something waiting. */
+function otTick(array $cfg): array {
+    $out = ['pending' => false, 'applied' => false, 'error' => null];
+    if (!otPending() || otPerfCommand($cfg) === '') return $out;
+    $out['pending'] = true;
+    $r = otApply($cfg, false);
+    if ($r['ok'] && empty($r['json']['deferred'])) {
+        $out['applied'] = true;
+        otMarkPending(false);
+    } elseif (!$r['ok']) {
+        $out['error'] = $r['error'] ?? 'could not write the drop-in';
+    }
+    return $out;
+}
+
+/**
  * The sentence the card puts under the numbers.
  *
  * The receive-buffer figure is the one that matters and the one nobody thinks to look at: opentracker

@@ -77,7 +77,32 @@ $d = otAdvice(['cpus' => 6, 'workers' => 4, 'workers_consistent' => true, 'rmem_
 check('advice: other drop-ins are named and declared untouched',
       str_contains(implode(' ', array_column($d, 'text')), 'never touched by the panel'));
 
-// ── 4. the root helper, end to end against stubs ────────────────────────────
+// ── 4. a deferred apply must survive the sandbox ────────────────────────────
+// The panel's PHP cannot write /etc when php-fpm runs with ProtectSystem, which is exactly the kind
+// of machine most likely to want these knobs. An Apply pressed in the browser therefore records what
+// was wanted and the janitor writes it; without that the button would simply not work there.
+if (is_file($root . '/config/database.php')) {
+    require_once $root . '/config/database.php';
+    require_once $root . '/includes/settings.php';
+    otMarkPending(false);
+    check('deferred apply: nothing pending to begin with', otPending() === false);
+    $t = otTick(['ot_perf_cmd' => 'sudo -n /usr/local/sbin/tracker-instance.sh']);
+    check('deferred apply: the tick does nothing when nothing is pending',
+          $t['pending'] === false && $t['applied'] === false, json_encode($t));
+    otMarkPending(true);
+    check('deferred apply: the flag survives a round trip through the state file', otPending() === true);
+    $t = otTick(['ot_perf_cmd' => '']);
+    check('deferred apply: with no helper configured the tick stays quiet', $t['pending'] === false, json_encode($t));
+    $t = otTick(['ot_perf_cmd' => '/nonexistent/nope.sh']);
+    check('deferred apply: a broken helper is reported, not swallowed',
+          $t['pending'] === true && $t['applied'] === false && $t['error'] !== null, json_encode($t));
+    check('deferred apply: … and it stays pending so the next tick retries', otPending() === true);
+    otMarkPending(false);
+} else {
+    skip('deferred apply', 'no local database configured — that half needs the state file');
+}
+
+// ── 5. the root helper, end to end against stubs ────────────────────────────
 $bash = null;
 foreach (['bash', 'C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files\\Git\\usr\\bin\\bash.exe', '/bin/bash'] as $cand) {
     $out = []; $rc = null;
