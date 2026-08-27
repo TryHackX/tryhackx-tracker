@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — the panel stops giving advice it cannot back up
+
+### Added
+- **The outbound budget is now adjustable from the panel**, not just displayed. A tracker answers
+  what it accepts, so the reply budget (table `inet ottrack`) is the other half of the same decision
+  — and the half that decides whether the rest of the machine stays reachable while a swarm shouts.
+  The helper could always set it; only the UI was missing. Same password gate as the inbound limit,
+  and one rule is swapped by handle so the counters keep running.
+- **Risk zones painted on both sliders.** The track is red below the rate that is actually happening
+  and amber for the 30 % of headroom above it; the thumb takes the colour of the zone it is in. The
+  reference is always *measured* — with nothing measured the zones simply do not appear, because a
+  threshold nobody measured would be worse than none.
+- **The backups table sorts** (when / profile / size / integrity), client-side: the list is a handful
+  of files the helper already handed over, so there is nothing to wait for.
+
+### Fixed
+- **The backups table clipped its own action buttons.** It was the only table on a `.wl-page` without
+  a `<colgroup>`, and with `table-layout: fixed` the browser then splits the width equally between
+  six columns while `overflow: hidden` cuts off whatever does not fit — which is why the header read
+  "ACTIO…" and the buttons ran off the edge.
+- **The recommendation led with a number that meant "no limit".** In a flood it said "a limit at
+  180,000 pps would essentially never trigger" and only *then* warned that arrivals are not demand —
+  by which point the number had already been read. The caveat now leads, the P95 figure is demoted
+  to a parenthesis, and the sentence quotes what is actually getting through as the number to choose
+  from. The per-value warning was worse: it judged the slider against the *arrivals* floor, so at
+  48 000 pps it claimed you would be "dropping traffic the tracker normally serves" while only
+  39 800 pps was getting through. It now judges against the live rate.
+
 ## [Unreleased] — E3a/E3b: the federation export stops building pages in memory (schema v12)
 
 ### Added

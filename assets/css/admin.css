@@ -1136,6 +1136,18 @@ input[type="number"] {
 .wl-page .wl-ellipsis { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wl-page .wl-th-check,
 .wl-page .wl-th-check input { text-align: center; }
+/* Backups (colgroup in backups.php). The actions column has to fit four buttons, so it is pinned
+   wider than the whitelist's; the min-width hands overflow to .table-responsive instead of letting
+   the fixed layout squash a column to nothing. */
+.wl-page #bk-table { min-width: 860px; }
+.bk-c-when      { width: 190px; }
+.bk-c-profile   { width: 150px; }
+.bk-c-size      { width: 100px; }
+.bk-c-flex      { width: auto; min-width: 180px; }
+.bk-c-integrity { width: 140px; }
+.bk-c-actions   { width: 150px; }
+.wl-page #bk-table td.th-actions { overflow: visible; }
+
 /* Column widths (colgroup in whitelist.php). */
 .wl-c-check    { width: 34px; }
 .wl-c-id       { width: 64px; }
@@ -1331,11 +1343,20 @@ input[type="number"] {
 .nl-slider:focus { outline: none; }
 /* `--nl-fill` is set from setPps() in admin-netlimit.js: WebKit has no ::-moz-range-progress
    equivalent, so the filled part of the rail is a hard-stop gradient on the track itself. */
+/* Two layers: the fill up to the thumb on top (translucent, so the zones read through it) and the
+   risk zones underneath. `--nl-zones` is built in admin-netlimit.js from MEASURED rates — with
+   nothing measured it is absent and the rail is the plain unlit colour, because a threshold nobody
+   measured would be worse than no threshold at all. */
 .nl-slider::-webkit-slider-runnable-track {
     height: 6px; border-radius: 999px; border: 1px solid #2a2a3a;
-    background: linear-gradient(90deg, rgba(74, 158, 255, 0.55) var(--nl-fill, 0%), #1c232b var(--nl-fill, 0%));
+    background:
+        linear-gradient(90deg, rgba(74, 158, 255, 0.55) var(--nl-fill, 0%), transparent var(--nl-fill, 0%)),
+        var(--nl-zones, linear-gradient(90deg, #1c232b 0%, #1c232b 100%));
 }
-.nl-slider::-moz-range-track { height: 6px; border-radius: 999px; border: 1px solid #2a2a3a; background: #1c232b; }
+.nl-slider::-moz-range-track {
+    height: 6px; border-radius: 999px; border: 1px solid #2a2a3a;
+    background: var(--nl-zones, linear-gradient(90deg, #1c232b 0%, #1c232b 100%));
+}
 .nl-slider::-moz-range-progress { height: 6px; border-radius: 999px; background: rgba(74, 158, 255, 0.55); }
 .nl-slider::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none; width: 15px; height: 15px; margin-top: -6px;
@@ -1350,6 +1371,14 @@ input[type="number"] {
 .nl-slider:hover::-moz-range-thumb, .nl-slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 0.2rem rgba(74, 158, 255, 0.25); }
 .nl-slider:active::-webkit-slider-thumb { cursor: grabbing; }
 .nl-slider:active::-moz-range-thumb { cursor: grabbing; }
+/* The thumb takes the colour of the zone it is standing in, so the state is readable without
+   reading the sentence underneath. */
+.nl-slider.nl-in-caution::-webkit-slider-thumb { background: #ffb74d; }
+.nl-slider.nl-in-caution::-moz-range-thumb { background: #ffb74d; }
+.nl-slider.nl-in-danger::-webkit-slider-thumb { background: #ff5252; }
+.nl-slider.nl-in-danger::-moz-range-thumb { background: #ff5252; }
+.nl-slider.nl-in-caution:hover::-webkit-slider-thumb, .nl-slider.nl-in-caution:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 0.2rem rgba(255, 183, 77, 0.28); }
+.nl-slider.nl-in-danger:hover::-webkit-slider-thumb, .nl-slider.nl-in-danger:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 0.2rem rgba(255, 82, 82, 0.28); }
 
 /* The ruler. The track is logarithmic, so a linear scale would misplace every number on it: a limit
    of 100 000 sits two thirds of the way across, not near the end. Ticks are drawn by the same

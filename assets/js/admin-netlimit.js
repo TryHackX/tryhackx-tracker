@@ -134,6 +134,8 @@
         renderStatus(j);
         renderMarks();
         renderAdvice();
+        renderEgressTune(j);
+        setPps(state.pps);   // repaint the inbound zones now that a fresh measurement is in
     }
 
     // A fetch that never settles runs neither the try nor the catch above, so nothing would ever
@@ -416,12 +418,146 @@
         box.appendChild(el('span', { text: r.text || '' }));
         if (r.samples && r.suggested) {
             const cur = state.pps;
-            if (cur < r.floor) {
-                box.appendChild(el('div', { className: 'text-warning wl-small', text: 'At ' + num(cur) + ' pps you would be dropping traffic the tracker normally serves.' }));
+            // `r.floor` is derived from ARRIVALS. In a flood that is the swarm, not the traffic the
+            // tracker serves, so warning "you would be dropping traffic the tracker normally serves"
+            // against it was simply false: here it fired at 48 000 pps while only 39 800 pps was
+            // getting through. When a live rate exists, judge against THAT.
+            const ref = inboundReference();
+            if (ref > 0) {
+                if (cur < ref) {
+                    box.appendChild(el('div', { className: 'text-danger wl-small', text: 'At ' + num(cur) + ' pps you would be cutting into the ' + num(ref) + ' pps that is getting through right now.' }));
+                } else if (cur < ref * ZONE_HEADROOM) {
+                    box.appendChild(el('div', { className: 'text-warning wl-small', text: 'At ' + num(cur) + ' pps there is little headroom over the ' + num(ref) + ' pps getting through right now — a normal spike would hit the limit.' }));
+                } else if (cur > r.peak * 2 && r.peak > 0) {
+                    box.appendChild(el('div', { className: 'text-muted wl-small', text: 'At ' + num(cur) + ' pps the limit is far above anything measured — it would effectively never trigger.' }));
+                }
+            } else if (cur < r.floor) {
+                box.appendChild(el('div', { className: 'text-warning wl-small', text: 'At ' + num(cur) + ' pps you would be dropping packets that are currently arriving.' }));
             } else if (cur > r.peak * 2 && r.peak > 0) {
                 box.appendChild(el('div', { className: 'text-muted wl-small', text: 'At ' + num(cur) + ' pps the limit is far above anything measured — it would effectively never trigger.' }));
             }
         }
+    }
+
+    // ── risk zones painted onto a slider track ───────────────────────────────
+    // A number alone does not tell you whether it is a sensible one. Both of these sliders have the
+    // same shape of danger and it is at the LOW end: a budget under the rate that is genuinely
+    // happening cuts into traffic the tracker is really carrying. So the track is painted red below
+    // the measured demand, amber for the little headroom above it, and left alone past that.
+    //
+    // The reference rate is measured, never guessed — with nothing measured yet the zones simply do
+    // not appear, because inventing a threshold would be worse than showing none.
+    const ZONE_HEADROOM = 1.3;   // amber up to 30 % over the measured rate: no room for a spike
+    function zoneCss(reference) {
+        if (!reference || reference <= 0) return '';
+        const red = ppsToPct(reference);
+        const amber = ppsToPct(Math.min(PPS_MAX, reference * ZONE_HEADROOM));
+        return 'linear-gradient(90deg,'
+            + ' rgba(255,82,82,0.42) 0%, rgba(255,82,82,0.42) ' + red + '%,'
+            + ' rgba(255,183,77,0.34) ' + red + '%, rgba(255,183,77,0.34) ' + amber + '%,'
+            + ' #1c232b ' + amber + '%, #1c232b 100%)';
+    }
+    function paintSlider(rangeEl, pps, reference) {
+        if (!rangeEl) return;
+        rangeEl.style.setProperty('--nl-fill', ppsToPct(pps) + '%');
+        const zones = zoneCss(reference);
+        if (zones) rangeEl.style.setProperty('--nl-zones', zones);
+        else rangeEl.style.removeProperty('--nl-zones');
+        // The thumb takes the colour of the zone it is standing in, so the state is readable at a
+        // glance without reading the sentence underneath.
+        rangeEl.classList.toggle('nl-in-danger', !!reference && pps < reference);
+        rangeEl.classList.toggle('nl-in-caution', !!reference && pps >= reference && pps < reference * ZONE_HEADROOM);
+    }
+
+    // ── outbound budget (table inet ottrack) ─────────────────────────────────
+    // A tracker answers what it accepts, so this is the other half of the same decision — and the
+    // half that decides whether www and SSH stay usable while a swarm is shouting. The helper could
+    // always set it; the card only ever displayed it.
+    const eState = { pps: 50000, loaded: false, ref: 0 };
+
+    function egressMeasured(j) {
+        // What the tracker is actually sending: replies to announces plus everything else that got
+        // past the budget. `capped` is what the budget already refused, so it is NOT demand met —
+        // but it IS demand, so it belongs in the reference the zones are drawn from.
+        const e = (j.live && j.live.epps) || {};
+        if (!Object.keys(e).length) return 0;
+        return (e.announce_ok || 0) + (e.passed_good || 0) + (e.capped || 0);
+    }
+
+    function renderEgressTune(j) {
+        const wrap = $('net-egress-tune');
+        if (!wrap) return;
+        const eg = (j.firewall && j.firewall.egress) || {};
+        if (!eg.table) { wrap.classList.add('d-hidden'); return; }
+        wrap.classList.remove('d-hidden');
+        eState.ref = egressMeasured(j);
+        if (!eState.loaded && eg.pps) { eState.pps = parseInt(eg.pps, 10) || 50000; eState.loaded = true; setEpps(eState.pps); }
+        else paintSlider($('net-epps-range'), eState.pps, eState.ref);
+        renderEgressScale();
+        renderEgressAdvice(eg);
+    }
+
+    function renderEgressScale() {
+        const host = $('net-escale');
+        if (!host) return;
+        host.textContent = '';
+        const inRange = SCALE_TICKS.filter(v => v >= PPS_MIN && v <= PPS_MAX);
+        inRange.forEach((v, i) => {
+            const major = SCALE_MAJOR.includes(v);
+            const t = el('span', { className: 'nl-scale-tick' + (major ? ' nl-scale-major' : '')
+                + (i === 0 ? ' nl-scale-first' : '') + (i === inRange.length - 1 ? ' nl-scale-last' : '') });
+            t.style.left = ppsToPct(v) + '%';
+            if (major) t.appendChild(el('span', { className: 'nl-scale-label', text: scaleLabel(v) }));
+            host.appendChild(t);
+        });
+        const marks = $('net-emarks');
+        if (!marks) return;
+        marks.textContent = '';
+        if (!eState.ref) return;
+        const m = el('span', { className: 'nl-mark nl-mark-median', title: 'Measured outbound rate: ' + num(eState.ref) + ' pps' });
+        m.style.left = ppsToPct(eState.ref) + '%';
+        m.style.setProperty('--nl-tick-h', '0.5rem');
+        m.appendChild(el('span', { className: 'nl-mark-label', text: 'sending now' }));
+        marks.appendChild(m);
+    }
+
+    function renderEgressAdvice(eg) {
+        const box = $('net-eadvice');
+        if (!box) return;
+        box.textContent = '';
+        const inForce = parseInt(eg.pps, 10) || 0;
+        const lines = [];
+        lines.push(el('div', { text: 'In force: ' + num(inForce) + ' pps. This is table inet ottrack, on the way OUT — what the tracker '
+            + 'answers. Capping it is what keeps the rest of the machine reachable while a swarm is shouting.' }));
+        if (!eState.ref) {
+            lines.push(el('div', { className: 'text-muted', text: 'No outbound rate measured yet, so there is nothing to judge a number against — the coloured zones appear once there is.' }));
+        } else {
+            lines.push(el('div', { text: 'Measured going out right now: ' + num(eState.ref) + ' pps (replies plus whatever the budget already refused).' }));
+            if (eState.pps < eState.ref) {
+                lines.push(el('div', { className: 'text-danger', text: 'At ' + num(eState.pps) + ' pps you would be refusing replies the tracker is sending right now — peers would see timeouts, not a slower tracker.' }));
+            } else if (eState.pps < eState.ref * ZONE_HEADROOM) {
+                lines.push(el('div', { className: 'text-warning', text: 'At ' + num(eState.pps) + ' pps there is almost no headroom over what is already going out; a normal spike would hit the cap.' }));
+            }
+        }
+        lines.forEach(l => box.appendChild(l));
+    }
+
+    function setEpps(v, fromInput) {
+        eState.pps = Math.max(PPS_MIN, Math.min(PPS_MAX, parseInt(v, 10) || PPS_MIN));
+        if (!fromInput) $('net-epps-input').value = eState.pps;
+        $('net-epps-range').value = ppsToPos(eState.pps);
+        paintSlider($('net-epps-range'), eState.pps, eState.ref);
+        const eg = (state.status && state.status.firewall && state.status.firewall.egress) || {};
+        renderEgressAdvice(eg);
+    }
+
+    // What the inbound limit must not cut into: the rate currently GETTING THROUGH. Arrivals are
+    // the swarm shouting, not demand — using them here would paint the whole track red and tell the
+    // admin nothing. Not everything getting through is demand the tracker must serve either, which
+    // is why the sentence under the slider says "currently getting through" and not "demand".
+    function inboundReference() {
+        const pps = (state.status && state.status.live && state.status.live.pps) || {};
+        return pps.in_passed || 0;
     }
 
     function setPps(v, fromInput) {
@@ -430,8 +566,8 @@
         const range = $('net-pps-range');
         range.value = ppsToPos(state.pps);
         // WebKit cannot fill the rail up to the thumb on its own (Gecko has ::-moz-range-progress);
-        // the CSS reads this as a gradient stop.
-        range.style.setProperty('--nl-fill', ppsToPct(state.pps) + '%');
+        // the CSS reads --nl-fill as a gradient stop and --nl-zones as the layer beneath it.
+        paintSlider(range, state.pps, inboundReference());
         renderAdvice();
     }
 
@@ -516,6 +652,16 @@
             undo: () => 'The janitor puts the previous setting back automatically after 15 minutes (and "Undo now" appears in the card meanwhile), so it cannot be forgotten.',
             undoCode: () => '',
         },
+        egress: {
+            title: 'Change the outbound budget',
+            ok: 'Apply budget',
+            okClass: 'btn-outline-success',
+            text: () => 'Set the reply budget in table inet ottrack to ' + num(eState.pps) + ' packets/second. This is what the '
+                + 'tracker is allowed to SEND: below what it is actually sending, peers get timeouts rather than a slower tracker; '
+                + 'far above it, nothing protects the rest of the machine when a swarm shouts.',
+            undo: () => 'One rule is swapped by handle, so the counters keep running. Undo: set it back, or on the server, ',
+            undoCode: () => 'sudo nft -f /etc/nftables.d/ottrack.nft',
+        },
         monitor: {
             title: 'Start counting (nothing is dropped)',
             ok: 'Start counting',
@@ -574,6 +720,7 @@
         const body = { op: op, password: $('net-confirm-password').value };
         if (op === 'apply') { body.pps = state.pps; body.burst = state.burst; body.port = state.port; }
         if (op === 'monitor') { body.port = state.port; }
+        if (op === 'egress') { body.pps = eState.pps; }
         try {
             const r = await apiCall('admin/net_apply', 'POST', body);
             if (r.success) {
@@ -654,6 +801,22 @@
             setPps(r.suggested);
             showToast('Slider set to the suggested ' + num(r.suggested) + ' pps. Nothing has been applied yet.', 'success');
         });
+        const eRange = $('net-epps-range'), eInput = $('net-epps-input');
+        if (eRange) eRange.addEventListener('input', (e) => setEpps(posToPps(parseInt(e.target.value, 10))));
+        if (eInput) {
+            eInput.addEventListener('input', (e) => setEpps(e.target.value, true));
+            eInput.addEventListener('change', () => setEpps(eInput.value));
+        }
+        const eSuggest = $('btn-net-esuggest');
+        if (eSuggest) eSuggest.addEventListener('click', () => {
+            if (!eState.ref) { showToast('Nothing measured going out yet — there is no number to suggest from.', 'warning'); return; }
+            // Twice what is going out: clear of the amber band, and still a real cap.
+            const v = Math.min(PPS_MAX, Math.max(PPS_MIN, Math.round(eState.ref * 2 / 1000) * 1000));
+            setEpps(v);
+            showToast('Slider set to ' + num(v) + ' pps — twice what is measured going out. Nothing applied yet.', 'success');
+        });
+        const eApply = $('btn-net-eapply');
+        if (eApply) eApply.addEventListener('click', () => ask('egress'));
         $('btn-net-preview').addEventListener('click', preview);
         $('btn-net-apply').addEventListener('click', () => ask('apply'));
         $('btn-net-off').addEventListener('click', () => ask('off'));

@@ -107,7 +107,9 @@ try {
     $fw = $out['firewall'] ?? [];
     $flood = is_array($fw) && (($fw['mode'] ?? '') === 'count' || !empty($fw['manual_rules']));
     $out['recommend_days'] = $days;
-    $rec['text'] = netlimitRecommendText($rec, $flood);
+    // In a flood the number worth quoting is what is GETTING THROUGH, not what is arriving.
+    $passedNow = (int)(($out['live']['pps']['in_passed'] ?? 0));
+    $rec['text'] = netlimitRecommendText($rec, $flood, $passedNow);
     $rec['flood'] = $flood;
     $out['recommend'] = $rec;
 } catch (\Throwable $e) {

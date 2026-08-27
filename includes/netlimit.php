@@ -839,7 +839,7 @@ function netlimitRecommend(PDO $db, array $cfg, int $days = 7, ?int $now = null)
  * stops mattering, and where it starts biting — but the decision the admin is actually making is how
  * much they are willing to hand OpenTracker, so say that instead of implying the peak is a target.
  */
-function netlimitRecommendText(array $rec, bool $flood = false): string {
+function netlimitRecommendText(array $rec, bool $flood = false, int $passed = 0): string {
     if (!$rec['samples']) {
         return 'No traffic has been recorded yet. Start counting and come back in an hour — the suggestion needs measurements, not guesses.';
     }
@@ -847,13 +847,28 @@ function netlimitRecommendText(array $rec, bool $flood = false): string {
         (int)($rec['days'] ?? 7), ((int)($rec['days'] ?? 7)) === 1 ? '' : 's',
         number_format($rec['median']), number_format($rec['p95']), number_format($rec['peak']));
     if (!$rec['enough']) return $s . ' That is fewer than 60 samples — treat the numbers as a first impression, not a recommendation.';
+
+    // Which sentence comes FIRST decides what the admin reads. When arrivals are not demand — the
+    // counting mode drops nothing, or somebody else's rule drops it further down — leading with
+    // "a limit at P95 + 5 % would never trigger" hands them a number that means NO LIMIT, and the
+    // caveat afterwards arrives too late to stop them using it. So in that state the caveat leads,
+    // and the P95 figure is demoted to what it actually is: a description of the flood.
+    if ($flood) {
+        $s .= ' Those are ARRIVALS, not demand — a tracker whose old swarm keeps calling receives far more than'
+            . ' it serves, so a limit anywhere near them would never fire.';
+        if ($passed > 0) {
+            $s .= sprintf(' What is actually getting through right now is %s pps, and THAT is the number to pick from:'
+                . ' choose what you are willing to hand OpenTracker, with some headroom. Packets above it cost you'
+                . ' nothing, because the firewall drops them before the tracker ever sees them.',
+                number_format($passed));
+        } else {
+            $s .= ' Pick the number you are willing to hand OpenTracker, not one taken from the arrivals above.'
+                . ' Packets over it cost you nothing, because the firewall drops them before the tracker ever sees them.';
+        }
+        $s .= sprintf(' (For reference, a limit above the arrivals would be around %s pps.)', number_format($rec['suggested']));
+        return $s;
+    }
     $s .= sprintf(' A limit at %s pps (P95 + 5 %%) would essentially never trigger; below roughly %s pps you start dropping packets that are currently arriving.',
         number_format($rec['suggested']), number_format($rec['floor']));
-    if ($flood) {
-        $s .= ' Careful: these are ARRIVALS, not demand. A tracker whose old swarm keeps calling receives far more'
-            . ' than it serves, so matching the peak would mean no limit at all. Pick the number you are willing to'
-            . ' hand OpenTracker — packets above it cost you nothing, because the firewall drops them before the'
-            . ' tracker ever sees them.';
-    }
     return $s;
 }

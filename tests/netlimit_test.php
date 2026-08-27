@@ -111,6 +111,21 @@ check('flood mode warns that arrivals are not demand', str_contains($flood, 'ARR
 check('flood mode reframes the decision', str_contains($flood, 'willing to hand OpenTracker'));
 check('flood mode says why dropping is free', str_contains($flood, 'before the') && str_contains($flood, 'ever sees them'));
 check('normal mode does not carry the flood warning', !str_contains($text, 'ARRIVALS, not demand'));
+// WHICH sentence comes first decides what gets acted on. Leading with "a limit at P95 + 5 % would
+// never trigger" hands the admin a number that means NO LIMIT, and a caveat afterwards arrives too
+// late. In a flood the caveat has to lead, and the P95 figure be demoted to a parenthesis.
+$posCaveat = strpos($flood, 'ARRIVALS, not demand');
+$posNumber = strpos($flood, number_format($rec['suggested']));
+check('flood mode puts the caveat BEFORE the number it warns about',
+      $posCaveat !== false && $posNumber !== false && $posCaveat < $posNumber, substr($flood, 0, 220));
+check('flood mode does not present the arrivals figure as a recommendation',
+      !str_contains($flood, 'would essentially never trigger'), $flood);
+// …and when we know what is actually getting through, that is the number to pick from.
+$floodP = netlimitRecommendText($rec, true, 39800);
+check('flood mode quotes what is getting through', str_contains($floodP, '39,800'), $floodP);
+check('flood mode names it as the number to choose from', str_contains($floodP, 'the number to pick from'), $floodP);
+check('flood mode without a live rate still gives direction',
+      !str_contains($flood, 'the number to pick from') && str_contains($flood, 'not one taken from the arrivals'), $flood);
 
 // ── 5. bucketing ─────────────────────────────────────────────────────────────
 check('bucket: 24 h of 60 s samples stays raw', netlimitBucketFor(86400, 60) === 0);

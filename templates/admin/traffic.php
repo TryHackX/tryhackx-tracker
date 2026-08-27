@@ -87,6 +87,27 @@
                     </div>
                 </div>
 
+                <!-- The other half of the same decision. A tracker answers what it accepts, so a
+                     budget on the way out matters exactly as much as the one on the way in — and it
+                     is the one that decides whether the rest of the machine stays reachable. It was
+                     read-only here while the helper could already set it. -->
+                <div class="nl-tune d-hidden" id="net-egress-tune">
+                    <div class="nl-tune-head">
+                        <span class="nl-tune-title">Outbound budget <span class="nl-unit">(replies the tracker sends)</span></span>
+                        <span class="nl-tune-value"><input type="number" id="net-epps-input" class="form-control form-control-sm bg-dark text-light border-secondary" value="50000" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000" aria-label="Outbound packets per second"> <span class="nl-unit">pps</span></span>
+                    </div>
+                    <div class="nl-slider-wrap">
+                        <input type="range" class="form-range nl-slider" id="net-epps-range" min="0" max="1000" value="0" aria-label="Outbound packets/second budget">
+                        <div class="nl-scale" id="net-escale" aria-hidden="true"></div>
+                        <div class="nl-marks" id="net-emarks" aria-hidden="true"></div>
+                    </div>
+                    <div class="nl-advice" id="net-eadvice"></div>
+                    <div class="nl-tune-actions">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-net-esuggest" title="Set the slider to a value with headroom over what was measured"><i class="bi bi-magic"></i> Use suggested</button>
+                        <button type="button" class="btn btn-sm btn-outline-success" id="btn-net-eapply"><i class="bi bi-check2-circle"></i> Apply budget&hellip;</button>
+                    </div>
+                </div>
+
                 <div class="nl-chart-head">
                     <span class="nl-chart-title">Packets / second</span>
                     <div class="nl-ranges" id="net-ranges" role="group" aria-label="Chart range"></div>

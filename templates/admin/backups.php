@@ -57,13 +57,21 @@
 
         <div class="table-responsive">
             <table class="table table-dark table-hover align-middle wl-table" id="bk-table">
+                <!-- Every other table on a .wl-page carries a colgroup, and this one did not: with
+                     `table-layout: fixed` the browser then splits the width equally between six
+                     columns and `overflow: hidden` clips whatever does not fit — which is why the
+                     four action buttons ran off the edge and the header read "ACTIO…". -->
+                <colgroup>
+                    <col class="bk-c-when"><col class="bk-c-profile"><col class="bk-c-size">
+                    <col class="bk-c-flex"><col class="bk-c-integrity"><col class="bk-c-actions">
+                </colgroup>
                 <thead>
                     <tr>
-                        <th>When</th>
-                        <th>Profile</th>
-                        <th>Size</th>
+                        <th class="sortable" data-sort="when">When <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="profile">Profile <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="size">Size <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th>Contents</th>
-                        <th>Integrity</th>
+                        <th class="sortable" data-sort="integrity">Integrity <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="th-actions">Actions</th>
                     </tr>
                 </thead>

@@ -19,7 +19,7 @@
     'use strict';
 
     if (typeof window.AdminCommon === 'undefined') return;
-    const { apiCall, el, showToast, fmtAgo, fmtBytes, fmtDate } = window.AdminCommon;
+    const { apiCall, el, showToast, fmtAgo, fmtBytes, fmtDate, makeSortStack } = window.AdminCommon;
     const $ = (id) => document.getElementById(id);
     const POLL_IDLE = 15000;     // nothing running: the list barely changes
     const POLL_BUSY = 2000;      // a run is in flight: show it moving
@@ -179,11 +179,44 @@
         $('bk-progress-log').scrollTop = $('bk-progress-log').scrollHeight;
     }
 
+    // ── sorting ──────────────────────────────────────────────────────────────
+    // The list is a handful of files the helper already handed over, so this sorts in place: no
+    // request, no debounce, nothing to wait for. Same header behaviour as every other table in the
+    // panel (desc → asc → off, multiple keys with priority badges) via the shared sort stack.
+    let bkSort = null;
+    let lastList = [];
+    let lastServerTime = 0;   // re-sorting repaints the rows, and the "x ago" column is server-relative
+    let lastCheck = null;     // the empty-table wording depends on it, so keep it for a repaint
+    const SORT_KEYS = {
+        when:      a => a.ts || 0,
+        profile:   a => (a.profile || (a.mode === 'builtin' ? 'database only' : '')).toLowerCase(),
+        size:      a => a.size || 0,
+        // three states, ordered worst-first so one click surfaces what needs attention
+        integrity: a => (a.verified === false ? 0 : a.verified === true ? 2 : 1),
+    };
+    function sortList(list) {
+        const stack = bkSort ? bkSort.get() : [];
+        if (!stack.length) return list;
+        return list.slice().sort((x, y) => {
+            for (const { col, dir } of stack) {
+                const get = SORT_KEYS[col];
+                if (!get) continue;
+                const a = get(x), b = get(y);
+                if (a < b) return dir === 'asc' ? -1 : 1;
+                if (a > b) return dir === 'asc' ? 1 : -1;
+            }
+            return 0;
+        });
+    }
+
     // ── the table ────────────────────────────────────────────────────────────
     function renderRows(j) {
         const tb = $('bk-rows');
         tb.textContent = '';
-        const list = j.archives || [];
+        lastList = j.archives || [];
+        if (j.server_time) lastServerTime = j.server_time;
+        if (j.check) lastCheck = j.check;
+        const list = sortList(lastList);
         if (!list.length) {
             tb.appendChild(el('tr', {}, [el('td', { colspan: '6', className: 'text-center text-muted py-4',
                 text: (j.check && j.check.mode) ? 'No archives yet.' : 'Backups are not available on this machine — see the status above.' })]));
@@ -384,6 +417,14 @@
 
     // ── wiring ───────────────────────────────────────────────────────────────
     function init() {
+        // Newest first is what an admin wants to see when this page opens: the archive they are
+        // about to rely on is almost always the last one taken.
+        bkSort = makeSortStack({
+            table: $('bk-table'),
+            defaultSort: [{ col: 'when', dir: 'desc' }],
+            onChange: () => renderRows({ archives: lastList, server_time: lastServerTime, check: lastCheck }),
+        });
+        bkSort.bindHeaders();
         $('btn-bk-run').addEventListener('click', () => ask('run', {}));
         $('btn-bk-cancel').addEventListener('click', () => ask('cancel', {}));
         $('btn-bk-prune').addEventListener('click', () => ask('prune', {}));
