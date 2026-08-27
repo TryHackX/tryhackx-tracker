@@ -4,6 +4,54 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] — 2026-08-27 (schema v11)
+
+### Added
+- **UDP traffic monitor + inbound rate limit** (Admin → Whitelist → *UDP traffic*, configured under
+  Settings → Tracker & whitelist → *UDP traffic & rate limit*). The egress budget shipped in
+  `tools/opentracker/egress-budget/` keeps the machine reachable; this is the other half of the same
+  problem — the CPU the tracker burns answering a swarm whose torrents it will refuse anyway. A packet
+  dropped by the firewall costs nothing at all.
+  - **Measure before you decide.** With the monitor on, the janitor samples the nftables counters once
+    a minute into the new `net_samples` table: arriving / served / dropped packets per second, plus the
+    egress counters, plus the limit in force. The card charts them (1 h … 30 d, bucketed server-side)
+    and — the point of the whole thing — turns them into a sentence: *"median 22 000 pps, P95 38 000
+    pps, peak 61 000 pps → suggested limit 40 000 pps (P95 + 5 %); below roughly 24 000 pps you start
+    dropping traffic you normally serve."* The same three values are drawn as marks on the
+    (logarithmic) slider, so the number being chosen has context instead of being a guess. The monitor
+    works with or without a limit loaded.
+  - **Non-invasive by construction.** Everything the panel writes is **one file**
+    (`/etc/nftables.d/ottrack-in.nft`) in **its own table** (`inet ottrack_in`, hook `input`,
+    `priority filter - 5`, `policy accept`). The distribution's `inet filter` table is never written
+    and never flushed, so a rule an admin added there by hand keeps working — the card lists any such
+    rule it finds on the same port together with the exact `nft delete rule …` line to remove it.
+    The ruleset loads as a single `nft -f` transaction (create-if-missing → delete → recreate), so the
+    port is never unprotected while the limit changes. Undo is one button.
+  - **Automatic mode** (off by default) moves the limit ±10 % inside a configurable band once a
+    minute, but only after three consecutive samples on the same side and with a two-minute cool-down,
+    so a single spike changes nothing; a load-per-core guard tightens even when the packet rate is
+    under target. **"Throttle hard"** clamps the port to 10 000 pps for 15 minutes and the janitor
+    restores the previous setting by itself — including switching the limit back *off* if it was off —
+    so the panic button cannot be left on by accident.
+  - **Root stays behind one narrow door**: `tools/opentracker/tracker-netlimit.sh`, allowed through
+    `sudoers` with NOPASSWD, validating every argument itself; PHP never calls `nft` directly. Applying,
+    removing, throttling and restoring need the admin password. **Preview ruleset** does not — it
+    renders and `nft -c`-checks the file without loading it, which is what you want to read *before*
+    committing. The **Test** button is read-only as well and checks `exec()`, the sudoers rule
+    (`sudo -n -l`, which lists the permission without running anything), `nft`, `/etc/nftables.d/` and
+    the `include` line that makes the rule survive a reboot, with copy-paste fixes for whatever is
+    missing. Where `nft` is absent the card says so; nothing errors.
+  - The card also **shows** the egress budget's counters next to the inbound ones and can change its
+    rate with a handle-targeted `nft replace`, so that table's 262 144-entry "good client" sets are not
+    flushed. It never installs or removes `ottrack.nft` — that stays a manual, documented step.
+  - New: `includes/netlimit.php`, `tools/opentracker/tracker-netlimit.sh`, `assets/js/admin-netlimit.js`,
+    `api/admin/net_status.php` / `net_samples.php` / `net_apply.php` / `net_test.php`,
+    `tests/netlimit_test.php` (152 checks, including the helper driven end to end against a stub `nft`).
+  - Settings: `net_monitor_enabled`, `net_sample_seconds`, `net_keep_days`, `net_limit_enabled`,
+    `net_limit_pps`, `net_limit_burst`, `net_limit_port`, `net_limit_cmd`, `net_auto_enabled`,
+    `net_auto_min`, `net_auto_max`, `net_auto_target`, `net_auto_target_cpu`. **All off by default:**
+    a fresh install never calls the helper, never writes a firewall rule and renders no extra card.
+
 ## [1.10.1] — 2026-08-26
 
 ### Added

@@ -45,6 +45,7 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Metadata worker** — optional `python3-libtorrent` daemon (systemd, unprivileged, column-level MySQL grants) that resolves name / size / file list through DHT + trackers in upload mode; the panel queues rows and polls
 - **Mode-aware moderation** — in whitelist mode "block" = ban (removed from the served list, can never be re-registered) and the report/appeal flows, status page and public copy adapt automatically
 - **CAPTCHA provider** — Google reCAPTCHA v2 or v3, Cloudflare Turnstile or hCaptcha (one shared modal, fail-closed verification with timeouts)
+- **UDP traffic monitor + inbound rate limit** (1.11.0, off by default) — measure the swarm hitting the tracker port (arriving / served / dropped packets per second, charted), then set a limit from those measurements instead of guessing: the slider is annotated with the median, P95 and peak of the last week and the panel says which value it suggests and below which one you start dropping real traffic. Applied through one root helper into its **own** nftables table and file, so your existing firewall is untouched and undoing it is one click — see [UDP traffic monitor + inbound rate limit](#7-udp-traffic-monitor--inbound-rate-limit-optional-1110)
 
 ### User accounts & federation (1.6.0, both off by default)
 - **User accounts** — registration/login with CAPTCHA (selectable sign-in duration, email verification), groups with per-feature permissions (`guest` = anonymous visitors; a signed-in user gets exactly the union of their own groups; system `admin` group passes everything — 1.7.0 semantics), timed memberships (1 d … 1 y / custom from–to, extend-on-repurchase), in-app + email notifications, an account page and an admin Users page — see [User accounts, groups & permissions](#user-accounts-groups--permissions-160)
@@ -772,6 +773,88 @@ torrent keeps sending `connect` + `announce` (measured on tryhackx.org: **90–2
   to speed that up is a UDP reply that makes them back off (long `interval`), which is a policy /
   patch decision, not a config one.
 
+#### 7. UDP traffic monitor + inbound rate limit (optional, 1.11.0)
+
+The egress budget above protects the *machine*. The other half of the same problem is the **CPU** the
+tracker burns answering a swarm it will refuse anyway — and a packet dropped by the firewall costs
+nothing at all. **Admin → Whitelist → UDP traffic** measures both and can set the inbound limit,
+**Settings → Tracker & whitelist → UDP traffic & rate limit** configures it. Off by default: a fresh
+install never calls the helper, never writes a firewall rule and renders no extra card.
+
+```bash
+sudo install -m 0755 tools/opentracker/tracker-netlimit.sh /usr/local/sbin/tracker-netlimit.sh
+echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-netlimit.sh' | sudo tee /etc/sudoers.d/tracker-netlimit
+sudo chmod 0440 /etc/sudoers.d/tracker-netlimit && sudo visudo -c -f /etc/sudoers.d/tracker-netlimit
+grep -q '/etc/nftables.d' /etc/nftables.conf \
+  || echo 'include "/etc/nftables.d/*.nft"' | sudo tee -a /etc/nftables.conf   # so it survives a reboot
+sudo /usr/local/sbin/tracker-netlimit.sh check       # JSON verdict; the panel's Test button runs this
+```
+
+Everything the panel writes lives in **one file** (`/etc/nftables.d/ottrack-in.nft`) inside **its own
+nftables table** (`inet ottrack_in`, hook `input`, `priority filter - 5`, `policy accept`). Your
+distribution's `inet filter` table is never read for writing and never flushed, so a rule you added
+there by hand keeps working — the card lists any such rule it finds on the same port, together with
+the exact `nft delete rule …` line to remove it yourself once you no longer want it. The ruleset is
+loaded as one `nft -f` transaction (create-if-missing → delete → recreate), so the port is never left
+unprotected while the limit changes. Undo is one button, or:
+
+```bash
+sudo nft delete table inet ottrack_in && sudo rm /etc/nftables.d/ottrack-in.nft
+```
+
+**Picking a number.** Nobody knows their tracker's packets-per-second by heart, so the panel works it
+out. Turn the **traffic monitor** on and the janitor samples the nftables counters once a minute into
+`net_samples` (three series: arriving / served / dropped, plus the egress counters). After an hour or
+two the card draws them and annotates the slider with the **median, P95 and peak** of the last week,
+and says in words: *"median 22 000 pps, P95 38 000 pps, peak 61 000 pps → suggested limit 40 000 pps
+(P95 + 5 %); below roughly 24 000 pps you start dropping traffic you normally serve."* The monitor
+works with or without a limit in force, so you can measure first and decide afterwards.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `net_monitor_enabled` | `0` | record packets/second into `net_samples` (needed for the chart and the suggestion) |
+| `net_sample_seconds` / `net_keep_days` | `60` / `14` | sampling interval and retention (~1 440 tiny rows a day) |
+| `net_limit_enabled` / `net_limit_pps` / `net_limit_burst` | `0` / `30000` / `100` | the throttle itself (1 000–1 000 000 pps) |
+| `net_limit_port` | `6969` | the only port the rule touches |
+| `net_limit_cmd` | `sudo -n /usr/local/sbin/tracker-netlimit.sh` | the root helper; same character rules as the mode switch command |
+| `net_auto_enabled` | `0` | move the limit automatically (see below) |
+| `net_auto_min` / `net_auto_max` / `net_auto_target` | `10000` / `80000` / `30000` | the band it may move inside, and the packets/second you are willing to hand the tracker |
+| `net_auto_target_cpu` | `70` | 1-minute load per core above which the automatic mode tightens anyway |
+
+**Automatic mode** (off by default) compares the rate that actually reached the tracker with your
+target once a minute and moves the limit by ±10 % inside the band — but only after **three**
+consecutive samples on the same side, with a two-minute cool-down between moves, so one spike changes
+nothing. **"Throttle hard"** clamps the port to 10 000 pps for 15 minutes and the janitor restores the
+previous setting automatically (including switching the limit back *off* if it was off), so the panic
+button cannot be left on by accident.
+
+Applying, removing, throttling hard and restoring all require the **admin password**;
+**Preview ruleset** does not, because it only renders and `nft -c`-checks the file without loading it.
+The **Test** button in Settings is read-only too: it checks `exec()`, the sudoers rule (`sudo -n -l`,
+which lists the permission without running anything), `nft`, `/etc/nftables.d/` and the `include` line
+that makes the rule survive a reboot, and prints copy-paste fixes for whatever is missing. When
+`nft` is absent the card simply says so — nothing errors.
+
+The card also **shows** the egress budget's counters next to the inbound ones and can change its rate
+(`nft replace rule` on that one rule, so the table's 262 144-entry "good client" sets are not flushed);
+it never installs or removes `ottrack.nft` — that stays a manual, documented step.
+
+### Server-side integrations — what runs as root, and how to undo it
+
+None of these are required: the tracker runs fine without any of them, and removing one leaves the
+system exactly as it was before. Each is a **single script** allowed through `sudoers` with `NOPASSWD`
+— never a shell, never `nft`/`systemctl` called straight from PHP — and each validates its own
+arguments independently of the panel.
+
+| Helper | Installed as | Sudoers line | What it touches | Undo |
+|---|---|---|---|---|
+| `tools/opentracker/tracker-mode.sh` | `/usr/local/sbin/tracker-mode.sh` | `www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-mode.sh` | the `opentracker` / `opentracker.conf` symlinks + `systemctl restart opentracker` | point the symlinks back and restart; delete `/etc/sudoers.d/tracker-mode` |
+| `tools/opentracker/tracker-netlimit.sh` | `/usr/local/sbin/tracker-netlimit.sh` | `www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-netlimit.sh` | `/etc/nftables.d/ottrack-in.nft` + table `inet ottrack_in`; the rate of `inet ottrack` on request | `nft delete table inet ottrack_in && rm /etc/nftables.d/ottrack-in.nft`; delete `/etc/sudoers.d/tracker-netlimit` |
+| `systemctl restart/reload <unit>` | — | `www-data ALL=(root) NOPASSWD: /bin/systemctl reload opentracker` | the tracker service only | delete the sudoers line; the panel's buttons then just report the failure |
+
+Everything else the panel does to the system it does as the web user: writing the accesslist file,
+reading `/proc`, and running the janitor from a systemd timer.
+
 ### Moving the admin sign-in address (1.10.0)
 
 By default the panel's sign-in form lives at `/?action=admin`, and that is the **only** address that
@@ -873,7 +956,11 @@ tracker/
 │       ├── tracker_service_status.php # GET — restart recommendations for the dashboard
 │       ├── restart_tracker.php # POST — restart the tracker service (password-confirmed)
 │       ├── reload_tracker.php  # POST — reload the tracker blacklist via SIGHUP (password-confirmed)
-│       └── test_tracker_permission.php # GET — test sudo perms for restart/reload (read-only)
+│       ├── test_tracker_permission.php # GET — test sudo perms for restart/reload (read-only)
+│       ├── net_status.php     # GET — firewall state + live packets/second + measured suggestion
+│       ├── net_samples.php    # GET — the packets/second series behind the UDP traffic chart
+│       ├── net_apply.php      # POST — load/remove/throttle-hard/restore the inbound limit (password)
+│       └── net_test.php       # GET — can this machine run the inbound limit at all (read-only)
 │
 ├── assets/
 │   ├── css/
@@ -883,6 +970,7 @@ tracker/
 │   │   ├── app.js             # Public site JavaScript
 │   │   ├── admin.js           # Admin panel JavaScript
 │   │   ├── admin-index.js     # Observed-hash index page (?action=admin-index)
+│   │   ├── admin-netlimit.js  # UDP traffic card: live counters, chart, throttle slider
 │   │   └── stats-timeline.js  # Swarm timeline chart (public stats page + admin whitelist page)
 │   ├── vendor/uplot/          # uPlot (MIT) — vendored, no CDN
 │   └── img/
@@ -900,6 +988,7 @@ tracker/
 │   ├── login_attempts.json    # Per-IP login throttle state (runtime)
 │   ├── rate_limits.json       # Per-IP/action rate-limit state (runtime)
 │   ├── blacklist_changes.json # Blacklist add/remove log since last tracker start (runtime)
+│   ├── net_state.json         # UDP monitor state: last counters, automatic mode, panic window (runtime)
 │   └── .htaccess              # Deny all access
 │
 ├── includes/                  # Core PHP libraries (protected)
@@ -907,6 +996,7 @@ tracker/
 │   ├── auth.php               # Authentication (login, session, attempt checking)
 │   ├── mail.php               # Email system (sending, templates, preferences)
 │   ├── settings.php           # Database settings management (getSettings, setSettings)
+│   ├── netlimit.php           # UDP traffic monitor + inbound rate limit (drives the root helper)
 │   └── .htaccess              # Deny all access
 │
 ├── templates/                 # PHP templates (protected)
@@ -959,6 +1049,7 @@ The installer creates the following tables:
 | `user_notifications` | In-app notifications (grants, expiry warnings, admin messages) |
 | `user_tokens` | Remember-me + password-reset tokens (sha256 only) |
 | `fed_peers` | Federation peers (base URL, outbound bearer, inbound API client, pull cursor/status) |
+| `net_samples` | UDP traffic: one sample per interval — nftables counters plus the packets/second derived from them, and the limit in force — schema v11 |
 
 Schema upgrades are applied automatically on the first request (`includes/schema.php`,
 `settings.schema_version`); fresh installs get the same tables from `install.php`.
@@ -1034,6 +1125,10 @@ All require active admin session. Prefix: `admin/`
 | `admin/restart_tracker` | POST | Restart the configured tracker service (password-confirmed) |
 | `admin/reload_tracker` | POST | Reload the tracker blacklist via SIGHUP / `systemctl reload` (password-confirmed) |
 | `admin/test_tracker_permission` | GET | Read-only `sudo -n -l` check of restart/reload permission (`op=restart\|reload`) |
+| `admin/net_status` | GET | UDP traffic card: firewall state, live packets/second, foreign rules on the port, measured suggestion (1.11.0) |
+| `admin/net_samples` | GET | Packets/second series for the chart (`range=1h\|6h\|24h\|7d\|14d\|30d`, or `from`/`to`; bucketed server-side) |
+| `admin/net_apply` | POST | The only endpoint that changes the firewall: `op=apply\|off\|panic\|restore\|egress` (admin password) or `op=preview` (read-only, no password) |
+| `admin/net_test` | GET | Read-only check of `exec()`, the sudoers rule, `nft` and the reboot-persistence include |
 | `admin/check_whitelist_path` | POST | Test the whitelist file / directory permissions |
 | `admin/whitelist_status` | GET | Status card data (file, state, counts, worker heartbeat, warnings) |
 | `admin/fetch_whitelist` | GET | Paginated whitelist (`sort=col:dir,…`, `search`, `search_files`, `source`, `meta`, `banned`, `ip`, `group=ip`) |

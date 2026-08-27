@@ -10,7 +10,10 @@
  * request-driven janitor could not run because nobody visited the site, removes stale temp files and
  * prunes old API bans. Then the statistics timeline tick (includes/stats_timeline.php): one sample per
  * configured interval (from the shared stats cache when fresh, otherwise from the tracker), 5-minute /
- * hourly roll-ups and retention. Safe to run every minute; exits 0 always. See README "Whitelist mode".
+ * hourly roll-ups and retention. Then the observed-hash index, the inbound UDP traffic sample
+ * (includes/netlimit.php — also where an expired "throttle hard" window is undone and where the
+ * automatic limit moves) and the user-account tick. Safe to run every minute; exits 0 always.
+ * See README "Whitelist mode".
  */
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 
@@ -27,6 +30,7 @@ require_once $root . '/includes/stats_timeline.php';
 require_once $root . '/includes/index.php';
 require_once $root . '/includes/mail.php';
 require_once $root . '/includes/users.php';
+require_once $root . '/includes/netlimit.php';
 
 try {
     $db  = getDb();
@@ -56,6 +60,15 @@ try {
             $ix['poll'] ? ' (entries=' . (int)$ix['poll']['entries'] . ' kept=' . (int)$ix['poll']['kept'] . ($ix['poll']['truncated'] ? ' TRUNCATED' : '') . ' ms=' . (int)$ix['poll']['ms'] . ')' : '',
             (int)$ix['meta_queued'], $ix['prune'] ? ' pruned=' . (int)$ix['prune']['expired'] . '/' . (int)$ix['prune']['capped'] : '',
             $ix['error'] !== null ? ' error=' . $ix['error'] : ''), "\n";
+    }
+    // inbound UDP traffic: sample the nftables counters, expire a panic window, move the automatic
+    // limit (no-op — not even a fork — while the monitor and the automatic mode are both off)
+    $nl = netlimitTick($db, $cfg);
+    if ($nl['enabled'] && ($nl['error'] !== null || $nl['auto'] !== null || $nl['panic'] !== null || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[netlimit] sampled=%s%s%s pruned=%d%s', $nl['sampled'] ? 'yes' : 'no',
+            $nl['auto'] ? ' auto=' . $nl['auto']['action'] . '→' . (int)$nl['auto']['pps'] . 'pps (' . $nl['auto']['reason'] . ')' : '',
+            $nl['panic'] ? ' panic=restored' : '', (int)$nl['pruned'],
+            $nl['error'] !== null ? ' error=' . $nl['error'] : ''), "\n";
     }
     // user accounts: expire/warn timed group memberships, prune notifications + tokens (no-op when disabled)
     $us = usersTick($db, $cfg);

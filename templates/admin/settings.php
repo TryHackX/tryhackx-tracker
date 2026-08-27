@@ -1132,6 +1132,134 @@
                 </div>
             </div>
 
+            <!-- UDP traffic & rate limit — includes/netlimit.php + tools/opentracker/tracker-netlimit.sh -->
+            <div class="settings-section" id="section-netlimit" data-group="tracker" data-title="UDP traffic &amp; rate limit">
+                <h5>UDP traffic &amp; rate limit</h5>
+                <p class="settings-hint mb-2">
+                    Two different problems, two different levers.
+                    <strong>Inbound</strong> (this section): packets dropped by the firewall never reach OpenTracker, so a swarm that keeps
+                    hammering the port costs no CPU. <strong>Outbound</strong> (<code>tools/opentracker/egress-budget/ottrack.nft</code>):
+                    capping what the tracker <em>answers</em> is what keeps the rest of the machine reachable. The panel drives the first and
+                    shows the second side by side on the <a href="<?= $baseUrl ?>?action=admin-whitelist#net-card">Whitelist page</a>.
+                    <br>
+                    Everything here is applied through the root helper <code>tools/opentracker/tracker-netlimit.sh</code>, which writes
+                    <strong>one file</strong> (<code>/etc/nftables.d/ottrack-in.nft</code>) in <strong>its own nftables table</strong>
+                    (<code>inet ottrack_in</code>). Your distribution's <code>inet filter</code> table and any rule you added there by hand are
+                    never read or written &mdash; undoing all of this is one click, or <code>nft delete table inet ottrack_in</code>.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Traffic monitor</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="net_monitor_enabled">
+                            <option value="0" <?= ($cfg['net_monitor_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="1" <?= ($cfg['net_monitor_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On &mdash; record packets/second</option>
+                        </select>
+                        <small class="settings-hint">Works with or without a limit in force. Turn it on <em>first</em>: the suggested threshold is computed from what was measured, not guessed.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Sample every <small class="settings-hint">(seconds)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_sample_seconds" value="<?= (int)netlimitSampleSeconds($cfg) ?>" min="<?= NET_SAMPLE_MIN ?>" max="<?= NET_SAMPLE_MAX ?>">
+                        <small class="settings-hint">The janitor timer runs every minute, so anything below 60 s samples at most once a minute anyway.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Keep samples for <small class="settings-hint">(days)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_keep_days" value="<?= (int)netlimitKeepDays($cfg) ?>" min="<?= NET_KEEP_MIN ?>" max="<?= NET_KEEP_MAX ?>">
+                        <small class="settings-hint">At one sample a minute that is ~1 440 rows a day &mdash; 14 days is about 20 000 tiny rows.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Tracker UDP port</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_limit_port" value="<?= (int)netlimitPort($cfg) ?>" min="1" max="65535">
+                        <small class="settings-hint">The port in your announce URL (<code>6969</code> by default). Only this port is touched.</small>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-netlimit-throttle">Inbound limit <small class="settings-hint fw-normal">(the throttle)</small></h6>
+                <p class="settings-hint mb-2">
+                    Saving here records what the panel <em>should</em> load &mdash; it does not touch the firewall. Loading, previewing and
+                    removing the rule live on the <a href="<?= $baseUrl ?>?action=admin-whitelist#net-card">Whitelist page</a>, behind the
+                    admin password, with the measured median / P95 / peak drawn on the slider.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Inbound limit</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="net_limit_enabled">
+                            <option value="0" <?= ($cfg['net_limit_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off &mdash; nothing is dropped</option>
+                            <option value="1" <?= ($cfg['net_limit_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Packets / second</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_limit_pps" value="<?= (int)netlimitPps($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
+                        <small class="settings-hint">Everything above this is dropped before OpenTracker sees it. <?= NET_PPS_MIN ?>&ndash;<?= NET_PPS_MAX ?>.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Burst <small class="settings-hint">(packets)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_limit_burst" value="<?= (int)netlimitBurst($cfg) ?>" min="<?= NET_BURST_MIN ?>" max="<?= NET_BURST_MAX ?>">
+                        <small class="settings-hint">How far over the budget a short spike may go before packets are dropped. 100 is a sane default; 5 makes the limit bite almost immediately.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label d-block">Availability test</label>
+                        <button type="button" class="btn btn-outline-info btn-sm w-100" id="btn-test-netlimit"><i class="bi bi-shield-check"></i> Test firewall access</button>
+                        <small class="settings-hint d-block mt-1">Read-only: checks <code>nft</code>, the sudoers rule and whether the rule would survive a reboot. It never loads or removes anything.</small>
+                    </div>
+                    <div class="col-12">
+                        <div id="netlimit-result" class="blacklist-result"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Root helper command <small class="settings-hint">(the action arguments are appended automatically; empty = feature disabled)</small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="net_limit_cmd" value="<?= sanitize($cfg['net_limit_cmd'] ?? NET_DEFAULT_CMD) ?>" placeholder="<?= NET_DEFAULT_CMD ?>" maxlength="255">
+                        <small class="settings-hint">Only letters, digits, space and <code>_ . / -</code> &mdash; no shell metacharacters, exactly like the mode switch command above.</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Install it once, on the server</label>
+                        <pre class="settings-code mb-0"><code>sudo install -m 0755 tools/opentracker/tracker-netlimit.sh /usr/local/sbin/
+echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-netlimit.sh' \
+  | sudo tee /etc/sudoers.d/tracker-netlimit
+sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-netlimit-auto">Automatic mode <small class="settings-hint fw-normal">(off by default)</small></h6>
+                <p class="settings-hint mb-2">
+                    Once a minute the janitor compares the packets/second that actually reached the tracker with your target and moves the limit by
+                    &plusmn;10 % inside the band below. It takes <strong>three</strong> samples in a row on the same side before anything moves
+                    (so one spike changes nothing), and there is a two-minute cool-down between moves. Needs both the monitor and the inbound
+                    limit switched on.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Automatic mode</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="net_auto_enabled">
+                            <option value="0" <?= ($cfg['net_auto_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="1" <?= ($cfg['net_auto_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On &mdash; move the limit for me</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Target <small class="settings-hint">(packets/second)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_target" value="<?= (int)netlimitAutoTarget($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
+                        <small class="settings-hint">How many packets a second you are willing to hand to OpenTracker. Above it the limit tightens, comfortably below it (&minus;20 %) it loosens.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Band: minimum</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_min" value="<?= (int)netlimitAutoMin($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
+                        <small class="settings-hint">The automatic mode never throttles below this.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Band: maximum</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_max" value="<?= (int)netlimitAutoMax($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
+                        <small class="settings-hint">&hellip; and never loosens above this.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">CPU guard <small class="settings-hint">(% load per core)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_target_cpu" value="<?= (int)netlimitAutoTargetCpu($cfg) ?>" min="10" max="100">
+                        <small class="settings-hint">
+                            When the 1-minute load average per core is above this, the automatic mode tightens even if the packet rate is under target.
+                            <?php $nlCpus = netlimitCpuCount(); if ($nlCpus > 0): ?>This machine has <strong><?= (int)$nlCpus ?></strong> cores, so <?= (int)netlimitAutoTargetCpu($cfg) ?> % means a load average above <strong><?= number_format($nlCpus * netlimitAutoTargetCpu($cfg) / 100, 1) ?></strong>.<?php endif; ?>
+                        </small>
+                    </div>
+                </div>
+            </div>
+
             <!-- Footer -->
             <div class="settings-section" id="section-footer" data-group="general" data-title="Footer">
                 <h5>Footer</h5>
@@ -1556,6 +1684,40 @@
 
     document.getElementById('btn-test-restart').addEventListener('click', (e) => runTrackerPermTest('restart', e.currentTarget));
     document.getElementById('btn-test-reload').addEventListener('click', (e) => runTrackerPermTest('reload', e.currentTarget));
+
+    // --- Inbound UDP rate limit: availability test ---------------------------
+    // Read-only on the server too (see api/admin/net_test.php): it checks nft, the sudoers rule and
+    // the reboot-persistence include, and never loads or removes a rule.
+    document.getElementById('btn-test-netlimit').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const el = document.getElementById('netlimit-result');
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
+        el.innerHTML = '<span class="text-info">Checking the firewall helper&hellip;</span>';
+        try {
+            const res = await fetch(API_BASE + 'admin/net_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
+            const json = await res.json();
+            const sug = (json.suggestions || []).map(esc);
+            const meta = '<br><small style="color:#a0a0b0;">'
+                + (json.command ? 'Command: <code>' + esc(json.command) + '</code><br>' : '')
+                + (json.output ? 'Output: <code>' + esc(json.output) + '</code><br>' : '')
+                + 'OS: ' + esc(json.os || '') + ' | PHP user: ' + esc(json.php_user || '')
+                + (json.cpus ? ' | CPU cores: ' + esc(String(json.cpus)) : '') + '</small>';
+            if (json.ok) {
+                el.innerHTML = '<span class="text-success">&#10003; The panel can load and remove the inbound limit.</span>'
+                    + (sug.length ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
+            } else {
+                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || ['Test failed']).map(esc).join('<br>') + '</span>'
+                    + (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
+            }
+        } catch {
+            el.innerHTML = '<span class="text-danger">Network error</span>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
+    });
 
     document.getElementById('btn-logout').addEventListener('click', async () => {
         await fetch(API_BASE + 'admin/logout', { method: 'POST', headers: { 'X-CSRF-Token': CSRF } });

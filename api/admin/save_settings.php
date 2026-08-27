@@ -51,6 +51,12 @@ $allowed = [
     'whitelist_scrape_url', 'whitelist_require_tracker', 'whitelist_tracker_hosts',
     // scheduled tracker mode (includes/schedule.php)
     'tracker_schedule_enabled', 'tracker_schedule', 'tracker_schedule_tz', 'tracker_mode_switch_cmd',
+    // schema v11: inbound UDP monitor + rate limit (includes/netlimit.php). Changing the limit
+    // itself does NOT touch the firewall here — that goes through admin/net_apply, which asks for
+    // the admin password; saving only records what the panel should load.
+    'net_monitor_enabled', 'net_sample_seconds', 'net_keep_days',
+    'net_limit_enabled', 'net_limit_pps', 'net_limit_burst', 'net_limit_port', 'net_limit_cmd',
+    'net_auto_enabled', 'net_auto_min', 'net_auto_max', 'net_auto_target', 'net_auto_target_cpu',
     // captcha provider (reCAPTCHA v2 keys are the legacy recaptcha_* entries above)
     'captcha_provider', 'turnstile_site_key', 'turnstile_secret',
     'recaptcha_v3_site_key', 'recaptcha_v3_secret', 'recaptcha_v3_min_score',
@@ -143,6 +149,12 @@ $intClamp = [
     'rate_limit_user_login' => [0, 1000, 10],
     'rate_limit_user_register' => [0, 1000, 5], 'rate_limit_index_search' => [0, 100000, 120],
     'fed_export_max_batch' => [100, 20000, 2000], 'fed_pull_minutes' => [5, 1440, 60],
+    // UDP monitor + rate limit (includes/netlimit.php)
+    'net_sample_seconds' => [NET_SAMPLE_MIN, NET_SAMPLE_MAX, 60], 'net_keep_days' => [NET_KEEP_MIN, NET_KEEP_MAX, 14],
+    'net_limit_pps' => [NET_PPS_MIN, NET_PPS_MAX, 30000], 'net_limit_burst' => [NET_BURST_MIN, NET_BURST_MAX, 100],
+    'net_limit_port' => [1, 65535, 6969],
+    'net_auto_min' => [NET_PPS_MIN, NET_PPS_MAX, 10000], 'net_auto_max' => [NET_PPS_MIN, NET_PPS_MAX, 80000],
+    'net_auto_target' => [NET_PPS_MIN, NET_PPS_MAX, 30000], 'net_auto_target_cpu' => [10, 100, 70],
 ];
 foreach ($intClamp as $k => [$min, $max, $def]) {
     if (isset($data[$k])) {
@@ -162,8 +174,21 @@ if (isset($data['whitelist_tracker_hosts'])) {
 foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
           'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist',
-          'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new'] as $k) {
+          'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new',
+          'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
+}
+// ── UDP rate limit ──
+// The helper command is handed to the shell, so it gets the same treatment as the mode switch
+// command: a strict character class here, escapeshellarg() on every argument in includes/netlimit.php.
+if (isset($data['net_limit_cmd']) && !netlimitValidCommand($data['net_limit_cmd'])) {
+    jsonResponse(['error' => 'Invalid rate-limit helper command: only letters, digits, space and _ . / - are allowed (no shell metacharacters); the action arguments are appended automatically. Leave empty to disable the feature.'], 400);
+}
+// An upside-down automatic band would let one save lock the limit at a single value.
+if (isset($data['net_auto_min']) || isset($data['net_auto_max'])) {
+    $min = (int)($data['net_auto_min'] ?? netlimitAutoMin($cfg));
+    $max = (int)($data['net_auto_max'] ?? netlimitAutoMax($cfg));
+    if ($max < $min) jsonResponse(['error' => 'The automatic band is upside down: the maximum (' . number_format($max) . ' pps) must not be below the minimum (' . number_format($min) . ' pps).'], 400);
 }
 if (isset($data['users_default_group'])) {
     $data['users_default_group'] = strtolower($data['users_default_group']);

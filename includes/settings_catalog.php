@@ -27,7 +27,7 @@ function settingsCatalogGroups(): array {
         ['id' => 'users',        'title' => 'User accounts',      'icon' => 'bi-people',
          'keywords' => 'users accounts registration login members groups permissions verification terms email change cooldown search'],
         ['id' => 'tracker',      'title' => 'Tracker & whitelist','icon' => 'bi-hdd-network',
-         'keywords' => 'tracker opentracker mode blacklist whitelist accesslist schedule open hours service systemd restart reload scrape torrents hashes'],
+         'keywords' => 'tracker opentracker mode blacklist whitelist accesslist schedule open hours service systemd restart reload scrape torrents hashes firewall nftables rate limit throttle udp packets pps traffic flood'],
         ['id' => 'stats',        'title' => 'Statistics',         'icon' => 'bi-graph-up',
          'keywords' => 'statistics stats numbers chart graph timeline history samples roll-up retention peers seeds leechers uptime live refresh ranges'],
         ['id' => 'index',        'title' => 'Index',              'icon' => 'bi-collection',
@@ -164,6 +164,21 @@ function settingsCatalogKeywords(): array {
         'tracker_blacklist_warn_count' => 'blacklist size warning threshold blocked hashes',
         'tracker_blacklist_danger_count' => 'blacklist size danger threshold blocked hashes',
         'admin_near_pages'         => 'near pages radius bulk actions this page neighbours metadata',
+
+        // ── Tracker & whitelist: inbound UDP throttle (includes/netlimit.php) ──
+        'net_monitor_enabled'      => 'udp traffic monitor packets per second pps counters measure record firewall nftables graph chart bandwidth flood',
+        'net_sample_seconds'       => 'sample interval seconds resolution pps recording granularity udp traffic',
+        'net_keep_days'            => 'udp traffic samples retention days keep history prune pps',
+        'net_limit_enabled'        => 'udp rate limit throttle dlawik cap flood ddos drop packets nftables firewall ingress inbound on off',
+        'net_limit_pps'            => 'packets per second pps budget threshold limit rate udp throttle cap drop swarm flood',
+        'net_limit_burst'          => 'burst packets allowance spike tolerance rate limiter token bucket',
+        'net_limit_port'           => 'tracker udp port 6969 announce which port is limited',
+        'net_limit_cmd'            => 'helper script sudo root nft nftables command tracker-netlimit path privileged',
+        'net_auto_enabled'         => 'automatic adaptive limit self tuning auto adjust throttle hysteresis',
+        'net_auto_min'             => 'automatic mode lower bound floor minimum pps band',
+        'net_auto_max'             => 'automatic mode upper bound ceiling maximum pps band',
+        'net_auto_target'          => 'automatic mode target packets per second goal setpoint how much traffic to accept',
+        'net_auto_target_cpu'      => 'automatic mode cpu load per core percentage guard overload tighten',
 
         // ── Statistics ──
         'tracker_stats_enabled'    => 'statistics page numbers swarm live counters on off',

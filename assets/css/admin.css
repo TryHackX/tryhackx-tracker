@@ -1309,3 +1309,71 @@ input[type="number"] {
 }
 .sync-dot.on { opacity: 1; animation: sync-dot-pulse 0.9s ease-in-out infinite; }
 @keyframes sync-dot-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.55); opacity: 0.45; } }
+
+/* === Admin › UDP traffic card (assets/js/admin-netlimit.js) === */
+.nl-card .nl-unit { color: #8b96a5; font-size: 0.78rem; }
+
+/* the throttle: number + logarithmic slider + the measured marks drawn on the track */
+.nl-tune { margin-top: 0.9rem; padding: 0.8rem 0.9rem; background: #10161d; border: 1px solid #1c232b; border-radius: 6px; }
+.nl-tune-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.nl-tune-title { color: #ddd; font-weight: 600; font-size: 0.9rem; }
+.nl-tune-value { display: flex; align-items: center; gap: 0.35rem; }
+.nl-tune-value input { width: 8.5rem; text-align: right; }
+/* room under the track for the labels; the marks are absolutely positioned inside it */
+.nl-slider-wrap { position: relative; padding: 0.6rem 0 1.5rem; }
+.nl-slider { width: 100%; margin: 0; }
+.nl-marks { position: absolute; left: 0; right: 0; bottom: 0; height: 1.4rem; pointer-events: none; }
+.nl-mark { position: absolute; top: 0; width: 0; }
+.nl-mark::before { content: ''; position: absolute; left: 0; top: -0.55rem; width: 2px; height: 0.5rem; background: currentColor; border-radius: 1px; }
+.nl-mark-label { position: absolute; left: 0; top: 0.15rem; transform: translateX(-50%); font-size: 0.68rem; white-space: nowrap; color: inherit; }
+.nl-mark-median { color: #66bb6a; }
+.nl-mark-p95 { color: #ffb74d; }
+.nl-mark-peak { color: #ff5252; }
+.nl-advice { margin-top: 0.2rem; color: #9aa4b2; font-size: 0.8rem; line-height: 1.45; }
+.nl-tune-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.7rem; }
+
+/* notes that need a sentence rather than a tile (foreign rules on the port, failures, a dead timer) */
+.nl-note { margin-top: 0.7rem; padding: 0.55rem 0.75rem; border-radius: 6px; font-size: 0.82rem; line-height: 1.5; border: 1px solid; }
+.nl-note-info { background: rgba(74, 158, 255, 0.08); border-color: rgba(74, 158, 255, 0.35); color: #cfe3ff; }
+.nl-note-warn { background: rgba(255, 183, 77, 0.08); border-color: rgba(255, 183, 77, 0.35); color: #ffe0b2; }
+.nl-note-bad { background: rgba(255, 82, 82, 0.08); border-color: rgba(255, 82, 82, 0.35); color: #ffcdd2; }
+.nl-note code { color: #8ab4ff; font-size: 0.76rem; word-break: break-all; }
+.nl-note-list { list-style: none; margin: 0.4rem 0 0; padding: 0; }
+.nl-note-list li { padding: 0.25rem 0; border-top: 1px solid rgba(255,255,255,0.06); }
+
+.nl-chart-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin: 1rem 0 0.2rem; }
+.nl-chart-title { color: #9aa4b2; font-size: 0.8rem; }
+.nl-card .nl-ranges { display: inline-flex; border: 1px solid #2a2a3a; border-radius: 6px; overflow: hidden; }
+.nl-chart { position: relative; min-height: 200px; }
+/* the "no samples yet" message lives in a data attribute so the JS never writes markup */
+.nl-chart-empty::after {
+    content: attr(data-empty); position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; text-align: center; padding: 1rem; color: #6b7684; font-size: 0.85rem;
+}
+.nl-egress { margin-top: 0.4rem; }
+.nl-undo { margin-bottom: 0.6rem; }
+.nl-undo code { display: block; margin-top: 0.2rem; color: #8ab4ff; font-size: 0.76rem; word-break: break-all; }
+.nl-preview {
+    max-height: 60vh; overflow: auto; background: #0b0f14; border: 1px solid #1c232b; border-radius: 6px;
+    padding: 0.7rem 0.9rem; color: #cfd8e3; font-size: 0.76rem; line-height: 1.5; white-space: pre; margin: 0;
+}
+.nl-preview-sm { max-height: 12rem; font-size: 0.72rem; white-space: pre-wrap; }
+
+/* the copy-paste install block in Settings → UDP traffic & rate limit */
+.settings-code {
+    background: #0b0f14; border: 1px solid #1c232b; border-radius: 6px; padding: 0.6rem 0.8rem;
+    color: #cfd8e3; font-size: 0.74rem; line-height: 1.55; white-space: pre-wrap; word-break: break-all;
+}
+.settings-code code { color: inherit; }
+
+@media (max-width: 576px) {
+    .nl-tune-head { flex-direction: column; align-items: flex-start; }
+    .nl-tune-value input { width: 100%; }
+    .nl-tune-value { width: 100%; }
+    /* Median and P95 sit close together on a log track, so on a phone their labels collide. Keep the
+       ticks (they still show where the values are, and each one has a tooltip) and drop the words —
+       the sentence right underneath spells all three numbers out anyway. */
+    .nl-mark-label { display: none; }
+    .nl-slider-wrap { padding-bottom: 0.6rem; }
+    .nl-marks { height: 0.6rem; }
+}

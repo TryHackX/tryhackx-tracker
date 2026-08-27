@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 10;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons)
+const TRACKER_SCHEMA_VERSION = 11;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings)
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -163,6 +163,27 @@ function trackerSchemaStatements(): array {
             `wl_share` TINYINT UNSIGNED NOT NULL DEFAULT 0,
             `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
             `index_rows` INT UNSIGNED NOT NULL DEFAULT 0
+        ) $engine",
+
+        // ── UDP traffic samples (schema v11, includes/netlimit.php): nftables counters turned into
+        //    packets/second, one row per sample. The cumulative columns are kept next to the derived
+        //    rates so a gap (or a counter reset after "Apply") can always be told apart from a lull.
+        //    Retention is net_keep_days; there is no roll-up — at one minute and 14 days that is
+        //    ~20 000 rows, small enough to read raw.
+        "CREATE TABLE IF NOT EXISTS `net_samples` (
+            `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `span` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `in_total` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `in_passed` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `in_capped` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `out_ok` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `out_capped` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `pps_total` INT UNSIGNED NOT NULL DEFAULT 0,
+            `pps_passed` INT UNSIGNED NOT NULL DEFAULT 0,
+            `pps_capped` INT UNSIGNED NOT NULL DEFAULT 0,
+            `epps_ok` INT UNSIGNED NOT NULL DEFAULT 0,
+            `epps_capped` INT UNSIGNED NOT NULL DEFAULT 0,
+            `limit_pps` INT UNSIGNED NOT NULL DEFAULT 0
         ) $engine",
 
         // ── Observed-hash index (schema v6, includes/index.php): a catalogue of info hashes seen on the
@@ -494,6 +515,22 @@ function trackerSchemaDefaultSettings(): array {
         // (defaults = the classic behaviour of ?action=admin, with the login form nowhere else)
         'admin_login_path'            => 'admin',
         'admin_hidden_behavior'       => 'home',
+        // schema v11: inbound UDP monitor + rate limit (includes/netlimit.php +
+        // tools/opentracker/tracker-netlimit.sh). Everything off: a fresh install never calls the
+        // helper, never writes an nftables rule and behaves exactly as before.
+        'net_monitor_enabled'         => '0',
+        'net_sample_seconds'          => '60',
+        'net_keep_days'               => '14',
+        'net_limit_enabled'           => '0',
+        'net_limit_pps'               => '30000',
+        'net_limit_burst'             => '100',
+        'net_limit_port'              => '6969',
+        'net_limit_cmd'               => 'sudo -n /usr/local/sbin/tracker-netlimit.sh',
+        'net_auto_enabled'            => '0',
+        'net_auto_min'                => '10000',
+        'net_auto_max'                => '80000',
+        'net_auto_target'             => '30000',
+        'net_auto_target_cpu'         => '70',
     ];
 }
 

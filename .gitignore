@@ -25,6 +25,9 @@ config/index_state.lock
 config/index_poll.lock
 config/index_prune.lock
 config/users_state.json
+config/net_state.json
+config/net_state.json.tmp.*
+config/net_state.lock
 config/*.marker
 
 # Stray backups — must never ship to production (e.g. hash.txt.orig leaks the admin hash)

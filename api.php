@@ -33,6 +33,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/federation.php';
+require_once __DIR__ . '/includes/netlimit.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -44,7 +45,7 @@ ensureSchema($db, $cfg);
 // the stats poller and the admin tracker-service status poll are both hit repeatedly and have
 // nothing to do with the report/appeal janitors, so running them there is pure overhead. They
 // still run everywhere else. S2S calls never run them either.
-if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status'], true)) {
+if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status'], true)) {
     autoArchiveOldReports($db, $cfg);
     autoArchiveOldAppeals($db, $cfg);
     pruneOldSentEmails($db, $cfg);
@@ -89,6 +90,11 @@ $apiRoutes = [
     'admin/restart_tracker' => 'api/admin/restart_tracker.php',
     'admin/reload_tracker'  => 'api/admin/reload_tracker.php',
     'admin/test_tracker_permission' => 'api/admin/test_tracker_permission.php',
+    // ── Inbound UDP monitor + rate limit (admin; includes/netlimit.php) ──
+    'admin/net_status'      => 'api/admin/net_status.php',
+    'admin/net_samples'     => 'api/admin/net_samples.php',
+    'admin/net_apply'       => 'api/admin/net_apply.php',
+    'admin/net_test'        => 'api/admin/net_test.php',
     // ── Whitelist (public) ──
     'whitelist_submit'      => 'api/whitelist_submit.php',
     'whitelist_check'       => 'api/whitelist_check.php',

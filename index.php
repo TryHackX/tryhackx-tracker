@@ -24,6 +24,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/federation.php';
+require_once __DIR__ . '/includes/netlimit.php';
 
 $db = getDb();
 $cfg = getSettings($db);
