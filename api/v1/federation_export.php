@@ -31,14 +31,20 @@ $out = [
     'ok' => true, 'node' => fedNodeName($cfg), 'server_time' => time(),
     'rows' => $res['rows'], 'next' => $res['next'], 'has_more' => $res['has_more'],
 ];
+// The request that asks for a page is a few bytes; the reply is the part that costs bandwidth, so
+// that is what the daily budget has to count.
 if (!empty($payload['gzip'])) {
     $json = json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     if ($json !== false) {
+        $body = gzencode($json, 6);
+        apiChargeBytes($db, $client, strlen($body));
         while (ob_get_level()) ob_end_clean();
         header('Content-Type: application/json; charset=utf-8');
         header('Content-Encoding: gzip');
-        echo gzencode($json, 6);
+        echo $body;
         exit;
     }
 }
+$plain = json_encode($out, JSON_UNESCAPED_UNICODE);
+apiChargeBytes($db, $client, $plain === false ? 0 : strlen($plain));
 jsonResponse($out);

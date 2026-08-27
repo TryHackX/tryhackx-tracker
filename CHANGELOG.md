@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — E3a: the server-to-server API gets a ceiling (schema v12)
+
+### Added
+- **Per-key rate limits on `v1/*`** — requests per minute (`api_rate_limit_per_min`, default 60) and
+  bytes per day (`api_rate_limit_bytes_day`, default 5 GB), under Settings → Server-to-server API.
+  Until now the ban machinery only ever reacted to *bad* authentication, so a key that was perfectly
+  valid — a federation peer pulling too eagerly, or a key that had leaked — could not be slowed down
+  at all short of disabling it by hand. Counted **per key** rather than per IP, because one partner
+  pulls from one address and an IP bucket would be shared with anyone behind the same NAT. Going
+  over answers **429 with `Retry-After`**, never a ban: pulling too fast is a misconfiguration
+  between partners, not an attack. Addresses on the never-ban list are exempt from both budgets, so
+  the operator's own integrations (the forum on the same host) are untouched. **0 switches a budget
+  off.** The federation export charges what it *sends*, since the request that asks for a page is a
+  few bytes and the reply is what actually costs bandwidth.
+
+### Changed
+- **A federation peer's base URL must now be `https://`.** The bearer we hold for a partner travels
+  in a header on every single pull; over http it is readable by anything on the path, and a leaked
+  federation key is a licence to read the whole resolved index. Existing `http://` peers keep
+  working until the row is next saved, and the message says exactly why.
+
 ## [1.11.2] — 2026-08-27
 
 ### Fixed

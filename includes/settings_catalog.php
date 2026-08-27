@@ -221,6 +221,8 @@ function settingsCatalogKeywords(): array {
         'api_enabled'              => 'server to server api endpoints clients integration on off',
         'api_ban_days'             => 'api ban duration days abuse blocked clients',
         'api_ban_exempt_ips'       => 'api ban whitelist exempt addresses never ban own server',
+        'api_rate_limit_per_min'   => 'api rate limit requests per minute throttle server to server bearer key 429 too many',
+        'api_rate_limit_bytes_day' => 'api rate limit bytes per day budget transfer quota bandwidth federation export',
         'fed_enabled'              => 'federation cluster partners sharing network on off',
         'fed_node_name'            => 'federation node identity name peers display',
         'fed_export_enabled'       => 'federation export share our whitelist outgoing',

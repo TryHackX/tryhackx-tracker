@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 11;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings)
+const TRACKER_SCHEMA_VERSION = 12;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*)
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -90,6 +90,11 @@ function trackerSchemaStatements(): array {
             `last_used_at` DATETIME DEFAULT NULL,
             `last_used_ip` VARCHAR(45) DEFAULT NULL,
             `requests_count` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `rl_min_start` DATETIME DEFAULT NULL,
+            `rl_min_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `rl_day` DATE DEFAULT NULL,
+            `rl_day_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `rl_blocked_count` BIGINT UNSIGNED NOT NULL DEFAULT 0,
             UNIQUE KEY `uq_api_clients_key` (`key_id`)
         ) $engine",
 
@@ -351,6 +356,20 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'api_clients', 'scope')) {
         $out[] = "ALTER TABLE `api_clients` ADD COLUMN `scope` VARCHAR(32) NOT NULL DEFAULT 'whitelist'";
     }
+    // v12: the rate-limit counters live on the client row, so the budget is per key rather than per
+    // IP — a federation peer pulls from one address and would otherwise share a bucket with anyone
+    // behind the same NAT. api_clients is a handful of rows, so this ALTER is instant.
+    $aparts = [];
+    foreach ([
+        'rl_min_start'     => "ADD COLUMN `rl_min_start` DATETIME DEFAULT NULL",
+        'rl_min_count'     => "ADD COLUMN `rl_min_count` INT UNSIGNED NOT NULL DEFAULT 0",
+        'rl_day'           => "ADD COLUMN `rl_day` DATE DEFAULT NULL",
+        'rl_day_bytes'     => "ADD COLUMN `rl_day_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0",
+        'rl_blocked_count' => "ADD COLUMN `rl_blocked_count` BIGINT UNSIGNED NOT NULL DEFAULT 0",
+    ] as $col => $sql) {
+        if (!schemaColumnExists($db, 'api_clients', $col)) $aparts[] = $sql;
+    }
+    if ($aparts) $out[] = "ALTER TABLE `api_clients` " . implode(', ', $aparts);
     // index_hashes carries a FULLTEXT index, so ADD COLUMN cannot be INSTANT — it is a full table
     // rebuild on a live 200k-row table. Do BOTH changes in ONE ALTER (one rebuild, not two), no
     // AFTER clause (column position doesn't matter, and AFTER also blocks INSTANT on newer MySQL).
@@ -504,6 +523,11 @@ function trackerSchemaDefaultSettings(): array {
         'index_search_enabled'        => '1',
         'index_search_include_whitelist' => '1',
         // schema v7: federation (includes/federation.php + worker/federation.py)
+        // Per-client budgets for the server-to-server API. A valid bearer used to be a licence to
+        // hammer the database as fast as the network allowed; a federation peer pulling pages is
+        // exactly the shape of traffic that needs a ceiling. 0 = no limit.
+        'api_rate_limit_per_min'      => '60',
+        'api_rate_limit_bytes_day'    => '5368709120',   // 5 GB
         'fed_enabled'                 => '0',
         'fed_node_name'               => '',
         'fed_export_enabled'          => '0',

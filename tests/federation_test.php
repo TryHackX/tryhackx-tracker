@@ -26,6 +26,75 @@ function check(string $name, bool $ok, string $info = ''): void {
 function h(int $i): string { return substr(sprintf('%040x', $i * 0x9E3779B1 + 7), -40); }
 
 $db = getDb(); $cfg = getSettings($db); ensureSchema($db, $cfg);
+// ── 4. per-client rate limits on the S2S API ────────────────────────────────
+// The ban machinery only ever reacted to BAD authentication, so a valid key — a peer pulling too
+// eagerly, or a key that leaked — could not be slowed down at all. These budgets are the answer.
+check('rate accessor: default is 60/min', apiRateLimitPerMin([]) === 60);
+check('rate accessor: 0 means unlimited and survives', apiRateLimitPerMin(['api_rate_limit_per_min' => '0']) === 0);
+check('rate accessor: rubbish falls back to 0, never negative', apiRateLimitPerMin(['api_rate_limit_per_min' => '-5']) === 0);
+check('rate accessor: absurd values are capped', apiRateLimitPerMin(['api_rate_limit_per_min' => '9999999']) === 100000);
+check('byte accessor: default is 5 GB', apiRateLimitBytesDay([]) === 5368709120);
+check('byte accessor: 0 means unlimited', apiRateLimitBytesDay(['api_rate_limit_bytes_day' => '0']) === 0);
+
+$db->exec("DELETE FROM api_clients WHERE label LIKE 'rl-test%'");
+$rc = apiClientCreate($db, 'rl-test client', 'federation');
+$rcId = (int)$rc['id'];
+$cfgRl = array_merge($cfg, ['api_rate_limit_per_min' => '3', 'api_rate_limit_bytes_day' => '1000',
+                            'api_ban_exempt_ips' => '']);   // exempt list off, or the test host skips the limiter
+$client = ['id' => $rcId, 'label' => 'rl-test client'];
+$counters = static function (PDO $db, int $id): array {
+    $r = $db->query("SELECT rl_min_count, rl_day_bytes, rl_blocked_count FROM api_clients WHERE id = $id")->fetch(PDO::FETCH_ASSOC);
+    return ['min' => (int)$r['rl_min_count'], 'bytes' => (int)$r['rl_day_bytes'], 'blocked' => (int)$r['rl_blocked_count']];
+};
+check('schema: the counters exist on api_clients', $counters($db, $rcId) === ['min' => 0, 'bytes' => 0, 'blocked' => 0]);
+
+// apiRateLimit() exits the process when it refuses, so drive the counter statement directly: it is
+// the piece with the ordering trap (MariaDB evaluates SET left to right, so the count must be
+// written before the window start it tests, or every request would look like a fresh window).
+$bump = static function (PDO $db, int $id, int $bytes) {
+    $db->prepare("UPDATE api_clients SET
+            rl_min_count = IF(rl_min_start IS NULL OR rl_min_start <= NOW() - INTERVAL 60 SECOND, 1, rl_min_count + 1),
+            rl_min_start = IF(rl_min_start IS NULL OR rl_min_start <= NOW() - INTERVAL 60 SECOND, NOW(), rl_min_start),
+            rl_day_bytes = IF(rl_day IS NULL OR rl_day <> CURDATE(), ?, rl_day_bytes + ?),
+            rl_day = CURDATE()
+         WHERE id = ?")->execute([$bytes, $bytes, $id]);
+};
+$bump($db, $rcId, 100);
+check('counter: the first request opens the window at 1', $counters($db, $rcId)['min'] === 1);
+$bump($db, $rcId, 100);
+$bump($db, $rcId, 100);
+$c3 = $counters($db, $rcId);
+check('counter: it really counts up rather than resetting', $c3['min'] === 3, json_encode($c3));
+check('counter: bytes accumulate alongside', $c3['bytes'] === 300, json_encode($c3));
+$bump($db, $rcId, 100);
+check('counter: the 4th request is over a budget of 3', $counters($db, $rcId)['min'] === 4);
+
+// an expired window must start again at 1, not carry the old count forward
+$db->prepare("UPDATE api_clients SET rl_min_start = NOW() - INTERVAL 61 SECOND WHERE id = ?")->execute([$rcId]);
+$bump($db, $rcId, 50);
+$cw = $counters($db, $rcId);
+check('counter: a minute later the window starts over', $cw['min'] === 1, json_encode($cw));
+check('counter: … but the daily bytes do NOT reset with it', $cw['bytes'] === 450, json_encode($cw));
+
+// a new day resets the byte budget without touching the request window
+$db->prepare("UPDATE api_clients SET rl_day = CURDATE() - INTERVAL 1 DAY WHERE id = ?")->execute([$rcId]);
+$bump($db, $rcId, 7);
+$cd = $counters($db, $rcId);
+check('counter: a new day starts the byte budget from this request', $cd['bytes'] === 7, json_encode($cd));
+
+// what the endpoints call to charge a reply they have already produced
+apiChargeBytes($db, ['id' => $rcId], 1000);
+check('apiChargeBytes adds what we SENT to the same budget', $counters($db, $rcId)['bytes'] === 1007);
+apiChargeBytes($db, ['id' => $rcId], 0);
+check('apiChargeBytes ignores a zero-byte reply', $counters($db, $rcId)['bytes'] === 1007);
+apiChargeBytes($db, ['id' => 0], 500);
+check('apiChargeBytes ignores an unknown client', $counters($db, $rcId)['bytes'] === 1007);
+
+// the exempt list covers these budgets too — the operator's own integrations must not throttle
+check('the never-ban list also exempts from the rate limit',
+      apiIpExempt('127.0.0.1', array_merge($cfg, ['api_ban_exempt_ips' => '127.0.0.1, ::1'])) === true);
+$db->exec("DELETE FROM api_clients WHERE id = $rcId");
+
 $db->exec("TRUNCATE TABLE index_hashes");
 $db->exec("TRUNCATE TABLE index_files");
 $db->exec("TRUNCATE TABLE fed_peers");
@@ -92,6 +161,14 @@ $peers = fedPeersList($db);
 check('peers list has the peer (URL trimmed)', count($peers) === 1 && $peers[0]['base_url'] === 'https://other.example.org');
 check('bearer never leaks via the list', !isset($peers[0]['bearer']) && $peers[0]['has_bearer'] === false);
 check('bad URL rejected', isset(fedPeerSave($db, null, ['name' => 'x2', 'base_url' => 'ftp://nope'])['error']));
+// The bearer we hold for a peer travels in a header on every single pull, so http is not a
+// preference — it would put a key that reads our whole resolved index on the wire in clear text.
+$httpTry = fedPeerSave($db, null, ['name' => 'x-http', 'base_url' => 'http://plain.example.org']);
+check('http:// peer URL rejected', isset($httpTry['error']));
+check('… and the message says why', str_contains(strtolower((string)($httpTry['error'] ?? '')), 'https'), (string)($httpTry['error'] ?? ''));
+check('… and nothing was written', (int)$db->query("SELECT COUNT(*) FROM fed_peers WHERE name = 'x-http'")->fetchColumn() === 0);
+check('HTTPS:// in capitals is still accepted', !isset(fedPeerSave($db, null, ['name' => 'x-caps', 'base_url' => 'HTTPS://caps.example.org'])['error']));
+$db->exec("DELETE FROM fed_peers WHERE name = 'x-caps'");
 check('bad name rejected', isset(fedPeerSave($db, null, ['name' => '!', 'base_url' => 'https://x.org'])['error']));
 check('bad bearer rejected', isset(fedPeerSave($db, $peerId, ['name' => 'peer-one', 'base_url' => 'https://other.example.org', 'bearer' => 'not-a-key'])['error']));
 $ok = fedPeerSave($db, $peerId, ['name' => 'peer-one', 'base_url' => 'https://other.example.org', 'bearer' => str_repeat('a', 16) . '.' . str_repeat('b', 64), 'pull_enabled' => 1, 'pull_files' => 0]);

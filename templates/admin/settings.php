@@ -513,6 +513,26 @@
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="api_ban_exempt_ips" value="<?= sanitize($cfg['api_ban_exempt_ips'] ?? '127.0.0.1, ::1') ?>" placeholder="127.0.0.1, ::1, 203.0.113.10">
                     </div>
                 </div>
+                <p class="settings-hint mt-3 mb-2">
+                    The ban machinery above only reacts to <em>bad</em> authentication. These two budgets are what
+                    limits a key that is perfectly valid &mdash; a federation peer pulling pages, or a key that has
+                    leaked. They are counted <strong>per key</strong> (not per IP, so one partner cannot be starved by
+                    a stranger behind the same NAT), and going over answers <code>429</code> with <code>Retry-After</code>
+                    rather than a ban: pulling too fast is a misconfiguration between partners, not an attack.
+                    Addresses in <em>Never-ban IPs</em> are exempt from these too. <strong>0 switches a budget off.</strong>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Requests per minute <small class="settings-hint">(per key)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="api_rate_limit_per_min" value="<?= sanitize($cfg['api_rate_limit_per_min'] ?? '60') ?>" min="0" max="100000">
+                        <small class="settings-hint">0 = unlimited. A federation pull is one request per page, so 60 is generous.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Bytes per day <small class="settings-hint">(per key)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="api_rate_limit_bytes_day" value="<?= sanitize($cfg['api_rate_limit_bytes_day'] ?? '5368709120') ?>" min="0" max="1099511627776" step="1073741824">
+                        <small class="settings-hint">0 = unlimited. 5368709120 = 5 GB. Counts what we <em>send</em> as well as what we receive, so a runaway export is caught.</small>
+                    </div>
+                </div>
             </div>
 
             <!-- User accounts -->

@@ -23,6 +23,9 @@ const API_MAX_BODY_BYTES     = 524288;     // 512 KB request body cap
 const API_SNAPSHOT_MAX_BODY  = 262144;     // body bytes stored in a ban snapshot
 const API_BAN_INSERTS_PER_MIN = 30;        // global throttle on new ban rows (snapshot dropped above it)
 
+/** The per-minute budget is a fixed window: cheap to count, and its end is what Retry-After names. */
+const API_RATE_WINDOW = 60;
+
 function apiParseIpList(string $list): array {
     return array_values(array_filter(array_map('trim', preg_split('/[\s,;]+/', $list) ?: []), fn($v) => $v !== ''));
 }
@@ -142,6 +145,92 @@ function apiAuthorizationHeader(): ?string {
     return null;
 }
 
+function apiRateLimitPerMin(array $cfg): int { return max(0, min(100000, (int)($cfg['api_rate_limit_per_min'] ?? 60))); }
+function apiRateLimitBytesDay(array $cfg): int { return max(0, (int)($cfg['api_rate_limit_bytes_day'] ?? 5368709120)); }
+
+/**
+ * Per-client budgets for the server-to-server API: requests per minute and bytes per day.
+ *
+ * Until now a valid bearer was a licence to hammer the database as fast as the network allowed. The
+ * ban machinery only ever reacted to BAD authorisation, so a partner whose key was correct — or
+ * whose key had leaked — could not be slowed down at all short of disabling them by hand. A
+ * federation peer pulling pages is exactly the shape of traffic that needs a ceiling.
+ *
+ * The counters live on the client row, not on the IP: one partner pulls from one address, and an
+ * IP bucket would be shared by everyone behind the same NAT. Both budgets are windows that reset
+ * rather than rolling averages — cheap, and the reset is what Retry-After can point at honestly.
+ *
+ * Refusal is 429 with Retry-After, never a ban: going too fast is a configuration mistake between
+ * partners, not an attack, and banning would take the whole node offline for a mis-set interval.
+ * Either budget set to 0 switches that half off.
+ */
+function apiRateLimit(PDO $db, array $cfg, array $client, int $requestBytes): void {
+    $perMin   = apiRateLimitPerMin($cfg);
+    $bytesDay = apiRateLimitBytesDay($cfg);
+    if ($perMin <= 0 && $bytesDay <= 0) return;
+    // The same list that exempts an address from bans exempts it here: it exists for the operator's
+    // own integrations (the forum on this very machine), and throttling ourselves helps nobody.
+    if (apiIpExempt(getClientIp($cfg), $cfg)) return;
+
+    $id = (int)($client['id'] ?? 0);
+    if ($id <= 0) return;
+    try {
+        // One statement, so two requests arriving together cannot both read a stale count. MariaDB
+        // evaluates SET assignments left to right, so each counter is written BEFORE the column its
+        // own reset test reads — hence count before start, and bytes before day. Swapping either
+        // pair would make the window reset on every request.
+        $db->prepare(
+            "UPDATE api_clients SET
+                rl_min_count = IF(rl_min_start IS NULL OR rl_min_start <= NOW() - INTERVAL " . API_RATE_WINDOW . " SECOND, 1, rl_min_count + 1),
+                rl_min_start = IF(rl_min_start IS NULL OR rl_min_start <= NOW() - INTERVAL " . API_RATE_WINDOW . " SECOND, NOW(), rl_min_start),
+                rl_day_bytes = IF(rl_day IS NULL OR rl_day <> CURDATE(), ?, rl_day_bytes + ?),
+                rl_day = CURDATE()
+             WHERE id = ?")
+           ->execute([$requestBytes, $requestBytes, $id]);
+        $st = $db->prepare("SELECT rl_min_count, UNIX_TIMESTAMP(rl_min_start) AS rl_start, rl_day_bytes FROM api_clients WHERE id = ?");
+        $st->execute([$id]);
+        $c = $st->fetch(PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        return;   // a counter that cannot be written must never take the API down
+    }
+    if (!$c) return;
+
+    $retry = null;
+    $why = '';
+    if ($perMin > 0 && (int)$c['rl_min_count'] > $perMin) {
+        $retry = max(1, API_RATE_WINDOW - (time() - (int)$c['rl_start']));
+        $why = 'rate';
+    } elseif ($bytesDay > 0 && (int)$c['rl_day_bytes'] > $bytesDay) {
+        $retry = max(1, strtotime('tomorrow midnight') - time());
+        $why = 'bytes';
+    }
+    if ($retry === null) return;
+
+    try { $db->prepare("UPDATE api_clients SET rl_blocked_count = rl_blocked_count + 1 WHERE id = ?")->execute([$id]); } catch (\Throwable $e) {}
+    header('Retry-After: ' . (int)$retry);
+    jsonResponse([
+        'error' => 'rate_limited',
+        'detail' => $why === 'rate'
+            ? 'more than ' . $perMin . ' requests in a minute for this key'
+            : 'the daily byte budget for this key is spent',
+        'retry_after' => (int)$retry,
+    ], 429);
+}
+
+/**
+ * Charge bytes we SENT to the client's daily budget. Called by endpoints that answer with a large
+ * body (the federation export), because the request that asks for a page is tiny and the reply is
+ * the part that actually costs bandwidth. Best effort — never worth failing a served response over.
+ */
+function apiChargeBytes(PDO $db, array $client, int $bytes): void {
+    $id = (int)($client['id'] ?? 0);
+    if ($id <= 0 || $bytes <= 0) return;
+    try {
+        $db->prepare("UPDATE api_clients SET rl_day_bytes = IF(rl_day IS NULL OR rl_day <> CURDATE(), ?, rl_day_bytes + ?), rl_day = CURDATE() WHERE id = ?")
+           ->execute([$bytes, $bytes, $id]);
+    } catch (\Throwable $e) {}
+}
+
 /**
  * Authenticate the request or exit with the appropriate JSON error. On success returns the client
  * row (id, label, key_id). All failures respond with the same generic 403 body.
@@ -177,6 +266,7 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
            ->execute([$ip, (int)$client['id']]);
     } catch (\Throwable $e) {}
     unset($client['secret_hash']);
+    apiRateLimit($db, $cfg, $client, strlen((string)$rawBody));
     return $client;
 }
 

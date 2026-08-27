@@ -78,6 +78,7 @@ $allowed = [
     'users_require_email_verify', 'users_terms_text', 'users_email_change_cooldown_days',
     'index_search_enabled', 'index_search_include_whitelist',
     // federation (includes/federation.php + worker/federation.py)
+    'api_rate_limit_per_min', 'api_rate_limit_bytes_day',
     'fed_enabled', 'fed_node_name', 'fed_export_enabled', 'fed_export_files', 'fed_export_max_batch',
     'fed_import_new', 'fed_pull_minutes',
 ];
@@ -155,6 +156,8 @@ $intClamp = [
     'rate_limit_user_login' => [0, 1000, 10],
     'rate_limit_user_register' => [0, 1000, 5], 'rate_limit_index_search' => [0, 100000, 120],
     'fed_export_max_batch' => [100, 20000, 2000], 'fed_pull_minutes' => [5, 1440, 60],
+    // 0 on either budget switches that half off; the ceilings are only a guard against typos
+    'api_rate_limit_per_min' => [0, 100000, 60],
     // UDP monitor + rate limit (includes/netlimit.php)
     'net_sample_seconds' => [NET_SAMPLE_MIN, NET_SAMPLE_MAX, 60], 'net_keep_days' => [NET_KEEP_MIN, NET_KEEP_MAX, 14],
     'net_limit_pps' => [NET_PPS_MIN, NET_PPS_MAX, 30000], 'net_limit_burst' => [NET_BURST_MIN, NET_BURST_MAX, 100],
@@ -265,6 +268,16 @@ if (isset($data['meta_worker_concurrency']) && $data['meta_worker_concurrency'] 
     $n = is_numeric($data['meta_worker_concurrency']) ? (int)$data['meta_worker_concurrency'] : 0;
     if ($n < 1) $data['meta_worker_concurrency'] = '';
     else $data['meta_worker_concurrency'] = (string)min(16, $n);
+}
+if (isset($data['api_rate_limit_bytes_day'])) {
+    // A day's transfer budget is measured in gigabytes, so it does not belong in the shared small-int
+    // clamp. 0 = no limit; the 1 TB ceiling only catches a slipped keyboard.
+    $v = $data['api_rate_limit_bytes_day'];
+    $n = is_numeric($v) ? (int)$v : -1;
+    if ($n < 0 || $n > 1099511627776) {
+        jsonResponse(['error' => 'Daily API byte budget must be between 0 (no limit) and 1 TB.'], 400);
+    }
+    $data['api_rate_limit_bytes_day'] = (string)$n;
 }
 if (isset($data['fed_node_name'])) {
     $data['fed_node_name'] = mb_substr(preg_replace('/[^\w .\-]/u', '', $data['fed_node_name']) ?? '', 0, 64);
