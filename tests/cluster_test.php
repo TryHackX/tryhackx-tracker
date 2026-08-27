@@ -162,7 +162,24 @@ if ($bash === null || !trackerExecAvailable() || !is_file($helper)) {
     }
     file_put_contents($bin . '/id', "#!/bin/bash\n[ \"\$1\" = \"-u\" ] && { echo 0; exit 0; }\nexec /usr/bin/id \"\$@\"\n");
     file_put_contents($bin . '/systemctl', "#!/bin/bash\ncase \"\$1\" in is-active) echo active; exit 0 ;; show) echo 0 ;; esac\nexit 0\n");
-    file_put_contents($bin . '/ss', "#!/bin/bash\nexit 0\n");
+    // A stub that models the thing that matters: a tracker listens on whatever its config names, and
+    // a config that names nothing falls back to opentracker's own default. Without this the "is it
+    // actually listening" check has nothing to look at -- and that check exists because on the live
+    // server an instance came up "active" while quietly sharing the primary's port.
+    file_put_contents($bin . '/ss', <<<'SS'
+#!/bin/bash
+{
+  for f in "$TRACKER_HOME"/opentracker.conf.* "$INSTANCES_DIR"/*/opentracker.conf.*; do
+    [ -f "$f" ] || continue
+    if grep -qE '^[[:space:]]*listen\.(udp|tcp)[[:space:]]' "$f" 2>/dev/null; then
+      grep -hoE '^[[:space:]]*listen\.(udp|tcp)[[:space:]].*:[0-9]+' "$f" 2>/dev/null | grep -oE '[0-9]+$'
+    else
+      echo "${OT_DEFAULT_PORT:-6969}"
+    fi
+  done
+} | sort -u | while read -r p; do [ -n "$p" ] && printf 'UNCONN 0 0 *:%s *:*\n' "$p"; done
+exit 0
+SS);
     @chmod($bin . '/id', 0755); @chmod($bin . '/systemctl', 0755); @chmod($bin . '/ss', 0755);
 
     $pathBefore = (string)getenv('PATH');
@@ -172,6 +189,7 @@ if ($bash === null || !trackerExecAvailable() || !is_file($helper)) {
         'INSTANCES_DIR' => $posix($home . '/instances'),
         'TEMPLATE_UNIT' => $posix($tmp . '/systemd/opentracker@.service'),
         'TRACKER_USER'  => 'nobody',
+        'OT_DEFAULT_PORT' => '6969',
     ] as $k => $v) putenv($k . '=' . $v);
 
     $bashCmd = str_contains($bash, ' ') ? '"' . $bash . '"' : $bash;
@@ -235,6 +253,33 @@ if ($bash === null || !trackerExecAvailable() || !is_file($helper)) {
           ($rm['json']['ok'] ?? false) === true && !is_dir($home . '/instances/edge-a'), $rm['out']);
     check('helper: the template survives while another instance still uses it',
           is_file($tmp . '/systemd/opentracker@.service') && ($rm['json']['template_removed'] ?? true) === false);
+    // ── the bug production found, pinned ─────────────────────────────────
+    //
+    // The primary's config on the reference machine names NO listen port at all: opentracker has its
+    // own default and the operator never needed to write one down. Copying that config verbatim
+    // produced an instance that fell back to the same default and bound the port the primary was
+    // already on -- systemd called it active, the panel called it created, and it was a second copy
+    // of the first tracker rather than a second tracker.
+    file_put_contents($home . '/opentracker.conf.white', "listen.udp.workers 4\naccess.whitelist /home/tracker/accesslist/whitelist\n");
+    file_put_contents($home . '/opentracker.conf.black', "listen.udp.workers 4\naccess.whitelist /home/tracker/accesslist/whitelist\n");
+    $st = $run('status');
+    check('helper: a primary that names no port falls back to opentracker\'s default',
+          (int)($st['json']['primary']['udp_port'] ?? 0) === 6969, json_encode($st['json']['primary'] ?? null));
+    check('helper: … and says the number was assumed, not read',
+          ($st['json']['primary']['port_source'] ?? '') === 'default', json_encode($st['json']['primary'] ?? null));
+    check('helper: … so that default port is refused for a new instance',
+          ($run('plan edge-c 6969 6969')['json']['ok'] ?? true) === false,
+          (string)($run('plan edge-c 6969 6969')['json']['problems'] ?? ''));
+    $c2 = $run('create edge-c 6975 6975 "" 0');
+    check('helper: … and a new instance gets listen lines APPENDED rather than nothing',
+          ($c2['json']['ok'] ?? false) === true, $c2['out']);
+    check('helper: … which actually name the port it was given',
+          str_contains((string)@file_get_contents($home . '/instances/edge-c/opentracker.conf.white'), 'listen.udp 0.0.0.0:6975'),
+          (string)@file_get_contents($home . '/instances/edge-c/opentracker.conf.white'));
+    check('helper: … while everything else in the config is still the primary\'s',
+          str_contains((string)@file_get_contents($home . '/instances/edge-c/opentracker.conf.white'), 'access.whitelist /home/tracker/accesslist/whitelist'));
+    $run('remove edge-c');
+
     $rm2 = $run('remove edge-b');
     check('helper: removing the last one takes the template too — "remove every trace" means it',
           ($rm2['json']['template_removed'] ?? false) === true && !is_file($tmp . '/systemd/opentracker@.service'));
@@ -242,7 +287,7 @@ if ($bash === null || !trackerExecAvailable() || !is_file($helper)) {
           is_file($home . '/opentracker.conf.white') && is_file($home . '/opentracker.white'));
 
     putenv('PATH=' . $pathBefore);
-    foreach (['TRACKER_HOME', 'INSTANCES_DIR', 'TEMPLATE_UNIT', 'TRACKER_USER'] as $k) putenv($k);
+    foreach (['TRACKER_HOME', 'INSTANCES_DIR', 'TEMPLATE_UNIT', 'TRACKER_USER', 'OT_DEFAULT_PORT'] as $k) putenv($k);
     $rmrf = static function (string $d) use (&$rmrf) {
         foreach (glob($d . '/*') ?: [] as $f) { is_dir($f) ? $rmrf($f) : @unlink($f); }
         @rmdir($d);

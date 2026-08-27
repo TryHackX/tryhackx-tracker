@@ -47,6 +47,11 @@ PRIMARY_UNIT="${PRIMARY_UNIT:-opentracker}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 SS_BIN="${SS_BIN:-ss}"
 TRACKER_USER="${TRACKER_USER:-tracker}"
+# opentracker's own default when a config says nothing: port 6969, all interfaces. Found the hard way
+# on a live server, where the primary's config has no listen line at all -- so a copy of it had none
+# either, the new instance fell back to the same default, and it bound the port the primary was
+# already on. It looked like a healthy second instance and was a second copy of the first one.
+OT_DEFAULT_PORT="${OT_DEFAULT_PORT:-6969}"
 PROC_DIR="${PROC_DIR:-/proc}"
 
 jesc() {
@@ -137,10 +142,19 @@ primary_conf() {
     printf '%s' "$TRACKER_HOME/opentracker.conf.$m"
 }
 primary_port() {   # $1 = udp|tcp
+    local f v; f="$(primary_conf white)"
+    [ -f "$f" ] || f="$(primary_conf black)"
+    [ -f "$f" ] || { printf %s "$OT_DEFAULT_PORT"; return; }
+    v="$(grep -E "^[[:space:]]*listen\.$1([[:space:]]|$)" "$f" 2>/dev/null | head -1 | sed 's/.*://' | tr -dc '0-9')"
+    is_uint "$v" && [ "$v" -gt 0 ] && { printf %s "$v"; return; }
+    printf %s "$OT_DEFAULT_PORT"
+}
+# Whether that number was read or assumed. The panel must not claim to have read a port it inferred.
+primary_port_source() {
     local f; f="$(primary_conf white)"
     [ -f "$f" ] || f="$(primary_conf black)"
-    [ -f "$f" ] || { printf 0; return; }
-    num_or_zero "$(grep -E "^[[:space:]]*listen\.$1([[:space:]]|$)" "$f" 2>/dev/null | head -1 | sed 's/.*://' | tr -dc '0-9')"
+    [ -f "$f" ] && grep -qE "^[[:space:]]*listen\.(udp|tcp)([[:space:]]|$)" "$f" 2>/dev/null \
+        && printf 'config' || printf 'default'
 }
 
 # ── port checks: two of them, each individually insufficient ────────────────
@@ -158,7 +172,14 @@ port_in_use_conf() {
     local p="$1" f
     for f in "$TRACKER_HOME"/opentracker.conf.* "$INSTANCES_DIR"/*/opentracker.conf.*; do
         [ -f "$f" ] || continue
-        grep -qE "^[[:space:]]*listen\.(udp|tcp)[[:space:]].*:$p([[:space:]]|$)" "$f" 2>/dev/null && { printf '%s' "$f"; return 0; }
+        if grep -qE "^[[:space:]]*listen\.(udp|tcp)[[:space:]].*:$p([[:space:]]|$)" "$f" 2>/dev/null; then
+            printf '%s' "$f"; return 0
+        fi
+        # A config that names no port is not a config that uses none: opentracker falls back to its
+        # own default, and that port is just as taken as one written down.
+        if [ "$p" = "$OT_DEFAULT_PORT" ] && ! grep -qE "^[[:space:]]*listen\.(udp|tcp)([[:space:]]|$)" "$f" 2>/dev/null; then
+            printf '%s (no listen line, so it uses opentracker default port %s)' "$f" "$OT_DEFAULT_PORT"; return 0
+        fi
     done
     return 1
 }
@@ -239,10 +260,10 @@ action_status() {
     printf ',"instances_dir":%s' "$(jstr "$INSTANCES_DIR")"
     printf ',"template":%s' "$(jstr "$TEMPLATE_UNIT")"
     printf ',"template_present":%s' "$([ -f "$TEMPLATE_UNIT" ] && echo true || echo false)"
-    printf ',"primary":{"unit":%s,"state":%s,"udp_port":%s,"tcp_port":%s}' \
+    printf ',"primary":{"unit":%s,"state":%s,"udp_port":%s,"tcp_port":%s,"port_source":"%s"}' \
         "$(jstr "$PRIMARY_UNIT")" \
         "$(jstr "$(have_systemctl && "$SYSTEMCTL_BIN" is-active "$PRIMARY_UNIT" 2>/dev/null || echo unknown)")" \
-        "$(primary_port udp)" "$(primary_port tcp)"
+        "$(primary_port udp)" "$(primary_port tcp)" "$(primary_port_source)"
     printf ',"instances":['
     for n in $(instance_names); do
         [ "$first" = 1 ] || printf ','
@@ -262,7 +283,7 @@ action_check() {
     have_systemctl || { ok=0; notes="$notes systemctl not found;"; }
     [ -d "$TRACKER_HOME" ] || { ok=0; notes="$notes $TRACKER_HOME does not exist;"; }
     [ -e "$TRACKER_HOME/opentracker" ] || { ok=0; notes="$notes the shared binary symlink $TRACKER_HOME/opentracker is missing — every instance runs it, so nothing can be created without it;"; }
-    [ "$(primary_port udp)" -gt 0 ] 2>/dev/null || notes="$notes could not read the primary's UDP port from its config, so ports cannot be proposed;"
+    [ "$(primary_port_source)" = "config" ] || notes="$notes the primary's config names no listen port, so opentracker's own default ($OT_DEFAULT_PORT) is assumed — an extra instance must therefore never be given that port;"
     [ -w "$(dirname "$TEMPLATE_UNIT")" ] || notes="$notes $(dirname "$TEMPLATE_UNIT") is read-only for this process — creating an instance will be deferred to the janitor;"
     printf '{"ok":%s' "$(jbool "$ok")"
     printf ',"version":%s' "$VERSION"
@@ -273,6 +294,7 @@ action_check() {
     printf ',"dir_writable":%s' "$([ -w "$(dirname "$TEMPLATE_UNIT")" ] && echo true || echo false)"
     printf ',"primary_udp":%s' "$(primary_port udp)"
     printf ',"primary_tcp":%s' "$(primary_port tcp)"
+    printf ',"primary_port_source":%s' "$(jstr "$(primary_port_source)")"
     printf ',"count":%s' "$(instance_names | grep -c . | tr -d ' \n')"
     printf ',"notes":%s' "$(jstr "$(printf '%s' "$notes" | sed 's/^ *//')")"
     printf '}\n'
@@ -313,6 +335,13 @@ render_conf() {
     sed -e "s|^[[:space:]]*listen\.udp[[:space:]].*|listen.udp 0.0.0.0:$udp|" \
         -e "s|^[[:space:]]*listen\.tcp[[:space:]].*|listen.tcp 0.0.0.0:$tcp|" \
         "$src" >"$dst" || return 1
+    # Substitution only rewrites lines that exist. A primary whose config names no port at all is
+    # ordinary -- opentracker has a default -- and copying it verbatim would produce an instance that
+    # quietly binds the port the primary is already on. So the lines are APPENDED when absent.
+    grep -qE '^[[:space:]]*listen\.udp[[:space:]]' "$dst" 2>/dev/null \
+        || printf 'listen.udp 0.0.0.0:%s\n' "$udp" >>"$dst"
+    grep -qE '^[[:space:]]*listen\.tcp[[:space:]]' "$dst" 2>/dev/null \
+        || printf 'listen.tcp 0.0.0.0:%s\n' "$tcp" >>"$dst"
     if [ "$workers" -gt 0 ] 2>/dev/null; then
         if grep -qE '^[[:space:]]*listen\.udp\.workers' "$dst"; then
             sed -i -e "s|^[[:space:]]*listen\.udp\.workers.*|listen.udp.workers $workers|" "$dst"
@@ -339,6 +368,17 @@ action_create() {
         made=1
     done
     [ "$made" = 1 ] || fail "create: the primary has no config to copy from" 4
+
+    # Read back what was written. A config that does not name the requested port produces an instance
+    # that shares the primary's, which is the failure this whole check exists for: it starts, it is
+    # "active", and it is a second copy of the first tracker rather than a second tracker.
+    for m in white black; do
+        [ -f "$INSTANCES_DIR/$name/opentracker.conf.$m" ] || continue
+        grep -qE "^[[:space:]]*listen\.udp[[:space:]].*:$udp([[:space:]]|\$)" "$INSTANCES_DIR/$name/opentracker.conf.$m" \
+            || { rm -rf "$INSTANCES_DIR/$name"; fail "create: the $m config does not name UDP port $udp after writing it — refusing to start an instance that would share the primary's port" 4; }
+        grep -qE "^[[:space:]]*listen\.tcp[[:space:]].*:$tcp([[:space:]]|\$)" "$INSTANCES_DIR/$name/opentracker.conf.$m" \
+            || { rm -rf "$INSTANCES_DIR/$name"; fail "create: the $m config does not name TCP port $tcp after writing it" 4; }
+    done
 
     # Point at whatever the primary is currently running, so a new instance never joins in the wrong
     # mode even for a moment.
@@ -368,7 +408,17 @@ action_create() {
         rm -rf "$INSTANCES_DIR/$name"
         exit 5
     fi
-    printf '{"ok":true,"created":true,"name":%s,"unit":%s,"mode":%s,"udp_port":%s,"tcp_port":%s}\n' \
+    # Active is not the same as listening. An instance that came up on the wrong port is worse than
+    # one that failed, because nothing about it looks wrong.
+    local bound=0
+    "$SS_BIN" -lnu 2>/dev/null | grep -qE "[:.]$udp[[:space:]]" && bound=1
+    if [ "$bound" != 1 ]; then
+        "$SYSTEMCTL_BIN" disable --now "$(unit_of "$name")" >/dev/null 2>&1
+        rm -rf "$INSTANCES_DIR/$name"
+        "$SYSTEMCTL_BIN" daemon-reload >/dev/null 2>&1
+        fail "create: the instance started but is not listening on UDP $udp — it has been removed again" 5
+    fi
+    printf '{"ok":true,"created":true,"name":%s,"unit":%s,"mode":%s,"udp_port":%s,"tcp_port":%s,"bound":true}\n' \
         "$(jstr "$name")" "$(jstr "$(unit_of "$name")")" "$(jstr "$cur")" "$(num_or_zero "$udp")" "$(num_or_zero "$tcp")"
 }
 
