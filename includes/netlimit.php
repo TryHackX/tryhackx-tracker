@@ -831,8 +831,12 @@ function netlimitTick(PDO $db, array &$cfg, ?int $now = null): array {
 
         // 2b. finish a save the panel could not do itself. `file_matches` is absent on an older
         // helper, and then this does nothing at all.
-        if (!$out['persisted'] && !empty($status['table'])
-            && array_key_exists('file_matches', $status) && !$status['file_matches']) {
+        // The outbound budget drifts the same way and for the same reason (its file lives in the
+        // same read-only /etc), so a mismatch there is just as much a reason to run persist.
+        $egDrift = isset($status['egress']['file_matches']) && $status['egress']['file_matches'] === false
+                   && !empty($status['egress']['table']);
+        if (!$out['persisted'] && (($egDrift)
+            || (!empty($status['table']) && array_key_exists('file_matches', $status) && !$status['file_matches']))) {
             $pr = netlimitPersist($cfg);
             $out['persisted'] = $pr['ok'] && !empty($pr['json']['saved']);
             if (!$pr['ok']) $out['error'] = $pr['error'] ?? 'could not save the ruleset';

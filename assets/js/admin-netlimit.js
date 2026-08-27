@@ -598,6 +598,16 @@
         const lines = [];
         lines.push(el('div', { text: 'In force: ' + num(inForce) + ' pps. This is table inet ottrack, on the way OUT — what the tracker '
             + 'answers. Capping it is what keeps the rest of the machine reachable while a swarm is shouting.' }));
+        // A budget that is live but missing from the file is gone at the next reboot, and there is
+        // no way to find that out except by rebooting. So say it here instead.
+        if (eg.file === false) {
+            lines.push(el('div', { className: 'text-warning', text:
+                'There is no file for this budget on disk, so it will not come back after a reboot — the egress table was installed by hand.' }));
+        } else if (eg.file_matches === false) {
+            lines.push(el('div', { className: 'text-warning', text:
+                'Live, but the saved copy still says ' + num(eg.file_pps || 0) + ' pps — after a reboot that is what would come back.'
+                + ' The janitor rewrites it within a minute; if this sticks, the availability test in Settings says why.' }));
+        }
         if (!eState.ref) {
             lines.push(el('div', { className: 'text-muted', text: 'No outbound rate measured yet, so there is nothing to judge a number against — the coloured zones appear once there is.' }));
         } else {

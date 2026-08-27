@@ -119,6 +119,14 @@ read_header() {  # read_header pps|burst|port
     awk -v k="$1=" '/^# tracker-netlimit:/ { for (i = 1; i <= NF; i++) if (index($i, k) == 1) { print substr($i, length(k) + 1); exit } }' "$RULES_FILE"
 }
 
+# What the egress FILE says, as opposed to what is loaded. The two drifting apart is exactly the
+# failure the panel is meant to catch: a budget changed from the panel is live immediately and gone
+# at the next reboot if nobody wrote the file.
+read_egress_file_limit() {
+    [ -r "$EGRESS_FILE" ] || return 0
+    sed -n 's/.*limit rate over \([0-9]\{1,\}\)\/second.*/\1/p' "$EGRESS_FILE" | head -1
+}
+
 # Rules in OTHER tables that also rate-limit this port — an admin's hand-made rule, typically in
 # `inet filter` and typically only in RAM. We never touch them; the panel just needs to say so.
 #
@@ -311,10 +319,15 @@ EOF
     printf '}'
 
     local elimit; elimit="$(read_egress_limit)"; is_uint "$elimit" || elimit=0
-    printf ',"egress":{"table":%s,"pps":%s,"file":%s,"counters":{' \
+    local egfile; egfile="$(read_egress_file_limit)"; is_uint "$egfile" || egfile=0
+    # A budget that is live but absent from the file is gone at the next reboot — the exact
+    # thing an admin would only discover by rebooting, so the card gets told about it.
+    printf ',"egress":{"table":%s,"pps":%s,"file":%s,"file_pps":%s,"file_matches":%s,"counters":{' \
         "$(table_exists ottrack && echo true || echo false)" \
         "$elimit" \
-        "$([ -f "$EGRESS_FILE" ] && echo true || echo false)"
+        "$([ -f "$EGRESS_FILE" ] && echo true || echo false)" \
+        "$egfile" \
+        "$([ "$egfile" = "$elimit" ] && [ "$elimit" != 0 ] && echo true || echo false)"
     first=1
     while read -r n p b; do
         [ -n "$n" ] || continue
@@ -454,6 +467,19 @@ action_monitor() {
         "$([ "$rc" = 0 ] && include_ok && echo true || echo false)"
 }
 
+# Rewrite the egress budget in its own file.
+#   0 = saved   1 = deferred (read-only mount namespace)   2 = failed / nothing to edit
+save_egress_file() {  # save_egress_file <pps>
+    [ -f "$EGRESS_FILE" ] || return 2
+    local tmpf
+    tmpf="$(mktemp "${TMPDIR:-/tmp}/ottrack-eg.XXXXXX")" || return 2
+    sed -E "s#(limit rate over )[0-9]+(/second)#\\1$1\\2#" "$EGRESS_FILE" >"$tmpf" || { rm -f "$tmpf"; return 2; }
+    if install -m 0644 "$tmpf" "$EGRESS_FILE" 2>/dev/null; then rm -f "$tmpf"; return 0; fi
+    rm -f "$tmpf"
+    dir_writable && return 2
+    return 1
+}
+
 # Write the file so it describes what is CURRENTLY loaded, and nothing else. This exists because a
 # limit applied from the panel travels through php-fpm, whose mount namespace makes /etc read-only:
 # the rule reaches the kernel, but the file that would restore it after a reboot never gets written.
@@ -461,8 +487,14 @@ action_monitor() {
 # Idempotent by design: it does nothing at all when the file already matches.
 action_persist() {
     have_nft || fail "nftables (nft) is not installed."
-    table_exists "$TABLE" || { printf '{"ok":true,"saved":false,"reason":"no table is loaded"}\n'; return 0; }
-    if file_matches; then printf '{"ok":true,"saved":false,"in_sync":true}\n'; return 0; fi
+    # Even with nothing to do for the inbound table, the outbound budget may still have drifted.
+    local egl egf egfixed=false
+    egl="$(read_egress_limit)"; egf="$(read_egress_file_limit)"
+    if is_uint "$egl" && [ "$egl" != "$egf" ] && is_root; then
+        save_egress_file "$egl" && egfixed=true
+    fi
+    table_exists "$TABLE" || { printf '{"ok":true,"saved":%s,"egress_saved":%s,"reason":"no table is loaded"}\n' "$egfixed" "$egfixed"; return 0; }
+    if file_matches; then printf '{"ok":true,"saved":%s,"egress_saved":%s,"in_sync":true}\n' "$egfixed" "$egfixed"; return 0; fi
     is_root || fail "must run as root to save the ruleset"
     [ -d "$NFT_DIR" ] || mkdir -p "$NFT_DIR" || fail "cannot create $NFT_DIR"
 
@@ -476,6 +508,12 @@ action_persist() {
         is_uint "$pps" || fail "cannot read the live limit back from the ruleset"
         render "$pps" "$burst" "$port" >"$tmp"
     fi
+    # The outbound budget lives in its own file and drifts for the same reason, so the janitor
+    # reconciles both in one visit — otherwise an admin fixes one and is surprised by the other.
+    local eglive egfile
+    eglive="$(read_egress_limit)"; egfile="$(read_egress_file_limit)"
+    if is_uint "$eglive" && [ "$eglive" != "$egfile" ]; then save_egress_file "$eglive" || true; fi
+
     local rc=0; save_rules "$tmp" || rc=$?
     [ "$rc" = 0 ] || fail "could not save $RULES_FILE — $([ "$rc" = 1 ] && printf '%s' "$PERSIST_HINT" || printf 'the write failed')" 4
 
@@ -523,12 +561,15 @@ action_egress() {
     local out
     out="$("$NFT" replace rule inet ottrack output handle "$handle" limit rate over "$pps"/second counter name capped drop 2>&1)" \
         || fail "nft replace failed: $out" 3
-    # keep the persisted file in step (best effort — the live rule is what matters)
-    local saved=false
-    if [ -f "$EGRESS_FILE" ] && [ -w "$EGRESS_FILE" ]; then
-        sed -i -E "s#(limit rate over )[0-9]+(/second)#\\1$pps\\2#" "$EGRESS_FILE" && saved=true
-    fi
-    printf '{"ok":true,"applied":true,"pps":%s,"handle":%s,"file_updated":%s}\n' "$pps" "$handle" "$saved"
+    # The live rule is changed; now make it survive a reboot. `[ -w ]` was the bug: inside php-fpm's
+    # mount namespace /etc is read-only, so the test simply failed and the file was silently left
+    # alone — the budget reverted at every restart and nothing said why.
+    local rc=0
+    save_egress_file "$pps" || rc=$?
+    printf '{"ok":true,"applied":true,"pps":%s,"handle":%s,"file_updated":%s,"persist_deferred":%s,"persist_hint":%s}\n' \
+        "$pps" "$handle" "$([ "$rc" = 0 ] && echo true || echo false)" \
+        "$([ "$rc" = 1 ] && echo true || echo false)" \
+        "$(jstr "$([ "$rc" = 1 ] && printf '%s' "$PERSIST_HINT")")"
 }
 
 # Every reply is captured first and written in a single printf. A command substitution that leaks a

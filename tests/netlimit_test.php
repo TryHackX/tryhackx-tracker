@@ -413,6 +413,47 @@ STUB);
     $in = netlimitCounterPackets((array)$s['counters'], NET_IN_COUNTERS);
     check('PHP reads the helper counters', $in === ['in_total' => 1000, 'in_passed' => 900, 'in_capped' => 100], json_encode($in));
 
+    // ── the outbound budget has to survive a reboot too ──────────────────────
+    // Reported from production: the budget set from the panel was back at its old value after a
+    // restart. The old code guarded the file write with `[ -w "$EGRESS_FILE" ]`, which is false
+    // inside php-fpm's read-only /etc — so the write was skipped in silence and the live rule and
+    // the file drifted apart, discoverable only by rebooting.
+    file_put_contents($tmp . '/state/t_out', '');   // the egress table exists in the stub
+    file_put_contents($tmp . '/nftd/ottrack.nft',
+        "#!/usr/sbin/nft -f\ntable inet ottrack {\n  chain output {\n" .
+        "    limit rate over 50000/second counter name capped drop\n  }\n}\n");
+    file_put_contents($tmp . '/state/epps', '50000');
+
+    $r = $run('status');
+    check('egress: status reports what the FILE says, not just the live rule',
+          (int)($r['json']['egress']['file_pps'] ?? -1) === 50000, json_encode($r['json']['egress'] ?? null));
+    check('egress: … and that the two agree', ($r['json']['egress']['file_matches'] ?? null) === true);
+
+    $r = $run('egress 90000');
+    check('egress: the change applies', $r['rc'] === 0 && (int)($r['json']['pps'] ?? 0) === 90000, $r['out']);
+    check('egress: … and the file is written, not skipped', ($r['json']['file_updated'] ?? null) === true, $r['out']);
+    check('egress: … so the file now says the new number',
+          str_contains((string)@file_get_contents($tmp . '/nftd/ottrack.nft'), 'limit rate over 90000/second'),
+          (string)@file_get_contents($tmp . '/nftd/ottrack.nft'));
+    $r = $run('status');
+    check('egress: live and saved agree again', ($r['json']['egress']['file_matches'] ?? null) === true
+          && (int)($r['json']['egress']['file_pps'] ?? 0) === 90000, json_encode($r['json']['egress'] ?? null));
+
+    // a file left behind at the old value is exactly the reported bug, and `persist` must fix it
+    file_put_contents($tmp . '/nftd/ottrack.nft',
+        str_replace('90000', '50000', (string)@file_get_contents($tmp . '/nftd/ottrack.nft')));
+    $r = $run('status');
+    check('egress: a drifted file is reported as a mismatch', ($r['json']['egress']['file_matches'] ?? null) === false,
+          json_encode($r['json']['egress'] ?? null));
+    $r = $run('persist');
+    check('egress: persist rewrites the budget file too', $r['rc'] === 0
+          && str_contains((string)@file_get_contents($tmp . '/nftd/ottrack.nft'), 'limit rate over 90000/second'),
+          (string)@file_get_contents($tmp . '/nftd/ottrack.nft'));
+    $r = $run('status');
+    check('egress: … and the mismatch is gone', ($r['json']['egress']['file_matches'] ?? null) === true);
+    check('egress: the inbound file was not disturbed by any of this',
+          str_contains((string)@file_get_contents($tmp . '/nftd/ottrack-in.nft'), 'ottrack_in'));
+
     // egress rate change (handle-targeted, so the dynamic client sets survive)
     $r = $run('egress 60000');
     check('helper: egress rate applied', $r['rc'] === 0 && (int)($r['json']['pps'] ?? 0) === 60000, $r['out']);

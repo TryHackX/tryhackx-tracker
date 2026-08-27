@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — the outbound budget did not survive a reboot
+
+### Fixed
+- **A budget set from the panel reverted at the next restart.** The egress action guarded its file
+  write with `[ -w "$EGRESS_FILE" ]`, and inside php-fpm's mount namespace `/etc` is read-only — so
+  the test simply failed, the write was skipped in silence, and the live rule and the file drifted
+  apart. The only way to find out was to reboot, which is exactly how it was found. The write now
+  goes through the same three-way answer as the inbound ruleset (saved / deferred / failed), the
+  janitor reconciles the budget file on the same visit as the inbound one, and the status reports
+  `file_pps` and `file_matches` so the card can say **"live, but the saved copy still says N pps"**
+  instead of leaving it to be discovered by accident.
+
 ## [Unreleased] — the panel measures where THIS machine starts to struggle (schema v13)
 
 ### Added
