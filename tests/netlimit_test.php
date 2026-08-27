@@ -674,6 +674,24 @@ if ($db !== null) {
     $tick = netlimitTick($db, $offCfg, $t0);
     check('tick: inert while the feature is off', $tick['enabled'] === false && $tick['sampled'] === false && $tick['error'] === null, json_encode($tick));
 
+    // A deferred save must survive a monitor-less install. The early return above is what keeps a
+    // disabled feature from forking a process every minute — and the deferred save used to sit
+    // AFTER it, so a limit applied on such an install stayed live with a stale file for ever:
+    // exactly the failure the deferred save exists to close, reappearing wherever nobody switched
+    // the monitor on.
+    netlimitStateUpdate(function (array &$s) { $s['persist_deferred'] = false; return true; });
+    $tick = netlimitTick($db, $offCfg, $t0);
+    check('tick: still inert when there is nothing pending to save',
+          $tick['enabled'] === false && $tick['persisted'] === false, json_encode($tick));
+    netlimitStateUpdate(function (array &$s) { $s['persist_deferred'] = true; return true; });
+    $tick = netlimitTick($db, $offCfg, $t0);
+    check('tick: a pending save wakes it up even with the monitor off', $tick['enabled'] === true, json_encode($tick));
+    // The helper path here does not exist, so the save cannot succeed. What matters is that it was
+    // ATTEMPTED and reported rather than silently skipped by the early return.
+    check('tick: … and the failure is reported, not swallowed',
+          $tick['persisted'] === false && $tick['error'] !== null, json_encode($tick));
+    netlimitStateUpdate(function (array &$s) { $s['persist_deferred'] = false; $s['last_error'] = null; return true; });
+
     $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
     @unlink($stateFile);
     if ($stateBackup !== null) file_put_contents($stateFile, $stateBackup);

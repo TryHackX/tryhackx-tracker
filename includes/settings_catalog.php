@@ -228,6 +228,8 @@ function settingsCatalogKeywords(): array {
         'fed_export_enabled'       => 'federation export share our whitelist outgoing',
         'fed_export_files'         => 'federation export file lists metadata included',
         'fed_export_max_batch'     => 'federation export batch size rows per request',
+        'fed_export_max_bytes'     => 'federation export page byte budget size limit streaming ndjson memory',
+        'fed_export_max_files'     => 'federation export page file records budget limit streaming ndjson memory',
         'fed_import_new'           => 'federation import add new hashes from peers incoming',
         'fed_pull_minutes'         => 'federation pull interval minutes sync frequency',
 

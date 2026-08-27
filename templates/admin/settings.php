@@ -657,6 +657,17 @@
                     <div class="col-md-3">
                         <label class="form-label">Rows per export page</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_export_max_batch" value="<?= sanitize($cfg['fed_export_max_batch'] ?? '2000') ?>" min="100" max="20000">
+                        <small class="settings-hint">Counts torrents, not what they contain &mdash; see the two budgets beside it.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Bytes per export page</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_export_max_bytes" value="<?= sanitize($cfg['fed_export_max_bytes'] ?? '8388608') ?>" min="0" max="1073741824" step="1048576">
+                        <small class="settings-hint">0 = no limit. 8388608 = 8 MB, measured on the wire.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">File records per export page</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_export_max_files" value="<?= sanitize($cfg['fed_export_max_files'] ?? '200000') ?>" min="0" max="50000000" step="10000">
+                        <small class="settings-hint">0 = no limit. A page ends on whichever of the three runs out first, and hands back the cursor &mdash; so a heavy catalogue produces smaller pages on its own.</small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Accept new hashes</label>

@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — E3a/E3b: the federation export stops building pages in memory (schema v12)
+
+### Added
+- **Streaming NDJSON export** (`"format": "ndjson"` on `v1/federation/export`). The buffered reply
+  assembles the whole page — rows *and* every file record of every row — in a PHP array before a
+  byte leaves. `fed_export_max_batch` counts **torrents**, not what a torrent contains, so it never
+  bounded the work: measured here, 3 000 torrents of 120 files (360 000 file records) **exhausts a
+  128 MB limit and dies**. The same page streamed peaks at **32 MB** and takes 1.4 s. Header line,
+  one row per line, trailer line carrying the cursor — so a truncated transfer is detectable.
+  Compressed incrementally with `deflate_add()` rather than `gzencode()` on a finished string, which
+  keeps memory flat *and* lets the byte budget count what actually goes on the wire.
+- **Two budgets that actually bound a page**: `fed_export_max_bytes` (8 MB) and
+  `fed_export_max_files` (200 000). A page ends on whichever of rows / bytes / file-records runs out
+  first and hands back the cursor, so a heavy catalogue produces smaller pages by itself instead of
+  the peer having to guess. A budget smaller than a single row still sends that row, or a catalogue
+  with one huge entry could never get past it.
+
+### Fixed
+- **A deferred ruleset save could never complete on an install with the monitor off.** The janitor
+  tick returns early when the monitor and the automatic mode are both off — that early exit is what
+  stops a disabled feature forking a process every minute — and the deferred save sat *after* it. A
+  limit applied on such an install stayed live with a stale file for ever: precisely the failure the
+  deferred save exists to close, reappearing wherever nobody switched the monitor on. The tick now
+  checks the pending flag first, and forks nothing until there is genuinely something to save.
+
 ## [Unreleased] — E3a: the server-to-server API gets a ceiling (schema v12)
 
 ### Added

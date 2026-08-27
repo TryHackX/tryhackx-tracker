@@ -533,6 +533,9 @@ function trackerSchemaDefaultSettings(): array {
         'fed_export_enabled'          => '0',
         'fed_export_files'            => '1',
         'fed_export_max_batch'        => '2000',
+        // rows alone never bounded a page: 20 000 torrents can carry millions of file records
+        'fed_export_max_bytes'        => '8388608',    // 8 MB on the wire
+        'fed_export_max_files'        => '200000',
         'fed_import_new'              => '0',
         'fed_pull_minutes'            => '60',
         // schema v10: the admin sign-in address and what other panel URLs answer when signed out

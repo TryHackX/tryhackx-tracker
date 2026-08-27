@@ -80,6 +80,7 @@ $allowed = [
     // federation (includes/federation.php + worker/federation.py)
     'api_rate_limit_per_min', 'api_rate_limit_bytes_day',
     'fed_enabled', 'fed_node_name', 'fed_export_enabled', 'fed_export_files', 'fed_export_max_batch',
+    'fed_export_max_bytes', 'fed_export_max_files',
     'fed_import_new', 'fed_pull_minutes',
 ];
 
@@ -158,6 +159,7 @@ $intClamp = [
     'fed_export_max_batch' => [100, 20000, 2000], 'fed_pull_minutes' => [5, 1440, 60],
     // 0 on either budget switches that half off; the ceilings are only a guard against typos
     'api_rate_limit_per_min' => [0, 100000, 60],
+    'fed_export_max_bytes' => [0, 1073741824, 8388608], 'fed_export_max_files' => [0, 50000000, 200000],
     // UDP monitor + rate limit (includes/netlimit.php)
     'net_sample_seconds' => [NET_SAMPLE_MIN, NET_SAMPLE_MAX, 60], 'net_keep_days' => [NET_KEEP_MIN, NET_KEEP_MAX, 14],
     'net_limit_pps' => [NET_PPS_MIN, NET_PPS_MAX, 30000], 'net_limit_burst' => [NET_BURST_MIN, NET_BURST_MAX, 100],

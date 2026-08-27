@@ -192,6 +192,95 @@ $db->exec("TRUNCATE TABLE fed_peers");
 check('fedExportEnabled needs both flags', !fedExportEnabled(array_merge($cfg, ['fed_enabled' => '0', 'fed_export_enabled' => '1'])) && fedExportEnabled($cfgF));
 check('fedExportMaxBatch clamps', fedExportMaxBatch(array_merge($cfg, ['fed_export_max_batch' => '999999'])) === 20000);
 
+// ── 5. streaming export: bounded memory and three budgets ───────────────────
+// The buffered exporter builds a whole page, files and all, before sending anything: rows count
+// TORRENTS, so 20 000 rows of a hundred files each is two million records in a PHP array. These
+// checks pin down that the streaming path never does that, and that a page ends on whichever
+// budget runs out first while still handing back a usable cursor.
+$db->exec("TRUNCATE TABLE index_hashes");
+$db->exec("TRUNCATE TABLE index_files");
+$base = time() - 7200;
+$ins = $db->prepare("INSERT INTO index_hashes (info_hash, name, total_size, files_count, piece_length,
+        last_seeders, last_leechers, first_seen, last_seen, seen_count, meta_status, meta_fetched_at)
+    VALUES (?, ?, ?, ?, 262144, 3, 4, NOW(), NOW(), 1, 'done', FROM_UNIXTIME(?))");
+$insF = $db->prepare("INSERT INTO index_files (info_hash, path, size) VALUES (?, ?, ?)");
+for ($i = 0; $i < 40; $i++) {
+    $h = str_pad(dechex($i + 0x100), 40, '0', STR_PAD_LEFT);
+    $ins->execute([$h, 'torrent ' . $i, 1000 + $i, 5, $base + $i]);
+    for ($f = 0; $f < 5; $f++) $insF->execute([$h, 'dir/file-' . $f . '.bin', 100 + $f]);
+}
+
+$collect = static function (array $cfgUse, int $since = 0, string $after = '', int $limit = 1000, bool $files = true) use ($db) {
+    $lines = [];
+    $res = fedExportStream($db, $cfgUse, $since, $after, $limit, $files, static function (string $l) use (&$lines) {
+        $lines[] = rtrim($l, "\n");
+        return strlen($l);
+    });
+    return [$res, $lines];
+};
+
+$cfgS = array_merge($cfg, ['fed_export_max_batch' => '20000', 'fed_export_max_bytes' => '0', 'fed_export_max_files' => '0']);
+[$res, $lines] = $collect($cfgS);
+check('stream: every row is emitted as its own line', $res['rows'] === 40 && count($lines) === 40, json_encode([$res['rows'], count($lines)]));
+check('stream: each line is a complete JSON object', count(array_filter($lines, static fn($l) => is_array(json_decode($l, true)))) === 40);
+check('stream: files travel with their row', count(json_decode($lines[0], true)['files'] ?? []) === 5, $lines[0]);
+check('stream: the file records are counted', $res['files'] === 200, (string)$res['files']);
+check('stream: nothing left to fetch', $res['has_more'] === false && $res['stopped_by'] === 'end');
+$first = json_decode($lines[0], true); $last = json_decode($lines[39], true);
+check('stream: rows come back in cursor order', $first['mf'] < $last['mf'], json_encode([$first['mf'], $last['mf']]));
+check('stream: the cursor points at the last row sent',
+      $res['next']['since'] === $last['mf'] && $res['next']['after'] === $last['h'], json_encode($res['next']));
+
+// the row budget
+[$res2, $lines2] = $collect($cfgS, 0, '', 10);
+check('stream: the row budget ends the page', $res2['rows'] === 10 && $res2['stopped_by'] === 'rows', json_encode($res2));
+check('stream: … and it reports there is more', $res2['has_more'] === true);
+[$res3, $lines3] = $collect($cfgS, $res2['next']['since'], $res2['next']['after'], 10);
+check('stream: the cursor resumes without repeating a row',
+      json_decode($lines3[0], true)['h'] !== json_decode($lines2[9], true)['h'], $lines3[0]);
+check('stream: … and without skipping one', json_decode($lines3[0], true)['h'] === json_decode($lines[10], true)['h']);
+
+// the byte budget
+$cfgB = array_merge($cfgS, ['fed_export_max_bytes' => '600']);
+[$res4, $lines4] = $collect($cfgB);
+check('stream: the byte budget ends the page early', $res4['stopped_by'] === 'bytes' && $res4['rows'] < 40, json_encode($res4));
+check('stream: … at or just past the budget, never far beyond', $res4['bytes'] >= 600 && $res4['bytes'] < 600 + 2000, (string)$res4['bytes']);
+check('stream: … and the cursor is still usable', is_array($res4['next']) && strlen((string)$res4['next']['after']) === 40);
+
+// the file-record budget
+$cfgF = array_merge($cfgS, ['fed_export_max_files' => '12']);
+[$res5, $lines5] = $collect($cfgF);
+check('stream: the file budget ends the page', $res5['stopped_by'] === 'files' && $res5['files'] >= 12, json_encode($res5));
+check('stream: … after only a few rows', $res5['rows'] === 3, (string)$res5['rows']);
+
+// a budget smaller than a single row must still make progress, or the peer loops forever
+$cfgTiny = array_merge($cfgS, ['fed_export_max_bytes' => '1']);
+[$res6, $lines6] = $collect($cfgTiny);
+check('stream: a budget smaller than one row still sends that row', $res6['rows'] === 1 && count($lines6) === 1, json_encode($res6));
+check('stream: … so the cursor always advances', $res6['next'] !== null && $res6['has_more'] === true);
+
+// files off
+[$res7, $lines7] = $collect($cfgS, 0, '', 5, false);
+check('stream: files can be left out', $res7['files'] === 0 && !isset(json_decode($lines7[0], true)['files']), $lines7[0]);
+
+// the same exclusions as the buffered exporter
+$db->prepare("INSERT INTO banned_hashes (info_hash, reason) VALUES (?, 'test')")->execute([str_pad(dechex(0x100), 40, '0', STR_PAD_LEFT)]);
+[$res8, $lines8] = $collect($cfgS);
+check('stream: a banned hash never leaves the node', $res8['rows'] === 39
+      && !in_array(str_pad(dechex(0x100), 40, '0', STR_PAD_LEFT), array_map(static fn($l) => json_decode($l, true)['h'], $lines8), true));
+$db->exec("TRUNCATE TABLE banned_hashes");
+
+// the streaming and buffered paths must agree on what they would send
+[$res9, $lines9] = $collect($cfgS, 0, '', 7);
+$buf = fedExportRows($db, $cfgS, 0, '', 7, true);
+check('stream and buffered exporters agree on the rows',
+      array_map(static fn($l) => json_decode($l, true)['h'], $lines9) === array_column($buf['rows'], 'h'));
+check('… and on the cursor they hand back', $res9['next'] === $buf['next'], json_encode([$res9['next'], $buf['next']]));
+
+check('export budget accessors: defaults', fedExportMaxBytes([]) === 8388608 && fedExportMaxFiles([]) === 200000);
+check('export budget accessors: 0 means no limit', fedExportMaxBytes(['fed_export_max_bytes' => '0']) === 0);
+check('export budget accessors: negatives clamp to 0', fedExportMaxFiles(['fed_export_max_files' => '-9']) === 0);
+
 $db->exec("TRUNCATE TABLE index_hashes");
 $db->exec("TRUNCATE TABLE index_files");
 

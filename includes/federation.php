@@ -24,6 +24,17 @@ function fedExportEnabled(array $cfg): bool { return fedEnabled($cfg) && (($cfg[
 function fedExportFiles(array $cfg): bool { return (($cfg['fed_export_files'] ?? '1') === '1'); }
 function fedExportMaxBatch(array $cfg): int { return max(100, min(20000, (int)($cfg['fed_export_max_batch'] ?? 2000) ?: 2000)); }
 function fedImportNew(array $cfg): bool { return (($cfg['fed_import_new'] ?? '0') === '1'); }
+/**
+ * Budgets that end an export page. `fed_export_max_batch` (rows) has always existed and is the one
+ * that does NOT bound the work: a page of 20 000 rows can carry millions of file records, because
+ * it counts torrents rather than what a torrent contains. These two count the things that actually
+ * grow — bytes on the wire and file records — so a page is bounded whatever the rows hold.
+ * 0 switches a budget off.
+ */
+function fedExportMaxBytes(array $cfg): int { return max(0, min(1073741824, (int)($cfg['fed_export_max_bytes'] ?? 8388608))); }
+function fedExportMaxFiles(array $cfg): int { return max(0, min(50000000, (int)($cfg['fed_export_max_files'] ?? 200000))); }
+/** Rows read from the database at a time while streaming. Bounds memory; not user-visible. */
+const FED_STREAM_CHUNK = 500;
 function fedPullMinutes(array $cfg): int { return max(5, min(1440, (int)($cfg['fed_pull_minutes'] ?? 60) ?: 60)); }
 
 /**
@@ -84,6 +95,119 @@ function fedExportRows(PDO $db, array $cfg, int $since, string $afterHash, int $
         $next = ['since' => $lastRow['mf'], 'after' => $lastRow['h']];
     }
     return ['rows' => $out, 'next' => $next, 'has_more' => $hasMore];
+}
+
+/**
+ * Stream one export page as NDJSON, with a bounded memory footprint whatever the page contains.
+ *
+ * The buffered exporter above builds the whole page — rows AND every file record of every row — in
+ * a PHP array and then json_encodes the lot. That is fine for a few thousand small torrents and
+ * fatal for a real catalogue: `fed_export_max_batch` counts TORRENTS, so 20 000 rows of a hundred
+ * files each is two million records assembled in memory before a single byte is sent. This walks
+ * the same cursor in chunks of FED_STREAM_CHUNK, emits each row as it is built, and never holds
+ * more than one chunk.
+ *
+ * Three budgets end a page, whichever is reached first — rows, bytes on the wire, file records —
+ * and the cursor comes back so the peer simply asks for the next page. "Smaller pages" therefore
+ * happen automatically on a heavy catalogue instead of being something the client has to guess.
+ *
+ * $emit receives each finished line (newline included) and returns how many bytes that actually put
+ * on the wire, so the byte budget counts what is sent rather than what was built.
+ *
+ * Returns ['rows'=>int, 'files'=>int, 'bytes'=>int, 'next'=>['since'=>int,'after'=>string]|null,
+ *          'has_more'=>bool, 'stopped_by'=>'rows'|'bytes'|'files'|'end'].
+ */
+function fedExportStream(PDO $db, array $cfg, int $since, string $afterHash, int $limit, bool $withFiles, callable $emit): array {
+    $limit    = max(1, min(fedExportMaxBatch($cfg), $limit));
+    $maxBytes = fedExportMaxBytes($cfg);
+    $maxFiles = fedExportMaxFiles($cfg);
+    $afterHash = preg_match('/^[a-f0-9]{40}$/', $afterHash) ? $afterHash : '';
+
+    // Same two invariants as the buffered exporter: never read into the open second (rows are still
+    // being committed into it, and a cursor landing inside would skip them forever), and never
+    // export a hash that is locally whitelisted or banned.
+    $sql =
+        "SELECT info_hash, name, total_size, files_count, piece_length, last_seeders, last_leechers,
+                first_seen, last_seen, seen_count, UNIX_TIMESTAMP(meta_fetched_at) AS mf
+         FROM index_hashes i
+         WHERE meta_status = 'done' AND meta_fetched_at IS NOT NULL
+           AND meta_fetched_at < FROM_UNIXTIME(UNIX_TIMESTAMP())
+           AND (meta_fetched_at > FROM_UNIXTIME(?) OR (meta_fetched_at = FROM_UNIXTIME(?) AND info_hash > ?))
+           AND NOT EXISTS (SELECT 1 FROM banned_hashes b WHERE b.info_hash = i.info_hash)
+           AND NOT EXISTS (SELECT 1 FROM whitelist w WHERE w.info_hash = i.info_hash)
+         ORDER BY meta_fetched_at, info_hash
+         LIMIT ";
+    $st = $db->prepare($sql . (FED_STREAM_CHUNK + 1));
+
+    $curSince = $since; $curAfter = $afterHash;
+    $rowsOut = 0; $filesOut = 0; $bytesOut = 0;
+    $next = null; $hasMore = false; $stoppedBy = 'end';
+
+    while (true) {
+        $st->execute([$curSince, $curSince, $curAfter]);
+        $chunk = $st->fetchAll(PDO::FETCH_ASSOC);
+        $st->closeCursor();
+        if (!$chunk) break;
+        $moreAfterChunk = count($chunk) > FED_STREAM_CHUNK;
+        if ($moreAfterChunk) array_pop($chunk);
+
+        // Files for this chunk only — one round trip per 500 hashes instead of one per row, and the
+        // result set is bounded by the chunk rather than by the whole page.
+        $files = [];
+        if ($withFiles) {
+            $hashes = array_column($chunk, 'info_hash');
+            $in = implode(',', array_fill(0, count($hashes), '?'));
+            $fs = $db->prepare("SELECT info_hash, path, size FROM index_files WHERE info_hash IN ($in) ORDER BY info_hash, id");
+            $fs->execute($hashes);
+            while ($f = $fs->fetch(PDO::FETCH_ASSOC)) {
+                $files[$f['info_hash']][] = [$f['path'], (int)$f['size']];
+            }
+            $fs->closeCursor();
+        }
+
+        foreach ($chunk as $r) {
+            $h = $r['info_hash'];
+            $row = [
+                'h' => $h, 'n' => $r['name'],
+                's'  => $r['total_size']   !== null ? (int)$r['total_size']   : null,
+                'fc' => $r['files_count']  !== null ? (int)$r['files_count']  : null,
+                'pl' => $r['piece_length'] !== null ? (int)$r['piece_length'] : null,
+                'sl' => [(int)$r['last_seeders'], (int)$r['last_leechers']],
+                'seen' => ['f' => $r['first_seen'], 'l' => $r['last_seen'], 'c' => (int)$r['seen_count']],
+                'mf' => (int)$r['mf'],
+            ];
+            $rowFiles = $files[$h] ?? [];
+            if ($rowFiles) $row['files'] = $rowFiles;
+
+            $line = json_encode($row, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+            if ($line === false) continue;   // one unencodable row must not kill the whole page
+            $bytesOut += $emit($line . "\n");
+            $rowsOut++;
+            $filesOut += count($rowFiles);
+            $curSince = (int)$r['mf']; $curAfter = $h;
+            $next = ['since' => $curSince, 'after' => $curAfter];
+
+            // Budgets are checked AFTER the row is sent, so a page always carries at least one row
+            // even when a single torrent is larger than the whole budget — otherwise a catalogue
+            // with one huge entry could never make progress past it.
+            if ($rowsOut >= $limit)                      { $stoppedBy = 'rows';  break 2; }
+            if ($maxBytes > 0 && $bytesOut >= $maxBytes) { $stoppedBy = 'bytes'; break 2; }
+            if ($maxFiles > 0 && $filesOut >= $maxFiles) { $stoppedBy = 'files'; break 2; }
+        }
+        if (!$moreAfterChunk) break;
+    }
+
+    if ($stoppedBy !== 'end') {
+        // A budget stopped us, so there MAY be more. Confirm it rather than assuming: claiming
+        // has_more when the page happened to land on the last row would cost the peer one pointless
+        // request every cycle, forever.
+        $probe = $db->prepare($sql . '1');
+        $probe->execute([$curSince, $curSince, $curAfter]);
+        $hasMore = $probe->fetchColumn(0) !== false;
+        $probe->closeCursor();
+    }
+    return ['rows' => $rowsOut, 'files' => $filesOut, 'bytes' => $bytesOut,
+            'next' => $next, 'has_more' => $hasMore, 'stopped_by' => $stoppedBy];
 }
 
 /** Peers with the inbound api_client joined (label/enabled/last use) — for the admin UI + CLI. */

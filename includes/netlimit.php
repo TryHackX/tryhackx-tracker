@@ -686,6 +686,17 @@ function netlimitTick(PDO $db, array &$cfg, ?int $now = null): array {
     $state = netlimitStateRead();
     $panicPending = (int)($state['panic']['until'] ?? 0) > 0;
     $out = ['enabled' => false, 'sampled' => false, 'auto' => null, 'panic' => null, 'pruned' => 0, 'persisted' => false, 'error' => null];
+    // A save the panel could not perform must be finished even with the monitor and the automatic
+    // mode both off — otherwise applying a limit on a monitor-less install leaves the rule live and
+    // the file stale for ever, which is the exact failure the deferred save exists to close. The
+    // flag is set by netlimitApply(), so this costs one already-loaded state read and forks nothing
+    // until there is genuinely something to save.
+    if (!empty($state['persist_deferred'])) {
+        $pr = netlimitPersist($cfg);
+        $out['enabled'] = true;
+        $out['persisted'] = $pr['ok'] && !empty($pr['json']['saved']);
+        if (!$pr['ok']) $out['error'] = $pr['error'] ?? 'could not save the ruleset';
+    }
     if (!netlimitMonitorEnabled($cfg) && !netlimitAutoEnabled($cfg) && !$panicPending) return $out;
     $out['enabled'] = true;
 
@@ -718,7 +729,8 @@ function netlimitTick(PDO $db, array &$cfg, ?int $now = null): array {
 
         // 2b. finish a save the panel could not do itself. `file_matches` is absent on an older
         // helper, and then this does nothing at all.
-        if (!empty($status['table']) && array_key_exists('file_matches', $status) && !$status['file_matches']) {
+        if (!$out['persisted'] && !empty($status['table'])
+            && array_key_exists('file_matches', $status) && !$status['file_matches']) {
             $pr = netlimitPersist($cfg);
             $out['persisted'] = $pr['ok'] && !empty($pr['json']['saved']);
             if (!$pr['ok']) $out['error'] = $pr['error'] ?? 'could not save the ruleset';
