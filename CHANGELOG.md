@@ -4,7 +4,99 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — E4: OpenTracker's performance knobs, from the panel (schema v14)
+## [1.12.0] — 2026-08-27 (schema v15)
+
+Federation you can undo, hold back and stop paying for twice; the tracker's own threads measured
+rather than guessed; and the knobs that come before extra instances.
+
+### Added — federation P1 (E5)
+
+- **The origin time travels with the metadata.** Every import used to stamp `meta_fetched_at = NOW()`,
+  which is when a row reached *us*. After three hops the panel called month-old metadata fresh, and
+  no node could tell a genuinely newer resolve from the same description coming round again.
+  `index_hashes.meta_origin_at` carries when it was first resolved *anywhere*; the export sends it as
+  `mo` beside the cursor's `mf`, and the importer compares origins before writing anything.
+  - A peer with a wrong clock cannot mint permanently-newest rows: an origin in the future is clamped
+    to now.
+  - A node that sends no `mo` falls back to `mf`, which is what it has always meant on a two-node
+    exchange — so an older partner keeps working without knowing anything changed.
+- **Split horizon on the export.** Importing re-stamps the arrival time, which put every borrowed row
+  into our own export window: two nodes spent every cycle shipping each other's catalogue back —
+  megabytes of transfer for zero writes, indefinitely. The export now leaves out whatever the asking
+  peer contributed. It knows who is asking because the bearer key belongs to a peer row. Verified on
+  production: with the node as its own peer, five staged rows go out to a stranger and exactly the
+  two it did not contribute go out to the peer, in both the buffered and the streaming exporter.
+- **Quarantine — `fed_import_mode = review`.** A peer's answer lands in `fed_review` and reaches the
+  catalogue only when an admin accepts it. Deliberately a holding table rather than a new
+  `meta_status`: widening that ENUM means rebuilding a FULLTEXT table of millions of rows, and every
+  query that lists the catalogue would have had to learn the new state or start leaking unreviewed
+  names. Accepting runs the same merge the fill path does, so review mode changes *when* a row is
+  trusted and never *how* it is stored.
+  - Rejecting leaves a mark rather than deleting the row. A peer offers its whole catalogue on every
+    pull, and a decision that does not persist is not a decision. "Allow again" withdraws it.
+  - The queue is bulk-operable per peer — a first sync can park tens of thousands of packages, and
+    accepting a whole peer's backlog publishes descriptions nobody has read, so that one asks for the
+    admin password while per-row decisions do not.
+  - Names are rendered as text, never as markup, in the queue exactly as in the catalogue. Review
+    mode is about *what you publish*, not about script injection.
+- **Undo import (F7).** One button per peer returns everything it contributed to unresolved. The
+  hashes and their local history stay — `first_seen`, `seen_count`, the seeder peaks were observed by
+  this tracker's own swarm and were never the peer's to take; only the borrowed description goes.
+  Sliced at 2000 rows per request, because a peer that has fed a node for a month can own a million
+  rows and one statement over a million rows on a MariaDB shared with mail and a forum takes
+  something else down as a side effect. `worker/federation.py --purge NAME` does the same work
+  without a browser tab having to stay open, and `--dry-run` counts first.
+
+### Added — the tracker's own load, measured (E6)
+
+- **Per-thread load on the OpenTracker card**, and a verdict on the question the plan gates extra
+  instances on. The helper reports raw counters — `utime+stime` per tid, plus machine-wide busy and
+  idle ticks from the same clock — and never a percentage, because a percentage needs two samples and
+  taking the second would mean the helper sleeping inside a web request. The card subtracts
+  consecutive polls instead.
+  - Threads rather than the process, because they are not the same question: four UDP workers at 25%
+    each and one worker pinned at 100% are the same 100% in `top` and mean opposite things.
+  - The verdict says the one case that justifies a second instance — busiest worker at the ceiling
+    with one thread per core — and otherwise says so and points at what is actually limiting the
+    tracker.
+  - **Measured on production while writing this: 89–104% of 600%, busiest UDP worker 23%, at the
+    60 000 pps inbound budget.** One sixth of the machine. So E6's build half — the systemd template,
+    `tracker-mode.sh --all`, per-instance SIGHUP, per-node stats, multi-port announce URLs — is
+    deliberately **not built**, and the panel now says why on its own rather than leaving it to a
+    feeling about `top`.
+
+### Fixed
+
+- **A measurement that lied.** `socket_drops` pulled the per-socket counter out of `ss`'s skmem blob
+  with a `sed` backreference that had been mangled into a literal `0x01` byte: the pattern matched,
+  the substitution produced rubbish, the unsigned-integer guard rejected it, and the helper returned
+  a confident **0** every time. It is `awk` now, and a test drives the real helper against a stub
+  `ss`. With it fixed, production immediately showed what had been hidden: **~51 packets a second**
+  discarded because the socket queue was full, and a lifetime counter past 630 000. A broken
+  measurement that reads "healthy" is worse than one that fails out loud.
+- **The card could sit on "measuring" for ever.** The baseline advanced on every poll, so a tab whose
+  visibility flaps — a window manager, a screen recorder, a user moving between tabs — reset it
+  before the window ever reached the three seconds a reading needs. The baseline now moves only when
+  it was actually used, or when it has aged past ten minutes. A poll that lands too soon keeps
+  showing the last good reading rather than blanking a working display.
+- **A reading that was arithmetically impossible.** Thread time is counted in 10 ms ticks, so over a
+  one-second window one tick of rounding is a large percentage — two forced refreshes in quick
+  succession produced threads apparently running at 648%. Windows under three seconds are discarded,
+  and a thread that still appears to exceed one core is dropped rather than drawn.
+- **Each poll runs `pgrep`, several `systemctl` reads and `ss` on the server.** Forced reloads are now
+  spaced, so a flapping tab cannot ask for that thirty times a minute.
+
+### Changed
+
+- **A migration that would rebuild `index_hashes` no longer runs inside a page view.** That rebuild
+  holds a shared lock for minutes — InnoDB does not permit concurrent DML while rebuilding a FULLTEXT
+  table — and there are five php-fpm children, so a browser request doing it takes the site down for
+  the duration. The janitor is an ordinary CLI job and performs it a minute later; the schema version
+  is not recorded until it has, so a deferred migration cannot be mistaken for a finished one. The
+  ALTER offers `ALGORITHM=INSTANT`, then `INPLACE`, then the plain form — on production INSTANT was
+  refused and INPLACE succeeded, which is exactly the case the fallback exists for.
+
+### Also in this release — E4: OpenTracker's performance knobs, from the panel (schema v14)
 
 ### Added
 - **Settings → OpenTracker performance** and a card on the Traffic page: UDP worker threads, `Nice`,
@@ -32,7 +124,7 @@ All notable changes to this project are documented here. The format is loosely b
   and gives the command; it does not write sysctls, because those are system-wide and belong to
   whoever owns the machine.
 
-## [Unreleased] — E3c: the federation importer stops doing four queries per row
+### Also in this release — E3c: the federation importer stops doing four queries per row
 
 ### Changed
 - **`worker/federation.py` reads NDJSON and merges in micro-batches.** The old importer issued two
@@ -60,7 +152,7 @@ All notable changes to this project are documented here. The format is loosely b
   the cursor never advanced — every run would have re-fetched the same page for ever. Caught by
   running it against the real catalogue rather than a fixture.
 
-## [Unreleased] — the outbound budget did not survive a reboot
+### Also in this release — the outbound budget did not survive a reboot
 
 ### Fixed
 - **A budget set from the panel reverted at the next restart.** The egress action guarded its file
@@ -72,7 +164,7 @@ All notable changes to this project are documented here. The format is loosely b
   `file_pps` and `file_matches` so the card can say **"live, but the saved copy still says N pps"**
   instead of leaving it to be discovered by accident.
 
-## [Unreleased] — the panel measures where THIS machine starts to struggle (schema v13)
+### Also in this release — the panel measures where THIS machine starts to struggle (schema v13)
 
 ### Added
 - **A load study.** A packets-per-second number means nothing on its own — 40 000 is trivial on one
@@ -102,7 +194,7 @@ All notable changes to this project are documented here. The format is loosely b
   happening silently. Caught by a test that had been passing only because another suite migrated the
   database first — that check no longer depends on the order suites run in.
 
-## [Unreleased] — "search inside file lists" could take the whole site off the air
+### Also in this release — "search inside file lists" could take the whole site off the air
 
 ### Fixed
 - **One search held every PHP worker for 24 minutes.** Searching inside file lists built the clause
@@ -118,7 +210,7 @@ All notable changes to this project are documented here. The format is loosely b
   pathological query costs one visitor an error instead of the site. CLI stays untouched — the
   janitor, the metadata worker and `mariadb-dump` all run legitimately long statements.
 
-## [Unreleased] — federation exported nothing at all on MariaDB 11.8
+### Also in this release — federation exported nothing at all on MariaDB 11.8
 
 ### Fixed
 - **A peer starting from a cold cursor received an empty page, every time, for ever.** The export
@@ -130,7 +222,7 @@ All notable changes to this project are documented here. The format is loosely b
   nothing. The queries now clamp the cursor away from the epoch, and the suite carries a check that
   runs for real on a database exhibiting the NULL and skips with a reason on one that does not.
 
-## [Unreleased] — the panel stops giving advice it cannot back up
+### Also in this release — the panel stops giving advice it cannot back up
 
 ### Added
 - **The outbound budget is now adjustable from the panel**, not just displayed. A tracker answers
@@ -158,7 +250,7 @@ All notable changes to this project are documented here. The format is loosely b
   48 000 pps it claimed you would be "dropping traffic the tracker normally serves" while only
   39 800 pps was getting through. It now judges against the live rate.
 
-## [Unreleased] — E3a/E3b: the federation export stops building pages in memory (schema v12)
+### Also in this release — E3a/E3b: the federation export stops building pages in memory (schema v12)
 
 ### Added
 - **Streaming NDJSON export** (`"format": "ndjson"` on `v1/federation/export`). The buffered reply
@@ -183,7 +275,7 @@ All notable changes to this project are documented here. The format is loosely b
   deferred save exists to close, reappearing wherever nobody switched the monitor on. The tick now
   checks the pending flag first, and forks nothing until there is genuinely something to save.
 
-## [Unreleased] — E3a: the server-to-server API gets a ceiling (schema v12)
+### Also in this release — E3a: the server-to-server API gets a ceiling (schema v12)
 
 ### Added
 - **Per-key rate limits on `v1/*`** — requests per minute (`api_rate_limit_per_min`, default 60) and

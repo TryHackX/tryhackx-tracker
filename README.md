@@ -457,6 +457,57 @@ re-fetching everything from the DHT — any OpenTracker + this web app can join.
   into *Their bearer* and enables *Pull*. **Test** verifies the outbound direction; per-peer status,
   cursor and imported-row counters are visible in the peers table.
 
+Four things the exchange needs once the partner is somebody else's machine (1.12.0):
+
+- **Where the description came from, not when it arrived** — `index_hashes.meta_origin_at` records
+  when metadata was first resolved *anywhere*, and the export carries it as `mo` beside the cursor's
+  `mf`. Without it a row imported at each hop looks brand new to the next node, so the panel calls
+  month-old metadata fresh and nobody can tell a newer resolve from the same one coming round again.
+  A clock ahead of ours is clamped to now; a peer that sends no `mo` falls back to `mf`.
+- **Split horizon** — a peer is never handed back the rows it gave us. Importing re-stamps the
+  arrival time, which would otherwise put every borrowed row into our own export window and have two
+  nodes trade the same catalogue back and forth for ever.
+- **Quarantine** (`fed_import_mode = review`) — the peer's answer waits in `fed_review` and reaches
+  the catalogue only when an admin accepts it, from the queue under the peers table. Accepting runs
+  the same merge the normal path does; rejecting leaves a mark, because a peer offers its whole
+  catalogue on every pull and a decision that does not persist is not a decision. Accepting a whole
+  peer's backlog asks for the admin password; single packages do not.
+- **Undo import** — one button per peer returns everything it contributed to unresolved. The hashes
+  and their local history stay: `first_seen`, `seen_count` and the seeder peaks came from this
+  tracker's own swarm and were never the peer's. Sliced at 2000 rows per request;
+  `worker/federation.py --purge <peer>` (with `--dry-run`) does the same from the shell for the
+  cases that run into millions.
+
+### OpenTracker performance — the knobs, and the measurement that decides the next one (1.11.0/1.12.0)
+
+**Admin → Traffic → OpenTracker — performance** (settings in Settings → *OpenTracker performance*)
+exposes what any systemd box already has: UDP worker threads (`listen.udp.workers`), `Nice`,
+`CPUWeight`, `CPUAffinity` and `LimitNOFILE`. Everything the panel writes goes into **one file it
+owns**, `90-tracker-panel.conf`; `override.conf` and `limits.conf` are never touched, and **Reset**
+deletes the panel's file and nothing else. Saving a setting changes nothing — a password-gated
+**Apply** puts it in force, after showing the exact file. Where `/etc` is read-only for php-fpm
+(`ProtectSystem`), the Apply is queued and the janitor writes it within the minute.
+
+The card also **measures the tracker's own threads** and answers the question that gates building
+anything bigger. The helper reports raw counters — CPU ticks per thread, plus machine-wide busy and
+idle from the same clock — and the card subtracts consecutive polls, so nothing has to sleep inside a
+web request. Threads rather than the process, because four UDP workers at 25% each and one worker
+pinned at 100% look identical in `top` and mean opposite things.
+
+The verdict names the one case that justifies a second tracker instance — busiest worker at the
+ceiling with one thread per core — and otherwise says what is actually limiting the tracker instead.
+On the reference deployment (6 vCPU, 60 000 pps inbound budget) that is **≈90–104% of 600%, busiest
+worker 23%**: one sixth of the machine, so extra instances would add the one thing that is not short.
+
+Two numbers on this card are diagnoses rather than knobs, and both are easy to miss:
+
+- **`net.core.rmem_max`** — opentracker asks the kernel for a socket buffer and the kernel clamps it
+  to this. When it fills, the packet is discarded *after* the machine has paid to receive it: the
+  worst place to lose an announce, unlike a firewall drop, which costs nothing. The panel reports it
+  and gives the command; it does not write sysctls, because they are system-wide.
+- **the socket's own drop counter** (`ss -ulnpm`, the `d<N>` in skmem) — how many announces were
+  thrown away for exactly that reason.
+
 ### OpenTracker service reload & restart
 
 OpenTracker reads its blacklist file **only at startup**, so a blocked/unblocked hash doesn't take
@@ -1139,7 +1190,7 @@ The installer creates the following tables:
 | `api_bans` | IP bans issued by the API auth layer (with request snapshot) or manually |
 | `stats_samples` | Statistics timeline: raw samples (UNIX `ts`, gauges + cumulative counters + mode) — schema v5 |
 | `stats_samples_5m` / `stats_samples_1h` | 5-minute / hourly roll-ups (avg/min/max, last counter value, whitelist share) |
-| `index_hashes` | Observed-hash index: hashes seen on the tracker (S/L, seen count, grace/protect, metadata, `meta_source`) — schema v6/v7 |
+| `index_hashes` | Observed-hash index: hashes seen on the tracker (S/L, seen count, grace/protect, metadata, `meta_source`, `meta_origin_at`) — schema v6/v7/v15 |
 | `index_files` | File lists for indexed hashes (keyed by info_hash, FULLTEXT searchable) |
 | `users` | User accounts (username, optional email, password hash, status) — schema v7 |
 | `user_groups` | Groups with JSON permissions (seeded: `guest` = anonymous visitors, `member` = granted on registration, `admin` = passes every check) — schema v8 semantics |
@@ -1147,10 +1198,19 @@ The installer creates the following tables:
 | `user_notifications` | In-app notifications (grants, expiry warnings, admin messages) |
 | `user_tokens` | Remember-me + password-reset tokens (sha256 only) |
 | `fed_peers` | Federation peers (base URL, outbound bearer, inbound API client, pull cursor/status) |
+| `fed_review` | Quarantine for `fed_import_mode = review`: what a peer offered, waiting for an admin to accept or reject it — schema v15 |
 | `net_samples` | UDP traffic: one sample per interval — nftables counters plus the packets/second derived from them, and the limit in force — schema v11 |
 
 Schema upgrades are applied automatically on the first request (`includes/schema.php`,
 `settings.schema_version`); fresh installs get the same tables from `install.php`.
+
+One exception, since 1.12.0: a migration that would **rebuild `index_hashes`** is skipped in a web
+request and left to the janitor. That rebuild holds a shared lock for minutes on a real catalogue —
+InnoDB does not permit concurrent DML while rebuilding a FULLTEXT table — and with a handful of
+php-fpm children a page view doing it takes the site down for the duration. The version is not
+recorded until the migration has actually run, so a deferred upgrade cannot be mistaken for a
+finished one; running `sudo -u www-data php tools/janitor.php` right after an upload does it at once
+instead of within the minute.
 
 ---
 
