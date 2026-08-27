@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 15;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling, 14 = settings only (OpenTracker performance knobs: ot_*), 15 = federation P1: index_hashes.meta_origin_at (when the metadata was FIRST resolved anywhere, so it stops circulating between three or more nodes) + the fed_review quarantine table
+const TRACKER_SCHEMA_VERSION = 16;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling, 14 = settings only (OpenTracker performance knobs: ot_*), 15 = federation P1: index_hashes.meta_origin_at (when the metadata was FIRST resolved anywhere, so it stops circulating between three or more nodes) + the fed_review quarantine table, 16 = settings only (curated kernel network buffers: sysctl_*)
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -612,6 +612,15 @@ function trackerSchemaDefaultSettings(): array {
         'ot_cpu_affinity'             => '',
         'ot_limit_nofile'             => '65536',
         'ot_udp_workers'              => '',      // empty = leave opentracker's own config alone
+        // Kernel network buffers (v16). The command is EMPTY by default and the feature is off:
+        // defaulting it to a path would make every existing install start polling an endpoint that
+        // shells out to a script nobody installed. The eight values are empty too — an empty value
+        // means "the panel does not manage this key", and an unmanaged key never appears in the file
+        // it writes. A form with eight boxes that writes all eight is how the expensive one gets
+        // raised by accident.
+        'sysctl_cmd'                  => '',
+        'sysctl_enabled'              => '0',
+        'sysctl_confirm_seconds'      => '120',   // clamped to whole minutes, 60-900
         'fed_enabled'                 => '0',
         'fed_node_name'               => '',
         'fed_export_enabled'          => '0',

@@ -33,6 +33,7 @@ require_once $root . '/includes/mail.php';
 require_once $root . '/includes/users.php';
 require_once $root . '/includes/netlimit.php';
 require_once $root . '/includes/opentracker.php';
+require_once $root . '/includes/sysctl.php';
 require_once $root . '/includes/backup.php';
 
 try {
@@ -79,6 +80,17 @@ try {
     if ($ot['pending'] || $ot['error'] !== null) {
         echo sprintf('[opentracker] pending=yes applied=%s%s', $ot['applied'] ? 'yes' : 'no',
             $ot['error'] !== null ? ' error=' . $ot['error'] : ''), "
+";
+    }
+    // Kernel network buffers. This is the ONLY place on the machine that can write one: php-fpm
+    // runs with ProtectKernelTunables=yes, so /proc/sys is read-only inside its mount namespace --
+    // for root too, because it is a namespace and not a permission bit. The panel records what was
+    // asked for; this performs it, and puts it back when an armed change was never confirmed.
+    $sy = sysctlTick($cfg);
+    if ($sy['did'] !== null) {
+        echo sprintf('[sysctl] %s ok=%s%s%s', $sy['did'], $sy['ok'] ? 'yes' : 'no',
+            $sy['reverted'] ? ' reverted=yes' : '',
+            $sy['error'] !== null ? ' error=' . $sy['error'] : ''), "
 ";
     }
     // scheduled backups: fire when a slot is due (no-op — not even a fork — while backups are off)

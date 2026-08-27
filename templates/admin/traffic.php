@@ -256,6 +256,89 @@
             </div>
         </div>
         <?php endif; ?>
+
+        <?php if (sysctlEnabled($cfg)): ?>
+        <!-- Kernel network buffers. Deliberately the LAST card on this page: the two above measure
+             the loss, this one is the only thing that can do something about it, and it is the only
+             thing here that changes a setting belonging to the whole machine rather than to the
+             tracker. Gated on the feature being both configured and enabled, so an install that
+             never turned it on never renders it and never polls it. -->
+        <div class="wl-status-card nl-card" id="sysctl-card"
+             data-confirm-seconds="<?= (int)sysctlConfirmSeconds($cfg) ?>">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-sliders2"></i> Kernel network buffers <span class="wl-status-updated" id="sy-updated"></span></h6>
+                <div class="wl-status-actions">
+                    <a href="<?= $baseUrl ?>?action=settings#section-sysctl" class="btn btn-sm btn-outline-secondary" title="Helper and confirmation window"><i class="bi bi-gear"></i> Settings</a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-sy-suggest" title="Fill in what the measurements above actually support"><i class="bi bi-magic"></i> Use suggested</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-sy-preview" title="Render the file without writing it"><i class="bi bi-eye"></i> Preview file</button>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="btn-sy-arm"><i class="bi bi-stopwatch"></i> Apply for a while&hellip;</button>
+                </div>
+            </div>
+
+            <!-- Shown only while a change is in force and unconfirmed. Confirm and Revert are kept
+                 apart on purpose: one of them makes the change survive a reboot, and it would be read
+                 on a page that may be stuttering at the time. -->
+            <div class="sy-armed d-hidden" id="sy-armed">
+                <div class="sy-armed-head">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <span id="sy-armed-text">A change is in force and will undo itself.</span>
+                </div>
+                <div class="sy-countdown" id="sy-countdown"></div>
+                <div class="sy-armed-keys" id="sy-armed-keys"></div>
+                <div class="sy-armed-actions">
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="btn-sy-revert"><i class="bi bi-arrow-counterclockwise"></i> Put it back now</button>
+                    <span class="sy-armed-gap"></span>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="btn-sy-confirm"><i class="bi bi-check2-circle"></i> Keep it (survives a reboot)&hellip;</button>
+                </div>
+            </div>
+
+            <div class="wl-status-grid" id="sy-grid">
+                <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading the kernel&hellip;</div>
+            </div>
+            <div id="sy-notes"></div>
+        </div>
+
+        <!-- One password gate, one acknowledgement per dangerous key -->
+        <div class="modal fade" id="syConfirmModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content bg-dark">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title"><i class="bi bi-shield-lock text-warning"></i> <span id="sy-modal-title">Apply the kernel buffers</span></h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="text-light mb-2" style="font-size:0.9rem;" id="sy-modal-text"></p>
+                        <div class="nl-undo" id="sy-modal-undo"></div>
+                        <div id="sy-modal-warnings"></div>
+                        <form id="sy-confirm-form">
+                            <div id="sy-modal-acks"></div>
+                            <div class="mb-3">
+                                <label class="form-label" style="font-size:0.85rem;color:#bbb;">Admin Password *</label>
+                                <input type="password" class="form-control bg-dark text-light border-secondary" id="sy-confirm-password" autocomplete="current-password" required>
+                            </div>
+                            <div class="d-flex justify-content-end gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><i class="bi bi-x-lg"></i> Cancel</button>
+                                <button type="submit" class="btn btn-sm btn-outline-success" id="sy-confirm-ok"><i class="bi bi-check-lg"></i> Confirm</button>
+                            </div>
+                        </form>
+                        <div id="sy-confirm-alert" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="syPreviewModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content bg-dark">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title"><i class="bi bi-file-earmark-code"></i> <span id="sy-preview-title">File preview</span></h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body"><pre class="nl-preview" id="sy-preview-body"></pre></div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
@@ -274,6 +357,9 @@
     <?php endif; ?>
     <?php if (otPerfCommand($cfg) !== ''): ?>
     <script src="<?= $baseUrl ?>assets/js/admin-otperf.js<?= assetVer('assets/js/admin-otperf.js') ?>"></script>
+    <?php if (sysctlEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/js/admin-sysctl.js<?= assetVer('assets/js/admin-sysctl.js') ?>"></script>
+    <?php endif; ?>
     <?php endif; ?>
 </body>
 </html>

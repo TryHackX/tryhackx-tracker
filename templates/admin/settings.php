@@ -675,6 +675,37 @@
                 </div>
             </div>
 
+            <!-- Kernel network buffers -->
+            <div class="settings-section" id="section-sysctl" data-group="tracker" data-title="Kernel network buffers">
+                <h5>Kernel network buffers</h5>
+                <small class="settings-hint d-block mb-3">The eight kernel settings that decide how many announces survive a burst &mdash; the socket buffers, the per-CPU packet queue and the machine-wide UDP memory pool. This is the first thing the panel touches that is <strong>not</strong> the tracker&rsquo;s own: these belong to the whole machine, which here also runs mail, the forum, the file service and the database they share. So nothing is applied by saving. A change is <em>armed</em>, takes effect while you watch it, and <strong>puts itself back automatically unless you confirm</strong> &mdash; the undo is scheduled through systemd before the change is made, so it does not need this panel, the database, or an administrator who can still log in. Nothing is written to <code>/etc</code> until you confirm either, so until then a reboot also undoes it. The values live on the <a href="<?= $baseUrl ?>?action=admin-traffic#sysctl-card">Traffic page</a>, next to the counters that say which of them is worth touching at all.</small>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Helper command</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="sysctl_cmd" value="<?= sanitize($cfg['sysctl_cmd'] ?? '') ?>" maxlength="255" placeholder="sudo -n /usr/local/sbin/tracker-sysctl.sh">
+                        <small class="settings-hint">Empty = the feature does not exist: no card, no polling, no <code>sudo</code>. Install <code>tools/opentracker/tracker-sysctl.sh</code> and its <code>sudoers.d</code> rule first, then press Test.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Enabled</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="sysctl_enabled">
+                            <option value="0" <?= ($cfg['sysctl_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>No</option>
+                            <option value="1" <?= ($cfg['sysctl_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Yes</option>
+                        </select>
+                        <small class="settings-hint">Off by default. Turning it on only shows the card; it changes nothing.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Confirmation window (s)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="sysctl_confirm_seconds" value="<?= sanitize($cfg['sysctl_confirm_seconds'] ?? '120') ?>" min="60" max="900" step="60">
+                        <small class="settings-hint">How long an armed change waits for your confirmation before undoing itself. Rounded to whole minutes, because the fallback watchdog is the janitor and it runs once a minute &mdash; a 30-second promise it cannot keep would still read as a guarantee.</small>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-sysctl-test"><i class="bi bi-plug"></i> Test</button>
+                    <div id="sysctl-test-result" class="mt-2"></div>
+                </div>
+            </div>
+
+
             <!-- Federation / cluster -->
             <div class="settings-section" id="section-federation" data-group="integrations" data-title="Federation / Cluster">
                 <h5>Federation / Cluster</h5>
@@ -2288,6 +2319,44 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 box.innerHTML = '<span class="text-danger">&#10007; ' + esc(j.error || 'Test failed') + '</span>'
                     + (j.hint ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + esc(j.hint) + '</small>' : '') + meta;
             }
+        } catch {
+            box.innerHTML = '<span class="text-danger">Network error</span>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
+    });
+
+    // The kernel-buffer Test button. Read-only in every branch: it establishes whether the path from
+    // the panel to the kernel exists, and never uses it. Two of its checks are EXPECTED to be false on
+    // a hardened box (php-fpm cannot write /proc/sys or /etc), so they are rendered as information
+    // rather than as failures — otherwise a correctly configured machine would report itself broken.
+    document.getElementById('btn-sysctl-test')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const box = document.getElementById('sysctl-test-result');
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
+        box.innerHTML = '<span class="text-info">Asking the helper&hellip;</span>';
+        try {
+            const res = await fetch(API_BASE + 'admin/sysctl_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
+            const j = await res.json();
+            let html = j.ok
+                ? '<span class="text-success">&#10003; The panel can reach the kernel-buffer helper.</span>'
+                : '<span class="text-danger">&#10007; Something on the path is missing.</span>';
+            html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
+            (j.checks || []).forEach(c => {
+                const mark = c.ok ? '<span class="text-success">&#10003;</span>'
+                                  : (c.info ? '<span style="color:#a0a0b0;">&#8226;</span>' : '<span class="text-danger">&#10007;</span>');
+                html += '<li>' + mark + ' ' + esc(c.name)
+                     + (c.detail ? ' <small style="color:#a0a0b0;">&mdash; ' + esc(c.detail) + '</small>' : '') + '</li>';
+            });
+            html += '</ul>';
+            (j.errors || []).forEach(x => { html += '<div class="text-warning" style="font-size:.85rem;">' + esc(x) + '</div>'; });
+            if ((j.suggestions || []).length) {
+                html += '<pre class="nl-preview mt-2" style="white-space:pre-wrap;">' + esc(j.suggestions.join(String.fromCharCode(10))) + '</pre>';
+            }
+            box.innerHTML = html;
         } catch {
             box.innerHTML = '<span class="text-danger">Network error</span>';
         } finally {

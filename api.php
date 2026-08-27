@@ -36,6 +36,7 @@ require_once __DIR__ . '/includes/federation.php';
 require_once __DIR__ . '/includes/netlimit.php';
 require_once __DIR__ . '/includes/backup.php';
 require_once __DIR__ . '/includes/opentracker.php';
+require_once __DIR__ . '/includes/sysctl.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -60,7 +61,7 @@ ensureSchema($db, $cfg);
 // the stats poller and the admin tracker-service status poll are both hit repeatedly and have
 // nothing to do with the report/appeal janitors, so running them there is pure overhead. They
 // still run everywhere else. S2S calls never run them either.
-if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status'], true)) {
+if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status', 'admin/sysctl_status'], true)) {
     autoArchiveOldReports($db, $cfg);
     autoArchiveOldAppeals($db, $cfg);
     pruneOldSentEmails($db, $cfg);
@@ -110,6 +111,10 @@ $apiRoutes = [
     'admin/ot_status'       => 'api/admin/ot_status.php',
     'admin/ot_apply'        => 'api/admin/ot_apply.php',
     'admin/ot_test'         => 'api/admin/ot_test.php',
+    // ── Kernel network buffers (admin; includes/sysctl.php) ──
+    'admin/sysctl_status'   => 'api/admin/sysctl_status.php',
+    'admin/sysctl_apply'    => 'api/admin/sysctl_apply.php',
+    'admin/sysctl_test'     => 'api/admin/sysctl_test.php',
     'admin/net_samples'     => 'api/admin/net_samples.php',
     'admin/net_apply'       => 'api/admin/net_apply.php',
     'admin/net_test'        => 'api/admin/net_test.php',
@@ -217,7 +222,7 @@ if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login') {
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && in_array($endpoint, [
             'admin/net_status', 'admin/net_samples', 'admin/backup_status',
             'admin/whitelist_status', 'admin/index_status', 'admin/tracker_service_status',
-            'admin/ot_status'], true)) {
+            'admin/ot_status', 'admin/sysctl_status'], true)) {
         session_write_close();
     }
 }

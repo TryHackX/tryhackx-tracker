@@ -1493,3 +1493,41 @@ input[type="number"] {
    It holds its place instead of appearing a second late, so nothing moves under the reader. */
 .nl-tune-pending { opacity: 0.55; }
 .nl-tune-waiting { font-size: 0.82rem; color: #6c7a89; font-style: italic; }
+
+/* Kernel network buffers card (assets/js/admin-sysctl.js).
+   Three columns per key: what it is, what is in force, what you are asking for — because the middle
+   one is the number people forget to look at before typing the third. */
+.sy-rows { display: flex; flex-direction: column; gap: 0.5rem; }
+.sy-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.2fr); gap: 0.9rem;
+          padding: 0.6rem 0.7rem; background: #10161d; border: 1px solid #1c232b; border-radius: 6px; align-items: start; }
+.sy-row-wide { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.6fr); }
+.sy-key-label { font-size: 0.86rem; color: #dfe6ee; font-weight: 500; }
+.sy-key-name { display: block; font-size: 0.74rem; color: #6c7a89; margin: 0.1rem 0 0.25rem; }
+.sy-key-what { font-size: 0.76rem; color: #8b98a6; line-height: 1.45; }
+.sy-now-v { font-size: 0.9rem; color: #cfd8e3; font-variant-numeric: tabular-nums; }
+.sy-now-raw { font-size: 0.74rem; color: #6c7a89; font-variant-numeric: tabular-nums; }
+.sy-now-base { font-size: 0.74rem; color: #7d8a97; margin-top: 0.2rem; font-style: italic; }
+.sy-input-wrap { display: flex; gap: 0.35rem; align-items: center; }
+.sy-input { max-width: 8rem; }
+.sy-unit { max-width: 5.5rem; }
+.sy-unit-static { font-size: 0.76rem; color: #6c7a89; }
+.sy-echo { font-size: 0.75rem; color: #8b98a6; margin-top: 0.25rem; line-height: 1.45; }
+.sy-echo-warn { color: #d9a441; }
+.sy-sugg { font-size: 0.75rem; color: #4f9d69; margin-top: 0.2rem; }
+.sy-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.35rem; }
+.sy-three-label { font-size: 0.7rem; color: #6c7a89; display: block; }
+
+/* The armed banner. Keep and Put-it-back are pushed apart deliberately: one of them makes the change
+   survive a reboot, and it gets read on a page that may be stuttering at the time. */
+.sy-armed { margin: 0.6rem 0; padding: 0.7rem 0.8rem; border: 1px solid #6b4f1d; background: #1d1810; border-radius: 6px; }
+.sy-armed-head { font-size: 0.88rem; color: #e8c877; display: flex; gap: 0.4rem; align-items: center; }
+.sy-countdown { font-size: 0.8rem; color: #d9a441; margin-top: 0.3rem; font-variant-numeric: tabular-nums; }
+.sy-armed-keys { margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.1rem; }
+.sy-armed-key { font-size: 0.76rem; color: #9aa7b4; font-variant-numeric: tabular-nums; }
+.sy-armed-key-bad { color: #d97a6c; }
+.sy-armed-actions { margin-top: 0.6rem; display: flex; align-items: center; }
+.sy-armed-gap { flex: 1 1 auto; min-width: 2.5rem; }
+
+@media (max-width: 900px) {
+  .sy-row, .sy-row-wide { grid-template-columns: minmax(0, 1fr); }
+}

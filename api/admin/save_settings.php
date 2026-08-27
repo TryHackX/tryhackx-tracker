@@ -84,6 +84,11 @@ $allowed = [
     'fed_export_max_bytes', 'fed_export_max_files',
     'fed_import_batch_rows', 'fed_import_batch_bytes', 'fed_import_max_seconds', 'fed_worker_mem_mb',
     'fed_import_new', 'fed_import_mode', 'fed_pull_minutes',
+    // Kernel network buffers: the plumbing only. The eight VALUES are written by
+    // api/admin/sysctl_apply.php after the armed protocol, never by a form post, and there is
+    // deliberately no key here that could rewrite the record of what the machine looked like
+    // before the panel first touched it.
+    'sysctl_cmd', 'sysctl_enabled', 'sysctl_confirm_seconds',
 ];
 
 $data = [];
@@ -162,6 +167,10 @@ $intClamp = [
     // 0 on either budget switches that half off; the ceilings are only a guard against typos
     'api_rate_limit_per_min' => [0, 100000, 60],
     'ot_nice' => [-20, 19, -2], 'ot_cpu_weight' => [1, 10000, 100], 'ot_limit_nofile' => [1024, 1048576, 65536],
+    // Clamped here and rounded to whole minutes in sysctlConfirmSeconds(): the janitor is the
+    // coarsest watchdog and it ticks once a minute, so a 30-second promise it cannot keep would
+    // read as a guarantee to whoever is watching the countdown.
+    'sysctl_confirm_seconds' => [60, 900, 120],
     'fed_export_max_bytes' => [0, 1073741824, 8388608], 'fed_export_max_files' => [0, 50000000, 200000],
     'fed_import_batch_rows' => [25, 5000, 500], 'fed_import_batch_bytes' => [1048576, 268435456, 33554432],
     'fed_import_max_seconds' => [30, 21600, 600], 'fed_worker_mem_mb' => [64, 4096, 256],
@@ -191,10 +200,13 @@ if (isset($data['whitelist_tracker_hosts'])) {
     $data['whitelist_tracker_hosts'] = implode(', ', array_unique($clean));
 }
 if (isset($data['fed_import_mode'])) $data['fed_import_mode'] = $data['fed_import_mode'] === 'review' ? 'review' : 'fill';
+if (isset($data['sysctl_cmd']) && !sysctlValidCommand((string)$data['sysctl_cmd'])) {
+    jsonResponse(['error' => 'The kernel-buffer helper command may only contain letters, digits, spaces and _ . / -'], 400);
+}
 foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
           'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist',
-          'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new',
+          'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled',
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'backup_enabled', 'backup_verify_after'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
