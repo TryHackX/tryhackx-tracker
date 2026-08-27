@@ -21,9 +21,12 @@ All notable changes to this project are documented here. The format is loosely b
     a minute into the new `net_samples` table: arriving / served / dropped packets per second, plus the
     egress counters, plus the limit in force. The card charts them (1 h … 30 d, bucketed server-side)
     and — the point of the whole thing — turns them into a sentence: *"median 22 000 pps, P95 38 000
-    pps, peak 61 000 pps → suggested limit 40 000 pps (P95 + 5 %); below roughly 24 000 pps you start
-    dropping traffic you normally serve."* The same three values are drawn as marks on the
-    (logarithmic) slider, so the number being chosen has context instead of being a guess.
+    pps, peak 61 000 pps. A limit at 40 000 pps (P95 + 5 %) would essentially never trigger; below
+    roughly 24 000 pps you start dropping packets that are currently arriving."* The same three values
+    are drawn as marks on the (logarithmic) slider, so the number being chosen has context instead of
+    being a guess. It refuses to pretend arrivals are demand: when nothing is dropping them (or
+    somebody else's rule is doing it downstream) it says so, because on a tracker whose old swarm keeps
+    calling, matching the measured peak would mean no limit at all.
   - **Non-invasive by construction.** Everything the panel writes is **one file**
     (`/etc/nftables.d/ottrack-in.nft`) in **its own table** (`inet ottrack_in`, hook `input`,
     `priority filter - 5`, `policy accept`). The distribution's `inet filter` table is never written

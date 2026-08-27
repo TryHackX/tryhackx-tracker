@@ -91,7 +91,13 @@ $out['last_tick_at'] = (int)($state['last_tick_at'] ?? 0);
 try {
     $days = max(1, min(30, (int)($_GET['days'] ?? 7)));
     $rec = netlimitRecommend($db, $cfg, $days, $now);
-    $rec['text'] = netlimitRecommendText($rec);
+    // "Flood" = the arrivals are far above what anything is letting through, either because the
+    // counting mode drops nothing or because somebody else's rule is doing the dropping downstream.
+    // In that state the measured peak is the swarm, not demand, and the wording has to say so.
+    $fw = $out['firewall'] ?? [];
+    $flood = is_array($fw) && (($fw['mode'] ?? '') === 'count' || !empty($fw['manual_rules']));
+    $rec['text'] = netlimitRecommendText($rec, $flood);
+    $rec['flood'] = $flood;
     $out['recommend'] = $rec;
 } catch (\Throwable $e) {
     $out['recommend'] = null;

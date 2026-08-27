@@ -812,8 +812,16 @@ sudo nft delete table inet ottrack_in && sudo rm /etc/nftables.d/ottrack-in.nft
 out. Turn the **traffic monitor** on and the janitor samples the nftables counters once a minute into
 `net_samples` (three series: arriving / served / dropped, plus the egress counters). After an hour or
 two the card draws them and annotates the slider with the **median, P95 and peak** of the last week,
-and says in words: *"median 22 000 pps, P95 38 000 pps, peak 61 000 pps → suggested limit 40 000 pps
-(P95 + 5 %); below roughly 24 000 pps you start dropping traffic you normally serve."*
+and says in words: *"median 22 000 pps, P95 38 000 pps, peak 61 000 pps. A limit at 40 000 pps
+(P95 + 5 %) would essentially never trigger; below roughly 24 000 pps you start dropping packets that
+are currently arriving."*
+
+It is careful about one thing in particular: on a tracker whose old swarm keeps calling, those
+arrivals are **not** demand — measured here, 52 000–168 000 pps arrive while the tracker serves a
+fraction of it — so matching the peak would mean no limit at all. When the panel can see that (nothing
+is being dropped by us, or another rule is dropping downstream) it says so and reframes the choice as
+what you are *willing to hand* OpenTracker, since packets above that cost nothing: the firewall drops
+them before the tracker sees them.
 
 Those counters live **in the firewall**, so measuring needs a table loaded — with none, every sample
 would be a zero and the suggestion would be meaningless. That is what **"Start counting"** is for: it

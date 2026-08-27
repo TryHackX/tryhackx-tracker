@@ -100,9 +100,17 @@ check('recommendation: 100 samples is enough', $rec['enough'] === true);
 check('recommendation: 59 samples is not enough', netlimitRecommendFrom(array_fill(0, 59, 1000))['enough'] === false);
 $rec['days'] = 7;
 $text = netlimitRecommendText($rec);
-check('recommendation text names the suggestion', str_contains($text, '40,000') && str_contains($text, 'Suggested'), $text);
+check('recommendation text names the numbers', str_contains($text, '40,000') && str_contains($text, 'never trigger'), $text);
+check('recommendation text says what the floor costs', str_contains($text, '24,000') && str_contains($text, 'currently arriving'), $text);
 check('recommendation text without samples explains why', str_contains(netlimitRecommendText(netlimitRecommendFrom([])), 'No traffic has been recorded'));
 check('recommendation text warns when there is too little data', str_contains(netlimitRecommendText(netlimitRecommendFrom(array_fill(0, 10, 5000)) + ['days' => 7]), 'first impression'));
+// On a tracker whose stale swarm keeps calling, P95 of ARRIVALS is the flood, not demand — telling
+// the admin to match it would mean "no limit at all", so that case has to say so out loud.
+$flood = netlimitRecommendText($rec, true);
+check('flood mode warns that arrivals are not demand', str_contains($flood, 'ARRIVALS, not demand'), $flood);
+check('flood mode reframes the decision', str_contains($flood, 'willing to hand OpenTracker'));
+check('flood mode says why dropping is free', str_contains($flood, 'before the') && str_contains($flood, 'ever sees them'));
+check('normal mode does not carry the flood warning', !str_contains($text, 'ARRIVALS, not demand'));
 
 // ── 5. bucketing ─────────────────────────────────────────────────────────────
 check('bucket: 24 h of 60 s samples stays raw', netlimitBucketFor(86400, 60) === 0);
