@@ -23,7 +23,8 @@
  * from them, so the admin sets a threshold from measurements instead of guessing.
  *
  * Settings (schema v11, Settings → "UDP traffic & rate limit", group `tracker`):
- *   net_monitor_enabled  0/1   record the PPS series (works with or without a limit in force)
+ *   net_monitor_enabled  0/1   record the PPS series (the counters need a table loaded — either the
+ *                              limit itself, or the counting-only ruleset the panel can load instead)
  *   net_sample_seconds   60    seconds between samples (30–600)
  *   net_keep_days        14    retention of net_samples
  *   net_limit_enabled    0/1   is the ingress limit supposed to be loaded
@@ -428,6 +429,37 @@ function netlimitApply(array $cfg, int $pps, int $burst, int $port, bool $dryRun
         });
     } elseif (!$r['ok']) {
         $err = $r['error'] ?? 'apply failed';
+        netlimitStateUpdate(function (array &$s) use ($err) { $s['last_error'] = $err; $s['last_error_at'] = time(); return true; });
+    }
+    return $r;
+}
+
+/**
+ * Load the COUNTING-ONLY ruleset: the same table and counters, no drop rule at all.
+ *
+ * This exists because the feature's whole promise — measure first, pick a threshold from what was
+ * measured — needs numbers before there is a limit, and the counters live in the firewall. With no
+ * table there is nothing to count, so switching the monitor on without this would record zeros and
+ * quietly make the recommendation meaningless.
+ */
+function netlimitApplyMonitor(array $cfg, ?int $port = null, bool $dryRun = false, string $source = 'admin'): array {
+    $port = netlimitClampInt($port ?? netlimitPort($cfg), 1, 65535, 6969);
+    $args = ['monitor', (string)$port];
+    if ($dryRun) $args[] = '--dry-run';
+    $r = netlimitRun($cfg, $args);
+    if ($r['ok'] && !$dryRun) {
+        netlimitStateUpdate(function (array &$s) use ($source) {
+            $s['last_apply_at'] = time();
+            $s['last_apply_pps'] = 0;
+            $s['last_apply_source'] = $source . ':count';
+            $s['status'] = null; $s['status_at'] = 0;
+            $s['live'] = ['ts' => 0, 'counters' => [], 'egress' => [], 'pps' => [], 'epps' => []];
+            $s['sample'] = ['ts' => 0, 'counters' => []];
+            $s['last_error'] = null;
+            return true;
+        });
+    } elseif (!$r['ok']) {
+        $err = $r['error'] ?? 'could not load the counters';
         netlimitStateUpdate(function (array &$s) use ($err) { $s['last_error'] = $err; $s['last_error_at'] = time(); return true; });
     }
     return $r;

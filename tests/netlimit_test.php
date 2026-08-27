@@ -324,6 +324,37 @@ STUB);
     check('helper: --brief keeps the egress budget', (int)($b['egress']['pps'] ?? 0) === 50000);
     check('helper: --brief skips the expensive scan', ($b['brief'] ?? null) === true && !array_key_exists('manual_rules', $b), json_encode(array_keys($b ?: [])));
 
+    // ── counting-only mode ──
+    // The counters live in the firewall, so "measure first, then pick a threshold" needs a table
+    // with no drop rule in it at all. Anything else would record zeros and make the suggestion a lie.
+    $r = $run('monitor 6969 --dry-run');
+    check('helper: monitor --dry-run renders a ruleset', ($r['json']['dry_run'] ?? null) === true && ($r['json']['mode'] ?? '') === 'count', $r['out']);
+    $mon = (string)($r['json']['ruleset'] ?? '');
+    // the header comment explains the intent in prose, so assert against the RULES only
+    $monRules = implode("
+", array_filter(explode("
+", $mon), fn($l) => !str_starts_with(ltrim($l), '#')));
+    check('helper: the counting ruleset has the three counters', str_contains($monRules, 'counter name in_total') && str_contains($monRules, 'counter name in_passed'));
+    check('helper: the counting ruleset contains NO drop at all', !str_contains($monRules, 'drop'), $monRules);
+    check('helper: … and no rate limit', !str_contains($monRules, 'limit rate'));
+    check('helper: it still only looks at the tracker port', str_contains($monRules, 'udp dport != 6969 accept') && str_contains($monRules, 'meta l4proto != udp accept'));
+    check('helper: it still accepts by default', str_contains($monRules, 'policy accept'));
+    check('helper: its header says it is a counter', str_contains($mon, 'mode=count') && str_contains($mon, 'pps=0'));
+
+    $r = $run('monitor 6969');
+    check('helper: monitor applies', ($r['json']['applied'] ?? null) === true && ($r['json']['mode'] ?? '') === 'count', $r['out']);
+    $r = $run('status');
+    check('helper: status reports the counting mode', ($r['json']['mode'] ?? '') === 'count', json_encode($r['json']['mode'] ?? null));
+    check('helper: counting mode reports no rate', (int)($r['json']['pps'] ?? -1) === 0, json_encode($r['json']['pps'] ?? null));
+    check('helper: counting mode still returns the counters', isset($r['json']['counters']['in_total']['packets']));
+    check('helper: an invalid port is refused for monitor too', $run('monitor 99999')['rc'] !== 0);
+
+    // back to a real limit, and the mode flips
+    $r = $run('set 40000 200 6969');
+    check('helper: going from counting to limiting reloads the table', ($r['json']['mode'] ?? '') === 'reload', (string)($r['json']['mode'] ?? ''));
+    $r = $run('status');
+    check('helper: status reports the limiting mode', ($r['json']['mode'] ?? '') === 'limit' && (int)($r['json']['pps'] ?? 0) === 40000, json_encode([$r['json']['mode'] ?? null, $r['json']['pps'] ?? null]));
+
     // Changing only the rate on a table that is already there must NOT rebuild it: the three counters
     // would restart and the monitor, which reads rates as differences, would lose a chart sample on
     // every automatic ±10 % move.

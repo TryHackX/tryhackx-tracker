@@ -18,7 +18,7 @@ requirePost();
 
 $input = readJsonBody();
 $op    = strtolower(trim((string)($input['op'] ?? 'apply')));
-$known = ['apply', 'off', 'panic', 'restore', 'egress', 'preview'];
+$known = ['apply', 'monitor', 'off', 'panic', 'restore', 'egress', 'preview'];
 if (!in_array($op, $known, true)) {
     jsonResponse(['error' => 'Unknown operation. Use one of: ' . implode(', ', $known) . '.'], 400);
 }
@@ -50,6 +50,18 @@ switch ($op) {
         jsonResponse(['success' => true, 'dry_run' => true, 'ruleset' => (string)($r['json']['ruleset'] ?? ''),
                       'pps' => (int)($r['json']['pps'] ?? $pps), 'burst' => (int)($r['json']['burst'] ?? $burst),
                       'port' => (int)($r['json']['port'] ?? $port), 'file' => (string)($r['json']['file'] ?? '')]);
+
+    case 'monitor':
+        // Counters with no drop rule: the chain accepts by default and contains no `drop`, so it
+        // cannot discard a packet. It is what makes "measure first" possible at all.
+        $r = netlimitApplyMonitor($cfg, $port, false, 'admin');
+        if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? 'Could not load the counters.', 'output' => $r['output']], 500);
+        setSettings($db, ['net_monitor_enabled' => '1', 'net_limit_enabled' => '0',
+                          'net_limit_port' => (string)netlimitClampInt($port, 1, 65535, 6969)]);
+        jsonResponse(['success' => true, 'mode' => 'count', 'applied' => $r['json'],
+                      'persistent' => !empty($r['json']['persistent']),
+                      'message' => 'Counting started on UDP port ' . (int)($r['json']['port'] ?? $port)
+                                   . '. Nothing is being dropped — come back in an hour or two for a suggested limit.']);
 
     case 'apply':
         $r = netlimitApply($cfg, $pps, $burst, $port, false, 'admin');

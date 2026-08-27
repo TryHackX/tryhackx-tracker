@@ -1155,7 +1155,11 @@
                             <option value="0" <?= ($cfg['net_monitor_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
                             <option value="1" <?= ($cfg['net_monitor_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On &mdash; record packets/second</option>
                         </select>
-                        <small class="settings-hint">Works with or without a limit in force. Turn it on <em>first</em>: the suggested threshold is computed from what was measured, not guessed.</small>
+                        <small class="settings-hint">
+                            Turn it on <em>first</em>: the suggested threshold is computed from what was measured, not guessed.
+                            The counters live in the firewall, so the Whitelist page offers <strong>Start counting</strong> &mdash; the same table with
+                            <strong>no drop rule at all</strong>, which measures without throttling anything.
+                        </small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Sample every <small class="settings-hint">(seconds)</small></label>

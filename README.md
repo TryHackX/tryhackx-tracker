@@ -788,7 +788,9 @@ echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-netlimit.sh' | sudo 
 sudo chmod 0440 /etc/sudoers.d/tracker-netlimit && sudo visudo -c -f /etc/sudoers.d/tracker-netlimit
 grep -q '/etc/nftables.d' /etc/nftables.conf \
   || echo 'include "/etc/nftables.d/*.nft"' | sudo tee -a /etc/nftables.conf   # so it survives a reboot
-sudo /usr/local/sbin/tracker-netlimit.sh check       # JSON verdict; the panel's Test button runs this
+sudo /usr/local/sbin/tracker-netlimit.sh check           # JSON verdict; the panel's Test button runs this
+sudo /usr/local/sbin/tracker-netlimit.sh monitor 6969    # counters only, drops nothing
+sudo /usr/local/sbin/tracker-netlimit.sh status | head -c 400
 ```
 
 Everything the panel writes lives in **one file** (`/etc/nftables.d/ottrack-in.nft`) inside **its own
@@ -808,12 +810,18 @@ out. Turn the **traffic monitor** on and the janitor samples the nftables counte
 `net_samples` (three series: arriving / served / dropped, plus the egress counters). After an hour or
 two the card draws them and annotates the slider with the **median, P95 and peak** of the last week,
 and says in words: *"median 22 000 pps, P95 38 000 pps, peak 61 000 pps → suggested limit 40 000 pps
-(P95 + 5 %); below roughly 24 000 pps you start dropping traffic you normally serve."* The monitor
-works with or without a limit in force, so you can measure first and decide afterwards.
+(P95 + 5 %); below roughly 24 000 pps you start dropping traffic you normally serve."*
+
+Those counters live **in the firewall**, so measuring needs a table loaded — with none, every sample
+would be a zero and the suggestion would be meaningless. That is what **"Start counting"** is for: it
+loads the same table with the three counters and **no drop rule at all** (the chain accepts by default
+and contains nothing that can discard a packet — a meter, not a valve). Measure with it for a day,
+then press **Apply limit** to add the rule. The card says which of the two is loaded at all times, and
+`tracker-netlimit.sh status` reports it as `"mode":"count"` or `"mode":"limit"`.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `net_monitor_enabled` | `0` | record packets/second into `net_samples` (needed for the chart and the suggestion) |
+| `net_monitor_enabled` | `0` | record packets/second into `net_samples` (needs a table loaded — "Start counting" or the limit itself) |
 | `net_sample_seconds` / `net_keep_days` | `60` / `14` | sampling interval and retention (~1 440 tiny rows a day) |
 | `net_limit_enabled` / `net_limit_pps` / `net_limit_burst` | `0` / `30000` / `100` | the throttle itself (1 000–1 000 000 pps) |
 | `net_limit_port` | `6969` | the only port the rule touches |

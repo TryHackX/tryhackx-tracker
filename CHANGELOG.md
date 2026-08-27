@@ -12,14 +12,18 @@ All notable changes to this project are documented here. The format is loosely b
   `tools/opentracker/egress-budget/` keeps the machine reachable; this is the other half of the same
   problem — the CPU the tracker burns answering a swarm whose torrents it will refuse anyway. A packet
   dropped by the firewall costs nothing at all.
-  - **Measure before you decide.** With the monitor on, the janitor samples the nftables counters once
+  - **Measure before you decide** — and the panel can measure *without throttling anything*. The
+    counters live in the firewall, so with no table of ours loaded every sample would be a zero;
+    **"Start counting"** loads the same table with the three counters and **no drop rule at all** (the
+    chain accepts by default and contains nothing that can discard a packet). Measure with it for a
+    day, then press Apply limit to add the rule. The card always says which of the two is in force.
+    With the monitor on, the janitor samples the nftables counters once
     a minute into the new `net_samples` table: arriving / served / dropped packets per second, plus the
     egress counters, plus the limit in force. The card charts them (1 h … 30 d, bucketed server-side)
     and — the point of the whole thing — turns them into a sentence: *"median 22 000 pps, P95 38 000
     pps, peak 61 000 pps → suggested limit 40 000 pps (P95 + 5 %); below roughly 24 000 pps you start
     dropping traffic you normally serve."* The same three values are drawn as marks on the
-    (logarithmic) slider, so the number being chosen has context instead of being a guess. The monitor
-    works with or without a limit loaded.
+    (logarithmic) slider, so the number being chosen has context instead of being a guess.
   - **Non-invasive by construction.** Everything the panel writes is **one file**
     (`/etc/nftables.d/ottrack-in.nft`) in **its own table** (`inet ottrack_in`, hook `input`,
     `priority filter - 5`, `policy accept`). The distribution's `inet filter` table is never written
@@ -46,7 +50,7 @@ All notable changes to this project are documented here. The format is loosely b
     flushed. It never installs or removes `ottrack.nft` — that stays a manual, documented step.
   - New: `includes/netlimit.php`, `tools/opentracker/tracker-netlimit.sh`, `assets/js/admin-netlimit.js`,
     `api/admin/net_status.php` / `net_samples.php` / `net_apply.php` / `net_test.php`,
-    `tests/netlimit_test.php` (152 checks, including the helper driven end to end against a stub `nft`).
+    `tests/netlimit_test.php` (172 checks, including the helper driven end to end against a stub `nft`).
   - Settings: `net_monitor_enabled`, `net_sample_seconds`, `net_keep_days`, `net_limit_enabled`,
     `net_limit_pps`, `net_limit_burst`, `net_limit_port`, `net_limit_cmd`, `net_auto_enabled`,
     `net_auto_min`, `net_auto_max`, `net_auto_target`, `net_auto_target_cpu`. **All off by default:**

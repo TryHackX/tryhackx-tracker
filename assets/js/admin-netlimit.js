@@ -135,6 +135,13 @@
         } else if (!fw.nft) {
             grid.appendChild(kv('Firewall', [badge('no nftables', 'wl-b-bad'), ' ',
                 el('span', { className: 'wl-small text-muted', text: 'nft is not installed — the limit cannot be loaded on this machine.' })]));
+        } else if (fw.table && fw.mode === 'count') {
+            // counters loaded, no drop rule: measuring, not throttling — say so unambiguously
+            const parts = [badge('counting only', 'wl-b-pending'), ' ',
+                el('span', { className: 'text-muted', text: 'port ' + fw.port + ' · nothing is dropped' }),
+                el('div', { className: 'wl-small text-muted', text: 'The rules in force contain no drop at all — they exist to measure. Pick a limit below once there are enough samples.' })];
+            if (!fw.persistent) parts.push(el('div', { className: 'wl-small text-warning', text: 'Loaded, but NOT persistent — it will be gone after a reboot. Run the availability test in Settings for the one line to add.' }));
+            grid.appendChild(kv('Inbound limit', parts));
         } else if (fw.table) {
             const parts = [badge(num(fw.pps) + ' pps', 'wl-b-ok'), ' ',
                 el('span', { className: 'text-muted', text: 'burst ' + num(fw.burst) + ' · port ' + fw.port })];
@@ -234,6 +241,18 @@
             box.appendChild(el('div', { className: 'nl-note nl-note-bad' }, [
                 el('i', { className: 'bi bi-exclamation-triangle' }),
                 el('span', { text: ' Last failure: ' + j.last_error + (j.last_error_at ? ' (' + fmtAgo(Math.floor(j.server_time - j.last_error_at)) + ' ago)' : '') }),
+            ]));
+        }
+        // The counters live in the firewall: with no table of ours there is nothing to count, so the
+        // monitor would quietly record zeros and the suggestion would be meaningless. Say that, and
+        // offer the one action that fixes it.
+        if (j.configured && j.configured.monitor && fw.nft && !fw.table && !j.error) {
+            box.appendChild(el('div', { className: 'nl-note nl-note-warn' }, [
+                el('div', {}, [el('i', { className: 'bi bi-exclamation-triangle' }),
+                    el('strong', { text: ' The monitor is on but nothing is being counted.' }),
+                    el('span', { text: ' The counters live in the firewall, and none of our rules are loaded — every sample would be zero. Load the counting-only rules: they contain no drop at all, so nothing is throttled.' })]),
+                el('button', { className: 'btn btn-sm btn-outline-info mt-2', type: 'button',
+                               onclick: () => ask('monitor') }, [el('i', { className: 'bi bi-activity' }), ' Start counting…']),
             ]));
         }
         if (j.configured && j.configured.monitor && j.last_tick_at && (j.server_time - j.last_tick_at) > 300) {
@@ -369,6 +388,16 @@
             undo: () => 'The janitor puts the previous setting back automatically after 15 minutes (and "Undo now" appears in the card meanwhile), so it cannot be forgotten.',
             undoCode: () => '',
         },
+        monitor: {
+            title: 'Start counting (nothing is dropped)',
+            ok: 'Start counting',
+            okClass: 'btn-outline-info',
+            text: () => 'Loads an nftables table with three counters on UDP port ' + state.port + ' and NO drop rule — '
+                      + 'the chain accepts by default and contains nothing that can discard a packet. It is a meter, not a valve. '
+                      + 'After an hour or two the slider below will carry the median, P95 and peak that were actually measured.',
+            undo: () => 'Undo: the "Remove limit" button — or on the server, ',
+            undoCode: () => 'sudo nft delete table inet ottrack_in && sudo rm /etc/nftables.d/ottrack-in.nft',
+        },
         restore: {
             title: 'Undo the emergency throttle',
             ok: 'Restore',
@@ -416,12 +445,13 @@
         alert.textContent = '';
         const body = { op: op, password: $('net-confirm-password').value };
         if (op === 'apply') { body.pps = state.pps; body.burst = state.burst; body.port = state.port; }
+        if (op === 'monitor') { body.port = state.port; }
         try {
             const r = await apiCall('admin/net_apply', 'POST', body);
             if (r.success) {
                 bootstrap.Modal.getOrCreateInstance($('netConfirmModal')).hide();
                 showToast(r.message || 'Done', 'success');
-                if (op === 'apply' && r.persistent === false) {
+                if ((op === 'apply' || op === 'monitor') && r.persistent === false) {
                     showToast('The rule is live but will not survive a reboot — see the availability test in Settings.', 'warning');
                 }
                 state.pending = null;
