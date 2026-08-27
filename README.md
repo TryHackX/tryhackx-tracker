@@ -864,12 +864,12 @@ it never installs or removes `ottrack.nft` — that stays a manual, documented s
 **Admin → Backups** (`?action=admin-backups`) makes, schedules, rotates, verifies, downloads and
 restores archives; **Settings → Backups** holds the policy. Everything is off by default.
 
-The panel is not a backup program. `Backup-serwera.sh` — the server toolkit that lives outside this
-repo — already is one, with granular items (`tracker-db`, `tracker-db-lekka`, `tracker-config`,
+This backs up **the tracker**, and by default that means its database. Where `Backup-serwera.sh` —
+the server toolkit that lives outside this repo — is installed, the panel **steers that instead of
+duplicating it** through one root helper, so the machine has one backup program and not two, and the
+profiles gain its granular items (`tracker-db`, `tracker-db-lekka`, `tracker-config`,
 `tracker-listy`, `tracker-opentracker`, `tracker-worker`, `tracker-janitor`, `tracker-siec`,
-`tracker-sudoers`, …), a `MANIFEST.txt` and a `SUMY.sha256`, and it knows about every service on the
-box rather than just the tracker. The panel **steers** it through one root helper, so this machine
-has one backup program and not two:
+`tracker-sudoers`, …) together with its `MANIFEST.txt` and `SUMY.sha256`:
 
 ```bash
 sudo install -m 0755 tools/opentracker/tracker-backup.sh /usr/local/sbin/tracker-backup.sh
@@ -879,8 +879,10 @@ sudo install -d -m 0700 /var/backups/tracker
 sudo /usr/local/sbin/tracker-backup.sh check /var/backups/tracker   # JSON verdict; the Test button runs this
 ```
 
-Where the toolkit is not installed the helper falls back to `mariadb-dump` of the tracker database
-alone, and the page says so in as many words — **a database dump is not a backup of a server.**
+Where the toolkit is not installed the helper dumps the tracker database with `mariadb-dump`
+instead. That is a **scope, not a fallback**: backing up a whole machine — mail, the forum,
+certificates — is a different job for a different tool, and this page does not try to be it. The card
+says what an archive covers and leaves it there.
 
 **Nothing heavy runs inside a web request.** "Back up now" starts the real work detached
 (`systemd-run` with `Nice=` and idle I/O priority where available, a background job otherwise) and

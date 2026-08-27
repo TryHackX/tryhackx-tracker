@@ -1281,10 +1281,12 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
             <div class="settings-section" id="section-backups" data-group="maintenance" data-title="Backups">
                 <h5>Backups</h5>
                 <p class="settings-hint mb-2">
-                    The panel does not back anything up itself — it drives <code>Backup-serwera.sh</code> (the server toolkit) through the
-                    root helper <code>tools/opentracker/tracker-backup.sh</code>, so there is one backup program on this machine, not two.
-                    Where that toolkit is missing, the panel falls back to a plain dump of the tracker database and says so: a database dump
-                    is not a backup of a server. Browse, verify, download and restore archives on the
+                    This backs up <strong>the tracker</strong>. Backing up the whole machine — mail, the forum, certificates — is a separate
+                    job for the server toolkit, and the panel does not try to be it.
+                    By default it dumps the tracker database with <code>mariadb-dump</code>. If <code>Backup-serwera.sh</code> is installed here,
+                    the panel drives <em>that</em> instead, through the root helper <code>tools/opentracker/tracker-backup.sh</code> — so there is one
+                    backup program on this machine, not two — and the profiles below gain its configuration, list, unit and firewall items.
+                    Browse, verify, download and restore archives on the
                     <a href="<?= $baseUrl ?>?action=admin-backups">Backups page</a>; this section is the policy.
                     <br>
                     Nothing heavy ever runs in a web request: a backup is started detached and reports back through a state file the page polls.

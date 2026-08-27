@@ -36,7 +36,8 @@ if (empty($result['local'])) {
         $result['suggestions'][] = 'sudo apt install mariadb-client   (built-in mode: the tracker database only)';
         $result['suggestions'][] = 'or install the server toolkit: sudo install -m 0755 Backup-serwera.sh /usr/local/sbin/';
     } elseif (empty($check['script'])) {
-        $result['suggestions'][] = 'Backup-serwera.sh was not found at ' . (string)($check['script_path'] ?? '') . ', so the panel falls back to a plain dump of the tracker database. That is not a backup of the server — install the toolkit for the full set of items.';
+        // Whole-server backups are a different job for a different tool. State the scope; do not nag.
+        $result['suggestions'][] = 'This will back up the tracker database. Backup-serwera.sh is not installed here, so the configuration files, lists and units are not included — if you put the toolkit at ' . (string)($check['script_path'] ?? '') . ', this page will use it and offer its items too.';
     }
     if (empty($check['gpg']) && backupGpgRecipient($cfg) !== '') {
         $result['suggestions'][] = 'A GPG recipient is configured but gpg is not installed — archives would be written unencrypted.';

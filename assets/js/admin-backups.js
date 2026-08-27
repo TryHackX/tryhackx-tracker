@@ -3,8 +3,11 @@
  *
  * The page has one job beyond listing files: make it obvious whether the backups an admin *thinks*
  * they have actually exist and are readable. So every row carries its integrity state, the status
- * card says in words what the machine can and cannot do (no toolkit → built-in mode, no dump client
- * → nothing at all), and a run streams its own log while it happens instead of spinning silently.
+ * card says in plain words what each archive covers, and a run streams its own log while it happens
+ * instead of spinning silently.
+ *
+ * "Database only" is a scope, not a failure: backing up a whole server is a different job for a
+ * different tool. The card states what it covers and leaves it at that.
  *
  * Everything that changes something goes through one password modal and one endpoint
  * (admin/backup_action). Restoring the database additionally makes a person type the database name,
@@ -77,13 +80,15 @@
             grid.appendChild(kv('Backups', [badge('unavailable', 'wl-b-bad'), ' ',
                 el('span', { className: 'wl-small text-muted', text: j.error })]));
         } else if (chk.mode === 'script') {
-            grid.appendChild(kv('Mode', [badge('full', 'wl-b-ok'), ' ',
-                el('span', { className: 'text-muted', text: 'Backup-serwera.sh' }),
+            grid.appendChild(kv('Covers', [badge('database + files', 'wl-b-ok'), ' ',
+                el('span', { className: 'text-muted', text: 'via Backup-serwera.sh' }),
                 el('div', { className: 'wl-small text-muted', text: 'Database, configuration, lists, units and firewall rules — whatever the profile asks for.' })]));
         } else if (chk.mariadb_dump) {
-            grid.appendChild(kv('Mode', [badge('built-in', 'wl-b-warn'), ' ',
-                el('span', { className: 'text-muted', text: 'database dump only' }),
-                el('div', { className: 'wl-small text-warning', text: 'Backup-serwera.sh was not found, so only the tracker database is dumped. That is not a backup of the server.' })]));
+            // Not a degraded state: backing up the whole server is a different job, done by a
+            // different tool. Say what this covers, and do not nag about what it deliberately is not.
+            grid.appendChild(kv('Covers', [badge('database only', 'wl-b-ok'), ' ',
+                el('span', { className: 'text-muted', text: 'the tracker database' }),
+                el('div', { className: 'wl-small text-muted', text: 'Whole-server backups — mail, the forum, certificates — are a separate job. If Backup-serwera.sh is installed here, this page will use it and offer its items too.' })]));
         } else {
             grid.appendChild(kv('Mode', [badge('nothing available', 'wl-b-bad'),
                 el('div', { className: 'wl-small text-muted', text: (chk.error || 'No dump client and no toolkit on this machine.') })]));

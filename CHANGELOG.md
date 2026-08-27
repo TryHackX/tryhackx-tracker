@@ -61,11 +61,11 @@ All notable changes to this project are documented here. The format is loosely b
 
 - **Backups from the panel** — a new page (**Admin → Backups**, `?action=admin-backups`) and a
   Settings section, driven by a second root helper `tools/opentracker/tracker-backup.sh`.
-  - **It does not back anything up itself.** `Backup-serwera.sh` (the server toolkit) already does,
-    with granular items, a MANIFEST and SUMY.sha256 — the panel *steers* it, so there is one backup
-    program on the machine rather than two. Where the toolkit is absent there is a built-in fallback
-    that dumps the tracker database and says so in as many words: a database dump is not a backup of
-    a server.
+  - **It backs up the tracker, not the machine.** By default that means the tracker database, via
+    `mariadb-dump`. Where `Backup-serwera.sh` (the server toolkit) is installed, the panel *steers
+    that* rather than duplicating it — one backup program on the machine, not two — and the profiles
+    gain its configuration, list, unit and firewall items. Whole-server backups stay that tool's job;
+    the page states what an archive covers instead of nagging about what it is not.
   - **Nothing heavy in a web request**: a run is started detached (systemd-run when available, with
     `Nice=` and idle I/O priority) and reports through a JSON state file the page polls — including
     the live log tail, so a backup shows what it is doing instead of spinning silently. A worker that

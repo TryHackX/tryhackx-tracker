@@ -140,7 +140,27 @@ foreach (['../etc/passwd', 'backup-tryhackx-1/../x', '', '.', 'random-file', 'ba
 check('bytes render', backupFormatBytes(0) === '0 B' && backupFormatBytes(1536) === '1.5 KB' && backupFormatBytes(2147483648) === '2 GB',
       backupFormatBytes(1536) . ' / ' . backupFormatBytes(2147483648));
 
-// ── 8. the helper, end to end ────────────────────────────────────────────────
+// ── 8. the database (needed by the schedule test below) ─────────────────────
+// Needs the local test database (deploy/local_bootstrap.php); everything that uses it is skipped
+// with a visible line otherwise, so the pure half above still runs on a bare checkout.
+$db = null; $cfgDb = [];
+if (is_file($root . '/config/database.php')) {
+    require_once $root . '/config/database.php';
+    require_once $root . '/includes/settings.php';
+    require_once $root . '/includes/schema.php';
+    try {
+        $db = getDb();
+        $cfgDb = getSettings($db);
+        ensureSchema($db, $cfgDb);
+    } catch (\Throwable $e) {
+        $db = null;
+        skip('storage + schedule against the database', 'no test database: ' . $e->getMessage());
+    }
+} else {
+    skip('storage + schedule against the database', 'config/database.php missing — run deploy/local_bootstrap.php first');
+}
+
+// ── 9. the helper, end to end ────────────────────────────────────────────────
 $helper = $root . '/tools/opentracker/tracker-backup.sh';
 check('helper script is in the repo', is_file($helper));
 
@@ -224,6 +244,29 @@ STUB);
     file_put_contents($tmp . '/bin/mariadb', "#!/bin/bash\nfor a in \"\$@\"; do case \"\$a\" in -e) exit 0 ;; esac; done\ncat > \"\$IMPORTED_TO\"\nexit 0\n");
     // the helper refuses to touch anything unless it is root, which no test runner is
     file_put_contents($tmp . '/bin/id', "#!/bin/bash\n[ \"\$1\" = \"-u\" ] && { echo 0; exit 0; }\nexec /usr/bin/id \"\$@\"\n");
+
+    // A wrapper the PANEL can call the way it calls the real helper: a bare command name found on
+    // PATH, made only of characters backupValidCommand() accepts. Without it the schedule could only
+    // be exercised against a command that fails, which proves nothing about a backup actually running.
+    $isWin = DIRECTORY_SEPARATOR === '\\';
+    $wrapperName = $isWin ? 'bktest.cmd' : 'bktest';
+    $envLines = "export BACKUP_ALLOW_ANY_DIR=1\n"
+        . 'export BACKUP_SCRIPT=' . escapeshellarg($posix($tmp . '/bin/Backup-serwera.sh')) . "\n"
+        . 'export MARIADB_DUMP_BIN=' . escapeshellarg($posix($tmp . '/bin/mariadb-dump')) . "\n"
+        . 'export MARIADB_BIN=' . escapeshellarg($posix($tmp . '/bin/mariadb')) . "\n"
+        . 'export IMPORTED_TO=' . escapeshellarg($posix($tmp . '/imported.sql')) . "\n"
+        . 'export DUMPARGS_TO=' . escapeshellarg($posix($tmp . '/dumpargs.txt')) . "\n"
+        . 'export PATH=' . escapeshellarg($posix($tmp . '/bin')) . ':$PATH' . "\n"
+        . 'exec bash ' . escapeshellarg($posix($helper)) . ' "$@"' . "\n";
+    file_put_contents($tmp . '/bin/bktest.sh', "#!/bin/bash\n" . $envLines);
+    @chmod($tmp . '/bin/bktest.sh', 0755);
+    if ($isWin) {
+        file_put_contents($tmp . '/bin/' . $wrapperName,
+            "@echo off\r\n\"" . $bash . "\" \"" . $posix($tmp . '/bin/bktest.sh') . "\" %*\r\n");
+    } else {
+        copy($tmp . '/bin/bktest.sh', $tmp . '/bin/' . $wrapperName);
+    }
+    @chmod($tmp . '/bin/' . $wrapperName, 0755);
     foreach (['Backup-serwera.sh', 'mariadb-dump', 'mariadb', 'id'] as $f) @chmod($tmp . '/bin/' . $f, 0755);
 
     $dir = $posix($tmp . '/dir');
@@ -456,6 +499,93 @@ STUB);
     $r = $run('delete ' . $q($dir) . ' ' . $q((string)$st4['id']));
     check('helper: delete removes the archive', ($r['json']['deleted'] ?? '') === (string)$st4['id'], $r['out']);
     check('helper: … and its sidecar', !is_file($tmp . '/dir/' . $st4['id'] . '.meta.json'));
+
+    // ── the schedule, end to end ──
+    // Everything above proves the helper works when something asks it to run. This proves the thing
+    // that actually asks: the janitor tick, deciding from the weekly plan, starting a real backup,
+    // and — the part that matters on a timer firing every minute — NOT starting a second one for the
+    // same slot.
+    if ($db === null) {
+        skip('schedule: janitor tick fires a real backup', 'no test database');
+    } else {
+        $keep = getSettings($db, true);
+        $saved = [];
+        foreach (['backup_enabled', 'backup_dir', 'backup_cmd', 'backup_script_path', 'backup_profile',
+                  'backup_schedule', 'backup_schedule_tz', 'backup_keep', 'backup_keep_days',
+                  'backup_max_size_gb', 'backup_verify_after', 'backup_db_name'] as $k) $saved[$k] = $keep[$k] ?? '';
+
+        // Wednesday 2026-09-02, backups at 04:00 UTC
+        $planTest = json_encode(['days' => ['wed'], 'time' => '04:00']);
+        setSettings($db, [
+            'backup_enabled' => '1', 'backup_dir' => $posix($tmp . '/dir'), 'backup_cmd' => $wrapperName,
+            'backup_script_path' => '', 'backup_profile' => 'tracker-lekki', 'backup_schedule' => $planTest,
+            'backup_schedule_tz' => 'UTC', 'backup_keep' => '0', 'backup_keep_days' => '0',
+            'backup_max_size_gb' => '0', 'backup_verify_after' => '1', 'backup_db_name' => 'tracker',
+        ]);
+        $cfgS2 = getSettings($db, true);
+        $stateBk = is_file(backupStateFile()) ? file_get_contents(backupStateFile()) : null;
+        @unlink(backupStateFile());
+        foreach (glob($tmp . '/dir/*') ?: [] as $f) @unlink($f);
+
+        $wed0400 = (new DateTimeImmutable('2026-09-02 04:00:20', new DateTimeZone('UTC')))->getTimestamp();
+        $wed0359 = (new DateTimeImmutable('2026-09-02 03:59:00', new DateTimeZone('UTC')))->getTimestamp();
+        $thu0400 = (new DateTimeImmutable('2026-09-03 04:00:20', new DateTimeZone('UTC')))->getTimestamp();
+        $wed2next = (new DateTimeImmutable('2026-09-09 04:00:20', new DateTimeZone('UTC')))->getTimestamp();
+
+        // the panel can reach the wrapper at all — otherwise every check below would pass vacuously
+        $probe = backupRun($cfgS2, ['check', $posix($tmp . '/dir')]);
+        check('schedule: the panel can run the helper through its configured command', $probe['ok'] === true,
+              (string)($probe['error'] ?? '') . ' | ' . substr($probe['output'], 0, 160));
+
+        if (!$probe['ok']) {
+            skip('schedule: janitor tick fires a real backup', 'the wrapper is not reachable on this machine');
+        } else {
+            $t = backupTick($db, $cfgS2, $wed0359);
+            check('schedule: a minute before the slot, nothing runs', $t['started'] === false && $t['skipped'] === 'not due', json_encode($t));
+
+            $t = backupTick($db, $cfgS2, $wed0400);
+            check('schedule: at the slot the janitor starts a backup', $t['started'] === true && !empty($t['id']), json_encode($t));
+            $st = $waitDone($posix($tmp . '/dir'), time() - 5);
+            check('schedule: … and it really finishes', ($st['state'] ?? '') === 'done', json_encode($st));
+            check('schedule: … producing an archive', !empty($st['archive']) && is_file($native((string)$st['archive'])), (string)($st['archive'] ?? ''));
+            check('schedule: … with the configured profile', ($st['profile'] ?? '') === 'tracker-lekki', (string)($st['profile'] ?? ''));
+            $after = $run('list ' . $q($posix($tmp . '/dir')));
+            check('schedule: exactly one archive so far', count($after['json']['archives'] ?? []) === 1, json_encode(array_column($after['json']['archives'] ?? [], 'id')));
+
+            // The janitor runs every minute. This is the check that matters.
+            $t = backupTick($db, $cfgS2, $wed0400 + 60);
+            check('schedule: a minute later it does NOT run again', $t['started'] === false && $t['skipped'] === 'not due', json_encode($t));
+            $t = backupTick($db, $cfgS2, $wed0400 + 3600);
+            check('schedule: nor an hour later in the same slot', $t['started'] === false, json_encode($t));
+            $t = backupTick($db, $cfgS2, $thu0400);
+            check('schedule: nor on a day the plan does not name', $t['started'] === false, json_encode($t));
+            $after = $run('list ' . $q($posix($tmp . '/dir')));
+            check('schedule: still exactly one archive', count($after['json']['archives'] ?? []) === 1, json_encode(array_column($after['json']['archives'] ?? [], 'id')));
+
+            // next week's slot fires again
+            $t = backupTick($db, $cfgS2, $wed2next);
+            check('schedule: next week it runs again', $t['started'] === true, json_encode($t));
+            $st = $waitDone($posix($tmp . '/dir'), time() - 5);
+            check('schedule: … and that one finishes too', ($st['state'] ?? '') === 'done', json_encode($st));
+            $after = $run('list ' . $q($posix($tmp . '/dir')));
+            check('schedule: now two archives', count($after['json']['archives'] ?? []) === 2, json_encode(array_column($after['json']['archives'] ?? [], 'id')));
+
+            // switching backups off stops the timer dead, whatever the plan says
+            setSettings($db, ['backup_enabled' => '0']);
+            $t = backupTick($db, getSettings($db, true), $wed2next + 7 * 86400);
+            check('schedule: with backups off the tick is inert', $t['enabled'] === false && $t['started'] === false, json_encode($t));
+
+            // an empty plan is not an error, it just never fires
+            setSettings($db, ['backup_enabled' => '1', 'backup_schedule' => '']);
+            $t = backupTick($db, getSettings($db, true), $wed2next + 7 * 86400);
+            check('schedule: an empty plan never fires', $t['started'] === false && $t['skipped'] === 'no schedule', json_encode($t));
+        }
+
+        setSettings($db, $saved);
+        getSettings($db, true);
+        @unlink(backupStateFile());
+        if ($stateBk !== null) file_put_contents(backupStateFile(), $stateBk);
+    }
 
     // clean up
     foreach (glob($tmp . '/dir/*') ?: [] as $f) @unlink($f);

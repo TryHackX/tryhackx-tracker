@@ -2,10 +2,10 @@
 /**
  * Database / configuration backups, driven from the admin panel.
  *
- * The panel does not back anything up itself. `Backup-serwera.sh` (the server toolkit that lives
- * outside this repo) already does, with granular items, a MANIFEST and SUMY.sha256, and it knows
- * about every service on the box — not just the tracker. This module *steers* it through one narrow
- * root helper, `tools/opentracker/tracker-backup.sh`:
+ * This backs up THE TRACKER, and by default that means its database. Where `Backup-serwera.sh` (the
+ * server toolkit that lives outside this repo) is installed, this module *steers that* rather than
+ * duplicating it — it already has granular items, a MANIFEST and SUMY.sha256, and it knows about
+ * every service on the box — through one narrow root helper, `tools/opentracker/tracker-backup.sh`:
  *
  *     panel (PHP)  →  sudo -n /usr/local/sbin/tracker-backup.sh <action> …
  *                        →  Backup-serwera.sh --backup --items … --out …
@@ -15,8 +15,9 @@
  * when available, a background job otherwise) and returns immediately. Progress is a JSON state file
  * the helper writes and the panel polls, exactly like the whitelist status card.
  *
- * Where the toolkit is absent there is a built-in fallback that dumps the tracker database and
- * nothing else. It is announced as such in the UI — a database dump is not a backup of the server.
+ * Where the toolkit is absent the module dumps the tracker database with mariadb-dump instead. That
+ * is a legitimate scope, not a degraded one: backing up a whole machine is a different job for a
+ * different tool. The UI states what an archive covers and does not nag about what it is not.
  *
  * Two guards worth knowing about, because they shape the UI:
  *   · Backup-serwera.sh refuses to overwrite a database unless somebody types its name at a
@@ -77,7 +78,7 @@ function backupTimezone(array $cfg): string {
     return ($tz !== '' && in_array($tz, timezone_identifiers_list(), true)) ? $tz : 'Europe/Warsaw';
 }
 
-/** The database the built-in fallback dumps and the restore action targets. */
+/** The database that gets dumped without the toolkit, and that a restore targets. */
 function backupDbName(array $cfg): string {
     $db = trim((string)($cfg['backup_db_name'] ?? ''));
     return preg_match('/^[A-Za-z0-9_]{1,64}$/', $db) ? $db : 'tracker';
