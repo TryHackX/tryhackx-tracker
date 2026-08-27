@@ -778,7 +778,7 @@ torrent keeps sending `connect` + `announce` (measured on tryhackx.org: **90–2
 
 The egress budget above protects the *machine*. The other half of the same problem is the **CPU** the
 tracker burns answering a swarm it will refuse anyway — and a packet dropped by the firewall costs
-nothing at all. **Admin → Whitelist → UDP traffic** measures both and can set the inbound limit,
+nothing at all. **Admin → Traffic → UDP traffic** measures both and can set the inbound limit,
 **Settings → Tracker & whitelist → UDP traffic & rate limit** configures it. Off by default: a fresh
 install never calls the helper, never writes a firewall rule and renders no extra card.
 
@@ -960,7 +960,7 @@ collides with a public page falls back to `admin`), and decides what a signed-ou
 | `404` | a site-styled **404 Not Found** page with a 404 status |
 
 Once signed in, the panel keeps its classic addresses (`?action=admin`, `?action=settings`,
-`?action=admin-index`, `?action=admin-users`, `?action=admin-whitelist`), so bookmarks, in-panel links
+`?action=admin-index`, `?action=admin-traffic`, `?action=admin-users`, `?action=admin-whitelist`), so bookmarks, in-panel links
 and the **Logout** button keep working; the sign-in address itself just redirects to the dashboard.
 
 What this does and does not buy you: it keeps crawlers and drive-by bots away from the form, and while
@@ -1066,6 +1066,7 @@ tracker/
 │   │   ├── admin-index.js     # Observed-hash index page (?action=admin-index)
 │   │   ├── admin-netlimit.js  # UDP traffic card: live counters, chart, throttle slider
 │   │   ├── admin-backups.js   # Backups page: run/verify/restore/download, live progress
+│   │   ├── admin-traffic.js   # Traffic page (?action=admin-traffic) — page furniture only
 │   │   └── stats-timeline.js  # Swarm timeline chart (public stats page + admin whitelist page)
 │   ├── vendor/uplot/          # uPlot (MIT) — vendored, no CDN
 │   └── img/

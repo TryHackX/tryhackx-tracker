@@ -4,6 +4,48 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.11.1] — 2026-08-27
+
+### Fixed
+- **The UDP traffic card could sit on "Reading the firewall…" for ever.** Three separate paths led
+  there and none of them could recover. The poll discarded any answer that arrived after a newer
+  request had *started* — so with a status call slower than the five-second poll, every single answer
+  was thrown away and the card never painted although the server was replying normally. A rejected
+  fetch returned silently, leaving the loading state with nothing on screen to say anything had gone
+  wrong. And a request that never settles ran neither branch at all. Now: one request in flight at a
+  time, the repaint guard compares against what is actually **on screen**, failures render an
+  explanation with a **Try again** button, and a 15-second watchdog replaces the loading state when
+  nothing comes back. Opening the page also stopped firing two identical status requests at once.
+- **A limit applied from the panel was live but never saved.** `/etc` is mounted read-only inside
+  php-fpm's mount namespace (systemd `ProtectSystem=full`) — for root too, because it is a namespace
+  and not a permission bit — so the rule reached the kernel and the file that restores it after a
+  reboot did not. Worse, the card still reported it as persistent, because `persistent` only meant
+  "a file exists": on the production box the loaded ruleset was a 40 000 pps limit while the saved
+  copy was the old counting-only one. `persistent` now means *what is loaded will still be here after
+  a reboot* and compares the file with the live table; a save the web server cannot perform is
+  reported as deferred rather than as a failed apply, and the janitor — an ordinary unit without that
+  sandbox — finishes it within a minute through the helper's new `persist` action. The availability
+  test says so up front.
+- Read-only admin pollers release the PHP session lock (`session_write_close()`) once past the auth
+  check. They only read, and holding the lock made every poll on a page queue behind the slowest one.
+
+### Changed
+- **New panel page: Traffic** (`?action=admin-traffic`). The swarm timeline and the UDP traffic card
+  moved there from Whitelist and Index. Every chart in the panel is now in one place, and neither
+  list page loads uPlot any more.
+- **The navigation bar shows every page on every page**, current one included and marked active. Each
+  template used to carry its own hand-edited copy of the bar with its own entry deleted, so the bar
+  changed shape from page to page and nothing told you where you were. It now comes from one list
+  (`adminNavItems()`) through one partial (`templates/admin/_header_actions.php`).
+- **Sorting waits 900 ms instead of 450 ms** before it fetches — long enough to pick a column *and*
+  its direction, since the direction cycles through three states. The tabs that had no delay at all
+  (Banned, API bans, and the whole dashboard) now use the same wait.
+- The backups table's row buttons use the panel's standard action-button class, so they are spaced
+  and sized like every other table instead of being glued edge to edge.
+- The inbound-limit slider is drawn in the panel's own palette instead of Bootstrap's light default,
+  and carries a **logarithmic ruler** (1k / 10k / 100k / 1M with minor ticks), so a value can be read
+  off the track rather than guessed.
+
 ## [1.11.0] — 2026-08-27 (schema v11)
 
 ### Added
