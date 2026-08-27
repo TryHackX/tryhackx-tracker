@@ -19,6 +19,7 @@
                 <a href="<?= $baseUrl ?>?action=admin" class="btn btn-sm btn-outline-info"><i class="bi bi-flag"></i> Reports</a>
                 <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
                 <a href="<?= $baseUrl ?>?action=admin-users" class="btn btn-sm btn-outline-info"><i class="bi bi-people"></i> Users</a>
+                <a href="<?= $baseUrl ?>?action=admin-backups" class="btn btn-sm btn-outline-info"><i class="bi bi-archive"></i> Backups</a>
                 <a href="<?= $baseUrl ?>?action=settings#section-index" class="btn btn-sm btn-outline-info"><i class="bi bi-gear"></i> Settings</a>
                 <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
             </div>

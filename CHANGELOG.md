@@ -52,6 +52,42 @@ All notable changes to this project are documented here. The format is loosely b
     `net_auto_min`, `net_auto_max`, `net_auto_target`, `net_auto_target_cpu`. **All off by default:**
     a fresh install never calls the helper, never writes a firewall rule and renders no extra card.
 
+- **Backups from the panel** — a new page (**Admin → Backups**, `?action=admin-backups`) and a
+  Settings section, driven by a second root helper `tools/opentracker/tracker-backup.sh`.
+  - **It does not back anything up itself.** `Backup-serwera.sh` (the server toolkit) already does,
+    with granular items, a MANIFEST and SUMY.sha256 — the panel *steers* it, so there is one backup
+    program on the machine rather than two. Where the toolkit is absent there is a built-in fallback
+    that dumps the tracker database and says so in as many words: a database dump is not a backup of
+    a server.
+  - **Nothing heavy in a web request**: a run is started detached (systemd-run when available, with
+    `Nice=` and idle I/O priority) and reports through a JSON state file the page polls — including
+    the live log tail, so a backup shows what it is doing instead of spinning silently. A worker that
+    is killed or lost to a reboot is reported as failed rather than "running" for ever.
+  - Profiles (**light** — everything except the two huge index tables, which rebuild themselves from
+    the swarm — **full**, **database only**, **custom**), a weekday+time schedule fired by the janitor
+    (a slot missed while the machine was off still runs later the same day, never twice), rotation by
+    count / age / total size (oldest first, and the last archive standing is never deleted), and a
+    checksum + read-back after every run, because an archive nobody has ever read back is a guess.
+  - **Restoring** is split in two on purpose. Files and configuration go through the toolkit, which
+    leaves a `.bak-<stamp>` of everything it overwrites; the **database** is its own action, because
+    `Backup-serwera.sh` deliberately refuses to overwrite one without a person typing its name at a
+    terminal. We do not fake a terminal for it — the panel asks for the same thing (the admin password
+    *and* the exact database name), and the helper dumps the database it is about to overwrite before
+    importing a single byte, refusing outright if that dump fails.
+  - **Encryption is public-key** (`gpg --encrypt --recipient`), not the toolkit's interactive
+    `--symmetric`, which needs a terminal for its passphrase and silently skips itself without one.
+  - Archives are `0600` in a `0700 root` directory — the web user cannot read them at all. Downloads
+    stream through the helper (constant memory regardless of size) behind a token that is bound to one
+    archive, expires in five minutes and is burned on first use.
+  - New: `includes/backup.php`, `tools/opentracker/tracker-backup.sh`, `assets/js/admin-backups.js`,
+    `templates/admin/backups.php`, `api/admin/backup_{status,action,test_path,download}.php`,
+    `tests/backup_test.php` (134 checks, the helper driven end to end against a stub toolkit).
+  - Settings (group **Backups**): `backup_enabled`, `backup_dir`, `backup_profile`, `backup_items`,
+    `backup_schedule`, `backup_schedule_tz`, `backup_keep`, `backup_keep_days`, `backup_max_size_gb`,
+    `backup_gpg_recipient`, `backup_nice`, `backup_verify_after`, `backup_cmd`, `backup_script_path`,
+    `backup_db_name`. Off by default, and the directory is refused if it is anywhere the web server
+    could serve it.
+
 ## [1.10.1] — 2026-08-26
 
 ### Added

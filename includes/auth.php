@@ -17,12 +17,12 @@ function isLoggedIn(): bool {
 function adminReservedActions(): array {
     return ['home', 'info', 'tos', 'report', 'status', 'transparency', 'unsubscribe', 'stats',
             'whitelist', 'login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search',
-            'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'notfound'];
+            'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-backups', 'notfound'];
 }
 
 /** The panel actions that exist regardless of where the sign-in form lives. */
 function adminPanelActions(): array {
-    return ['admin', 'settings', 'admin-whitelist', 'admin-index', 'admin-users'];
+    return ['admin', 'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-backups'];
 }
 
 /** The ?action= value that opens the admin sign-in form (default 'admin'; garbage falls back). */

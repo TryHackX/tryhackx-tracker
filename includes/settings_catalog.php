@@ -34,6 +34,8 @@ function settingsCatalogGroups(): array {
          'keywords' => 'index observed hashes catalogue metadata worker poll scrape names files search seeders prune'],
         ['id' => 'integrations', 'title' => 'API & federation',   'icon' => 'bi-plug',
          'keywords' => 'api server to server clients keys bearer bans federation cluster peers export import sync partners'],
+        ['id' => 'maintenance',  'title' => 'Backups',            'icon' => 'bi-archive',
+         'keywords' => 'backup backups archive archives dump restore recovery disaster snapshot copy rotation retention schedule gpg encryption mariadb mysqldump kopia zapasowa'],
         ['id' => 'credentials',  'title' => 'Admin credentials',  'icon' => 'bi-key',
          'keywords' => 'admin username password change credentials login account panel'],
     ];
@@ -226,6 +228,23 @@ function settingsCatalogKeywords(): array {
         'fed_export_max_batch'     => 'federation export batch size rows per request',
         'fed_import_new'           => 'federation import add new hashes from peers incoming',
         'fed_pull_minutes'         => 'federation pull interval minutes sync frequency',
+
+        // ── Backups (includes/backup.php) ──
+        'backup_enabled'           => 'backup backups on off master switch archive dump kopia zapasowa disaster recovery scheduled',
+        'backup_dir'               => 'backup directory path where archives are stored disk destination folder /var/backups',
+        'backup_profile'           => 'backup profile what is included light full database only index tables preset',
+        'backup_items'             => 'backup custom items selection pieces which parts config lists units firewall',
+        'backup_schedule'          => 'backup schedule automatic when weekly days time cron timer nightly',
+        'backup_schedule_tz'       => 'backup timezone iana clock europe warsaw utc schedule',
+        'backup_keep'              => 'backup rotation how many archives keep count retention prune delete old',
+        'backup_keep_days'         => 'backup retention age days old delete prune rotation',
+        'backup_max_size_gb'       => 'backup total size cap disk quota gigabytes rotation full disk',
+        'backup_gpg_recipient'     => 'backup encryption gpg pgp key recipient encrypt secure off site passwords',
+        'backup_nice'              => 'backup nice ionice priority load io slow down during dump',
+        'backup_verify_after'      => 'backup verify checksum sha256 integrity after run check corrupt',
+        'backup_cmd'               => 'backup helper script sudo root command tracker-backup path privileged',
+        'backup_script_path'       => 'backup-serwera.sh toolkit path server backup script location',
+        'backup_db_name'           => 'backup database name tracker schema which database is dumped restored',
 
         // ── Admin credentials ──
         'admin_username'           => 'admin login name panel user rename',

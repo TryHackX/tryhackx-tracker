@@ -34,6 +34,7 @@ require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/federation.php';
 require_once __DIR__ . '/includes/netlimit.php';
+require_once __DIR__ . '/includes/backup.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -45,7 +46,7 @@ ensureSchema($db, $cfg);
 // the stats poller and the admin tracker-service status poll are both hit repeatedly and have
 // nothing to do with the report/appeal janitors, so running them there is pure overhead. They
 // still run everywhere else. S2S calls never run them either.
-if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status'], true)) {
+if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status'], true)) {
     autoArchiveOldReports($db, $cfg);
     autoArchiveOldAppeals($db, $cfg);
     pruneOldSentEmails($db, $cfg);
@@ -95,6 +96,11 @@ $apiRoutes = [
     'admin/net_samples'     => 'api/admin/net_samples.php',
     'admin/net_apply'       => 'api/admin/net_apply.php',
     'admin/net_test'        => 'api/admin/net_test.php',
+    // ── Backups (admin; includes/backup.php) ──
+    'admin/backup_status'   => 'api/admin/backup_status.php',
+    'admin/backup_action'   => 'api/admin/backup_action.php',
+    'admin/backup_test_path' => 'api/admin/backup_test_path.php',
+    'admin/backup_download' => 'api/admin/backup_download.php',
     // ── Whitelist (public) ──
     'whitelist_submit'      => 'api/whitelist_submit.php',
     'whitelist_check'       => 'api/whitelist_check.php',

@@ -46,6 +46,7 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Mode-aware moderation** — in whitelist mode "block" = ban (removed from the served list, can never be re-registered) and the report/appeal flows, status page and public copy adapt automatically
 - **CAPTCHA provider** — Google reCAPTCHA v2 or v3, Cloudflare Turnstile or hCaptcha (one shared modal, fail-closed verification with timeouts)
 - **UDP traffic monitor + inbound rate limit** (1.11.0, off by default) — measure the swarm hitting the tracker port (arriving / served / dropped packets per second, charted), then set a limit from those measurements instead of guessing: the slider is annotated with the median, P95 and peak of the last week and the panel says which value it suggests and below which one you start dropping real traffic. Applied through one root helper into its **own** nftables table and file, so your existing firewall is untouched and undoing it is one click — see [UDP traffic monitor + inbound rate limit](#7-udp-traffic-monitor--inbound-rate-limit-optional-1110)
+- **Backups from the panel** (1.11.0, off by default) — make, schedule, rotate, verify, download and restore database/configuration archives from **Admin → Backups**. The panel steers `Backup-serwera.sh` through a root helper rather than reimplementing it (with a built-in database-only fallback where that toolkit is absent), runs everything detached with a live log, and splits restoring files from restoring the database — the latter asks for the exact database name and dumps the current one first — see [Backups](#8-backups-from-the-panel-optional-1110)
 
 ### User accounts & federation (1.6.0, both off by default)
 - **User accounts** — registration/login with CAPTCHA (selectable sign-in duration, email verification), groups with per-feature permissions (`guest` = anonymous visitors; a signed-in user gets exactly the union of their own groups; system `admin` group passes everything — 1.7.0 semantics), timed memberships (1 d … 1 y / custom from–to, extend-on-repurchase), in-app + email notifications, an account page and an admin Users page — see [User accounts, groups & permissions](#user-accounts-groups--permissions-160)
@@ -839,6 +840,73 @@ The card also **shows** the egress budget's counters next to the inbound ones an
 (`nft replace rule` on that one rule, so the table's 262 144-entry "good client" sets are not flushed);
 it never installs or removes `ottrack.nft` — that stays a manual, documented step.
 
+#### 8. Backups from the panel (optional, 1.11.0)
+
+**Admin → Backups** (`?action=admin-backups`) makes, schedules, rotates, verifies, downloads and
+restores archives; **Settings → Backups** holds the policy. Everything is off by default.
+
+The panel is not a backup program. `Backup-serwera.sh` — the server toolkit that lives outside this
+repo — already is one, with granular items (`tracker-db`, `tracker-db-lekka`, `tracker-config`,
+`tracker-listy`, `tracker-opentracker`, `tracker-worker`, `tracker-janitor`, `tracker-siec`,
+`tracker-sudoers`, …), a `MANIFEST.txt` and a `SUMY.sha256`, and it knows about every service on the
+box rather than just the tracker. The panel **steers** it through one root helper, so this machine
+has one backup program and not two:
+
+```bash
+sudo install -m 0755 tools/opentracker/tracker-backup.sh /usr/local/sbin/tracker-backup.sh
+echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-backup.sh' | sudo tee /etc/sudoers.d/tracker-backup
+sudo chmod 0440 /etc/sudoers.d/tracker-backup && sudo visudo -c -f /etc/sudoers.d/tracker-backup
+sudo install -d -m 0700 /var/backups/tracker
+sudo /usr/local/sbin/tracker-backup.sh check /var/backups/tracker   # JSON verdict; the Test button runs this
+```
+
+Where the toolkit is not installed the helper falls back to `mariadb-dump` of the tracker database
+alone, and the page says so in as many words — **a database dump is not a backup of a server.**
+
+**Nothing heavy runs inside a web request.** "Back up now" starts the real work detached
+(`systemd-run` with `Nice=` and idle I/O priority where available, a background job otherwise) and
+returns immediately; progress is a JSON state file the page polls, log tail included, so a backup
+shows what it is doing instead of spinning silently. A worker that is killed, runs out of memory or
+is lost to a reboot is reported as **failed**, not left saying "running" for ever.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `backup_enabled` | `0` | lets the schedule run (manual backups work either way) |
+| `backup_dir` | `/var/backups/tracker` | created `0700 root`; any path the web server could serve is refused |
+| `backup_profile` / `backup_items` | `tracker-lekki` | light (without `index_hashes` / `index_files`, which rebuild themselves from the swarm), full, database only, or a custom item list |
+| `backup_schedule` / `backup_schedule_tz` | — | weekdays plus a time, fired by the janitor timer |
+| `backup_keep` / `backup_keep_days` / `backup_max_size_gb` | `7` / `30` / `20` | rotation, oldest first; the last archive standing is never deleted |
+| `backup_verify_after` | `1` | checksum and read the archive back after writing it |
+| `backup_gpg_recipient` | — | public-key encryption of the finished archive |
+| `backup_nice` | `15` | so a dump does not fight the tracker for CPU and disk |
+| `backup_cmd` / `backup_script_path` | see above | the root helper, and where `Backup-serwera.sh` lives |
+| `backup_db_name` | `tracker` | dumped by the fallback, and the name you type to confirm a restore |
+
+**Two things the toolkit deliberately refuses to do without a person at a terminal, and why the
+panel does not work around either of them:**
+
+1. It will not overwrite a **database** unless somebody types its name on a TTY. That guard is right,
+   so the panel does not feed it a fake terminal. Restoring the database is its own action: it asks
+   for the admin password **and** the exact database name, and the helper dumps the database it is
+   about to overwrite (`before-restore-<db>-<stamp>.sql.gz`, next to the archives) before importing a
+   single byte — refusing outright if that dump fails. Restoring **files** goes through the toolkit as
+   normal, which keeps a `.bak-<stamp>` copy of everything it replaces.
+2. Its encryption is `gpg --symmetric` with an interactive passphrase, which cannot work from a web
+   request — it detects the missing TTY and silently skips encrypting. So the panel always passes
+   `--no-gpg` and, when `backup_gpg_recipient` is set, encrypts with a **public key** instead
+   (`gpg --batch --encrypt --recipient`): no passphrase, non-interactive by construction. Import the
+   key as root first (`sudo gpg --import backup.pub`).
+
+**Security.** Archives are `0600` inside a `0700 root` directory, so the web user cannot read one at
+all — everything the panel shows comes back through the helper. Downloads are streamed in chunks
+(constant memory whatever the size) behind a token that is bound to one archive, expires after 300
+seconds and is burned on first use; minting it needs the admin password, because an archive contains
+every database password on the machine. Every run, restore, download and deletion is logged in the
+backup directory.
+
+> **Keep a copy off this server.** A backup on the same disk as the thing it protects survives a bad
+> migration and nothing else.
+
 ### Server-side integrations — what runs as root, and how to undo it
 
 None of these are required: the tracker runs fine without any of them, and removing one leaves the
@@ -850,6 +918,7 @@ arguments independently of the panel.
 |---|---|---|---|---|
 | `tools/opentracker/tracker-mode.sh` | `/usr/local/sbin/tracker-mode.sh` | `www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-mode.sh` | the `opentracker` / `opentracker.conf` symlinks + `systemctl restart opentracker` | point the symlinks back and restart; delete `/etc/sudoers.d/tracker-mode` |
 | `tools/opentracker/tracker-netlimit.sh` | `/usr/local/sbin/tracker-netlimit.sh` | `www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-netlimit.sh` | `/etc/nftables.d/ottrack-in.nft` + table `inet ottrack_in`; the rate of `inet ottrack` on request | `nft delete table inet ottrack_in && rm /etc/nftables.d/ottrack-in.nft`; delete `/etc/sudoers.d/tracker-netlimit` |
+| `tools/opentracker/tracker-backup.sh` | `/usr/local/sbin/tracker-backup.sh` | `www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-backup.sh` | reads and writes `backup_dir` (default `/var/backups/tracker`), runs `Backup-serwera.sh`, and on an explicit database restore imports a dump | delete `/etc/sudoers.d/tracker-backup`; the archives are plain files you can remove yourself |
 | `systemctl restart/reload <unit>` | — | `www-data ALL=(root) NOPASSWD: /bin/systemctl reload opentracker` | the tracker service only | delete the sudoers line; the panel's buttons then just report the failure |
 
 Everything else the panel does to the system it does as the web user: writing the accesslist file,
@@ -960,7 +1029,11 @@ tracker/
 │       ├── net_status.php     # GET — firewall state + live packets/second + measured suggestion
 │       ├── net_samples.php    # GET — the packets/second series behind the UDP traffic chart
 │       ├── net_apply.php      # POST — load/remove/throttle-hard/restore the inbound limit (password)
-│       └── net_test.php       # GET — can this machine run the inbound limit at all (read-only)
+│       ├── net_test.php       # GET — can this machine run the inbound limit at all (read-only)
+│       ├── backup_status.php  # GET — what this machine can back up, the run state, the archives
+│       ├── backup_action.php  # POST — run/cancel/verify/prune/delete/restore/token (admin password)
+│       ├── backup_test_path.php # POST — test the backup directory + the tooling (read-only)
+│       └── backup_download.php # GET — stream one archive (single-use token)
 │
 ├── assets/
 │   ├── css/
@@ -971,6 +1044,7 @@ tracker/
 │   │   ├── admin.js           # Admin panel JavaScript
 │   │   ├── admin-index.js     # Observed-hash index page (?action=admin-index)
 │   │   ├── admin-netlimit.js  # UDP traffic card: live counters, chart, throttle slider
+│   │   ├── admin-backups.js   # Backups page: run/verify/restore/download, live progress
 │   │   └── stats-timeline.js  # Swarm timeline chart (public stats page + admin whitelist page)
 │   ├── vendor/uplot/          # uPlot (MIT) — vendored, no CDN
 │   └── img/
@@ -989,6 +1063,7 @@ tracker/
 │   ├── rate_limits.json       # Per-IP/action rate-limit state (runtime)
 │   ├── blacklist_changes.json # Blacklist add/remove log since last tracker start (runtime)
 │   ├── net_state.json         # UDP monitor state: last counters, automatic mode, panic window (runtime)
+│   ├── backup_state.json      # Backups: last run, schedule bookkeeping, spent download tokens (runtime)
 │   └── .htaccess              # Deny all access
 │
 ├── includes/                  # Core PHP libraries (protected)
@@ -997,6 +1072,7 @@ tracker/
 │   ├── mail.php               # Email system (sending, templates, preferences)
 │   ├── settings.php           # Database settings management (getSettings, setSettings)
 │   ├── netlimit.php           # UDP traffic monitor + inbound rate limit (drives the root helper)
+│   ├── backup.php             # Panel-driven backups (drives Backup-serwera.sh via the root helper)
 │   └── .htaccess              # Deny all access
 │
 ├── templates/                 # PHP templates (protected)
@@ -1129,6 +1205,10 @@ All require active admin session. Prefix: `admin/`
 | `admin/net_samples` | GET | Packets/second series for the chart (`range=1h\|6h\|24h\|7d\|14d\|30d`, or `from`/`to`; bucketed server-side) |
 | `admin/net_apply` | POST | The only endpoint that changes the firewall: `op=apply\|off\|panic\|restore\|egress` (admin password) or `op=preview` (read-only, no password) |
 | `admin/net_test` | GET | Read-only check of `exec()`, the sudoers rule, `nft` and the reboot-persistence include |
+| `admin/backup_status` | GET | Backups page: what this machine can back up, the run state (with log tail), the archives, the schedule (1.11.0) |
+| `admin/backup_action` | POST | `op=run\|cancel\|verify\|prune\|delete\|restore\|restore-db\|token` — every one behind the admin password; `restore-db` also needs the exact database name typed |
+| `admin/backup_test_path` | POST | Read-only test of the backup directory and the tooling |
+| `admin/backup_download` | GET | Streams one archive; `?id=&token=` with a single-use, five-minute token |
 | `admin/check_whitelist_path` | POST | Test the whitelist file / directory permissions |
 | `admin/whitelist_status` | GET | Status card data (file, state, counts, worker heartbeat, warnings) |
 | `admin/fetch_whitelist` | GET | Paginated whitelist (`sort=col:dir,…`, `search`, `search_files`, `source`, `meta`, `banned`, `ip`, `group=ip`) |

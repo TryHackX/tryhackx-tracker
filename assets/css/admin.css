@@ -1377,3 +1377,25 @@ input[type="number"] {
     .nl-slider-wrap { padding-bottom: 0.6rem; }
     .nl-marks { height: 0.6rem; }
 }
+
+/* === Admin › Backups page (assets/js/admin-backups.js) === */
+/* live log while a run is in flight, and the same block for a restore's output */
+.bk-progress { margin-top: 0.8rem; padding: 0.7rem 0.9rem; background: #10161d; border: 1px solid #1c232b; border-radius: 6px; }
+.bk-progress-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; color: #ddd; font-size: 0.88rem; margin-bottom: 0.5rem; }
+.bk-log {
+    max-height: 14rem; overflow: auto; background: #0b0f14; border: 1px solid #1c232b; border-radius: 6px;
+    padding: 0.6rem 0.8rem; color: #cfd8e3; font-size: 0.74rem; line-height: 1.5; white-space: pre-wrap;
+    word-break: break-word; margin: 0;
+}
+.bk-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.15rem 1rem; margin-bottom: 0.8rem; }
+.bk-items .form-check-label { font-size: 0.85rem; }
+.bk-db-restore { padding: 0.6rem 0.8rem; border: 1px solid rgba(255, 82, 82, 0.35); background: rgba(255, 82, 82, 0.07); border-radius: 6px; }
+
+/* Settings → Backups: the item checkboxes and the weekday/time schedule row */
+.bk-item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.1rem 1rem; }
+.bk-item-grid .form-check-label code { font-size: 0.78rem; color: #8ab4ff; }
+/* the custom list only applies to the "Custom selection" profile — say so by fading it */
+.bk-items-dim { opacity: 0.5; }
+.bk-sched-row { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; padding: 0.4rem 0; }
+.bk-sched-at { color: #8b96a5; font-size: 0.85rem; margin: 0 0.2rem; }
+.bk-sched-time { width: 7.5rem; }

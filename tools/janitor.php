@@ -12,8 +12,9 @@
  * configured interval (from the shared stats cache when fresh, otherwise from the tracker), 5-minute /
  * hourly roll-ups and retention. Then the observed-hash index, the inbound UDP traffic sample
  * (includes/netlimit.php — also where an expired "throttle hard" window is undone and where the
- * automatic limit moves) and the user-account tick. Safe to run every minute; exits 0 always.
- * See README "Whitelist mode".
+ * automatic limit moves), any due scheduled backup (includes/backup.php — this is the only place a
+ * backup starts on a timer, never a web request) and the user-account tick. Safe to run every
+ * minute; exits 0 always. See README "Whitelist mode".
  */
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 
@@ -31,6 +32,7 @@ require_once $root . '/includes/index.php';
 require_once $root . '/includes/mail.php';
 require_once $root . '/includes/users.php';
 require_once $root . '/includes/netlimit.php';
+require_once $root . '/includes/backup.php';
 
 try {
     $db  = getDb();
@@ -69,6 +71,12 @@ try {
             $nl['auto'] ? ' auto=' . $nl['auto']['action'] . '→' . (int)$nl['auto']['pps'] . 'pps (' . $nl['auto']['reason'] . ')' : '',
             $nl['panic'] ? ' panic=restored' : '', (int)$nl['pruned'],
             $nl['error'] !== null ? ' error=' . $nl['error'] : ''), "\n";
+    }
+    // scheduled backups: fire when a slot is due (no-op — not even a fork — while backups are off)
+    $bk = backupTick($db, $cfg);
+    if ($bk['enabled'] && ($bk['error'] !== null || $bk['started'] || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[backup] started=%s%s%s', $bk['started'] ? 'yes' : 'no',
+            $bk['id'] ? ' id=' . $bk['id'] : '', $bk['error'] !== null ? ' error=' . $bk['error'] : ''), "\n";
     }
     // user accounts: expire/warn timed group memberships, prune notifications + tokens (no-op when disabled)
     $us = usersTick($db, $cfg);

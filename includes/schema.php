@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 11;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings)
+const TRACKER_SCHEMA_VERSION = 11;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings)
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -531,6 +531,24 @@ function trackerSchemaDefaultSettings(): array {
         'net_auto_max'                => '80000',
         'net_auto_target'             => '30000',
         'net_auto_target_cpu'         => '70',
+        // schema v11: panel-driven backups (includes/backup.php + tools/opentracker/tracker-backup.sh).
+        // Off by default; the archives live outside the web root and are only ever read through the
+        // root helper, so nothing here is reachable without the admin password.
+        'backup_enabled'              => '0',
+        'backup_dir'                  => '/var/backups/tracker',
+        'backup_profile'              => 'tracker-lekki',
+        'backup_items'                => '',
+        'backup_schedule'             => '',
+        'backup_schedule_tz'          => 'Europe/Warsaw',
+        'backup_keep'                 => '7',
+        'backup_keep_days'            => '30',
+        'backup_max_size_gb'          => '20',
+        'backup_gpg_recipient'        => '',
+        'backup_nice'                 => '15',
+        'backup_verify_after'         => '1',
+        'backup_cmd'                  => 'sudo -n /usr/local/sbin/tracker-backup.sh',
+        'backup_script_path'          => '/usr/local/sbin/Backup-serwera.sh',
+        'backup_db_name'              => 'tracker',
     ];
 }
 

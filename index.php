@@ -25,6 +25,7 @@ require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/federation.php';
 require_once __DIR__ . '/includes/netlimit.php';
+require_once __DIR__ . '/includes/backup.php';
 
 $db = getDb();
 $cfg = getSettings($db);
@@ -80,6 +81,8 @@ if (in_array($action, $adminPanelActions, true) || $action === $adminLoginAction
             include __DIR__ . '/templates/admin/index_page.php';
         } elseif ($action === 'admin-users') {
             include __DIR__ . '/templates/admin/users.php';
+        } elseif ($action === 'admin-backups') {
+            include __DIR__ . '/templates/admin/backups.php';
         } else {
             include __DIR__ . '/templates/admin/dashboard.php';
         }

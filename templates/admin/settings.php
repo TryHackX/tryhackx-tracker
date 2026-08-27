@@ -18,6 +18,7 @@
                 <a href="<?= $baseUrl ?>?action=admin-whitelist" class="btn btn-sm btn-outline-info"><i class="bi bi-list-check"></i> Whitelist</a>
                 <a href="<?= $baseUrl ?>?action=admin-index" class="btn btn-sm btn-outline-info"><i class="bi bi-collection"></i> Index</a>
                 <a href="<?= $baseUrl ?>?action=admin-users" class="btn btn-sm btn-outline-info"><i class="bi bi-people"></i> Users</a>
+                <a href="<?= $baseUrl ?>?action=admin-backups" class="btn btn-sm btn-outline-info"><i class="bi bi-archive"></i> Backups</a>
                 <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
             </div>
         </div>
@@ -1260,6 +1261,182 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                 </div>
             </div>
 
+            <!-- Backups — includes/backup.php + tools/opentracker/tracker-backup.sh -->
+            <?php
+            $bkPlan = backupParseSchedule((string)($cfg['backup_schedule'] ?? ''));
+            $bkDays = $bkPlan['days'] ?? [];
+            $bkTime = $bkPlan ? sprintf('%02d:%02d', intdiv($bkPlan['minutes'], 60), $bkPlan['minutes'] % 60) : '04:00';
+            $bkTz   = backupTimezone($cfg);
+            $bkTzGroups = [];
+            foreach ((function_exists('timezone_identifiers_list') ? timezone_identifiers_list() : [$bkTz]) as $tzId) {
+                $bkTzGroups[strpos($tzId, '/') !== false ? substr($tzId, 0, strpos($tzId, '/')) : 'Other'][] = $tzId;
+            }
+            $bkItems = backupSanitizeItems((string)($cfg['backup_items'] ?? ''));
+            $bkItemsSel = $bkItems === '' ? [] : explode(',', $bkItems);
+            ?>
+            <div class="settings-section" id="section-backups" data-group="maintenance" data-title="Backups">
+                <h5>Backups</h5>
+                <p class="settings-hint mb-2">
+                    The panel does not back anything up itself — it drives <code>Backup-serwera.sh</code> (the server toolkit) through the
+                    root helper <code>tools/opentracker/tracker-backup.sh</code>, so there is one backup program on this machine, not two.
+                    Where that toolkit is missing, the panel falls back to a plain dump of the tracker database and says so: a database dump
+                    is not a backup of a server. Browse, verify, download and restore archives on the
+                    <a href="<?= $baseUrl ?>?action=admin-backups">Backups page</a>; this section is the policy.
+                    <br>
+                    Nothing heavy ever runs in a web request: a backup is started detached and reports back through a state file the page polls.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Backups</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="backup_enabled">
+                            <option value="0" <?= ($cfg['backup_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="1" <?= ($cfg['backup_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On &mdash; allow the schedule to run</option>
+                        </select>
+                        <small class="settings-hint">Off means nothing runs on a timer. You can still make a backup by hand from the Backups page.</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Directory <small class="settings-hint">(outside the web root; created <code>0700 root</code> on the first run)</small></label>
+                        <div class="input-group">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" name="backup_dir" value="<?= sanitize(backupDir($cfg)) ?>" placeholder="<?= BACKUP_DEFAULT_DIR ?>">
+                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-backup-dir">Test</button>
+                        </div>
+                        <small class="settings-hint">An archive contains every database password on this box, so a path the web server could serve is refused outright.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Database to dump / restore</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="backup_db_name" value="<?= sanitize(backupDbName($cfg)) ?>" placeholder="tracker" pattern="[A-Za-z0-9_]+" maxlength="64">
+                        <small class="settings-hint">Letters, digits and <code>_</code>. This is also the name you have to type to confirm a restore.</small>
+                    </div>
+                    <div class="col-12">
+                        <div id="backup-dir-result" class="blacklist-result"></div>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-backups-what">What goes in</h6>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Profile</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="backup_profile" id="backup-profile">
+                            <?php foreach (BACKUP_PROFILES as $p): ?>
+                            <option value="<?= sanitize($p) ?>" <?= backupProfile($cfg) === $p ? 'selected' : '' ?>><?= sanitize(backupProfileLabel($p)) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint">
+                            <strong>Light</strong> leaves out <code>index_hashes</code> / <code>index_files</code> &mdash; on this install those are the two biggest tables by far and they rebuild themselves from the swarm.
+                            <strong>Full</strong> takes everything.
+                        </small>
+                    </div>
+                    <div class="col-md-8" data-setting="backup_items" id="backup-items-cell">
+                        <label class="form-label">Custom selection <small class="settings-hint">(used by the "Custom selection" profile)</small></label>
+                        <div class="bk-item-grid">
+                            <?php foreach (backupTrackerItems() as $it): ?>
+                            <div class="form-check">
+                                <input class="form-check-input bk-item-check" type="checkbox" id="bk-set-<?= sanitize($it) ?>" value="<?= sanitize($it) ?>" <?= in_array($it, $bkItemsSel, true) ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="bk-set-<?= sanitize($it) ?>"><code><?= sanitize($it) ?></code></label>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <input type="hidden" name="backup_items" id="backup-items-json" value="<?= sanitize($bkItems) ?>">
+                        <small class="settings-hint">These are <code>Backup-serwera.sh</code> item names. Other services on this machine (mail, forum, files) have their own items &mdash; add them by hand in the field the toolkit's <code>--list</code> shows if you want one archive for everything.</small>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-backups-when">When</h6>
+                <div class="row g-3">
+                    <div class="col-12" data-setting="backup_schedule">
+                        <label class="form-label">Automatic backup</label>
+                        <div class="bk-sched-row">
+                            <?php foreach (BACKUP_DAY_LABELS as $d => $label): ?>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input bk-day-check" type="checkbox" id="bk-day-<?= $d ?>" value="<?= $d ?>" <?= in_array($d, $bkDays, true) ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="bk-day-<?= $d ?>"><?= $label ?></label>
+                            </div>
+                            <?php endforeach; ?>
+                            <span class="bk-sched-at">at</span>
+                            <input type="time" class="form-control form-control-sm bg-dark text-light border-secondary bk-sched-time" id="bk-sched-time" value="<?= sanitize($bkTime) ?>" step="60">
+                        </div>
+                        <input type="hidden" name="backup_schedule" id="backup-schedule-json" value="<?= sanitize((string)($cfg['backup_schedule'] ?? '')) ?>">
+                        <small class="settings-hint">
+                            Tick no days and nothing runs automatically. The janitor timer fires it (never a web request), and a slot that was missed
+                            because the machine was off still runs later the same day &mdash; but never twice for the same slot.
+                            <span id="bk-sched-summary" class="d-block mt-1"><?= sanitize(backupScheduleDescribe((string)($cfg['backup_schedule'] ?? ''), $bkTz)) ?></span>
+                        </small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Timezone</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="backup_schedule_tz" id="backup-tz">
+                            <?php foreach ($bkTzGroups as $grp => $ids): ?>
+                            <optgroup label="<?= sanitize($grp) ?>">
+                                <?php foreach ($ids as $tzId): ?>
+                                <option value="<?= sanitize($tzId) ?>" <?= $tzId === $bkTz ? 'selected' : '' ?>><?= sanitize($tzId) ?></option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Process priority <small class="settings-hint">(nice, 0&ndash;19)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="backup_nice" value="<?= (int)backupNice($cfg) ?>" min="0" max="19">
+                        <small class="settings-hint">15 keeps a dump from fighting the tracker for CPU and disk; the helper also asks systemd for idle I/O.</small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Check each archive after writing it</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="backup_verify_after">
+                            <option value="1" <?= ($cfg['backup_verify_after'] ?? '1') === '1' ? 'selected' : '' ?>>Yes &mdash; checksum + read it back</option>
+                            <option value="0" <?= ($cfg['backup_verify_after'] ?? '1') === '0' ? 'selected' : '' ?>>No</option>
+                        </select>
+                        <small class="settings-hint">An archive nobody has ever read back is a guess, not a backup.</small>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-backups-keep">How long they stay</h6>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Keep at most <small class="settings-hint">(archives; 0 = no limit)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="backup_keep" value="<?= (int)backupKeep($cfg) ?>" min="0" max="<?= BACKUP_KEEP_MAX ?>">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Delete older than <small class="settings-hint">(days; 0 = no limit)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="backup_keep_days" value="<?= (int)backupKeepDays($cfg) ?>" min="0" max="<?= BACKUP_DAYS_MAX ?>">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Directory ceiling <small class="settings-hint">(GB; 0 = no limit)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="backup_max_size_gb" value="<?= (int)backupMaxGb($cfg) ?>" min="0" max="<?= BACKUP_GB_MAX ?>">
+                        <small class="settings-hint">Oldest first, until the directory fits. The last archive standing is never deleted &mdash; a full disk is bad, no backup at all is worse.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Encrypt for <small class="settings-hint">(GPG key id or email; empty = no encryption)</small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="backup_gpg_recipient" value="<?= sanitize(backupGpgRecipient($cfg)) ?>" placeholder="backup@example.org" maxlength="128">
+                        <small class="settings-hint">
+                            <strong>Public-key</strong> encryption (<code>gpg --encrypt --recipient</code>), because it needs no passphrase and therefore no terminal.
+                            Import the key as root first (<code>gpg --import</code>). Leave empty and the archives sit on disk in the clear &mdash; acceptable while they never leave a server only root can read, and not acceptable the moment you copy one off it.
+                        </small>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-backups-tools">Tools</h6>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Root helper command <small class="settings-hint">(the action arguments are appended automatically)</small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="backup_cmd" value="<?= sanitize($cfg['backup_cmd'] ?? BACKUP_DEFAULT_CMD) ?>" placeholder="<?= BACKUP_DEFAULT_CMD ?>" maxlength="255">
+                        <small class="settings-hint">Only letters, digits, space and <code>_ . / -</code> &mdash; no shell metacharacters.</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Path to <code>Backup-serwera.sh</code> <small class="settings-hint">(empty = look in the usual places)</small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="backup_script_path" value="<?= sanitize($cfg['backup_script_path'] ?? BACKUP_DEFAULT_SCRIPT) ?>" placeholder="<?= BACKUP_DEFAULT_SCRIPT ?>" maxlength="255">
+                        <small class="settings-hint">Not found? The panel falls back to dumping the tracker database only, and the Backups page says so.</small>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Install it once, on the server</label>
+                        <pre class="settings-code mb-0"><code>sudo install -m 0755 tools/opentracker/tracker-backup.sh /usr/local/sbin/
+echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-backup.sh' \
+  | sudo tee /etc/sudoers.d/tracker-backup
+sudo chmod 440 /etc/sudoers.d/tracker-backup
+sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
+                    </div>
+                </div>
+            </div>
+
             <!-- Footer -->
             <div class="settings-section" id="section-footer" data-group="general" data-title="Footer">
                 <h5>Footer</h5>
@@ -1684,6 +1861,91 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
 
     document.getElementById('btn-test-restart').addEventListener('click', (e) => runTrackerPermTest('restart', e.currentTarget));
     document.getElementById('btn-test-reload').addEventListener('click', (e) => runTrackerPermTest('reload', e.currentTarget));
+
+    // --- Backups: schedule editor, item checkboxes, directory test -----------
+    // The schedule is a set of weekday checkboxes plus a time; the form submits it as the same JSON
+    // the server parses ({"days":[…],"time":"HH:MM"}), so there is one representation, not two.
+    (function () {
+        const dayChecks = [...document.querySelectorAll('.bk-day-check')];
+        const timeEl = document.getElementById('bk-sched-time');
+        const jsonEl = document.getElementById('backup-schedule-json');
+        const summary = document.getElementById('bk-sched-summary');
+        const tzEl = document.getElementById('backup-tz');
+        if (!dayChecks.length || !timeEl || !jsonEl) return;
+        const LABELS = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+        function sync() {
+            const days = dayChecks.filter(c => c.checked).map(c => c.value);
+            const time = /^\d{2}:\d{2}$/.test(timeEl.value) ? timeEl.value : '04:00';
+            jsonEl.value = days.length ? JSON.stringify({ days: days, time: time }) : '';
+            if (summary) {
+                summary.textContent = days.length
+                    ? (days.length === 7 ? 'Every day' : days.map(d => LABELS[d]).join(', ')) + ' at ' + time + ' (' + (tzEl ? tzEl.value : '') + ')'
+                    : 'No automatic backups — the schedule is empty.';
+            }
+        }
+        dayChecks.forEach(c => c.addEventListener('change', sync));
+        timeEl.addEventListener('input', sync);
+        timeEl.addEventListener('change', sync);
+        if (tzEl) tzEl.addEventListener('change', sync);
+        document.getElementById('settings-form').addEventListener('submit', sync, true);
+        sync();
+    })();
+
+    // The custom item checkboxes carry no name, so mirror them into the hidden field the form posts.
+    (function () {
+        const checks = [...document.querySelectorAll('.bk-item-check')];
+        const hidden = document.getElementById('backup-items-json');
+        const profile = document.getElementById('backup-profile');
+        const cell = document.getElementById('backup-items-cell');
+        if (!checks.length || !hidden) return;
+        const sync = () => { hidden.value = checks.filter(c => c.checked).map(c => c.value).join(','); };
+        const dim = () => { if (cell && profile) cell.classList.toggle('bk-items-dim', profile.value !== 'custom'); };
+        checks.forEach(c => c.addEventListener('change', sync));
+        if (profile) profile.addEventListener('change', dim);
+        document.getElementById('settings-form').addEventListener('submit', sync, true);
+        sync(); dim();
+    })();
+
+    document.getElementById('btn-test-backup-dir').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const el = document.getElementById('backup-dir-result');
+        const dir = (document.querySelector('[name="backup_dir"]') || {}).value || '';
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
+        el.innerHTML = '<span class="text-info">Checking the directory and the tooling&hellip;</span>';
+        try {
+            const res = await fetch(API_BASE + 'admin/backup_test_path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+                body: JSON.stringify({ backup_dir: dir.trim() }),
+            });
+            const json = await res.json();
+            const sug = (json.suggestions || []).map(esc);
+            const c = json.check || {};
+            const facts = [];
+            if (json.exists) {
+                facts.push('mode ' + esc(json.mode || '?') + ', owner ' + esc(json.owner || '?'));
+                if (json.archives !== undefined) facts.push(esc(String(json.archives)) + ' archive(s)');
+            } else { facts.push('does not exist yet'); }
+            if (json.free_bytes) facts.push(Math.round(json.free_bytes / 1073741824) + ' GB free');
+            if (c.mode) facts.push('mode: ' + esc(c.mode === 'script' ? 'full (Backup-serwera.sh)' : 'built-in (database only)'));
+            const meta = '<br><small style="color:#a0a0b0;">' + facts.join(' | ')
+                + '<br>OS: ' + esc(json.os || '') + ' | PHP user: ' + esc(json.php_user || '') + '</small>';
+            if (json.ok) {
+                el.innerHTML = '<span class="text-success">&#10003; The directory works and the panel can make a backup here.</span>'
+                    + (sug.length ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
+            } else {
+                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || ['Test failed']).map(esc).join('<br>') + '</span>'
+                    + (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
+            }
+        } catch {
+            el.innerHTML = '<span class="text-danger">Network error</span>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
+    });
 
     // --- Inbound UDP rate limit: availability test ---------------------------
     // Read-only on the server too (see api/admin/net_test.php): it checks nft, the sudoers rule and

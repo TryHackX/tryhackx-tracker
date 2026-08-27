@@ -57,6 +57,12 @@ $allowed = [
     'net_monitor_enabled', 'net_sample_seconds', 'net_keep_days',
     'net_limit_enabled', 'net_limit_pps', 'net_limit_burst', 'net_limit_port', 'net_limit_cmd',
     'net_auto_enabled', 'net_auto_min', 'net_auto_max', 'net_auto_target', 'net_auto_target_cpu',
+    // schema v11: panel-driven backups (includes/backup.php). Running, restoring and downloading
+    // all live behind the admin password in admin/backup_action — saving only records the policy.
+    'backup_enabled', 'backup_dir', 'backup_profile', 'backup_items', 'backup_schedule',
+    'backup_schedule_tz', 'backup_keep', 'backup_keep_days', 'backup_max_size_gb',
+    'backup_gpg_recipient', 'backup_nice', 'backup_verify_after', 'backup_cmd',
+    'backup_script_path', 'backup_db_name',
     // captcha provider (reCAPTCHA v2 keys are the legacy recaptcha_* entries above)
     'captcha_provider', 'turnstile_site_key', 'turnstile_secret',
     'recaptcha_v3_site_key', 'recaptcha_v3_secret', 'recaptcha_v3_min_score',
@@ -155,6 +161,9 @@ $intClamp = [
     'net_limit_port' => [1, 65535, 6969],
     'net_auto_min' => [NET_PPS_MIN, NET_PPS_MAX, 10000], 'net_auto_max' => [NET_PPS_MIN, NET_PPS_MAX, 80000],
     'net_auto_target' => [NET_PPS_MIN, NET_PPS_MAX, 30000], 'net_auto_target_cpu' => [10, 100, 70],
+    // backups (includes/backup.php)
+    'backup_keep' => [0, BACKUP_KEEP_MAX, 7], 'backup_keep_days' => [0, BACKUP_DAYS_MAX, 30],
+    'backup_max_size_gb' => [0, BACKUP_GB_MAX, 20], 'backup_nice' => [0, 19, 15],
 ];
 foreach ($intClamp as $k => [$min, $max, $def]) {
     if (isset($data[$k])) {
@@ -175,7 +184,8 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
           'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist',
           'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new',
-          'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled'] as $k) {
+          'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
+          'backup_enabled', 'backup_verify_after'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
 // ── UDP rate limit ──
@@ -189,6 +199,43 @@ if (isset($data['net_auto_min']) || isset($data['net_auto_max'])) {
     $min = (int)($data['net_auto_min'] ?? netlimitAutoMin($cfg));
     $max = (int)($data['net_auto_max'] ?? netlimitAutoMax($cfg));
     if ($max < $min) jsonResponse(['error' => 'The automatic band is upside down: the maximum (' . number_format($max) . ' pps) must not be below the minimum (' . number_format($min) . ' pps).'], 400);
+}
+// ── Backups ──
+// The directory is where archives full of database passwords land, so it is checked here as well as
+// in the helper — a save must never be able to point it at the web root.
+if (isset($data['backup_dir']) && $data['backup_dir'] !== '') {
+    $v = backupValidateDir($data['backup_dir']);
+    if (!$v['ok']) jsonResponse(['error' => 'Backup directory rejected: ' . $v['error'] . ($v['hint'] ? ' ' . $v['hint'] : '')], 400);
+    $data['backup_dir'] = rtrim(preg_replace('/[\x00-\x1F\x7F]/', '', trim($data['backup_dir'])), '/');
+}
+if (isset($data['backup_cmd']) && !backupValidCommand($data['backup_cmd'])) {
+    jsonResponse(['error' => 'Invalid backup helper command: only letters, digits, space and _ . / - are allowed (no shell metacharacters); the action arguments are appended automatically.'], 400);
+}
+if (isset($data['backup_script_path']) && $data['backup_script_path'] !== ''
+    && !preg_match('#^/[A-Za-z0-9 _./-]{1,255}$#', $data['backup_script_path'])) {
+    jsonResponse(['error' => 'The path to Backup-serwera.sh must be absolute and free of shell metacharacters.'], 400);
+}
+if (isset($data['backup_profile']) && !in_array($data['backup_profile'], BACKUP_PROFILES, true)) {
+    jsonResponse(['error' => 'Unknown backup profile.'], 400);
+}
+if (isset($data['backup_items'])) {
+    $data['backup_items'] = backupSanitizeItems($data['backup_items']);
+}
+if (isset($data['backup_schedule']) && trim($data['backup_schedule']) !== ''
+    && backupParseSchedule($data['backup_schedule']) === null) {
+    jsonResponse(['error' => 'Invalid backup schedule: pick at least one weekday and a time between 00:00 and 23:59.'], 400);
+}
+if (isset($data['backup_schedule_tz']) && $data['backup_schedule_tz'] !== ''
+    && !in_array($data['backup_schedule_tz'], timezone_identifiers_list(), true)) {
+    jsonResponse(['error' => 'Invalid backup timezone. Use an IANA identifier such as Europe/Warsaw or UTC.'], 400);
+}
+if (isset($data['backup_gpg_recipient']) && $data['backup_gpg_recipient'] !== ''
+    && !preg_match('/^[A-Za-z0-9@._+-]{1,128}$/', $data['backup_gpg_recipient'])) {
+    jsonResponse(['error' => 'Invalid GPG recipient: use a key id, fingerprint or email address.'], 400);
+}
+if (isset($data['backup_db_name']) && $data['backup_db_name'] !== ''
+    && !preg_match('/^[A-Za-z0-9_]{1,64}$/', $data['backup_db_name'])) {
+    jsonResponse(['error' => 'Invalid database name: letters, digits and _ only.'], 400);
 }
 if (isset($data['users_default_group'])) {
     $data['users_default_group'] = strtolower($data['users_default_group']);
