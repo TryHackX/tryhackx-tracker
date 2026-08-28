@@ -141,6 +141,16 @@ if ($bash === null) {
     check('there is no flag to override the tunnel requirement',
           !preg_match('/--force|--i-know|--allow-public/i', $hsrc));
 
+    // Found by running it: opentracker prints one static usage string whatever it was built with, so
+    // `-h` advertises "-s livesyncport" on a build that rejects -s, and /stats carries a <livesync>
+    // section on the same build. Reading either is how this check was wrong the first time.
+    check('the livesync capability check PROBES the flag instead of reading the help text',
+          str_contains($hsrc, 'timeout 2 "$binpath"') && str_contains($hsrc, '-s 65532'));
+    check('… and it does not decide from `-h` output any more',
+          !preg_match('/-h 2>&1 \| grep -q .livesyncport/', $hsrc));
+    check('… and says what to do about it, in the words that fix it',
+          str_contains($hsrc, '-DWANT_SYNC_LIVE'));
+
     $out = [];
     @exec(escapeshellarg($bash) . ' ' . escapeshellarg($helper) . ' --version 2>&1', $out, $rc);
     $j = json_decode(trim(implode('', $out)), true);
@@ -214,6 +224,16 @@ if ($bash === null) {
 /* ── 6. the panel tells the operator what to do rather than doing it ──────── */
 
 $hints = livesyncSetupHints(['livesync_bind_ip' => '10.9.0.1', 'livesync_peer_ip' => '10.9.0.2']);
+// Found by running two of them: livesync gossips to a multicast group (224.0.23.5), not to the peer
+// address — the -A peer/32 is an admin blessing, not a destination. A tunnel without a multicast
+// route binds the port, reports "on", and moves nothing.
+check('the setup hints mention the multicast route, because the tunnel alone is not enough',
+      str_contains(implode(chr(10), livesyncSetupHints([])), '224.0.0.0/4'));
+check('… and how to tell whether the binary even has livesync, by running it rather than reading it',
+      str_contains(implode(chr(10), livesyncSetupHints([])), '-s 65532'));
+check('the module says plainly that "on" is not proof peers are flowing',
+      str_contains((string)file_get_contents($root . '/includes/livesync.php'), 'still unproven'));
+
 check('the setup hints name WireGuard and the addresses in play',
       count($hints) >= 4 && str_contains(implode(' ', $hints), 'wireguard')
       && str_contains(implode(' ', $hints), '10.9.0.2'));

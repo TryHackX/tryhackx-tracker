@@ -599,7 +599,18 @@ peers into every swarm the tracker serves. So:
   a bigger claim on the machine than anything else here makes, and it would be doing it without being
   able to see the other end. Press **Test** and it prints the commands.
 
-This build takes livesync only from the command line, so the helper overrides `ExecStart` in its own
+**Before any of this can work the binary must have been built with `-DWANT_SYNC_LIVE`.** The
+opentracker shipped on this project's own server was not, and rejects `-s` outright — while its help
+text advertises `-s livesyncport` and `/stats` shows a `<livesync>` section, because opentracker
+prints both regardless of how it was compiled. The panel's **Test** therefore runs the binary with
+the flag rather than reading either, and says `-DWANT_SYNC_LIVE` when it is missing.
+
+**Livesync is multicast.** A livesync build joins 224.0.23.5; the peer address you configure is an
+*admin blessing*, not a destination. A tunnel needs `ip route add 224.0.0.0/4 dev <tunnel>` at both
+ends, which Test prints. And **"on" is not proof that peers are flowing** — watch the
+`<livesync><count>` counter on the Traffic card; it must climb.
+
+opentracker takes livesync only from the command line, so the helper overrides `ExecStart` in its own
 drop-in — the most invasive thing the panel does anywhere. It therefore records the command line it
 copied and reports when the unit's own has changed underneath it, because a stale copy runs the old
 command for ever while looking perfectly healthy. Undo is deleting one file.

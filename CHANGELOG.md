@@ -124,6 +124,35 @@ it protects nothing.
 It has already earned its place: it caught a new interpolation in `includes/reputation.php` the same
 day it was written.
 
+### Corrected — livesync is not compiled into the binary in service, and the panel believed otherwise
+
+E7 shipped in 1.17.0 saying livesync was "verified against the shipped binary". **That verification
+was wrong**, and running it is what showed it: the opentracker on this server **rejects `-s`
+outright**. It was built without `-DWANT_SYNC_LIVE` — confirmed against the build documentation,
+whose FEATURES line does not contain it.
+
+Two things lie about this, and both were believed:
+
+- opentracker prints **one static usage string** whatever it was built with, so `-h` advertises
+  `-s livesyncport` on a build that refuses it;
+- `/stats` carries a `<livesync>` section on the same build.
+
+The panel's Test read the first of those. It now **probes the flag** — runs the binary with `-s` for
+a moment and sees whether it is taken — and when it is not, says so and names `-DWANT_SYNC_LIVE`.
+
+A second finding from the same run: **livesync is MULTICAST.** A livesync-enabled build joins
+224.0.23.5 and binds two sockets on the sync port; the `-A <peer>/32` is an *admin blessing*, not a
+destination. A WireGuard tunnel therefore needs a multicast route on both ends, which the setup hints
+now print.
+
+**What is still unproven:** whether peers actually propagate. In a rig of two opentrackers in
+separate network namespaces on a veth pair, an announce to one never reached the other and the
+sending side emitted zero packets in twenty-five seconds — consistent with opentracker's own batching
+or with multicast in that rig, and not distinguished between. The code and the docs now say so
+plainly: **"on" is not proof that peers are flowing** — the `<livesync><count>` counter is, and it
+must climb. Nothing on the production tracker was touched by any of this; the throwaway binary,
+namespaces and sources were removed afterwards.
+
 ### Testing
 
 - `tests/reputation_test.php` (34 checks) proves the one-vote-per-identity rule **against the live

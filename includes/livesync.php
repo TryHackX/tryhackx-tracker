@@ -18,6 +18,28 @@
  *
  * Everything is off by default and nothing here forks a helper from a page view: the panel reads a
  * cached status the janitor refreshes, exactly like the cluster roster.
+ *
+ * ── what running it revealed, and what is still unproven ────────────────────
+ *
+ * Two things were learned by building a livesync-enabled opentracker and running two of them in
+ * separate network namespaces, and both change how this should be read:
+ *
+ * 1. **The binary in service here has no livesync at all.** It rejects `-s` outright. The help text
+ *    advertises `-s livesyncport` and `/stats` carries a `<livesync>` section REGARDLESS of how the
+ *    binary was built — both were believed, and both were wrong. The panel's Test now probes the
+ *    flag instead of reading either. Fixing it means rebuilding opentracker with `-DWANT_SYNC_LIVE`.
+ *
+ * 2. **Livesync is MULTICAST, not a link to the peer.** A livesync-enabled opentracker joins the
+ *    group 224.0.23.5 and binds two sockets on the sync port. The `-A <peer>/32` this code passes is
+ *    an ADMIN blessing — access control — not a destination. So on a WireGuard tunnel the multicast
+ *    route has to exist on both ends, which is a step this panel does not perform and cannot verify
+ *    from one side.
+ *
+ * What is still unproven: whether peers actually propagate. In the namespace rig a peer announced to
+ * one tracker never reached the other, and the sending side emitted zero packets in twenty-five
+ * seconds — consistent with opentracker's own batching, or with multicast in that rig, and not
+ * distinguished between. **Do not read the panel's "on" state as proof that peers are flowing.**
+ * The counter in the card (`<livesync><count>`) is the thing to watch: it must climb.
  */
 
 function livesyncEnabled(array $cfg): bool {
@@ -212,5 +234,11 @@ function livesyncSetupHints(array $cfg): array {
         'sudo nano /etc/wireguard/wg-tracker.conf   # [Interface] Address = ' . $bind . '/24 · [Peer] AllowedIPs = ' . $peer . '/32',
         'sudo systemctl enable --now wg-quick@wg-tracker',
         'ping -c1 ' . $peer . '   # the tunnel has to work before the panel will arm anything',
+        // Livesync gossips to a multicast group rather than to the peer address, so the tunnel needs
+        // a route for it. Without this the port binds, the panel says "on", and nothing ever moves.
+        'sudo ip route add 224.0.0.0/4 dev wg-tracker   # livesync is multicast (224.0.23.5)',
+        // And the binary has to have been built for it. The help text and /stats both mention
+        // livesync on builds that do not have it, so check by running it, not by reading it:
+        'opentracker -i 127.0.0.1 -p 65533 -P 65533 -s 65532 -u nobody   # "Usage:" = rebuild needed',
     ];
 }

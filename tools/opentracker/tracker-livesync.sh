@@ -17,10 +17,10 @@
 #
 # One file:  /etc/systemd/system/opentracker.service.d/91-tracker-livesync.conf
 #
-# It has to override ExecStart, because this build of opentracker takes livesync ONLY from the
-# command line — its config parser knows listen.*, access.* and tracker.*, and nothing else
-# (verified against the shipped binary, not assumed). Overriding somebody else's ExecStart is the
-# most invasive thing the panel does anywhere, so:
+# It has to override ExecStart, because opentracker takes livesync ONLY from the command line: its
+# config parser knows listen.*, access.* and tracker.*, and nothing else (checked against the shipped
+# binary, not assumed). Overriding somebody else's ExecStart is the most invasive thing the panel
+# does anywhere, so:
 #
 #   * it is a SEPARATE drop-in from 90-tracker-panel.conf, and never touches that file;
 #   * it records the ExecStart it was built from, and `status` reports when the unit's own has
@@ -227,17 +227,34 @@ action_check() {
     printf ',{"name":"the opentracker unit exists","ok":%s,"detail":%s}' "$unit_ok" "$(jstr "$UNIT")"
     [ "$unit_ok" = "true" ] || ok=0
 
-    # Is livesync even compiled into the binary that is running? Asking the unit's own binary rather
-    # than assuming: a build without WANT_SYNC_LIVE ignores -s silently, which would leave the panel
-    # reporting a tunnel that carries nothing.
-    local binpath sync_ok
+    # Is livesync compiled into the binary that is actually running?
+    #
+    # This must PROBE the flag, not read the help text. opentracker prints one static usage string
+    # regardless of what it was built with, so `-h` mentions "-s livesyncport" on a build that
+    # rejects -s outright; the stats page carries a <livesync> section for the same reason. Both were
+    # believed here once, and both were wrong: the binary on the machine this was written for was
+    # built without -DWANT_SYNC_LIVE and refuses -s, while advertising it in two places.
+    #
+    # So: run it with -s and a port, for a moment, and see whether it takes the flag. A build without
+    # livesync answers with its usage and exits.
+    local binpath sync_ok probe
     binpath="$(current_execstart | awk '{print $1}')"
     sync_ok=false
+    probe=""
     if [ -n "$binpath" ] && [ -x "$binpath" ]; then
-        "$binpath" -h 2>&1 | grep -q 'livesyncport' && sync_ok=true
+        # A port nothing uses, an address that is always local, and a timeout: this either exits at
+        # once with a usage message, or starts and is killed a second later. Neither disturbs the
+        # running tracker, which has its own process and its own sockets.
+        probe="$(timeout 2 "$binpath" -i 127.0.0.1 -p 65533 -P 65533 -s 65532 -u nobody 2>&1 | head -1)"
+        case "$probe" in
+            Usage*) sync_ok=false ;;
+            *)      sync_ok=true ;;
+        esac
     fi
     printf ',{"name":"this opentracker build has livesync compiled in","ok":%s,"detail":%s}' \
-        "$sync_ok" "$(jstr "$([ "$sync_ok" = true ] && echo "$binpath accepts -s" || echo "no -s in $binpath -h — this build ignores livesync entirely")")"
+        "$sync_ok" "$(jstr "$([ "$sync_ok" = true ] \
+            && echo "$binpath accepts -s" \
+            || echo "$binpath REFUSES -s. The help text and the <livesync> section in /stats both mention livesync on builds that do not have it — this one does not. Rebuild opentracker with -DWANT_SYNC_LIVE in FEATURES.")")"
     [ "$sync_ok" = "true" ] || ok=0
 
     printf ',{"name":"the drop-in directory can be written","ok":%s,"detail":%s}' \
