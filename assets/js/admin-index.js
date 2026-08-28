@@ -194,6 +194,11 @@
         const magWrap = el('div', { className: 'idx-magnet my-2' }, [
             el('input', { className: 'form-control form-control-sm bg-dark text-light border-secondary font-mono', readonly: true, value: d.magnet }),
             el('button', { type: 'button', className: 'btn btn-sm btn-outline-info', title: 'Copy magnet' }, el('i', { className: 'bi bi-clipboard' })),
+            // Open, not just copy. The row listing has had this since the page was written; the detail
+            // view, which is where somebody actually stops to read, had only the clipboard.
+            el('a', { className: 'btn btn-sm btn-outline-secondary', href: d.magnet,
+                      title: 'Open in your torrent client', 'aria-label': 'Open magnet link in your torrent client' },
+               el('i', { className: 'bi bi-magnet' })),
         ]);
         magWrap.querySelector('button').addEventListener('click', (e) => copyToClipboard(d.magnet, e.currentTarget));
         body.appendChild(magWrap);

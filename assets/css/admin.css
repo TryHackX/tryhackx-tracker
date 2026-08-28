@@ -972,7 +972,10 @@ input[type="number"] {
 .wl-sl { white-space: nowrap; }
 .wl-date { white-space: nowrap; color: #b0b8c4; font-size: 0.8rem; }
 .wl-actions { white-space: nowrap; }
-.wl-act { padding: 0.15rem 0.4rem; font-size: 0.78rem; margin-right: 0.25rem; }
+/* One number for every action bar. It used to be 0.25rem here and 0.1rem under .wl-page, so the same
+   row of buttons was spaced differently on Whitelist, Index, Users and Backups depending on which
+   rule won. 0.18rem is the middle of the two, and the override below is gone rather than retuned. */
+.wl-act { padding: 0.15rem 0.4rem; font-size: 0.78rem; margin-right: 0.18rem; }
 .wl-row-banned td { opacity: 0.65; }
 .wl-row-muted td { opacity: 0.65; }
 .wl-group-first td { border-top: 2px solid #2a3a4c; }
@@ -1131,7 +1134,6 @@ input[type="number"] {
 .wl-page .wl-source,
 .wl-page .wl-meta { text-align: center; }
 .wl-page .wl-actions { text-align: center; }
-.wl-page .wl-actions .wl-act { margin-right: 0.1rem; }
 .wl-page .wl-actions .wl-act:last-child { margin-right: 0; }
 .wl-page .wl-ellipsis { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wl-page .wl-th-check,
@@ -1239,6 +1241,7 @@ input[type="number"] {
 .idx-mkv { display: flex; justify-content: space-between; gap: 0.75rem; border-bottom: 1px solid #1c1c2a; padding: 0.25rem 0; font-size: 0.85rem; }
 .idx-mkv-k { color: #8a8a9a; } .idx-mkv-v { color: #e6e6ee; font-family: 'JetBrains Mono', Consolas, monospace; text-align: right; word-break: break-all; }
 .idx-magnet { display: flex; gap: 0.4rem; } .idx-magnet input { font-size: 0.72rem; }
+.wl-copybox .wl-copybox-btn + .wl-copybox-btn { margin-left: 0.18rem; }
 .idx-file-list { list-style: none; margin: 0.25rem 0 0; padding: 0; max-height: 260px; overflow-y: auto; }
 .idx-file-list li { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.15rem 0.25rem; border-bottom: 1px solid #171724; font-size: 0.78rem; }
 .idx-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .idx-file-size { flex: 0 0 auto; }

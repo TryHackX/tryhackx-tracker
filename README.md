@@ -508,6 +508,56 @@ Two numbers on this card are diagnoses rather than knobs, and both are easy to m
 - **the socket's own drop counter** (`ss -ulnpm`, the `d<N>` in skmem) — how many announces were
   thrown away for exactly that reason.
 
+### Two-factor authentication for the panel (1.14.0)
+
+**Settings → Two-factor authentication.** A six-digit TOTP code (RFC 6238) on top of the password,
+from any authenticator app. **Off by default.**
+
+- **Setup is two-step.** The secret is *pending* until a code generated from it verifies, so a
+  mistyped key cannot lock you out of your own panel.
+- **Ten single-use recovery codes**, shown once, stored as SHA-256, with regeneration behind the
+  password and a code. Fewer than three left and the panel says so without being asked.
+- **A code works once.** It is valid for its 30-second step plus one either side; the last accepted
+  step is recorded and never accepted again — including the code that confirmed the setup.
+- **Turning it off needs the password AND a code.** This exists for the case where somebody else has
+  the password, so the password alone must not be able to switch it off.
+- The password step **grants nothing on its own**: no session exists until the second factor is done,
+  and a correct password does not clear the brute-force counter (that would let someone holding it
+  reset the lockout and then guess six digits freely).
+- **No QR image, on purpose** — drawing one means sending the secret somewhere outside this machine,
+  and the secret is as good as the password. The key is shown in groups with the `otpauth://` URI.
+
+The secret lives in `config/admin_2fa.json`, beside the password hash, in a directory the web server
+is denied and no deploy overwrites — not in the settings table, which every backup dumps.
+
+**Locked out?** `php tools/twofa_cli.php off` from a shell. Reaching that shell already proves more
+than six digits could.
+
+### Extra opentracker instances (E6, 1.14.0)
+
+**Settings → OpenTracker instances**, with a roster card on the Traffic page. For a machine whose UDP
+workers are genuinely saturated — check the performance card first, which says outright whether that
+is you. **Off by default.**
+
+The installer's `opentracker.service` is never touched; extras are added beside it, share its
+accesslist, its white/black mode and its binary, and differ only in ports. The panel keeps no roster
+of its own: systemd and the filesystem hold it. `tracker-mode.sh --all` switches every instance with
+the primary last, an instance that cannot be switched is stopped rather than left serving the wrong
+list, and the reload fan-out runs from the janitor — never from a web request, and in blacklist mode
+too, where the whitelist path returns immediately and an extra would otherwise serve a hash banned an
+hour ago.
+
+```bash
+sudo install -m 0755 tools/opentracker/tracker-cluster.sh /usr/local/sbin/tracker-cluster.sh
+echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-cluster.sh' | sudo tee /etc/sudoers.d/tracker-cluster
+sudo chmod 0440 /etc/sudoers.d/tracker-cluster && sudo visudo -c -f /etc/sudoers.d/tracker-cluster
+# tracker-mode.sh must be reinstalled too, or the nightly schedule will not understand --all:
+sudo install -m 0755 tools/opentracker/tracker-mode.sh /usr/local/sbin/tracker-mode.sh
+```
+
+Remove every trace: `tracker-cluster.sh remove <name>` per instance, which takes the systemd template
+with the last one.
+
 ### Kernel network buffers — the eight knobs, armed rather than applied (1.13.0)
 
 **Admin → Traffic → Kernel network buffers** (helper and window in Settings → *Kernel network

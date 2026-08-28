@@ -653,8 +653,19 @@
             el('code', { className: 'wl-copybox-code', text }),
             el('button', { type: 'button', className: 'btn btn-sm wl-copybox-btn', title, 'aria-label': title, onclick: (e) => copyToClipboard(text, e.currentTarget) }, el('i', { className: 'bi bi-clipboard' })),
         ]);
+        // Copying a magnet and then finding somewhere to paste it is two steps too many when the
+        // whole point of opening this panel was to look at one torrent. The row listing already has an
+        // open button; the detail view, where somebody has deliberately stopped to read, did not.
+        const magnetBox = (text) => {
+            const box = copyBox(text, 'Copy magnet link');
+            box.appendChild(el('a', {
+                className: 'btn btn-sm wl-copybox-btn', href: text,
+                title: 'Open in your torrent client', 'aria-label': 'Open magnet link in your torrent client',
+            }, el('i', { className: 'bi bi-magnet' })));
+            return box;
+        };
         row('Info hash', [copyBox(it.info_hash, 'Copy hash')]);
-        row('Magnet link', [copyBox(magnet, 'Copy magnet link')]);
+        row('Magnet link', [magnetBox(magnet)]);
         row('Name', [el('span', { text: it.name || '—' })]);
         row('Size', [el('span', { text: it.total_size ? `${fmtBytes(it.total_size)} · ${it.files_count || 0} files` + (it.piece_length ? ` · piece ${fmtBytes(it.piece_length)}` : '') : '—' })]);
         const metaNodes = [metaBadge(it.meta_status)];

@@ -1836,6 +1836,10 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-settings.js<?= assetVer('assets/js/admin-settings.js') ?>"></script>
+    <!-- admin-common.js only defines window.AdminCommon (apiCall / el / showToast) and adds no globals
+         of its own, so it can join this page without colliding with the inline script above. Without
+         it admin-twofa.js returns immediately and the section sits on "Reading…" for ever. -->
+    <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-twofa.js<?= assetVer('assets/js/admin-twofa.js') ?>"></script>
     <script>
     const API_BASE = document.body.dataset.apiBase;

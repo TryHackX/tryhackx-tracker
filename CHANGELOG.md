@@ -4,6 +4,105 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] — 2026-08-28 (schema v17 + v18)
+
+### Added — two-factor authentication for the admin panel (schema v18)
+
+- **Settings → Two-factor authentication.** A six-digit TOTP code (RFC 6238) on top of the password,
+  from any authenticator app. **Off by default.** Verified against RFC 6238's own published test
+  vectors, because a one-byte slip in the dynamic truncation produces codes that are wrong in a way
+  nothing notices until somebody cannot sign in.
+- **The secret does not live in `settings`.** It is a credential — anyone holding it can mint valid
+  codes for ever — and that table is dumped by every backup and read by half the panel. It lives in
+  `config/admin_2fa.json` beside the password hash, in a directory the web server is denied (verified
+  on production: `403` for both) and that no deploy overwrites. One settings row mirrors the on/off
+  state so the settings search can find the section; the file decides.
+- **Setup is two-step.** The secret is *pending* until a code generated from it verifies, so a
+  mistyped key cannot lock an administrator out of their own panel — which is what happens when a
+  secret is stored the moment it is generated and the mistake is discovered at the next sign-in.
+- **Ten single-use recovery codes**, shown once, stored as SHA-256, with **regeneration** behind the
+  password and a code. Every previous code stops working the moment new ones are issued, and the
+  panel says so unprompted when fewer than three are left.
+- **A code cannot be used twice.** It is valid for its whole 30-second step plus one either side —
+  long enough for one read over a shoulder or out of a log — so the last accepted step is recorded and
+  never accepted again, including the code that confirmed the setup.
+- **Turning it off needs the password AND a current code.** The whole point is the case where somebody
+  else has the password; if that alone could disable it, it would protect nothing against precisely
+  the person it exists for. Same for regenerating codes.
+- **The password step now grants nothing on its own.** No session exists until the second factor is
+  done, so a stolen password reaches an "enter your code" box. The failure counter is deliberately
+  *not* cleared after a correct password either: clearing it there would let someone holding the
+  password reset the lockout at will and then take unlimited guesses at six digits.
+- **No QR image, and the panel says why**: drawing one means sending the secret to something outside
+  this machine, and the secret is as good as the password. The key is shown in groups with the full
+  `otpauth://` URI beside it.
+- **`tools/twofa_cli.php`** is the escape hatch. An administrator who has lost the app and spent every
+  recovery code still has SSH, and reaching that shell already proves more than six digits could. It
+  reads and disables only — turning it on from a terminal would print a secret into a shell history.
+
+### Added — extra opentracker instances (E6, schema v17)
+
+- **Settings → OpenTracker instances** and a roster card on the Traffic page. For a machine whose UDP
+  workers are genuinely saturated. **Off by default**, and the performance card above it says outright
+  whether it would help: on the reference deployment one instance uses a sixth of the machine with its
+  busiest worker at a quarter of a core, so the honest answer there is no.
+- **The installer's `opentracker.service` is never touched.** Extras are added beside it. Adopting it
+  would mean stopping the one unit whose failure takes the tracker down and migrating the stats URL,
+  the announce URL, the firewall port and the performance drop-in at once, on a working box.
+- **One mode, one binary.** Every instance executes the same shared symlink and reads the same
+  accesslist, so they cannot disagree about which build they are running and there is still exactly
+  one `tracker_mode`. The panel keeps **no roster**: systemd and the filesystem hold the truth, and
+  three settings rows are the entire database cost.
+- **The roster comes from the filesystem**, not `systemctl list-units` — without `--all` that lists
+  loaded units only, so a stopped, unloaded instance would vanish from the roster, never be switched
+  with the others, and come back weeks later serving whatever mode it was left in.
+- **The reload fan-out never runs in a web request.** `whitelistJanitor()` is called on every API
+  request by design; a loop of `systemctl reload` there would let one visitor stall five php-fpm
+  children. It lives in the janitor, refuses to run under any SAPI but the CLI, and is driven by the
+  accesslist file's mtime — which also makes it work in **blacklist mode**, where `whitelistJanitor()`
+  returns immediately and an extra would otherwise keep serving a hash banned an hour ago.
+- **`tracker-mode.sh` gained `--all` and `--instance`** without touching its output contract: detail
+  above, a bare mode word last, which is all `includes/schedule.php` reads — so the schedule needed no
+  change at all. An instance that cannot be switched is **stopped**, because serving the blacklist
+  build while the panel says "whitelist only" is not a degraded state but a wrong one. The aggregate
+  word follows the **primary** even when a secondary failed: that one row gates whitelist regeneration
+  for everyone.
+- **Creating an instance is refused while the automatic inbound limiter is on.** Its counters only see
+  the primary's port, so a second instance hides most of the traffic from it while leaving the load —
+  and it answers by throttling the primary, repeatedly, while the chart shows a rate saying it should
+  not be.
+
+### Fixed
+
+- **An instance that came up "active" while sharing the primary's port.** Found by rehearsing on the
+  live server, which is the only place it could have been found: the primary's config there names no
+  listen port at all — opentracker has its own default — so a copy of it had none either, the new
+  instance fell back to the same default, and it bound the port the primary was already on. systemd
+  called it active and the panel called it created. `create` now appends the listen lines when the
+  source has none, reads back what it wrote, checks the instance is actually **listening** on the port
+  it was given and removes itself again if it is not, and the panel reports whether the primary's port
+  was **read or assumed**.
+- **The mode switch's fast path asked the symlink, not the process.** With several instances the gap
+  between flipping the link and the last restart is seconds, and an interrupted switch could leave the
+  link saying white while every process still ran black from its open inode — after which the old code
+  printed success, restarted nothing, and the panel recorded a mode the tracker was not serving,
+  permanently. It reads `/proc/<pid>/exe` now.
+- **`systemctl reload` returning 0 meant nothing**, and this predates the cluster work: the exit code
+  says the signal was delivered, and on a build without the SIGHUP patch that signal can kill the
+  process a moment later — so a reload that emptied the swarm reported success and cleared the
+  pending-reload bookkeeping. One `is-active` check closes it.
+- **The kernel-buffer card was unreadable.** Its rows sat inside `.wl-status-grid`, which is
+  `repeat(auto-fill, minmax(250px, 1fr))`, so the whole card body landed in one 250-pixel column and
+  every sentence wrapped a word per line.
+- **The way back existed only while a change was armed.** Once it was confirmed the banner went and
+  "Put it back" went with it. There is now a **Restore defaults** button in the card's own action bar,
+  careful about the word: it restores what *this machine* had before the panel first touched these
+  settings, not the distribution's defaults — and with nothing captured it is disabled and says why
+  rather than doing nothing quietly.
+- **A disabled action in a status card looked enabled.** Bootstrap removes `pointer-events` from a
+  disabled button, which takes the not-allowed cursor and the tooltip with it — so the reason the
+  button cannot be used became unreachable exactly when it was needed.
+
 ## [1.13.0] — 2026-08-27 (schema v16)
 
 ### Added — the kernel's network buffers, from the panel
