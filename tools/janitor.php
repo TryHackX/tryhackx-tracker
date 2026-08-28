@@ -55,6 +55,19 @@ try {
         echo sprintf('[schedule] %s %s→%s%s%s', $sched['ok'] ? 'switched' : 'FAILED', $sched['from'], $sched['to'] ?? '?',
             $sched['error'] ? ' error=' . $sched['error'] : '', $sched['notes'] ? ' notes=' . implode(' | ', $sched['notes']) : ''), "\n";
     }
+    // Ask the helper what mode is REALLY running and cache it, so the panel's status card reads a warm
+    // answer instead of forking a sudo on every poll — and so a panel/tracker disagreement is noticed
+    // within a minute rather than whenever somebody happens to look.
+    if (function_exists('scheduleModeAgreement')) {
+        $agree = scheduleModeAgreement($cfg, true);
+        if ($agree['known'] && $agree['match'] === false) {
+            echo sprintf("[mode] MISMATCH: the panel says %s, the tracker is running %s
+", $agree['panel'], $agree['actual']);
+        } elseif (!$agree['known'] && $agree['error'] !== null && in_array('-v', $argv ?? [], true)) {
+            echo '[mode] could not read the running mode: ' . $agree['error'] . "
+";
+        }
+    }
     whitelistJanitor($db, $cfg);
     // statistics timeline: sample / roll up / prune (no-op when disabled)
     $tl = statsTimelineTick($db, $cfg);

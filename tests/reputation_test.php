@@ -87,9 +87,23 @@ check('the probe batch defaults to the worker concurrency',
       wlProbeMaxPerSubmit(['meta_worker_concurrency' => '12']) === 12);
 check('… and never exceeds it, however the setting is written',
       wlProbeMaxPerSubmit(['meta_worker_concurrency' => '4', 'wl_probe_max_batch' => '64']) === 4);
-check('the worker ceiling itself is now 64, in both the panel and the worker',
-      str_contains((string)file_get_contents($root . '/api/admin/save_settings.php'), 'min(64, $n)')
-      && str_contains((string)file_get_contents($root . '/worker/worker.py'), 'min(64,'));
+// The property is not "the number is 64" — it is that the PANEL and the WORKER agree on it. They
+// once did not: the panel offered up to 64 while the running worker enforced 16, and a stored 32 was
+// therefore read as garbage and silently replaced by the config default of 4. So both ceilings are
+// extracted and compared, and the test fails loudly if either cannot be found at all rather than
+// passing on an empty match.
+$panelSrc  = (string)file_get_contents($root . '/api/admin/save_settings.php');
+$workerSrc = (string)file_get_contents($root . '/worker/worker.py');
+$panelMax  = preg_match('/meta_worker_concurrency.*?min\((\d+),/s', $panelSrc, $pm) ? (int)$pm[1] : 0;
+$workerMax = preg_match('/^CONCURRENCY_MAX\s*=\s*(\d+)/m', $workerSrc, $wm) ? (int)$wm[1] : 0;
+check('the panel states a parallel-fetch ceiling', $panelMax > 0, 'found ' . $panelMax);
+check('the worker states one too, as a named constant', $workerMax > 0, 'found ' . $workerMax);
+check('and the two agree — a panel offering more than the worker accepts is how 32 became 4',
+      $panelMax === $workerMax, "panel=$panelMax worker=$workerMax");
+// An out-of-range number must be CLAMPED by the worker, never discarded: discarding falls back to
+// the config file, which is how asking for more parallelism produced less than before.
+check('the worker clamps an out-of-range request instead of ignoring it',
+      str_contains($workerSrc, 'val = max(1, min(CONCURRENCY_MAX, asked))'));
 
 /* ── 5. the live database: one vote per identity, enforced by the schema ──── */
 

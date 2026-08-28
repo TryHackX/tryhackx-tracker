@@ -39,11 +39,12 @@ $meUser = currentUser($db);
         <label class="search-check" title="Also match torrent file names"><input type="checkbox" id="search-files"><span class="search-check-box" aria-hidden="true"></span> Also search file names</label>
         <?php endif; ?>
         <?php if (($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1'): ?>
-        <select id="search-content" title="Which reviewed descriptions to include. The default hides rejected ones — a description a moderator turned down should not be the first thing you read, but the torrent behind it is still a torrent.">
+        <select id="search-content" title="Which descriptions to include, by review state. The default hides rejected ones — a description a moderator turned down should not be the first thing you read, but the torrent behind it is still a torrent.">
             <option value="not_rejected">Hide rejected</option>
             <option value="approved">Approved only</option>
             <option value="approved_or_none">Approved &amp; unreviewed</option>
-            <option value="none">Unreviewed only</option>
+            <option value="pending">Waiting for review</option>
+            <option value="none">Nothing written yet</option>
             <option value="rejected">Rejected only</option>
         </select>
         <?php endif; ?>

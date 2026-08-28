@@ -1749,6 +1749,31 @@ async function loadStatsHome(forceSync = false) {
     }
 }
 
+/* ── the two request helpers, at FILE scope on purpose ───────────────────────
+ *
+ * These used to live inside the accounts IIFE below, and two later features called them from their
+ * own IIFEs: the description preview and the "watching a submission prove itself" list. Both threw
+ * ReferenceError on their first call — silently, because both call sites are async and neither was
+ * awaited, so the rejection went nowhere and the feature simply never did anything. The preview box
+ * opened empty; the probe list never appeared.
+ *
+ * A file-scope const is the fix rather than `window.postJson`: it keeps one definition, and the next
+ * IIFE that needs it gets it by lexical scope instead of by remembering to export.
+ */
+const postJson = async (endpoint, body) => {
+    try {
+        const res = await fetch(APP_API + endpoint, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        return await res.json();
+    } catch { return null; }
+};
+const getJson = async (endpoint) => {
+    try { return await (await fetch(APP_API + endpoint, { headers: { 'Accept': 'application/json' } })).json(); }
+    catch { return null; }
+};
+
 // === User accounts (?action=login / register / account / reset) + index search (?action=search) ===
 // All rendering uses textContent — usernames, group names, notification titles and torrent names
 // are untrusted. Endpoints: user_login/user_register/user_logout/user_me/user_update/
@@ -1876,19 +1901,6 @@ async function loadStatsHome(forceSync = false) {
         if (!s) return '—';
         const d = new Date(String(s).replace(' ', 'T'));
         return isNaN(d.getTime()) ? String(s) : d.toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-    };
-    const postJson = async (endpoint, body) => {
-        try {
-            const res = await fetch(APP_API + endpoint, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                body: JSON.stringify(body),
-            });
-            return await res.json();
-        } catch { return null; }
-    };
-    const getJson = async (endpoint) => {
-        try { return await (await fetch(APP_API + endpoint, { headers: { 'Accept': 'application/json' } })).json(); }
-        catch { return null; }
     };
 
     // ── sign in ──
@@ -2344,13 +2356,16 @@ async function loadStatsHome(forceSync = false) {
                 }
                 // The state of the words attached to it, not of the torrent. Only shown when there
                 // is a state to show: an index row nobody has written about has none.
-                if (r.content_status === 'approved' || r.content_status === 'rejected') {
+                if (r.content_status === 'approved' || r.content_status === 'rejected' || r.content_status === 'pending') {
                     const cb = document.createElement('span');
                     cb.className = 'search-wl-badge search-cs-' + r.content_status;
-                    cb.title = r.content_status === 'approved'
-                        ? 'The description and source link were reviewed and published'
-                        : 'The description was reviewed and turned down — the torrent itself is unaffected';
-                    cb.textContent = r.content_status === 'approved' ? 'OK' : 'REJ';
+                    const CS = {
+                        approved: ['OK',  'The description and source link were reviewed and published'],
+                        rejected: ['REJ', 'The description was reviewed and turned down — the torrent itself is unaffected'],
+                        pending:  ['?',   'Somebody wrote a description; a moderator has not looked at it yet'],
+                    }[r.content_status];
+                    cb.textContent = CS[0];
+                    cb.title = CS[1];
                     nameTd.appendChild(cb);
                 }
                 if (r.files_count) {
@@ -3055,12 +3070,17 @@ async function loadStatsHome(forceSync = false) {
     window.askBeforeLeaving = askBeforeLeaving;
 })();
 
-/* ── the description preview ────────────────────────────────────────────────
+/* ── the description editor ─────────────────────────────────────────────────
  *
  * The renderer lives on the server, and this does not change that. Turning the text into HTML in
  * the browser would put the one guarantee this feature rests on — that the output contains only tags
  * the server itself wrote — in the least trustworthy place in the system. So the preview is a round
  * trip to the same function the visitor's page will use. Slower, and correct.
+ *
+ * The toolbar is the same idea as the admin bulk-mail composer: a <textarea> gets no Ctrl+B from the
+ * browser, so the keys and the buttons run one wrapper that inserts whichever syntax the selected
+ * format uses. A contenteditable box would give Ctrl+B for free and cost a second renderer, a paste
+ * sanitiser and a tag whitelist to police — for text typed by strangers, that is the wrong trade.
  *
  * Debounced, because it is somebody typing, and the endpoint is a parser anybody can call.
  */
@@ -3071,38 +3091,79 @@ async function loadStatsHome(forceSync = false) {
     const box = document.getElementById('wl-desc-preview');
     const counter = document.getElementById('wl-desc-count');
     const help = document.getElementById('wl-desc-help');
+    const syntax = document.getElementById('wl-desc-syntax');
+    const tools = document.getElementById('wl-desc-tools');
     const tabs = [...document.querySelectorAll('.rt-tab')];
     const fmtEl = document.getElementById('wl-desc-format');
     const csrf = document.querySelector('#wl-form input[name="csrf_token"]');
     let timer = null;
-    let lastAsked = '';
+    let lastShown = null;          // {key, ok} — what the box is currently displaying
+
+    const SYNTAX = {
+        markdown: { bold: ['**', '**'], italic: ['*', '*'], code: ['`', '`'],
+                    link: ['[', '](https://example.org)'], quote: ['> ', ''], list: ['- ', ''] },
+        bbcode:   { bold: ['[b]', '[/b]'], italic: ['[i]', '[/i]'], code: ['[code]', '[/code]'],
+                    link: ['[url=https://example.org]', '[/url]'], quote: ['[quote]', '[/quote]'],
+                    list: ['[list]\n[*] ', '\n[/list]'] },
+    };
+    const HINT = {
+        markdown: 'Markdown: **bold**, *italic*, # heading, - list, > quote, `code`, [text](url), ![](image). Ctrl+B, Ctrl+I and Ctrl+K work in the box.',
+        bbcode:   'BBCode: [b]bold[/b], [i]italic[/i], [url=…]text[/url], [quote], [code], [list], [img]. Ctrl+B, Ctrl+I and Ctrl+K work in the box.',
+    };
+    const fmt = () => (fmtEl && fmtEl.value === 'markdown') ? 'markdown' : 'bbcode';
+
+    /** Wrap the selection, or drop a stub at the caret and select it so typing replaces it. */
+    function wrap(kind) {
+        const syn = SYNTAX[fmt()];
+        if (!syn || !syn[kind]) return;
+        const [open, close] = syn[kind];
+        const start = ta.selectionStart, end = ta.selectionEnd;
+        const sel = ta.value.slice(start, end);
+        // A line-prefix mark (quote, and a Markdown list) belongs at the start of EVERY selected
+        // line: wrapping the block instead would quote only its first line.
+        const linewise = close === '';
+        const inserted = linewise
+            ? (sel || 'text').split('\n').map(l => open + l).join('\n')
+            : open + (sel || 'text') + close;
+        ta.setRangeText(inserted, start, end, 'end');
+        if (!sel) ta.setSelectionRange(start + open.length, start + open.length + 4);
+        ta.focus();
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
 
     function show(which) {
         tabs.forEach(t => t.classList.toggle('active', t.dataset.rt === which));
         ta.hidden = which !== 'write';
+        if (tools) tools.hidden = which !== 'write';
         box.hidden = which !== 'preview';
         if (which === 'preview') render();
     }
 
     async function render() {
         const text = ta.value;
-        const fmt = fmtEl ? fmtEl.value : 'bbcode';
-        const key = fmt + String.fromCharCode(31) + text;
-        if (key === lastAsked) return;
-        lastAsked = key;
+        const f = fmt();
+        const key = f + String.fromCharCode(31) + text;
+        // Only skip the round trip when the box already holds a GOOD render of this exact text. The
+        // previous version recorded the key before asking and never cleared it on failure, so one
+        // 403, one rate-limited 429 or one dropped connection wedged the preview for that text for
+        // good — the retry the visitor pressed did nothing at all.
+        if (lastShown && lastShown.ok && lastShown.key === key) return;
         if (!text.trim()) {
             box.textContent = '';
             box.appendChild(Object.assign(document.createElement('p'), {
                 className: 'text-muted', textContent: 'Nothing to preview yet.' }));
+            lastShown = { key, ok: true };
             return;
         }
+        box.textContent = 'Rendering…';
         const r = await postJson('richtext_preview', {
-            text, format: fmt, csrf_token: csrf ? csrf.value : '' });
-        if (!r) { box.textContent = 'Could not reach the server.'; return; }
-        if (!r.success) { box.textContent = r.error || 'Could not render that.'; return; }
+            text, format: f, csrf_token: csrf ? csrf.value : '' });
+        if (!r) { box.textContent = 'Could not reach the server.'; lastShown = { key, ok: false }; return; }
+        if (!r.success) { box.textContent = r.error || 'Could not render that.'; lastShown = { key, ok: false }; return; }
         // The server built this from fully escaped input with a fixed tag whitelist
         // (includes/richtext.php). It is the same string the public page will show.
         box.innerHTML = r.html;
+        lastShown = { key, ok: true };
         if (counter) {
             const bits = [r.length + '/' + r.limit + ' characters'];
             if (r.images.limit > 0 || r.images.used) bits.push(r.images.used + '/' + r.images.limit + ' images');
@@ -3115,12 +3176,34 @@ async function loadStatsHome(forceSync = false) {
         }
     }
 
+    function syncFormat() {
+        if (syntax) syntax.textContent = HINT[fmt()];
+        lastShown = null;                       // the same text renders differently in the other syntax
+        if (!box.hidden) render();
+    }
+
     tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.rt)));
+    if (tools) tools.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-md]');
+        if (b) wrap(b.dataset.md);
+    });
+    ta.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+        const kind = { b: 'bold', i: 'italic', k: 'link' }[e.key.toLowerCase()];
+        if (!kind) return;
+        e.preventDefault();
+        wrap(kind);
+    });
     ta.addEventListener('input', () => {
         clearTimeout(timer);
+        // The counter is worth having while WRITING too, not only after a preview — it is the only
+        // thing that tells somebody they are near the character limit before the form refuses them.
+        if (counter && ta.maxLength > 0) counter.textContent = ta.value.length + '/' + ta.maxLength + ' characters';
         if (!box.hidden) timer = setTimeout(render, 400);
     });
-    if (fmtEl) fmtEl.addEventListener('change', () => { lastAsked = ''; if (!box.hidden) render(); });
+    if (fmtEl && fmtEl.tagName === 'SELECT') fmtEl.addEventListener('change', syncFormat);
+    syncFormat();
+    if (counter && ta.maxLength > 0) counter.textContent = '0/' + ta.maxLength + ' characters';
 })();
 
 /* ── watching a submission prove itself ─────────────────────────────────────

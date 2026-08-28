@@ -20,6 +20,21 @@ try {
     $scrape = null;
 }
 
+// What the CATALOGUE knows about the same hash. The whitelist row says when we were told about the
+// torrent; index_hashes says when the tracker last actually saw it and how big the swarm ever got —
+// and those were visible in the Index panel and the public Info panel but not here, which is most of
+// what "the whitelist details have fewer details" meant. Missing is normal: a registered hash that
+// has never been announced has no index row.
+$idx = null;
+try {
+    $st = $db->prepare("SELECT first_seen, last_seen, seen_count, last_seeders, last_leechers,
+                               last_completed, peak_seeders, meta_status AS idx_meta_status,
+                               total_size AS idx_total_size, files_count AS idx_files_count, promoted_at
+                          FROM index_hashes WHERE info_hash = ? LIMIT 1");
+    $st->execute([(string)$row['info_hash']]);
+    $idx = $st->fetch() ?: null;
+} catch (\Throwable $e) { $idx = null; }
+
 $item = $row;
 unset($item['meta_claim']);
 $item['id'] = (int)$item['id'];
@@ -77,6 +92,7 @@ jsonResponse([
     'scrape' => $scrape,
     'banned_reason' => $bannedReason,
     'api_client' => $apiClient,
+    'index' => $idx,
     // Shown to an administrator whatever its review state: a moderator cannot judge text
     // they are not allowed to see.
     'content' => richtextContentFor($db, $cfg, $row['info_hash'], true),

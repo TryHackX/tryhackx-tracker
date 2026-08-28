@@ -1158,13 +1158,39 @@ function isHashBlocked(PDO $db, array $cfg, string $hash): bool {
 // Status / diagnostics
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Age in seconds of the metadata worker heartbeat file, or null when absent. */
-function whitelistWorkerHeartbeatAge(array $cfg): ?int {
+/**
+ * The metadata worker's heartbeat: how old it is, and what the worker says it is doing.
+ *
+ * The file used to be empty — its mtime was the entire message — so the panel could say "alive" and
+ * nothing more. That is how a worker can sit at 4 parallel fetches for a day while the panel proudly
+ * displays the 32 somebody typed into Settings: with nothing to ask, the panel reported the setting
+ * back to the operator and called it status. Worker 3 writes one JSON line instead; an older worker
+ * still just touches the file, so `info` is simply null and everything else behaves as before.
+ *
+ * Returns ['age' => ?int seconds, 'info' => ?array, 'file' => ?string].
+ */
+function whitelistWorkerHeartbeat(array $cfg): array {
     $candidates = [(string)($cfg['worker_heartbeat_file'] ?? ''), '/home/tracker/metadata_worker/heartbeat'];
     foreach ($candidates as $f) {
-        if ($f !== '' && is_file($f)) { $m = @filemtime($f); if ($m) return max(0, time() - $m); }
+        if ($f === '' || !is_file($f)) continue;
+        $m = @filemtime($f);
+        if (!$m) continue;
+        $info = null;
+        // Bounded read: this file is written by another process and a panel poll must not depend on
+        // its good behaviour.
+        $raw = @file_get_contents($f, false, null, 0, 4096);
+        if (is_string($raw) && $raw !== '') {
+            $d = json_decode(trim($raw), true);
+            if (is_array($d)) $info = $d;
+        }
+        return ['age' => max(0, time() - $m), 'info' => $info, 'file' => $f];
     }
-    return null;
+    return ['age' => null, 'info' => null, 'file' => null];
+}
+
+/** Age in seconds of the metadata worker heartbeat file, or null when absent. */
+function whitelistWorkerHeartbeatAge(array $cfg): ?int {
+    return whitelistWorkerHeartbeat($cfg)['age'];
 }
 
 /** Everything the admin status card needs, plus a list of warnings for the dashboard. */
@@ -1186,7 +1212,8 @@ function whitelistStatus(PDO $db, array $cfg): array {
         $counts['pending_meta'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE meta_status = 'pending'")->fetchColumn();
         $counts['fetching_meta'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE meta_status = 'fetching'")->fetchColumn();
     } catch (\Throwable $e) {}
-    $hb = whitelistWorkerHeartbeatAge($cfg);
+    $workerHb = whitelistWorkerHeartbeat($cfg);
+    $hb = $workerHb['age'];
     $warnings = [];
     if ($mode === 'whitelist') {
         if (!$perm['ok']) $warnings[] = ['level' => 'danger', 'text' => 'Whitelist file problem: ' . implode(' ', $perm['errors'])];
@@ -1199,6 +1226,21 @@ function whitelistStatus(PDO $db, array $cfg): array {
         }
         if ((int)$state['fail_count'] >= 2) $warnings[] = ['level' => 'danger', 'text' => 'The last ' . (int)$state['fail_count'] . ' tracker reloads failed: ' . ($state['last_reload_output'] ?: 'unknown error') . ' — is the service running?'];
         if ($counts['pending_meta'] > 0 && ($hb === null || $hb > 300)) $warnings[] = ['level' => 'warn', 'text' => 'Metadata worker heartbeat ' . ($hb === null ? 'missing' : formatUptime($hb) . ' old') . ' — ' . $counts['pending_meta'] . ' hashes wait for metadata.'];
+        // What the worker RUNS versus what Settings asked for. A worker started before the file was
+        // last updated keeps running the old code, which is how "set 32, gets 4" happens with every
+        // number in the panel looking right.
+        $asked = trim((string)($cfg['meta_worker_concurrency'] ?? ''));
+        $wi = $workerHb['info'];
+        if ($asked !== '' && is_array($wi) && isset($wi['concurrency'])) {
+            $running = (int)$wi['concurrency'];
+            if ($running !== (int)$asked) {
+                $warnings[] = ['level' => 'warn', 'text' => 'The metadata worker is running '
+                    . $running . ' parallel fetches, not the ' . (int)$asked . ' set in Settings'
+                    . (isset($wi['concurrency_max']) && (int)$asked > (int)$wi['concurrency_max']
+                        ? ' — that build tops out at ' . (int)$wi['concurrency_max'] . '.'
+                        : ' — restart tracker-metadata if worker.py was updated since it started.')];
+            }
+        }
     }
     // scheduled mode (includes/schedule.php): surface a failed / overdue switch in both modes
     $schedule = null;
@@ -1219,7 +1261,8 @@ function whitelistStatus(PDO $db, array $cfg): array {
     }
     return [
         'mode' => $mode, 'path' => $path, 'permissions' => $perm, 'file' => $file, 'state' => $state, 'counts' => $counts,
-        'worker_heartbeat_age' => $hb, 'reload_min_interval' => max(10, (int)($cfg['whitelist_reload_min_interval'] ?? 45)),
+        'worker_heartbeat_age' => $hb, 'worker' => $workerHb['info'],
+        'reload_min_interval' => max(10, (int)($cfg['whitelist_reload_min_interval'] ?? 45)),
         'next_reload_in' => whitelistSecondsToNextReload($cfg), 'warnings' => $warnings,
         'service' => ['name' => (string)($cfg['opentracker_service_name'] ?? ''), 'auto_reload' => (($cfg['opentracker_auto_reload'] ?? '1') === '1'), 'exec' => trackerExecAvailable()],
         'schedule' => $schedule,

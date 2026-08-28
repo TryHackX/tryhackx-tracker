@@ -835,7 +835,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
      * would be using a judgement about words as a judgement about a swarm.
      */
     $contentFilter = (string)($q['content'] ?? 'not_rejected');
-    if (!in_array($contentFilter, ['not_rejected', 'rejected', 'approved', 'approved_or_none', 'none'], true)) {
+    if (!in_array($contentFilter, ['not_rejected', 'rejected', 'approved', 'approved_or_none', 'none', 'pending'], true)) {
         $contentFilter = 'not_rejected';
     }
 
@@ -933,10 +933,14 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                 'rejected'         => "content_status = 'rejected'",
                 'approved'         => "content_status = 'approved'",
                 'approved_or_none' => "content_status IN ('approved','none')",
-                'none'             => "content_status IN ('none','pending')",
+                // 'pending' and 'none' used to be one bucket called "Unreviewed only", which made the
+                // review queue invisible from search: a moderator could not ask "what is waiting?"
+                // and got rows nobody had written about mixed in with rows waiting for them.
+                'pending'          => "content_status = 'pending'",
+                'none'             => "content_status = 'none'",
             ];
             $where[] = $contentSql[$contentFilter];
-        } elseif ($contentFilter === 'rejected' || $contentFilter === 'approved') {
+        } elseif ($contentFilter === 'rejected' || $contentFilter === 'approved' || $contentFilter === 'pending') {
             // An index row has no reviewed state, so a filter asking for one must exclude the whole
             // arm rather than quietly returning rows that cannot match.
             $where[] = '1 = 0';

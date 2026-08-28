@@ -1926,36 +1926,52 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .leave-url { display: block; margin: 0.6rem 0 0.9rem; padding: 0.5rem 0.6rem; border-radius: 4px; background: rgba(0,0,0,0.35); font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; word-break: break-all; }
 .leave-acts { display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; }
 
-/* The Info panel: a wider box than the file list, because it carries prose as well as a tree.
-   The panel is built as four bands — the swarm numbers, the qualifying chips, the prose and rating,
-   then the record — separated by rules rather than by guesswork about margins, so a torrent with no
-   description and a torrent with three paragraphs both read as the same panel. */
-.info-box { max-width: 46rem; }
-.info-section { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); }
-.info-section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
-.info-sub { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.55; margin-bottom: 0.4rem; }
+/* The description editor.
+   None of this existed: .rt-tabs, .rt-tab, .rt-counter and .rt-preview were emitted by the template
+   and had no rule anywhere, so the tabs rendered as raw browser buttons — which is exactly what the
+   screenshot showed. The format <select> was worse than unstyled: it inherited
+   `.form-group select { width: 100% }` and stretched across the form inside a one-line label, so it
+   needs an explicit override rather than merely a new rule. */
+.rt-editor { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-code); overflow: hidden; }
+.rt-tabs { display: flex; align-items: center; gap: 0.15rem; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--border); }
+.rt-tab {
+    background: transparent; border: 1px solid transparent; border-radius: 4px;
+    color: var(--text-muted); font: inherit; font-size: 0.82rem; line-height: 1.4;
+    padding: 0.25rem 0.7rem; cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.rt-tab:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+.rt-tab.active { color: var(--text); background: var(--bg); border-color: var(--border); }
+.rt-counter { margin-left: auto; font-size: 0.75rem; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* width:auto beats the .form-group select rule this control would otherwise inherit */
+.rt-format, .rt-format-fixed { margin-left: 0.5rem; font-size: 0.78rem; }
+.form-group .rt-editor select.rt-format {
+    width: auto; padding: 0.15rem 0.4rem; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+}
+.rt-format-fixed { color: var(--text-muted); }
+.rt-tools { display: flex; gap: 0.2rem; flex-wrap: wrap; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--border); }
+.rt-tools[hidden] { display: none; }
+.rt-tools button {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-muted); font: inherit; font-size: 0.8rem; line-height: 1.4;
+    min-width: 2rem; padding: 0.2rem 0.5rem; cursor: pointer; transition: color 0.15s, border-color 0.15s;
+}
+.rt-tools button:hover { color: var(--text); border-color: var(--accent); }
+/* The box and the preview occupy the same slot, so switching tabs does not move the page. */
+.form-group .rt-editor textarea {
+    width: 100%; min-height: 9rem; margin: 0; border: 0; border-radius: 0;
+    background: var(--bg-code); resize: vertical;
+}
+.form-group .rt-editor textarea:focus { outline: none; box-shadow: none; }
+.rt-preview { min-height: 9rem; max-height: 26rem; overflow-y: auto; padding: 0.7rem 0.85rem; }
+.rt-preview[hidden] { display: none; }
+.form-hint-bad { color: var(--error); }
+.wl-extra { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.wl-extra-head { color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.9rem; }
 
-/* The swarm strip. These are the numbers the panel exists for, so they are the biggest thing in it
-   and they are read before the prose, not after it. Tabular figures so a refresh that changes 9 to
-   10 does not shuffle the row sideways. */
-.info-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); gap: 0.5rem; }
-.info-stat { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.55rem 0.6rem; border-radius: 6px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.07); }
-.info-stat-v { font-size: 1.15rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.info-stat-l { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.6; }
-.info-stat-seed .info-stat-v { color: #6fce8b; }
-.info-stat-leech .info-stat-v { color: #e0b85c; }
-
-.info-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.6rem; }
-.info-chip { display: inline-block; padding: 0.12rem 0.55rem; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); font-size: 0.75rem; opacity: 0.85; }
-.info-chip-ok { border-color: rgba(63,164,91,0.55); color: #6fce8b; opacity: 1; }
-.info-chip-auto { border-style: dashed; opacity: 0.7; }
-.info-refresh { margin-left: auto; }
-
-.info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.1rem 1.2rem; }
-.info-kv { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.3rem 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
-.info-kv-label { opacity: 0.7; font-size: 0.85rem; }
-.info-kv-value { font-size: 0.88rem; text-align: right; }
-.info-hash { font-size: 0.7rem; word-break: break-all; }
+/* The Info panel's primitives live in assets/css/detail-panel.css, which BOTH the public layout and
+   the admin whitelist/index pages load. They used to sit here, in the public-only stylesheet, which
+   is why the admin detail panels could not look like this one however much anybody wanted them to. */
 
 /* Ratings. The bar shows the split; the label under it shows the COUNT, because a bar alone cannot
    distinguish "100% from one vote" from "100% from four hundred", and those are different facts. */
@@ -2001,3 +2017,6 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .star-hit-r { right: 0; }
 .star-hit:focus-visible { outline: 2px solid #4a9eff; outline-offset: 1px; border-radius: 2px; }
 .search-rep-stars { color: #f0b429; white-space: nowrap; }
+/* Waiting for a moderator. Amber rather than green or red, because it is neither: somebody wrote
+   something and nobody has judged it yet. */
+.search-cs-pending { background: rgba(201,162,39,0.18); border-color: rgba(201,162,39,0.55); color: #d8b13a; }

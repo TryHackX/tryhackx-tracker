@@ -311,10 +311,14 @@ if (isset($data['mail_from_email']) && $data['mail_from_email'] !== '') {
     }
 }
 if (isset($data['meta_worker_concurrency']) && $data['meta_worker_concurrency'] !== '') {
-    // empty = keep the worker's own config; otherwise clamp to a sane 1..16
-    $n = is_numeric($data['meta_worker_concurrency']) ? (int)$data['meta_worker_concurrency'] : 0;
-    if ($n < 1) $data['meta_worker_concurrency'] = '';
-    else $data['meta_worker_concurrency'] = (string)min(64, $n);
+    // Empty means "use the worker's own config file"; a number is clamped to 1..64.
+    //
+    // The comment here used to say 1..16 while the code said 64 — the ceiling was raised and only
+    // half the line was updated. And 0 or a negative number was silently rewritten to '', which reads
+    // in the panel as "accepted" and means "ignore me": the operator sees their entry vanish into the
+    // worker's default. Below one is now clamped to one, which is what asking for 0 can only mean.
+    $n = is_numeric($data['meta_worker_concurrency']) ? (int)$data['meta_worker_concurrency'] : 1;
+    $data['meta_worker_concurrency'] = (string)max(1, min(64, $n));
 }
 if (isset($data['ot_perf_cmd']) && $data['ot_perf_cmd'] !== '' && !otValidCommand($data['ot_perf_cmd'])) {
     jsonResponse(['error' => 'The OpenTracker helper command may contain only letters, digits, spaces, dots, slashes, dashes and underscores.'], 400);
@@ -419,6 +423,18 @@ if ($limitsChanged) {
     requireAdminReauth($confirmPassword, $cfg);
 }
 
+// The tracker mode is not an ordinary setting: it describes something OUTSIDE the database.
+//
+// Writing this row tells the panel which list to generate and what the public pages promise; it does
+// not move the symlinks or restart the service, and until now nothing said so. An operator could
+// select "whitelist", watch a whitelist file appear, and be served by the blacklist build — with
+// every status card agreeing, because they all read the row that had just been written.
+//
+// Saving still writes it (it really does govern the panel), but the answer now carries the truth,
+// and it is asked of the helper AFTER the write so it describes the state the admin is now in.
+$modeWasChanged = array_key_exists('tracker_mode', $data)
+    && (string)$data['tracker_mode'] !== (string)($cfg['tracker_mode'] ?? 'blacklist');
+
 setSettings($db, $data);
 
 // The panel bakes the sign-in address into <body data-login-path> at render time and the Logout
@@ -427,4 +443,20 @@ setSettings($db, $data);
 $applied = [];
 if (array_key_exists('admin_login_path', $data)) $applied['admin_login_path'] = adminLoginPath($data + $cfg);
 
-jsonResponse(['success' => true] + ($applied ? ['applied' => $applied] : []));
+$warning = null;
+if ($modeWasChanged) {
+    $cfg['tracker_mode'] = (string)$data['tracker_mode'];
+    $agree = function_exists('scheduleModeAgreement') ? scheduleModeAgreement($cfg, true) : ['known' => false];
+    if (!empty($agree['known']) && $agree['match'] === false) {
+        $warning = 'Saved — but the TRACKER has not been switched. It is still running '
+                 . $agree['actual'] . ' mode while the panel now says ' . $agree['panel'] . '. '
+                 . 'Use “Switch the tracker now” on the Whitelist page, or turn the schedule on.';
+    } elseif (empty($agree['known'])) {
+        $warning = 'Saved — but the panel could not confirm which mode the tracker is actually running'
+                 . (!empty($agree['error']) ? ' (' . $agree['error'] . ')' : '')
+                 . '. Check it on the Whitelist page before relying on this.';
+    }
+}
+
+jsonResponse(['success' => true] + ($applied ? ['applied' => $applied] : [])
+             + ($warning !== null ? ['warning' => $warning] : []));

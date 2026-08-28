@@ -133,24 +133,37 @@ if ($wlSched) {
         <?php endif; ?>
         <?php if ($wlDescOn): ?>
         <div class="form-group">
-            <label for="wl-desc">Description
-                <?php if (count($wlFormats) > 1): ?>
-                <select id="wl-desc-format" name="description_format" class="wl-format-select">
-                    <option value="bbcode">BBCode</option>
-                    <option value="markdown">Markdown</option>
-                </select>
-                <?php else: ?>
-                <input type="hidden" id="wl-desc-format" name="description_format" value="<?= sanitize($wlFormats[0]) ?>">
-                <small class="form-hint">&mdash; <?= $wlFormats[0] === 'markdown' ? 'Markdown' : 'BBCode' ?></small>
-                <?php endif; ?>
-            </label>
-            <div class="rt-tabs">
-                <button type="button" class="rt-tab active" data-rt="write">Write</button>
-                <button type="button" class="rt-tab" data-rt="preview">Preview</button>
-                <span class="rt-counter" id="wl-desc-count"></span>
+            <label for="wl-desc">Description</label>
+            <!-- The editor is one card: tabs and format on the top rail, the formatting buttons on the
+                 second, then the box itself. The buttons insert the syntax of whichever format is
+                 selected, so the writer never has to remember whether this site wants [b] or **. -->
+            <div class="rt-editor">
+                <div class="rt-tabs">
+                    <button type="button" class="rt-tab active" data-rt="write">Write</button>
+                    <button type="button" class="rt-tab" data-rt="preview">Preview</button>
+                    <span class="rt-counter" id="wl-desc-count"></span>
+                    <?php if (count($wlFormats) > 1): ?>
+                    <select id="wl-desc-format" name="description_format" class="rt-format" title="Which syntax you are writing in">
+                        <option value="bbcode">BBCode</option>
+                        <option value="markdown">Markdown</option>
+                    </select>
+                    <?php else: ?>
+                    <input type="hidden" id="wl-desc-format" name="description_format" value="<?= sanitize($wlFormats[0]) ?>">
+                    <span class="rt-format-fixed"><?= $wlFormats[0] === 'markdown' ? 'Markdown' : 'BBCode' ?></span>
+                    <?php endif; ?>
+                </div>
+                <div class="rt-tools" id="wl-desc-tools" role="toolbar" aria-label="Formatting">
+                    <button type="button" data-md="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
+                    <button type="button" data-md="italic" title="Italic (Ctrl+I)"><em>I</em></button>
+                    <button type="button" data-md="link" title="Link (Ctrl+K)">&#128279;</button>
+                    <button type="button" data-md="list" title="Bulleted list">&#8226;&nbsp;List</button>
+                    <button type="button" data-md="quote" title="Quote">&rdquo;</button>
+                    <button type="button" data-md="code" title="Code">&lt;/&gt;</button>
+                </div>
+                <textarea id="wl-desc" name="description" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="What is it? Technical details are welcome &mdash; use a code block for anything that must keep its formatting."></textarea>
+                <div class="rt-preview rt-body" id="wl-desc-preview" hidden></div>
             </div>
-            <textarea id="wl-desc" name="description" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="What is it? Technical details are welcome &mdash; use a code block for anything that must keep its formatting."></textarea>
-            <div class="rt-preview rt-body" id="wl-desc-preview" hidden></div>
+            <div class="form-hint" id="wl-desc-syntax"></div>
             <div class="form-hint" id="wl-desc-help"></div>
         </div>
         <?php endif; ?>

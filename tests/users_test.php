@@ -296,5 +296,76 @@ $db->prepare("UPDATE users SET email = NULL, email_verified = 0, email_changed_a
 $r4 = userEmailChangeStart($db, $cfgEc, userFindById($db, (int)$carol['id']), 'carol@example.org');
 check('no old address → direct set', ($r4['stage'] ?? '') === 'done_direct' && userFindById($db, (int)$carol['id'])['email'] === 'carol@example.org');
 
+
+/* == every registered permission must have been GRANTED to somebody ======== */
+//
+// This exists because of a real failure, not a hypothetical one. v1.19.0 registered rating.vote,
+// content.submit and content.propose, and granted them to nobody. With the users feature on, an
+// absent key in a group's stored JSON means DENIED — so shipping the permission silently took the
+// feature away from every account that was not an admin, and the release notes said the opposite.
+//
+// The property: a permission is either granted in includes/schema.php (in a group seed or in a
+// schemaGrantOnce call) or it is deliberately admin-only and named below with a reason. Adding a
+// permission without deciding which of those it is now fails here.
+
+$ADMIN_ONLY = [
+    // permission => why nobody but an admin should ever have it
+];
+
+$schemaSrc = (string)file_get_contents($root . '/includes/schema.php');
+
+// Scope to the places that actually GRANT something, so a permission merely named in a comment does
+// not count. If the scoping finds nothing the test fails rather than passing on an empty haystack --
+// this project has been bitten once by a grep test that went green when the code it checked was
+// deleted.
+$granting = '';
+if (preg_match_all('/INSERT IGNORE INTO `user_groups`.*?VALUES(.*?)"\s*\)/s', $schemaSrc, $m)) {
+    $granting .= implode(' ', $m[1]);
+}
+if (preg_match_all('/schemaGrantOnce\s*\(.*?\)\s*;/s', $schemaSrc, $m2)) {
+    $granting .= ' ' . implode(' ', $m2[0]);
+}
+check('the permission-granting statements in schema.php were found at all',
+      strlen($granting) > 200, 'found ' . strlen($granting) . ' chars');
+
+foreach (array_keys(userPermissionList()) as $perm) {
+    if (isset($ADMIN_ONLY[$perm])) {
+        check("permission $perm is deliberately admin-only", true);
+        continue;
+    }
+    check("permission $perm is granted somewhere in schema.php",
+          strpos($granting, $perm) !== false,
+          'register a permission and nobody has it: with users on, absent = denied');
+}
+
+/* == the grant must fire ONCE, not on every later migration =============== */
+//
+// trackerSchemaDataMigrations() runs on every version bump. A plain grant would resurrect a
+// permission the operator had removed on purpose, every time anything else in the schema changed.
+
+$marker = 'test_' . bin2hex(random_bytes(4));
+$db->prepare("INSERT INTO user_groups (slug, name, description, priority, is_default, is_system, permissions)
+              VALUES (?, 'Grant probe', 'temporary', 1, 0, 0, ?)")
+   ->execute(['grantprobe', json_encode(['stats.view' => true])]);
+
+$first = schemaGrantOnce($db, $marker, ['grantprobe' => ['rating.vote', 'content.submit']]);
+$after = userGroupPermissions(userGroupBySlug($db, 'grantprobe')['permissions']);
+check('a first grant adds the missing permissions',
+      $first === 1 && isset($after['rating.vote']) && isset($after['content.submit']));
+
+// the operator removes one on purpose
+$db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'grantprobe'")
+   ->execute([json_encode(['stats.view' => true, 'rating.vote' => true])]);
+$second = schemaGrantOnce($db, $marker, ['grantprobe' => ['rating.vote', 'content.submit']]);
+$after2 = userGroupPermissions(userGroupBySlug($db, 'grantprobe')['permissions']);
+check('a second run changes nothing, so a removed permission stays removed',
+      $second === 0 && !isset($after2['content.submit']));
+
+check('an unknown slug is skipped rather than fatal',
+      schemaGrantOnce($db, $marker . 'x', ['no-such-group' => ['rating.vote']]) === 0);
+
+$db->prepare("DELETE FROM user_groups WHERE slug = 'grantprobe'")->execute();
+$db->prepare("DELETE FROM settings WHERE `key` LIKE ?")->execute(['schema_grant_test_%']);
+
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

@@ -4,6 +4,107 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.20.0] — 2026-08-28 (schema v24)
+
+Six defects, four of them mine, three of them silently breaking things on a live tracker.
+
+### Fixed — permissions that were registered and granted to nobody
+
+v1.19.0 added `rating.vote`, `content.submit` and `content.propose` and never gave them to a single
+group. With the users feature ON an absent key means **denied**, so the release notes said ratings
+and descriptions were available and in practice only administrators could use either. Measured on
+production: the `member` group carried 8 of the 11 registered permissions, and the three missing ones
+were exactly the new ones.
+
+`userLegacyDefault()` was supposed to cover this and does not — it is reached only when accounts are
+switched OFF, which is the one case where there are no groups to grant anything to. The fix is a
+one-shot grant in the schema migration, and a test that fails the next time a permission is
+registered without deciding who has it. One-shot matters: the data migration runs on every version
+bump, so a plain grant would resurrect a permission an operator had deliberately removed.
+
+### Fixed — the description preview and the submission progress never ran at all
+
+`postJson` and `getJson` were declared inside the accounts IIFE. Two later features call them from
+their own IIFEs, so both threw `ReferenceError` on their first call — silently, because neither call
+site was awaited. The preview box opened empty and stayed empty; the "checking your submission" list
+never appeared. Both are now file-scope.
+
+The preview also poisoned its own retry cache: it recorded the request key *before* asking and never
+cleared it on failure, so one 403 or one dropped connection wedged that exact text for good. It now
+records only what it actually managed to display.
+
+### Added — the description editor has an editor
+
+`.rt-tabs`, `.rt-tab`, `.rt-counter` and `.rt-preview` were emitted by the template and had **no CSS
+rule anywhere**, so the tabs rendered as raw browser buttons. The format dropdown was worse than
+unstyled: it inherited `.form-group select { width: 100% }` and stretched across the form.
+
+There is now a real toolbar — bold, italic, link, list, quote, code — with **Ctrl+B / Ctrl+I /
+Ctrl+K**, inserting whichever syntax the selected format uses, a live character counter, and a
+one-line reminder of the syntax. Same mechanism as the admin bulk-mail composer.
+
+### Fixed — the tracker mode was a database row that told the tracker nothing
+
+Changing **Tracker mode** in Settings wrote a row. It did not move the symlinks and it did not
+restart the service: the only code that ever ran the mode helper was the schedule, and only while the
+schedule was switched on. So an operator could select "whitelist", watch a whitelist file appear —
+159 hashes, written and correct — and be served by the blacklist build the entire time, with every
+status card agreeing with them because every status card was reading the row they had just written.
+
+Found on production, in exactly that state.
+
+Now: the Whitelist status card asks the helper what is **actually** running and says plainly when the
+two disagree; **Switch the tracker now** does the real thing (prepare the list, run the helper,
+restart, and only then flip the setting) behind a password like every other action that changes the
+machine; **Test** reports what the helper says; saving a mode change that has not reached the tracker
+returns a warning instead of a success; and the janitor logs a mismatch within a minute of it
+appearing.
+
+### Fixed — 32 parallel fetches became 4
+
+The metadata worker's ceiling was raised from 16 to 64 and `worker.py` on the server was updated —
+but the process was never restarted, so it kept running the old code with the old limit. It read the
+admin's 32, decided a number above 16 was garbage, and fell back to the **config file's 4**. Asking
+for more parallelism produced less than before, and every number in the panel looked right.
+
+An out-of-range value is now clamped rather than discarded, so a version-skewed worker degrades to
+its own ceiling instead of to the config default, and it says which happened. The ceiling is one
+named constant instead of a literal in two places. The heartbeat file carries what the worker is
+actually doing — version, effective concurrency, active fetches — so the panel can report reality
+rather than reading the setting back to the operator, and warns when the two differ. The panel's
+clamp also had no lower bound: 0 was silently rewritten to "use the worker's config".
+
+### Fixed — saving Settings while filtered made the whole page flash
+
+Also mine. A capture-phase click listener lifted the group/search filter before every submit — to
+stop Chrome refusing to focus an invalid control inside a `display:none` block — and restored it in a
+`setTimeout`. Two tasks, so the browser had a rendering opportunity in between and painted all 27
+sections at once. Worse, when validation actually failed the submit event never fired, so the
+restore never ran and the filter was lost for good.
+
+It now touches nothing unless the form is genuinely invalid, and then unhides only the ancestors of
+the offending field. Measured after the change: with one section showing, a `MutationObserver`
+watching class changes across the whole save never saw a second one appear.
+
+### Added — the review state is visible from search
+
+The approved/rejected filter existed; **pending** did not. "Unreviewed only" folded *waiting for a
+moderator* together with *nobody has written anything*, which are different facts, and no badge was
+drawn for pending at all — so a moderator could not ask "what is waiting?" anywhere in search. Both
+now exist.
+
+### Changed — the three detail panels are one design again
+
+The Info panel's primitives (the stat strip, the chips, the banded sections) lived in the public-only
+stylesheet, so the admin panels could not use them however much anybody wanted them to. They now sit
+in `assets/css/detail-panel.css`, which both layouts load.
+
+The admin Whitelist panel was not smaller because data was missing — `SELECT *` fetched all of it and
+the renderer read a third of it. It now shows the swarm strip, the rating (which the row listing
+already showed, so clicking a row for *more* detail showed less), the "prove it" state, the dead-row
+mark, and — by joining the catalogue — first seen, last seen, times seen and peak seeders. A
+registered hash the tracker has never been asked for now says so.
+
 ## [1.19.1] — 2026-08-28
 
 ### Fixed

@@ -282,29 +282,39 @@
         }
     });
 
-    // Saving while filtered: the browser validates a form BEFORE its submit event, and a control that
-    // fails validation inside a display:none section cannot be focused — Chrome then aborts the submit
-    // with only a console warning ("not focusable"), so the button would look dead. Lift the filter for
-    // that moment; if validation passes (submit fires) put it straight back, and if it fails leave
-    // everything visible so the offending field is on screen. Bound at document level in the capture
-    // phase because the page has TWO forms: the settings form and the Security & Credentials one,
-    // whose own required fields can be filtered away just as easily.
-    let restoreAfterSubmit = null;
+    // Saving while filtered.
+    //
+    // The browser validates a form BEFORE its submit event, and a control that fails validation
+    // inside a display:none section cannot be focused — Chrome then aborts the submit with only a
+    // console warning ("not focusable"), so the button looks dead. That is a real problem and this
+    // code exists for it.
+    //
+    // The first version solved it by lifting the WHOLE filter on every submit click and putting it
+    // back in a setTimeout. Two things were wrong with that. The restore landed in a separate task,
+    // so the browser got a rendering opportunity in between and painted all 27 sections at once —
+    // the flash. And when validation actually failed the submit event never fired, so the restore
+    // never ran and the admin lost their group and their query for good.
+    //
+    // So: touch nothing unless the form is genuinely invalid, and then unhide only what the browser
+    // needs to be able to focus. A valid save — which is nearly every save — now does no DOM work at
+    // all, so there is nothing to paint and nothing to restore. Bound at document level in the
+    // capture phase because the page has TWO forms: the settings form and the Security & Credentials
+    // one, whose own fields can be filtered away just as easily.
+    function revealFor(el) {
+        const sec = el.closest('.settings-section');
+        for (let n = el; n && n !== sec; n = n.parentElement) n.classList.remove('d-hidden');
+        if (sec) { sec.classList.remove('d-hidden'); sec.scrollIntoView({ block: 'center' }); }
+        syncChrome();
+    }
     document.addEventListener('click', (e) => {
         const btn = e.target.closest && e.target.closest('button[type="submit"], input[type="submit"]');
         if (!btn || !btn.form) return;
-        restoreAfterSubmit = null;           // never carry a stale filter over from a failed attempt
-        if (!norm(input.value) && group === 'all') return;
-        restoreAfterSubmit = { q: input.value, group: group };
-        input.value = '';
-        group = 'all';
-        applyGroup();
-    }, true);
-    document.addEventListener('submit', () => {
-        if (!restoreAfterSubmit) return;
-        const st = restoreAfterSubmit;
-        restoreAfterSubmit = null;
-        setTimeout(() => { input.value = st.q; group = st.group; runSearch(); }, 0);
+        if (btn.form.noValidate || btn.hasAttribute('formnovalidate')) return;
+        // .validity.valid rather than .checkValidity(), which would fire an `invalid` event as a
+        // side effect of merely asking.
+        const bad = [...btn.form.elements].find(el => el.willValidate && !el.validity.valid);
+        if (!bad) return;                       // the common case: not one class is touched
+        revealFor(bad);
     }, true);
 
     // group counts in the sub-menu

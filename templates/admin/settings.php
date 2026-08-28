@@ -2839,7 +2839,11 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             if (json.success) {
                 // keep the Logout target in sync when the sign-in address was just changed
                 if (json.applied && json.applied.admin_login_path) document.body.dataset.loginPath = json.applied.admin_login_path;
-                showToast('success', 'Settings saved successfully.');
+                // A save can succeed and still leave the machine disagreeing with what was saved --
+                // switching the tracker mode writes a row, it does not move the symlinks. That is a
+                // warning, not an error, and it must not be dressed up as a success and forgotten.
+                if (json.warning) showToast('error', json.warning);
+                else showToast('success', 'Settings saved successfully.');
                 return true;
             } else {
                 const errMsg = json.error || 'Error saving settings';

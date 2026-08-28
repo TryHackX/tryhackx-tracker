@@ -11,7 +11,10 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 23;  // 23 = bulk messages carry their markup format, so the HTML part
+const TRACKER_SCHEMA_VERSION = 24;  // 24 = grant the three permissions v1.19.0 registered but never
+                                    // gave to anybody: with the users feature ON, an absent key means
+                                    // DENIED, so ratings and descriptions were admin-only in practice.
+                                    // 23 = bulk messages carry their markup format, so the HTML part
                                     // of the mail is rendered rather than escaped line by line.
                                     // 22 = a star rating mode beside the up/down one (rep_mode,
                                     // votes_count on both rating tables) and the permissions the
@@ -669,6 +672,47 @@ function trackerSchemaGuardedStatements(PDO $db): array {
  * list with the admin group. The panel password hash is copied once — later panel password changes
  * do NOT sync (the two logins stay independent).
  */
+/**
+ * Grant permissions to a seeded group ONCE, without disturbing what the operator has decided since.
+ *
+ * The problem this solves: a newly registered permission defaults to DENIED for every existing group,
+ * because userEffectivePermissions() reads each group's stored JSON and an absent key is absent. So
+ * shipping a permission for a feature that previously had no permission check SILENTLY TAKES THE
+ * FEATURE AWAY from everyone but admins — which is exactly what v1.19.0 did to ratings, descriptions
+ * and rewrite proposals. The fix is not to make absent keys default to allowed (that would make the
+ * whole permission system advisory); it is to grant, deliberately, at the moment the permission is
+ * introduced.
+ *
+ * ONCE is the important word. trackerSchemaDataMigrations() runs on every version bump, so a plain
+ * grant would resurrect a permission an operator had removed on purpose, every time anything else in
+ * the schema changed. The marker row makes it fire exactly once per install; INSERT IGNORE returning
+ * a row is the atomic test-and-set, so two workers migrating together cannot both do it.
+ *
+ * Returns the number of groups actually changed.
+ */
+function schemaGrantOnce(PDO $db, string $marker, array $bySlug): int {
+    $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
+    $ins->execute(['schema_grant_' . $marker, (string)time()]);
+    if ($ins->rowCount() !== 1) return 0;   // somebody already did it on this install
+
+    $changed = 0;
+    foreach ($bySlug as $slug => $perms) {
+        $st = $db->prepare("SELECT id, permissions FROM user_groups WHERE slug = ?");
+        $st->execute([$slug]);
+        $g = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$g) continue;
+        $cur = json_decode((string)$g['permissions'], true);
+        if (!is_array($cur)) $cur = [];
+        $before = count($cur);
+        foreach ($perms as $perm) if (!array_key_exists($perm, $cur)) $cur[$perm] = true;
+        if (count($cur) === $before) continue;
+        $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")
+           ->execute([json_encode($cur, JSON_UNESCAPED_SLASHES), (int)$g['id']]);
+        $changed++;
+    }
+    return $changed;
+}
+
 function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // admin group (INSERT IGNORE above only fires on fresh CREATE; existing installs need it too)
     $db->exec("INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
@@ -680,6 +724,23 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // guest was a baseline for signed-in users too, which is no longer true)
     $db->prepare("UPDATE `user_groups` SET description = ? WHERE slug = 'guest' AND description = ?")
        ->execute(['Permissions of anonymous (not signed-in) visitors.', 'Baseline permissions for every visitor (anonymous included).']);
+    // v24: the permissions v1.19.0 registered and never granted.
+    //
+    // Before they existed, whether somebody could rate or attach a description was decided entirely by
+    // the feature settings (rep_who_can_vote, whitelist_submit_mode, wl_allow_description). Adding a
+    // permission put a second gate in front of those, and every existing group failed it. Granting the
+    // three here restores exactly the previous behaviour: the feature settings remain the policy, and
+    // the permissions become the narrowing tool an operator can now reach for — rather than a silent
+    // change of policy nobody asked for.
+    //
+    // Guest gets them too, for the same reason: an anonymous visitor's ability to rate was governed by
+    // rep_who_can_vote (which defaults to signed-in accounts anyway), not by a permission. Withholding
+    // the grant here would not be caution, it would be a behaviour change disguised as one.
+    schemaGrantOnce($db, 'v24_content_rating', [
+        'guest'  => ['rating.vote', 'content.submit', 'content.propose'],
+        'member' => ['rating.vote', 'content.submit', 'content.propose'],
+    ]);
+
     // panel admin → users row (username from settings, hash from config/app.php, email = the
     // site contact address — verified, it is the owner's own)
     $adminUser = trim((string)($cfg['admin_username'] ?? ''));

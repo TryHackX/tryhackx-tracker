@@ -143,6 +143,7 @@ $apiRoutes = [
     // ── Whitelist (admin) ──
     'admin/check_whitelist_path' => 'api/admin/check_whitelist_path.php',
     'admin/whitelist_status'     => 'api/admin/whitelist_status.php',
+    'admin/tracker_mode'         => 'api/admin/tracker_mode.php',
     'admin/fetch_whitelist'      => 'api/admin/fetch_whitelist.php',
     'admin/whitelist_item'       => 'api/admin/whitelist_item.php',
     'admin/whitelist_add'        => 'api/admin/whitelist_add.php',

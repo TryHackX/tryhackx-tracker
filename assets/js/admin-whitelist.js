@@ -68,6 +68,42 @@
         } catch { showToast('Could not load whitelist status', 'danger'); }
     }
 
+    /** Ask the server what is really running, and say so out loud. */
+    async function modeTest(btn) {
+        const prev = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Asking…';
+        const r = await apiCall('admin/tracker_mode', 'POST', { op: 'status' });
+        btn.textContent = prev;
+        btn.disabled = false;
+        showToast((r && (r.message || r.error)) || 'No answer', r && r.success ? 'success' : 'error');
+        loadStatus();
+    }
+
+    /**
+     * Switch for real: prepare the list, run the helper, restart the service, then flip the setting.
+     *
+     * The service restart is the risky part, so this takes the admin password like every other action
+     * that changes the machine. The setting is flipped only after the helper confirms — a panel that
+     * says whitelist while the blacklist build serves the swarm is not a degraded state, it is a wrong
+     * one, and it is the exact failure this whole path exists to prevent.
+     */
+    async function modeSwitch(mode) {
+        const to = mode === 'whitelist' ? 'WHITELIST' : 'BLACKLIST';
+        if (!await confirmAction('Switch the tracker to ' + to,
+            'The tracker service is restarted. Peers announcing during the restart retry on their own, '
+            + 'but the swarm briefly has no tracker.',
+            { after: mode === 'whitelist'
+                ? 'In whitelist mode only registered hashes are served. The list is regenerated first.'
+                : 'In blacklist mode everything except banned hashes is served.',
+              okLabel: 'Switch', danger: true })) return;
+        const pw = await promptPassword('Switch the tracker', 'Confirm with the admin password.');
+        if (!pw) return;
+        const r = await apiCall('admin/tracker_mode', 'POST', { op: 'switch', mode, password: pw });
+        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        loadStatus();
+    }
+
     function kv(label, value, cls) {
         return el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: label }), el('div', { className: 'wl-kv-value ' + (cls || '') }, value)]);
     }
@@ -77,8 +113,46 @@
         grid.textContent = '';
         const st = s.state || {};
         const perm = s.permissions || {};
-        const modeBadge = badge(s.mode === 'whitelist' ? 'WHITELIST' : 'BLACKLIST', s.mode === 'whitelist' ? 'wl-b-ok' : 'wl-b-warn');
-        grid.appendChild(kv('Tracker mode', [modeBadge]));
+        // Tracker mode: what the PANEL says, and what the tracker is actually running.
+        //
+        // These used to be assumed identical, and were not: the setting governs which list the panel
+        // generates and what the public pages promise, while the running mode is whichever binary and
+        // config the symlinks point at. Only the schedule ever moved those. So this tile shows both,
+        // and says plainly when they disagree instead of repeating the setting back to the operator.
+        const ag = (s.schedule && s.schedule.agreement) || null;
+        const modeParts = [badge(s.mode === 'whitelist' ? 'WHITELIST' : 'BLACKLIST',
+                                 s.mode === 'whitelist' ? 'wl-b-ok' : 'wl-b-warn')];
+        if (ag && ag.known && ag.match === false) {
+            modeParts.push(' ', badge('TRACKER IS RUNNING ' + String(ag.actual || '').toUpperCase(), 'wl-b-bad'));
+            modeParts.push(el('div', { className: 'wl-small text-danger', text:
+                'The panel and the tracker disagree. Everything the panel generates and every public '
+                + 'page follows the setting; the swarm follows the running build.' }));
+        } else if (ag && ag.known) {
+            modeParts.push(' ', el('span', { className: 'wl-small text-muted', text: 'confirmed on the server' }));
+        } else if (ag) {
+            // Unknown is not a mismatch, and must not be drawn as one.
+            modeParts.push(el('div', { className: 'wl-small text-muted', text:
+                'Could not read what the tracker is running' + (ag.error ? ': ' + ag.error : '.') }));
+        }
+        const modeActs = el('div', { className: 'wl-mode-acts' });
+        const testBtn = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary',
+            title: 'Ask the helper which build and config the service is actually using' },
+            [el('i', { className: 'bi bi-search' }), ' Test']);
+        testBtn.addEventListener('click', () => modeTest(testBtn));
+        modeActs.appendChild(testBtn);
+        const other = s.mode === 'whitelist' ? 'blacklist' : 'whitelist';
+        const needsSwitch = ag && ag.known && ag.match === false;
+        const swBtn = el('button', { type: 'button',
+            className: 'btn btn-sm ' + (needsSwitch ? 'btn-outline-warning' : 'btn-outline-secondary'),
+            title: needsSwitch
+                ? 'Switch the tracker to ' + s.mode + ', which is what the panel already says'
+                : 'Switch the tracker (and the panel) to ' + other + ' mode' },
+            [el('i', { className: 'bi bi-arrow-left-right' }),
+             needsSwitch ? ' Switch the tracker now' : ' Switch to ' + other]);
+        swBtn.addEventListener('click', () => modeSwitch(needsSwitch ? s.mode : other));
+        modeActs.appendChild(swBtn);
+        modeParts.push(modeActs);
+        grid.appendChild(kv('Tracker mode', modeParts));
         // scheduled mode (whitelist hours): off / desired + next change / last switch outcome
         const sc = s.schedule;
         if (sc && sc.enabled) {
@@ -956,11 +1030,44 @@
         return wrap;
     }
 
+    /**
+     * The swarm numbers, as the strip the public Info panel uses.
+     *
+     * Same classes, same file (assets/css/detail-panel.css), so the two panels describing the same
+     * torrent look like the same thing. They did not: the public panel got a redesign and the admin
+     * panels kept a flat key/value list, because the CSS lived in the public-only stylesheet.
+     */
+    function statStrip(cells) {
+        const strip = el('div', { className: 'info-strip' });
+        cells.forEach(([value, label, cls]) => {
+            if (value === null || value === undefined) return;
+            strip.appendChild(el('div', { className: 'info-stat' + (cls ? ' ' + cls : '') }, [
+                el('span', { className: 'info-stat-v', text: String(value) }),
+                el('span', { className: 'info-stat-l', text: label }),
+            ]));
+        });
+        return strip.children.length ? strip : null;
+    }
+
     function renderDetails(r) {
         const it = r.item;
         const body = $('wd-body');
         body.textContent = '';
         const magnet = r.magnet || magnetFor(it.info_hash, it.name);
+
+        // The numbers first, the identifying facts under them. Whether anything is sharing this is
+        // the first question an admin has too; it used to be the sixth row of a flat list.
+        const idx = r.index || null;
+        const sc0 = r.scrape;
+        const strip = statStrip([
+            [sc0 ? sc0.seeders : (it.scrape_seeders != null ? it.scrape_seeders : null), 'seeders', 'info-stat-seed'],
+            [sc0 ? sc0.leechers : (it.scrape_leechers != null ? it.scrape_leechers : null), 'leechers', 'info-stat-leech'],
+            [sc0 ? sc0.completed : (it.scrape_completed != null ? it.scrape_completed : null), 'completed'],
+            [it.total_size ? fmtBytes(it.total_size) : null, 'size'],
+            [it.files_count != null ? it.files_count : null, it.files_count === 1 ? 'file' : 'files'],
+            [idx && idx.peak_seeders != null ? idx.peak_seeders : null, 'peak seeders'],
+        ]);
+        if (strip) body.appendChild(strip);
 
         const kvBox = el('div', { className: 'wl-kv' });
         const row = (label, valueNodes) => kvBox.appendChild(el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: label }), el('div', { className: 'wl-kv-value' }, valueNodes)]));
@@ -1011,6 +1118,39 @@
         if (it.banned || r.banned_reason) {
             const b = r.banned_reason || {};
             row('Ban', [badge('BANNED', 'wl-b-bad'), ' ', el('span', { text: (b.reason || '') + (b.source ? ` (${b.source}${b.source_id ? ' #' + b.source_id : ''})` : '') }), b.created_at ? el('span', { className: 'text-muted wl-small', text: ' · ' + fmtDate(b.created_at) }) : null]);
+        }
+        // Ratings: the LIST already showed these and the detail panel did not, which is a strange
+        // place to lose information — you click a row to see MORE.
+        if (it.votes_count) {
+            const pct = Math.round((it.score_x100 || 0) / 100);
+            row('Rating', [
+                badge(pct + '%', pct >= 50 ? 'wl-b-ok' : 'wl-b-warn'), ' ',
+                el('span', { className: 'text-muted wl-small',
+                    text: 'from ' + it.votes_count + (it.votes_count === 1 ? ' rating' : ' ratings')
+                        + (it.votes_up || it.votes_down ? ' (' + (it.votes_up || 0) + ' up, ' + (it.votes_down || 0) + ' down)' : '') }),
+            ]);
+        }
+        // "Prove it" state, when the tracker is set to make submissions prove themselves.
+        if (it.probe_status && it.probe_status !== 'none') {
+            // enum('none','probing','passed','failed') — the names are the schema's, not invented here
+            const cls = { passed: 'wl-b-ok', failed: 'wl-b-bad', probing: 'wl-b-pending' }[it.probe_status] || 'wl-b-muted';
+            const probeNodes = [badge(it.probe_status, cls)];
+            if (it.probe_error) probeNodes.push(' ', el('span', { className: 'text-danger wl-small', text: it.probe_error }));
+            if (it.probe_started_at) probeNodes.push(' ', el('span', { className: 'text-muted wl-small', text: 'started ' + fmtDate(it.probe_started_at) }));
+            row('Proof', probeNodes);
+        }
+        if (it.dead_since) {
+            row('Dead since', [el('span', { className: 'text-warning', text: fmtDate(it.dead_since) }), ' ',
+                el('span', { className: 'text-muted wl-small', text: 'no peers seen for long enough that the cleanup rule noticed' })]);
+        }
+        // What the CATALOGUE knows. Absent for a registered hash nobody has announced yet, which is
+        // itself worth seeing — it means the tracker has never been asked for this torrent.
+        if (idx) {
+            const seenNodes = [el('span', { text: fmtDate(idx.first_seen) + ' → ' + fmtDate(idx.last_seen) })];
+            if (idx.seen_count != null) seenNodes.push(' ', el('span', { className: 'text-muted wl-small', text: '· seen ' + idx.seen_count + '×' }));
+            row('Seen by the tracker', seenNodes);
+        } else {
+            row('Seen by the tracker', [el('span', { className: 'text-muted', text: 'never announced — no catalogue row' })]);
         }
         row('Created / updated', [el('span', { text: fmtDate(it.created_at) + ' / ' + fmtDate(it.updated_at) })]);
         body.appendChild(kvBox);

@@ -1,0 +1,42 @@
+/* Detail panels — the shared visual language of "here is everything about one hash".
+ *
+ * Loaded by templates/layout.php (public Info panel) AND by the admin whitelist / index pages, so
+ * the three panels that answer the same question look like each other. It lives in its own file for
+ * exactly that reason: these rules were written for the public panel and kept in style.css, which
+ * the admin pages never load, so the admin panels could not use them and drifted into three
+ * different shapes describing the same torrent.
+ *
+ * Colours are written as rgba over whatever background the host page provides, so the file needs no
+ * variables from either stylesheet and cannot go out of step with one of them.
+ */
+/* The Info panel: a wider box than the file list, because it carries prose as well as a tree.
+   The panel is built as four bands — the swarm numbers, the qualifying chips, the prose and rating,
+   then the record — separated by rules rather than by guesswork about margins, so a torrent with no
+   description and a torrent with three paragraphs both read as the same panel. */
+.info-box { max-width: 46rem; }
+.info-section { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); }
+.info-section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.info-sub { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.55; margin-bottom: 0.4rem; }
+
+/* The swarm strip. These are the numbers the panel exists for, so they are the biggest thing in it
+   and they are read before the prose, not after it. Tabular figures so a refresh that changes 9 to
+   10 does not shuffle the row sideways. */
+.info-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); gap: 0.5rem; }
+.info-stat { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.55rem 0.6rem; border-radius: 6px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.07); }
+.info-stat-v { font-size: 1.15rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.info-stat-l { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.6; }
+.info-stat-seed .info-stat-v { color: #6fce8b; }
+.info-stat-leech .info-stat-v { color: #e0b85c; }
+
+.info-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.6rem; }
+.info-chip { display: inline-block; padding: 0.12rem 0.55rem; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); font-size: 0.75rem; opacity: 0.85; }
+.info-chip-ok { border-color: rgba(63,164,91,0.55); color: #6fce8b; opacity: 1; }
+.info-chip-auto { border-style: dashed; opacity: 0.7; }
+.info-refresh { margin-left: auto; }
+
+.info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.1rem 1.2rem; }
+.info-kv { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.3rem 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.info-kv-label { opacity: 0.7; font-size: 0.85rem; }
+.info-kv-value { font-size: 0.88rem; text-align: right; }
+.info-hash { font-size: 0.7rem; word-break: break-all; }
+

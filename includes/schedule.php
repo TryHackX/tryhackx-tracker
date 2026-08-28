@@ -243,6 +243,8 @@ function scheduleStatus(array $cfg, ?DateTimeImmutable $now = null): array {
         'next_change_local' => $next ? scheduleFormatLocal($cfg, $next, true) : null,
         'cmd'            => scheduleSwitchCommand($cfg),
         'cmd_set'        => scheduleSwitchCommand($cfg) !== '',
+        // What the tracker is REALLY doing, beside what we believe. Cached, so polling is cheap.
+        'agreement'      => scheduleModeAgreement($cfg),
         'last_check_at'  => (int)($state['schedule_last_check_at'] ?? 0),
         'last_attempt_at' => (int)($state['schedule_last_attempt_at'] ?? 0),
         'last_switch_at' => (int)($state['schedule_last_switch_at'] ?? 0),
@@ -252,6 +254,98 @@ function scheduleStatus(array $cfg, ?DateTimeImmutable $now = null): array {
         'last_to'        => $state['schedule_last_to'] ?? null,
         'last_output'    => $state['schedule_last_output'] ?? '',
         'last_notes'     => $state['schedule_last_notes'] ?? '',
+    ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What is ACTUALLY running
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The mode the tracker is really in, asked of the helper rather than read from our own setting.
+ *
+ * This exists because the two can disagree, and did: `tracker_mode` in the database governs what the
+ * panel regenerates and what the public pages promise, while the running service is whichever binary
+ * and config the symlinks point at. Changing the setting in Settings never touched the symlinks —
+ * only the SCHEDULE did, and only while the schedule was switched on — so an operator could set the
+ * panel to "whitelist", watch it write a whitelist file, and be served by the blacklist build all
+ * along. Nothing said so, because nothing ever asked.
+ *
+ * The helper's contract is its LAST line: exactly "white" or "black" (tools/opentracker/tracker-mode.sh).
+ * Cached in the state file, because status cards poll and this forks a sudo. The janitor refreshes it
+ * every minute, so the web path normally reads a warm value and never forks at all; the TTL is the
+ * fallback for an install whose janitor timer is not running — which is itself worth noticing, and
+ * the card shows the age.
+ *
+ * Returns ['ok','mode','error','output','at','cached'] with mode 'whitelist'|'blacklist'|null.
+ */
+const SCHEDULE_ACTUAL_TTL = 90;
+
+function scheduleActualMode(array $cfg, bool $fresh = false): array {
+    $out = ['ok' => false, 'mode' => null, 'error' => null, 'output' => '', 'at' => 0, 'cached' => false];
+    $cmd = scheduleSwitchCommand($cfg);
+    if ($cmd === '') {
+        $out['error'] = 'No mode switch command is configured, so the panel cannot ask what is running.';
+        return $out;
+    }
+    $state = function_exists('whitelistStateRead') ? whitelistStateRead() : [];
+    $at = (int)($state['mode_actual_at'] ?? 0);
+    if (!$fresh && $at > 0 && (time() - $at) < SCHEDULE_ACTUAL_TTL && !empty($state['mode_actual'])) {
+        return ['ok' => true, 'mode' => (string)$state['mode_actual'], 'error' => null,
+                'output' => (string)($state['mode_actual_output'] ?? ''), 'at' => $at, 'cached' => true];
+    }
+    if (!trackerExecAvailable()) {
+        $out['error'] = 'exec() is disabled — cannot ask the helper which mode is running.';
+        return $out;
+    }
+    $lines = []; $rc = null;
+    @exec($cmd . ' ' . escapeshellarg('status') . ' 2>&1', $lines, $rc);
+    $output = trim(implode("\n", $lines));
+    $out['output'] = mb_substr($output, 0, 500);
+    $last = strtolower(trim((string)end($lines)));
+    if ($rc !== 0) {
+        $out['error'] = "The helper failed (exit $rc): " . ($output !== '' ? mb_substr($output, 0, 200) : 'no output');
+        return $out;
+    }
+    if ($last !== 'white' && $last !== 'black') {
+        // Exit 0 with an unreadable answer is NOT "probably fine". Reporting a mode we did not read
+        // is how the panel got into trouble in the first place.
+        $out['error'] = 'The helper exited 0 but its last line was not "white" or "black": '
+                      . ($last === '' ? '(empty)' : mb_substr($last, 0, 80));
+        return $out;
+    }
+    $out['ok'] = true;
+    $out['mode'] = $last === 'white' ? 'whitelist' : 'blacklist';
+    $out['at'] = time();
+    if (function_exists('whitelistStateUpdate')) {
+        whitelistStateUpdate(function (&$st) use ($out) {
+            $st['mode_actual'] = $out['mode'];
+            $st['mode_actual_at'] = $out['at'];
+            $st['mode_actual_output'] = $out['output'];
+        });
+    }
+    return $out;
+}
+
+/**
+ * Does what the panel believes match what the tracker is doing?
+ *
+ * Returns ['known'=>bool,'match'=>?bool,'panel'=>string,'actual'=>?string,'error'=>?string]. `known`
+ * is false when the helper could not be asked at all — which is NOT the same as a mismatch, and the
+ * UI must not draw it as one.
+ */
+function scheduleModeAgreement(array $cfg, bool $fresh = false): array {
+    $panel = function_exists('trackerMode') ? trackerMode($cfg)
+           : ((($cfg['tracker_mode'] ?? 'blacklist') === 'whitelist') ? 'whitelist' : 'blacklist');
+    $actual = scheduleActualMode($cfg, $fresh);
+    return [
+        'known'  => $actual['ok'],
+        'match'  => $actual['ok'] ? ($actual['mode'] === $panel) : null,
+        'panel'  => $panel,
+        'actual' => $actual['mode'],
+        'error'  => $actual['error'],
+        'output' => $actual['output'],
+        'at'     => $actual['at'],
     ];
 }
 
@@ -323,6 +417,92 @@ function scheduleRecordResult(array $r): void {
  * At most one attempt per SCHEDULE_MIN_ATTEMPT_INTERVAL seconds unless $force. Never throws.
  * Returns ['ok','changed','from','to','error','output','notes','skipped'].
  */
+/**
+ * Actually change the mode: prepare the list, run the helper, flip the setting, tidy up.
+ *
+ * Extracted from scheduleApply() so the SCHEDULE and a MANUAL switch cannot drift apart. They had
+ * already drifted in the worst possible way — the manual path did not exist, and changing the mode in
+ * Settings only wrote the database row — so the one thing this function must guarantee is that the
+ * setting is flipped ONLY after the service really switched. Steps 1-2 can fail; step 3 is the point
+ * of no return and is deliberately last.
+ *
+ * Mutates $out (the caller's result array) and returns true on success.
+ */
+function scheduleSwitchTo(PDO $db, array &$cfg, string $desired, array &$out): bool {
+    $cmd = scheduleSwitchCommand($cfg);
+    // 1) prepare the list the restarted tracker will load
+    if ($desired === 'blacklist') {
+        $sync = scheduleSyncBansToBlacklist($db, $cfg);
+        if (!$sync['ok']) $out['notes'][] = 'blacklist sync: ' . $sync['error'];
+        elseif ($sync['added'] > 0) $out['notes'][] = 'blacklist sync: +' . $sync['added'] . ' banned hashes appended';
+    } else {
+        $imp = whitelistImportBlacklist($db, $cfg);   // blacklist entries become bans (DB-only while still in blacklist mode)
+        if ($imp['error']) $out['notes'][] = 'blacklist import: ' . $imp['error'];
+        elseif ($imp['imported'] > 0) $out['notes'][] = 'blacklist import: ' . $imp['imported'] . ' new bans';
+        $rg = whitelistRegenerate($db, $cfg);        // fresh served file BEFORE the service restarts
+        if (!$rg['ok']) $out['notes'][] = 'whitelist regen: ' . ($rg['error'] ?? 'failed');
+    }
+
+    // 2) switch the service
+    if ($cmd !== '') {
+        if (!trackerExecAvailable()) {
+            $out['ok'] = false; $out['error'] = 'exec() is disabled — cannot run the mode switch command.';
+            error_log('[schedule] ' . $out['error']);
+            scheduleRecordResult($out);
+            return false;
+        }
+        $arg = $desired === 'whitelist' ? 'white' : 'black';
+        $full = $cmd . ' ' . escapeshellarg($arg) . ' 2>&1';
+        $lines = []; $rc = null;
+        @exec($full, $lines, $rc);
+        $output = trim(implode("\n", $lines));
+        $out['output'] = $output;
+        $lastLine = strtolower(trim((string)end($lines)));
+        if ($rc !== 0) {
+            $out['ok'] = false;
+            $out['error'] = "Switch command failed (exit $rc): " . ($output !== '' ? mb_substr($output, 0, 300) : 'no output');
+            error_log('[schedule] ' . $out['error']);
+            scheduleRecordResult($out);
+            return false;
+        }
+        if (($lastLine === 'white' || $lastLine === 'black') && $lastLine !== $arg) {
+            $out['ok'] = false;
+            $out['error'] = "Switch command exited 0 but reports mode '$lastLine' (wanted '$arg').";
+            error_log('[schedule] ' . $out['error']);
+            scheduleRecordResult($out);
+            return false;
+        }
+    }
+
+    // 3) flip the web setting.
+    //
+    // The cached answer to "what is running" is stale from this instant, so it is dropped rather than
+    // left to expire: a status card that shows the old mode for another half minute after a switch
+    // looks exactly like the bug this whole function exists to stop.
+    if (function_exists('whitelistStateUpdate')) {
+        whitelistStateUpdate(function (&$st) { unset($st['mode_actual'], $st['mode_actual_at'], $st['mode_actual_output']); });
+    }
+    setSetting($db, 'tracker_mode', $desired);
+    $cfg['tracker_mode'] = $desired;
+    if (isset($GLOBALS['cfg']) && is_array($GLOBALS['cfg'])) $GLOBALS['cfg']['tracker_mode'] = $desired;
+    $out['changed'] = true;
+
+    // 4) post-switch bookkeeping
+    if ($cmd !== '') {
+        // the service was restarted by the helper: it holds the current files now
+        if (function_exists('whitelistNoteReloaded')) whitelistNoteReloaded(true, 'mode switch → ' . $desired);
+        if (function_exists('resetBlacklistChanges')) resetBlacklistChanges();
+    } elseif ($desired === 'blacklist') {
+        $rl = autoReloadTrackerBlacklist($cfg);
+        if ($rl && empty($rl['ok'])) $out['notes'][] = 'blacklist reload failed: ' . ($rl['output'] ?? '');
+    } else {
+        whitelistMarkDirty(true);
+        $rl = whitelistMaybeReload($cfg, true);
+        if ($rl && empty($rl['ok'])) $out['notes'][] = 'whitelist reload failed: ' . ($rl['output'] ?? '');
+    }
+    return true;
+}
+
 function scheduleApply(PDO $db, array &$cfg, bool $force = false): array {
     $from = trackerMode($cfg);
     $out = ['ok' => true, 'changed' => false, 'from' => $from, 'to' => null, 'error' => null, 'output' => '', 'notes' => [], 'skipped' => null];
@@ -343,71 +523,7 @@ function scheduleApply(PDO $db, array &$cfg, bool $force = false): array {
         if (!$force && (time() - $lastAttempt) < SCHEDULE_MIN_ATTEMPT_INTERVAL) { $out['skipped'] = 'throttled'; return $out; }
         if (function_exists('whitelistStateUpdate')) whitelistStateUpdate(function (&$s) { $s['schedule_last_attempt_at'] = time(); });
 
-        $cmd = scheduleSwitchCommand($cfg);
-
-        // 1) prepare the list the restarted tracker will load
-        if ($desired === 'blacklist') {
-            $sync = scheduleSyncBansToBlacklist($db, $cfg);
-            if (!$sync['ok']) $out['notes'][] = 'blacklist sync: ' . $sync['error'];
-            elseif ($sync['added'] > 0) $out['notes'][] = 'blacklist sync: +' . $sync['added'] . ' banned hashes appended';
-        } else {
-            $imp = whitelistImportBlacklist($db, $cfg);   // blacklist entries become bans (DB-only while still in blacklist mode)
-            if ($imp['error']) $out['notes'][] = 'blacklist import: ' . $imp['error'];
-            elseif ($imp['imported'] > 0) $out['notes'][] = 'blacklist import: ' . $imp['imported'] . ' new bans';
-            $rg = whitelistRegenerate($db, $cfg);        // fresh served file BEFORE the service restarts
-            if (!$rg['ok']) $out['notes'][] = 'whitelist regen: ' . ($rg['error'] ?? 'failed');
-        }
-
-        // 2) switch the service
-        if ($cmd !== '') {
-            if (!trackerExecAvailable()) {
-                $out['ok'] = false; $out['error'] = 'exec() is disabled — cannot run the mode switch command.';
-                error_log('[schedule] ' . $out['error']);
-                scheduleRecordResult($out);
-                return $out;
-            }
-            $arg = $desired === 'whitelist' ? 'white' : 'black';
-            $full = $cmd . ' ' . escapeshellarg($arg) . ' 2>&1';
-            $lines = []; $rc = null;
-            @exec($full, $lines, $rc);
-            $output = trim(implode("\n", $lines));
-            $out['output'] = $output;
-            $lastLine = strtolower(trim((string)end($lines)));
-            if ($rc !== 0) {
-                $out['ok'] = false;
-                $out['error'] = "Switch command failed (exit $rc): " . ($output !== '' ? mb_substr($output, 0, 300) : 'no output');
-                error_log('[schedule] ' . $out['error']);
-                scheduleRecordResult($out);
-                return $out;
-            }
-            if (($lastLine === 'white' || $lastLine === 'black') && $lastLine !== $arg) {
-                $out['ok'] = false;
-                $out['error'] = "Switch command exited 0 but reports mode '$lastLine' (wanted '$arg').";
-                error_log('[schedule] ' . $out['error']);
-                scheduleRecordResult($out);
-                return $out;
-            }
-        }
-
-        // 3) flip the web setting
-        setSetting($db, 'tracker_mode', $desired);
-        $cfg['tracker_mode'] = $desired;
-        if (isset($GLOBALS['cfg']) && is_array($GLOBALS['cfg'])) $GLOBALS['cfg']['tracker_mode'] = $desired;
-        $out['changed'] = true;
-
-        // 4) post-switch bookkeeping
-        if ($cmd !== '') {
-            // the service was restarted by the helper: it holds the current files now
-            if (function_exists('whitelistNoteReloaded')) whitelistNoteReloaded(true, 'mode switch → ' . $desired);
-            if (function_exists('resetBlacklistChanges')) resetBlacklistChanges();
-        } elseif ($desired === 'blacklist') {
-            $rl = autoReloadTrackerBlacklist($cfg);
-            if ($rl && empty($rl['ok'])) $out['notes'][] = 'blacklist reload failed: ' . ($rl['output'] ?? '');
-        } else {
-            whitelistMarkDirty(true);
-            $rl = whitelistMaybeReload($cfg, true);
-            if ($rl && empty($rl['ok'])) $out['notes'][] = 'whitelist reload failed: ' . ($rl['output'] ?? '');
-        }
+        if (!scheduleSwitchTo($db, $cfg, $desired, $out)) return $out;   // it recorded its own failure
         scheduleRecordResult($out);
         return $out;
     } catch (\Throwable $e) {

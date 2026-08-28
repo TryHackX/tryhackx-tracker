@@ -1690,3 +1690,6 @@ input[type="number"] {
    screens, where the grid has only one anyway. */
 .wl-status-grid .ot-dropin-tile { grid-column: span 2; }
 @media (max-width: 900px) { .wl-status-grid .ot-dropin-tile { grid-column: auto; } }
+/* The mode tile carries two actions; they sit under the badges rather than beside them, because the
+   mismatch line above them is the thing that must be read first. */
+.wl-mode-acts { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.45rem; }

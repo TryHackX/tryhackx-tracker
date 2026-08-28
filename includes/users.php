@@ -65,9 +65,13 @@ function userPermissionList(): array {
 /**
  * What the site looks like with the user system disabled: index gated, the classic pages public.
  *
- * The content and rating permissions are NOT granted here. With accounts switched off there is no
- * identity to attach a rating or a description to, and the features' own settings decide instead —
- * this function must not become a second, invisible place that turns them on.
+ * The content and rating permissions ARE granted here, and that is the whole point: with accounts
+ * switched off there are no groups to grant anything, so the features' own settings (rep_who_can_vote,
+ * whitelist_submit_mode, wl_allow_description) are the only policy there is. Returning false would not
+ * be caution — it would switch those features off for every install that does not use accounts.
+ *
+ * This function is reached ONLY when the users feature is off (see userCan). With it on, an absent key
+ * means denied, which is why introducing a permission has to come with a grant in includes/schema.php.
  */
 function userLegacyDefault(string $perm): bool {
     if (str_starts_with($perm, 'rating.') || str_starts_with($perm, 'content.')) return true;

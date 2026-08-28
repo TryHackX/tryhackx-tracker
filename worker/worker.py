@@ -14,6 +14,11 @@ Requires: python3-libtorrent (libtorrent-rasterbar 2.x bindings), python3-pymysq
 """
 import configparser, json, logging, os, secrets, signal, sys, time
 
+# The parallel-fetch ceiling, in ONE place. It used to be written as a literal in two of them, which
+# is how a build enforcing 16 and a panel offering 64 ended up in the same install.
+CONCURRENCY_MAX = 64
+WORKER_VERSION = 3
+
 try:
     import libtorrent as lt
 except Exception as e:  # pragma: no cover
@@ -40,7 +45,7 @@ class Config:
         # in libtorrent. What it costs at the top end: roughly a few hundred sockets and a few
         # hundred MB, plus outbound traffic to match. Raise it because a machine has spare
         # capacity, not because the number is available.
-        self.concurrency = max(1, min(64, int(w.get("concurrency", 3))))
+        self.concurrency = max(1, min(CONCURRENCY_MAX, int(w.get("concurrency", 3))))
         self.timeout = max(20, min(600, int(w.get("timeout_seconds", 90))))
         # Second queue: the observed-hash index (includes/index.php). Empty = disabled (default), so an
         # existing deployment keeps whitelist-only behaviour until index_table is configured AND the
@@ -130,32 +135,72 @@ class Worker:
                  lt.__version__, cfg.listen_port, cfg.concurrency, cfg.timeout, ",".join(q["table"] for q in self.queues))
 
     def effective_concurrency(self):
-        """Config concurrency, unless the panel setting `meta_worker_concurrency` (1..64)
-        overrides it. Re-read at most every 60 s; any error (settings table not granted,
-        row absent, garbage value) silently falls back to the config file value."""
+        """Config concurrency, unless the panel setting `meta_worker_concurrency` overrides it.
+
+        A number OUTSIDE the range this build supports is CLAMPED, not discarded. That distinction
+        cost a real diagnosis: the panel's ceiling was raised from 16 to 64, the file on disk was
+        updated, and the long-running process was never restarted -- so it still enforced 1..16, saw
+        the admin's 32, decided it was garbage, and fell back to the CONFIG value of 4. The admin
+        asked for more parallelism and silently got less than before. Clamping turns that into
+        "you asked for 32, this build tops out at 16, so 16", which is the honest reading of an
+        out-of-range number and degrades in the right direction.
+
+        A read error still falls back to the config value -- an unreachable settings table says
+        nothing about what the operator wants -- but it is logged as an error rather than as a
+        deliberate "no override".
+
+        Re-read at most every 60 s.
+        """
         now = time.time()
         if now - self._conc_checked_at >= 60:
             self._conc_checked_at = now
-            val = None
+            val, why = None, "no row"
             try:
                 rows = self.db.query("SELECT `value` FROM settings WHERE `key`='meta_worker_concurrency'", fetch=True)
                 if rows:
                     raw = str(rows[0].get("value") or "").strip()
-                    if raw.isdigit() and 1 <= int(raw) <= 64:
-                        val = int(raw)
-            except Exception:
-                val = None
+                    if raw == "":
+                        why = "empty (use the config file)"
+                    elif raw.isdigit():
+                        asked = int(raw)
+                        val = max(1, min(CONCURRENCY_MAX, asked))
+                        why = ("as asked" if val == asked
+                               else "asked %d, this build tops out at %d" % (asked, CONCURRENCY_MAX))
+                    else:
+                        why = "not a number: %r" % raw[:20]
+            except Exception as e:
+                val, why = None, "settings unreadable (%s)" % e
             if val != self._conc_override:
-                log.info("concurrency override from settings: %s (config %d)", val if val is not None else "none", self.cfg.concurrency)
+                log.info("concurrency override from settings: %s (%s; config %d)",
+                         val if val is not None else "none", why, self.cfg.concurrency)
                 self._conc_override = val
         return self._conc_override or self.cfg.concurrency
 
     # ── queue ──────────────────────────────────────────────────────────────
     def heartbeat(self):
+        """Touch the file the panel watches -- and write what this worker is actually doing.
+
+        It used to be an empty file whose mtime was the whole message, so the panel could say "the
+        worker is alive" and nothing else. That is exactly how a worker can sit at 4 parallel fetches
+        for a day while the panel shows the 32 somebody typed: the panel had no way to ask, so it
+        reported the setting back to the operator and called it status.
+
+        One JSON line, rewritten each tick. Anything that cannot be written is not worth failing a
+        fetch over, so errors are logged and swallowed as before."""
         try:
-            with open(self.cfg.heartbeat, "a"):
-                pass
-            os.utime(self.cfg.heartbeat, None)
+            payload = {
+                "at": int(time.time()),
+                "pid": os.getpid(),
+                "version": WORKER_VERSION,
+                "concurrency": self.effective_concurrency(),
+                "concurrency_config": self.cfg.concurrency,
+                "concurrency_max": CONCURRENCY_MAX,
+                "active": len(self.active),
+            }
+            tmp = self.cfg.heartbeat + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(payload))
+            os.replace(tmp, self.cfg.heartbeat)
         except Exception as e:
             log.warning("heartbeat: %s", e)
 
