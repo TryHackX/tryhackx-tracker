@@ -144,7 +144,13 @@ if ($wlSched) {
                 <small class="form-hint">&mdash; <?= $wlFormats[0] === 'markdown' ? 'Markdown' : 'BBCode' ?></small>
                 <?php endif; ?>
             </label>
+            <div class="rt-tabs">
+                <button type="button" class="rt-tab active" data-rt="write">Write</button>
+                <button type="button" class="rt-tab" data-rt="preview">Preview</button>
+                <span class="rt-counter" id="wl-desc-count"></span>
+            </div>
             <textarea id="wl-desc" name="description" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="What is it? Technical details are welcome &mdash; use a code block for anything that must keep its formatting."></textarea>
+            <div class="rt-preview rt-body" id="wl-desc-preview" hidden></div>
             <div class="form-hint" id="wl-desc-help"></div>
         </div>
         <?php endif; ?>
@@ -157,6 +163,12 @@ if ($wlSched) {
         <button type="submit" class="btn" id="wl-submit">Register</button>
     </div>
 </form>
+
+<div id="wl-probe" class="wl-probe" hidden>
+    <h2>Checking your submission</h2>
+    <p class="form-hint" id="wl-probe-note"></p>
+    <ul class="wl-probe-list" id="wl-probe-list"></ul>
+</div>
 
 <div id="wl-results" class="wl-results" hidden>
     <h2>Result</h2>

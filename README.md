@@ -508,6 +508,43 @@ Two numbers on this card are diagnoses rather than knobs, and both are easy to m
 - **the socket's own drop counter** (`ss -ulnpm`, the `d<N>` in skmem) — how many announces were
   thrown away for exactly that reason.
 
+### Ratings (1.18.0)
+
+**Settings → Ratings.** Up or down on a torrent, in the Info panel and optionally as a column in the
+search results. **Off by default**, and signed-in accounts only unless you open it further.
+
+Counting is the easy part. A public voting button is the easiest thing on a site to automate, so four
+things stand in the way and none of them is sufficient alone: **one vote per identity enforced by a
+UNIQUE key in the database** (a check in PHP is a race two requests walk through), the shared rate
+limiter, the CAPTCHA points scheme this site already uses, and a weight that makes an anonymous vote
+worth a quarter of an account's. Below a configurable number of votes no percentage is shown at all —
+"100% from one vote" and "100% from four hundred" are different facts.
+
+**On IP addresses:** `REMOTE_ADDR` comes from the TCP connection and cannot be forged over the
+internet. Headers can be, and this panel only reads one when the request arrived from an address you
+listed as a trusted proxy. What none of that fixes is one person with a VPN and a phone — IPv6 is
+bucketed to a /64, and the panel says anonymous votes are a weak signal rather than implying
+otherwise.
+
+### Making a submission prove itself (1.18.0)
+
+**Settings → Make submissions prove themselves.** A new registration must show that its metadata
+resolves *and* that a scrape finds at least one peer — the torrent exists, is alive, and names this
+tracker. Until then the accesslist skips it. Existing rows count as already accepted, so turning it
+on never unpublishes anything.
+
+It reuses the metadata worker rather than adding a second queue, but jumps the queue: somebody is
+watching this one. The form shows a line per hash, and a failure says which half failed, because
+"nobody is sharing this" and "we could not read the torrent" need different fixes.
+
+### Whitelist upkeep (1.18.0)
+
+Two janitor jobs, both off: **refresh** re-scrapes rows whose numbers are stale, oldest first; the
+**dead-row rule** finds rows with no peers for N days. Its default is to **mark, not delete** — an
+automation that removes other people's registrations should be chosen deliberately. A row that has
+never been scraped is never called dead: no data is not no peers, and the difference matters most
+when the scrape path is broken.
+
 ### Source links and descriptions on registered torrents (1.17.0)
 
 **Settings → Tracker Mode & Whitelist → Source link & description.** Two optional fields on the

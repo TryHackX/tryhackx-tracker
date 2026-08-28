@@ -34,6 +34,9 @@ require_once __DIR__ . '/includes/twofa.php';
 require_once __DIR__ . '/includes/bulkmail.php';
 require_once __DIR__ . '/includes/richtext.php';
 require_once __DIR__ . '/includes/livesync.php';
+require_once __DIR__ . '/includes/reputation.php';
+require_once __DIR__ . '/includes/wlmaint.php';
+require_once __DIR__ . '/includes/wlprobe.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/federation.php';
@@ -186,6 +189,9 @@ $apiRoutes = [
     'index_search'               => 'api/index_search.php',
     'index_files'                => 'api/index_files.php',
     'index_info'                 => 'api/index_info.php',
+    'richtext_preview'           => 'api/richtext_preview.php',
+    'rate_hash'                  => 'api/rate_hash.php',
+    'whitelist_probe'            => 'api/whitelist_probe.php',
     // ── User accounts (admin) ──
     'admin/fetch_users'          => 'api/admin/fetch_users.php',
     'admin/user_update'          => 'api/admin/user_update.php',

@@ -14,6 +14,10 @@ if (!rateLimitAllow('idxsearch', ipBucket(getClientIp($cfg)), $perHour, 3600)) {
     jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
 }
 
+// Past the permission checks and only reading from here on, so the session lock can go. See
+// api/index_search.php for why this lives in the endpoint and not in the router.
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+
 $hash = strtolower(trim((string)($_GET['hash'] ?? '')));
 if (!isValidInfoHash($hash)) jsonResponse(['error' => 'Invalid hash'], 400);
 

@@ -4,6 +4,134 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.18.0] — 2026-08-28 (schema v21)
+
+### Added — ratings, and the four things that stop them being worthless
+
+Up or down on a torrent, in the Info panel and optionally as a column in the search results.
+**Off by default.**
+
+Counting two numbers is trivial. What is not trivial is that a public voting button is the easiest
+thing on a site to automate — one loop, a thousand negatives, and the score means nothing for ever.
+So almost all of this is about who may press it:
+
+- **One vote per identity, enforced by a UNIQUE key in the database.** Not by a `SELECT` in PHP: two
+  requests arriving together must collide somewhere real, and a check-then-insert is a race with a
+  comfortable window. Voting again changes your mind rather than adding a second vote.
+- **Rate limited** per address bucket and per account, on the limiter already here.
+- **CAPTCHA through the existing points scheme.** A vote adds points; the challenge appears at the
+  threshold. Steady use is never interrupted, fifty votes in a minute meets a CAPTCHA, and nobody had
+  to write a bot detector.
+- **Weight**: an anonymous vote counts for a quarter of an account's by default.
+- Below a configurable number of votes there is **no percentage at all**, because "100% from one
+  vote" and "100% from four hundred" are different facts and a bar that draws them the same is lying.
+
+**On attributing votes to an IP address** — the question was whether PHP is broken here. It is not.
+`REMOTE_ADDR` comes from the TCP connection: forging it means completing a handshake from the forged
+address, which over the internet means it is not forged. Headers *are* forgeable, and `getClientIp()`
+already refuses to read one unless the request genuinely arrived from an address in
+`trusted_proxy_ips`. What none of that fixes is one person with a VPN and a phone, so IPv6 is
+bucketed to a /64 and the panel says plainly that anonymous votes are a weak signal rather than
+implying a precision it does not have.
+
+### Added — a submission can be made to prove itself
+
+**Settings → Make submissions prove themselves.** With it on, a new registration must show that the
+metadata resolves *and* that a scrape finds at least one peer — meaning the torrent exists, is alive,
+and names this tracker. Until then the accesslist generator skips it, so nothing is served on the
+strength of somebody having typed forty hex characters.
+
+It reuses the metadata worker instead of adding a second queue (a second queue means a second thing
+that can get stuck, to do a job the first one already does) but **jumps the queue**: somebody is
+watching this one and nothing else in it is. The submission form shows a line per hash with its own
+state, and a failure says *which half* failed — "nobody is sharing this" and "we could not read the
+torrent" send somebody to completely different places.
+
+Existing rows count as already accepted, so switching this on never unpublishes anything. Verified on
+production: 159 rows before, 159 after.
+
+### Added — descriptions can be rewritten, by proposal
+
+Anyone can register anyone's hash, so the first person to describe a torrent is not automatically the
+right one — and "whoever submits last wins" would be an invitation. A later submission with a
+description now **proposes a replacement**, visible to a moderator with the old and new versions
+rendered side by side. Applying keeps the version it replaced, so an accepted rewrite can be undone.
+
+### Added — the whitelist keeps itself honest
+
+Two janitor jobs, both off by default: **refresh** re-scrapes rows whose numbers are older than N
+hours, stalest first; the **dead-row rule** finds rows with no seeders and no leechers for N days.
+Its default action is to **mark, not delete** — an automation that quietly removes other people's
+registrations is something an operator chooses in as many words. A row that has never been scraped is
+never called dead: no data is not the same as no peers, and the difference matters most when the
+scrape path is broken, which is exactly when a delete-on-zero rule would empty the list.
+
+### Added — a preview for descriptions, and the reviewed states in search
+
+- **Write / Preview** on the description field. The renderer stays on the server — it is the only
+  place that can guarantee what comes out, and moving it into the browser would move the guarantee to
+  the least trustworthy place in the system — so the preview is a round trip. Slower, and correct.
+- The search gains a filter for reviewed state (hide rejected by default, or approved only, or
+  unreviewed only) and a badge beside the name. **Hiding rejected is the default and hiding the
+  torrent is not**: a judgement about somebody's words is not a judgement about a swarm.
+- **Always publish** as a separate switch from *Review before publishing*, because "I do not
+  moderate" and "I moderate, but let this through" are different decisions.
+- Banning a hash now clears its pending description, its pending rewrites and its ratings — in
+  `whitelistBan()`, the one function every ban path goes through, rather than copied into each.
+
+### Fixed — the public search held the session lock
+
+Clicking Stats a second after clicking Search waited for the search: the same exclusive session lock
+that made the admin Index feel jammed, from the public side. The three read-only search endpoints
+release it.
+
+**Twice, because the first attempt was wrong in an instructive way.** Releasing it in the router —
+before the endpoint ran — meant `userCan()` and `currentUser()` saw nothing, and a signed-in member
+got `login_required` on their own search. The smoke suite caught it. The release now sits *after* the
+permission checks, in each endpoint, where it is provable rather than plausible.
+
+### Fixed — white dots all over the charts on a wide screen
+
+uPlot turns point markers on once the average pixel gap between samples passes a threshold, so the
+same chart was clean on a laptop and speckled on a wide monitor — a decision about the window, not
+about the data. Markers are now drawn only where the line cannot show a value on its own: a sample
+with a gap on both sides, which with `spanGaps: false` would otherwise be invisible. The hover point
+is drawn separately by uPlot and is untouched.
+
+### Changed — the metadata worker can now run 64 fetches at once
+
+Was capped at 16 in four places. Each fetch is one libtorrent handle holding a small set of DHT and
+peer connections, so the ceiling is file descriptors and memory rather than anything in libtorrent —
+at the top end, a few hundred sockets and a few hundred MB. The setting hint says so, because a
+number available is not a number free.
+
+### Security — an audit of every query, with a mechanism to keep it true
+
+`tests/sql_safety_test.php` walks every PHP file with PHP's own tokeniser, finds every variable that
+reaches the text of a `query()`, `exec()` or `prepare()`, and requires each to be either a shape that
+is safe by construction or an entry in a **reviewed baseline with a written reason**.
+
+**Result: zero injection findings.** Every site is an allow-listed identifier, an integer already
+cast, or a fragment assembled from literals with its values bound.
+
+Two earlier versions of the test are worth recording, because they are the reason this one is
+trustworthy. The first scanned lines for SQL keywords and reported eighty-eight false positives —
+including `->execute([$id])` next to a parameterised query. The second looked inside string literals
+and reported the `From:` header of an email and an error message containing the word "limit". Prose
+is full of SQL keywords; only a query is a query. A test nobody believes gets switched off, and then
+it protects nothing.
+
+It has already earned its place: it caught a new interpolation in `includes/reputation.php` the same
+day it was written.
+
+### Testing
+
+- `tests/reputation_test.php` (34 checks) proves the one-vote-per-identity rule **against the live
+  schema** — two inserts for the same identity, one row out — rather than against the PHP that
+  intends it.
+- `tests/sql_safety_test.php` (7 checks) as above.
+- 20 PHP suites, ~1560 checks; 3 smoke suites; 2 HTTP suites; the UI test. All green.
+
 ## [1.17.0] — 2026-08-28 (schema v19 + v20)
 
 ### Added — a source link and a description on a registered torrent (schema v19)

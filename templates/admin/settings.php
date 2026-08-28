@@ -312,6 +312,57 @@
             </div>
 
             <!-- Tracker mode & whitelist -->
+            <div class="settings-section" id="section-reputation" data-group="tracker" data-title="Ratings">
+                <h5><i class="bi bi-hand-thumbs-up"></i> Ratings</h5>
+                <small class="settings-hint d-block mb-3">Up or down on a torrent, shown in the Info panel and optionally beside every search result. <strong>Off by default.</strong>
+                <br><br><strong>What a public voting button really is:</strong> the easiest thing on a site to automate. One loop, a thousand negatives, and the score means nothing for ever. Four things stand in the way here, because no single one holds: one vote per identity enforced by a <strong>unique key in the database</strong> (not a check in PHP, which is a race two requests can walk straight through), the shared rate limiter, the CAPTCHA points scheme this site already uses, and a weight that makes an anonymous vote count for less than an account's.
+                <br><br><strong>About attributing votes to an IP address:</strong> <code>REMOTE_ADDR</code> comes from the TCP connection and cannot be forged over the internet — forging it would mean completing a handshake from the forged address. Headers can be forged, and this panel only reads one when the request genuinely arrived from an address you listed under <em>Trusted proxy IPs</em>. What none of that fixes is one person with a VPN and a phone: IPv6 is bucketed to a /64 so a single allocation counts once, but a score built from anonymous votes is a weak signal and the panel will not pretend otherwise.</small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="rep_enabled">
+                        <label class="form-label">Ratings</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="rep_enabled">
+                            <option value="0" <?= ($cfg['rep_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="1" <?= ($cfg['rep_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3" data-setting="rep_who_can_vote">
+                        <label class="form-label">Who can rate</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="rep_who_can_vote">
+                            <option value="off" <?= ($cfg['rep_who_can_vote'] ?? 'users') === 'off' ? 'selected' : '' ?>>Nobody &mdash; show scores only</option>
+                            <option value="users" <?= ($cfg['rep_who_can_vote'] ?? 'users') === 'users' ? 'selected' : '' ?>>Signed-in accounts</option>
+                            <option value="all" <?= ($cfg['rep_who_can_vote'] ?? 'users') === 'all' ? 'selected' : '' ?>>Anyone, including anonymous</option>
+                        </select>
+                        <small class="settings-hint">Anonymous voting is attributed to an address bucket, which one person can have several of. Open it knowing that.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="rep_show_in_results">
+                        <label class="form-label">Show in search results</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="rep_show_in_results">
+                            <option value="0" <?= ($cfg['rep_show_in_results'] ?? '0') !== '1' ? 'selected' : '' ?>>No &mdash; only in the Info panel</option>
+                            <option value="1" <?= ($cfg['rep_show_in_results'] ?? '0') === '1' ? 'selected' : '' ?>>Yes &mdash; a column in the list</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3" data-setting="rep_min_votes">
+                        <label class="form-label">Votes before a score is shown</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rep_min_votes" value="<?= sanitize($cfg['rep_min_votes'] ?? '3') ?>" min="1" max="1000">
+                        <small class="settings-hint">Below this the panel says &ldquo;too few ratings&rdquo; instead of a number. &ldquo;100% from one vote&rdquo; and &ldquo;100% from four hundred&rdquo; are not the same fact.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="rep_anon_weight">
+                        <label class="form-label">Weight of an anonymous vote (%)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rep_anon_weight" value="<?= sanitize($cfg['rep_anon_weight'] ?? '25') ?>" min="0" max="100">
+                        <small class="settings-hint">Against 100% for a signed-in account. 0 = anonymous votes are counted but change nothing.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="rep_rate_per_hour">
+                        <label class="form-label">Votes per hour, per voter</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rep_rate_per_hour" value="<?= sanitize($cfg['rep_rate_per_hour'] ?? '30') ?>" min="1" max="1000">
+                    </div>
+                    <div class="col-md-3" data-setting="captcha_pts_vote">
+                        <label class="form-label">CAPTCHA points per vote</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="captcha_pts_vote" value="<?= sanitize($cfg['captcha_pts_vote'] ?? '2') ?>" min="0" max="100">
+                        <small class="settings-hint">A vote adds this to the same score every other action feeds. Steady use is never interrupted; fifty votes in a minute meets a challenge, without anybody having to write a bot detector.</small>
+                    </div>
+                </div>
+            </div>
+
             <div class="settings-section" id="section-livesync" data-group="tracker" data-title="Live peer sync (second machine)">
                 <h5><i class="bi bi-diagram-3"></i> Live peer sync</h5>
                 <small class="settings-hint d-block mb-3">Two opentrackers on <strong>two machines</strong> telling each other who is in which swarm, live. This is <em>not</em> federation: federation moves metadata between panels over HTTPS with a key, this moves the peers themselves between trackers. Neither replaces the other, and on a single machine this does nothing at all &mdash; there is nobody to sync with. <strong>Off by default.</strong>
@@ -433,6 +484,84 @@
                 </div>
                 <div class="settings-hint mt-2">Manage the list itself (browse, add, ban, regenerate the file) on the <a href="<?= $baseUrl ?>?action=admin-whitelist">Whitelist page</a>.</div>
 
+                <!-- A submission has to prove itself (includes/wlprobe.php) -->
+                <h6 class="settings-subhead mt-4">Make submissions prove themselves</h6>
+                <small class="settings-hint d-block mb-3">Anybody can paste forty hex characters. Most of what a public whitelist accumulates is not abuse &mdash; it is hashes nobody is seeding, and hashes whose torrent never named this tracker. Each one becomes a row the accesslist carries for ever.
+                <br><br>With this on, a new submission has to show two things before the tracker serves it: <strong>the metadata resolves</strong> (somebody really is sharing it) and <strong>a scrape finds at least one peer</strong> (and they are announcing here). It reuses the metadata worker rather than adding a second queue, but jumps the queue &mdash; a person is watching this one, and nothing else in the queue is. <strong>Off by default:</strong> it changes what registering <em>means</em>, and that is not something to inherit from an upgrade.</small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="wl_probe_required">
+                        <label class="form-label">Check before serving</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_probe_required">
+                            <option value="0" <?= ($cfg['wl_probe_required'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="1" <?= ($cfg['wl_probe_required'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                        </select>
+                        <small class="settings-hint">Existing rows are unaffected: everything registered before this counts as already accepted, so turning it on never unpublishes anything.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_probe_timeout_minutes">
+                        <label class="form-label">Give it (minutes)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_probe_timeout_minutes" value="<?= sanitize($cfg['wl_probe_timeout_minutes'] ?? '10') ?>" min="1" max="1440">
+                        <small class="settings-hint">Fetching metadata from the DHT is not instant. Too short and honest submissions fail.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_probe_on_fail">
+                        <label class="form-label">If it never proves itself</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_probe_on_fail">
+                            <option value="delete" <?= ($cfg['wl_probe_on_fail'] ?? 'delete') === 'delete' ? 'selected' : '' ?>>Remove the row</option>
+                            <option value="keep" <?= ($cfg['wl_probe_on_fail'] ?? 'delete') === 'keep' ? 'selected' : '' ?>>Keep it, unserved, with the reason</option>
+                        </select>
+                        <small class="settings-hint">Deleting is the default here, unlike the dead-row rule: this row was never served, and nobody has come to rely on it.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_probe_max_batch">
+                        <label class="form-label">Per submission, at most</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_probe_max_batch" value="<?= sanitize($cfg['wl_probe_max_batch'] ?? '') ?>" min="1" max="64" placeholder="e.g. 8 (defaults to the worker's concurrency)">
+                        <small class="settings-hint">Five hundred rows in the priority lane are not resolved faster &mdash; they just make everyone wait together. Keep this at or below <em>Worker parallel fetches</em>.</small>
+                    </div>
+                </div>
+
+                <!-- Keeping the list honest over time (includes/wlmaint.php) -->
+                <h6 class="settings-subhead mt-4">Upkeep: refreshing and dead torrents</h6>
+                <small class="settings-hint d-block mb-3">A whitelist accumulates. Somebody registers a torrent, seeds it for a week and moves on, and years later the tracker is still serving a swarm with nobody in it. Both jobs below run from the <strong>janitor</strong>, never from a page view, and both are <strong>off by default</strong>.</small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="wl_scrape_every_hours">
+                        <label class="form-label">Refresh S/L every (hours)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_scrape_every_hours" value="<?= sanitize($cfg['wl_scrape_every_hours'] ?? '0') ?>" min="0" max="8760">
+                        <small class="settings-hint">0 = never. Rows are taken stalest-first, so a list larger than one batch is covered evenly instead of the same first two hundred rows being refreshed for ever.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_scrape_batch">
+                        <label class="form-label">Rows per run</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_scrape_batch" value="<?= sanitize($cfg['wl_scrape_batch'] ?? '200') ?>" min="1" max="2000">
+                        <small class="settings-hint">Each row is a scrape request to your own tracker. The janitor runs every minute.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_dead_after_days">
+                        <label class="form-label">Call a torrent dead after (days)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_dead_after_days" value="<?= sanitize($cfg['wl_dead_after_days'] ?? '0') ?>" min="0" max="3650">
+                        <small class="settings-hint">0 = off. Counted from the last scrape that showed <strong>no seeders and no leechers</strong>. A row that has never been scraped is <em>never</em> counted &mdash; no data is not the same as no peers, and the difference matters most when the scrape path is broken, which is exactly when a delete-on-zero rule would empty the list.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_dead_action">
+                        <label class="form-label">What to do with them</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_dead_action">
+                            <option value="mark" <?= ($cfg['wl_dead_action'] ?? 'mark') === 'mark' ? 'selected' : '' ?>>Mark them &mdash; nothing is removed</option>
+                            <option value="delete" <?= ($cfg['wl_dead_action'] ?? 'mark') === 'delete' ? 'selected' : '' ?>>Delete them</option>
+                            <option value="none" <?= ($cfg['wl_dead_action'] ?? 'mark') === 'none' ? 'selected' : '' ?>>Nothing</option>
+                        </select>
+                        <small class="settings-hint"><strong>Mark is the default deliberately.</strong> An automation that removes other people&rsquo;s registrations is something an operator should choose in as many words, not inherit.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_dead_every_days">
+                        <label class="form-label">Run the dead pass every (days)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_dead_every_days" value="<?= sanitize($cfg['wl_dead_every_days'] ?? '30') ?>" min="1" max="365">
+                    </div>
+                    <div class="col-md-9">
+                        <div class="settings-hint mt-4"><?php
+                            $wmCount = function_exists('wlMaintDeadCount') ? wlMaintDeadCount($db, $cfg) : 0;
+                            if (wlMaintDeadDays($cfg) > 0) {
+                                echo 'With the current settings this rule matches <strong>' . (int)$wmCount . '</strong> row'
+                                   . ($wmCount === 1 ? '' : 's') . ' right now.';
+                            } else {
+                                echo 'Set a number of days above to see how many rows the rule would match.';
+                            }
+                        ?></div>
+                    </div>
+                </div>
+
                 <!-- Source link + description on a whitelist row (includes/richtext.php) -->
                 <h6 class="settings-subhead mt-4">Source link &amp; description</h6>
                 <small class="settings-hint d-block mb-3">Two optional fields on the registration form: <strong>where the torrent came from</strong>, and <strong>what it is</strong>. They appear on the public whitelist, the Index and the public search. Both are <strong>off by default</strong>, because this is text an anonymous stranger types and you then publish under your own domain &mdash; a description can carry images and a link goes wherever its author decided. With review on (the default when you switch these on), the torrent still registers <em>immediately</em>; only the link and the description wait for you.</small>
@@ -459,6 +588,19 @@
                             <option value="0" <?= ($cfg['wl_content_review'] ?? '1') !== '1' ? 'selected' : '' ?>>No &mdash; publish at once</option>
                         </select>
                         <small class="settings-hint">Held items appear under <strong>To review</strong> on the <a href="<?= $baseUrl ?>?action=admin-whitelist">Whitelist page</a>. Turning this off means the first bad description is public before anyone has seen it.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_content_autopublish">
+                        <label class="form-label">Always publish</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_content_autopublish">
+                            <option value="0" <?= ($cfg['wl_content_autopublish'] ?? '0') !== '1' ? 'selected' : '' ?>>No</option>
+                            <option value="1" <?= ($cfg['wl_content_autopublish'] ?? '0') === '1' ? 'selected' : '' ?>>Yes &mdash; skip the queue entirely</option>
+                        </select>
+                        <small class="settings-hint">Separate from <em>Review before publishing</em> on purpose: &ldquo;I do not moderate&rdquo; and &ldquo;I moderate, but let this one through&rdquo; are different decisions, and collapsing them into one switch means you cannot make the second.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_edit_max_pending">
+                        <label class="form-label">Rewrite proposals per torrent</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_edit_max_pending" value="<?= sanitize($cfg['wl_edit_max_pending'] ?? '3') ?>" min="0" max="50">
+                        <small class="settings-hint">Registering a hash that already exists, with a description, <strong>proposes a rewrite</strong> rather than changing anything &mdash; anyone can register somebody else&rsquo;s torrent, so the first description is not automatically the right one. Proposals appear under <strong>Whitelist &rarr; To review &rarr; Rewrites</strong>, old and new side by side. 0 = do not accept proposals.</small>
                     </div>
                     <div class="col-md-3" data-setting="link_trusted_domains">
                         <label class="form-label">Domains that need no warning</label>
@@ -735,6 +877,11 @@
                     <div class="col-md-3">
                         <label class="form-label">Searches / hour (per IP)</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_index_search" value="<?= sanitize($cfg['rate_limit_index_search'] ?? '120') ?>" min="0" max="100000">
+                    </div>
+                    <div class="col-md-3" data-setting="rate_limit_preview">
+                        <label class="form-label">Description previews / min (per IP)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_preview" value="<?= sanitize($cfg['rate_limit_preview'] ?? '30') ?>" min="5" max="300">
+                        <small class="settings-hint">The Preview button renders on the server, because that is the only place that can guarantee what comes out &mdash; which makes it a parser anybody can call.</small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Member search</label>
@@ -1387,8 +1534,8 @@
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Worker parallel fetches <small class="settings-hint">(empty = worker config)</small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="meta_worker_concurrency" value="<?= sanitize($cfg['meta_worker_concurrency'] ?? '') ?>" min="1" max="16" placeholder="e.g. 8">
-                        <small class="settings-hint">How many hashes the metadata worker resolves at once (whitelist + index queues). The worker re-reads this every ~60&nbsp;s — no restart needed. Higher = faster drain, more DHT/RAM load. 1&ndash;16.</small>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="meta_worker_concurrency" value="<?= sanitize($cfg['meta_worker_concurrency'] ?? '') ?>" min="1" max="64" placeholder="e.g. 8">
+                        <small class="settings-hint">How many hashes the metadata worker resolves at once (whitelist + index queues). The worker re-reads this every ~60&nbsp;s &mdash; no restart needed. <strong>1&ndash;64.</strong> Each fetch is one libtorrent handle holding a small set of DHT and peer connections, so the ceiling here is file descriptors and memory, not libtorrent: at the top end expect a few hundred sockets, a few hundred MB, and outbound traffic to match. Raise it because this machine has spare capacity, not because the number is available.</small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Keep File Lists</label>

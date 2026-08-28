@@ -940,6 +940,17 @@ async function handleWhitelistSubmit(e) {
                 msg += secs > 0 ? ` New hashes become active on the tracker within ~${secs} s.` : ' New hashes are active on the tracker.';
             }
             if (json.file_ok === false) msg += ' (Warning: the tracker list file could not be updated — the admin has been notified.)';
+            // When the tracker checks submissions, "registered" is not the end of the story yet.
+            if (json.probe && json.probe.on && (json.probe.hashes || []).length) {
+                msg += ' They are being checked now — see below.';
+                if (window.wlWatchProbe) window.wlWatchProbe(json.probe.hashes, json.probe.timeout_minutes);
+            }
+            if (json.content_proposed) {
+                msg += ' This torrent already had a description, so yours was submitted as a proposed '
+                     + 'change for a moderator to look at.';
+            } else if (json.content_pending) {
+                msg += ' Your description and link are waiting to be reviewed.';
+            }
             alert.textContent = msg;
             renderWhitelistResults(json);
             ta.value = '';
@@ -2296,6 +2307,8 @@ async function loadStatsHome(forceSync = false) {
             if (q) qs.set('search', q);
             const filesOn = !!(filesBox && filesBox.checked);
             if (filesOn) qs.set('search_files', '1');
+            const contentSel = $id('search-content');
+            if (contentSel && contentSel.value) qs.set('content', contentSel.value);
             const json = await getJson('index_search&' + qs.toString());
             if (my !== seq) return;
             setLoading(false);
@@ -2329,6 +2342,17 @@ async function loadStatsHome(forceSync = false) {
                     wb.textContent = 'WL';
                     nameTd.appendChild(wb);
                 }
+                // The state of the words attached to it, not of the torrent. Only shown when there
+                // is a state to show: an index row nobody has written about has none.
+                if (r.content_status === 'approved' || r.content_status === 'rejected') {
+                    const cb = document.createElement('span');
+                    cb.className = 'search-wl-badge search-cs-' + r.content_status;
+                    cb.title = r.content_status === 'approved'
+                        ? 'The description and source link were reviewed and published'
+                        : 'The description was reviewed and turned down — the torrent itself is unaffected';
+                    cb.textContent = r.content_status === 'approved' ? 'OK' : 'REJ';
+                    nameTd.appendChild(cb);
+                }
                 if (r.files_count) {
                     const fc = document.createElement(canFiles && r.info_hash ? 'button' : 'span');
                     fc.className = 'search-files-chip' + (lastFilesSearch ? ' chip-hit' : '');
@@ -2349,6 +2373,21 @@ async function loadStatsHome(forceSync = false) {
                 slTd.className = 'search-num';
                 slTd.textContent = (r.seeders == null ? '—' : r.seeders) + ' / ' + (r.leechers == null ? '—' : r.leechers);
                 tr.appendChild(slTd);
+                if (json.rep_in_results) {
+                    const repTd = document.createElement('td');
+                    repTd.className = 'search-num search-rep';
+                    if (r.rep) {
+                        // The count comes with the percentage, always. A column that shows only
+                        // "100%" makes one vote look like four hundred.
+                        repTd.className += r.rep.pct >= 50 ? ' search-rep-up' : ' search-rep-down';
+                        repTd.textContent = r.rep.pct + '%';
+                        repTd.title = r.rep.total + (r.rep.total === 1 ? ' rating' : ' ratings');
+                    } else {
+                        repTd.textContent = '—';
+                        repTd.title = 'Too few ratings to show a score';
+                    }
+                    tr.appendChild(repTd);
+                }
                 const seenTd = document.createElement('td');
                 seenTd.className = 'search-num';
                 seenTd.textContent = fmtDatePub(r.last_seen);
@@ -2521,6 +2560,28 @@ async function loadStatsHome(forceSync = false) {
             return d;
         }
 
+        async function castVote(hash, dir, holder) {
+            const csrf = ($id('search-csrf') || {}).value || '';
+            const r = await postJson('rate_hash', { hash, vote: dir, csrf_token: csrf });
+            if (!r) return;
+            if (r.captcha) {
+                // The points scheme decided this visitor needs a challenge. Reopening the panel is
+                // the honest way to get one: the CAPTCHA belongs to the page, not to this button.
+                holder.textContent = 'Please solve the CAPTCHA on the page and try again.';
+                return;
+            }
+            if (!r.success) {
+                const why = document.createElement('div');
+                why.className = 'rep-label text-muted';
+                why.textContent = r.error || 'That did not go through.';
+                holder.appendChild(why);
+                return;
+            }
+            // Redraw from the server's answer, never from an optimistic guess: the whole value of a
+            // score is that it is the server's count and not the browser's.
+            openInfo(hash, null);
+        }
+
         async function openInfo(hash, name) {
             if (!infoOverlay) return;
             const body = $id('info-body'), title = $id('info-title');
@@ -2572,7 +2633,64 @@ async function loadStatsHome(forceSync = false) {
                 body.appendChild(none);
             }
 
-            // 3. the numbers
+            // 3. what people think of it
+            //
+            // The bar shows the split AND the count, because "100% from one vote" and "100% from
+            // four hundred" are not the same fact and a bar that draws them identically is lying.
+            // Below the operator's threshold there is no bar at all — just how many votes are in.
+            if (json.rating) {
+                const rep = document.createElement('div');
+                rep.className = 'rep-block';
+                const r = json.rating;
+
+                if (r.percent !== null) {
+                    const bar = document.createElement('div');
+                    bar.className = 'rep-bar';
+                    bar.setAttribute('role', 'img');
+                    bar.setAttribute('aria-label', r.percent + '% positive from ' + r.total + ' ratings');
+                    const up = document.createElement('span');
+                    up.className = 'rep-bar-up';
+                    up.style.width = r.percent + '%';
+                    bar.appendChild(up);
+                    rep.appendChild(bar);
+                    const label = document.createElement('div');
+                    label.className = 'rep-label';
+                    label.textContent = r.percent + '% positive · ' + r.up + ' up, ' + r.down + ' down';
+                    rep.appendChild(label);
+                } else {
+                    const label = document.createElement('div');
+                    label.className = 'rep-label text-muted';
+                    label.textContent = r.total === 0
+                        ? 'Nobody has rated this yet.'
+                        : r.total + ' of ' + r.min_votes + ' ratings needed before a score is shown.';
+                    rep.appendChild(label);
+                }
+
+                if (json.can_vote) {
+                    const acts = document.createElement('div');
+                    acts.className = 'rep-acts';
+                    const mk = (dir, glyph, title) => {
+                        const b = document.createElement('button');
+                        b.type = 'button';
+                        b.className = 'btn btn-secondary btn-small rep-btn' + (json.my_vote === dir ? ' rep-mine' : '');
+                        b.textContent = glyph;
+                        b.title = title;
+                        b.addEventListener('click', () => castVote(hash, dir, rep));
+                        return b;
+                    };
+                    acts.appendChild(mk(1, '\u25B2 Good', 'This is what it says it is'));
+                    acts.appendChild(mk(-1, '\u25BC Bad', 'Fake, mislabelled or broken'));
+                    rep.appendChild(acts);
+                } else if (json.vote_refusal) {
+                    const why = document.createElement('div');
+                    why.className = 'rep-label text-muted';
+                    why.textContent = json.vote_refusal;
+                    rep.appendChild(why);
+                }
+                body.appendChild(rep);
+            }
+
+            // 4. the numbers
             const st = json.stats || {};
             const grid = document.createElement('div');
             grid.className = 'info-grid';
@@ -2617,7 +2735,7 @@ async function loadStatsHome(forceSync = false) {
                 body.appendChild(btn);
             }
 
-            // 4. the files, last, because the panel is about the torrent and this is the long part
+            // 5. the files, last, because the panel is about the torrent and this is the long part
             if (json.can_files && st.files_count) {
                 const det = document.createElement('details');
                 det.className = 'rt-collapse';
@@ -2688,6 +2806,8 @@ async function loadStatsHome(forceSync = false) {
         if (clearBtn) clearBtn.addEventListener('click', () => animatedClearPub(input, () => { syncClear(); input.focus(); run(1); }));
         form.addEventListener('submit', (e) => { e.preventDefault(); run(1); });
         if (filesBox) filesBox.addEventListener('change', () => run(1));
+        const contentFilter = $id('search-content');
+        if (contentFilter) contentFilter.addEventListener('change', () => run(1));
         updateSortIcons();
         syncClear();
         run(1);
@@ -2785,4 +2905,170 @@ async function loadStatsHome(forceSync = false) {
     }, true);
 
     window.askBeforeLeaving = askBeforeLeaving;
+})();
+
+/* ── the description preview ────────────────────────────────────────────────
+ *
+ * The renderer lives on the server, and this does not change that. Turning the text into HTML in
+ * the browser would put the one guarantee this feature rests on — that the output contains only tags
+ * the server itself wrote — in the least trustworthy place in the system. So the preview is a round
+ * trip to the same function the visitor's page will use. Slower, and correct.
+ *
+ * Debounced, because it is somebody typing, and the endpoint is a parser anybody can call.
+ */
+(function () {
+    'use strict';
+    const ta = document.getElementById('wl-desc');
+    if (!ta) return;
+    const box = document.getElementById('wl-desc-preview');
+    const counter = document.getElementById('wl-desc-count');
+    const help = document.getElementById('wl-desc-help');
+    const tabs = [...document.querySelectorAll('.rt-tab')];
+    const fmtEl = document.getElementById('wl-desc-format');
+    const csrf = document.querySelector('#wl-form input[name="csrf_token"]');
+    let timer = null;
+    let lastAsked = '';
+
+    function show(which) {
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.rt === which));
+        ta.hidden = which !== 'write';
+        box.hidden = which !== 'preview';
+        if (which === 'preview') render();
+    }
+
+    async function render() {
+        const text = ta.value;
+        const fmt = fmtEl ? fmtEl.value : 'bbcode';
+        const key = fmt + String.fromCharCode(31) + text;
+        if (key === lastAsked) return;
+        lastAsked = key;
+        if (!text.trim()) {
+            box.textContent = '';
+            box.appendChild(Object.assign(document.createElement('p'), {
+                className: 'text-muted', textContent: 'Nothing to preview yet.' }));
+            return;
+        }
+        const r = await postJson('richtext_preview', {
+            text, format: fmt, csrf_token: csrf ? csrf.value : '' });
+        if (!r) { box.textContent = 'Could not reach the server.'; return; }
+        if (!r.success) { box.textContent = r.error || 'Could not render that.'; return; }
+        // The server built this from fully escaped input with a fixed tag whitelist
+        // (includes/richtext.php). It is the same string the public page will show.
+        box.innerHTML = r.html;
+        if (counter) {
+            const bits = [r.length + '/' + r.limit + ' characters'];
+            if (r.images.limit > 0 || r.images.used) bits.push(r.images.used + '/' + r.images.limit + ' images');
+            if (r.links.limit > 0 || r.links.used) bits.push(r.links.used + '/' + r.links.limit + ' links');
+            counter.textContent = bits.join(' · ');
+        }
+        if (help) {
+            help.textContent = r.problem || '';
+            help.classList.toggle('form-hint-bad', !!r.problem);
+        }
+    }
+
+    tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.rt)));
+    ta.addEventListener('input', () => {
+        clearTimeout(timer);
+        if (!box.hidden) timer = setTimeout(render, 400);
+    });
+    if (fmtEl) fmtEl.addEventListener('change', () => { lastAsked = ''; if (!box.hidden) render(); });
+})();
+
+/* ── watching a submission prove itself ─────────────────────────────────────
+ *
+ * When the tracker checks submissions, registering stops being instant: the metadata has to arrive
+ * from the DHT and a scrape has to find somebody actually sharing it. That is a wait of seconds to
+ * minutes, and a form that just sits there during it looks broken.
+ *
+ * So each hash gets its own line and its own state, and the states say WHICH half failed. "Nobody is
+ * sharing this" and "we could not read the torrent" send somebody to completely different places,
+ * and folding them into "failed" throws away the only useful part of the answer.
+ */
+(function () {
+    'use strict';
+    const box = document.getElementById('wl-probe');
+    if (!box) return;
+    const list = document.getElementById('wl-probe-list');
+    const note = document.getElementById('wl-probe-note');
+    let timer = null;
+    let started = 0;
+
+    const LABEL = {
+        probing: ['Checking…', 'wl-probe-wait'],
+        passed:  ['Registered and being served', 'wl-probe-ok'],
+        failed:  ['Not registered', 'wl-probe-bad'],
+        none:    ['Registered', 'wl-probe-ok'],
+        unknown: ['Not registered', 'wl-probe-bad'],
+    };
+
+    function draw(items) {
+        list.textContent = '';
+        Object.keys(items).forEach(hash => {
+            const it = items[hash];
+            const li = document.createElement('li');
+            const [text, cls] = LABEL[it.state] || LABEL.unknown;
+            li.className = 'wl-probe-item ' + cls;
+
+            const head = document.createElement('div');
+            head.className = 'wl-probe-head';
+            const name = document.createElement('strong');
+            name.textContent = it.name || hash.slice(0, 16) + '…';
+            head.appendChild(name);
+            const st = document.createElement('span');
+            st.className = 'wl-probe-state';
+            st.textContent = text;
+            head.appendChild(st);
+            li.appendChild(head);
+
+            const detail = document.createElement('div');
+            detail.className = 'wl-probe-detail';
+            if (it.state === 'passed' || it.state === 'none') {
+                const bits = [];
+                if (it.seeders != null) bits.push(it.seeders + ' seeders, ' + (it.leechers || 0) + ' leechers');
+                if (it.files != null) bits.push(it.files + (it.files === 1 ? ' file' : ' files'));
+                detail.textContent = bits.join(' · ');
+            } else if (it.state === 'failed' || it.state === 'unknown') {
+                // The reason, verbatim from the server. It is the whole point of the line.
+                detail.textContent = it.error || 'it did not pass the check';
+            } else {
+                detail.textContent = it.meta === 'done'
+                    ? 'metadata is in — looking for peers on this tracker…'
+                    : 'waiting for the torrent metadata…';
+            }
+            li.appendChild(detail);
+            list.appendChild(li);
+        });
+    }
+
+    async function poll(hashes, timeoutMinutes) {
+        const r = await getJson('whitelist_probe&hashes=' + encodeURIComponent(hashes.join(',')));
+        if (!r || !r.success) {
+            note.textContent = (r && r.error) || 'Could not read the progress.';
+            return;
+        }
+        draw(r.items);
+        const waiting = Object.keys(r.items).filter(h => r.items[h].state === 'probing').length;
+        if (waiting === 0) {
+            note.textContent = 'Done.';
+            clearTimeout(timer);
+            return;
+        }
+        const mins = Math.round((Date.now() - started) / 60000);
+        note.textContent = waiting + (waiting === 1 ? ' still being checked' : ' still being checked')
+            + ' — this can take a few minutes, and gives up after ' + timeoutMinutes + '.'
+            + (mins >= 1 ? ' (' + mins + ' min so far)' : '');
+        // Every three seconds. Faster tells nobody anything: the worker polls its queue on its own
+        // schedule and the answer cannot change in between.
+        timer = setTimeout(() => poll(hashes, timeoutMinutes), 3000);
+    }
+
+    window.wlWatchProbe = function (hashes, timeoutMinutes) {
+        if (!hashes || !hashes.length) return;
+        started = Date.now();
+        box.hidden = false;
+        note.textContent = 'Checking ' + hashes.length + (hashes.length === 1 ? ' submission…' : ' submissions…');
+        clearTimeout(timer);
+        poll(hashes, timeoutMinutes || 10);
+    };
 })();

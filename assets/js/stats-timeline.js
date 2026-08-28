@@ -143,8 +143,32 @@
             axes.push(Object.assign(axisBase(), { scale: 'torrents', side: 1, size: 56, stroke: '#b388ff', grid: { show: false }, values: (u, vals) => vals.map(yFmt) }));
         }
         const series = [{ label: 'Time', value: (u, v) => v == null ? '—' : fmtTime(v) }];
-        // points: uPlot's default shows markers only for isolated samples (a value with gaps on both sides) — keep it
-        defs.forEach(d => series.push({ label: d.label, stroke: d.color, width: 1.5, scale: isRate ? 'rps' : d.scale, show: d.on, spanGaps: false, points: { size: 5 }, value: (u, v) => legendFmt(v) }));
+
+        /**
+         * Draw a marker ONLY where the line cannot show the value on its own.
+         *
+         * uPlot's own default turns markers on once the average gap between samples passes a pixel
+         * threshold — so the same chart is clean on a laptop and covered in white dots on a wide
+         * monitor, which is not a decision about the data at all. The comment here used to claim the
+         * default was "isolated samples only"; it is not, and the screenshots showed it.
+         *
+         * A genuinely isolated sample — a value with a gap on both sides — still needs a marker, or
+         * it renders as nothing at all: `spanGaps: false` means there is no line segment to draw it
+         * on. So the rule is exactly that, and nothing else. The cursor's own hover point is drawn
+         * separately by uPlot and is untouched, which is the one place markers were wanted.
+         */
+        const isolatedOnly = (u, seriesIdx, idx0, idx1) => {
+            const data = u.data[seriesIdx];
+            const out = [];
+            for (let i = idx0; i <= idx1; i++) {
+                if (data[i] == null) continue;
+                const prev = i > 0 ? data[i - 1] : null;
+                const next = i < data.length - 1 ? data[i + 1] : null;
+                if (prev == null && next == null) out.push(i);
+            }
+            return out.length ? out : false;
+        };
+        defs.forEach(d => series.push({ label: d.label, stroke: d.color, width: 1.5, scale: isRate ? 'rps' : d.scale, show: d.on, spanGaps: false, points: { show: isolatedOnly, size: 5 }, value: (u, v) => legendFmt(v) }));
         const opts = {
             width, height, scales, axes, series,
             legend: { live: true },

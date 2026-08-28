@@ -72,6 +72,11 @@ $allowed = [
     // user accounts (includes/users.php)
     'users_enabled', 'users_registration_enabled', 'users_links_visible', 'users_default_group',
     'users_notify_expiry_days', 'rate_limit_user_login', 'rate_limit_user_register', 'rate_limit_index_search',
+    'rate_limit_preview',
+    'wl_content_autopublish', 'wl_edit_max_pending',
+    'wl_scrape_every_hours', 'wl_scrape_batch', 'wl_dead_after_days', 'wl_dead_action', 'wl_dead_every_days',
+    'wl_probe_required', 'wl_probe_timeout_minutes', 'wl_probe_on_fail', 'wl_probe_max_batch',
+    'rep_enabled', 'rep_who_can_vote', 'rep_show_in_results', 'rep_min_votes', 'rep_anon_weight', 'rep_rate_per_hour', 'captcha_pts_vote',
     'bulk_mail_enabled', 'bulk_mail_per_minute', 'bulk_mail_max_attempts',
     'wl_allow_source_url', 'wl_allow_description', 'wl_content_review',
     'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
@@ -171,6 +176,13 @@ $intClamp = [
     'desc_max_links' => [0, 100, 10], 'search_sl_refresh_seconds' => [10, 3600, 120],
     'rate_limit_user_login' => [0, 1000, 10],
     'rate_limit_user_register' => [0, 1000, 5], 'rate_limit_index_search' => [0, 100000, 120],
+    'rate_limit_preview' => [5, 300, 30],
+    'rep_min_votes' => [1, 1000, 3], 'rep_anon_weight' => [0, 100, 25],
+    'wl_edit_max_pending' => [0, 50, 3],
+    'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],
+    'wl_dead_after_days' => [0, 3650, 0], 'wl_dead_every_days' => [1, 365, 30],
+    'wl_probe_timeout_minutes' => [1, 1440, 10], 'wl_probe_max_batch' => [1, 64, 8],
+    'rep_rate_per_hour' => [1, 1000, 30], 'captcha_pts_vote' => [0, 100, 2],
     'fed_export_max_batch' => [100, 20000, 2000], 'fed_pull_minutes' => [5, 1440, 60],
     // 0 on either budget switches that half off; the ceilings are only a guard against typos
     'api_rate_limit_per_min' => [0, 100000, 60],
@@ -302,7 +314,7 @@ if (isset($data['meta_worker_concurrency']) && $data['meta_worker_concurrency'] 
     // empty = keep the worker's own config; otherwise clamp to a sane 1..16
     $n = is_numeric($data['meta_worker_concurrency']) ? (int)$data['meta_worker_concurrency'] : 0;
     if ($n < 1) $data['meta_worker_concurrency'] = '';
-    else $data['meta_worker_concurrency'] = (string)min(16, $n);
+    else $data['meta_worker_concurrency'] = (string)min(64, $n);
 }
 if (isset($data['ot_perf_cmd']) && $data['ot_perf_cmd'] !== '' && !otValidCommand($data['ot_perf_cmd'])) {
     jsonResponse(['error' => 'The OpenTracker helper command may contain only letters, digits, spaces, dots, slashes, dashes and underscores.'], 400);

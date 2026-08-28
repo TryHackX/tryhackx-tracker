@@ -683,9 +683,26 @@
         const w = Math.max(200, host.clientWidth || card.clientWidth || 800);
         const axisBase = () => ({ stroke: '#8a8a9a', font: '11px system-ui, -apple-system, Segoe UI, sans-serif', ticks: { stroke: '#2a2a3a', width: 1 }, grid: { stroke: 'rgba(255,255,255,0.06)', width: 1 } });
         const series = [{ label: 'Time', value: (u, v) => v == null ? '—' : fmtTime(v) }];
+        // Markers only where the line cannot show the value on its own. uPlot's default turns them on
+        // once the average pixel gap between samples passes a threshold, so the same chart is clean on
+        // a laptop and speckled white on a wide monitor — a decision about the window, not the data.
+        // A sample with a gap on both sides still needs one: with spanGaps false there is no line
+        // segment to draw it on, so without a marker it is invisible. The hover point uPlot draws for
+        // the cursor is separate and untouched.
+        const isolatedOnly = (u, seriesIdx, idx0, idx1) => {
+            const data = u.data[seriesIdx];
+            const out = [];
+            for (let i = idx0; i <= idx1; i++) {
+                if (data[i] == null) continue;
+                const prev = i > 0 ? data[i - 1] : null;
+                const next = i < data.length - 1 ? data[i + 1] : null;
+                if (prev == null && next == null) out.push(i);
+            }
+            return out.length ? out : false;
+        };
         SERIES.forEach(s => series.push({
             label: s.label, stroke: s.color, width: 1.5, show: s.on, spanGaps: false,
-            dash: s.dash || undefined, points: { size: 5 }, value: (u, v) => num(v),
+            dash: s.dash || undefined, points: { show: isolatedOnly, size: 5 }, value: (u, v) => num(v),
         }));
         return new uPlot({
             width: w, height: 200,

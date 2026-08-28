@@ -112,6 +112,16 @@ $sourceUrl = $srcOn ? trim((string)($input['source_url'] ?? '')) : '';
 $descText  = $descOn ? trim((string)($input['description'] ?? '')) : '';
 $descFmt   = (string)($input['description_format'] ?? 'bbcode');
 
+// With the probe on, a submission is a job somebody watches, not a paste-and-forget. The batch is
+// capped to what the metadata worker can actually work on at once: five hundred rows in the priority
+// lane are not resolved any faster, they just make everyone in the queue wait together.
+if (wlProbeEnabled($cfg) && $validCount > wlProbeMaxPerSubmit($cfg)) {
+    jsonResponse(['error' => 'This tracker checks each submission before serving it, so they go '
+                           . 'through a few at a time. Send at most ' . wlProbeMaxPerSubmit($cfg)
+                           . ' per submission.',
+                  'max' => wlProbeMaxPerSubmit($cfg)], 400);
+}
+
 if (($sourceUrl !== '' || $descText !== '') && $validCount > 1) {
     jsonResponse(['error' => 'A source link or description can only be added when you register one '
                            . 'torrent at a time — it would otherwise be attached to all of them.'], 400);
@@ -130,13 +140,53 @@ $addCtx = ['source' => 'web', 'ip' => $ip, 'auto_meta' => false];
 if ($submitUser !== null) $addCtx['ref'] = ['user' => $submitUser['username'], 'id' => (int)$submitUser['id']];
 $r = whitelistAddHashes($db, $cfg, $items, $addCtx);
 
-// Attach them to the row that was just created. `content_status` decides whether anybody but an
-// administrator ever sees them: with review on they wait, and the torrent works regardless.
+// Attach them to the row — or, if the row already has words on it, PROPOSE replacing them.
+//
+// Anyone can register anyone's hash. That means the first person to describe a torrent is not
+// automatically the right one, and it also means "whoever submits last wins" would be an invitation.
+// So: an empty row is filled directly, and an occupied one gets a proposal a moderator decides on.
+// Nothing a second submitter writes changes what the public sees until somebody says so.
 $contentSaved = false;
+$contentPending = false;
+$contentProposed = false;
 if ($sourceUrl !== '' || $descText !== '') {
     foreach ($r['results'] as $res) {
         if (empty($res['hash']) || !in_array($res['status'], ['added', 'exists'], true)) continue;
-        $status = ($cfg['wl_content_review'] ?? '1') === '1' ? 'pending' : 'approved';
+
+        $cur = $db->prepare("SELECT id, source_url, description, content_status FROM whitelist WHERE info_hash = ? LIMIT 1");
+        $cur->execute([$res['hash']]);
+        $row = $cur->fetch();
+        if (!$row) break;
+
+        $occupied = ($row['description'] !== null && $row['description'] !== '')
+                 || ($row['source_url'] !== null && $row['source_url'] !== '');
+
+        if ($occupied) {
+            $maxPending = max(0, min(50, (int)($cfg['wl_edit_max_pending'] ?? 3)));
+            if ($maxPending === 0) {
+                jsonResponse(['error' => 'This torrent already has a description, and this tracker does '
+                                       . 'not accept proposals to change one.'], 409);
+            }
+            $st = $db->prepare("SELECT COUNT(*) FROM wl_content_edits WHERE whitelist_id = ? AND status = 'pending'");
+            $st->execute([(int)$row['id']]);
+            if ((int)$st->fetchColumn() >= $maxPending) {
+                jsonResponse(['error' => 'There are already ' . $maxPending . ' proposals waiting for this '
+                                       . 'torrent. A moderator has to work through those first.'], 429);
+            }
+            $db->prepare("INSERT INTO wl_content_edits (whitelist_id, info_hash, source_url, description,
+                                 description_format, ip, user_id)
+                          VALUES (?, ?, ?, ?, ?, ?, ?)")
+               ->execute([(int)$row['id'], $res['hash'], $sourceUrl !== '' ? $sourceUrl : null,
+                          $descText !== '' ? $descText : null, $descFmt, $ip,
+                          $submitUser !== null ? (int)$submitUser['id'] : null]);
+            $contentProposed = true;
+            break;
+        }
+
+        // An empty row. Published at once when the operator has said so, otherwise it waits — and
+        // either way the torrent is already registered and serving.
+        $auto = ($cfg['wl_content_autopublish'] ?? '0') === '1';
+        $status = ($auto || ($cfg['wl_content_review'] ?? '1') !== '1') ? 'approved' : 'pending';
         $db->prepare("UPDATE whitelist SET source_url = ?, description = ?, description_format = ?,
                              content_status = ?, content_reviewed_at = NULL, content_rejected_note = NULL
                        WHERE info_hash = ?")
@@ -144,8 +194,20 @@ if ($sourceUrl !== '' || $descText !== '') {
                       $descText !== '' ? $descText : null,
                       $descFmt, $status, $res['hash']]);
         $contentSaved = true;
+        $contentPending = ($status === 'pending');
         break;
     }
+}
+
+// Everything that was just added has to prove itself: metadata in, and at least one peer announcing
+// to this tracker. Until then the accesslist generator skips it, so nothing is served on the
+// strength of somebody having typed it.
+$probing = [];
+if (wlProbeEnabled($cfg)) {
+    foreach ($r['results'] as $res) {
+        if (!empty($res['hash']) && $res['status'] === 'added') $probing[] = $res['hash'];
+    }
+    if ($probing) wlProbeStart($db, $cfg, $probing);
 }
 
 $magnets = [];
@@ -166,7 +228,12 @@ jsonResponse([
     'announce' => ['udp' => (string)($cfg['announce_url'] ?? ''), 'http' => (string)($cfg['announce_url_https'] ?? ''),
                    'all' => announceUrls($cfg)],
     'content_saved' => $contentSaved,
-    'content_pending' => $contentSaved && ($cfg['wl_content_review'] ?? '1') === '1',
+    'content_pending' => $contentPending,
+    'content_proposed' => $contentProposed,
+    'probe' => wlProbeEnabled($cfg)
+        ? ['on' => true, 'hashes' => $probing, 'timeout_minutes' => wlProbeTimeoutMinutes($cfg),
+           'on_fail' => wlProbeOnFail($cfg)]
+        : ['on' => false],
     'magnets' => $magnets,
     'active_in_seconds' => (int)$r['active_in_seconds'],
     'file_ok' => (bool)($r['file']['ok'] ?? true),

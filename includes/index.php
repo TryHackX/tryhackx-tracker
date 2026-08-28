@@ -826,6 +826,19 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     $searchFiles = !empty($q['search_files']);
     $search = trim((string)($q['search'] ?? ''));
 
+    /**
+     * Which reviewed states to show. Only the whitelist arm has a state at all — an index row is a
+     * hash somebody's tracker saw, with nobody's words attached to it.
+     *
+     * The default hides REJECTED and nothing else. A description a moderator turned down should not
+     * be the first thing a visitor reads, but the torrent behind it is still a torrent and hiding it
+     * would be using a judgement about words as a judgement about a swarm.
+     */
+    $contentFilter = (string)($q['content'] ?? 'not_rejected');
+    if (!in_array($contentFilter, ['not_rejected', 'rejected', 'approved', 'approved_or_none', 'none'], true)) {
+        $contentFilter = 'not_rejected';
+    }
+
     // multi-column sort stack "col:dir,col:dir" (same idea as the admin tables); 'relevance'
     // ignores its direction (best first is the only sensible order)
     $sortCols = ['relevance' => 'score', 'seeders' => 'seeders', 'leechers' => 'leechers',
@@ -896,19 +909,38 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     }
 
     // one arm = [select SQL, params, count SQL, params]; built for fulltext first, LIKE fallback
-    $buildArm = function (bool $wl, bool $useFt) use ($search, $isHash, $ft, $searchFiles, $fileHashes, $fileIds): array {
+    $buildArm = function (bool $wl, bool $useFt) use ($search, $isHash, $ft, $searchFiles, $fileHashes, $fileIds, $contentFilter): array {
         $tbl = $wl ? 'whitelist' : 'index_hashes';
+        // votes_up/votes_down/score_x100 are kept ON the row by repRecount(). Aggregating them per
+        // result would be fifty extra queries for one page, which is the shape of mistake this file
+        // has already made once with a listing over a large table.
         $cols = $wl
             ? "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, 0) AS seeders, COALESCE(scrape_leechers, 0) AS leechers,
-               COALESCE(scraped_at, updated_at, created_at) AS last_seen, 'whitelist' AS src"
+               COALESCE(scraped_at, updated_at, created_at) AS last_seen, votes_up, votes_down, score_x100,
+               content_status, 'whitelist' AS src"
             : "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, last_seeders) AS seeders, COALESCE(scrape_leechers, last_leechers) AS leechers,
-               last_seen, 'index' AS src";
+               last_seen, votes_up, votes_down, score_x100, 'none' AS content_status, 'index' AS src";
         // a NAMED row is searchable regardless of the queue state — a bulk re-fetch flips done →
         // pending without touching the stored metadata, and thousands of rows must not vanish from
         // the search until the worker gets around to re-resolving them
         $where = $wl
             ? ["banned = 0", "(meta_status = 'done' OR (name IS NOT NULL AND name <> ''))"]
             : ["(meta_status = 'done' OR (name IS NOT NULL AND name <> ''))"];
+        if ($wl) {
+            // Literal fragments chosen by a key; nothing from the request reaches the SQL.
+            $contentSql = [
+                'not_rejected'     => "content_status <> 'rejected'",
+                'rejected'         => "content_status = 'rejected'",
+                'approved'         => "content_status = 'approved'",
+                'approved_or_none' => "content_status IN ('approved','none')",
+                'none'             => "content_status IN ('none','pending')",
+            ];
+            $where[] = $contentSql[$contentFilter];
+        } elseif ($contentFilter === 'rejected' || $contentFilter === 'approved') {
+            // An index row has no reviewed state, so a filter asking for one must exclude the whole
+            // arm rather than quietly returning rows that cannot match.
+            $where[] = '1 = 0';
+        }
         $params = [];
         $scoreSql = '0';
         $scoreParams = [];

@@ -35,7 +35,12 @@ class Config:
         w = cp["worker"] if cp.has_section("worker") else {}
         self.db = dict(host=db.get("host", "localhost"), user=db.get("user"), password=db.get("password"), database=db.get("name", "tracker"),
                        charset="utf8mb4", autocommit=True, connect_timeout=10, read_timeout=30, write_timeout=30)
-        self.concurrency = max(1, min(16, int(w.get("concurrency", 3))))
+        # 64, not 16. libtorrent holds one handle per fetch and each is a small set of DHT and
+        # peer connections, so the ceiling is file descriptors and memory rather than anything
+        # in libtorrent. What it costs at the top end: roughly a few hundred sockets and a few
+        # hundred MB, plus outbound traffic to match. Raise it because a machine has spare
+        # capacity, not because the number is available.
+        self.concurrency = max(1, min(64, int(w.get("concurrency", 3))))
         self.timeout = max(20, min(600, int(w.get("timeout_seconds", 90))))
         # Second queue: the observed-hash index (includes/index.php). Empty = disabled (default), so an
         # existing deployment keeps whitelist-only behaviour until index_table is configured AND the
@@ -125,7 +130,7 @@ class Worker:
                  lt.__version__, cfg.listen_port, cfg.concurrency, cfg.timeout, ",".join(q["table"] for q in self.queues))
 
     def effective_concurrency(self):
-        """Config concurrency, unless the panel setting `meta_worker_concurrency` (1..16)
+        """Config concurrency, unless the panel setting `meta_worker_concurrency` (1..64)
         overrides it. Re-read at most every 60 s; any error (settings table not granted,
         row absent, garbage value) silently falls back to the config file value."""
         now = time.time()
@@ -136,7 +141,7 @@ class Worker:
                 rows = self.db.query("SELECT `value` FROM settings WHERE `key`='meta_worker_concurrency'", fetch=True)
                 if rows:
                     raw = str(rows[0].get("value") or "").strip()
-                    if raw.isdigit() and 1 <= int(raw) <= 16:
+                    if raw.isdigit() and 1 <= int(raw) <= 64:
                         val = int(raw)
             except Exception:
                 val = None

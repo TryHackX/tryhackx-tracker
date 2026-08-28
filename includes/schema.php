@@ -11,7 +11,10 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 20;  // 20 = settings only, and it needs its own number for the
+const TRACKER_SCHEMA_VERSION = 21;  // 21 = ratings (hash_votes + the totals kept on the row), the
+                                    // whitelist refresh/cleanup schedule, description edit
+                                    // proposals, and the "prove it" probe state on a submission.
+                                    // 20 = settings only, and it needs its own number for the
                                     // reason every "settings only" bump in this list needed one:
                                     // default rows are inserted by the migration block, and that
                                     // block runs when the VERSION moves. Adding keys without moving
@@ -396,6 +399,46 @@ function trackerSchemaStatements(): array {
             UNIQUE KEY `uq_fed_peers_name` (`name`)
         ) $engine",
 
+        // ── Proposed rewrites of somebody else's description ─────────────
+        // Anyone can register a hash, including somebody else's, and attach an ugly description to
+        // it. The answer is not to lock the fields — the first submitter is not necessarily the
+        // right one either — but to let a later submission PROPOSE a replacement that a moderator
+        // decides on. Nothing here changes what is public until somebody says so.
+        "CREATE TABLE IF NOT EXISTS `wl_content_edits` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `whitelist_id` INT UNSIGNED NOT NULL,
+            `info_hash` CHAR(40) NOT NULL,
+            `source_url` VARCHAR(500) DEFAULT NULL,
+            `description` MEDIUMTEXT DEFAULT NULL,
+            `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode',
+            `status` ENUM('pending','applied','rejected') NOT NULL DEFAULT 'pending',
+            `ip` VARCHAR(45) NOT NULL DEFAULT '',
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `note` VARCHAR(255) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `reviewed_at` DATETIME DEFAULT NULL,
+            KEY `idx_edits_status` (`status`, `created_at`),
+            KEY `idx_edits_hash` (`info_hash`)
+        ) $engine",
+
+        // ── Ratings: one row per hash per identity ───────────────────────
+        // The UNIQUE key is the point. One vote per identity is enforced HERE, where two requests
+        // arriving together actually collide — a check-then-insert in PHP is a race with a
+        // comfortable window, and a voting button is the most automated thing on any public site.
+        "CREATE TABLE IF NOT EXISTS `hash_votes` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `voter_type` ENUM('ip','user') NOT NULL,
+            `voter_key` VARCHAR(64) NOT NULL,
+            `vote` TINYINT NOT NULL,
+            `weight` SMALLINT UNSIGNED NOT NULL DEFAULT 100,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_vote_once` (`info_hash`, `voter_type`, `voter_key`),
+            KEY `idx_votes_hash` (`info_hash`),
+            KEY `idx_votes_voter` (`voter_type`, `voter_key`, `created_at`)
+        ) $engine",
+
         // ── Outgoing bulk mail, one row per recipient ────────────────────
         // Nothing is sent from a web request. The panel writes rows here and the janitor drains them
         // at a configured rate, because this server sends through PHP's mail() with no relay in front
@@ -519,10 +562,53 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'whitelist', 'content_rejected_note')) {
         $wparts[] = "ADD COLUMN `content_rejected_note` VARCHAR(255) DEFAULT NULL";
     }
+    if (!schemaColumnExists($db, 'whitelist', 'probe_status')) {
+        // 'none' for everything that already exists: rows registered before this feature were never
+        // asked to prove anything, and retroactively marking them unproven would empty the tracker.
+        $wparts[] = "ADD COLUMN `probe_status` ENUM('none','probing','passed','failed') NOT NULL DEFAULT 'none'";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'probe_started_at')) {
+        $wparts[] = "ADD COLUMN `probe_started_at` DATETIME DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'probe_error')) {
+        $wparts[] = "ADD COLUMN `probe_error` VARCHAR(255) DEFAULT NULL";
+    }
+    if (!schemaIndexExists($db, 'whitelist', 'idx_whitelist_probe')) {
+        $wparts[] = "ADD KEY `idx_whitelist_probe` (`probe_status`, `probe_started_at`)";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'dead_since')) {
+        // When the maintenance pass first found no seeders and no leechers on this row. NULL means
+        // "not dead as far as anybody knows", which is also what a row that has never been scraped
+        // says — no data is not the same as no peers.
+        $wparts[] = "ADD COLUMN `dead_since` DATETIME DEFAULT NULL";
+    }
+    if (!schemaIndexExists($db, 'whitelist', 'idx_whitelist_dead')) {
+        $wparts[] = "ADD KEY `idx_whitelist_dead` (`dead_since`)";
+    }
     if (!schemaIndexExists($db, 'whitelist', 'idx_whitelist_content')) {
         $wparts[] = "ADD KEY `idx_whitelist_content` (`content_status`, `created_at`)";
     }
     if ($wparts) $out[] = "ALTER TABLE `whitelist` " . implode(', ', $wparts);
+
+    // v21: the rating totals, kept on the row. A listing that showed a score for fifty rows would
+    // otherwise be fifty aggregate queries, and this project has already been bitten once by a
+    // listing doing per-row work over a large table.
+    foreach (['index_hashes', 'whitelist'] as $rt) {
+        $rparts = [];
+        if (!schemaColumnExists($db, $rt, 'votes_up'))   $rparts[] = "ADD COLUMN `votes_up` INT UNSIGNED NOT NULL DEFAULT 0";
+        if (!schemaColumnExists($db, $rt, 'votes_down')) $rparts[] = "ADD COLUMN `votes_down` INT UNSIGNED NOT NULL DEFAULT 0";
+        if (!schemaColumnExists($db, $rt, 'score_x100')) $rparts[] = "ADD COLUMN `score_x100` SMALLINT UNSIGNED NOT NULL DEFAULT 0";
+        if (!$rparts) continue;
+        if ($rt === 'whitelist') {
+            $out[] = "ALTER TABLE `whitelist` " . implode(', ', $rparts);
+        } elseif (schemaHeavyAllowed()) {
+            // index_hashes carries a FULLTEXT index, so this is a rebuild — the janitor, never a page.
+            $alter = "ALTER TABLE `index_hashes` " . implode(', ', $rparts);
+            $out[] = [$alter . ", ALGORITHM=INSTANT", $alter . ", ALGORITHM=INPLACE", $alter];
+        } else {
+            schemaDeferHeavy('index_hashes: ' . implode(', ', $rparts));
+        }
+    }
 
     // v19: the two composite indexes the catalogue has always needed.
     //
@@ -703,6 +789,32 @@ function trackerSchemaDefaultSettings(): array {
         'link_trusted_domains'        => 'tryhackx.org',
         'search_allow_sl_refresh'     => '0',
         'search_sl_refresh_seconds'   => '120',
+        'rate_limit_preview'          => '30',
+        // Ratings. Off, and read-only for anonymous visitors by default: a public voting button is
+        // the easiest thing on a site to automate, and the operator should choose to open it.
+        'rep_enabled'                 => '0',
+        'rep_who_can_vote'            => 'users',
+        'rep_show_in_results'         => '0',
+        'rep_min_votes'               => '3',
+        'rep_anon_weight'             => '25',
+        'rep_rate_per_hour'           => '30',
+        'captcha_pts_vote'            => '2',
+        // Publish descriptions without review. Separate from wl_content_review because "I do not
+        // moderate" and "I moderate, but let this through" are different decisions.
+        'wl_content_autopublish'      => '0',
+        'wl_edit_max_pending'         => '3',
+        // Whitelist upkeep. Both off: refreshing costs tracker requests, and a rule that removes
+        // other people's registrations must be switched on deliberately, never inherited.
+        'wl_scrape_every_hours'       => '0',
+        'wl_scrape_batch'             => '200',
+        'wl_dead_after_days'          => '0',
+        'wl_dead_action'              => 'mark',
+        'wl_dead_every_days'          => '30',
+        // Make a submission prove itself before the tracker serves it. Off: it changes what
+        // registering MEANS, and that is not a thing to inherit from an upgrade.
+        'wl_probe_required'           => '0',
+        'wl_probe_timeout_minutes'    => '10',
+        'wl_probe_on_fail'            => 'delete',
         // Live peer sync between two trackers. Off, with no command, on every install: the protocol
         // has no authentication, so this is the last thing that should ever default to on.
         'livesync_enabled'            => '0',

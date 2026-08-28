@@ -38,6 +38,15 @@ $meUser = currentUser($db);
         <?php if ($canFiles): ?>
         <label class="search-check" title="Also match torrent file names"><input type="checkbox" id="search-files"><span class="search-check-box" aria-hidden="true"></span> Also search file names</label>
         <?php endif; ?>
+        <?php if (($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1'): ?>
+        <select id="search-content" title="Which reviewed descriptions to include. The default hides rejected ones — a description a moderator turned down should not be the first thing you read, but the torrent behind it is still a torrent.">
+            <option value="not_rejected">Hide rejected</option>
+            <option value="approved">Approved only</option>
+            <option value="approved_or_none">Approved &amp; unreviewed</option>
+            <option value="none">Unreviewed only</option>
+            <option value="rejected">Rejected only</option>
+        </select>
+        <?php endif; ?>
         <select id="search-perpage" title="Results per page">
             <option value="15">15 / page</option>
             <option value="25" selected>25 / page</option>
@@ -58,6 +67,9 @@ $meUser = currentUser($db);
             <th class="search-sortable" data-sort="name">Name <span class="search-sort-icon" aria-hidden="true"></span></th>
             <th class="search-sortable" data-sort="size">Size <span class="search-sort-icon" aria-hidden="true"></span></th>
             <th class="search-sortable" data-sort="seeders" title="Seeders / leechers">S / L <span class="search-sort-icon" aria-hidden="true"></span></th>
+            <?php if (function_exists('repEnabled') && repEnabled($cfg) && repShowInResults($cfg)): ?>
+            <th title="How visitors rated it. The number of ratings is in the tooltip — a percentage on its own cannot tell one vote from four hundred.">Rating</th>
+            <?php endif; ?>
             <th class="search-sortable" data-sort="last">Last seen <span class="search-sort-icon" aria-hidden="true"></span></th><?= $canMagnet ? '<th></th>' : '' ?>
         </tr></thead>
         <tbody id="search-body"></tbody>

@@ -39,6 +39,9 @@ require_once $root . '/includes/backup.php';
 require_once $root . '/includes/bulkmail.php';
 require_once $root . '/includes/richtext.php';
 require_once $root . '/includes/livesync.php';
+require_once $root . '/includes/reputation.php';
+require_once $root . '/includes/wlmaint.php';
+require_once $root . '/includes/wlprobe.php';
 
 try {
     $db  = getDb();
@@ -131,6 +134,24 @@ try {
 ";
     }
     bulkPrune($db);
+
+    // whitelist upkeep: refresh stale swarm counts, and the dead-row pass on its own schedule
+    // submissions proving themselves: metadata in, at least one peer, or give up with a reason
+    $wp = wlProbeTick($db, $cfg);
+    if ($wp['passed'] || $wp['failed']) {
+        echo sprintf('[wlprobe] checked=%d passed=%d failed=%d deleted=%d',
+            $wp['checked'], $wp['passed'], $wp['failed'], $wp['deleted']), "
+";
+    }
+
+    $wm = wlMaintTick($db, $cfg);
+    if (($wm['refresh']['ran'] ?? false) || ($wm['dead']['ran'] ?? false) || $wm['error']) {
+        echo sprintf('[wlmaint] scraped=%d dead_matched=%d marked=%d deleted=%d%s',
+            (int)($wm['refresh']['scraped'] ?? 0), (int)($wm['dead']['matched'] ?? 0),
+            (int)($wm['dead']['marked'] ?? 0), (int)($wm['dead']['deleted'] ?? 0),
+            $wm['error'] ? ' error=' . $wm['error'] : ''), "
+";
+    }
 
     // live peer sync: refresh the cached view so the panel never forks a root script from a poll
     livesyncTick($cfg);

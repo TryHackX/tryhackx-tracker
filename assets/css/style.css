@@ -1897,3 +1897,29 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .info-kv-label { opacity: 0.7; font-size: 0.85rem; }
 .info-kv-value { font-size: 0.88rem; text-align: right; }
 .info-hash { font-size: 0.7rem; word-break: break-all; }
+
+/* Ratings. The bar shows the split; the label under it shows the COUNT, because a bar alone cannot
+   distinguish "100% from one vote" from "100% from four hundred", and those are different facts. */
+.rep-block { margin: 0.8rem 0; }
+.rep-bar { display: block; height: 8px; border-radius: 4px; overflow: hidden; background: #b4433c; }
+.rep-bar-up { display: block; height: 100%; background: #3fa45b; }
+.rep-label { margin-top: 0.35rem; font-size: 0.85rem; }
+.rep-acts { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
+.rep-btn.rep-mine { outline: 1px solid rgba(255,255,255,0.45); }
+.search-rep { font-size: 0.8rem; white-space: nowrap; }
+.search-rep-up { color: #6fce8b; }
+.search-rep-down { color: #ff8a8a; }
+.search-cs-approved { background: rgba(63,164,91,0.18); border-color: rgba(63,164,91,0.5); }
+.search-cs-rejected { background: rgba(180,67,60,0.18); border-color: rgba(180,67,60,0.5); }
+
+/* A submission proving itself. One line per hash, each with its own state — because "nobody is
+   sharing this" and "we could not read the torrent" are different problems with different fixes. */
+.wl-probe { margin: 1.2rem 0; }
+.wl-probe-list { list-style: none; margin: 0.6rem 0 0; padding: 0; }
+.wl-probe-item { border: 1px solid rgba(255,255,255,0.12); border-left-width: 3px; border-radius: 4px; padding: 0.55rem 0.75rem; margin-bottom: 0.5rem; }
+.wl-probe-head { display: flex; justify-content: space-between; gap: 0.75rem; align-items: baseline; flex-wrap: wrap; }
+.wl-probe-state { font-size: 0.82rem; opacity: 0.9; white-space: nowrap; }
+.wl-probe-detail { margin-top: 0.25rem; font-size: 0.85rem; opacity: 0.75; }
+.wl-probe-wait { border-left-color: #c9a227; }
+.wl-probe-ok   { border-left-color: #3fa45b; }
+.wl-probe-bad  { border-left-color: #b4433c; }

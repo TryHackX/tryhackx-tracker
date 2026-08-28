@@ -265,7 +265,12 @@ function whitelistRegenerate(PDO $db, array $cfg): array {
             if ($n === false || $n !== strlen($buf)) { $writeFailed = true; return false; }
             $bytes += $n; return true;
         };
-        $stmt = $db->prepare("SELECT info_hash FROM whitelist WHERE banned = 0 AND info_hash > ? ORDER BY info_hash LIMIT 50000");
+        // probe_status: a submission that has not proved itself yet is not served. 'none' covers
+        // every row registered before the feature existed, and every row when it is switched off —
+        // so turning it on never retroactively unpublishes anything.
+        $stmt = $db->prepare("SELECT info_hash FROM whitelist
+                               WHERE banned = 0 AND probe_status IN ('none','passed') AND info_hash > ?
+                               ORDER BY info_hash LIMIT 50000");
         while (!$writeFailed) {
             $stmt->execute([$last]);
             $rows = $stmt->fetchAll(PDO::FETCH_COLUMN);
@@ -762,6 +767,27 @@ function whitelistBan(PDO $db, array $cfg, array $hashes, array $ctx = []): arra
         $st->execute($chunk);
         $affected += $st->rowCount();
     }
+    // A banned hash has no business in a moderation queue. Whatever a moderator was going to decide
+    // about its description, the ban decided something larger — and leaving the item there means
+    // somebody works through a queue full of things that are already gone. Done HERE, in the one
+    // function every ban path goes through, rather than in each of the three callers.
+    foreach (array_chunk($hashes, WL_SQL_IN_CHUNK) as $chunk) {
+        $ph = implode(',', array_fill(0, count($chunk), '?'));
+        try {
+            $db->prepare("UPDATE whitelist SET content_status = 'rejected',
+                                 content_rejected_note = 'the hash was banned', content_reviewed_at = NOW()
+                           WHERE content_status = 'pending' AND info_hash IN ($ph)")->execute($chunk);
+            $db->prepare("UPDATE wl_content_edits SET status = 'rejected', reviewed_at = NOW(),
+                                 note = 'the hash was banned'
+                           WHERE status = 'pending' AND info_hash IN ($ph)")->execute($chunk);
+            // And the ratings go with it: a score left behind on a banned hash is a number about
+            // something nobody can reach any more.
+            if (function_exists('repClear')) foreach ($chunk as $h) repClear($db, $h);
+        } catch (\Throwable $e) {
+            // Older schema without these tables: the ban itself is what matters and must not fail.
+        }
+    }
+
     if ($affected > 0 && trackerMode($cfg) === 'whitelist') {
         whitelistRegenerate($db, $cfg);
         whitelistMarkDirty(true);

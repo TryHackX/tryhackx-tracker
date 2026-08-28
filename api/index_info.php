@@ -21,6 +21,11 @@ if (!userCan($db, $cfg, 'index.search')) {
 }
 
 $hash = strtolower(trim((string)($_GET['hash'] ?? '')));
+
+// GET only: the POST branch below verifies a CSRF token, which needs the session open.
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();   // see api/index_search.php for why this is here and not in the router
+}
 if (!preg_match('/^[0-9a-f]{40}$/', $hash)) jsonResponse(['error' => 'Invalid hash'], 400);
 
 /** Everything about this hash from both tables, whichever has it. */
@@ -113,6 +118,12 @@ jsonResponse([
         'files_count' => $idx['files_count'] ?? ($wl['files_count'] ?? null),
         'scraped_at'  => $wl['scraped_at'] ?? null,
     ],
+    // Ratings ride along with the rest of the panel: one request, not two, because the button and
+    // the numbers appear together and a second round trip would show one before the other.
+    'rating' => repEnabled($cfg) ? repFor($db, $cfg, $hash) : null,
+    'my_vote' => repEnabled($cfg) ? repMyVote($db, $cfg, $hash) : 0,
+    'can_vote' => repEnabled($cfg) && repVoteRefusal($db, $cfg) === null,
+    'vote_refusal' => repEnabled($cfg) ? repVoteRefusal($db, $cfg) : null,
     'can_refresh' => ($cfg['search_allow_sl_refresh'] ?? '0') === '1',
     'can_files'   => userCan($db, $cfg, 'index.files'),
 ]);

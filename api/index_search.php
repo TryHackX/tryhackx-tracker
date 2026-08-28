@@ -24,6 +24,20 @@ $canFiles = userCan($db, $cfg, 'index.files');
 $canMagnet = userCan($db, $cfg, 'index.magnet');
 $canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
 
+// Let go of the session before the slow part.
+//
+// PHP's file session handler holds an EXCLUSIVE lock for the whole request, so while a catalogue
+// search runs — seconds, on a table of millions — every other request from the same visitor waits.
+// Clicking Stats a second after clicking Search meant waiting for the search, which is exactly the
+// complaint the admin panel had, from the public side.
+//
+// AFTER the permission checks, not before. The first attempt at this released the session in the
+// router, before this file ran, and userCan()/currentUser() then saw nothing: a signed-in member got
+// "login_required" on their own search. Everything below only reads, and it has already established
+// who is asking.
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+
+
 // comma-separated multi-sort stack; unknown keys are dropped by indexSearchCatalogue
 $sort = (string)($_GET['sort'] ?? 'relevance:desc');
 if (!preg_match('/^(relevance|seeders|leechers|size|last|name|files)(:(asc|desc))?(,(relevance|seeders|leechers|size|last|name|files)(:(asc|desc))?)*$/', $sort)) {
@@ -40,7 +54,11 @@ $res = indexSearchCatalogue($db, $cfg, [
     'search'            => mb_substr(trim((string)($_GET['search'] ?? '')), 0, 200),
     'search_files'      => $canFiles && ($_GET['search_files'] ?? '') === '1',
     'include_whitelist' => $canWl,
+    'content'           => (string)($_GET['content'] ?? 'not_rejected'),
 ]);
+
+$repInResults = repEnabled($cfg) && repShowInResults($cfg);
+$repMin = repMinVotes($cfg);
 
 $rows = [];
 foreach ($res['rows'] as $r) {
@@ -54,10 +72,21 @@ foreach ($res['rows'] as $r) {
     ];
     if ($canFiles) $row['files_count'] = $r['files_count'];
     if ($canMagnet) $row['info_hash'] = $r['info_hash'];
+    // Only when the operator asked for it, and only above the threshold: a column showing "100%"
+    // next to a single vote would be worse than no column.
+    if ($repInResults) {
+        $up = (int)($r['votes_up'] ?? 0);
+        $down = (int)($r['votes_down'] ?? 0);
+        $row['rep'] = ($up + $down) >= $repMin
+            ? ['pct' => (int)round((int)($r['score_x100'] ?? 0) / 100), 'total' => $up + $down]
+            : null;
+    }
+    $row['content_status'] = (string)($r['content_status'] ?? 'none');
     $rows[] = $row;
 }
 
 jsonResponse([
     'success' => true, 'rows' => $rows, 'total' => $res['total'], 'page' => $res['page'], 'pages' => $res['pages'],
     'can' => ['files' => $canFiles, 'magnet' => $canMagnet, 'whitelist' => $canWl],
+    'rep_in_results' => $repInResults,
 ]);
