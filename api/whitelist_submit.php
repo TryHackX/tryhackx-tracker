@@ -126,6 +126,12 @@ if (($sourceUrl !== '' || $descText !== '') && $validCount > 1) {
     jsonResponse(['error' => 'A source link or description can only be added when you register one '
                            . 'torrent at a time — it would otherwise be attached to all of them.'], 400);
 }
+// Attaching words to a torrent is its own permission: an operator may want registration open and
+// descriptions restricted, and before this there was no way to say so.
+if (($sourceUrl !== '' || $descText !== '') && !userCan($db, $cfg, 'content.submit')) {
+    jsonResponse(['error' => 'Adding a source link or description needs an account with content '
+                           . 'access on this tracker. The torrent itself can still be registered.'], 403);
+}
 if ($sourceUrl !== '') {
     $e = richtextValidateSourceUrl($sourceUrl, $cfg);
     if ($e !== null) jsonResponse(['error' => $e], 400);
@@ -162,6 +168,10 @@ if ($sourceUrl !== '' || $descText !== '') {
                  || ($row['source_url'] !== null && $row['source_url'] !== '');
 
         if ($occupied) {
+            if (!userCan($db, $cfg, 'content.propose')) {
+                jsonResponse(['error' => 'This torrent already has a description. Proposing a change '
+                                       . 'to somebody else\'s needs an account with that access.'], 403);
+            }
             $maxPending = max(0, min(50, (int)($cfg['wl_edit_max_pending'] ?? 3)));
             if ($maxPending === 0) {
                 jsonResponse(['error' => 'This torrent already has a description, and this tracker does '

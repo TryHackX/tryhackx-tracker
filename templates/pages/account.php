@@ -29,22 +29,41 @@ $accCooldownDays = userEmailChangeCooldownDays($cfg);
         <h2>Profile</h2>
         <table class="account-kv">
             <tr><td>Username</td><td><?= sanitize($meUser['username']) ?></td></tr>
-            <tr><td>Email</td><td><span id="acc-email"><?= $accHasEmail ? sanitize($meUser['email']) : '<em>none</em>' ?></span>
-                <?php if ($accHasEmail): ?>
-                <span id="acc-email-badge" class="acc-badge <?= $accVerified ? 'acc-badge-ok' : 'acc-badge-warn' ?>"><?= $accVerified ? 'verified' : 'unverified' ?></span>
-                <?php if (!$accVerified): ?><button type="button" class="btn btn-secondary btn-small" id="acc-verify-send" title="Send the confirmation link again">Resend link</button><?php endif; ?>
+            <tr><td>Email</td><td>
+                <div class="acc-email-line">
+                    <span id="acc-email" class="acc-email-addr"><?= $accHasEmail ? sanitize($meUser['email']) : '<em>none</em>' ?></span>
+                    <?php if ($accHasEmail): ?>
+                    <span id="acc-email-badge" class="acc-badge <?= $accVerified ? 'acc-badge-ok' : 'acc-badge-warn' ?>"><?= $accVerified ? 'verified' : 'unverified' ?></span>
+                    <?php endif; ?>
+                </div>
+                <?php if ($accHasEmail && !$accVerified): ?>
+                <button type="button" class="btn btn-secondary btn-small acc-email-resend" id="acc-verify-send" title="Send the confirmation link again">Resend link</button>
                 <?php endif; ?>
             </td></tr>
             <tr><td>Member since</td><td><?= sanitize((string)$meUser['created_at']) ?></td></tr>
             <tr><td>Last sign-in</td><td><?= sanitize((string)($meUser['last_login_at'] ?? '—')) ?></td></tr>
-            <?php if ($accHasEmail): ?>
-            <tr><td>Account emails</td><td><label class="search-check acc-prefs-check" title="Expiry warnings, security notices and other account mail"><input type="checkbox" id="acc-mail-pref"><span class="search-check-box" aria-hidden="true"></span> <span id="acc-mail-pref-label">Loading&hellip;</span></label></td></tr>
-            <tr><td>Announcements</td><td><label class="search-check acc-prefs-check" title="Occasional messages the site sends to everyone. Password resets and security notices are not affected."><input type="checkbox" id="acc-bulk-pref"><span class="search-check-box" aria-hidden="true"></span> <span id="acc-bulk-pref-label">Loading&hellip;</span></label>
-                <div class="wl-small text-muted">Turning this off stops announcements only &mdash; password resets and security notices still reach you.</div></td></tr>
-            <?php endif; ?>
         </table>
         <?php if ($accHasEmail && !$accVerified): ?>
         <p class="text-muted acc-verify-note">A confirmation link was sent to this address — open it to verify. Unverified addresses still receive password resets.</p>
+        <?php endif; ?>
+        <?php if ($accHasEmail): ?>
+        <div class="acc-mail-prefs">
+            <h3 class="acc-sub">What we may send you</h3>
+            <label class="search-check acc-pref-row">
+                <input type="checkbox" id="acc-mail-pref"><span class="search-check-box" aria-hidden="true"></span>
+                <span class="acc-pref-text">
+                    <span class="acc-pref-name">Account mail <span class="acc-pref-state" id="acc-mail-pref-label">&hellip;</span></span>
+                    <span class="acc-pref-note">Expiry warnings, security notices and anything else about this account.</span>
+                </span>
+            </label>
+            <label class="search-check acc-pref-row">
+                <input type="checkbox" id="acc-bulk-pref"><span class="search-check-box" aria-hidden="true"></span>
+                <span class="acc-pref-text">
+                    <span class="acc-pref-name">Announcements <span class="acc-pref-state" id="acc-bulk-pref-label">&hellip;</span></span>
+                    <span class="acc-pref-note">Occasional messages sent to everyone. Turning this off stops those only &mdash; password resets and security notices still reach you.</span>
+                </span>
+            </label>
+        </div>
         <?php endif; ?>
     </div>
     <div class="account-card">

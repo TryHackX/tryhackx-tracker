@@ -106,8 +106,29 @@
                         <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="bm-subject" maxlength="200" placeholder="e.g. Scheduled maintenance on Sunday">
                     </div>
                     <div class="col-12">
-                        <label class="form-label">Message</label>
-                        <textarea class="form-control form-control-sm bg-dark text-light border-secondary" id="bm-body" rows="7" maxlength="5000" placeholder="Plain text. Line breaks are kept."></textarea>
+                        <div class="bm-msg-head">
+                            <label class="form-label mb-0" for="bm-body">Message</label>
+                            <div class="bm-tools d-hidden" id="bm-tools" role="toolbar" aria-label="Formatting">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="bold" title="Bold (Ctrl+B)"><i class="bi bi-type-bold"></i></button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="italic" title="Italic (Ctrl+I)"><i class="bi bi-type-italic"></i></button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="link" title="Link (Ctrl+K)"><i class="bi bi-link-45deg"></i></button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="list" title="Bulleted list"><i class="bi bi-list-ul"></i></button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="quote" title="Quote"><i class="bi bi-quote"></i></button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="code" title="Code"><i class="bi bi-code-slash"></i></button>
+                            </div>
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary bm-fmt" id="bm-format" title="How the message is written">
+                                <option value="plain">Plain text</option>
+                            </select>
+                        </div>
+                        <textarea class="form-control form-control-sm bg-dark text-light border-secondary" id="bm-body" rows="7" maxlength="5000" placeholder="Line breaks are kept."></textarea>
+                        <div class="bm-preview-wrap d-hidden" id="bm-preview-wrap">
+                            <div class="bm-preview-head">Preview of the email</div>
+                            <!-- Rendered by api/admin/bulk_send.php (op: render), which calls the same
+                                 bulkBodyHtml() the janitor calls. A preview drawn in the browser would
+                                 be a second renderer to keep in step, and the first one to drift. -->
+                            <div class="bm-preview" id="bm-preview-html"></div>
+                        </div>
+                        <small class="settings-hint" id="bm-fmt-hint">Plain text: line breaks are kept and nothing else is interpreted.</small>
                     </div>
                 </div>
 

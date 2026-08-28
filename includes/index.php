@@ -916,10 +916,10 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         // has already made once with a listing over a large table.
         $cols = $wl
             ? "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, 0) AS seeders, COALESCE(scrape_leechers, 0) AS leechers,
-               COALESCE(scraped_at, updated_at, created_at) AS last_seen, votes_up, votes_down, score_x100,
+               COALESCE(scraped_at, updated_at, created_at) AS last_seen, votes_up, votes_down, votes_count, score_x100,
                content_status, 'whitelist' AS src"
             : "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, last_seeders) AS seeders, COALESCE(scrape_leechers, last_leechers) AS leechers,
-               last_seen, votes_up, votes_down, score_x100, 'none' AS content_status, 'index' AS src";
+               last_seen, votes_up, votes_down, votes_count, score_x100, 'none' AS content_status, 'index' AS src";
         // a NAMED row is searchable regardless of the queue state — a bulk re-fetch flips done →
         // pending without touching the stored metadata, and thousands of rows must not vanish from
         // the search until the worker gets around to re-resolving them

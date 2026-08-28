@@ -53,11 +53,24 @@ function userPermissionList(): array {
         'stats.view'     => 'View the tracker statistics page',
         'stats.timeline' => 'See the statistics timeline chart',
         'home.stats'     => 'See the live stats widget on the home page',
+        // Everything below arrived with the descriptions, ratings and rewrite proposals. Shipping a
+        // feature that groups cannot govern means the only choices are "everybody" and "nobody",
+        // which is not a permission system, it is a switch.
+        'rating.vote'     => 'Rate torrents up or down (needs ratings switched on in Settings)',
+        'content.submit'  => 'Attach a source link and a description when registering a torrent',
+        'content.propose' => 'Propose a rewrite of a description somebody else wrote',
     ];
 }
 
-/** What the site looks like with the user system disabled: index gated, the classic pages public. */
+/**
+ * What the site looks like with the user system disabled: index gated, the classic pages public.
+ *
+ * The content and rating permissions are NOT granted here. With accounts switched off there is no
+ * identity to attach a rating or a description to, and the features' own settings decide instead —
+ * this function must not become a second, invisible place that turns them on.
+ */
 function userLegacyDefault(string $perm): bool {
+    if (str_starts_with($perm, 'rating.') || str_starts_with($perm, 'content.')) return true;
     return !str_starts_with($perm, 'index.');
 }
 

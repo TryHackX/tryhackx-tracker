@@ -243,46 +243,93 @@
     // The description is shown RENDERED, using the same renderer the public page uses. Reviewing the
     // source would mean waving through whatever an image tag turns out to point at.
 
-    const rvState = { page: 1 };
+    const rvState = { page: 1, status: 'pending', search: '', sub: 'queue' };
+    let rvSearchTimer = null;
+
+    function rvShowSub(sub) {
+        rvState.sub = sub;
+        document.querySelectorAll('#rv-subtabs .source-tab').forEach(b => b.classList.toggle('active', b.dataset.sub === sub));
+        $('rv-pane-queue').classList.toggle('d-hidden', sub !== 'queue');
+        $('rv-pane-edits').classList.toggle('d-hidden', sub !== 'edits');
+        if (sub === 'edits') loadEdits();
+    }
 
     async function loadReview() {
         const box = $('rv-list');
         if (!box) return;
         box.textContent = '';
         box.appendChild(el('div', { className: 'wl-status-loading', text: 'Loading…' }));
-        const r = await apiCall('admin/wl_content', 'POST', { op: 'list', page: rvState.page });
+        const r = await apiCall('admin/wl_content', 'POST',
+            { op: 'list', page: rvState.page, status: rvState.status, search: rvState.search });
         box.textContent = '';
         if (!r || !r.success) {
             box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || 'Could not load the queue.' }));
             return;
         }
+        // Both counters mean "waiting", never "matching the current filter": a badge that followed
+        // the filter would read zero with a full queue behind it.
         const badge = $('tab-badge-review');
-        if (badge) badge.textContent = r.total ? String(r.total) : '';
-        $('rv-total').textContent = r.total ? (r.total + ' waiting') : '';
+        const waiting = (r.waiting || 0) + (r.edits_pending || 0);
+        if (badge) badge.textContent = waiting ? String(waiting) : '';
+        $('rv-sub-count').textContent = r.waiting ? String(r.waiting) : '';
+        $('rv-edits-count').textContent = r.edits_pending ? String(r.edits_pending) : '';
+        $('rv-total').textContent = r.total
+            ? (r.total + (rvState.status === 'pending' ? ' waiting' : ' shown'))
+            : '';
         if (!r.review_on) {
             box.appendChild(el('div', { className: 'nl-note nl-note-info', text:
                 'Review is switched off, so new links and descriptions are published immediately. Anything here was submitted while it was on.' }));
         }
         if (!(r.rows || []).length) {
-            box.appendChild(el('div', { className: 'nl-note', text: 'Nothing is waiting.' }));
+            box.appendChild(el('div', { className: 'nl-note', text: rvState.search
+                ? 'Nothing matches that search.'
+                : (rvState.status === 'pending' ? 'Nothing is waiting.' : 'Nothing here yet.') }));
+            renderPagination($('rv-pagination'), { total: 0, page: 1, pages: 1, onPage: () => {} });
             return;
         }
         r.rows.forEach(row => box.appendChild(reviewCard(row)));
         renderPagination($('rv-pagination'), { total: r.total, page: r.page, pages: r.pages, onPage: (pg) => { rvState.page = pg; loadReview(); } });
     }
 
+    /** The state of one submission, as an icon and a word rather than a colour alone. */
+    const RV_STATE = {
+        pending:  { icon: 'bi-hourglass-split', cls: 'rv-st-wait', text: 'waiting' },
+        approved: { icon: 'bi-check-circle',    cls: 'rv-st-ok',   text: 'published' },
+        rejected: { icon: 'bi-x-circle',        cls: 'rv-st-no',   text: 'rejected' },
+    };
+
     function reviewCard(row) {
-        const card = el('div', { className: 'rv-card' });
-        const head = el('div', { className: 'rv-head' }, [
-            el('strong', { text: row.name || '(no name yet)' }),
+        const state = RV_STATE[row.content_status] || RV_STATE.pending;
+        const card = el('div', { className: 'rv-card ' + state.cls });
+
+        const head = el('div', { className: 'rv-head' });
+        const title = el('div', { className: 'rv-title' }, [
+            el('span', { className: 'rv-state', title: 'This submission is ' + state.text },
+               [el('i', { className: 'bi ' + state.icon }), ' ' + state.text]),
+            el('strong', { className: 'rv-name', text: row.name || '(no name yet)' }),
+        ]);
+        const meta = el('div', { className: 'rv-meta' }, [
             el('code', { className: 'rv-hash', text: row.info_hash }),
             el('span', { className: 'wl-small text-muted', text: fmtDate(String(row.created_at).replace(' ', 'T')) }),
+            el('span', { className: 'wl-badge wl-b-muted', text: 'via ' + (row.source || 'web') }),
         ]);
+        // Ratings decide the order of this queue, so the number that did the deciding is on the card.
+        // A moderator who cannot see why something is at the top is being asked to trust a sort.
+        if (row.votes_count) {
+            meta.appendChild(el('span', {
+                className: 'wl-badge ' + (row.score_x100 >= 5000 ? 'wl-b-ok' : 'wl-b-warn'),
+                title: 'Sorted worst-first: the ones people have complained about come before the ones nobody has an opinion on',
+                text: Math.round(row.score_x100 / 100) + '% from ' + row.votes_count
+                      + (row.votes_count === 1 ? ' rating' : ' ratings'),
+            }));
+        }
+        head.appendChild(title);
+        head.appendChild(meta);
         card.appendChild(head);
 
         if (row.source_url) {
             const line = el('div', { className: 'rv-src' });
-            line.appendChild(el('span', { className: 'wl-kv-label', text: 'Source link' }));
+            line.appendChild(el('span', { className: 'rv-label', text: 'Source link' }));
             // Not a live link, on purpose. A moderator deciding whether a link is acceptable should
             // not have to visit it to find out, and one accidental click is how that happens.
             line.appendChild(el('code', { className: 'rv-url', text: row.source_url }));
@@ -294,25 +341,126 @@
         }
 
         if (row.description_html) {
+            const sec = el('div', { className: 'rv-sec' });
+            sec.appendChild(el('div', { className: 'rv-label', text: 'Description (' + (row.description_format || 'bbcode') + ')' }));
             const d = el('div', { className: 'rv-desc rt-body' });
             // The server built this string from escaped input with a fixed tag whitelist
             // (includes/richtext.php). It is the only place in this file that assigns innerHTML.
             d.innerHTML = row.description_html;
-            card.appendChild(el('div', { className: 'wl-kv-label', text: 'Description (' + (row.description_format || 'bbcode') + ')' }));
-            card.appendChild(d);
+            sec.appendChild(d);
+            card.appendChild(sec);
+        }
+
+        if (row.content_status === 'rejected' && row.content_rejected_note) {
+            card.appendChild(el('div', { className: 'rv-note' },
+                [el('strong', { text: 'Rejected: ' }), row.content_rejected_note]));
         }
 
         const acts = el('div', { className: 'rv-acts' });
-        const ok = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success wl-act' },
-            [el('i', { className: 'bi bi-check-lg' }), ' Publish']);
-        ok.addEventListener('click', () => reviewAct(row.id, 'approve'));
-        const no = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning wl-act' },
-            [el('i', { className: 'bi bi-x-lg' }), ' Reject']);
-        no.addEventListener('click', () => reviewReject(row.id));
+        if (row.content_status !== 'approved') {
+            const ok = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success wl-act' },
+                [el('i', { className: 'bi bi-check-lg' }), ' Publish']);
+            ok.addEventListener('click', () => reviewAct(row.id, 'approve'));
+            acts.appendChild(ok);
+        }
+        if (row.content_status !== 'rejected') {
+            const no = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning wl-act' },
+                [el('i', { className: 'bi bi-x-lg' }), ' Reject']);
+            no.addEventListener('click', () => reviewReject(row.id));
+            acts.appendChild(no);
+        }
         const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: 'Delete the link and description outright. The torrent stays registered.' },
             [el('i', { className: 'bi bi-trash' }), ' Delete text']);
         del.addEventListener('click', () => reviewClear(row.id, row.info_hash));
-        acts.appendChild(ok); acts.appendChild(no); acts.appendChild(del);
+        acts.appendChild(del);
+        card.appendChild(acts);
+        return card;
+    }
+
+    // ───────────────────── proposed rewrites ─────────────────────
+    //
+    // The endpoint has been there since the proposals shipped; this is the screen that was missing,
+    // which is why Settings could point at "To review → Rewrites" and find nothing there.
+
+    async function loadEdits() {
+        const box = $('rv-edits-list');
+        if (!box) return;
+        box.textContent = '';
+        box.appendChild(el('div', { className: 'wl-status-loading', text: 'Loading…' }));
+        const r = await apiCall('admin/wl_content', 'POST', { op: 'edits' });
+        box.textContent = '';
+        if (!r || !r.success) {
+            box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || 'Could not load the proposals.' }));
+            return;
+        }
+        $('rv-edits-total').textContent = r.total ? (r.total + ' waiting') : '';
+        $('rv-edits-count').textContent = r.total ? String(r.total) : '';
+        if (!(r.rows || []).length) {
+            box.appendChild(el('div', { className: 'nl-note', text: 'Nobody has proposed a rewrite.' }));
+            return;
+        }
+        r.rows.forEach(row => box.appendChild(editCard(row)));
+    }
+
+    function editCard(row) {
+        const card = el('div', { className: 'rv-card rv-st-wait' });
+        card.appendChild(el('div', { className: 'rv-head' }, [
+            el('div', { className: 'rv-title' }, [
+                el('span', { className: 'rv-state', title: 'A rewrite waiting for a decision' },
+                   [el('i', { className: 'bi bi-pencil-square' }), ' rewrite']),
+                el('strong', { className: 'rv-name', text: row.name || '(no name yet)' }),
+            ]),
+            el('div', { className: 'rv-meta' }, [
+                el('code', { className: 'rv-hash', text: row.info_hash }),
+                el('span', { className: 'wl-small text-muted', text: fmtDate(String(row.created_at).replace(' ', 'T')) }),
+                el('span', { className: 'wl-small text-muted', text: row.ip ? 'from ' + row.ip : '' }),
+            ]),
+        ]));
+
+        // Side by side, both rendered. A rewrite that reads tamer in source and worse on screen is
+        // the whole risk of accepting one, so the comparison has to be of what people will SEE.
+        const cmp = el('div', { className: 'rv-diff' });
+        const side = (label, html, url, trusted) => {
+            const col = el('div', { className: 'rv-diff-col' });
+            col.appendChild(el('div', { className: 'rv-label', text: label }));
+            if (url) {
+                col.appendChild(el('div', { className: 'rv-src' }, [
+                    el('code', { className: 'rv-url', text: url }),
+                    trusted === null ? '' : el('span', {
+                        className: 'wl-badge ' + (trusted ? 'wl-b-ok' : 'wl-b-warn'),
+                        text: trusted ? 'trusted domain' : 'off-site' }),
+                ]));
+            }
+            const d = el('div', { className: 'rv-desc rt-body' });
+            // Server-rendered, same renderer as the public page (includes/richtext.php).
+            d.innerHTML = html || '<p class="text-muted">(nothing)</p>';
+            col.appendChild(d);
+            return col;
+        };
+        cmp.appendChild(side('Published now', row.cur_html, row.cur_source_url, null));
+        cmp.appendChild(side('Proposed', row.new_html, row.source_url, !!row.new_trusted));
+        card.appendChild(cmp);
+
+        const acts = el('div', { className: 'rv-acts' });
+        const ok = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success wl-act',
+            title: 'Replace the published text. The old version is kept as a rejected proposal, so this can be undone.' },
+            [el('i', { className: 'bi bi-check-lg' }), ' Apply']);
+        ok.addEventListener('click', async () => {
+            if (!await confirmAction('Apply this rewrite',
+                'The published description is replaced by the proposed one.',
+                { code: row.info_hash, after: 'The version it replaces is kept, so you can put it back by accepting it later.', okLabel: 'Apply' })) return;
+            const r = await apiCall('admin/wl_content', 'POST', { op: 'edit_apply', id: row.id });
+            showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+            if (r && r.success) loadEdits();
+        });
+        const no = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning wl-act' },
+            [el('i', { className: 'bi bi-x-lg' }), ' Reject']);
+        no.addEventListener('click', async () => {
+            const r = await apiCall('admin/wl_content', 'POST', { op: 'edit_reject', id: row.id });
+            showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+            if (r && r.success) loadEdits();
+        });
+        acts.appendChild(ok); acts.appendChild(no);
         card.appendChild(acts);
         return card;
     }
@@ -1144,6 +1292,19 @@
         initBanModal();
         initClientCreate();
         initApiBanAdd();
+
+        // review toolbar + sub-tabs
+        const rvSearch = $('rv-search');
+        if (rvSearch) {
+            const doRv = debounce(() => { rvState.search = rvSearch.value.trim(); rvState.page = 1; loadReview(); }, 350);
+            rvSearch.addEventListener('input', doRv);
+            bindSearchClear(rvSearch, $('rv-search-clear'), () => { rvState.search = ''; rvState.page = 1; loadReview(); });
+            $('rv-status').addEventListener('change', (e) => { rvState.status = e.target.value; rvState.page = 1; loadReview(); });
+            $('rv-subtabs').addEventListener('click', (e) => {
+                const b = e.target.closest('[data-sub]');
+                if (b) rvShowSub(b.dataset.sub);
+            });
+        }
 
         // whitelist toolbar
         const searchInput = $('wl-search');

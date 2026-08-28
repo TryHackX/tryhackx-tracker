@@ -1,6 +1,11 @@
 <?php
 /**
- * POST rate_hash — one visitor's opinion of one torrent. Up or down, nothing else.
+ * POST rate_hash — one visitor's opinion of one torrent.
+ *
+ * Two shapes, one table: a thumb (1 or -1) or a star rating (1..10, half a star each). Which one is
+ * accepted is repAllowedValues($cfg), so switching the mode does not need a second endpoint. Any
+ * 40-hex hash may be rated, whitelisted or not: an opinion about a torrent is not a statement about
+ * whether this tracker serves it.
  *
  * The interesting part is not the counting, it is who is allowed to press the button. Four layers,
  * because no single one holds: a UNIQUE key in the database (not a SELECT in PHP, which is a race),

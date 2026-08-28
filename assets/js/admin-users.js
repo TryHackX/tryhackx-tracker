@@ -388,6 +388,7 @@
             return;
         }
         $('bm-off-note').style.display = r.enabled ? 'none' : '';
+        bmFillFormats(r.formats);
         box.textContent = '';
         box.appendChild(el('strong', { text: String(r.recipients) }));
         const why = [];
@@ -442,9 +443,96 @@
         loadBatches();
     }
 
+    // ── the message editor ──────────────────────────────────────────────────
+    //
+    // Ctrl+B in a <textarea> does nothing on its own; the browser only wires those shortcuts to
+    // contenteditable regions. So the shortcuts and the buttons run the same function, which wraps
+    // the selection in whichever syntax the chosen format uses. A contenteditable box would have
+    // given Ctrl+B for free and cost a second renderer, a paste sanitiser and an HTML whitelist to
+    // police — the markup the site already renders is the cheaper honest answer.
+    const MD_SYNTAX = {
+        markdown: { bold: ['**', '**'], italic: ['*', '*'], code: ['`', '`'],
+                    link: ['[', '](https://example.org)'], quote: ['> ', ''], list: ['- ', ''] },
+        bbcode:   { bold: ['[b]', '[/b]'], italic: ['[i]', '[/i]'], code: ['[code]', '[/code]'],
+                    link: ['[url=https://example.org]', '[/url]'], quote: ['[quote]', '[/quote]'],
+                    list: ['[list]\n[*] ', '\n[/list]'] },
+    };
+
+    function bmFormat() { const f = $('bm-format'); return f ? f.value : 'plain'; }
+
+    /** Wrap the selection (or drop a stub at the caret) and keep the caret somewhere useful. */
+    function bmWrap(kind) {
+        const ta = $('bm-body');
+        const syn = MD_SYNTAX[bmFormat()];
+        if (!ta || !syn || !syn[kind]) return;
+        const [open, close] = syn[kind];
+        const start = ta.selectionStart, end = ta.selectionEnd;
+        const sel = ta.value.slice(start, end);
+        // Line-prefix marks (quote, list in Markdown) belong at the start of every selected line,
+        // not wrapped around the block — otherwise a three-line quote quotes only its first line.
+        const linewise = close === '' ;
+        let inserted;
+        if (linewise) {
+            const lines = (sel || 'text').split('\n');
+            inserted = lines.map(l => open + l).join('\n');
+        } else {
+            inserted = open + (sel || 'text') + close;
+        }
+        ta.setRangeText(inserted, start, end, 'end');
+        if (!sel) {
+            // No selection: select the placeholder so the next keystroke replaces it.
+            const at = start + (linewise ? open.length : open.length);
+            ta.setSelectionRange(at, at + 4);
+        }
+        ta.focus();
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    let bmPrevTimer = null;
+    async function bmRenderPreview() {
+        const wrap = $('bm-preview-wrap'), out = $('bm-preview-html');
+        if (!wrap || !out) return;
+        const fmt = bmFormat();
+        const body = $('bm-body').value;
+        if (fmt === 'plain' || body.trim() === '') { wrap.classList.add('d-hidden'); return; }
+        const r = await apiCall('admin/bulk_send', 'POST', { op: 'render', body, format: fmt });
+        if (!r || !r.success) { wrap.classList.add('d-hidden'); return; }
+        wrap.classList.remove('d-hidden');
+        // Server-rendered from fully escaped input by includes/richtext.php, the same call the
+        // janitor makes when it builds the mail.
+        out.innerHTML = r.html;
+    }
+    function bmPreviewSoon() { clearTimeout(bmPrevTimer); bmPrevTimer = setTimeout(bmRenderPreview, 350); }
+
+    function bmSyncFormatUi() {
+        const fmt = bmFormat();
+        const tools = $('bm-tools');
+        if (tools) tools.classList.toggle('d-hidden', fmt === 'plain');
+        const hint = $('bm-fmt-hint');
+        if (hint) {
+            hint.textContent = fmt === 'plain'
+                ? 'Plain text: line breaks are kept and nothing else is interpreted.'
+                : (fmt === 'markdown'
+                    ? 'Markdown: **bold**, *italic*, # heading, - list, > quote, `code`, [text](url). Ctrl+B, Ctrl+I and Ctrl+K work in the box.'
+                    : 'BBCode: [b], [i], [url=…], [quote], [code], [list]. Ctrl+B, Ctrl+I and Ctrl+K work in the box.');
+        }
+        bmRenderPreview();
+    }
+
+    /** Offer only the formats the site has switched on, plus plain text. */
+    function bmFillFormats(formats) {
+        const sel = $('bm-format');
+        if (!sel || !Array.isArray(formats) || sel.dataset.filled === '1') return;
+        const label = { plain: 'Plain text', markdown: 'Markdown', bbcode: 'BBCode' };
+        sel.textContent = '';
+        formats.forEach(f => sel.appendChild(el('option', { value: f, text: label[f] || f })));
+        sel.dataset.filled = '1';
+        bmSyncFormatUi();
+    }
+
     async function sendTest() {
         const r = await apiCall('admin/bulk_send', 'POST',
-            { op: 'test', subject: $('bm-subject').value, body: $('bm-body').value });
+            { op: 'test', subject: $('bm-subject').value, body: $('bm-body').value, format: bmFormat() });
         showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
     }
 
@@ -469,9 +557,9 @@
         if (!pw) return;
         const r = await apiCall('admin/bulk_send', 'POST', {
             op: 'queue', password: pw, audience: writeAudience(),
-            subject, body, notify: wantNotify, email: wantMail });
+            subject, body, format: bmFormat(), notify: wantNotify, email: wantMail });
         showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
-        if (r && r.success) { $('bm-subject').value = ''; $('bm-body').value = ''; loadBatches(); }
+        if (r && r.success) { $('bm-subject').value = ''; $('bm-body').value = ''; bmRenderPreview(); loadBatches(); }
     }
 
     // ── wiring ──────────────────────────────────────────────────────────────
@@ -518,6 +606,19 @@
         $('bm-mode').addEventListener('change', refreshPreview);
         $('bm-group').addEventListener('change', refreshPreview);
         $('bm-refresh').addEventListener('click', refreshPreview);
+        $('bm-format').addEventListener('change', bmSyncFormatUi);
+        $('bm-tools').addEventListener('click', (e) => {
+            const b = e.target.closest('[data-md]');
+            if (b) bmWrap(b.dataset.md);
+        });
+        $('bm-body').addEventListener('input', bmPreviewSoon);
+        $('bm-body').addEventListener('keydown', (e) => {
+            if (!(e.ctrlKey || e.metaKey) || e.altKey || bmFormat() === 'plain') return;
+            const kind = { b: 'bold', i: 'italic', k: 'link' }[e.key.toLowerCase()];
+            if (!kind) return;
+            e.preventDefault();
+            bmWrap(kind);
+        });
         $('bm-test').addEventListener('click', sendTest);
         $('bm-send').addEventListener('click', sendWrite);
         $('ge-save').addEventListener('click', saveGroup);

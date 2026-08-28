@@ -20,6 +20,12 @@ if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
     jsonResponse(['error' => 'Invalid CSRF token'], 403);
 }
 
+// Same permission as writing one: a preview is a parser, and handing it to somebody who may not
+// submit is handing out the parser for nothing.
+if (!userCan($db, $cfg, 'content.submit')) {
+    jsonResponse(['error' => 'Content access is required.'], 403);
+}
+
 $perMin = max(5, min(300, (int)($cfg['rate_limit_preview'] ?? 30) ?: 30));
 if (!rateLimitAllow('rtpreview', ipBucket(getClientIp($cfg)), $perMin, 60)) {
     jsonResponse(['error' => 'Too many previews — wait a moment.'], 429);

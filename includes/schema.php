@@ -11,7 +11,12 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 21;  // 21 = ratings (hash_votes + the totals kept on the row), the
+const TRACKER_SCHEMA_VERSION = 23;  // 23 = bulk messages carry their markup format, so the HTML part
+                                    // of the mail is rendered rather than escaped line by line.
+                                    // 22 = a star rating mode beside the up/down one (rep_mode,
+                                    // votes_count on both rating tables) and the permissions the
+                                    // descriptions, ratings and rewrite proposals should have
+                                    // shipped with. 21 = ratings (hash_votes + the totals kept on the row), the
                                     // whitelist refresh/cleanup schedule, description edit
                                     // proposals, and the "prove it" probe state on a submission.
                                     // 20 = settings only, and it needs its own number for the
@@ -451,6 +456,10 @@ function trackerSchemaStatements(): array {
             `email` VARCHAR(190) NOT NULL,
             `subject` VARCHAR(255) NOT NULL,
             `body` MEDIUMTEXT NOT NULL,
+            -- The format travels WITH the row rather than being read from settings at send time: a
+            -- batch written in Markdown and sent an hour after somebody switched Markdown off must
+            -- still arrive as the sender saw it, not as a page of raw asterisks.
+            `format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
             `status` ENUM('queued','sending','sent','failed','skipped') NOT NULL DEFAULT 'queued',
             `attempts` TINYINT UNSIGNED NOT NULL DEFAULT 0,
             `last_error` VARCHAR(255) NOT NULL DEFAULT '',
@@ -598,6 +607,12 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         if (!schemaColumnExists($db, $rt, 'votes_up'))   $rparts[] = "ADD COLUMN `votes_up` INT UNSIGNED NOT NULL DEFAULT 0";
         if (!schemaColumnExists($db, $rt, 'votes_down')) $rparts[] = "ADD COLUMN `votes_down` INT UNSIGNED NOT NULL DEFAULT 0";
         if (!schemaColumnExists($db, $rt, 'score_x100')) $rparts[] = "ADD COLUMN `score_x100` SMALLINT UNSIGNED NOT NULL DEFAULT 0";
+        // v22: how many votes, as its own column rather than votes_up + votes_down.
+        //
+        // With stars there is no "up" and no "down" — there is a count and an average — and reusing
+        // votes_up to mean "count in one mode and up-votes in the other" is exactly the overload that
+        // produces a wrong number two releases later, in whichever branch nobody re-read.
+        if (!schemaColumnExists($db, $rt, 'votes_count')) $rparts[] = "ADD COLUMN `votes_count` INT UNSIGNED NOT NULL DEFAULT 0";
         if (!$rparts) continue;
         if ($rt === 'whitelist') {
             $out[] = "ALTER TABLE `whitelist` " . implode(', ', $rparts);
@@ -608,6 +623,11 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         } else {
             schemaDeferHeavy('index_hashes: ' . implode(', ', $rparts));
         }
+    }
+
+    // v23: the markup format of a queued bulk message. Small table, ordinary ALTER.
+    if (!schemaColumnExists($db, 'mail_queue', 'format')) {
+        $out[] = "ALTER TABLE `mail_queue` ADD COLUMN `format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain'";
     }
 
     // v19: the two composite indexes the catalogue has always needed.
@@ -793,6 +813,7 @@ function trackerSchemaDefaultSettings(): array {
         // Ratings. Off, and read-only for anonymous visitors by default: a public voting button is
         // the easiest thing on a site to automate, and the operator should choose to open it.
         'rep_enabled'                 => '0',
+        'rep_mode'                    => 'thumbs',
         'rep_who_can_vote'            => 'users',
         'rep_show_in_results'         => '0',
         'rep_min_votes'               => '3',

@@ -76,7 +76,7 @@ $allowed = [
     'wl_content_autopublish', 'wl_edit_max_pending',
     'wl_scrape_every_hours', 'wl_scrape_batch', 'wl_dead_after_days', 'wl_dead_action', 'wl_dead_every_days',
     'wl_probe_required', 'wl_probe_timeout_minutes', 'wl_probe_on_fail', 'wl_probe_max_batch',
-    'rep_enabled', 'rep_who_can_vote', 'rep_show_in_results', 'rep_min_votes', 'rep_anon_weight', 'rep_rate_per_hour', 'captcha_pts_vote',
+    'rep_enabled', 'rep_mode', 'rep_who_can_vote', 'rep_show_in_results', 'rep_min_votes', 'rep_anon_weight', 'rep_rate_per_hour', 'captcha_pts_vote',
     'bulk_mail_enabled', 'bulk_mail_per_minute', 'bulk_mail_max_attempts',
     'wl_allow_source_url', 'wl_allow_description', 'wl_content_review',
     'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',

@@ -41,7 +41,7 @@ $loadRow = function () use ($db, $hash): array {
     $st = $db->prepare(
         "SELECT info_hash, name, created_at, total_size, files_count, scrape_seeders, scrape_leechers,
                 scrape_completed, scraped_at, source_url, description, description_format,
-                content_status, banned
+                content_status, banned, source, source_ref
            FROM whitelist WHERE info_hash = ? LIMIT 1");
     $st->execute([$hash]);
     $out['whitelist'] = $st->fetch() ?: null;
@@ -92,10 +92,23 @@ $canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whi
 // The link and the description belong to the whitelist row, and only once approved. A pending one is
 // text nobody has looked at yet; a rejected one is text somebody decided against. Neither is public.
 $sourceUrl = null;
+$sourceAuto = false;
 $descHtml  = '';
 if ($wl && !(int)$wl['banned'] && ($wl['content_status'] ?? 'none') === 'approved') {
     $sourceUrl = $wl['source_url'] ?: null;
     $descHtml  = richtextRender($wl['description'] ?? '', (string)$wl['description_format'], $cfg);
+}
+
+// A link the IMPORTER recorded (whitelist.source_ref, written by api/v1/whitelist_submit.php when the
+// forum posts a magnet) belongs in the same row as one somebody typed into the form — it answers the
+// same question, and hiding it in the admin table only meant visitors could not see where a torrent
+// came from. It does NOT get the same trust: it never passed the review queue, so it is published
+// only when richtextIsTrusted() says it points at this operator's own site. An importer run by
+// somebody else can still record a link; that one stays admin-only until a moderator approves it as
+// a normal source link. The form-supplied link always wins when both exist.
+if ($sourceUrl === null && $wl && !(int)$wl['banned']) {
+    $auto = richtextAutoSourceUrl($wl['source_ref'] ?? null, $cfg);
+    if ($auto !== null) { $sourceUrl = $auto; $sourceAuto = true; }
 }
 
 jsonResponse([
@@ -105,6 +118,11 @@ jsonResponse([
     'whitelisted' => $canWl ? (bool)$wl : null,
     'source_url'  => $sourceUrl,
     'source_trusted' => $sourceUrl ? richtextIsTrusted($sourceUrl, $cfg) : false,
+    'source_auto'    => $sourceAuto,
+    'source_auto_note' => $sourceAuto
+        ? 'Recorded by the ' . (($wl['source'] ?? '') === 'forum' ? 'forum' : 'importer')
+          . ' that registered this torrent, not typed in by an uploader.'
+        : null,
     'description_html' => $descHtml,
     'stats' => [
         'first_seen'  => $idx['first_seen'] ?? ($wl['created_at'] ?? null),

@@ -147,28 +147,39 @@
         /**
          * Draw a marker ONLY where the line cannot show the value on its own.
          *
-         * uPlot's own default turns markers on once the average gap between samples passes a pixel
-         * threshold — so the same chart is clean on a laptop and covered in white dots on a wide
-         * monitor, which is not a decision about the data at all. The comment here used to claim the
-         * default was "isolated samples only"; it is not, and the screenshots showed it.
+         * Two hooks, because uPlot splits the job: `points.show` answers "any markers at all?" with a
+         * BOOLEAN, and `points.filter` answers "which ones?" with an index array. Returning the array
+         * from `show` looked like it worked and did the opposite — an array is truthy, so a single
+         * isolated sample switched markers on for the entire series. That is the speckling that
+         * appeared at 7d and 2w and not at 24h: those ranges happen to contain one isolated point.
          *
-         * A genuinely isolated sample — a value with a gap on both sides — still needs a marker, or
-         * it renders as nothing at all: `spanGaps: false` means there is no line segment to draw it
-         * on. So the rule is exactly that, and nothing else. The cursor's own hover point is drawn
-         * separately by uPlot and is untouched, which is the one place markers were wanted.
+         * uPlot's own default for `show` turns markers on once the average pixel gap passes a
+         * threshold, so the same chart is clean on a laptop and covered in dots on a wide monitor —
+         * a decision about the window, not about the data.
+         *
+         * A genuinely isolated sample — a value with a gap on both sides — still needs a marker, or it
+         * renders as nothing at all: `spanGaps: false` means there is no line segment to draw it on.
+         * `filter` returns null rather than an empty array when there are none, because the draw call
+         * is `(show || filter) && paint(filter)` and `[]` is truthy. The cursor's own hover point is
+         * drawn separately by uPlot and is untouched.
          */
-        const isolatedOnly = (u, seriesIdx, idx0, idx1) => {
+        const isolatedIdxs = (u, seriesIdx) => {
             const data = u.data[seriesIdx];
+            const s = u.series[seriesIdx];
+            if (s._isoFor === data) return s._isoIdxs;          // recomputed only when the data changes
             const out = [];
-            for (let i = idx0; i <= idx1; i++) {
+            for (let i = 0; i < data.length; i++) {
                 if (data[i] == null) continue;
                 const prev = i > 0 ? data[i - 1] : null;
                 const next = i < data.length - 1 ? data[i + 1] : null;
                 if (prev == null && next == null) out.push(i);
             }
-            return out.length ? out : false;
+            s._isoFor = data; s._isoIdxs = out;
+            return out;
         };
-        defs.forEach(d => series.push({ label: d.label, stroke: d.color, width: 1.5, scale: isRate ? 'rps' : d.scale, show: d.on, spanGaps: false, points: { show: isolatedOnly, size: 5 }, value: (u, v) => legendFmt(v) }));
+        const isolatedShow   = (u, seriesIdx) => isolatedIdxs(u, seriesIdx).length > 0;
+        const isolatedFilter = (u, seriesIdx) => { const a = isolatedIdxs(u, seriesIdx); return a.length ? a : null; };
+        defs.forEach(d => series.push({ label: d.label, stroke: d.color, width: 1.5, scale: isRate ? 'rps' : d.scale, show: d.on, spanGaps: false, points: { show: isolatedShow, filter: isolatedFilter, size: 5 }, value: (u, v) => legendFmt(v) }));
         const opts = {
             width, height, scales, axes, series,
             legend: { live: true },

@@ -170,6 +170,58 @@ function richtextLinkAttrs(string $url, array $cfg): string {
     return $attrs;
 }
 
+/**
+ * The same HTML, but survivable in a mail client.
+ *
+ * Mail clients throw away <style> blocks and most of them throw away class attributes too, so the
+ * panel's stylesheet is not available: `<pre class="rt-code">` arrives as an unstyled block and a
+ * heading arrives as ordinary text. Rather than keep a second renderer in step with this one, the
+ * markup is produced exactly as on the site and the handful of classes are then swapped for the
+ * inline styles they stand for. If a rule changes on the site, the mail follows.
+ *
+ * `data-external` also goes: it drives the "you are leaving" dialog on the site, and there is no
+ * dialog in an inbox.
+ */
+/**
+ * The link an IMPORTER recorded, if it may be shown to the public.
+ *
+ * `whitelist.source_ref` is written by api/v1/whitelist_submit.php when the forum (or another API
+ * client) posts a magnet, and it usually holds the URL of the post the magnet came from. That
+ * answers the same question as the source link somebody types into the form, so it belongs in the
+ * same place — but it has NOT been through the review queue, and an API client is not necessarily
+ * run by the operator.
+ *
+ * So the rule is: publish it only when it points at this operator's own site. Anybody else's
+ * importer can still record a link; that one stays visible to admins and waits for a moderator to
+ * approve it as an ordinary source link. Returns null when there is nothing publishable.
+ */
+function richtextAutoSourceUrl(?string $sourceRefJson, array $cfg): ?string {
+    if ($sourceRefJson === null || trim($sourceRefJson) === '') return null;
+    $ref = json_decode($sourceRefJson, true);
+    if (!is_array($ref)) return null;
+    $url = isset($ref['url']) && is_string($ref['url']) ? trim($ref['url']) : '';
+    if ($url === '') return null;
+    if (richtextValidateSourceUrl($url, $cfg) !== null) return null;   // same rules as a typed one
+    return richtextIsTrusted($url, $cfg) ? $url : null;
+}
+
+function richtextRenderForEmail(?string $text, string $format, array $cfg): string {
+    $html = richtextRender($text, $format, $cfg);
+    if ($html === '') return '';
+    $style = [
+        'rt-code'   => 'margin:0.6rem 0;padding:10px 12px;border-radius:4px;background:#f4f5f7;border:1px solid #dcdfe4;overflow-x:auto;font-family:Consolas,Menlo,monospace;font-size:13px;white-space:pre-wrap',
+        'rt-inline' => 'padding:1px 5px;border-radius:3px;background:#f4f5f7;font-family:Consolas,Menlo,monospace;font-size:13px',
+        'rt-quote'  => 'margin:10px 0;padding:6px 14px;border-left:3px solid #c9ced6;color:#555',
+        'rt-list'   => 'margin:8px 0 10px 20px;padding:0',
+        'rt-h'      => 'margin:14px 0 6px;font-weight:600',
+        'rt-img'    => 'max-width:100%;height:auto;border-radius:4px;margin:8px 0',
+    ];
+    foreach ($style as $cls => $css) {
+        $html = str_replace(' class="' . $cls . '"', ' style="' . $css . '"', $html);
+    }
+    return str_replace(' data-external="1"', '', $html);
+}
+
 function richtextRender(?string $text, string $format, array $cfg): string {
     $text = (string)$text;
     if (trim($text) === '') return '';

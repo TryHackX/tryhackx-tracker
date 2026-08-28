@@ -42,6 +42,23 @@ function repWhoCanVote(array $cfg): string {
 
 function repShowInResults(array $cfg): bool { return ($cfg['rep_show_in_results'] ?? '0') === '1'; }
 
+/**
+ * 'thumbs' — up or down. 'stars' — five stars in half-star steps.
+ *
+ * Stars are stored as 1..10, which is what "half a star" actually means: the display rounds to five,
+ * the storage does not, and an average of 3.5 is a real value rather than something inferred from a
+ * percentage. The two modes share a table because a vote is a vote; only the reading differs.
+ */
+function repMode(array $cfg): string {
+    $m = (string)($cfg['rep_mode'] ?? 'thumbs');
+    return in_array($m, ['thumbs', 'stars'], true) ? $m : 'thumbs';
+}
+
+/** The values a vote may take in the current mode: [-1, 1] or [1..10]. */
+function repAllowedValues(array $cfg): array {
+    return repMode($cfg) === 'stars' ? range(1, 10) : [-1, 1];
+}
+
 /** Below this many votes the score is not a score, and the UI says so instead of showing a number. */
 function repMinVotes(array $cfg): int { return max(1, min(1000, (int)($cfg['rep_min_votes'] ?? 3) ?: 3)); }
 
@@ -79,6 +96,13 @@ function repVoteRefusal(PDO $db, array $cfg): ?string {
         return $who === 'users' ? 'Sign in to rate.' : 'Could not identify you well enough to accept a rating.';
     }
     if ($who === 'users' && $voter['type'] !== 'user') return 'Sign in to rate.';
+    // A group can be denied rating without being denied everything else. Anonymous voters are
+    // governed by the guest group, which is what "who can vote: anyone" really means.
+    if (function_exists('userCan') && !userCan($db, $cfg, 'rating.vote')) {
+        return $voter['type'] === 'user'
+            ? 'Your account does not have rating access.'
+            : 'Ratings are limited to accounts with rating access here.';
+    }
     if (function_exists('rateLimitAllow')
         && !rateLimitAllow('repvote', $voter['type'] . ':' . $voter['key'], repRatePerHour($cfg), 3600)) {
         return 'That is a lot of ratings in one hour. Try again later.';
@@ -97,7 +121,11 @@ function repVoteRefusal(PDO $db, array $cfg): ?string {
 function repCastVote(PDO $db, array $cfg, string $hash, int $vote): array {
     $hash = strtolower(trim($hash));
     if (!preg_match('/^[0-9a-f]{40}$/', $hash)) return ['error' => 'Invalid hash'];
-    if ($vote !== 1 && $vote !== -1) return ['error' => 'A rating is either up or down.'];
+    if (!in_array($vote, repAllowedValues($cfg), true)) {
+        return ['error' => repMode($cfg) === 'stars'
+            ? 'A rating is between half a star and five stars.'
+            : 'A rating is either up or down.'];
+    }
     $refusal = repVoteRefusal($db, $cfg);
     if ($refusal !== null) return ['error' => $refusal];
     $voter = repVoterKey($db, $cfg);
@@ -111,7 +139,7 @@ function repCastVote(PDO $db, array $cfg, string $hash, int $vote): array {
          ON DUPLICATE KEY UPDATE vote = VALUES(vote), weight = VALUES(weight), updated_at = NOW()")
        ->execute([$hash, $voter['type'], $voter['key'], $vote, (int)$voter['weight']]);
 
-    repRecount($db, $hash);
+    repRecount($db, $hash, $cfg);
     return ['success' => true] + repFor($db, $cfg, $hash);
 }
 
@@ -122,53 +150,89 @@ function repCastVote(PDO $db, array $cfg, string $hash, int $vote): array {
  * would otherwise be fifty aggregate queries, and this project has already been bitten once by a
  * listing that did per-row work over a large table.
  */
-function repRecount(PDO $db, string $hash): void {
+function repRecount(PDO $db, string $hash, ?array $cfg = null): void {
+    $mode = is_array($cfg) ? repMode($cfg) : 'thumbs';
+    // CAST(weight AS SIGNED) is not decoration. weight is SMALLINT UNSIGNED and vote is signed, so
+    // MySQL promotes the product to UNSIGNED and -1 * 100 becomes a number the size of the universe:
+    // "BIGINT UNSIGNED value is out of range". The query then fails for any hash that ever received a
+    // down-vote — which is to say, in production, on the first one.
     $st = $db->prepare(
-        "SELECT SUM(vote = 1) up, SUM(vote = -1) down,
+        "SELECT COUNT(*) n,
+                SUM(vote = 1) up, SUM(vote = -1) down,
                 SUM(CASE WHEN vote = 1 THEN weight ELSE 0 END) wup,
-                SUM(CASE WHEN vote = -1 THEN weight ELSE 0 END) wdown
+                SUM(CASE WHEN vote = -1 THEN weight ELSE 0 END) wdown,
+                SUM(vote * CAST(weight AS SIGNED)) wsum, SUM(weight) wtot
            FROM hash_votes WHERE info_hash = ?");
     $st->execute([$hash]);
     $r = $st->fetch() ?: [];
-    $up = (int)($r['up'] ?? 0);
+    $n    = (int)($r['n'] ?? 0);
+    $up   = (int)($r['up'] ?? 0);
     $down = (int)($r['down'] ?? 0);
-    $wu = (int)($r['wup'] ?? 0);
-    $wd = (int)($r['wdown'] ?? 0);
-    // Weighted percentage, in hundredths so it stays an integer all the way to the template.
-    $score = ($wu + $wd) > 0 ? (int)round($wu * 10000 / ($wu + $wd)) : 0;
+
+    if ($mode === 'stars') {
+        // The weighted mean, in hundredths of a star: 4.5 stars is 450. Weight is what makes an
+        // account count for more than an anonymous voter, exactly as in the other mode.
+        $wsum = (int)($r['wsum'] ?? 0);
+        $wtot = (int)($r['wtot'] ?? 0);
+        // vote is 1..10 (half-star steps), so the mean is halved to land back on a five-star scale.
+        $score = $wtot > 0 ? (int)round($wsum * 100 / $wtot / 2) : 0;
+        $up = $n; $down = 0;   // meaningless here; votes_count is the number that is read
+    } else {
+        $wu = (int)($r['wup'] ?? 0);
+        $wd = (int)($r['wdown'] ?? 0);
+        $score = ($wu + $wd) > 0 ? (int)round($wu * 10000 / ($wu + $wd)) : 0;
+    }
 
     foreach (['index_hashes', 'whitelist'] as $t) {
         try {
-            $db->prepare("UPDATE `$t` SET votes_up = ?, votes_down = ?, score_x100 = ? WHERE info_hash = ?")
-               ->execute([$up, $down, $score, $hash]);
-        } catch (\Throwable $e) { /* a table without the columns yet is not an error worth failing on */ }
+            $db->prepare("UPDATE `$t` SET votes_up = ?, votes_down = ?, votes_count = ?, score_x100 = ?
+                           WHERE info_hash = ?")
+               ->execute([$up, $down, $n, $score, $hash]);
+        } catch (\Throwable $e) { /* a table without the columns yet is not worth failing on */ }
     }
 }
 
-/** The reputation of one hash, as the UI needs it. */
+/** The reputation of one hash, as the UI needs it — in whichever mode is switched on. */
 function repFor(PDO $db, array $cfg, string $hash): array {
-    $st = $db->prepare("SELECT SUM(vote = 1) up, SUM(vote = -1) down,
+    $st = $db->prepare("SELECT COUNT(*) n, SUM(vote = 1) up, SUM(vote = -1) down,
                                SUM(CASE WHEN vote = 1 THEN weight ELSE 0 END) wup,
-                               SUM(CASE WHEN vote = -1 THEN weight ELSE 0 END) wdown
+                               SUM(CASE WHEN vote = -1 THEN weight ELSE 0 END) wdown,
+                               SUM(vote * CAST(weight AS SIGNED)) wsum, SUM(weight) wtot
                           FROM hash_votes WHERE info_hash = ?");
     $st->execute([strtolower($hash)]);
     $r = $st->fetch() ?: [];
-    $up = (int)($r['up'] ?? 0);
-    $down = (int)($r['down'] ?? 0);
-    $wu = (int)($r['wup'] ?? 0);
-    $wd = (int)($r['wdown'] ?? 0);
-    $total = $up + $down;
-    $min = repMinVotes($cfg);
-    return [
-        'up' => $up,
-        'down' => $down,
-        'total' => $total,
-        // Null, not zero, below the threshold. "0%" and "nobody has said" are different facts and a
-        // bar that cannot tell them apart is worse than no bar.
-        'percent' => ($total >= $min && ($wu + $wd) > 0) ? (int)round($wu * 100 / ($wu + $wd)) : null,
-        'enough' => $total >= $min,
+    $mode  = repMode($cfg);
+    $total = (int)($r['n'] ?? 0);
+    $min   = repMinVotes($cfg);
+    $enough = $total >= $min;
+
+    $out = [
+        'mode'      => $mode,
+        'total'     => $total,
+        'enough'    => $enough,
         'min_votes' => $min,
+        'up'        => (int)($r['up'] ?? 0),
+        'down'      => (int)($r['down'] ?? 0),
+        'percent'   => null,
+        'stars'     => null,
     ];
+
+    // Null, not zero, below the threshold. "0%" and "nobody has said" are different facts, and a bar
+    // or a row of stars that cannot tell them apart is worse than showing nothing.
+    if (!$enough) return $out;
+
+    if ($mode === 'stars') {
+        $wsum = (int)($r['wsum'] ?? 0);
+        $wtot = (int)($r['wtot'] ?? 0);
+        // One decimal, because that is the precision a half-star scale actually has. Rounding to a
+        // whole star would throw away the thing the mode exists for.
+        $out['stars'] = $wtot > 0 ? round($wsum / $wtot / 2, 1) : null;
+    } else {
+        $wu = (int)($r['wup'] ?? 0);
+        $wd = (int)($r['wdown'] ?? 0);
+        $out['percent'] = ($wu + $wd) > 0 ? (int)round($wu * 100 / ($wu + $wd)) : null;
+    }
+    return $out;
 }
 
 /** My own vote on this hash, so the button can show which way it went. 0 = none. */
@@ -195,6 +259,6 @@ function repClear(PDO $db, string $hash): int {
     $st = $db->prepare("DELETE FROM hash_votes WHERE info_hash = ?");
     $st->execute([strtolower($hash)]);
     $n = $st->rowCount();
-    if ($n) repRecount($db, strtolower($hash));
+    if ($n) repRecount($db, strtolower($hash));   // mode does not matter: everything is zero now
     return $n;
 }

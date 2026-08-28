@@ -508,10 +508,16 @@ Two numbers on this card are diagnoses rather than knobs, and both are easy to m
 - **the socket's own drop counter** (`ss -ulnpm`, the `d<N>` in skmem) — how many announces were
   thrown away for exactly that reason.
 
-### Ratings (1.18.0)
+### Ratings (1.18.0, star mode 1.19.0)
 
-**Settings → Ratings.** Up or down on a torrent, in the Info panel and optionally as a column in the
-search results. **Off by default**, and signed-in accounts only unless you open it further.
+**Settings → Ratings.** An opinion on a torrent, in the Info panel and optionally as a column in the
+search results. **Off by default**, and signed-in accounts only unless you open it further. Ratings
+apply to **any hash the catalogue knows**, whitelisted or not — an opinion about a torrent is not a
+statement about whether this tracker serves it.
+
+Two modes. **Up or down** is a percentage and a bar. **Five stars** shows five and stores ten, so
+half a star is a real value somebody cast rather than one inferred from a percentage; hovering
+previews what a click would set, and leaving puts back what is actually stored.
 
 Counting is the easy part. A public voting button is the easiest thing on a site to automate, so four
 things stand in the way and none of them is sufficient alone: **one vote per identity enforced by a
@@ -525,6 +531,35 @@ internet. Headers can be, and this panel only reads one when the request arrived
 listed as a trusted proxy. What none of that fixes is one person with a VPN and a phone — IPv6 is
 bucketed to a /64, and the panel says anonymous votes are a weak signal rather than implying
 otherwise.
+
+### Writing to members, with formatting (1.19.0)
+
+**Users → Write to members.** Plain text, Markdown or BBCode, with a toolbar and Ctrl+B / Ctrl+I /
+Ctrl+K in the box. The preview is a round trip to the same function the janitor uses to build the
+mail — a preview drawn by different code is a guess about what will arrive. Mail clients drop
+`<style>` and usually `class`, so the renderer's output has its classes swapped for inline styles;
+change a rule on the site and the mail follows. The format is stored on each queued row, so a batch
+written in Markdown and sent after Markdown was switched off still arrives as its author saw it.
+
+Nothing is sent from the panel. Queueing writes rows; the janitor sends a few a minute, because this
+server has no relay in front of `mail()` and a burst from an address that normally sends a handful a
+day is what gets a domain filed under bulk.
+
+### Reviewing what people write (1.17.0, rewrites screen 1.19.0)
+
+**Whitelist → To review.** Two lists. **Submissions** are source links and descriptions waiting to be
+published — searchable by hash, name, link or a word from the text, and filterable to what was
+published or rejected, so "why is this public" can be answered without reading the database.
+**Rewrites** are proposed replacements for text that is already published, shown side by side with
+the current version, both rendered: a rewrite that reads tamer in source and worse on screen is the
+whole risk of accepting one. Applying keeps the version it replaces, so it can be undone.
+
+Everything is shown **rendered**, never as source. Reviewing markup means waving through whatever an
+image tag turns out to point at.
+
+A link the **importer** recorded (`whitelist.source_ref`, written when the forum posts a magnet) is
+shown in the same place as one typed into the form, marked as automatic — but only when it points at
+your own site. It never passed this queue, and an API client is not necessarily yours.
 
 ### Making a submission prove itself (1.18.0)
 

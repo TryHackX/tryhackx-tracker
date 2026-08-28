@@ -59,6 +59,7 @@ $res = indexSearchCatalogue($db, $cfg, [
 
 $repInResults = repEnabled($cfg) && repShowInResults($cfg);
 $repMin = repMinVotes($cfg);
+$repMode = repMode($cfg);
 
 $rows = [];
 foreach ($res['rows'] as $r) {
@@ -75,10 +76,13 @@ foreach ($res['rows'] as $r) {
     // Only when the operator asked for it, and only above the threshold: a column showing "100%"
     // next to a single vote would be worse than no column.
     if ($repInResults) {
-        $up = (int)($r['votes_up'] ?? 0);
-        $down = (int)($r['votes_down'] ?? 0);
-        $row['rep'] = ($up + $down) >= $repMin
-            ? ['pct' => (int)round((int)($r['score_x100'] ?? 0) / 100), 'total' => $up + $down]
+        // votes_count, not votes_up + votes_down: in star mode there is no "up" and no "down", and
+        // adding two columns that mean nothing there would produce a confident zero.
+        $cnt = (int)($r['votes_count'] ?? 0);
+        $row['rep'] = $cnt >= $repMin
+            ? ($repMode === 'stars'
+                ? ['mode' => 'stars', 'stars' => round((int)($r['score_x100'] ?? 0) / 100, 1), 'total' => $cnt]
+                : ['mode' => 'thumbs', 'pct' => (int)round((int)($r['score_x100'] ?? 0) / 100), 'total' => $cnt])
             : null;
     }
     $row['content_status'] = (string)($r['content_status'] ?? 'none');

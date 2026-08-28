@@ -210,5 +210,32 @@ check('an excerpt carries no markup and no HTML',
       !str_contains($ex, '<') && !str_contains($ex, '[b]') && !str_contains($ex, '**'), $ex);
 check('a long excerpt is cut and marked', mb_strlen(richtextExcerpt(str_repeat('word ', 100), 60)) <= 60);
 
+
+/* -- the link an importer recorded ---------------------------------------- */
+//
+// whitelist.source_ref never passes the review queue, so it may be published only when it points at
+// the operator's own site. Everything else is somebody else's importer writing a link onto a public
+// page, which is exactly what the queue exists to stop.
+
+$auto = fn(?string $json) => richtextAutoSourceUrl($json, $cfg);
+
+check('auto source: a link on a trusted domain is published',
+      $auto('{"url":"https://tryhackx.org/d/12-thread","post_id":3}') === 'https://tryhackx.org/d/12-thread');
+check('auto source: a subdomain of a trusted domain counts as trusted',
+      $auto('{"url":"https://forum.tryhackx.org/d/12"}') === 'https://forum.tryhackx.org/d/12');
+check("auto source: somebody else's domain is NOT published",
+      $auto('{"url":"https://elsewhere.example/post/1"}') === null);
+check('auto source: a javascript: URL is refused before the trust check',
+      $auto('{"url":"javascript:alert(1)"}') === null);
+check('auto source: plain http is refused like a typed link',
+      $auto('{"url":"http://tryhackx.org/d/12"}') === null);
+check('auto source: a ref with no url yields nothing',
+      $auto('{"post_id":3,"discussion_id":9}') === null);
+check('auto source: broken JSON yields nothing rather than an error',
+      $auto('{not json') === null);
+check('auto source: an empty ref yields nothing', $auto('') === null && $auto(null) === null);
+check('auto source: credentials in the URL are refused',
+      $auto('{"url":"https://user:pw@tryhackx.org/x"}') === null);
+
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

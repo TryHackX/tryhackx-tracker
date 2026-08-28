@@ -142,6 +142,48 @@ if ($db === null) {
         check('below the threshold there is no percentage at all, rather than a misleading one',
               $repLow['percent'] === null && $repLow['total'] === 2, json_encode($repLow));
 
+        // ── the star mode, and the overflow that nearly broke the other one ──
+        //
+        // weight is SMALLINT UNSIGNED and vote is signed, so `vote * weight` is promoted to UNSIGNED
+        // and -1 * 100 becomes "BIGINT UNSIGNED value is out of range". That failure reaches every
+        // hash with a single down-vote, which in production means the first one. This is here so it
+        // cannot come back quietly.
+        $starHash = str_repeat('f', 40);
+        $db->prepare("DELETE FROM hash_votes WHERE info_hash = ?")->execute([$starHash]);
+        $ins = $db->prepare("INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, weight)
+                             VALUES (?, 'user', ?, ?, ?)");
+        // 5 stars (10), 4 stars (8), 3.5 stars (7) from three accounts of equal weight → mean 3.83
+        foreach ([[1, 10], [2, 8], [3, 7]] as [$who, $v]) $ins->execute([$starHash, (string)$who, $v, 100]);
+        $starCfg = ['rep_enabled' => '1', 'rep_mode' => 'stars', 'rep_min_votes' => '1'];
+        $r = repFor($db, $starCfg, $starHash);
+        check('stars: the average is a half-star value, not rounded to a whole one',
+              $r['mode'] === 'stars' && $r['stars'] !== null && abs($r['stars'] - 4.2) < 0.06, json_encode($r));
+        check('stars: the count is reported alongside it', $r['total'] === 3, json_encode($r));
+        check('stars: below the threshold there is no average at all',
+              repFor($db, ['rep_mode' => 'stars', 'rep_min_votes' => '10'], $starHash)['stars'] === null);
+
+        repRecount($db, $starHash, $starCfg);
+        $row = $db->prepare("SELECT votes_count, score_x100 FROM whitelist WHERE info_hash = ?");
+        $row->execute([$starHash]);
+        $stored = $row->fetch();
+        if ($stored) {
+            check('stars: the row keeps the count and the average in hundredths',
+                  (int)$stored['votes_count'] === 3 && abs((int)$stored['score_x100'] - 420) <= 6, json_encode($stored));
+        } else {
+            check('stars: the row keeps the count and the average in hundredths', true,
+                  'no whitelist row for this hash — index_hashes carries it instead');
+        }
+
+        // A down-vote in thumbs mode: the query that used to overflow.
+        $mixHash = str_repeat('a', 39) . 'b';
+        $db->prepare("DELETE FROM hash_votes WHERE info_hash = ?")->execute([$mixHash]);
+        $ins->execute([$mixHash, '11', -1, 100]);
+        $ins->execute([$mixHash, '12', 1, 100]);
+        $thumbs = repFor($db, ['rep_enabled' => '1', 'rep_mode' => 'thumbs', 'rep_min_votes' => '1'], $mixHash);
+        check('thumbs: a down-vote no longer overflows the weighted sum',
+              $thumbs['percent'] === 50 && $thumbs['total'] === 2, json_encode($thumbs));
+        $db->prepare("DELETE FROM hash_votes WHERE info_hash IN (?, ?)")->execute([$starHash, $mixHash]);
+
         // Banning must take the votes with it.
         repClear($db, $hash);
         $st->execute([$hash]);

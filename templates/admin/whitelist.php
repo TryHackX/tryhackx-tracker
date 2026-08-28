@@ -49,14 +49,44 @@
 
         <!-- ===== Review queue: source links and descriptions waiting to be published ===== -->
         <div class="wl-view d-hidden" id="view-review">
-            <div class="admin-toolbar-card">
-                <div class="toolbar-row">
-                    <div class="toolbar-search"><span class="text-muted wl-small">Source links and descriptions written by submitters. <strong>The torrents are already registered</strong> &mdash; only the words are waiting. What you see below is rendered exactly as a visitor would see it, not as the source, because an image or a broken tag only shows itself after rendering.</span></div>
-                    <div class="toolbar-right"><span id="rv-total" class="text-muted wl-total"></span></div>
-                </div>
+            <div class="rv-subtabs" id="rv-subtabs">
+                <button type="button" class="source-tab active" data-sub="queue"><i class="bi bi-inbox"></i> Submissions <span id="rv-sub-count" class="wl-tab-count"></span></button>
+                <button type="button" class="source-tab" data-sub="edits"><i class="bi bi-pencil-square"></i> Rewrites <span id="rv-edits-count" class="wl-tab-count"></span></button>
             </div>
-            <div id="rv-list"></div>
-            <div class="admin-pagination" id="rv-pagination"></div>
+
+            <div id="rv-pane-queue">
+                <div class="admin-toolbar-card">
+                    <div class="toolbar-row">
+                        <div class="toolbar-search">
+                            <span class="toolbar-search-icon"><i class="bi bi-search"></i></span>
+                            <div class="search-input-wrap">
+                                <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="rv-search" placeholder="Hash, name, link or a word from the text...">
+                                <button type="button" class="search-clear-btn" id="rv-search-clear" title="Clear search"><i class="bi bi-x-lg"></i></button>
+                            </div>
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="rv-status" title="Which items to show">
+                                <option value="pending">Waiting for a decision</option>
+                                <option value="approved">Published</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="all">Everything decided or waiting</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-right"><span id="rv-total" class="text-muted wl-total"></span></div>
+                    </div>
+                    <div class="rv-explain wl-small text-muted">Source links and descriptions written by submitters. <strong>The torrents are already registered</strong> &mdash; only the words are waiting. Everything below is rendered exactly as a visitor would see it, not as the source, because an image or a broken tag only shows itself after rendering.</div>
+                </div>
+                <div id="rv-list"></div>
+                <div class="admin-pagination" id="rv-pagination"></div>
+            </div>
+
+            <div id="rv-pane-edits" class="d-hidden">
+                <div class="admin-toolbar-card">
+                    <div class="toolbar-row">
+                        <div class="toolbar-search"><span class="text-muted wl-small">Rewrites proposed for descriptions that are already published. <strong>Nothing changes until you apply one</strong>, and applying keeps the version it replaces, so an accepted rewrite can be undone by accepting the old text back.</span></div>
+                        <div class="toolbar-right"><span id="rv-edits-total" class="text-muted wl-total"></span></div>
+                    </div>
+                </div>
+                <div id="rv-edits-list"></div>
+            </div>
         </div>
 
         <!-- ===== Whitelist view ===== -->

@@ -3,6 +3,7 @@
  * POST admin/bulk_send — write to an audience.
  *
  *   {"op":"preview","audience":{...}}
+ *   {"op":"render","body":"…","format":"markdown"}         — what the HTML half will look like
  *   {"op":"test","subject":"…","body":"…"}                 — one copy, to the admin's own address
  *   {"op":"queue","password":"…","audience":{…},"subject":"…","body":"…","notify":bool,"email":bool}
  *   {"op":"status","batch_id":"…"} | {"op":"batches"} | {"op":"cancel","password":"…","batch_id":"…"}
@@ -18,7 +19,7 @@
 requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? '');
-if (!in_array($op, ['preview', 'test', 'queue', 'status', 'batches', 'cancel'], true)) {
+if (!in_array($op, ['preview', 'render', 'test', 'queue', 'status', 'batches', 'cancel'], true)) {
     jsonResponse(['error' => 'Unknown operation'], 400);
 }
 
@@ -26,8 +27,22 @@ $audience = (array)($input['audience'] ?? []);
 $subject  = (string)($input['subject'] ?? '');
 $body     = (string)($input['body'] ?? '');
 
+// 'plain' is always available; the two markup formats are the ones the site has switched on, so the
+// composer cannot offer a syntax the renderer has been told not to accept.
+$bulkFormats = array_merge(['plain'], richtextFormats($cfg));
+$format = (string)($input['format'] ?? 'plain');
+if (!in_array($format, $bulkFormats, true)) $format = 'plain';
+
+if ($op === 'render') {
+    // The preview goes through the SAME function the janitor will use. A preview drawn by different
+    // code is a guess about the mail, and the whole point of previewing is not to guess.
+    jsonResponse(['success' => true, 'format' => $format, 'formats' => $bulkFormats,
+                  'html' => bulkBodyHtml($body, $format, $cfg)]);
+}
+
 if ($op === 'preview') {
-    jsonResponse(['success' => true, 'enabled' => bulkMailEnabled($cfg)] + bulkPreview($db, $cfg, $audience));
+    jsonResponse(['success' => true, 'enabled' => bulkMailEnabled($cfg), 'formats' => $bulkFormats]
+                 + bulkPreview($db, $cfg, $audience));
 }
 
 if ($op === 'batches') {
@@ -59,7 +74,7 @@ if ($op === 'test') {
     if (trim($subject) === '' || trim($body) === '') jsonResponse(['error' => 'A subject and a message are both required.'], 400);
     $unsub = getUnsubscribeUrl($to, $cfg);
     $html = buildEmailHtml(['title' => $subject, 'greeting' => '',
-                            'body' => nl2br(sanitize($body)), 'unsubscribe_url' => $unsub], $cfg);
+                            'body' => bulkBodyHtml($body, $format, $cfg), 'unsubscribe_url' => $unsub], $cfg);
     $ok = sendEmail($to, $subject, $body, $html, $cfg, $unsub);
     jsonResponse(['success' => $ok, 'to' => $to,
                   'message' => $ok ? 'Sent one copy to ' . $to . '.' : 'The mailer refused it.']);
@@ -86,7 +101,7 @@ if ($wantNotify) {
 }
 
 if ($wantMail) {
-    $r = bulkQueue($db, $cfg, $audience, $subject, $body);
+    $r = bulkQueue($db, $cfg, $audience, $subject, $body, $format);
     if (!empty($r['error'])) jsonResponse(['error' => $r['error']], 400);
     $out['queued']   = $r['queued'];
     $out['skipped']  = $r['skipped'];

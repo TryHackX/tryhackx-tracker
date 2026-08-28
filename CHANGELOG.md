@@ -4,6 +4,123 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.19.0] — 2026-08-28 (schema v22 + v23)
+
+### Added — five stars, in half steps
+
+A second rating mode beside up/down. Five stars on screen, **ten steps underneath**, because that is
+what "half a star" actually means: 3.5 is a value somebody can cast, not one inferred from a
+percentage. Hovering previews what a click would set and leaving puts back what is really stored —
+a widget that keeps the last hovered value is telling you something you never did.
+
+`votes_count` is a new column rather than a reuse of `votes_up`. In star mode there is no "up" and no
+"down"; there is a count and an average. Reusing one column to mean "the count here, up-votes there"
+is exactly the overload that produces a wrong number two releases later, in whichever branch nobody
+re-read.
+
+Ratings apply to **any hash the catalogue knows**, whitelisted or not, and the operator can let
+anonymous visitors vote. An opinion about a torrent is not a statement about whether this tracker
+serves it.
+
+Fixed while adding it: `SUM(vote * weight)` overflowed. `weight` is `SMALLINT UNSIGNED`, so MySQL
+promoted the product to unsigned and `-1 * 100` became a number the size of the universe. The first
+down-vote on a live tracker would have taken the ratings down with it. Now `CAST(weight AS SIGNED)`,
+with a test that casts one.
+
+### Added — formatting in bulk messages
+
+Markdown or BBCode in a message to every member, with a toolbar and **Ctrl+B / Ctrl+I / Ctrl+K**
+working in the box. A `<textarea>` gets none of those shortcuts for free, so the keys and the buttons
+run the same wrapper; a `contenteditable` box would have given Ctrl+B for nothing and cost a second
+renderer, a paste sanitiser and an HTML whitelist to police.
+
+The preview is a round trip to `bulkBodyHtml()` — the same function the janitor calls when it builds
+the mail. A preview drawn by different code is a guess about what will arrive.
+
+Mail clients drop `<style>` and usually drop `class` too, so the site's renderer output is run
+through an inliner: the markup is produced exactly as on the site, then the handful of classes are
+swapped for the styles they stand for. Change a rule on the site and the mail follows.
+
+The format is stored **per queued row**, not read from settings at send time. A batch written in
+Markdown and sent an hour after somebody switched Markdown off still arrives as its author saw it.
+
+### Added — the review queue's missing half
+
+`admin/wl_content` has had `edits`, `edit_apply` and `edit_reject` since rewrite proposals shipped,
+and Settings has pointed at "Whitelist → To review → Rewrites" ever since. **That screen did not
+exist.** It does now: the published text and the proposed one side by side, both rendered, because a
+rewrite that reads tamer in source and worse on screen is the entire risk of accepting one.
+
+The queue itself gained a search (hash, name, link, or a word from the text) and a filter for
+published and rejected items, so "why is this public" and "who rejected mine" can be answered
+without reading the database by hand. The tab badge keeps counting what is **waiting** whatever the
+filter shows — a badge that followed the filter would read zero with a full queue behind it.
+
+### Added — the link an importer recorded now reaches the public page
+
+When the forum posts a magnet it records the thread it came from in `whitelist.source_ref`. That
+answers the same question as a source link typed into the form, and it was visible only to admins.
+
+It is now shown in the same place, marked as automatic — but only when it points at **this
+operator's own site**. It never passed the review queue, and an API client is not necessarily run by
+the operator; anybody else's importer can still record a link, and that one waits for a moderator
+like any other.
+
+### Fixed — a single isolated sample turned on markers for a whole chart
+
+`points.show` in uPlot returns a **boolean**; `points.filter` returns the index array. The previous
+fix returned the array from `show`, and an array is truthy — so one isolated sample switched markers
+on for every point in the series. That is why 7d and 2w were speckled and 24h was clean: those
+ranges happen to contain exactly one isolated sample (measured on the live database: 14 gaps in the
+rate series over a week, one of them isolated).
+
+There is now a test that reproduces uPlot's own call site — `(show || filter) && paint(filter)` —
+rather than checking that the right indices come back, because the first version returned the right
+indices and still painted everything.
+
+### Fixed — the settings search drew sections on top of each other
+
+Bootstrap builds its gutter from a negative margin on `.row` plus matching padding on the cells.
+Hide every cell and the padding goes with them; the negative margin stays. So a row the search
+emptied did not collapse — it pulled everything after it a gutter's width **upwards**. Three emptied
+rows in one section (Backups managed that on most queries) dragged the next row 48 px up, over the
+rows above it.
+
+Measured on production before and after: six of fifteen sample queries produced a real overlap;
+after the fix, none did, in either place.
+
+### Fixed — the Traffic page said Apply would fail, and it does not
+
+"That directory is read-only … so Apply would fail from here" described something that does not
+happen: the helper reports `deferred`, the panel records the change, and the janitor writes the file
+within a minute. The message made a working feature look broken. The load-per-thread chart also
+moved to its own full-width tile — five short tiles and one tall one in the same auto-fill grid left
+a hole the height of the tall one, which is the "5 on top, 1 below" that never looked right.
+
+### Changed — appearance
+
+- **The Info panel** is now four bands: the swarm numbers first and largest, then the chips that
+  qualify them, then prose and rating, then the record. Seeders and leechers used to be a sentence
+  three quarters of the way down a flat list, below "Times seen". Reading order is a claim about
+  importance, and that one was wrong.
+- **The search results page** is wider (86em) and the actions column fits its three buttons.
+  Measured before: the Info button's right edge sat 22 px outside its cell.
+- **Email management** on the account page: the two mail switches were rows in the Profile table,
+  where a two-line explanation had to fit a 272 px cell and made one row 137 px tall. They are
+  choices, not facts about the account, and now they have the card's width and read as a short list
+  of decisions.
+- **Review cards** lead with their state — a coloured edge *and* an icon and a word, because a
+  colour alone is not a label — with the identifying facts on their own line and the parts of a
+  submission separated.
+- Every `<option>` in Settings now says what it means. A menu of bare "On" / "Off" is what Chrome's
+  auto-translate turned into meaningless two-letter particles, and no `<option>` in the form is a
+  bare word any more.
+
+### Changed — permissions
+
+`rating.vote`, `content.submit` and `content.propose` exist as real permissions rather than being
+implied by whatever else an account could do. Legacy installs keep the behaviour they had.
+
 ## [1.18.0] — 2026-08-28 (schema v21)
 
 ### Added — ratings, and the four things that stop them being worthless

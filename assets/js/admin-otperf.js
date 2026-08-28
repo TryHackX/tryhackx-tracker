@@ -248,8 +248,14 @@
         }
         dparts.push(el('div', { className: 'wl-small text-muted', text: s.dropin || '' }));
         if (s.dropin_writable === false) {
+            // The old wording said Apply "would fail from here", and that is simply not what happens:
+            // the helper reports `deferred`, the panel records what was asked for, and the janitor
+            // writes the file within a minute. Saying it fails made a working feature look broken.
             dparts.push(el('div', { className: 'wl-small text-muted',
-                text: 'That directory is read-only for the panel’s PHP (systemd ProtectSystem), so Apply would fail from here.' }));
+                text: 'This directory is read-only for the panel’s PHP (systemd ProtectSystem), so Apply '
+                    + 'does not write it directly — it records the change and the janitor writes it within '
+                    + 'a minute. Nothing is broken; “not written” only means the panel has not applied any '
+                    + 'override yet.' }));
         }
         g.appendChild(kv('Panel drop-in', dparts));
 
@@ -274,7 +280,10 @@
                 row.appendChild(el('span', { className: 'ot-thread-pct', text: t.pct.toFixed(0) + '%' }));
                 box.appendChild(row);
             });
-            const wrap = el('div', { className: 'wl-kv-item' });
+            // Its own full-width tile below the others. Five small tiles and one tall one sharing an
+            // auto-fill grid leaves a hole the size of the tall one; the bar chart wants the width
+            // anyway, and the small facts want to sit together.
+            const wrap = el('div', { className: 'wl-kv-item ot-load-tile' });
             wrap.appendChild(el('div', { className: 'wl-kv-k', text: 'Load per thread' }));
             wrap.appendChild(box);
             g.appendChild(wrap);

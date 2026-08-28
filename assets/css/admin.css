@@ -1596,13 +1596,38 @@ input[type="number"] {
 /* ── the review queue, and rendered submitter text wherever it appears ──────
    The description is shown as a visitor would see it. That means it needs real styling: reviewing
    raw source is how an image tag gets waved through because nobody saw what it pointed at. */
-.rv-card { border: 1px solid rgba(255,255,255,0.10); border-radius: 6px; padding: 0.85rem 1rem; margin-bottom: 0.9rem; background: rgba(255,255,255,0.02); }
-.rv-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem; margin-bottom: 0.5rem; }
+/* Review queue.
+   A card used to be a run-on line: name, hash, date and then the text, with nothing saying what the
+   card WAS. Now the state leads — a coloured left edge plus an icon and a word, because a colour on
+   its own is not a label — the identifying facts sit on a second line, and the parts of the
+   submission are separated so a moderator can see where the link ends and the prose begins. */
+.rv-subtabs { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.rv-card { border: 1px solid rgba(255,255,255,0.10); border-left-width: 3px; border-radius: 6px; padding: 0.85rem 1rem; margin-bottom: 0.9rem; background: rgba(255,255,255,0.02); }
+.rv-st-wait { border-left-color: #c9a227; }
+.rv-st-ok   { border-left-color: #3fa45b; }
+.rv-st-no   { border-left-color: #b4433c; }
+.rv-head { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.6rem; }
+.rv-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.rv-name { font-size: 0.95rem; overflow-wrap: anywhere; }
+.rv-state { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; }
+.rv-st-wait .rv-state { color: #d8b13a; }
+.rv-st-ok   .rv-state { color: #6fce8b; }
+.rv-st-no   .rv-state { color: #ff8a8a; }
+.rv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .rv-hash { font-size: 0.72rem; opacity: 0.75; word-break: break-all; }
+.rv-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: #7f8c9a; margin-bottom: 0.2rem; }
+.rv-sec { margin: 0.55rem 0; padding-top: 0.55rem; border-top: 1px solid rgba(255,255,255,0.07); }
 .rv-src { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.4rem 0; }
+.rv-src .rv-label { margin-bottom: 0; }
 .rv-url { font-size: 0.76rem; word-break: break-all; background: rgba(0,0,0,0.3); padding: 0.15rem 0.4rem; border-radius: 3px; }
 .rv-desc { margin: 0.35rem 0 0.7rem; }
-.rv-acts { display: flex; gap: 0.18rem; flex-wrap: wrap; }
+.rv-note { margin: 0.5rem 0; padding: 0.45rem 0.65rem; border-radius: 4px; background: rgba(180,67,60,0.12); font-size: 0.82rem; }
+.rv-acts { display: flex; gap: 0.35rem; flex-wrap: wrap; padding-top: 0.6rem; border-top: 1px solid rgba(255,255,255,0.07); }
+.rv-explain { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #262b31; line-height: 1.5; }
+/* Old and new next to each other; stacked when there is not room for two readable columns. */
+.rv-diff { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 0.9rem; margin: 0.5rem 0; }
+.rv-diff-col { padding: 0.6rem 0.7rem; border: 1px solid rgba(255,255,255,0.08); border-radius: 5px; background: rgba(0,0,0,0.18); }
+.rv-diff-col .rv-desc { margin-bottom: 0; }
 
 /* Rendered submitter text. Everything is bounded: an image that decided to be 4000 pixels wide, or a
    code block with a 500-character line, must not push the rest of the page sideways. */
@@ -1636,3 +1661,27 @@ input[type="number"] {
 .leave-box h3 { margin: 0 0 0.6rem; font-size: 1.05rem; }
 .leave-url { display: block; margin: 0.6rem 0 0.9rem; padding: 0.5rem 0.6rem; border-radius: 4px; background: rgba(0,0,0,0.35); font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.76rem; word-break: break-all; }
 .leave-acts { display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; }
+
+/* The load chart gets the full row.
+   Five short tiles and one tall one in the same auto-fill grid leaves a gap as tall as the chart,
+   which is what "5 on top, 1 below" looked like. Spanning every column puts the bars under the
+   facts on purpose instead of by accident, and the chart reads better wide anyway. */
+.wl-status-grid .ot-load-tile { grid-column: 1 / -1; }
+/* Twelve bars stacked in one column make the tile taller than the five above it put together.
+   Given the whole row, they wrap into columns and the tile stays about as tall as its neighbours. */
+.wl-status-grid .ot-load-tile .wl-kv-v { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.1rem 1.2rem; }
+.wl-status-grid .ot-load-tile .wl-kv-v > .wl-small { grid-column: 1 / -1; }
+
+/* Bulk message composer: the label, the formatting buttons and the format select share one line, so
+   the toolbar reads as belonging to the box under it rather than floating above the page. */
+.bm-msg-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.35rem; }
+.bm-tools { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.bm-tools .btn { padding: 0.1rem 0.45rem; line-height: 1.5; }
+.bm-fmt { width: auto; margin-left: auto; }
+.bm-preview-wrap { margin-top: 0.6rem; border: 1px solid #333; border-radius: 6px; overflow: hidden; }
+.bm-preview-head { padding: 0.3rem 0.7rem; background: #1b1b1b; border-bottom: 1px solid #333; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa4b2; }
+/* Light, because the mail template is light. A preview on a dark panel that arrives white in the
+   inbox is a preview of the wrong thing. */
+.bm-preview { padding: 0.8rem 0.9rem; background: #fff; color: #1c1e21; font-size: 0.88rem; line-height: 1.55; max-height: 22rem; overflow: auto; }
+.bm-preview a { color: #1a56a8; }
+.bm-preview img { max-width: 100%; height: auto; }

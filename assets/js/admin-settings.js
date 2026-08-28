@@ -67,6 +67,7 @@
         return {
             el, i, anchor,
             items: cells.concat(extras),
+            rows: [...el.querySelectorAll('.row')],
             group: el.dataset.group || '',
             title: norm(el.dataset.title || textOf(el.querySelector('h5'))),
             groupText: '',
@@ -126,8 +127,24 @@
 
     function resetSection(sec, visible) {
         sec.items.forEach(it => it.el.classList.remove('d-hidden', 'settings-hit'));
+        sec.rows.forEach(r => r.classList.remove('d-hidden'));
         sec.el.classList.remove('settings-section-hit');
         show(sec.el, visible);
+    }
+    /**
+     * A .row whose every cell the search hid must be hidden itself.
+     *
+     * Bootstrap builds the gutter out of a negative margin on .row and a matching padding on its
+     * cells. Hide all the cells and the padding goes with them, but the negative margin stays — so an
+     * emptied row does not merely collapse, it pulls everything after it a gutter's width UPWARDS.
+     * Three emptied rows in a section (Backups does this on most queries) pulled the next row 48 px
+     * up, straight over the rows above it. That is the "two things drawn on top of each other".
+     */
+    function syncRows(sec) {
+        sec.rows.forEach(row => {
+            const anyVisible = [...row.children].some(c => !c.classList.contains('d-hidden'));
+            row.classList.toggle('d-hidden', !anyVisible);
+        });
     }
     /** Put the sections back in their original document order (search reorders them). */
     function restoreOrder() {
@@ -196,6 +213,7 @@
                 item.el.classList.toggle('d-hidden', !hit && !inHit);
                 item.el.classList.toggle('settings-hit', hit);
             });
+            syncRows(sec);
         });
 
         // best matches first (only inside the form — the credentials block is its own <form> and

@@ -157,6 +157,7 @@ function settingsCatalogKeywords(): array {
         'desc_allow_markdown'    => 'description format markdown allowed',
         'rate_limit_preview'     => 'description preview rate limit per minute render bbcode markdown',
         'rep_enabled'            => 'reputation rating vote up down score percent thumbs',
+        'rep_mode'               => 'rating mode stars thumbs up down five star half star ten point',
         'rep_who_can_vote'       => 'who can rate vote anonymous logged in users only off',
         'rep_show_in_results'    => 'show rating score on search results list column',
         'rep_min_votes'          => 'minimum votes before showing a score percent threshold',

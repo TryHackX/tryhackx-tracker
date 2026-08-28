@@ -1633,13 +1633,40 @@ footer p { margin: 0.25rem 0; }
 .acc-badge-ok { background: rgba(76, 175, 80, 0.2); color: var(--success); border: 1px solid var(--success); }
 .acc-badge-warn { background: rgba(255, 152, 0, 0.15); color: var(--warning); border: 1px solid var(--warning); }
 .acc-verify-note { font-size: 0.8rem; margin: 0.6rem 0 0; }
+
+/* Email management.
+   The address and its badge share a line that wraps as a unit, so a long address never breaks in
+   the middle of the domain; the resend button sits under it rather than being squeezed in beside. */
+.acc-email-line { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.acc-email-addr { overflow-wrap: anywhere; }
+.acc-email-line .acc-badge { margin: 0; }
+.acc-email-resend { margin-top: 0.35rem; }
+
+/* The two mail switches were rows in the Profile table, where a two-line explanation had to fit a
+   272 px cell and made one row 137 px tall. They are choices, not facts about the account, so they
+   get the card's full width and read as a short list of decisions. */
+.acc-mail-prefs { margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px solid var(--border); }
+.acc-sub { margin: 0 0 0.5rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); font-weight: 600; }
+/* .search-check is an inline-flex nowrap toolbar control and is defined further down this file, so
+   these need the extra class to win: without it the rows shrink-wrap to their text and two rows of
+   the same list come out different widths. */
+.acc-mail-prefs .acc-pref-row { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.4rem 0; white-space: normal; }
+.acc-mail-prefs .acc-pref-row .search-check-box { margin-top: 0.18rem; }
+.acc-pref-row + .acc-pref-row { border-top: 1px solid var(--border); }
+.acc-pref-text { display: flex; flex-direction: column; gap: 0.1rem; }
+.acc-pref-name { font-size: 0.9rem; }
+.acc-pref-state { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.acc-pref-note { font-size: 0.78rem; color: var(--text-muted); line-height: 1.45; }
 .acc-notif-note { font-size: 0.78rem; margin-top: 0.5rem; }
 .acc-notif-pagination { justify-content: flex-start; }
 .user-card { max-width: 30em; margin: 1.5rem auto; padding: 1.5rem 2rem 1rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
 .user-card .user-form { margin-top: 0.5rem; }
 
 /* === Search page (?action=search) === */
-body.page-search .container { max-width: 72em; }
+/* Wider than the reading pages. This table carries a name, four numeric columns and three action
+   buttons; at 72em the actions column could not hold them and the third button hung 22 px outside
+   the cell (measured, not guessed). Prose stays narrow elsewhere — this page is a table. */
+body.page-search .container { max-width: 86em; }
 .search-panel { margin: 1rem 0 0; }
 /* toolbar sits ON the table (same pattern as the admin panels): joined card above the rows */
 .search-toolbar {
@@ -1706,7 +1733,9 @@ body.page-search .container { max-width: 72em; }
 .search-c-size { width: 6.5em; }
 .search-c-sl { width: 6.5em; }
 .search-c-seen { width: 10em; }
-.search-c-actions { width: 10.5em; }
+/* Three buttons at their real rendered widths plus the cell padding. Measured against the widest
+   labels rather than eyeballed, with a little headroom so a longer label wraps instead of escaping. */
+.search-c-actions { width: 13.5em; }
 .search-name { word-break: break-word; }
 .search-name > span:first-child { margin-right: 0.15rem; }
 .search-num { white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -1725,8 +1754,10 @@ button.search-files-chip { cursor: pointer; transition: border-color 0.15s, colo
 button.search-files-chip:hover { border-color: var(--accent); color: var(--accent); }
 /* fixed-width action buttons — "Copy" → "✓" must not change the column width */
 .search-actions { white-space: nowrap; }
-.search-act-btn { min-width: 4.2em; text-align: center; padding: 0.25rem 0.4rem; margin-right: 0.35rem; }
-.search-act-btn:last-child { margin-right: 0; }
+/* The cell lays the buttons out, so a set that does not fit wraps onto a second line inside the
+   column instead of spilling over the one beside it. */
+.search-c-actions-cell { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.search-act-btn { min-width: 4.2em; text-align: center; padding: 0.25rem 0.4rem; }
 .search-act-btn.copied { color: var(--success); border-color: var(--success); }
 .search-note { margin-top: 0.5rem; }
 /* pagination in the admin style (First/Prev/page box/Next/Last) */
@@ -1757,6 +1788,11 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 }
 .files-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
 .files-head h3 { margin: 0; font-size: 0.95rem; color: var(--accent); word-break: break-word; }
+/* The Info dialog's title is the torrent's name, which is the thing being described — it earns a
+   little more weight than the word "Files" does. */
+.info-box .files-head { padding: 0.9rem 1.1rem; }
+.info-box .files-head h3 { font-size: 1.05rem; line-height: 1.35; }
+.info-box .files-body { padding: 1rem 1.1rem 1.1rem; }
 .files-close { background: transparent; border: 0; color: var(--text-muted); font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 0.25rem; }
 .files-close:hover { color: var(--error); }
 .files-body { padding: 0.5rem 1rem 1rem; overflow-y: auto; font-size: 0.85rem; }
@@ -1890,10 +1926,33 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .leave-url { display: block; margin: 0.6rem 0 0.9rem; padding: 0.5rem 0.6rem; border-radius: 4px; background: rgba(0,0,0,0.35); font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; word-break: break-all; }
 .leave-acts { display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; }
 
-/* The Info panel: a wider box than the file list, because it carries prose as well as a tree. */
+/* The Info panel: a wider box than the file list, because it carries prose as well as a tree.
+   The panel is built as four bands — the swarm numbers, the qualifying chips, the prose and rating,
+   then the record — separated by rules rather than by guesswork about margins, so a torrent with no
+   description and a torrent with three paragraphs both read as the same panel. */
 .info-box { max-width: 46rem; }
-.info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.4rem 1.2rem; margin: 0.8rem 0; }
-.info-kv { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.25rem 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.info-section { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); }
+.info-section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.info-sub { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.55; margin-bottom: 0.4rem; }
+
+/* The swarm strip. These are the numbers the panel exists for, so they are the biggest thing in it
+   and they are read before the prose, not after it. Tabular figures so a refresh that changes 9 to
+   10 does not shuffle the row sideways. */
+.info-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); gap: 0.5rem; }
+.info-stat { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.55rem 0.6rem; border-radius: 6px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.07); }
+.info-stat-v { font-size: 1.15rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.info-stat-l { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.6; }
+.info-stat-seed .info-stat-v { color: #6fce8b; }
+.info-stat-leech .info-stat-v { color: #e0b85c; }
+
+.info-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.6rem; }
+.info-chip { display: inline-block; padding: 0.12rem 0.55rem; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); font-size: 0.75rem; opacity: 0.85; }
+.info-chip-ok { border-color: rgba(63,164,91,0.55); color: #6fce8b; opacity: 1; }
+.info-chip-auto { border-style: dashed; opacity: 0.7; }
+.info-refresh { margin-left: auto; }
+
+.info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.1rem 1.2rem; }
+.info-kv { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.3rem 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
 .info-kv-label { opacity: 0.7; font-size: 0.85rem; }
 .info-kv-value { font-size: 0.88rem; text-align: right; }
 .info-hash { font-size: 0.7rem; word-break: break-all; }
@@ -1923,3 +1982,22 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .wl-probe-wait { border-left-color: #c9a227; }
 .wl-probe-ok   { border-left-color: #3fa45b; }
 .wl-probe-bad  { border-left-color: #b4433c; }
+
+/* Five stars, half a star at a time.
+   The star is one glyph with a second copy clipped over it: filling half a character is the whole
+   point of a half-star scale, and two stacked glyphs do it without an image or a font icon. */
+.stars-wrap { margin: 0.2rem 0; }
+.stars { display: inline-flex; gap: 0.15rem; line-height: 1; }
+.star { position: relative; width: 1.35rem; height: 1.35rem; display: inline-block; }
+.star::before,
+.star::after { content: '★'; position: absolute; inset: 0; font-size: 1.3rem; line-height: 1; }
+.star::before { color: rgba(255, 255, 255, 0.18); }               /* the empty star underneath */
+.star::after  { color: #f0b429; width: 0; overflow: hidden; }     /* the filled one, clipped */
+.star-half::after { width: 50%; }
+.star-full::after { width: 100%; }
+.stars-live .star { cursor: pointer; }
+.star-hit { position: absolute; top: 0; height: 100%; width: 50%; padding: 0; margin: 0; border: 0; background: none; cursor: pointer; z-index: 1; }
+.star-hit-l { left: 0; }
+.star-hit-r { right: 0; }
+.star-hit:focus-visible { outline: 2px solid #4a9eff; outline-offset: 1px; border-radius: 2px; }
+.search-rep-stars { color: #f0b429; white-space: nowrap; }

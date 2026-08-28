@@ -26,7 +26,30 @@ if ($op === 'list') {
     $page = max(1, (int)($input['page'] ?? 1));
     $per  = 25;
     $off  = ($page - 1) * $per;
-    $total = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE content_status = 'pending'")->fetchColumn();
+
+    // What to show. 'pending' is the queue; the other two are the record of what was decided, which
+    // is the only way to answer "why is this published" or "who rejected mine" without reading the
+    // database by hand.
+    $status = (string)($input['status'] ?? 'pending');
+    if (!in_array($status, ['pending', 'approved', 'rejected', 'all'], true)) $status = 'pending';
+    $where  = $status === 'all' ? "content_status <> 'none'" : "content_status = ?";
+    $args   = $status === 'all' ? [] : [$status];
+
+    // A hash prefix, a name, or a word from the text. The queue is small, so this is a LIKE and not
+    // a full-text index; if it ever stops being small the index goes on `name`, not on `description`.
+    $search = trim((string)($input['search'] ?? ''));
+    if ($search !== '') {
+        $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $search) . '%';
+        $where .= " AND (info_hash LIKE ? OR name LIKE ? OR source_url LIKE ? OR description LIKE ?)";
+        array_push($args, $like, $like, $like, $like);
+    }
+
+    $cs = $db->prepare("SELECT COUNT(*) FROM whitelist WHERE $where");
+    $cs->execute($args);
+    $total = (int)$cs->fetchColumn();
+    // The tab badge counts what is WAITING, whatever the current filter shows. A badge that follows
+    // the filter would read 0 while a queue sat behind it.
+    $waiting = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE content_status = 'pending'")->fetchColumn();
     // Worst first. A moderator working through a queue should meet the things people have already
     // complained about before the things nobody has an opinion on — the queue is not a mailbox, and
     // oldest-first spends attention in the order the abuse arrived rather than where it matters.
@@ -34,12 +57,13 @@ if ($op === 'list') {
     // the queue on the strength of nobody having voted.
     $st = $db->prepare(
         "SELECT id, info_hash, name, source, source_url, description, description_format,
-                content_status, created_at, votes_up, votes_down, score_x100
-           FROM whitelist WHERE content_status = 'pending'
-          ORDER BY CASE WHEN (votes_up + votes_down) = 0 THEN 5000 ELSE score_x100 END ASC,
-                   (votes_up + votes_down) DESC, created_at ASC
+                content_status, content_rejected_note, created_at, votes_up, votes_down,
+                votes_count, score_x100
+           FROM whitelist WHERE $where
+          ORDER BY CASE WHEN votes_count = 0 THEN 5000 ELSE score_x100 END ASC,
+                   votes_count DESC, created_at ASC
           LIMIT $per OFFSET $off");
-    $st->execute();
+    $st->execute($args);
     $rows = $st->fetchAll();
     // The rendered HTML is built here, by the same renderer the public page uses, so a moderator is
     // looking at exactly what a visitor would see — not at the source, where a broken tag or an
@@ -52,6 +76,7 @@ if ($op === 'list') {
     $edits = (int)$db->query("SELECT COUNT(*) FROM wl_content_edits WHERE status = 'pending'")->fetchColumn();
     jsonResponse(['success' => true, 'rows' => $rows, 'total' => $total, 'page' => $page,
                   'pages' => max(1, (int)ceil($total / $per)),
+                  'status' => $status, 'waiting' => $waiting,
                   'edits_pending' => $edits,
                   'autopublish' => ($cfg['wl_content_autopublish'] ?? '0') === '1',
                   'review_on' => ($cfg['wl_content_review'] ?? '1') === '1']);

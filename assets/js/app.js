@@ -2376,7 +2376,14 @@ async function loadStatsHome(forceSync = false) {
                 if (json.rep_in_results) {
                     const repTd = document.createElement('td');
                     repTd.className = 'search-num search-rep';
-                    if (r.rep) {
+                    if (r.rep && r.rep.mode === 'stars') {
+                        // Compact in a table cell: the number, then the glyph. Five drawn stars in
+                        // every row of a fifty-row table is noise, and the tooltip carries the count.
+                        repTd.className += ' search-rep-stars';
+                        repTd.textContent = r.rep.stars.toFixed(1) + ' ★';
+                        repTd.title = r.rep.stars.toFixed(1) + ' out of 5, from ' + r.rep.total
+                                    + (r.rep.total === 1 ? ' rating' : ' ratings');
+                    } else if (r.rep) {
                         // The count comes with the percentage, always. A column that shows only
                         // "100%" makes one vote look like four hundred.
                         repTd.className += r.rep.pct >= 50 ? ' search-rep-up' : ' search-rep-down';
@@ -2394,7 +2401,7 @@ async function loadStatsHome(forceSync = false) {
                 tr.appendChild(seenTd);
                 if (canMagnet) {
                     const magTd = document.createElement('td');
-                    magTd.className = 'search-actions';
+                    magTd.className = 'search-actions search-c-actions-cell';
                     if (r.info_hash) {
                         const a = document.createElement('a');
                         a.href = magnetFor(r.info_hash, r.name);
@@ -2560,6 +2567,84 @@ async function loadStatsHome(forceSync = false) {
             return d;
         }
 
+        /**
+         * Five stars, half a star at a time.
+         *
+         * Ten clickable halves rather than five stars: the storage is in halves and the pointer has
+         * to be able to reach one, or "3.5" would be a value nobody can actually cast. Hovering
+         * previews what a click would set, which is the whole reason a star widget feels different
+         * from a number field — and leaving restores what is really stored, so a hover never lies
+         * about the current state.
+         */
+        function buildStars(r, json, hash) {
+            const wrap = document.createElement('div');
+            wrap.className = 'stars-wrap';
+
+            const row = document.createElement('div');
+            row.className = 'stars' + (json.can_vote ? ' stars-live' : '');
+            row.setAttribute('role', json.can_vote ? 'group' : 'img');
+
+            const shown = r.stars === null ? 0 : r.stars;
+            const mine = json.my_vote > 0 ? json.my_vote / 2 : 0;
+
+            // Paint to a value in stars (0..5), filling halves.
+            const paint = (value) => {
+                [...row.querySelectorAll('.star')].forEach((st, i) => {
+                    const full = value >= i + 1;
+                    const half = !full && value >= i + 0.5;
+                    st.classList.toggle('star-full', full);
+                    st.classList.toggle('star-half', half);
+                });
+            };
+
+            for (let i = 0; i < 5; i++) {
+                const st = document.createElement('span');
+                st.className = 'star';
+                st.setAttribute('aria-hidden', 'true');
+                // Two hit areas per star: left half and right half.
+                if (json.can_vote) {
+                    [0.5, 1].forEach(part => {
+                        const hit = document.createElement('button');
+                        hit.type = 'button';
+                        hit.className = 'star-hit star-hit-' + (part === 0.5 ? 'l' : 'r');
+                        const value = i + part;
+                        hit.title = value + (value === 1 ? ' star' : ' stars');
+                        hit.setAttribute('aria-label', 'Rate ' + value + ' out of 5');
+                        hit.addEventListener('mouseenter', () => paint(value));
+                        hit.addEventListener('focus', () => paint(value));
+                        hit.addEventListener('click', () => castVote(hash, Math.round(value * 2), wrap));
+                        st.appendChild(hit);
+                    });
+                }
+                row.appendChild(st);
+            }
+            // Leaving puts back what is actually stored — the visitor's own rating if they have one,
+            // otherwise the average. A widget that keeps the last hovered value is telling them
+            // something they never did.
+            row.addEventListener('mouseleave', () => paint(mine || shown));
+            paint(mine || shown);
+            wrap.appendChild(row);
+
+            const label = document.createElement('div');
+            label.className = 'rep-label';
+            if (r.stars === null) {
+                label.classList.add('text-muted');
+                label.textContent = r.total === 0
+                    ? 'Nobody has rated this yet.'
+                    : r.total + ' of ' + r.min_votes + ' ratings needed before an average is shown.';
+            } else {
+                label.textContent = r.stars.toFixed(1) + ' / 5 · '
+                    + r.total + (r.total === 1 ? ' rating' : ' ratings')
+                    + (mine ? ' · yours: ' + mine : '');
+            }
+            wrap.appendChild(label);
+            row.title = r.stars === null
+                ? (r.total + ' of ' + r.min_votes + ' ratings so far')
+                : (r.stars.toFixed(1) + ' out of 5, from ' + r.total + (r.total === 1 ? ' rating' : ' ratings'));
+            if (!json.can_vote && json.vote_refusal) row.title += ' — ' + json.vote_refusal;
+            return wrap;
+        }
+
         async function castVote(hash, dir, holder) {
             const csrf = ($id('search-csrf') || {}).value || '';
             const r = await postJson('rate_hash', { hash, vote: dir, csrf_token: csrf });
@@ -2599,10 +2684,86 @@ async function loadStatsHome(forceSync = false) {
             }
             title.textContent = json.name || name || 'Details';
 
-            // 1. where it came from
+            const st = json.stats || {};
+
+            // 1. the numbers people actually opened this for, before anything else.
+            //
+            // Seeders and leechers used to be one sentence three quarters of the way down a flat
+            // list, below "Times seen". Reading order is a claim about importance, and that one was
+            // wrong: whether anything is sharing it is the first question, and every other field is
+            // context for the answer.
+            const strip = document.createElement('div');
+            strip.className = 'info-strip';
+            const statCell = (value, label, cls) => {
+                const c = document.createElement('div');
+                c.className = 'info-stat' + (cls ? ' ' + cls : '');
+                const v = document.createElement('span');
+                v.className = 'info-stat-v';
+                if (value instanceof Node) v.appendChild(value); else v.textContent = value;
+                const l = document.createElement('span');
+                l.className = 'info-stat-l';
+                l.textContent = label;
+                c.appendChild(v); c.appendChild(l);
+                return c;
+            };
+            const seedV = document.createElement('span');
+            seedV.id = 'info-sl-seed';
+            seedV.textContent = st.seeders == null ? '—' : Number(st.seeders).toLocaleString();
+            const leechV = document.createElement('span');
+            leechV.id = 'info-sl-leech';
+            leechV.textContent = st.leechers == null ? '—' : Number(st.leechers).toLocaleString();
+            strip.appendChild(statCell(seedV, 'seeders', 'info-stat-seed'));
+            strip.appendChild(statCell(leechV, 'leechers', 'info-stat-leech'));
+            if (st.completed != null) strip.appendChild(statCell(Number(st.completed).toLocaleString(), 'completed'));
+            if (st.total_size != null) strip.appendChild(statCell(fmtBytesPub(st.total_size), 'size'));
+            if (st.files_count != null) strip.appendChild(statCell(Number(st.files_count).toLocaleString(), st.files_count === 1 ? 'file' : 'files'));
+            body.appendChild(strip);
+
+            // 2. the two chips that qualify those numbers, on one line with the refresh control.
+            const chips = document.createElement('div');
+            chips.className = 'info-chips';
+            if (json.whitelisted) {
+                const chip = document.createElement('span');
+                chip.className = 'info-chip info-chip-ok';
+                chip.textContent = 'Registered';
+                chip.title = 'On the whitelist — this tracker serves it';
+                chips.appendChild(chip);
+            }
+            if (st.last_seen) {
+                const chip = document.createElement('span');
+                chip.className = 'info-chip';
+                chip.textContent = 'Last seen ' + fmtDatePub(st.last_seen);
+                chips.appendChild(chip);
+            }
+            if (json.can_refresh) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-secondary btn-small info-refresh';
+                btn.textContent = 'Refresh';
+                btn.title = 'Ask the tracker for the swarm counts again';
+                btn.addEventListener('click', async () => {
+                    btn.disabled = true;
+                    const prev = btn.textContent;
+                    btn.textContent = 'Asking…';
+                    const r = await postJson('index_info&hash=' + encodeURIComponent(hash), {
+                        op: 'refresh', csrf_token: ($id('search-csrf') || {}).value || '' });
+                    if (r && r.success) {
+                        seedV.textContent = Number(r.seeders).toLocaleString();
+                        leechV.textContent = Number(r.leechers).toLocaleString();
+                        btn.textContent = 'Refreshed';
+                    } else {
+                        btn.textContent = (r && r.error) || 'No answer';
+                    }
+                    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 4000);
+                });
+                chips.appendChild(btn);
+            }
+            if (chips.children.length) body.appendChild(chips);
+
+            // 3. where it came from
             if (json.source_url) {
                 const row = document.createElement('div');
-                row.className = 'rt-src-row';
+                row.className = 'rt-src-row info-section';
                 const lab = document.createElement('strong');
                 lab.textContent = 'Source:';
                 const a = document.createElement('a');
@@ -2614,36 +2775,48 @@ async function loadStatsHome(forceSync = false) {
                 // Not our link. Off-site ones get the confirmation; the operator's own trusted
                 // domains do not, because warning about your own site teaches people to click through.
                 if (!json.source_trusted) a.setAttribute('data-external', '1');
-                row.appendChild(lab); row.appendChild(a);
+                if (json.source_auto) {
+                    // Added by the importer, not typed into the form. Saying so is the difference
+                    // between "the uploader vouched for this link" and "this is where we found it".
+                    const tag = document.createElement('span');
+                    tag.className = 'info-chip info-chip-auto';
+                    tag.textContent = 'added automatically';
+                    tag.title = json.source_auto_note || 'Recorded by the importer that first saw this torrent';
+                    row.appendChild(lab); row.appendChild(a); row.appendChild(tag);
+                } else {
+                    row.appendChild(lab); row.appendChild(a);
+                }
                 body.appendChild(row);
             }
 
             // 2. what it is
             if (json.description_html) {
                 const d = document.createElement('div');
-                d.className = 'rt-body';
+                d.className = 'rt-body info-section';
                 // Built on the server by includes/richtext.php out of fully escaped input with a
                 // fixed tag whitelist. This is the only assignment of innerHTML on the public pages.
                 d.innerHTML = json.description_html;
                 body.appendChild(d);
             } else if (!json.source_url) {
                 const none = document.createElement('p');
-                none.className = 'text-muted';
+                none.className = 'text-muted info-section';
                 none.textContent = 'Nobody has written anything about this one.';
                 body.appendChild(none);
             }
 
             // 3. what people think of it
             //
-            // The bar shows the split AND the count, because "100% from one vote" and "100% from
-            // four hundred" are not the same fact and a bar that draws them identically is lying.
-            // Below the operator's threshold there is no bar at all — just how many votes are in.
+            // Two modes share this block. Whichever it is, the COUNT is always shown next to the
+            // score: "5 stars" and "5 stars from one vote" are different claims, and a widget that
+            // renders them identically is making the stronger one on no evidence.
             if (json.rating) {
                 const rep = document.createElement('div');
-                rep.className = 'rep-block';
+                rep.className = 'rep-block info-section';
                 const r = json.rating;
 
-                if (r.percent !== null) {
+                if (r.mode === 'stars') {
+                    rep.appendChild(buildStars(r, json, hash));
+                } else if (r.percent !== null) {
                     const bar = document.createElement('div');
                     bar.className = 'rep-bar';
                     bar.setAttribute('role', 'img');
@@ -2666,7 +2839,7 @@ async function loadStatsHome(forceSync = false) {
                     rep.appendChild(label);
                 }
 
-                if (json.can_vote) {
+                if (json.can_vote && r.mode !== 'stars') {
                     const acts = document.createElement('div');
                     acts.className = 'rep-acts';
                     const mk = (dir, glyph, title) => {
@@ -2678,10 +2851,10 @@ async function loadStatsHome(forceSync = false) {
                         b.addEventListener('click', () => castVote(hash, dir, rep));
                         return b;
                     };
-                    acts.appendChild(mk(1, '\u25B2 Good', 'This is what it says it is'));
-                    acts.appendChild(mk(-1, '\u25BC Bad', 'Fake, mislabelled or broken'));
+                    acts.appendChild(mk(1, '▲ Good', 'This is what it says it is'));
+                    acts.appendChild(mk(-1, '▼ Bad', 'Fake, mislabelled or broken'));
                     rep.appendChild(acts);
-                } else if (json.vote_refusal) {
+                } else if (!json.can_vote && json.vote_refusal) {
                     const why = document.createElement('div');
                     why.className = 'rep-label text-muted';
                     why.textContent = json.vote_refusal;
@@ -2690,55 +2863,30 @@ async function loadStatsHome(forceSync = false) {
                 body.appendChild(rep);
             }
 
-            // 4. the numbers
-            const st = json.stats || {};
+            // 4. the rest: provenance and identity, under a heading so it reads as a footnote to the
+            //    strip above rather than as another list of equally important facts.
             const grid = document.createElement('div');
             grid.className = 'info-grid';
-            const sl = document.createElement('span');
-            sl.id = 'info-sl';
-            sl.textContent = (st.seeders == null ? '—' : st.seeders) + ' seeders / '
-                           + (st.leechers == null ? '—' : st.leechers) + ' leechers';
-            grid.appendChild(infoRow('Swarm', sl));
-            if (st.completed != null) grid.appendChild(infoRow('Completed', Number(st.completed).toLocaleString()));
             if (st.peak_seeders != null) grid.appendChild(infoRow('Peak seeders', Number(st.peak_seeders).toLocaleString()));
-            if (st.total_size != null) grid.appendChild(infoRow('Size', fmtBytesPub(st.total_size)));
-            if (st.files_count != null) grid.appendChild(infoRow('Files', Number(st.files_count).toLocaleString()));
             if (st.first_seen) grid.appendChild(infoRow('First seen', fmtDatePub(st.first_seen)));
-            if (st.last_seen) grid.appendChild(infoRow('Last seen', fmtDatePub(st.last_seen)));
             if (st.seen_count != null) grid.appendChild(infoRow('Times seen', Number(st.seen_count).toLocaleString()));
-            if (json.whitelisted) grid.appendChild(infoRow('Registered', 'yes — served by this tracker'));
             const hashEl = document.createElement('code');
             hashEl.className = 'info-hash';
             hashEl.textContent = json.info_hash;
             grid.appendChild(infoRow('Info hash', hashEl));
-            body.appendChild(grid);
-
-            if (json.can_refresh) {
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'btn btn-secondary btn-small';
-                btn.textContent = 'Refresh seeders';
-                btn.addEventListener('click', async () => {
-                    btn.disabled = true;
-                    const prev = btn.textContent;
-                    btn.textContent = 'Asking the tracker…';
-                    const r = await postJson('index_info&hash=' + encodeURIComponent(hash), {
-                        op: 'refresh', csrf_token: ($id('search-csrf') || {}).value || '' });
-                    if (r && r.success) {
-                        sl.textContent = r.seeders + ' seeders / ' + r.leechers + ' leechers';
-                        btn.textContent = 'Refreshed';
-                    } else {
-                        btn.textContent = (r && r.error) || 'The tracker did not answer';
-                    }
-                    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 4000);
-                });
-                body.appendChild(btn);
-            }
+            const det = document.createElement('div');
+            det.className = 'info-section';
+            const detH = document.createElement('div');
+            detH.className = 'info-sub';
+            detH.textContent = 'Record';
+            det.appendChild(detH);
+            det.appendChild(grid);
+            body.appendChild(det);
 
             // 5. the files, last, because the panel is about the torrent and this is the long part
             if (json.can_files && st.files_count) {
                 const det = document.createElement('details');
-                det.className = 'rt-collapse';
+                det.className = 'rt-collapse info-section';
                 det.open = true;
                 const sum = document.createElement('summary');
                 sum.textContent = 'Files (' + Number(st.files_count).toLocaleString() + ')';

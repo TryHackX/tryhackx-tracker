@@ -321,9 +321,18 @@
                     <div class="col-md-3" data-setting="rep_enabled">
                         <label class="form-label">Ratings</label>
                         <select class="form-select bg-dark text-light border-secondary" name="rep_enabled">
-                            <option value="0" <?= ($cfg['rep_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
-                            <option value="1" <?= ($cfg['rep_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                            <option value="0" <?= ($cfg['rep_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Ratings are off</option>
+                            <option value="1" <?= ($cfg['rep_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Ratings are on</option>
                         </select>
+                        <small class="settings-hint">Ratings apply to <strong>any hash the catalogue knows</strong>, not only registered ones &mdash; a torrent does not have to be on the whitelist to be rated.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="rep_mode">
+                        <label class="form-label">How people rate</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="rep_mode">
+                            <option value="thumbs" <?= repMode($cfg) === 'thumbs' ? 'selected' : '' ?>>Up or down</option>
+                            <option value="stars" <?= repMode($cfg) === 'stars' ? 'selected' : '' ?>>Five stars, in half steps</option>
+                        </select>
+                        <small class="settings-hint">Stars are stored in ten steps and shown as five, so half a star is a real value rather than something inferred. Switching mode does not delete anything, but the two scales are not comparable &mdash; ratings cast in one mode will read oddly in the other.</small>
                     </div>
                     <div class="col-md-3" data-setting="rep_who_can_vote">
                         <label class="form-label">Who can rate</label>
@@ -337,8 +346,8 @@
                     <div class="col-md-3" data-setting="rep_show_in_results">
                         <label class="form-label">Show in search results</label>
                         <select class="form-select bg-dark text-light border-secondary" name="rep_show_in_results">
-                            <option value="0" <?= ($cfg['rep_show_in_results'] ?? '0') !== '1' ? 'selected' : '' ?>>No &mdash; only in the Info panel</option>
-                            <option value="1" <?= ($cfg['rep_show_in_results'] ?? '0') === '1' ? 'selected' : '' ?>>Yes &mdash; a column in the list</option>
+                            <option value="0" <?= ($cfg['rep_show_in_results'] ?? '0') !== '1' ? 'selected' : '' ?>>Only in the Info panel</option>
+                            <option value="1" <?= ($cfg['rep_show_in_results'] ?? '0') === '1' ? 'selected' : '' ?>>Also as a column in the list</option>
                         </select>
                     </div>
                     <div class="col-md-3" data-setting="rep_min_votes">
@@ -492,8 +501,8 @@
                     <div class="col-md-3" data-setting="wl_probe_required">
                         <label class="form-label">Check before serving</label>
                         <select class="form-select bg-dark text-light border-secondary" name="wl_probe_required">
-                            <option value="0" <?= ($cfg['wl_probe_required'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
-                            <option value="1" <?= ($cfg['wl_probe_required'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                            <option value="0" <?= ($cfg['wl_probe_required'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
+                            <option value="1" <?= ($cfg['wl_probe_required'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled</option>
                         </select>
                         <small class="settings-hint">Existing rows are unaffected: everything registered before this counts as already accepted, so turning it on never unpublishes anything.</small>
                     </div>
@@ -569,16 +578,16 @@
                     <div class="col-md-3" data-setting="wl_allow_source_url">
                         <label class="form-label">Source link field</label>
                         <select class="form-select bg-dark text-light border-secondary" name="wl_allow_source_url">
-                            <option value="0" <?= ($cfg['wl_allow_source_url'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
-                            <option value="1" <?= ($cfg['wl_allow_source_url'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                            <option value="0" <?= ($cfg['wl_allow_source_url'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
+                            <option value="1" <?= ($cfg['wl_allow_source_url'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled</option>
                         </select>
                         <small class="settings-hint"><strong>https only.</strong> Plain HTTP is refused rather than upgraded: this page is served over TLS and must not hand anyone a downgrade. Private addresses and credentials in the URL are refused too.</small>
                     </div>
                     <div class="col-md-3" data-setting="wl_allow_description">
                         <label class="form-label">Description field</label>
                         <select class="form-select bg-dark text-light border-secondary" name="wl_allow_description">
-                            <option value="0" <?= ($cfg['wl_allow_description'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
-                            <option value="1" <?= ($cfg['wl_allow_description'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                            <option value="0" <?= ($cfg['wl_allow_description'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
+                            <option value="1" <?= ($cfg['wl_allow_description'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled</option>
                         </select>
                     </div>
                     <div class="col-md-3" data-setting="wl_content_review">
@@ -639,8 +648,8 @@
                     <div class="col-md-3" data-setting="search_allow_sl_refresh">
                         <label class="form-label">Let visitors refresh S/L</label>
                         <select class="form-select bg-dark text-light border-secondary" name="search_allow_sl_refresh">
-                            <option value="0" <?= ($cfg['search_allow_sl_refresh'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
-                            <option value="1" <?= ($cfg['search_allow_sl_refresh'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                            <option value="0" <?= ($cfg['search_allow_sl_refresh'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
+                            <option value="1" <?= ($cfg['search_allow_sl_refresh'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled</option>
                         </select>
                         <small class="settings-hint">Adds a refresh button to the Info panel in the public search, scraping that one hash live. Off by default: it is a button that makes strangers' clicks into tracker requests.</small>
                     </div>
@@ -673,8 +682,8 @@
                     <div class="col-md-2">
                         <label class="form-label">Scheduled mode</label>
                         <select class="form-select bg-dark text-light border-secondary" name="tracker_schedule_enabled" id="sched-enabled">
-                            <option value="0" <?= !$schedOn ? 'selected' : '' ?>>Off</option>
-                            <option value="1" <?= $schedOn ? 'selected' : '' ?>>On</option>
+                            <option value="0" <?= !$schedOn ? 'selected' : '' ?>>Disabled</option>
+                            <option value="1" <?= $schedOn ? 'selected' : '' ?>>Enabled</option>
                         </select>
                     </div>
                     <div class="col-md-4">
@@ -833,8 +842,8 @@
                     <div class="col-md-3" data-setting="bulk_mail_enabled">
                         <label class="form-label">Write to everyone (bulk mail)</label>
                         <select class="form-select bg-dark text-light border-secondary" name="bulk_mail_enabled">
-                            <option value="0" <?= ($cfg['bulk_mail_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
-                            <option value="1" <?= ($cfg['bulk_mail_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                            <option value="0" <?= ($cfg['bulk_mail_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
+                            <option value="1" <?= ($cfg['bulk_mail_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled</option>
                         </select>
                         <small class="settings-hint">Adds <strong>Write to members</strong> on the <a href="<?= $baseUrl ?>?action=admin-users">Users page</a>: a message to a selection, a group, or everyone. In-app notifications work with this off &mdash; this switch is about <em>email</em>. Off by default.</small>
                     </div>
@@ -1630,7 +1639,7 @@
                     <div class="col-md-3">
                         <label class="form-label">Traffic monitor</label>
                         <select class="form-select bg-dark text-light border-secondary" name="net_monitor_enabled">
-                            <option value="0" <?= ($cfg['net_monitor_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="0" <?= ($cfg['net_monitor_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
                             <option value="1" <?= ($cfg['net_monitor_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On &mdash; record packets/second</option>
                         </select>
                         <small class="settings-hint">
@@ -1667,7 +1676,7 @@
                         <label class="form-label">Inbound limit</label>
                         <select class="form-select bg-dark text-light border-secondary" name="net_limit_enabled">
                             <option value="0" <?= ($cfg['net_limit_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off &mdash; nothing is dropped</option>
-                            <option value="1" <?= ($cfg['net_limit_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                            <option value="1" <?= ($cfg['net_limit_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled</option>
                         </select>
                     </div>
                     <div class="col-md-3">
@@ -1713,7 +1722,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                     <div class="col-md-3">
                         <label class="form-label">Automatic mode</label>
                         <select class="form-select bg-dark text-light border-secondary" name="net_auto_enabled">
-                            <option value="0" <?= ($cfg['net_auto_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="0" <?= ($cfg['net_auto_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
                             <option value="1" <?= ($cfg['net_auto_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On &mdash; move the limit for me</option>
                         </select>
                     </div>
@@ -1773,7 +1782,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                     <div class="col-md-3">
                         <label class="form-label">Backups</label>
                         <select class="form-select bg-dark text-light border-secondary" name="backup_enabled">
-                            <option value="0" <?= ($cfg['backup_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="0" <?= ($cfg['backup_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
                             <option value="1" <?= ($cfg['backup_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On &mdash; allow the schedule to run</option>
                         </select>
                         <small class="settings-hint">Off means nothing runs on a timer. You can still make a backup by hand from the Backups page.</small>

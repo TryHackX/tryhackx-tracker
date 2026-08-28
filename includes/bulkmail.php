@@ -128,13 +128,31 @@ function bulkNotify(PDO $db, array $spec, string $title, string $body): int {
 function bulkNewBatchId(): string { return bin2hex(random_bytes(8)); }
 
 /**
+ * The HTML half of a bulk message.
+ *
+ * 'plain' keeps what was always there: escape, then turn newlines into breaks. Anything else goes
+ * through the site's own renderer with the mail-safe styles inlined, so what the admin previewed and
+ * what lands in the inbox come out of the same function. The plain-text half of the mail is always
+ * the raw body — a mail client that shows text gets the markup, which is the readable fallback.
+ */
+function bulkBodyHtml(string $body, string $format, array $cfg): string {
+    if ($format !== 'bbcode' && $format !== 'markdown') {
+        return function_exists('sanitize') ? nl2br(sanitize($body)) : nl2br(htmlspecialchars($body, ENT_QUOTES, 'UTF-8'));
+    }
+    if (!function_exists('richtextRenderForEmail')) return nl2br(sanitize($body));
+    $html = richtextRenderForEmail($body, $format, $cfg);
+    return $html !== '' ? $html : nl2br(sanitize($body));
+}
+
+/**
  * Queue a message for an audience. Returns [batch_id, queued, skipped…].
  *
  * Nothing is sent here. The rows sit in mail_queue until the janitor picks them up.
  */
-function bulkQueue(PDO $db, array $cfg, array $spec, string $subject, string $body): array {
+function bulkQueue(PDO $db, array $cfg, array $spec, string $subject, string $body, string $format = 'plain'): array {
     $subject = mb_substr(trim($subject), 0, 200);
     $body    = trim($body);
+    if (!in_array($format, ['plain', 'bbcode', 'markdown'], true)) $format = 'plain';
     if ($subject === '' || $body === '') {
         return ['error' => 'A subject and a message are both required.'];
     }
@@ -144,12 +162,12 @@ function bulkQueue(PDO $db, array $cfg, array $spec, string $subject, string $bo
     $batch = bulkNewBatchId();
     $queued = 0; $skipped = 0;
     $st = $db->prepare(
-        "INSERT INTO mail_queue (batch_id, user_id, email, subject, body) VALUES (?, ?, ?, ?, ?)");
+        "INSERT INTO mail_queue (batch_id, user_id, email, subject, body, format) VALUES (?, ?, ?, ?, ?, ?)");
     foreach ($rows as $r) {
         $email = trim((string)($r['email'] ?? ''));
         if ($email === '' || (int)($r['bulk_optout'] ?? 0) === 1) { $skipped++; continue; }
         if (function_exists('isUnsubscribed') && isUnsubscribed($db, $email, 'bulk')) { $skipped++; continue; }
-        $st->execute([$batch, (int)$r['id'], $email, $subject, $body]);
+        $st->execute([$batch, (int)$r['id'], $email, $subject, $body, $format]);
         $queued++;
     }
     return ['batch_id' => $batch, 'queued' => $queued, 'skipped' => $skipped];
@@ -203,7 +221,7 @@ function bulkTick(PDO $db, array $cfg): array {
     $maxAttempts = bulkMailMaxAttempts($cfg);
 
     $due = $db->prepare(
-        "SELECT id, user_id, email, subject, body, attempts FROM mail_queue
+        "SELECT id, user_id, email, subject, body, format, attempts FROM mail_queue
           WHERE status = 'queued' AND next_attempt_at <= NOW()
           ORDER BY id LIMIT $limit");
     $due->execute();
@@ -221,14 +239,15 @@ function bulkTick(PDO $db, array $cfg): array {
         $err = '';
         try {
             $unsub = function_exists('getUnsubscribeUrl') ? getUnsubscribeUrl((string)$r['email'], $cfg) : '';
+            $htmlBody = bulkBodyHtml((string)$r['body'], (string)($r['format'] ?? 'plain'), $cfg);
             $html = function_exists('buildEmailHtml')
                 ? buildEmailHtml([
                     'title'    => (string)$r['subject'],
                     'greeting' => '',
-                    'body'     => nl2br(sanitize((string)$r['body'])),
+                    'body'     => $htmlBody,
                     'unsubscribe_url' => $unsub,
                   ], $cfg)
-                : nl2br(sanitize((string)$r['body']));
+                : $htmlBody;
             $ok = sendEmail((string)$r['email'], (string)$r['subject'], (string)$r['body'], $html, $cfg, $unsub);
         } catch (\Throwable $e) {
             $err = mb_substr($e->getMessage(), 0, 255);
