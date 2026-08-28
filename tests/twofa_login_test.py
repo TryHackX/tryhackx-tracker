@@ -18,6 +18,7 @@ USER, PASS = "admin", "admin123"
 
 fails = 0
 n = 0
+skips = 0
 
 
 def check(name, cond, info=""):
@@ -26,6 +27,12 @@ def check(name, cond, info=""):
     print(("PASS " if cond else "FAIL ") + name + ("" if cond or not info else "  -> " + str(info)[:300]))
     if not cond:
         fails += 1
+
+
+def skip(name, why):
+    global skips
+    skips += 1
+    print("SKIP " + name + "  -> " + why)
 
 
 def totp(secret_b32, at=None, digits=6, period=30):
@@ -109,8 +116,29 @@ check("setup refuses a wrong password", st == 403, (st, j))
 st, begin = s.post("admin/twofa", {"op": "begin", "password": PASS})
 check("setup hands back a secret, a URI and ten recovery codes",
       begin.get("success") is True and len(begin.get("recovery", [])) == 10 and begin.get("secret"), begin)
-check("… and says plainly why there is no QR image",
-      "outside this machine" in (begin.get("qr_note") or ""), begin.get("qr_note"))
+# The QR is the path almost everybody will take, so it is checked end to end rather than by looking
+# at the SVG markup: the symbol is rasterised and read back with a real decoder. If it does not come
+# back as the exact same otpauth URI, an app scanning it would be set up against a different secret
+# and every code it produced would be refused -- which is a lockout, discovered at the worst moment.
+check("the server draws a QR and does not send the secret anywhere to do it",
+      isinstance(begin.get("qr"), str) and begin["qr"].startswith("<svg")
+      and "http" not in begin["qr"].replace("http://www.w3.org/2000/svg", ""),
+      (begin.get("qr") or "")[:120])
+try:
+    import numpy as np, zxingcpp, re
+    rects = re.findall(r'<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"', begin["qr"])
+    dim = int(re.search(r'width="(\d+)"', begin["qr"]).group(1))
+    img = np.ones((dim, dim), dtype=np.uint8) * 255
+    for x, y, w, h in rects:
+        x, y, w, h = int(x), int(y), int(w), int(h)
+        img[y:y + h, x:x + w] = 0
+    img = np.kron(img, np.ones((3, 3), dtype=np.uint8))  # the SVG is 4px per module; give the decoder room
+    res = zxingcpp.read_barcode(img)
+    got = res.text if res else ""
+    check("… and a real decoder reads that QR back as exactly the setup URI",
+          got == begin.get("uri"), got[:120] or "the decoder found no symbol")
+except ImportError:
+    skip("reading the QR back with a real decoder", "pip install zxing-cpp numpy")
 
 secret = begin["secret"]
 recovery = begin["recovery"]
@@ -210,5 +238,5 @@ out = subprocess.run([sys.executable and "php", os.path.join(ROOT, "tools", "two
 check("the CLI reports the state", "two-factor authentication: off" in out.stdout, out.stdout + out.stderr)
 
 cleanup()
-print("\n%d checks, %d failed" % (n, fails))
+print("\n%d checks, %d failed%s" % (n, fails, ", %d skipped" % skips if skips else ""))
 sys.exit(1 if fails else 0)

@@ -4,6 +4,78 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] — 2026-08-28
+
+### Added — a QR code for the two-factor setup, drawn on this machine
+
+- **Settings → Two-factor authentication now shows a QR code.** 1.14.0 deliberately shipped without
+  one, on the grounds that drawing a QR means sending the secret somewhere outside the server. That
+  reasoning was right about the risk and wrong about the options: the panel now carries its own
+  encoder (`includes/qr.php`), so nothing is sent anywhere. No QR service, no CDN library, no network
+  call — the SVG is built in PHP from the URI the server has just generated. The typed key and the
+  `otpauth://` URI stay on screen underneath, for anyone who cannot scan or would rather not.
+- Reed-Solomon over GF(256), byte mode, error correction level M, versions 1 to 10, and the
+  standard's own mask-penalty rules. Loaded only on the one request that needs it.
+- If the drawing fails for any reason the setup still works and says so: the key underneath is the
+  real payload, and a shortcut that breaks must not take the whole page with it.
+
+### Fixed — two encoder bugs that only a decoder could see
+
+Both were found by `tests/qr_test.php`, and neither could have been found by the encoder checking its
+own work — that is the point of testing against something that did not write the code.
+
+- **The format-information bits were written in reverse order.** Position 0 took bit 0 instead of bit
+  14. This file's own reader agreed with its own writer, so a round-trip passed perfectly; no scanner
+  on earth would have read the symbol. Caught by comparing against an independent encoder.
+- **The dark module was being blanked.** The second copy of the format information is eight modules
+  wide but only *seven* tall; reserving eight in both directions overwrote the dark module that the
+  standard requires to be set. The reversed writer above then happened to write something back over
+  it, so the two bugs hid each other and the symbol still scanned. Fixing one exposed the other.
+
+### Testing
+
+- `tests/qr_test.php` (18 checks) verifies the encoder three independent ways: module for module
+  against `python-qrcode`; read back as exactly the codewords that went in, using the mask the symbol
+  itself declares; and — the one that matters — through a real decoder (`zxing-cpp`), required to
+  return the exact input string. The reference libraries are development-only and are never shipped;
+  if they are absent those checks skip visibly rather than passing quietly.
+- One test case is pinned deliberately: an `otpauth://` URI whose lowest-penalty mask is 3. OpenCV's
+  detector cannot find the resulting symbol — for this encoder and for `python-qrcode` alike, since
+  both produce the identical matrix — while `zxing-cpp` reads it without trouble. The case is kept so
+  that nobody later "fixes" the mask selection to please a weak detector.
+- `tests/twofa_login_test.py` (31 checks) now rasterises the QR the server actually returns over HTTP
+  and decodes it, asserting it carries exactly the setup URI. A QR encoding the wrong secret would
+  set an app up against a key the server does not have, and every code it produced would be refused —
+  a lockout discovered at the worst possible moment.
+- Verified on production: identical matrix on PHP 8.5.8 and 8.4.15, and the QR rendered in the live
+  panel decoded back to its own setup URI. The pending secret used for that check was cancelled.
+
+### Fixed — the Index page appeared to jam the whole panel
+
+- **Clicking away from Index during a fetch did nothing until the fetch finished.** It looked like
+  PHP or MariaDB struggling under the catalogue query, and it was neither: PHP's file session handler
+  holds an **exclusive lock for the whole request**, so a three-to-nine-second catalogue search held
+  the session while every other page of the panel queued behind it. The listing endpoints now release
+  the session with `session_write_close()` once they are past the authentication check — they only
+  read, so nothing after that point needs it open. Measured on production afterwards: a 5.5-second
+  catalogue search running while another admin page loaded **in 106 ms**.
+
+### Changed — Restore defaults also undoes edits made in the form
+
+- The button had exactly one meaning — *put the machine back* — and said "nothing to undo" to somebody
+  who had filled three fields in and thought better of it. That is answering a question nobody asked.
+  It now covers both undos, because from the reader's side they are one idea: with a change the panel
+  actually applied, it restores the machine; with only unsaved edits, it discards them locally and
+  says so plainly. The label and tooltip change to name whichever it would do, so the button is never
+  a surprise, and it greys out only when there is genuinely nothing to put back.
+
+### Security
+
+- `config/admin_2fa.json` is now in `.gitignore`. It holds the TOTP secret and the recovery-code
+  hashes; committing it would put a working second factor into the repository, where every clone and
+  every fork would carry it. (Checked: it had never been committed, and `config/` is excluded from
+  deploys.)
+
 ## [1.14.0] — 2026-08-28 (schema v17 + v18)
 
 ### Added — two-factor authentication for the admin panel (schema v18)

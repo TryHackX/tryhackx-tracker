@@ -508,7 +508,7 @@ Two numbers on this card are diagnoses rather than knobs, and both are easy to m
 - **the socket's own drop counter** (`ss -ulnpm`, the `d<N>` in skmem) — how many announces were
   thrown away for exactly that reason.
 
-### Two-factor authentication for the panel (1.14.0)
+### Two-factor authentication for the panel (1.14.0, QR added in 1.15.0)
 
 **Settings → Two-factor authentication.** A six-digit TOTP code (RFC 6238) on top of the password,
 from any authenticator app. **Off by default.**
@@ -524,8 +524,18 @@ from any authenticator app. **Off by default.**
 - The password step **grants nothing on its own**: no session exists until the second factor is done,
   and a correct password does not clear the brute-force counter (that would let someone holding it
   reset the lockout and then guess six digits freely).
-- **No QR image, on purpose** — drawing one means sending the secret somewhere outside this machine,
-  and the secret is as good as the password. The key is shown in groups with the `otpauth://` URI.
+- **A QR code, drawn here.** The panel carries its own QR encoder (`includes/qr.php`:
+  Reed-Solomon over GF(256), byte mode, error correction level M, versions 1–10, the standard's own
+  mask-penalty rules). Nothing is sent to a QR service and no CDN library is loaded, because either
+  would be handed a secret that is as good as the password. The typed key and the `otpauth://` URI
+  stay on screen underneath for anyone who would rather not scan.
+
+  Writing an encoder is only worth it if it is *right*, so `tests/qr_test.php` checks it three ways:
+  every symbol is compared module for module against an independent encoder, read back as the
+  codewords that went in, and — the one that matters — put through a real decoder (`zxing-cpp`) and
+  required to come back as the exact string. That found two real bugs a self-consistency check could
+  never have: the format-information bits were written in reverse order, and the reservation loop
+  blanked the dark module. Both were invisible to the encoder's own reader and fatal to a scanner.
 
 The secret lives in `config/admin_2fa.json`, beside the password hash, in a directory the web server
 is denied and no deploy overwrites — not in the settings table, which every backup dumps.

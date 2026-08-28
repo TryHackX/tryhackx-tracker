@@ -1558,3 +1558,8 @@ input[type="number"] {
 }
 .wl-status-actions .btn:disabled:hover,
 .wl-status-actions .btn[disabled]:hover { background: transparent; }
+
+/* The two-factor setup QR. The symbol is drawn light-on-dark because that is the only way round a
+   scanner reads, so it needs its own white plate inside a dark panel rather than inheriting one. */
+.tf-qr { display: flex; justify-content: center; margin: 0.25rem 0 0.5rem; }
+.tf-qr svg { width: 200px; height: 200px; max-width: 100%; border-radius: 4px; }

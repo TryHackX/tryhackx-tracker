@@ -6,8 +6,9 @@
  *  - It never claims anything is on before the server says so. The secret is pending until a code
  *    generated from it has been verified, and the panel says that in as many words while it is.
  *  - The recovery codes are shown once, and the page says so before showing them rather than after.
- *  - There is no QR image, and the reason is stated: drawing one means sending the secret somewhere
- *    outside this machine, and the secret is as good as the password.
+ *  - The QR is drawn by this project's own encoder (includes/qr.php) and rendered inline. No hosted
+ *    QR service and no CDN library is involved, because either would be handed a secret that is as
+ *    good as the password. The typed key stays on screen underneath it.
  *
  * Renders through textContent / createElement only.
  */
@@ -85,12 +86,21 @@
         if (setup) {
             panel.appendChild(el('div', { className: 'nl-note nl-note-info', text: setup.note }));
             const key = el('div', { className: 'nl-note' });
-            key.appendChild(el('div', { className: 'wl-small text-muted', text: 'Setup key (type this into your authenticator app):' }));
+            // The QR first, because scanning is what almost everybody will do; the key stays right
+            // underneath for the people who cannot, or who are setting the app up on this same screen.
+            // innerHTML is safe here and nowhere near a general habit: qr.svg is built by
+            // includes/qr.php out of integers and fixed strings — no part of it comes from input.
+            if (setup.qr) {
+                const box = el('div', { className: 'tf-qr' });
+                box.innerHTML = setup.qr;
+                key.appendChild(box);
+            }
+            key.appendChild(el('div', { className: 'wl-small text-muted' + (setup.qr ? ' mt-1' : ''), text: setup.qr_note }));
+            key.appendChild(el('div', { className: 'wl-small text-muted mt-2', text: 'Setup key (type this into your authenticator app):' }));
             key.appendChild(el('pre', { className: 'nl-preview mt-1', text: setup.secret_grouped }));
             key.appendChild(el('div', { className: 'wl-small text-muted', text: 'Account: the admin username. Algorithm SHA1, 6 digits, 30 seconds — the defaults every app uses.' }));
             key.appendChild(el('div', { className: 'wl-small text-muted mt-1', text: 'Full otpauth URI, if your app accepts one:' }));
             key.appendChild(el('pre', { className: 'nl-preview mt-1', text: setup.uri }));
-            key.appendChild(el('div', { className: 'wl-small text-muted mt-1', text: setup.qr_note }));
             panel.appendChild(key);
             panel.appendChild(recoveryBlock(setup.recovery,
                 'Save these ten recovery codes NOW — they are shown once and never again. Each one works a '

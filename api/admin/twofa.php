@@ -72,13 +72,30 @@ if ($op === 'begin') {
     }
     $r = twofaBeginSetup($cfg);
     if (!empty($r['error'])) jsonResponse(['error' => $r['error']], 500);
+    // The QR is drawn HERE, by this project's own encoder, from the URI this server just built. That is
+    // the whole reason the encoder exists: every hosted QR service and every CDN-loaded QR library
+    // would be handed a secret that is as good as the password. Loaded only on this one path — it is
+    // several hundred lines that no other request has any use for.
+    //
+    // If the drawing fails the setup still works. The key underneath is the real payload; the QR is a
+    // shortcut, and a shortcut that breaks must not take the whole page with it.
+    $qr = null;
+    try {
+        require_once dirname(__DIR__, 2) . '/includes/qr.php';
+        $qr = qrSvg(qrMatrix((string)($r['uri'] ?? '')));
+    } catch (Throwable $e) {
+        error_log('2FA QR could not be drawn: ' . $e->getMessage());
+    }
     // Nothing has changed yet. The secret is pending until a code proves it arrived intact.
     jsonResponse(['success' => true] + $r + [
         'note' => 'Nothing is switched on yet. Add the key to your authenticator app, then enter a code from '
                 . 'it below — that is what proves the key arrived intact, and only then does anything change.',
-        'qr_note' => 'There is no QR image on purpose: drawing one would mean sending this secret to something '
-                   . 'outside this machine, and this secret is as good as your password. Add it by hand — every '
-                   . 'authenticator app supports that.',
+        'qr' => $qr,
+        'qr_note' => $qr === null
+            ? 'The QR code could not be drawn on this server, so add the key by hand — every authenticator '
+            . 'app supports that, and the key below carries exactly what the QR would have.'
+            : 'Drawn on this server and never sent anywhere: this secret is as good as your password, so it '
+            . 'does not go to a QR service. Cannot scan it? The key below is the same thing, by hand.',
     ]);
 }
 

@@ -326,11 +326,17 @@
 
         const restore = $('btn-sy-restore');
         if (restore) {
-            const can = restorable();
-            restore.disabled = !can;
-            restore.title = can
+            const canMachine = restorable();
+            const dirty = formDirty();
+            restore.disabled = !canMachine && !dirty;
+            // Say which of the two it would do, so the button is never a surprise.
+            restore.title = canMachine
                 ? 'Put back the values this machine had before the panel first touched them, and delete the panel’s file'
-                : 'Nothing to undo: the panel has never changed any of these, so what you see is this machine’s own configuration';
+                : (dirty
+                    ? 'Discard the edits in this form and show what the kernel is actually running'
+                    : 'Nothing to put back: the panel has never changed any of these and you have not edited anything');
+            const label = restore.querySelector('.sy-restore-label');
+            if (label) label.textContent = (!canMachine && dirty) ? ' Discard my edits' : ' Restore defaults';
         }
 
         renderArmed();
@@ -514,9 +520,33 @@
         return !!(st.baseline && st.baseline.values && Object.keys(st.baseline.values).length) || !!st.file_present;
     }
 
+    /** Has the operator typed something into this form that is not what the kernel is running? */
+    function formDirty() {
+        return Object.keys(changedPairs()).length > 0;
+    }
+
+    /**
+     * Put the form back to what is actually in force.
+     *
+     * Nothing is sent anywhere: this undoes typing, not a change to the machine. It matters because
+     * the two are easy to confuse — somebody who has filled three fields in and thought better of it
+     * is looking for exactly this button, and telling them "nothing to undo" because the panel has
+     * never written a sysctl would be answering a question they did not ask.
+     */
+    function resetForm() {
+        const vals = (state.status && state.status.values) || {};
+        Object.keys(state.wanted).forEach(k => { state.wanted[k] = String(vals[k] === undefined ? '' : vals[k]); });
+        render();
+        showToast('Put back to what the kernel is running. Nothing was changed on the machine — those were only edits in this form.', 'success');
+    }
+
     async function revert() {
+        // Two different undos behind one button, because from the reader's side they are one idea:
+        // "put it back". Unsaved edits are discarded locally; a change the panel actually applied is
+        // restored on the machine. When both exist the machine takes priority and the form follows.
         if (!restorable()) {
-            showToast('The panel has never changed any of these, so there is nothing of its doing to undo — what you see IS this machine’s own configuration.', 'info');
+            if (formDirty()) { resetForm(); return; }
+            showToast('Nothing to put back: the panel has never changed any of these, and you have not edited anything — what you see IS this machine’s own configuration.', 'info');
             return;
         }
         if (!window.confirm('Put the captured values back?\n\nThis restores what the machine had before the panel first touched these settings, and removes the panel’s file. It is NOT the distribution’s defaults — it is what your machine had. It never asks for a password, on purpose.')) return;

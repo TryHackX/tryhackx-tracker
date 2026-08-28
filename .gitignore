@@ -20,6 +20,10 @@ config/stats_timeline_*.json
 config/stats_timeline_*.json.tmp.*
 config/stats_timeline_*.json.lock
 config/index_state.json
+# The two-factor secret and the recovery-code hashes. Committing this would put a working
+# second factor into the repository, where every clone and every fork would carry it.
+config/admin_2fa.json
+config/admin_2fa.json.tmp.*
 config/index_state.json.tmp.*
 config/index_state.lock
 config/index_poll.lock

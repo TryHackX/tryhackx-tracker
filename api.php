@@ -231,10 +231,21 @@ if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login' && $endp
     // other request the page makes, and with only a handful of php-fpm children that is how a card
     // ends up stuck on "loading" while the server is answering fine. These endpoints only read, and
     // they are past the auth check, so nothing below needs the session open any more.
+    //
+    // The LISTINGS belong here too, and their absence is what made the Index page feel like it jammed
+    // the panel. A catalogue search is three to nine seconds of MariaDB; while it ran it held the
+    // session lock, so clicking through to another admin page did not load until the search finished.
+    // It looked like PHP or the database was struggling and it was neither: one request was simply
+    // waiting for another to let go of a file lock. Every endpoint below is a GET that only reads and
+    // is already past the auth check, so nothing after this point needs the session open.
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && in_array($endpoint, [
             'admin/net_status', 'admin/net_samples', 'admin/backup_status',
             'admin/whitelist_status', 'admin/index_status', 'admin/tracker_service_status',
-            'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status'], true)) {
+            'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status',
+            'admin/fetch_index', 'admin/fetch_whitelist', 'admin/fetch_banned',
+            'admin/fetch_reports', 'admin/fetch_appeals', 'admin/fetch_users',
+            'admin/fetch_groups', 'admin/fetch_api_clients', 'admin/fetch_api_bans',
+            'admin/fetch_fed_peers'], true)) {
         session_write_close();
     }
 }

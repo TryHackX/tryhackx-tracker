@@ -274,7 +274,7 @@
                     <button type="button" class="btn btn-sm btn-outline-success" id="btn-sy-arm"><i class="bi bi-stopwatch"></i> Apply for a while&hellip;</button>
                     <!-- Always here, not only inside the armed banner. Once a change is confirmed the
                          banner is gone, and the way back went with it. -->
-                    <button type="button" class="btn btn-sm btn-outline-warning" id="btn-sy-restore" disabled><i class="bi bi-arrow-counterclockwise"></i> Restore defaults</button>
+                    <button type="button" class="btn btn-sm btn-outline-warning" id="btn-sy-restore" disabled><i class="bi bi-arrow-counterclockwise"></i><span class="sy-restore-label"> Restore defaults</span></button>
                 </div>
             </div>
 
