@@ -434,7 +434,7 @@
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Mode switch command <small class="settings-hint">(root helper; <code>white</code>/<code>black</code> is appended; empty = only flip the web setting)</small></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="tracker_mode_switch_cmd" value="<?= sanitize($cfg['tracker_mode_switch_cmd'] ?? 'sudo -n /usr/local/sbin/tracker-mode.sh') ?>" placeholder="sudo -n /usr/local/sbin/tracker-mode.sh" maxlength="255">
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="tracker_mode_switch_cmd" value="<?= sanitize($cfg['tracker_mode_switch_cmd'] ?? 'sudo -n /usr/local/sbin/tracker-mode.sh') ?>" placeholder="e.g. sudo -n /usr/local/sbin/tracker-mode.sh" maxlength="255">
                     </div>
                     <div class="col-12">
                         <input type="hidden" name="tracker_schedule" id="sched-json" value="<?= sanitize(json_encode($schedDays)) ?>">
@@ -641,7 +641,7 @@
                     <div class="col-md-6">
                         <label class="form-label">Helper command</label>
                         <div class="input-group">
-                            <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_perf_cmd" value="<?= sanitize($cfg['ot_perf_cmd'] ?? '') ?>" placeholder="sudo -n /usr/local/sbin/tracker-instance.sh">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_perf_cmd" value="<?= sanitize($cfg['ot_perf_cmd'] ?? '') ?>" placeholder="e.g. sudo -n /usr/local/sbin/tracker-instance.sh">
                             <button class="btn btn-outline-info" type="button" id="btn-ot-test"><i class="bi bi-clipboard-check"></i> Test</button>
                         </div>
                         <small class="settings-hint">Needs a sudoers rule: <code>www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-instance.sh</code>. Empty = the panel can only read, never change.</small>
@@ -683,7 +683,7 @@
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label class="form-label">Helper command</label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_cluster_cmd" value="<?= sanitize($cfg['ot_cluster_cmd'] ?? '') ?>" maxlength="255" placeholder="sudo -n /usr/local/sbin/tracker-cluster.sh">
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_cluster_cmd" value="<?= sanitize($cfg['ot_cluster_cmd'] ?? '') ?>" maxlength="255" placeholder="e.g. sudo -n /usr/local/sbin/tracker-cluster.sh">
                         <small class="settings-hint">Empty = the feature does not exist: no card, no polling, no <code>sudo</code>.</small>
                     </div>
                     <div class="col-md-3">
@@ -714,7 +714,7 @@
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label class="form-label">Helper command</label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="sysctl_cmd" value="<?= sanitize($cfg['sysctl_cmd'] ?? '') ?>" maxlength="255" placeholder="sudo -n /usr/local/sbin/tracker-sysctl.sh">
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="sysctl_cmd" value="<?= sanitize($cfg['sysctl_cmd'] ?? '') ?>" maxlength="255" placeholder="e.g. sudo -n /usr/local/sbin/tracker-sysctl.sh">
                         <small class="settings-hint">Empty = the feature does not exist: no card, no polling, no <code>sudo</code>. Install <code>tools/opentracker/tracker-sysctl.sh</code> and its <code>sudoers.d</code> rule first, then press Test.</small>
                     </div>
                     <div class="col-md-3">
@@ -1405,7 +1405,7 @@
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Root helper command <small class="settings-hint">(the action arguments are appended automatically; empty = feature disabled)</small></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="net_limit_cmd" value="<?= sanitize($cfg['net_limit_cmd'] ?? NET_DEFAULT_CMD) ?>" placeholder="<?= NET_DEFAULT_CMD ?>" maxlength="255">
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="net_limit_cmd" value="<?= sanitize($cfg['net_limit_cmd'] ?? NET_DEFAULT_CMD) ?>" placeholder="e.g. <?= NET_DEFAULT_CMD ?>" maxlength="255">
                         <small class="settings-hint">Only letters, digits, space and <code>_ . / -</code> &mdash; no shell metacharacters, exactly like the mode switch command above.</small>
                     </div>
                     <div class="col-md-6">
@@ -1617,7 +1617,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label class="form-label">Root helper command <small class="settings-hint">(the action arguments are appended automatically)</small></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="backup_cmd" value="<?= sanitize($cfg['backup_cmd'] ?? BACKUP_DEFAULT_CMD) ?>" placeholder="<?= BACKUP_DEFAULT_CMD ?>" maxlength="255">
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="backup_cmd" value="<?= sanitize($cfg['backup_cmd'] ?? BACKUP_DEFAULT_CMD) ?>" placeholder="e.g. <?= BACKUP_DEFAULT_CMD ?>" maxlength="255">
                         <small class="settings-hint">Only letters, digits, space and <code>_ . / -</code> &mdash; no shell metacharacters.</small>
                     </div>
                     <div class="col-md-6">

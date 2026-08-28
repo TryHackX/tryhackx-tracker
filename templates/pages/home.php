@@ -90,6 +90,12 @@
     $copyParts = [];
     if ($httpUrl) $copyParts[] = $httpUrl;
     if ($udpUrl) $copyParts[] = $udpUrl;
+    // Ports served by extra opentracker instances. They listen on their own ports and share nothing,
+    // so a visitor given only the first URL never reaches them and the extra process idles. Empty on
+    // every install that has not enabled the cluster, which is nearly all of them.
+    $extraUrls = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
+                                         array_filter([$udpUrl, $httpUrl])));
+    foreach ($extraUrls as $eu) $copyParts[] = $eu;
 ?>
 <h2>Announce URL</h2>
 <div class="code-block pos-relative">
@@ -99,6 +105,14 @@
     <?php endif; ?>
     <?php if (!empty($udpUrl)): ?>
     <div class="label label-top"><?= $udpLabel ?></div><code><?= sanitize($udpUrl) ?></code>
+    <?php endif; ?>
+    <?php foreach ($extraUrls as $eu): ?>
+    <div class="label label-top">EXTRA</div><code><?= sanitize($eu) ?></code>
+    <?php endforeach; ?>
+    <?php if ($extraUrls): ?>
+    <p class="announce-extra-note">This tracker runs on more than one port. Add <strong>all</strong> of
+       them to your client &mdash; each is answered by a different process, and using only the first
+       leaves the others idle.</p>
     <?php endif; ?>
     <span id="announce-copy" class="announce-hidden"><?= trim(implode("\n", $copyParts)) ?></span>
 </div>

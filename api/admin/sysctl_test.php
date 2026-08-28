@@ -13,7 +13,8 @@ $add('PHP can run a command', trackerExecAvailable(),
      trackerExecAvailable() ? '' : 'exec() is disabled in php.ini — no helper can be reached at all.');
 
 if ($cmd === '') {
-    $add('A helper command is configured', false, 'Empty, so the feature is off and the card is not rendered.');
+    $add('A helper command is configured', false, 'Nothing is saved here, so the feature is off and the card is not rendered. The grey text in '
+         . 'the field is a suggestion, not a value — type it in and press Save to switch this on.');
     $out['suggestions'][] = 'sudo install -m 0755 /var/www/tracker.tryhackx.org/tools/opentracker/tracker-sysctl.sh /usr/local/sbin/tracker-sysctl.sh';
     $out['suggestions'][] = "echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-sysctl.sh' | sudo tee /etc/sudoers.d/tracker-sysctl";
     $out['suggestions'][] = 'sudo chmod 0440 /etc/sudoers.d/tracker-sysctl && sudo visudo -c -f /etc/sudoers.d/tracker-sysctl';

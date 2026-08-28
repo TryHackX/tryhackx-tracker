@@ -2200,7 +2200,12 @@ async function loadStatsHome(forceSync = false) {
         if (!form) return;
         const canMagnet = form.dataset.canMagnet === '1';
         const canFiles = form.dataset.canFiles === '1';
-        const announces = [form.dataset.announce, form.dataset.announceHttps].filter(Boolean);
+        // Every port, not just the first. Extra opentracker instances listen on their own ports and
+        // share nothing between them, so a magnet that names one port is only ever answered by one
+        // process. The attribute is empty without the cluster, which leaves this unchanged.
+        const announces = [form.dataset.announce, form.dataset.announceHttps]
+            .concat((form.dataset.announceExtra || '').split(/\s+/))
+            .filter(Boolean);
         const input = $id('search-input'), clearBtn = $id('search-clear');
         const bestBox = $id('search-best'), filesBox = $id('search-files');
         const magnetFor = (hash, name) => {

@@ -115,7 +115,10 @@ jsonResponse([
     'success' => true,
     'results' => array_map(fn($x) => ['input' => mb_substr((string)$x['input'], 0, 200), 'hash' => $x['hash'], 'status' => $x['status'], 'error' => $x['error']], $r['results']),
     'summary' => $r['summary'],
-    'announce' => ['udp' => (string)($cfg['announce_url'] ?? ''), 'http' => (string)($cfg['announce_url_https'] ?? '')],
+    // `all` carries the extra instances' ports too; udp/http stay exactly what they were, so nothing
+    // already reading this response has to change.
+    'announce' => ['udp' => (string)($cfg['announce_url'] ?? ''), 'http' => (string)($cfg['announce_url_https'] ?? ''),
+                   'all' => announceUrls($cfg)],
     'magnets' => $magnets,
     'active_in_seconds' => (int)$r['active_in_seconds'],
     'file_ok' => (bool)($r['file']['ok'] ?? true),

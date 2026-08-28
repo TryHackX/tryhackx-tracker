@@ -54,6 +54,71 @@ $base = ['announce_url' => 'udp://tracker.example.org:6969/announce',
 check('with the cluster off the announce URLs are exactly the two configured ones',
       otClusterAnnounceUrls($base) === array_values($base));
 
+/* ── 3b. and the extra ports actually reach the client ─────────────────── */
+//
+// This is the half that decides whether the whole feature is worth anything. Extra instances listen
+// on their OWN ports and share nothing: the kernel does not split one UDP port across processes, and
+// opentracker spreads load across THREADS on a single socket instead. So an extra instance receives
+// exactly the announces whose magnet names its port -- and if the panel keeps handing out only the
+// primary's URL, the extra process sits at zero for ever while looking perfectly healthy.
+
+require_once $root . '/includes/whitelist.php';
+
+check('with the cluster off, announceUrls() is exactly the two configured URLs',
+      announceUrls($base) === array_values($base));
+check('… and the magnet it builds names both of them, and nothing else',
+      substr_count(buildMagnet(str_repeat('a', 40), 'x', $base), '&tr=') === 2);
+
+// Inject a roster the way the janitor would have cached one. The state file is local-only
+// (config/ is never deployed), and it is put back byte for byte afterwards.
+$stateFile = netlimitStateFile();
+$stateBackup = is_file($stateFile) ? file_get_contents($stateFile) : null;
+$on = $base + ['ot_cluster_enabled' => '1', 'ot_cluster_cmd' => 'sudo -n /usr/local/sbin/tracker-cluster.sh'];
+otClusterStateSet(['roster' => [
+    'primary'   => ['udp_port' => 6969, 'tcp_port' => 6969],
+    'instances' => [
+        ['name' => 'edge-a', 'udp_port' => 6970, 'state' => 'active'],
+        ['name' => 'edge-b', 'udp_port' => 6971, 'state' => 'inactive'],
+    ],
+    'count' => 2, 'at' => time(),
+]]);
+
+$urls = announceUrls($on);
+check('an active extra instance adds its port to the announce list',
+      in_array('udp://tracker.example.org:6970/announce', $urls, true), implode(' ', $urls));
+check('… and an instance that is NOT listening is never advertised',
+      !in_array('udp://tracker.example.org:6971/announce', $urls, true), implode(' ', $urls));
+check('the primary URLs stay first, so nothing that reads position breaks',
+      array_slice($urls, 0, 2) === array_values($base), implode(' ', $urls));
+$magnet = buildMagnet(str_repeat('b', 40), 'x', $on);
+check('the magnet the panel builds carries the extra port too — which is the only way a client '
+      . 'ever reaches that instance', substr_count($magnet, '&tr=') === 4, $magnet);
+check('… and it does not carry the port of the instance that is down',
+      !str_contains($magnet, '6971'), $magnet);
+
+// The public surfaces have to actually use it, or the function above is decoration. A template must
+// both ASSIGN the variable and RENDER it: an earlier version of this check looked only for the name,
+// which stayed present after an edit dropped the assignment -- the page rendered with no extra port
+// at all and this went on passing. tests/announce_multiport_test.py asks the running server instead,
+// which is the check that actually holds; these two only fail earlier and more cheaply.
+foreach ([
+    'templates/pages/home.php'      => ['$extraUrls = ', 'foreach ($extraUrls'],
+    'templates/pages/whitelist.php' => ['$wlExtra    = ', 'foreach ($wlExtra'],
+    'templates/pages/search.php'    => ['$sExtra = ', 'data-announce-extra'],
+    'api/whitelist_submit.php'      => ["'all' => announceUrls", "'all' => announceUrls"],
+] as $file => $needles) {
+    $src = file_get_contents($root . '/' . $file);
+    check('the extra ports are computed in ' . $file, str_contains($src, $needles[0]));
+    check('… and actually rendered there', str_contains($src, $needles[1]));
+}
+check('… and the client-side magnet builder reads them',
+      str_contains(file_get_contents($root . '/assets/js/app.js'), 'announceExtra'));
+
+if ($stateBackup === null) { @unlink($stateFile); } else { file_put_contents($stateFile, $stateBackup); }
+check('the test put the state file back exactly as it found it',
+      ($stateBackup === null && !is_file($stateFile))
+      || ($stateBackup !== null && file_get_contents($stateFile) === $stateBackup));
+
 /* ── 4. port proposal ─────────────────────────────────────────────────────── */
 
 $roster = ['primary' => ['udp_port' => 6969, 'tcp_port' => 6969], 'instances' => []];

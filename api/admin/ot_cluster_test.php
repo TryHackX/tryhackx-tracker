@@ -12,7 +12,8 @@ $add = function (string $name, bool $ok, string $detail = '', bool $info = false
 $add('PHP can run a command', trackerExecAvailable(),
      trackerExecAvailable() ? '' : 'exec() is disabled in php.ini.');
 if ($cmd === '') {
-    $add('A helper command is configured', false, 'Empty, so the feature is off and no card is rendered.');
+    $add('A helper command is configured', false, 'Nothing is saved here, so the feature is off and no card is rendered. The grey text in the '
+         . 'field is a suggestion, not a value — type it in and press Save to switch this on.');
     $out['suggestions'][] = 'sudo install -m 0755 /var/www/tracker.tryhackx.org/tools/opentracker/tracker-cluster.sh /usr/local/sbin/tracker-cluster.sh';
     $out['suggestions'][] = "echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-cluster.sh' | sudo tee /etc/sudoers.d/tracker-cluster";
     $out['suggestions'][] = 'sudo chmod 0440 /etc/sudoers.d/tracker-cluster && sudo visudo -c -f /etc/sudoers.d/tracker-cluster';

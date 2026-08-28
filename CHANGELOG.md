@@ -4,6 +4,62 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.16.0] — 2026-08-28
+
+### Added — extra opentracker instances finally receive traffic (E6, completed)
+
+The instance machinery shipped in 1.14.0 could create a second opentracker, bind it, switch its mode
+and remove it cleanly. What it could not do was give it a single announce to answer.
+
+**Separate ports do not share traffic.** The kernel does not split one UDP port across processes, and
+opentracker spreads load across THREADS on one socket (`listen.udp.workers`) rather than across
+processes. So an extra instance on port 6970 receives exactly the announces whose magnet names 6970
+— and while every status card reported it healthy, it sat at zero. The public pages only ever
+advertised the primary's port.
+
+- **`announceUrls()`** (`includes/whitelist.php`) is now the single source of announce URLs, and
+  `buildMagnet()` builds from it. Every active extra port lands in the magnet the panel hands out.
+- The **home page**, the **whitelist page**, the **search form** (which builds magnets in the
+  browser) and the **submit response** all carry the full set. The home page also says, in the
+  visitor's own terms, why there is more than one and that all of them should be added.
+- **An instance that is not listening is never advertised.** The roster's `state` gates it, so a
+  stopped extra silently drops out of the magnets instead of sending clients at a dead port.
+- **Nothing changes on an install without the cluster** — verified by test, not by inspection: the
+  same two URLs, in the same order, and not one file read from disk.
+
+### Fixed — the Test button said "Empty" about a field that looked filled
+
+The cluster card's **Helper command** shows `sudo -n /usr/local/sbin/tracker-cluster.sh` in grey.
+That is a placeholder, the field is empty, and the Test button was correct — and still misleading
+enough that the person who knows this panel best read it as configured and reported the Test as
+broken. Being right is not the same as being understood.
+
+- Six fields whose placeholder is a ready-to-paste command now read **`e.g. …`**, matching the
+  `e.g. 2-5` convention the same file already used elsewhere and applied unevenly.
+- The Test message names the thing the reader is actually looking at: *"Nothing is saved here … the
+  grey text in the field is a suggestion, not a value — type it in and press Save."*
+
+### Testing
+
+- **`tests/announce_multiport_test.py`** (17 checks) asks the running server for the real pages with a
+  roster injected, and reads what a visitor would see. It exists because a unit test did not catch a
+  real break: that one asserted a template *contained* `$extraUrls`, which stayed true after an edit
+  dropped the line that *assigns* it — the page rendered with no extra port and the check went on
+  passing. A test that greps for a name proves the name is present, nothing more.
+- The unit check now requires the assignment as well as the render, so it fails earlier and cheaper.
+- `tests/cluster_test.php` grew to 91 checks: an active instance is advertised, an inactive one never
+  is, the primary's URLs stay first, and the magnet carries four `tr=` entries instead of two.
+- The new test sets up its own preconditions (whitelist mode, catalogue on, a CAPTCHA that is never
+  called, an admin session for the permission-gated search page) and restores every one of them,
+  including on failure — proven by running it twice in a row against an unchanged tracker.
+
+### Measured, not assumed
+
+On production: one opentracker process, **10 threads, one UDP socket** (`fd=5`) on 6969 — no
+`SO_REUSEPORT`, no second socket. The panel's own performance card agrees: *"One instance is using
+97% of the 600% this machine has … A second instance would add tracker capacity, which is not what
+is short."* The packets being lost here are lost to the socket receive buffer, not to CPU.
+
 ## [1.15.0] — 2026-08-28
 
 ### Added — a QR code for the two-factor setup, drawn on this machine

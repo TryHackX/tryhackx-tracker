@@ -23,7 +23,10 @@ $meUser = currentUser($db);
 <p>Search everything this tracker has <em>seen</em> (resolved metadata only<?= $canWl ? ', registered torrents included' : '' ?>). This is a catalogue of hashes observed in the swarm &mdash; nothing is hosted here.</p>
 <form id="search-form" class="search-panel" novalidate
       data-can-files="<?= $canFiles ? '1' : '0' ?>" data-can-magnet="<?= $canMagnet ? '1' : '0' ?>"
-      data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>">
+      data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
+      <?php $sExtra = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
+                                              array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')]))); ?>
+      data-announce-extra="<?= sanitize(implode(' ', $sExtra)) ?>">
     <div class="search-toolbar">
         <div class="search-box">
             <span class="search-box-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>

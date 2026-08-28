@@ -16,6 +16,11 @@ $wlUserOk    = $wlUsersMode && $wlMe !== null && userCan($db, $cfg, 'whitelist.a
 $wlMax      = max(1, (int)($cfg['whitelist_max_per_submission'] ?? 20));
 $wlUdp      = trim((string)($cfg['announce_url'] ?? ''));
 $wlHttp     = trim((string)($cfg['announce_url_https'] ?? ''));
+// Ports served by extra opentracker instances. A magnet naming only the first one never reaches
+// them, so somebody registering a torrent here has to be given the whole set. Empty unless the
+// cluster is on, which it is not on the overwhelming majority of installs.
+$wlExtra    = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
+                                      array_filter([$wlUdp, $wlHttp])));
 $wlOpen     = $wlReg && $wlPublic && $wlCaptcha;
 // Official number of registered (active, non-banned) hashes. Cheap path: the state file
 // (config/whitelist_state.json) — `count` is the row count of the last regeneration plus every append since
@@ -128,7 +133,8 @@ if ($wlSched) {
     <button class="copy-btn" onclick="copyText(this, 'wl-announce-copy')" title="Copy announce URLs"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
     <?php if ($wlHttp !== ''): ?><div class="label"><?= stripos($wlHttp, 'https://') === 0 ? 'HTTPS' : 'HTTP' ?></div><code><?= sanitize($wlHttp) ?></code><?php endif; ?>
     <?php if ($wlUdp !== ''): ?><div class="label label-top">UDP</div><code><?= sanitize($wlUdp) ?></code><?php endif; ?>
-    <span id="wl-announce-copy" class="announce-hidden"><?= trim(sanitize($wlHttp) . "\n" . sanitize($wlUdp)) ?></span>
+    <?php foreach ($wlExtra as $eu): ?><div class="label label-top">EXTRA</div><code><?= sanitize($eu) ?></code><?php endforeach; ?>
+    <span id="wl-announce-copy" class="announce-hidden"><?= trim(implode(PHP_EOL, array_filter(array_merge([sanitize($wlHttp), sanitize($wlUdp)], array_map('sanitize', $wlExtra))))) ?></span>
 </div>
 <?php endif; ?>
 

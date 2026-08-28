@@ -587,11 +587,32 @@ function magnetHasTrackerHost(string $magnet, array $hosts): bool {
 function buildMagnet(string $hash, ?string $name, array $cfg): string {
     $m = 'magnet:?xt=urn:btih:' . strtolower($hash);
     if ($name !== null && $name !== '') $m .= '&dn=' . rawurlencode($name);
-    foreach (['announce_url', 'announce_url_https'] as $k) {
-        $u = trim((string)($cfg[$k] ?? ''));
-        if ($u !== '' && preg_match('#^(udp|https?|wss?)://#i', $u)) $m .= '&tr=' . rawurlencode($u);
+    foreach (announceUrls($cfg) as $u) {
+        if (preg_match('#^(udp|https?|wss?)://#i', $u)) $m .= '&tr=' . rawurlencode($u);
     }
     return $m;
+}
+
+/**
+ * Every announce URL a client should be handed, in one place.
+ *
+ * Extra opentracker instances listen on their OWN ports and share nothing between them -- the kernel
+ * does not split a UDP port across processes, and opentracker spreads load across THREADS on one
+ * socket instead. So an extra instance receives exactly the announces whose magnet names its port,
+ * and nothing else. Which makes this function, unglamorous as it is, the thing that decides whether
+ * running more than one is worth anything at all.
+ *
+ * With the cluster off it returns the two URLs the panel has always rendered, byte for byte, and
+ * reads nothing from disk -- so an install that never enabled it pays nothing and changes nothing.
+ */
+function announceUrls(array $cfg): array {
+    if (function_exists('otClusterAnnounceUrls')) return otClusterAnnounceUrls($cfg);
+    $urls = [];
+    foreach (['announce_url', 'announce_url_https'] as $k) {
+        $u = trim((string)($cfg[$k] ?? ''));
+        if ($u !== '') $urls[] = $u;
+    }
+    return $urls;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

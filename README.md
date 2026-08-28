@@ -543,11 +543,30 @@ is denied and no deploy overwrites — not in the settings table, which every ba
 **Locked out?** `php tools/twofa_cli.php off` from a shell. Reaching that shell already proves more
 than six digits could.
 
-### Extra opentracker instances (E6, 1.14.0)
+### Extra opentracker instances (E6, 1.14.0; announce URLs completed in 1.16.0)
 
 **Settings → OpenTracker instances**, with a roster card on the Traffic page. For a machine whose UDP
 workers are genuinely saturated — check the performance card first, which says outright whether that
 is you. **Off by default.**
+
+**Read this before enabling it: separate ports do not share traffic.** The kernel does not split one
+UDP port across processes, and opentracker itself scales by running several threads on a *single*
+socket (`listen.udp.workers`) — on this project's own server that is one process, ten threads, one
+socket on 6969. So a second instance on 6970 answers exactly the announces whose magnet names 6970,
+and nothing else. It is not a load balancer sitting behind the main port; there is no main port doing
+any distributing.
+
+That makes the announce URLs the entire mechanism, which is why `announceUrls()` feeds the magnet
+builder, the home page, the whitelist page, the search form and the submit response. A client that
+is only ever handed `:6969` will only ever talk to the primary. An instance the roster reports as not
+listening is never advertised, so stopping one takes it out of the magnets rather than sending
+clients at a dead port.
+
+**Which means: for most operators this is the wrong knob.** More threads, a nicer priority and a
+bigger socket buffer are worth nearly all of the available gain at nearly none of the risk. The
+performance card says outright which of those is short on your machine, and on this one the answer is
+the receive buffer, not the CPU. Extra instances earn their keep when the worker threads are actually
+saturated — and when you are prepared to publish more than one announce URL.
 
 The installer's `opentracker.service` is never touched; extras are added beside it, share its
 accesslist, its white/black mode and its binary, and differ only in ports. The panel keeps no roster

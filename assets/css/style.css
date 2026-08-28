@@ -1854,3 +1854,7 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .terms-body { white-space: normal; line-height: 1.7; font-size: 0.9rem; }
 .reg-terms { color: var(--text); }
 .acc-prefs-check { font-size: 0.85rem; }
+
+/* The note under the announce block when this tracker answers on more than one port. Only rendered
+   when extra opentracker instances are actually running, so on nearly every install it never exists. */
+.announce-extra-note { margin: 0.6rem 0 0; font-size: 0.85rem; opacity: 0.75; line-height: 1.45; }
