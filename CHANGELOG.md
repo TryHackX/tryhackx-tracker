@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.19.1] — 2026-08-28
+
+### Fixed
+
+The OpenTracker performance card still left a hole: five tiles in a three-column grid fill two rows
+and leave the sixth slot empty. The drop-in tile — the only one carrying a sentence — now spans two
+columns, so the grid is full: three tiles, then one plus a wide one, then the load chart across the
+whole row. Measured on production: 334 / 334 / 334, then 334 / 678, then 1021.
+
 ## [1.19.0] — 2026-08-28 (schema v22 + v23)
 
 ### Added — five stars, in half steps

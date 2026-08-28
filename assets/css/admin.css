@@ -1685,3 +1685,8 @@ input[type="number"] {
 .bm-preview { padding: 0.8rem 0.9rem; background: #fff; color: #1c1e21; font-size: 0.88rem; line-height: 1.55; max-height: 22rem; overflow: auto; }
 .bm-preview a { color: #1a56a8; }
 .bm-preview img { max-width: 100%; height: auto; }
+/* The only tile with a sentence in it, and the one that balances the grid: five tiles in three
+   columns otherwise leave a hole where the sixth would be. Collapses to one column on narrow
+   screens, where the grid has only one anyway. */
+.wl-status-grid .ot-dropin-tile { grid-column: span 2; }
+@media (max-width: 900px) { .wl-status-grid .ot-dropin-tile { grid-column: auto; } }

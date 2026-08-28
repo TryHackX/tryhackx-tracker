@@ -252,12 +252,15 @@
             // the helper reports `deferred`, the panel records what was asked for, and the janitor
             // writes the file within a minute. Saying it fails made a working feature look broken.
             dparts.push(el('div', { className: 'wl-small text-muted',
-                text: 'This directory is read-only for the panel’s PHP (systemd ProtectSystem), so Apply '
-                    + 'does not write it directly — it records the change and the janitor writes it within '
-                    + 'a minute. Nothing is broken; “not written” only means the panel has not applied any '
-                    + 'override yet.' }));
+                text: 'Read-only for the panel’s PHP (systemd ProtectSystem), so Apply hands the change '
+                    + 'to the janitor, which writes it within a minute. “Not written” only means no '
+                    + 'override has been applied yet.' }));
         }
-        g.appendChild(kv('Panel drop-in', dparts));
+        // Two columns: it is the only tile carrying a sentence, and five tiles in a three-column grid
+        // otherwise leave a hole where the sixth would be.
+        const dropTile = kv('Panel drop-in', dparts);
+        dropTile.classList.add('ot-dropin-tile');
+        g.appendChild(dropTile);
 
         // Load, measured rather than guessed. Absent on the first poll: one sample is not a rate.
         // A poll that lands too soon after the last one keeps showing the previous reading, which is
