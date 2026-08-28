@@ -10,9 +10,7 @@ if (!$currentPassword) {
     jsonResponse(['error' => 'Current password is required'], 400);
 }
 
-if (!password_verify($currentPassword, ADMIN_PASSWORD_HASH)) {
-    jsonResponse(['error' => 'Current password is incorrect'], 403);
-}
+requireAdminReauth($currentPassword, $cfg);
 
 $changes = [];
 

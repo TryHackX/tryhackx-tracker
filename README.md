@@ -508,6 +508,77 @@ Two numbers on this card are diagnoses rather than knobs, and both are easy to m
 - **the socket's own drop counter** (`ss -ulnpm`, the `d<N>` in skmem) — how many announces were
   thrown away for exactly that reason.
 
+### Source links and descriptions on registered torrents (1.17.0)
+
+**Settings → Tracker Mode & Whitelist → Source link & description.** Two optional fields on the
+registration form: where the torrent came from, and what it is. They show on the Whitelist and Index
+detail panels and in the public search. **Both off by default.**
+
+- **The renderer is written here** (`includes/richtext.php`), not imported. Every general-purpose
+  Markdown/BBCode parser passes raw HTML through by design, and the ones that filter it use a
+  blacklist that has to stay ahead of whoever is trying — the wrong shape for text typed into a
+  public form. Here the input is escaped **in full before a single rule runs**, so the only tags in
+  the output are the ones the file itself writes.
+- Both syntaxes, admin enables each, the writer picks. `[code]` is handled first and restored last,
+  so a description explaining BBCode does not get its own example rendered.
+- **A review queue** (Whitelist → To review). The torrent registers immediately; only the words wait.
+  The moderator sees the description rendered, because reviewing the source is how an image tag gets
+  waved through without anybody seeing where it points.
+- **Off-site links ask first**, naming the URL and saying the site has not checked it. Domains in
+  `link_trusted_domains` skip that — warning about your own site teaches people to click through.
+- The source link must be **https**. Plain HTTP is refused rather than upgraded; so are credentials
+  in the URL, private addresses, and hosts with no domain.
+- The public search gains an **Info** panel: link, description, first/last seen, swarm, peak
+  seeders, size, and the file list at the bottom. Optionally a *Refresh seeders* button — off by
+  default and rate-limited per hash across all visitors, since it turns a click into a tracker
+  request.
+
+### Writing to members (1.17.0)
+
+**Users → Write to members**, with a tick box on every row. A message to a selection, a group, or
+everyone; as an in-app notification, an email, or both.
+
+Nothing is sent from a web request. The panel writes rows and the janitor sends a few a minute:
+this server sends through `mail()` with no relay in front of it, and a burst from a domain that
+normally sends a handful a day is what gets the *password-reset* mail filed as spam. The panel shows
+who would be excluded and why (no address, opted out, unsubscribed) before anything is queued, and
+again at the moment of committing. Members opt out of announcements on their account page; every
+bulk message carries an unsubscribe link. **Transactional mail is never affected.**
+
+### Live peer sync between two machines (E7, 1.17.0)
+
+**Settings → Live peer sync.** opentracker gossiping live peers to another opentracker: who is in
+which swarm, right now. Not federation — that moves metadata between panels over HTTPS with a key.
+On a single machine this does nothing; there is nobody to sync with.
+
+**The protocol has no authentication and no encryption.** Anything that can reach the port can inject
+peers into every swarm the tracker serves. So:
+
+- the helper **refuses** to arm unless the address is on a tunnel interface, with **no override
+  flag** — an override is the only feature anybody would regret adding here;
+- after arming it checks the port is actually listening, *and on the tunnel address only*, and undoes
+  its own change if not;
+- the panel does **not** configure WireGuard. Generating a private key and writing it into `/etc` is
+  a bigger claim on the machine than anything else here makes, and it would be doing it without being
+  able to see the other end. Press **Test** and it prints the commands.
+
+This build takes livesync only from the command line, so the helper overrides `ExecStart` in its own
+drop-in — the most invasive thing the panel does anywhere. It therefore records the command line it
+copied and reports when the unit's own has changed underneath it, because a stale copy runs the old
+command for ever while looking perfectly healthy. Undo is deleting one file.
+
+### Guessing the confirmation password (1.17.0)
+
+Every dangerous action asks for the password again, and that check now lives in exactly one place.
+Wrong answers cost progressively more time from the first one; after `admin_reauth_max_attempts`
+(default 5) **the session is destroyed**, so getting back in means the sign-in page with its CAPTCHA
+and address lockout — and the failures count against that lockout too, so guessing here poisons the
+way back in rather than being a side door around it.
+
+The session gate keeps strangers out of the panel. This is for whoever is already sitting at the
+machine: a borrowed laptop, an unlocked screen, a stolen cookie — which is the case the password
+prompt existed for in the first place.
+
 ### Two-factor authentication for the panel (1.14.0, QR added in 1.15.0)
 
 **Settings → Two-factor authentication.** A six-digit TOTP code (RFC 6238) on top of the password,

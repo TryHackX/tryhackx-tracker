@@ -17,6 +17,7 @@ require_once __DIR__ . '/includes/settings.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/schema.php';
 require_once __DIR__ . '/includes/whitelist.php';
+require_once __DIR__ . '/includes/richtext.php';
 require_once __DIR__ . '/includes/schedule.php';
 require_once __DIR__ . '/includes/stats_timeline.php';
 require_once __DIR__ . '/includes/index.php';

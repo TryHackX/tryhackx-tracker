@@ -43,9 +43,7 @@ if ($op === 'reload') {
 }
 
 $password = (string)($input['password'] ?? '');
-if ($password === '' || ADMIN_PASSWORD_HASH === '' || !password_verify($password, ADMIN_PASSWORD_HASH)) {
-    jsonResponse(['error' => 'Wrong admin password'], 403);
-}
+requireAdminReauth($password, $cfg);
 
 if ($op === 'create') {
     // The nftables counters and the automatic limiter only ever see the PRIMARY's port. Add a second

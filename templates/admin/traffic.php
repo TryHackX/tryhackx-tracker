@@ -416,6 +416,24 @@
             </div>
         </div>
         <?php endif; ?>
+
+        <?php if (function_exists('livesyncEnabled') && livesyncEnabled($cfg)): ?>
+        <div class="wl-status-card nl-card" id="livesync-card">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-arrow-left-right"></i> Live peer sync <span class="wl-status-updated" id="ls-updated"></span></h6>
+                <div class="wl-status-actions">
+                    <a href="<?= $baseUrl ?>?action=settings#section-livesync" class="btn btn-sm btn-outline-secondary"><i class="bi bi-gear"></i> Settings</a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-ls-plan"><i class="bi bi-eye"></i> Preview</button>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="btn-ls-arm"><i class="bi bi-play-circle"></i> Turn on&hellip;</button>
+                    <button type="button" class="btn btn-sm btn-outline-warning" id="btn-ls-off"><i class="bi bi-stop-circle"></i> Turn off&hellip;</button>
+                </div>
+            </div>
+            <div class="sy-body" id="ls-body">
+                <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading the tunnel&hellip;</div>
+            </div>
+            <div id="ls-notes"></div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
@@ -439,6 +457,9 @@
     <?php endif; ?>
     <?php if (otClusterEnabled($cfg)): ?>
     <script src="<?= $baseUrl ?>assets/js/admin-cluster.js<?= assetVer('assets/js/admin-cluster.js') ?>"></script>
+    <?php if (function_exists('livesyncEnabled') && livesyncEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/js/admin-livesync.js<?= assetVer('assets/js/admin-livesync.js') ?>"></script>
+    <?php endif; ?>
     <?php endif; ?>
     <?php endif; ?>
 </body>

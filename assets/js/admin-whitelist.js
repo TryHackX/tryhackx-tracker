@@ -6,7 +6,7 @@
     'use strict';
     // Quick feedback (copies) goes through copyToClipboard → flashTip (tooltip on the clicked element);
     // showToast is reserved for real outcomes (added / banned / deleted / errors).
-    const { apiCall, el, showToast, confirmAction, promptModal, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot } = window.AdminCommon;
+    const { apiCall, el, showToast, confirmAction, promptModal, promptPassword, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot } = window.AdminCommon;
 
     const $ = (id) => document.getElementById(id);
     const bodyDs = document.body.dataset;
@@ -225,11 +225,122 @@
     function switchView(view) {
         state.view = view;
         document.querySelectorAll('#wl-tabs .source-tab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-        ['whitelist', 'banned', 'clients', 'bans'].forEach(v => $('view-' + v).classList.toggle('d-hidden', v !== view));
+        ['whitelist', 'banned', 'clients', 'bans', 'review'].forEach(v => $('view-' + v).classList.toggle('d-hidden', v !== view));
         if (view === 'whitelist') loadWhitelist();
         else if (view === 'banned') loadBanned();
         else if (view === 'clients') loadClients();
         else if (view === 'bans') loadApiBans();
+        else if (view === 'review') loadReview();
+    }
+
+
+    // ───────────────────────── review queue ─────────────────────────
+    //
+    // Source links and descriptions written by submitters, waiting to be published. The torrents
+    // themselves are already registered and stay that way whatever happens here: a description
+    // nobody approved is a description nobody sees, not a reason to stop serving a swarm.
+    //
+    // The description is shown RENDERED, using the same renderer the public page uses. Reviewing the
+    // source would mean waving through whatever an image tag turns out to point at.
+
+    const rvState = { page: 1 };
+
+    async function loadReview() {
+        const box = $('rv-list');
+        if (!box) return;
+        box.textContent = '';
+        box.appendChild(el('div', { className: 'wl-status-loading', text: 'Loading…' }));
+        const r = await apiCall('admin/wl_content', 'POST', { op: 'list', page: rvState.page });
+        box.textContent = '';
+        if (!r || !r.success) {
+            box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || 'Could not load the queue.' }));
+            return;
+        }
+        const badge = $('tab-badge-review');
+        if (badge) badge.textContent = r.total ? String(r.total) : '';
+        $('rv-total').textContent = r.total ? (r.total + ' waiting') : '';
+        if (!r.review_on) {
+            box.appendChild(el('div', { className: 'nl-note nl-note-info', text:
+                'Review is switched off, so new links and descriptions are published immediately. Anything here was submitted while it was on.' }));
+        }
+        if (!(r.rows || []).length) {
+            box.appendChild(el('div', { className: 'nl-note', text: 'Nothing is waiting.' }));
+            return;
+        }
+        r.rows.forEach(row => box.appendChild(reviewCard(row)));
+        renderPagination($('rv-pagination'), { total: r.total, page: r.page, pages: r.pages, onPage: (pg) => { rvState.page = pg; loadReview(); } });
+    }
+
+    function reviewCard(row) {
+        const card = el('div', { className: 'rv-card' });
+        const head = el('div', { className: 'rv-head' }, [
+            el('strong', { text: row.name || '(no name yet)' }),
+            el('code', { className: 'rv-hash', text: row.info_hash }),
+            el('span', { className: 'wl-small text-muted', text: fmtDate(String(row.created_at).replace(' ', 'T')) }),
+        ]);
+        card.appendChild(head);
+
+        if (row.source_url) {
+            const line = el('div', { className: 'rv-src' });
+            line.appendChild(el('span', { className: 'wl-kv-label', text: 'Source link' }));
+            // Not a live link, on purpose. A moderator deciding whether a link is acceptable should
+            // not have to visit it to find out, and one accidental click is how that happens.
+            line.appendChild(el('code', { className: 'rv-url', text: row.source_url }));
+            line.appendChild(el('span', {
+                className: 'wl-badge ' + (row.source_trusted ? 'wl-b-ok' : 'wl-b-warn'),
+                text: row.source_trusted ? 'trusted domain' : 'off-site',
+            }));
+            card.appendChild(line);
+        }
+
+        if (row.description_html) {
+            const d = el('div', { className: 'rv-desc rt-body' });
+            // The server built this string from escaped input with a fixed tag whitelist
+            // (includes/richtext.php). It is the only place in this file that assigns innerHTML.
+            d.innerHTML = row.description_html;
+            card.appendChild(el('div', { className: 'wl-kv-label', text: 'Description (' + (row.description_format || 'bbcode') + ')' }));
+            card.appendChild(d);
+        }
+
+        const acts = el('div', { className: 'rv-acts' });
+        const ok = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success wl-act' },
+            [el('i', { className: 'bi bi-check-lg' }), ' Publish']);
+        ok.addEventListener('click', () => reviewAct(row.id, 'approve'));
+        const no = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning wl-act' },
+            [el('i', { className: 'bi bi-x-lg' }), ' Reject']);
+        no.addEventListener('click', () => reviewReject(row.id));
+        const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: 'Delete the link and description outright. The torrent stays registered.' },
+            [el('i', { className: 'bi bi-trash' }), ' Delete text']);
+        del.addEventListener('click', () => reviewClear(row.id, row.info_hash));
+        acts.appendChild(ok); acts.appendChild(no); acts.appendChild(del);
+        card.appendChild(acts);
+        return card;
+    }
+
+    async function reviewAct(id, op, extra) {
+        const r = await apiCall('admin/wl_content', 'POST', Object.assign({ op, id }, extra || {}));
+        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        if (r && r.success) loadReview();
+    }
+
+    async function reviewReject(id) {
+        const note = await promptModal({
+            title: 'Reject this text',
+            label: 'Why (optional, kept for the record)',
+            placeholder: 'e.g. unrelated advertising',
+            maxlength: 255,
+            okLabel: 'Reject',
+        });
+        if (note === null) return;
+        reviewAct(id, 'reject', { note });
+    }
+
+    async function reviewClear(id, hash) {
+        if (!await confirmAction('Delete this text', 'Delete the source link and description for this row?',
+            { code: hash, after: 'The torrent stays registered. This cannot be undone.', okLabel: 'Delete', danger: true })) return;
+        const pw = await promptPassword('Delete this text', 'Confirm with the admin password.');
+        if (!pw) return;
+        reviewAct(id, 'clear', { password: pw });
     }
 
     // ───────────────────────── whitelist view ─────────────────────────
@@ -404,7 +515,9 @@
     }
 
     async function unbanHash(hash) {
-        if (!await confirmAction('Unban hash', `Lift the ban on ${hash}? If a whitelist row exists it becomes active again.`, { okLabel: 'Unban', danger: false })) return;
+        if (!await confirmAction('Unban hash', 'Lift the ban on this hash?',
+            { code: hash, after: 'If a whitelist row exists it becomes active again.',
+              okLabel: 'Unban', danger: false })) return;
         try {
             const r = await apiCall('admin/whitelist_unban', 'POST', { hash });
             if (r.success) showToast('Ban lifted', 'success'); else showToast(r.error || 'Unban failed', 'danger');
@@ -640,6 +753,61 @@
         }
     }
 
+
+    /**
+     * The submitter's source link and description, as a block for a detail panel.
+     *
+     * Sits between the key/value grid and the file list: the numbers are what the panel is for, the
+     * files are the long part, and this belongs in between. The description starts COLLAPSED — an
+     * essay that pushes the file list below the fold helps nobody who came here to look at a torrent.
+     *
+     * Returns null when there is nothing to show, so callers can append it unconditionally.
+     */
+    function contentBlock(c) {
+        if (!c) return null;
+        const hasText = !!c.description_html;
+        const hasLink = !!c.source_url;
+        if (!hasText && !hasLink) return null;
+
+        const wrap = el('div', { className: 'wl-content-block' });
+
+        if (c.content_status && c.content_status !== 'approved') {
+            wrap.appendChild(el('div', {
+                className: 'wl-badge ' + (c.content_status === 'pending' ? 'wl-b-pending' : 'wl-b-warn'),
+                text: c.content_status === 'pending'
+                    ? 'waiting for review — not public yet'
+                    : 'rejected' + (c.rejected_note ? ' — ' + c.rejected_note : '') + ' — not public',
+            }));
+        }
+
+        if (hasLink) {
+            const row = el('div', { className: 'rt-src-row' });
+            row.appendChild(el('span', { className: 'wl-kv-label', text: 'Source' }));
+            const a = el('a', {
+                className: 'rt-src-url', href: c.source_url, text: c.source_url,
+                rel: 'nofollow noopener noreferrer ugc', target: '_blank',
+                title: c.source_trusted ? 'A domain you have marked as trusted' : 'Off-site — you will be asked to confirm',
+            });
+            // Not our link. The confirmation is the panel's too: an administrator clicking through a
+            // queue is exactly the person who should not open one by accident.
+            if (!c.source_trusted) a.setAttribute('data-external', '1');
+            row.appendChild(a);
+            wrap.appendChild(row);
+        }
+
+        if (hasText) {
+            const det = el('details', { className: 'rt-collapse' });
+            det.appendChild(el('summary', { text: 'Description' }));
+            const body = el('div', { className: 'rt-body' });
+            // Built on the server by includes/richtext.php from fully escaped input with a fixed tag
+            // whitelist. Everything else in this file goes through el()/textContent.
+            body.innerHTML = c.description_html;
+            det.appendChild(body);
+            wrap.appendChild(det);
+        }
+        return wrap;
+    }
+
     function renderDetails(r) {
         const it = r.item;
         const body = $('wd-body');
@@ -698,6 +866,10 @@
         }
         row('Created / updated', [el('span', { text: fmtDate(it.created_at) + ' / ' + fmtDate(it.updated_at) })]);
         body.appendChild(kvBox);
+
+        // The submitter own words, between the numbers above and the files below.
+        const cb = contentBlock(r.content);
+        if (cb) body.appendChild(cb);
 
         // files tree
         const filesBox = el('div', { className: 'wl-files' });

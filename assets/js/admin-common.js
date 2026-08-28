@@ -100,7 +100,10 @@
                         el('div', { className: 'modal-content bg-dark' }, [
                             el('div', { className: 'modal-body text-center' }, [
                                 el('h6', { className: 'text-light mb-2', id: 'commonConfirm-title' }),
-                                el('p', { className: 'text-light mb-3 confirm-msg', id: 'commonConfirm-msg' }),
+                                el('p', { className: 'text-light mb-2 confirm-msg', id: 'commonConfirm-msg' }),
+                                // opts.code: an identifier the reader is meant to CHECK, not read past.
+                                el('code', { className: 'confirm-code', id: 'commonConfirm-code', style: 'display:none' }),
+                                el('p', { className: 'text-light mb-3 confirm-msg', id: 'commonConfirm-after', style: 'display:none' }),
                                 el('div', { className: 'd-flex justify-content-center gap-2' }, [
                                     el('button', { className: 'btn btn-sm btn-outline-secondary', id: 'commonConfirm-cancel', type: 'button' }, [el('i', { className: 'bi bi-x-lg' }), ' Cancel']),
                                     el('button', { className: 'btn btn-sm btn-outline-danger', id: 'commonConfirm-ok', type: 'button' }, [el('i', { className: 'bi bi-check-lg' }), ' OK']),
@@ -113,6 +116,12 @@
             }
             confirmModalEl.querySelector('#commonConfirm-title').textContent = title || '';
             confirmModalEl.querySelector('#commonConfirm-msg').textContent = message || '';
+            const codeEl = confirmModalEl.querySelector('#commonConfirm-code');
+            const afterEl = confirmModalEl.querySelector('#commonConfirm-after');
+            codeEl.textContent = opts.code || '';
+            codeEl.style.display = opts.code ? '' : 'none';
+            afterEl.textContent = opts.after || '';
+            afterEl.style.display = opts.after ? '' : 'none';
             const okBtn = confirmModalEl.querySelector('#commonConfirm-ok');
             const cancelBtn = confirmModalEl.querySelector('#commonConfirm-cancel');
             okBtn.className = 'btn btn-sm ' + (opts.danger === false ? 'btn-outline-info' : 'btn-outline-danger');
@@ -145,7 +154,7 @@
      */
     function promptModal(opts = {}) {
         if (typeof opts === 'string') opts = { title: opts };
-        const o = Object.assign({ title: 'Input', label: '', value: '', placeholder: '', okLabel: 'OK', danger: false, multiline: false, maxlength: null, hint: '' }, opts);
+        const o = Object.assign({ title: 'Input', label: '', value: '', placeholder: '', okLabel: 'OK', danger: false, multiline: false, maxlength: null, hint: '', password: false }, opts);
         return new Promise((resolve) => {
             if (!promptModalEl) {
                 promptModalEl = el('div', { className: 'modal confirm-modal prompt-modal', id: 'commonPromptModal', tabindex: '-1', 'aria-labelledby': 'commonPrompt-title' }, [
@@ -178,7 +187,7 @@
             field.textContent = '';
             const input = o.multiline
                 ? el('textarea', { className: 'form-control form-control-sm bg-dark text-light border-secondary', id: 'commonPrompt-input', rows: '3' })
-                : el('input', { type: 'text', className: 'form-control form-control-sm bg-dark text-light border-secondary', id: 'commonPrompt-input', autocomplete: 'off' });
+                : el('input', { type: o.password ? 'password' : 'text', className: 'form-control form-control-sm bg-dark text-light border-secondary', id: 'commonPrompt-input', autocomplete: o.password ? 'current-password' : 'off' });
             if (o.placeholder) input.setAttribute('placeholder', o.placeholder);
             if (o.maxlength) input.setAttribute('maxlength', String(o.maxlength));
             input.value = o.value == null ? '' : String(o.value);
@@ -507,5 +516,72 @@
         }).catch(() => flashTip(target, 'Clipboard not available', { variant: 'warning', duration: 2000 }));
     }
 
-    window.AdminCommon = { apiCall, esc, el, showToast, confirmAction, promptModal, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot };
+    /**
+     * Ask for the admin password.
+     *
+     * A thin wrapper, but a wrapper worth having: window.prompt() is unstyled, is suppressed by some
+     * browsers, and shows the password in clear on screen. Every dangerous action in this panel ends
+     * up here, so it should look and behave like the panel.
+     */
+    function promptPassword(title, message) {
+        return promptModal({
+            title: title || 'Confirm',
+            label: 'Admin password',
+            hint: message || '',
+            password: true,
+            okLabel: 'Confirm',
+        });
+    }
+
+
+    /* ── leaving the site, in the panel too ─────────────────────────────────
+     *
+     * The public pages have this; the panel needs it more. A moderator working through a review
+     * queue is precisely the person who will click a submitter's link by accident, and the whole
+     * question in front of them is whether that link is safe.
+     *
+     * One delegated listener on the document, for the same reason as on the public side: a
+     * description can be rendered into a detail modal, a queue card or a panel opened from another
+     * panel, and whoever adds the next place should not have to remember this.
+     */
+    function askBeforeLeaving(url) {
+        const box = document.createElement('div');
+        box.className = 'leave-modal';
+        box.setAttribute('role', 'dialog');
+        box.setAttribute('aria-modal', 'true');
+        const inner = el('div', { className: 'leave-box' }, [
+            el('h3', { text: 'You are leaving this panel' }),
+            el('p', { text: 'This link was written by whoever registered the torrent. Nobody here has '
+                          + 'checked where it goes. Open it at your own risk.' }),
+            // textContent, not innerHTML: the URL is the untrusted part of a dialog whose entire
+            // purpose is warning about untrusted things.
+            el('code', { className: 'leave-url', text: url }),
+        ]);
+        const acts = el('div', { className: 'leave-acts' });
+        const cancel = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', text: 'Stay here' });
+        const go = el('a', { className: 'btn btn-sm btn-outline-warning', href: url, target: '_blank',
+                             rel: 'nofollow noopener noreferrer ugc', text: 'Open anyway' });
+        const close = () => { if (box.parentNode) box.parentNode.removeChild(box); document.removeEventListener('keydown', onEsc, true); };
+        function onEsc(e) { if (e.key === 'Escape') close(); }
+        cancel.addEventListener('click', close);
+        go.addEventListener('click', close);
+        acts.appendChild(cancel); acts.appendChild(go);
+        inner.appendChild(acts);
+        box.appendChild(inner);
+        box.addEventListener('click', (e) => { if (e.target === box) close(); });
+        document.body.appendChild(box);
+        document.addEventListener('keydown', onEsc, true);
+        cancel.focus();
+    }
+
+    document.addEventListener('click', function (e) {
+        const a = e.target && e.target.closest ? e.target.closest('a[data-external]') : null;
+        if (!a) return;
+        const href = a.getAttribute('href') || '';
+        if (!/^https?:\/\//i.test(href)) return;
+        e.preventDefault();
+        askBeforeLeaving(href);
+    }, true);
+
+    window.AdminCommon = { apiCall, esc, el, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot };
 })();

@@ -11,7 +11,16 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 18;  // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling, 14 = settings only (OpenTracker performance knobs: ot_*), 15 = federation P1: index_hashes.meta_origin_at (when the metadata was FIRST resolved anywhere, so it stops circulating between three or more nodes) + the fed_review quarantine table, 16 = settings only (curated kernel network buffers: sysctl_*), 17 = settings only (extra opentracker instances: ot_cluster_*), 18 = settings only (admin_2fa_enabled: a MIRROR of config/admin_2fa.json, which is authoritative)
+const TRACKER_SCHEMA_VERSION = 20;  // 20 = settings only, and it needs its own number for the
+                                    // reason every "settings only" bump in this list needed one:
+                                    // default rows are inserted by the migration block, and that
+                                    // block runs when the VERSION moves. Adding keys without moving
+                                    // it leaves them absent from the table -- harmless, since every
+                                    // reader has a fallback, but the Settings page then shows values
+                                    // nothing saved. The keys: the whitelist source link and
+                                    // description (with their limits and the trusted-domain list),
+                                    // bulk mail, the re-authentication throttle, and live sync.
+                                    // 19 = source link + description on whitelist rows (with a review queue), the bulk mail queue, users.bulk_optout, and the two composite indexes the catalogue always needed — its own default first page was a full scan of 2.7 M rows, measured at 1 747 ms. Earlier: // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling, 14 = settings only (OpenTracker performance knobs: ot_*), 15 = federation P1: index_hashes.meta_origin_at (when the metadata was FIRST resolved anywhere, so it stops circulating between three or more nodes) + the fed_review quarantine table, 16 = settings only (curated kernel network buffers: sysctl_*), 17 = settings only (extra opentracker instances: ot_cluster_*), 18 = settings only (admin_2fa_enabled: a MIRROR of config/admin_2fa.json, which is authoritative)
 
 /**
  * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
@@ -386,6 +395,28 @@ function trackerSchemaStatements(): array {
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY `uq_fed_peers_name` (`name`)
         ) $engine",
+
+        // ── Outgoing bulk mail, one row per recipient ────────────────────
+        // Nothing is sent from a web request. The panel writes rows here and the janitor drains them
+        // at a configured rate, because this server sends through PHP's mail() with no relay in front
+        // of it: fire fifty at once and the domain's reputation is what pays, which then costs the
+        // password-reset messages that actually matter.
+        "CREATE TABLE IF NOT EXISTS `mail_queue` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `batch_id` CHAR(16) NOT NULL,
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `email` VARCHAR(190) NOT NULL,
+            `subject` VARCHAR(255) NOT NULL,
+            `body` MEDIUMTEXT NOT NULL,
+            `status` ENUM('queued','sending','sent','failed','skipped') NOT NULL DEFAULT 'queued',
+            `attempts` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `last_error` VARCHAR(255) NOT NULL DEFAULT '',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `next_attempt_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `sent_at` DATETIME DEFAULT NULL,
+            KEY `idx_mq_due` (`status`, `next_attempt_at`),
+            KEY `idx_mq_batch` (`batch_id`, `status`)
+        ) $engine",
     ];
 }
 
@@ -463,7 +494,65 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     $uparts = [];
     if (!schemaColumnExists($db, 'users', 'pending_email')) $uparts[] = "ADD COLUMN `pending_email` VARCHAR(190) DEFAULT NULL";
     if (!schemaColumnExists($db, 'users', 'email_changed_at')) $uparts[] = "ADD COLUMN `email_changed_at` DATETIME DEFAULT NULL";
+    // v19: whoever does not want the newsletter must be able to say so once and be believed.
+    if (!schemaColumnExists($db, 'users', 'bulk_optout')) $uparts[] = "ADD COLUMN `bulk_optout` TINYINT(1) NOT NULL DEFAULT 0";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
+
+    // v19: a source link and a description on a whitelist row. The table is small (hundreds of rows),
+    // so this is an ordinary ALTER — nothing here needs the deferral machinery below.
+    $wparts = [];
+    if (!schemaColumnExists($db, 'whitelist', 'source_url')) {
+        $wparts[] = "ADD COLUMN `source_url` VARCHAR(500) DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'description')) {
+        $wparts[] = "ADD COLUMN `description` MEDIUMTEXT DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'description_format')) {
+        $wparts[] = "ADD COLUMN `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode'";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'content_status')) {
+        $wparts[] = "ADD COLUMN `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none'";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'content_reviewed_at')) {
+        $wparts[] = "ADD COLUMN `content_reviewed_at` DATETIME DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'content_rejected_note')) {
+        $wparts[] = "ADD COLUMN `content_rejected_note` VARCHAR(255) DEFAULT NULL";
+    }
+    if (!schemaIndexExists($db, 'whitelist', 'idx_whitelist_content')) {
+        $wparts[] = "ADD KEY `idx_whitelist_content` (`content_status`, `created_at`)";
+    }
+    if ($wparts) $out[] = "ALTER TABLE `whitelist` " . implode(', ', $wparts);
+
+    // v19: the two composite indexes the catalogue has always needed.
+    //
+    // Measured on the live table (2 746 616 rows, 2 GB): the Index page's own default first page ran
+    // `ORDER BY last_seeders DESC, last_seen DESC LIMIT 50` as `type=ALL … Using filesort` — a full
+    // scan of every row, 1 747 ms, on every single load. There WAS an index on `last_seeders` alone,
+    // and a single-column index cannot satisfy a two-column sort, so the optimiser discarded it.
+    //
+    // The public search is the same shape with `WHERE meta_status='done'` in front.
+    //
+    // This is worth more than any cache in front of it: a cache would have hidden a 1.7-second scan
+    // that also evicts a 512 MB InnoDB buffer pool with 2 GB of table on every miss — and that pool
+    // is shared with the mail, the forum and the file service on this machine. The fix belongs here.
+    $iparts = [];
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_seed_seen')) {
+        $iparts[] = "ADD KEY `idx_index_seed_seen` (`last_seeders`, `last_seen`)";
+    }
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_seed')) {
+        $iparts[] = "ADD KEY `idx_index_meta_seed` (`meta_status`, `last_seeders`, `last_seen`)";
+    }
+    if ($iparts) {
+        // Same reasoning as the ALTER above: FULLTEXT on this table means a rebuild, minutes long,
+        // holding a shared lock — never inside a page view. The janitor picks it up on its next tick.
+        if (schemaHeavyAllowed()) {
+            $alter = "ALTER TABLE `index_hashes` " . implode(', ', $iparts);
+            $out[] = [$alter . ", ALGORITHM=INPLACE, LOCK=NONE", $alter . ", ALGORITHM=INPLACE", $alter];
+        } else {
+            schemaDeferHeavy('index_hashes: ' . implode(', ', $iparts));
+        }
+    }
     return $out;
 }
 
@@ -594,6 +683,33 @@ function trackerSchemaDefaultSettings(): array {
         // (empty = link to ?action=tos, otherwise shown in a modal); email-change cooldown; member
         // search master switches
         'users_require_email_verify'  => '1',
+        // How many wrong password confirmations sign the session out. Registered here as well as in
+        // the allow-list, the catalogue and the form: three of four is a setting the page shows and
+        // the table has never heard of.
+        'admin_reauth_max_attempts'   => '5',
+        'bulk_mail_enabled'           => '0',
+        'bulk_mail_per_minute'        => '20',
+        'bulk_mail_max_attempts'      => '3',
+        // Source links and descriptions on whitelist rows. Everything OFF, because these are fields
+        // anonymous strangers type into, and an operator should have to decide to want them.
+        'wl_allow_source_url'         => '0',
+        'wl_allow_description'        => '0',
+        'wl_content_review'           => '1',
+        'desc_allow_bbcode'           => '1',
+        'desc_allow_markdown'         => '1',
+        'desc_max_chars'              => '4000',
+        'desc_max_images'             => '3',
+        'desc_max_links'              => '10',
+        'link_trusted_domains'        => 'tryhackx.org',
+        'search_allow_sl_refresh'     => '0',
+        'search_sl_refresh_seconds'   => '120',
+        // Live peer sync between two trackers. Off, with no command, on every install: the protocol
+        // has no authentication, so this is the last thing that should ever default to on.
+        'livesync_enabled'            => '0',
+        'livesync_cmd'                => '',
+        'livesync_bind_ip'            => '',
+        'livesync_peer_ip'            => '',
+        'livesync_port'               => '9696',
         'users_terms_text'            => '',
         'users_email_change_cooldown_days' => '30',
         'index_search_enabled'        => '1',

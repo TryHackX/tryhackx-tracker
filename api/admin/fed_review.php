@@ -42,9 +42,7 @@ if (!$ids && $peer === '') {
 // descriptions nobody has looked at, and "accept all" publishes every one of them.
 if (!$ids) {
     $password = (string)($input['password'] ?? '');
-    if ($password === '' || ADMIN_PASSWORD_HASH === '' || !password_verify($password, ADMIN_PASSWORD_HASH)) {
-        jsonResponse(['error' => 'Wrong admin password'], 403);
-    }
+    requireAdminReauth($password, $cfg);
 }
 
 try {

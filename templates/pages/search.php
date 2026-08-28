@@ -21,6 +21,7 @@ $meUser = currentUser($db);
 <?php endif; ?>
 <?php else: ?>
 <p>Search everything this tracker has <em>seen</em> (resolved metadata only<?= $canWl ? ', registered torrents included' : '' ?>). This is a catalogue of hashes observed in the swarm &mdash; nothing is hosted here.</p>
+<input type="hidden" id="search-csrf" value="<?= $csrfToken ?>">
 <form id="search-form" class="search-panel" novalidate
       data-can-files="<?= $canFiles ? '1' : '0' ?>" data-can-magnet="<?= $canMagnet ? '1' : '0' ?>"
       data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
@@ -65,6 +66,18 @@ $meUser = currentUser($db);
 <div class="trans-pagination search-pagination" id="search-pagination"></div>
 <p class="text-muted search-note" id="search-note" hidden></p>
 <?php if ($canFiles): ?>
+<!-- Info panel: what this torrent is, where it came from, and how the swarm looks. The file list
+     lives at the bottom of it; the "N files" chip beside a result still opens the tree on its own. -->
+<div class="files-overlay" id="info-overlay" hidden>
+    <div class="files-box info-box" role="dialog" aria-modal="true" aria-labelledby="info-title">
+        <div class="files-head">
+            <h3 id="info-title">Details</h3>
+            <button type="button" class="files-close" id="info-close" title="Close" aria-label="Close">&times;</button>
+        </div>
+        <div class="files-body" id="info-body"></div>
+    </div>
+</div>
+
 <div class="files-overlay" id="files-overlay" hidden>
     <div class="files-box" role="dialog" aria-modal="true" aria-labelledby="files-title">
         <div class="files-head">

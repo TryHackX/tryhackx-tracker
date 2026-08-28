@@ -162,6 +162,61 @@
     }
 
     // ── modal ──────────────────────────────────────────────────────────────
+
+    /**
+     * The submitter's source link and description, as a block for a detail panel.
+     *
+     * Sits between the key/value grid and the file list: the numbers are what the panel is for, the
+     * files are the long part, and this belongs in between. The description starts COLLAPSED — an
+     * essay that pushes the file list below the fold helps nobody who came here to look at a torrent.
+     *
+     * Returns null when there is nothing to show, so callers can append it unconditionally.
+     */
+    function contentBlock(c) {
+        if (!c) return null;
+        const hasText = !!c.description_html;
+        const hasLink = !!c.source_url;
+        if (!hasText && !hasLink) return null;
+
+        const wrap = el('div', { className: 'wl-content-block' });
+
+        if (c.content_status && c.content_status !== 'approved') {
+            wrap.appendChild(el('div', {
+                className: 'wl-badge ' + (c.content_status === 'pending' ? 'wl-b-pending' : 'wl-b-warn'),
+                text: c.content_status === 'pending'
+                    ? 'waiting for review — not public yet'
+                    : 'rejected' + (c.rejected_note ? ' — ' + c.rejected_note : '') + ' — not public',
+            }));
+        }
+
+        if (hasLink) {
+            const row = el('div', { className: 'rt-src-row' });
+            row.appendChild(el('span', { className: 'wl-kv-label', text: 'Source' }));
+            const a = el('a', {
+                className: 'rt-src-url', href: c.source_url, text: c.source_url,
+                rel: 'nofollow noopener noreferrer ugc', target: '_blank',
+                title: c.source_trusted ? 'A domain you have marked as trusted' : 'Off-site — you will be asked to confirm',
+            });
+            // Not our link. The confirmation is the panel's too: an administrator clicking through a
+            // queue is exactly the person who should not open one by accident.
+            if (!c.source_trusted) a.setAttribute('data-external', '1');
+            row.appendChild(a);
+            wrap.appendChild(row);
+        }
+
+        if (hasText) {
+            const det = el('details', { className: 'rt-collapse' });
+            det.appendChild(el('summary', { text: 'Description' }));
+            const body = el('div', { className: 'rt-body' });
+            // Built on the server by includes/richtext.php from fully escaped input with a fixed tag
+            // whitelist. Everything else in this file goes through el()/textContent.
+            body.innerHTML = c.description_html;
+            det.appendChild(body);
+            wrap.appendChild(det);
+        }
+        return wrap;
+    }
+
     async function openModal(hash) {
         modal = modal || bootstrap.Modal.getOrCreateInstance($('idxModal'));
         const body = $('idx-modal-body');
@@ -202,6 +257,8 @@
         ]);
         magWrap.querySelector('button').addEventListener('click', (e) => copyToClipboard(d.magnet, e.currentTarget));
         body.appendChild(magWrap);
+        const cb = contentBlock(d.content);
+        if (cb) body.appendChild(cb);
         // actions
         const actions = el('div', { className: 'd-flex flex-wrap gap-2 my-2' }, [
             el('button', { type: 'button', className: 'btn btn-sm btn-outline-success', id: 'm-promote' }, [el('i', { className: 'bi bi-arrow-up-circle' }), ' Promote → whitelist']),

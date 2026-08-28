@@ -50,24 +50,26 @@ if (empty($password)) {
     jsonResponse(['error' => 'Admin password is required'], 400);
 }
 
-// Verify admin password
-if (!password_verify($password, ADMIN_PASSWORD_HASH)) {
-
-    // Record time of last failed attempt
+// The password itself goes through the one shared check, so this action is throttled and signs the
+// session out on repeat failures like every other. The timed cool-down below is kept on top of it:
+// permanent deletion is the one action here with no undo at all, and a pause is worth more than a
+// clearer error message.
+$reauth = adminReauth($password, $cfg);
+if (!$reauth['ok']) {
+    if ($reauth['locked_out']) {
+        jsonResponse(['error' => $reauth['error'], 'signed_out' => true], 401);
+    }
     $_SESSION['delete_last_attempt_time'] = time();
-
-    // Increment attempts
     $_SESSION['delete_attempts'] = ($deleteAttempts + 1);
-    
-    // Check if lockout limit is reached (X failed attempts)
     $lockoutAttempts = (int)($cfg['delete_lockout_attempts'] ?? 5);
     if ($_SESSION['delete_attempts'] >= $lockoutAttempts) {
         $lockoutMinutes = (int)($cfg['delete_lockout_minutes'] ?? 60);
-        $_SESSION['delete_lockout_until'] = time() + ($lockoutMinutes * 60); // X minutes lockout
+        $_SESSION['delete_lockout_until'] = time() + ($lockoutMinutes * 60);
         jsonResponse(['error' => "Incorrect admin password. Too many failed attempts, locked out for $lockoutMinutes minutes."], 403);
     }
-    
-    jsonResponse(['error' => 'Incorrect admin password. Failed attempts: ' . $_SESSION['delete_attempts'] . '/' . $lockoutAttempts], 403);
+    jsonResponse(['error' => $reauth['error'] . ' Failed attempts on this action: '
+                           . $_SESSION['delete_attempts'] . '/' . $lockoutAttempts,
+                  'attempts_left' => $reauth['left']], 403);
 }
 
 // If password verified, reset rate limit counters

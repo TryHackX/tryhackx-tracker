@@ -914,10 +914,18 @@ async function handleWhitelistSubmit(e) {
     const orig = btn.textContent;
     btn.textContent = 'Registering…';
     try {
-        const json = await fetchWithCaptcha('whitelist_submit', {
-            input: ta.value,
-            csrf_token: form.csrf_token.value,
-        });
+        // The optional fields only make sense for a single torrent: one description cannot describe
+        // twelve of them, and silently attaching it to all twelve would be worse than refusing.
+        const srcEl = document.getElementById('wl-source');
+        const descEl = document.getElementById('wl-desc');
+        const fmtEl = document.getElementById('wl-desc-format');
+        const payload = { input: ta.value, csrf_token: form.csrf_token.value };
+        if (srcEl && srcEl.value.trim()) payload.source_url = srcEl.value.trim();
+        if (descEl && descEl.value.trim()) {
+            payload.description = descEl.value;
+            payload.description_format = fmtEl ? fmtEl.value : 'bbcode';
+        }
+        const json = await fetchWithCaptcha('whitelist_submit', payload);
         if (json.success) {
             alert.className = 'alert alert-success show';
             const s = json.summary || {};
@@ -2078,19 +2086,33 @@ async function loadStatsHome(forceSync = false) {
             if (r && r.success) location.reload();
             else cancelEc.disabled = false;
         });
+        // Two preferences, one endpoint. Account mail and announcements are separate on purpose:
+        // somebody who wants no announcements still needs the password-reset message to arrive.
         const mailPref = $id('acc-mail-pref');
-        if (mailPref) {
+        const bulkPref = $id('acc-bulk-pref');
+        if (mailPref || bulkPref) {
             const label = $id('acc-mail-pref-label');
+            const bulkLabel = $id('acc-bulk-pref-label');
             getJson('user_email_prefs').then(r => {
-                if (!r || !r.success) { label.textContent = 'unavailable'; return; }
-                mailPref.checked = !!r.enabled;
-                label.textContent = r.enabled ? 'enabled' : 'disabled';
+                if (!r || !r.success) {
+                    if (label) label.textContent = 'unavailable';
+                    if (bulkLabel) bulkLabel.textContent = 'unavailable';
+                    return;
+                }
+                if (mailPref) { mailPref.checked = !!r.enabled; label.textContent = r.enabled ? 'enabled' : 'disabled'; }
+                if (bulkPref) { bulkPref.checked = !!r.bulk_enabled; bulkLabel.textContent = r.bulk_enabled ? 'enabled' : 'disabled'; }
             });
-            mailPref.addEventListener('change', async () => {
-                const r = await postJson('user_email_prefs', { csrf_token: $id('account-csrf').value, enabled: mailPref.checked ? 1 : 0 });
-                if (r && r.success) label.textContent = r.enabled ? 'enabled' : 'disabled';
-                else { mailPref.checked = !mailPref.checked; }
-            });
+            const bind = (box, lab, type) => {
+                if (!box) return;
+                box.addEventListener('change', async () => {
+                    const r = await postJson('user_email_prefs', {
+                        csrf_token: $id('account-csrf').value, enabled: box.checked ? 1 : 0, type });
+                    if (r && r.success) lab.textContent = r.enabled ? 'enabled' : 'disabled';
+                    else { box.checked = !box.checked; }
+                });
+            };
+            bind(mailPref, label, 'account');
+            bind(bulkPref, bulkLabel, 'bulk');
         }
         const verifyBtn = $id('acc-verify-send');
         if (verifyBtn) verifyBtn.addEventListener('click', async () => {
@@ -2353,6 +2375,13 @@ async function loadStatsHome(forceSync = false) {
                                 .catch(() => {});
                         });
                         magTd.appendChild(copy);
+                        const info = document.createElement('button');
+                        info.type = 'button';
+                        info.className = 'btn btn-secondary btn-small search-act-btn';
+                        info.title = 'What this is, where it came from, and how the swarm looks';
+                        info.textContent = 'Info';
+                        info.addEventListener('click', () => openInfo(r.info_hash, r.name));
+                        magTd.appendChild(info);
                     }
                     tr.appendChild(magTd);
                 }
@@ -2460,6 +2489,170 @@ async function loadStatsHome(forceSync = false) {
             })(root, container, 0);
             return container;
         }
+
+        // ── the Info panel ──────────────────────────────────────────────────
+        //
+        // Everything about one hash in one place: the source link (behind the leaving-the-site
+        // confirmation, because it is not our link), the description as its author wrote it, the
+        // numbers, and the file list at the bottom. The "N files" chip beside a result still opens
+        // the plain tree on its own — somebody who only wants the file names should not have to read
+        // an essay to reach them.
+        const infoOverlay = $id('info-overlay');
+        let infoHash = null;
+
+        function closeInfo() {
+            if (!infoOverlay) return;
+            infoOverlay.hidden = true;
+            infoHash = null;
+            document.removeEventListener('keydown', escInfo);
+        }
+        function escInfo(e) { if (e.key === 'Escape') closeInfo(); }
+
+        function infoRow(label, value) {
+            const d = document.createElement('div');
+            d.className = 'info-kv';
+            const l = document.createElement('span');
+            l.className = 'info-kv-label';
+            l.textContent = label;
+            const v = document.createElement('span');
+            v.className = 'info-kv-value';
+            if (value instanceof Node) v.appendChild(value); else v.textContent = value == null ? '—' : String(value);
+            d.appendChild(l); d.appendChild(v);
+            return d;
+        }
+
+        async function openInfo(hash, name) {
+            if (!infoOverlay) return;
+            const body = $id('info-body'), title = $id('info-title');
+            infoHash = hash;
+            title.textContent = name || 'Details';
+            body.textContent = 'Loading…';
+            infoOverlay.hidden = false;
+            document.addEventListener('keydown', escInfo);
+            const json = await getJson('index_info&hash=' + encodeURIComponent(hash));
+            if (infoOverlay.hidden || infoHash !== hash) return;
+            body.textContent = '';
+            if (!json || !json.success) {
+                body.textContent = (json && json.error) || 'Could not load the details.';
+                return;
+            }
+            title.textContent = json.name || name || 'Details';
+
+            // 1. where it came from
+            if (json.source_url) {
+                const row = document.createElement('div');
+                row.className = 'rt-src-row';
+                const lab = document.createElement('strong');
+                lab.textContent = 'Source:';
+                const a = document.createElement('a');
+                a.className = 'rt-src-url';
+                a.href = json.source_url;
+                a.textContent = json.source_url;
+                a.rel = 'nofollow noopener noreferrer ugc';
+                a.target = '_blank';
+                // Not our link. Off-site ones get the confirmation; the operator's own trusted
+                // domains do not, because warning about your own site teaches people to click through.
+                if (!json.source_trusted) a.setAttribute('data-external', '1');
+                row.appendChild(lab); row.appendChild(a);
+                body.appendChild(row);
+            }
+
+            // 2. what it is
+            if (json.description_html) {
+                const d = document.createElement('div');
+                d.className = 'rt-body';
+                // Built on the server by includes/richtext.php out of fully escaped input with a
+                // fixed tag whitelist. This is the only assignment of innerHTML on the public pages.
+                d.innerHTML = json.description_html;
+                body.appendChild(d);
+            } else if (!json.source_url) {
+                const none = document.createElement('p');
+                none.className = 'text-muted';
+                none.textContent = 'Nobody has written anything about this one.';
+                body.appendChild(none);
+            }
+
+            // 3. the numbers
+            const st = json.stats || {};
+            const grid = document.createElement('div');
+            grid.className = 'info-grid';
+            const sl = document.createElement('span');
+            sl.id = 'info-sl';
+            sl.textContent = (st.seeders == null ? '—' : st.seeders) + ' seeders / '
+                           + (st.leechers == null ? '—' : st.leechers) + ' leechers';
+            grid.appendChild(infoRow('Swarm', sl));
+            if (st.completed != null) grid.appendChild(infoRow('Completed', Number(st.completed).toLocaleString()));
+            if (st.peak_seeders != null) grid.appendChild(infoRow('Peak seeders', Number(st.peak_seeders).toLocaleString()));
+            if (st.total_size != null) grid.appendChild(infoRow('Size', fmtBytesPub(st.total_size)));
+            if (st.files_count != null) grid.appendChild(infoRow('Files', Number(st.files_count).toLocaleString()));
+            if (st.first_seen) grid.appendChild(infoRow('First seen', fmtDatePub(st.first_seen)));
+            if (st.last_seen) grid.appendChild(infoRow('Last seen', fmtDatePub(st.last_seen)));
+            if (st.seen_count != null) grid.appendChild(infoRow('Times seen', Number(st.seen_count).toLocaleString()));
+            if (json.whitelisted) grid.appendChild(infoRow('Registered', 'yes — served by this tracker'));
+            const hashEl = document.createElement('code');
+            hashEl.className = 'info-hash';
+            hashEl.textContent = json.info_hash;
+            grid.appendChild(infoRow('Info hash', hashEl));
+            body.appendChild(grid);
+
+            if (json.can_refresh) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-secondary btn-small';
+                btn.textContent = 'Refresh seeders';
+                btn.addEventListener('click', async () => {
+                    btn.disabled = true;
+                    const prev = btn.textContent;
+                    btn.textContent = 'Asking the tracker…';
+                    const r = await postJson('index_info&hash=' + encodeURIComponent(hash), {
+                        op: 'refresh', csrf_token: ($id('search-csrf') || {}).value || '' });
+                    if (r && r.success) {
+                        sl.textContent = r.seeders + ' seeders / ' + r.leechers + ' leechers';
+                        btn.textContent = 'Refreshed';
+                    } else {
+                        btn.textContent = (r && r.error) || 'The tracker did not answer';
+                    }
+                    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 4000);
+                });
+                body.appendChild(btn);
+            }
+
+            // 4. the files, last, because the panel is about the torrent and this is the long part
+            if (json.can_files && st.files_count) {
+                const det = document.createElement('details');
+                det.className = 'rt-collapse';
+                det.open = true;
+                const sum = document.createElement('summary');
+                sum.textContent = 'Files (' + Number(st.files_count).toLocaleString() + ')';
+                det.appendChild(sum);
+                const holder = document.createElement('div');
+                holder.className = 'rt-body';
+                holder.textContent = 'Loading…';
+                det.appendChild(holder);
+                body.appendChild(det);
+                const fj = await getJson('index_files&hash=' + encodeURIComponent(hash));
+                if (infoOverlay.hidden || infoHash !== hash) return;
+                holder.textContent = '';
+                if (fj && fj.success && fj.files && fj.files.length) {
+                    holder.appendChild(buildTreePub(fj.files, []));
+                    if (fj.truncated) {
+                        const more = document.createElement('p');
+                        more.className = 'text-muted';
+                        more.textContent = 'List truncated — this torrent has more files.';
+                        holder.appendChild(more);
+                    }
+                } else {
+                    holder.textContent = 'No file list stored for this entry.';
+                }
+            }
+        }
+
+        if (infoOverlay) {
+            infoOverlay.addEventListener('click', (e) => { if (e.target === infoOverlay) closeInfo(); });
+            const ic = $id('info-close');
+            if (ic) ic.addEventListener('click', closeInfo);
+        }
+
         async function openFiles(hash, name) {
             if (!overlay) return;
             const body = $id('files-body'), title = $id('files-title');
@@ -2507,4 +2700,89 @@ async function loadStatsHome(forceSync = false) {
         initReset();
         initSearch();
     });
+})();
+
+/* ── leaving the site ───────────────────────────────────────────────────────
+ *
+ * Any link a SUBMITTER wrote carries data-external unless its domain is on the operator's trusted
+ * list. Following one is a decision the visitor should get to make knowingly: this site exists to be
+ * careful about what it points at, and a link in a description is not something it has checked.
+ *
+ * One delegated listener, on the document. Descriptions are rendered into the page at all sorts of
+ * moments — a search result, a detail panel, a modal opened from another modal — and binding at
+ * render time would mean every one of those places having to remember. Whoever adds the next place
+ * gets this for free, which is the only way a rule like this survives.
+ */
+(function () {
+    'use strict';
+
+    function closeLeave(box) {
+        if (box && box.parentNode) box.parentNode.removeChild(box);
+        document.removeEventListener('keydown', onEsc, true);
+    }
+    let openBox = null;
+    function onEsc(e) { if (e.key === 'Escape') { closeLeave(openBox); openBox = null; } }
+
+    function askBeforeLeaving(url) {
+        const box = document.createElement('div');
+        box.className = 'leave-modal';
+        box.setAttribute('role', 'dialog');
+        box.setAttribute('aria-modal', 'true');
+
+        const inner = document.createElement('div');
+        inner.className = 'leave-box';
+
+        const h = document.createElement('h3');
+        h.textContent = 'You are leaving this site';
+        inner.appendChild(h);
+
+        const p1 = document.createElement('p');
+        p1.textContent = 'This link was written by whoever registered the torrent, not by us. '
+            + 'We have not checked where it goes and we are not responsible for what is there. '
+            + 'Open it at your own risk.';
+        inner.appendChild(p1);
+
+        // textContent, never innerHTML: the URL is the untrusted part of this dialog, and a dialog
+        // warning about an untrusted link would be an absurd place to inject one.
+        const u = document.createElement('code');
+        u.className = 'leave-url';
+        u.textContent = url;
+        inner.appendChild(u);
+
+        const acts = document.createElement('div');
+        acts.className = 'leave-acts';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'btn btn-secondary';
+        cancel.textContent = 'Stay here';
+        cancel.addEventListener('click', () => { closeLeave(box); openBox = null; });
+        const go = document.createElement('a');
+        go.className = 'btn';
+        go.href = url;
+        go.target = '_blank';
+        go.rel = 'nofollow noopener noreferrer ugc';
+        go.textContent = 'Open anyway';
+        go.addEventListener('click', () => { closeLeave(box); openBox = null; });
+        acts.appendChild(cancel);
+        acts.appendChild(go);
+        inner.appendChild(acts);
+
+        box.appendChild(inner);
+        box.addEventListener('click', (e) => { if (e.target === box) { closeLeave(box); openBox = null; } });
+        document.body.appendChild(box);
+        document.addEventListener('keydown', onEsc, true);
+        openBox = box;
+        cancel.focus();
+    }
+
+    document.addEventListener('click', function (e) {
+        const a = e.target && e.target.closest ? e.target.closest('a[data-external]') : null;
+        if (!a) return;
+        const href = a.getAttribute('href') || '';
+        if (!/^https?:\/\//i.test(href)) return;
+        e.preventDefault();
+        askBeforeLeaving(href);
+    }, true);
+
+    window.askBeforeLeaving = askBeforeLeaving;
 })();

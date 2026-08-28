@@ -240,6 +240,89 @@ function clearLoginFailures(string $ip): void {
     }
 }
 
+/* ── re-confirming the password, and what happens when it keeps being wrong ──
+ *
+ * Every dangerous action in the panel asks for the password again. That check sat inline at fourteen
+ * call sites as a bare `password_verify()`, which meant somebody who already HAD a session -- a
+ * borrowed laptop, an unlocked screen, a stolen cookie -- could guess at it for as long as they
+ * liked. The session gate stops an outsider; it does nothing about the person already inside, and
+ * the second factor is exactly the case the password prompt exists for.
+ *
+ * So there is now one function, and it is the only way to check that password:
+ *
+ *   - every wrong answer costs progressively more time, starting immediately;
+ *   - after `admin_reauth_max_attempts` the SESSION IS DESTROYED. Not the action refused -- the
+ *     session. Getting back in means the sign-in page, which has the CAPTCHA and the IP lockout
+ *     that this path deliberately does not duplicate;
+ *   - failures count against that same IP lockout, so guessing here poisons the way back in rather
+ *     than being a quiet side door around it.
+ *
+ * The counter lives in the session AND on disk. The session copy survives nothing, which is the
+ * point; the disk copy is what makes a fresh cookie no help at all.
+ */
+
+function adminReauthMaxAttempts(array $cfg): int {
+    return max(1, min(20, (int)($cfg['admin_reauth_max_attempts'] ?? 5) ?: 5));
+}
+
+/** How long a wrong answer costs, in microseconds: 0, 0.5 s, 1 s, 2 s, 4 s, capped at 8. */
+function adminReauthDelayUs(int $failuresSoFar): int {
+    if ($failuresSoFar <= 0) return 0;
+    return (int)(min(8.0, 0.25 * (2 ** $failuresSoFar)) * 1000000);
+}
+
+/**
+ * Check the admin password for a dangerous action.
+ *
+ * Returns ['ok' => bool, 'error' => string, 'left' => int, 'locked_out' => bool]. On `locked_out`
+ * the session is already gone by the time this returns and the caller must say so and stop.
+ */
+function adminReauth(string $password, array $cfg): array {
+    $max = adminReauthMaxAttempts($cfg);
+    $failed = (int)($_SESSION['reauth_failures'] ?? 0);
+
+    if ($password === '' || ADMIN_PASSWORD_HASH === '') {
+        return ['ok' => false, 'error' => 'Password required', 'left' => max(0, $max - $failed),
+                'locked_out' => false];
+    }
+    if (password_verify($password, ADMIN_PASSWORD_HASH)) {
+        unset($_SESSION['reauth_failures']);
+        return ['ok' => true, 'error' => '', 'left' => $max, 'locked_out' => false];
+    }
+
+    $failed++;
+    $_SESSION['reauth_failures'] = $failed;
+    // Count it where the sign-in page will see it too: guessing in here must not be a way to avoid
+    // the lockout that guards the front door.
+    recordLoginFailure(getClientIp(), $cfg);
+    usleep(adminReauthDelayUs($failed));
+
+    if ($failed >= $max) {
+        logout();
+        return ['ok' => false, 'left' => 0, 'locked_out' => true,
+                'error' => 'Wrong password ' . $failed . ' times — you have been signed out. '
+                         . 'Sign in again to continue; repeated failures there lock the address out.'];
+    }
+    $left = $max - $failed;
+    return ['ok' => false, 'left' => $left, 'locked_out' => false,
+            'error' => 'Wrong password. ' . $left . ' ' . ($left === 1 ? 'attempt' : 'attempts')
+                     . ' left before this session is signed out.'];
+}
+
+/**
+ * The whole check in one line for an endpoint: verifies, or sends the reply and exits.
+ *
+ * Deliberately exits rather than returning false. An endpoint that forgot to check the return value
+ * would carry out the action with a wrong password, and that is not a mistake this code should leave
+ * available.
+ */
+function requireAdminReauth(string $password, array $cfg): void {
+    $r = adminReauth($password, $cfg);
+    if ($r['ok']) return;
+    jsonResponse(['error' => $r['error'], 'signed_out' => $r['locked_out'],
+                  'attempts_left' => $r['left']], $r['locked_out'] ? 401 : 403);
+}
+
 function logout(): void {
     $_SESSION = [];
     if (ini_get('session.use_cookies')) {

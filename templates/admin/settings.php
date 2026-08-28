@@ -312,6 +312,45 @@
             </div>
 
             <!-- Tracker mode & whitelist -->
+            <div class="settings-section" id="section-livesync" data-group="tracker" data-title="Live peer sync (second machine)">
+                <h5><i class="bi bi-diagram-3"></i> Live peer sync</h5>
+                <small class="settings-hint d-block mb-3">Two opentrackers on <strong>two machines</strong> telling each other who is in which swarm, live. This is <em>not</em> federation: federation moves metadata between panels over HTTPS with a key, this moves the peers themselves between trackers. Neither replaces the other, and on a single machine this does nothing at all &mdash; there is nobody to sync with. <strong>Off by default.</strong>
+                <br><br><strong>The protocol has no authentication and no encryption.</strong> Anything that can reach the port can inject peers into every swarm this tracker serves, so the helper <strong>refuses</strong> to arm unless the address belongs to a tunnel interface. There is no override for that, on purpose. The panel does not set up WireGuard for you either &mdash; generating a private key and writing it into <code>/etc</code> is a bigger claim on the machine than anything else here makes, and it would be doing it without being able to see the other end. Press <strong>Test</strong> and it prints the commands.</small>
+                <div class="row g-3">
+                    <div class="col-md-6" data-setting="livesync_cmd">
+                        <label class="form-label">Helper command</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="livesync_cmd" value="<?= sanitize($cfg['livesync_cmd'] ?? '') ?>" maxlength="255" placeholder="e.g. sudo -n /usr/local/sbin/tracker-livesync.sh">
+                        <small class="settings-hint">Empty = the feature does not exist: no card, no polling, no <code>sudo</code>.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="livesync_enabled">
+                        <label class="form-label">Enabled</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="livesync_enabled">
+                            <option value="0" <?= ($cfg['livesync_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>No</option>
+                            <option value="1" <?= ($cfg['livesync_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Yes</option>
+                        </select>
+                        <small class="settings-hint">Turning this on only shows the card; arming it is a separate, password-confirmed action on the <a href="<?= $baseUrl ?>?action=admin-traffic#livesync-card">Traffic page</a>.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="livesync_port">
+                        <label class="form-label">Sync port (UDP)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="livesync_port" value="<?= sanitize($cfg['livesync_port'] ?? '9696') ?>" min="1024" max="65535">
+                        <small class="settings-hint">Its own port, not the tracker's 6969.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="livesync_bind_ip">
+                        <label class="form-label">This machine, inside the tunnel</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="livesync_bind_ip" value="<?= sanitize($cfg['livesync_bind_ip'] ?? '') ?>" maxlength="45" placeholder="e.g. 10.9.0.1">
+                        <small class="settings-hint">A private address on a tunnel interface. A public one is refused.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="livesync_peer_ip">
+                        <label class="form-label">The other tracker, inside the tunnel</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="livesync_peer_ip" value="<?= sanitize($cfg['livesync_peer_ip'] ?? '') ?>" maxlength="45" placeholder="e.g. 10.9.0.2">
+                    </div>
+                </div>
+                <div class="settings-test mt-3">
+                    <button type="button" class="btn btn-sm btn-outline-info settings-test-btn" data-test="admin/livesync_test"><i class="bi bi-diagram-3"></i> Test</button>
+                    <div class="settings-test-out"></div>
+                </div>
+            </div>
+
             <div class="settings-section" id="section-whitelist" data-group="tracker" data-title="Tracker Mode &amp; Whitelist">
                 <h5>Tracker Mode &amp; Whitelist</h5>
                 <p class="settings-hint mb-2">
@@ -393,6 +432,82 @@
                     </div>
                 </div>
                 <div class="settings-hint mt-2">Manage the list itself (browse, add, ban, regenerate the file) on the <a href="<?= $baseUrl ?>?action=admin-whitelist">Whitelist page</a>.</div>
+
+                <!-- Source link + description on a whitelist row (includes/richtext.php) -->
+                <h6 class="settings-subhead mt-4">Source link &amp; description</h6>
+                <small class="settings-hint d-block mb-3">Two optional fields on the registration form: <strong>where the torrent came from</strong>, and <strong>what it is</strong>. They appear on the public whitelist, the Index and the public search. Both are <strong>off by default</strong>, because this is text an anonymous stranger types and you then publish under your own domain &mdash; a description can carry images and a link goes wherever its author decided. With review on (the default when you switch these on), the torrent still registers <em>immediately</em>; only the link and the description wait for you.</small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="wl_allow_source_url">
+                        <label class="form-label">Source link field</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_allow_source_url">
+                            <option value="0" <?= ($cfg['wl_allow_source_url'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="1" <?= ($cfg['wl_allow_source_url'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                        </select>
+                        <small class="settings-hint"><strong>https only.</strong> Plain HTTP is refused rather than upgraded: this page is served over TLS and must not hand anyone a downgrade. Private addresses and credentials in the URL are refused too.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_allow_description">
+                        <label class="form-label">Description field</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_allow_description">
+                            <option value="0" <?= ($cfg['wl_allow_description'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="1" <?= ($cfg['wl_allow_description'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_content_review">
+                        <label class="form-label">Review before publishing</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_content_review">
+                            <option value="1" <?= ($cfg['wl_content_review'] ?? '1') === '1' ? 'selected' : '' ?>>Yes &mdash; hold for review</option>
+                            <option value="0" <?= ($cfg['wl_content_review'] ?? '1') !== '1' ? 'selected' : '' ?>>No &mdash; publish at once</option>
+                        </select>
+                        <small class="settings-hint">Held items appear under <strong>To review</strong> on the <a href="<?= $baseUrl ?>?action=admin-whitelist">Whitelist page</a>. Turning this off means the first bad description is public before anyone has seen it.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="link_trusted_domains">
+                        <label class="form-label">Domains that need no warning</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="link_trusted_domains" value="<?= sanitize($cfg['link_trusted_domains'] ?? '') ?>" placeholder="e.g. tryhackx.org, files.example.org">
+                        <small class="settings-hint">Every off-site link asks the visitor to confirm first. These domains (and their subdomains) skip that. Empty = warn on everything, including your own.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="desc_allow_bbcode">
+                        <label class="form-label">Allow BBCode</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="desc_allow_bbcode">
+                            <option value="1" <?= ($cfg['desc_allow_bbcode'] ?? '1') === '1' ? 'selected' : '' ?>>Yes</option>
+                            <option value="0" <?= ($cfg['desc_allow_bbcode'] ?? '1') !== '1' ? 'selected' : '' ?>>No</option>
+                        </select>
+                        <small class="settings-hint"><code>[b] [i] [u] [s] [code] [quote] [list] [url] [img]</code></small>
+                    </div>
+                    <div class="col-md-3" data-setting="desc_allow_markdown">
+                        <label class="form-label">Allow Markdown</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="desc_allow_markdown">
+                            <option value="1" <?= ($cfg['desc_allow_markdown'] ?? '1') === '1' ? 'selected' : '' ?>>Yes</option>
+                            <option value="0" <?= ($cfg['desc_allow_markdown'] ?? '1') !== '1' ? 'selected' : '' ?>>No</option>
+                        </select>
+                        <small class="settings-hint">With both on, whoever writes picks. With both off, BBCode is still offered &mdash; a description field with no syntax at all would be a trap.</small>
+                    </div>
+                    <div class="col-md-2" data-setting="desc_max_chars">
+                        <label class="form-label">Max characters</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_chars" value="<?= sanitize($cfg['desc_max_chars'] ?? '4000') ?>" min="200" max="20000">
+                    </div>
+                    <div class="col-md-2" data-setting="desc_max_images">
+                        <label class="form-label">Max images</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_images" value="<?= sanitize($cfg['desc_max_images'] ?? '3') ?>" min="0" max="50">
+                        <small class="settings-hint">0 = none. Every image is a request from your visitor to somebody else's server.</small>
+                    </div>
+                    <div class="col-md-2" data-setting="desc_max_links">
+                        <label class="form-label">Max links</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_links" value="<?= sanitize($cfg['desc_max_links'] ?? '10') ?>" min="0" max="100">
+                    </div>
+                    <div class="col-md-3" data-setting="search_allow_sl_refresh">
+                        <label class="form-label">Let visitors refresh S/L</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="search_allow_sl_refresh">
+                            <option value="0" <?= ($cfg['search_allow_sl_refresh'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="1" <?= ($cfg['search_allow_sl_refresh'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                        </select>
+                        <small class="settings-hint">Adds a refresh button to the Info panel in the public search, scraping that one hash live. Off by default: it is a button that makes strangers' clicks into tracker requests.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="search_sl_refresh_seconds">
+                        <label class="form-label">Refresh cooldown (s)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="search_sl_refresh_seconds" value="<?= sanitize($cfg['search_sl_refresh_seconds'] ?? '120') ?>" min="10" max="3600">
+                        <small class="settings-hint">Per hash, across every visitor. Without this the button is a free load generator pointed at your own tracker.</small>
+                    </div>
+                </div>
 
                 <!-- Scheduled mode (whitelist hours) — includes/schedule.php -->
                 <?php
@@ -572,6 +687,24 @@
                         <label class="form-label">Expiry warning (days)</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="users_notify_expiry_days" value="<?= sanitize($cfg['users_notify_expiry_days'] ?? '3') ?>" min="0" max="30">
                         <small class="settings-hint">Notify (+email when possible) this many days before a timed group ends. 0 = off.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="bulk_mail_enabled">
+                        <label class="form-label">Write to everyone (bulk mail)</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="bulk_mail_enabled">
+                            <option value="0" <?= ($cfg['bulk_mail_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off</option>
+                            <option value="1" <?= ($cfg['bulk_mail_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On</option>
+                        </select>
+                        <small class="settings-hint">Adds <strong>Write to members</strong> on the <a href="<?= $baseUrl ?>?action=admin-users">Users page</a>: a message to a selection, a group, or everyone. In-app notifications work with this off &mdash; this switch is about <em>email</em>. Off by default.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="bulk_mail_per_minute">
+                        <label class="form-label">Bulk mail per minute</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="bulk_mail_per_minute" value="<?= sanitize($cfg['bulk_mail_per_minute'] ?? '20') ?>" min="1" max="500">
+                        <small class="settings-hint">This server sends through <code>mail()</code> with no relay in front of it, so a hundred messages leaving at once from a domain that normally sends a handful is what gets it filed under bulk &mdash; and the first casualty is the password-reset mail. The panel only queues; the janitor sends this many a minute.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="bulk_mail_max_attempts">
+                        <label class="form-label">Bulk mail retries</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="bulk_mail_max_attempts" value="<?= sanitize($cfg['bulk_mail_max_attempts'] ?? '3') ?>" min="1" max="10">
+                        <small class="settings-hint">Tries per message before it is marked failed, backing off longer each time. A mailer that is refusing does not want to be asked again immediately.</small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Require email verification</label>
@@ -971,6 +1104,11 @@
                     <div class="col-md-3">
                         <label class="form-label">Login lockout window (min)</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="login_lockout_minutes" value="<?= sanitize($cfg['login_lockout_minutes'] ?? '15') ?>" min="1" max="1440">
+                    </div>
+                    <div class="col-md-3" data-setting="admin_reauth_max_attempts">
+                        <label class="form-label">Wrong password confirmations before sign-out</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="admin_reauth_max_attempts" value="<?= sanitize($cfg['admin_reauth_max_attempts'] ?? '5') ?>" min="1" max="20">
+                        <small class="settings-hint">Every dangerous action asks for the password again. This many wrong answers <strong>signs the session out</strong> &mdash; getting back in means the sign-in page, with its CAPTCHA and address lockout. Each wrong answer also costs progressively more time, starting at once. The session gate keeps strangers out; this is for whoever is already sitting at the machine.</small>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Trusted proxy IPs <small class="settings-hint">(comma separated, leave empty if no proxy)</small></label>

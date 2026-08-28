@@ -163,7 +163,7 @@ check('a reload that returned 0 is re-checked, because a SIGHUP can kill an unpa
 $apply = file_get_contents($root . '/api/admin/ot_cluster_apply.php');
 check('creating an instance is refused while the automatic limiter is on',
       str_contains($apply, 'netlimitAutoEnabled($cfg)') && str_contains($apply, 'throttling the primary'));
-check('create, remove and restart are password-gated', str_contains($apply, 'password_verify($password, ADMIN_PASSWORD_HASH)'));
+check('create, remove and restart are password-gated', str_contains($apply, 'requireAdminReauth($password, $cfg)'));
 check('plan and reload are not — neither changes the roster',
       strpos($apply, "if (\$op === 'plan')") < strpos($apply, '$password = (string)'));
 

@@ -77,4 +77,7 @@ jsonResponse([
     'scrape' => $scrape,
     'banned_reason' => $bannedReason,
     'api_client' => $apiClient,
+    // Shown to an administrator whatever its review state: a moderator cannot judge text
+    // they are not allowed to see.
+    'content' => richtextContentFor($db, $cfg, $row['info_hash'], true),
 ]);

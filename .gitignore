@@ -63,3 +63,4 @@ __pycache__/
 *.log
 HANDOFF*.md
 SPEC-*.md
+config/index_count.json

@@ -15,7 +15,7 @@ $res = indexListSelect($db, $cfg, [
 
 $counts = ['total' => 0, 'protected' => 0, 'pending_meta' => 0];
 try {
-    $counts['total'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn();
+    $counts['total'] = indexTotalCached($db);
     $counts['protected'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE protected_until IS NOT NULL AND protected_until >= NOW()")->fetchColumn();
     $counts['pending_meta'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status IN ('pending','fetching')")->fetchColumn();
 } catch (\Throwable $e) {}

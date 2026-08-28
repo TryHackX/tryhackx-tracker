@@ -28,6 +28,7 @@
         <div class="source-tabs" id="us-tabs">
             <button type="button" class="source-tab active" data-view="users"><i class="bi bi-person"></i> Users</button>
             <button type="button" class="source-tab" data-view="groups"><i class="bi bi-people-fill"></i> Groups</button>
+            <button type="button" class="source-tab" data-view="write"><i class="bi bi-envelope-paper"></i> Write to members</button>
         </div>
 
         <!-- Users view -->
@@ -57,6 +58,7 @@
             <div class="table-responsive">
                 <table class="table table-dark table-hover dash-table wl-table" id="us-table">
                     <thead><tr>
+                        <th class="us-c-pick"><label class="search-check" title="Select every user on this page"><input type="checkbox" id="us-pick-all"><span class="search-check-box" aria-hidden="true"></span></label></th>
                         <th class="sortable" data-sort="id">ID <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="username">Username <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="email">Email <i class="bi bi-arrow-down-up sort-icon"></i></th>
@@ -70,6 +72,63 @@
                 </table>
             </div>
             <div class="admin-pagination" id="us-pagination"></div>
+        </div>
+
+        <!-- Write to members -->
+        <div class="wl-view d-hidden" id="view-write">
+            <div class="wl-status-card">
+                <div class="wl-status-head"><h6><i class="bi bi-envelope-paper"></i> Write to members</h6></div>
+                <p class="idx-note">Two separate things, and you can send either or both. An <strong>in-app notification</strong> appears the next time somebody opens the site and costs nothing to send. An <strong>email</strong> leaves this machine, so it is queued and sent a few a minute &mdash; this server has no relay in front of <code>mail()</code>, and a burst from a domain that normally sends a handful a day is what gets password-reset mail filed as spam.</p>
+                <p class="idx-note" id="bm-off-note" style="display:none">Email is <strong>off</strong>. Turn on <em>Write to everyone</em> in <a href="<?= $baseUrl ?>?action=settings#section-users">Settings &rarr; User Accounts</a>, or send the notification only.</p>
+
+                <div class="row g-3 mt-1">
+                    <div class="col-md-4">
+                        <label class="form-label">Who</label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="bm-mode">
+                            <option value="selected">The users I ticked</option>
+                            <option value="group">A group</option>
+                            <option value="all">Everyone</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4" id="bm-group-wrap" style="display:none">
+                        <label class="form-label">Group</label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="bm-group"></select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Send as</label>
+                        <div class="d-flex gap-3 pt-1">
+                            <label class="search-check"><input type="checkbox" id="bm-notify" checked><span class="search-check-box" aria-hidden="true"></span> Notification</label>
+                            <label class="search-check"><input type="checkbox" id="bm-email"><span class="search-check-box" aria-hidden="true"></span> Email</label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Subject</label>
+                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="bm-subject" maxlength="200" placeholder="e.g. Scheduled maintenance on Sunday">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Message</label>
+                        <textarea class="form-control form-control-sm bg-dark text-light border-secondary" id="bm-body" rows="7" maxlength="5000" placeholder="Plain text. Line breaks are kept."></textarea>
+                    </div>
+                </div>
+
+                <div class="nl-note mt-3" id="bm-preview"><span class="text-muted">Choose an audience to see who would receive this.</span></div>
+
+                <div class="wl-status-actions mt-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="bm-refresh"><i class="bi bi-people"></i> Recount</button>
+                    <button type="button" class="btn btn-sm btn-outline-info" id="bm-test"><i class="bi bi-send-check"></i> Send one to me</button>
+                    <button type="button" class="btn btn-sm btn-primary" id="bm-send"><i class="bi bi-send"></i> Send&hellip;</button>
+                </div>
+            </div>
+
+            <div class="wl-status-card mt-3">
+                <div class="wl-status-head"><h6><i class="bi bi-clock-history"></i> Recent sends <span class="wl-status-updated" id="bm-depth"></span></h6></div>
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover dash-table wl-table" id="bm-table">
+                        <thead><tr><th>Started</th><th>Subject</th><th>Total</th><th>Sent</th><th>Failed</th><th>Waiting</th><th class="th-actions">Actions</th></tr></thead>
+                        <tbody id="bm-batches"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
 
         <!-- Groups view -->

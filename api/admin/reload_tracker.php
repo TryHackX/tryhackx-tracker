@@ -22,9 +22,7 @@ $input    = readJsonBody();
 $password = (string)($input['password'] ?? '');
 
 // Confirm the admin password (mirrors restart_tracker / deletion-limit changes).
-if ($password === '' || ADMIN_PASSWORD_HASH === '' || !password_verify($password, ADMIN_PASSWORD_HASH)) {
-    jsonResponse(['error' => 'Incorrect password.'], 403);
-}
+requireAdminReauth($password, $cfg);
 
 $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
 if ($service === '') {

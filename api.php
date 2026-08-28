@@ -31,6 +31,9 @@ require_once __DIR__ . '/includes/index.php';
 require_once __DIR__ . '/includes/api_auth.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/twofa.php';
+require_once __DIR__ . '/includes/bulkmail.php';
+require_once __DIR__ . '/includes/richtext.php';
+require_once __DIR__ . '/includes/livesync.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/federation.php';
@@ -182,6 +185,7 @@ $apiRoutes = [
     'user_email_prefs'           => 'api/user_email_prefs.php',
     'index_search'               => 'api/index_search.php',
     'index_files'                => 'api/index_files.php',
+    'index_info'                 => 'api/index_info.php',
     // ── User accounts (admin) ──
     'admin/fetch_users'          => 'api/admin/fetch_users.php',
     'admin/user_update'          => 'api/admin/user_update.php',
@@ -189,6 +193,10 @@ $apiRoutes = [
     'admin/user_grant'           => 'api/admin/user_grant.php',
     'admin/user_revoke'          => 'api/admin/user_revoke.php',
     'admin/user_notify'          => 'api/admin/user_notify.php',
+    'admin/bulk_send'            => 'api/admin/bulk_send.php',
+    'admin/wl_content'           => 'api/admin/wl_content.php',
+    'admin/livesync_test'        => 'api/admin/livesync_test.php',
+    'admin/livesync_apply'       => 'api/admin/livesync_apply.php',
     'admin/fetch_groups'         => 'api/admin/fetch_groups.php',
     'admin/group_save'           => 'api/admin/group_save.php',
     'admin/group_delete'         => 'api/admin/group_delete.php',

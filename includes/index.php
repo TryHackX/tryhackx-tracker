@@ -29,6 +29,49 @@ const IDX_FETCH_MAX_BYTES  = 268435456; // 256 MB hard cap on the downloaded scr
 
 function indexEnabled(array $cfg): bool { return (($cfg['index_enabled'] ?? '0') === '1'); }
 function indexSourceUrl(array $cfg): string { return trim((string)($cfg['index_source_url'] ?? 'http://127.0.0.1:6969/scrape')); }
+/**
+ * COUNT(*) over the whole catalogue, remembered for thirty seconds.
+ *
+ * This is the ONE query on the Index page worth caching, and it took measuring to know that. The
+ * listing itself ran at 1 747 ms until v19 added the composite index; it is 0.8 ms now, and a cache
+ * in front of THAT would have been pure liability — staleness bought with nothing. The count is a
+ * different animal: InnoDB keeps no row counter, so an unfiltered COUNT(*) walks an index over 2.7
+ * million rows every time, 557 ms measured, and no index changes that.
+ *
+ * What it draws is a pager. A pager does not need an exact number, it needs one that is right to the
+ * page — and thirty seconds of drift on a table that gains rows in half-hourly batches cannot be
+ * seen. Filtered counts deliberately do NOT come through here: the filters are indexed and cheap,
+ * and there are enough distinct ones that a cache would miss more often than it hit.
+ */
+function indexTotalCacheFile(): string { return __DIR__ . '/../config/index_count.json'; }
+
+/**
+ * Forget the cached total.
+ *
+ * Called wherever the row count really changes — a poll, a prune, a delete. Thirty seconds of drift
+ * is invisible while nothing is happening and glaring the moment something does: a poll that has
+ * just added six hundred thousand rows, followed by a page still showing the old number, reads as a
+ * broken poll. The saving is for the quiet minutes in between, which is nearly all of them.
+ */
+function indexTotalCacheDrop(): void { @unlink(indexTotalCacheFile()); }
+
+function indexTotalCached(PDO $db, int $ttl = 30): int {
+    $file = indexTotalCacheFile();
+    if (is_file($file)) {
+        $c = json_decode((string)@file_get_contents($file), true);
+        if (is_array($c) && isset($c['at'], $c['total']) && (time() - (int)$c['at']) < $ttl) {
+            return (int)$c['total'];
+        }
+    }
+    try {
+        $total = (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn();
+    } catch (\Throwable $e) {
+        return 0;
+    }
+    @file_put_contents($file, json_encode(['at' => time(), 'total' => $total]), LOCK_EX);
+    return $total;
+}
+
 function indexPollMinutes(array $cfg): int { return max(5, min(1440, (int)($cfg['index_poll_minutes'] ?? 30) ?: 30)); }
 function indexMinSeeders(array $cfg): int { return max(0, min(100000, (int)($cfg['index_min_seeders'] ?? 1))); }
 function indexMaxRows(array $cfg): int { return max(10, min(5000000, (int)($cfg['index_max_rows'] ?? 200000) ?: 200000)); }
@@ -39,6 +82,13 @@ function indexMetaAutoQueue(array $cfg): bool { return (($cfg['index_meta_auto_q
 function indexKeepFiles(array $cfg): bool { return (($cfg['index_keep_files'] ?? '1') === '1'); }
 function indexPollBudget(array $cfg): int { return max(5, min(120, (int)($cfg['index_poll_budget'] ?? 45) ?: 45)); }
 
+/**
+ * The exact number of catalogue rows.
+ *
+ * Deliberately NOT indexTotalCached(): the caller at the prune site uses this to decide whether to
+ * start deleting, and the same rule applies here as there — a pager may be approximate, a delete may
+ * not. Cards and status panels use the cached one; anything that acts on the number uses this.
+ */
 function indexRowsCount(PDO $db): int {
     try { return (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn(); } catch (\Throwable $e) { return 0; }
 }
@@ -121,7 +171,18 @@ function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array 
     $out['ms'] = (int)round((microtime(true) - $t0) * 1000);
     if ($tooBig) { @unlink($tmp); $out['error'] = 'Full scrape exceeds ' . IDX_FETCH_MAX_BYTES . ' bytes'; return $out; }
     if ($ok === false) { @unlink($tmp); $out['error'] = 'cURL error: ' . $err; return $out; }
-    if ($code !== 200) { @unlink($tmp); $out['error'] = 'HTTP ' . $code; return $out; }
+    if ($code !== 200) {
+        @unlink($tmp);
+        // 402 is not a payment and not our firewall: it is opentracker's own refusal of a FULL
+        // scrape asked for too soon after the last one. It clears itself on the next poll, and a
+        // bare "HTTP 402" sends whoever reads it hunting through rate limits that have nothing to
+        // do with it -- the throttle on this machine is UDP-only and this request is HTTP.
+        $out['error'] = $code === 402
+            ? 'HTTP 402 — the tracker refused a full scrape, which is how it rate-limits them. '
+            . 'Nothing is wrong: the next poll picks it up.'
+            : 'HTTP ' . $code;
+        return $out;
+    }
     $out['bytes'] = (int)@filesize($tmp);
     if ($out['bytes'] < 9) { @unlink($tmp); $out['error'] = 'Empty scrape reply'; return $out; }
     // gzip magic
@@ -285,6 +346,9 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
             elseif ($out['ok']) { $s['last_error'] = null; }
             return true;
         });
+        // The row count has just changed, probably by a lot. Anything that shows a total must ask
+        // again rather than answering from a cache filled before the poll ran.
+        indexTotalCacheDrop();
         return $out;
     } finally {
         @flock($lockH, LOCK_UN); @fclose($lockH);
@@ -372,6 +436,9 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
     // re-inserted as brand-new rows (history reset) by the resume pass. poll_skip is non-zero only
     // between a truncated pass and the pass that finishes the file, so the cap defers by one cycle at most.
     $max = indexMaxRows($cfg);
+    // Deliberately NOT the cached count: this number decides how many rows get deleted, and pruning
+    // against a figure that is thirty seconds stale would delete thirty seconds' worth of the wrong
+    // rows. A pager can be approximate; a delete cannot.
     $total = (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn();
     if ($total > $max && (int)indexStateRead()['poll_skip'] === 0) {
         $excess = $total - $max;
@@ -389,6 +456,7 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
         $res['orphan_files'] = (int)$db->exec("DELETE f FROM index_files f LEFT JOIN index_hashes h ON h.info_hash = f.info_hash WHERE h.info_hash IS NULL");
     }
     indexStateUpdate(function (array &$s) use ($now, $res) { $s['last_prune_at'] = $now; $s['last_prune'] = $res; return true; });
+    if ($res['expired'] > 0 || $res['capped'] > 0) indexTotalCacheDrop();
     return $res;
     } finally {
         @flock($lockH, LOCK_UN); @fclose($lockH);
@@ -466,6 +534,7 @@ function indexDelete(PDO $db, array $hashes): int {
         $d->execute($chunk);
         $n += $d->rowCount();
     }
+    if ($n > 0) indexTotalCacheDrop();
     return $n;
 }
 
@@ -695,9 +764,12 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         $w = $where; $p = $params;
         if ($extra) { $w[] = $extra['sql']; $p = array_merge($p, $extra['params']); }
         $whereClause = $w ? 'WHERE ' . implode(' AND ', $w) : '';
-        $countStmt = $db->prepare("SELECT COUNT(*) FROM index_hashes $whereClause");
-        $countStmt->execute($p);
-        $total = (int)$countStmt->fetchColumn();
+        $total = $whereClause === '' ? indexTotalCached($db)
+                                     : (function () use ($db, $whereClause, $p): int {
+                                           $st = $db->prepare("SELECT COUNT(*) FROM index_hashes $whereClause");
+                                           $st->execute($p);
+                                           return (int)$st->fetchColumn();
+                                       })();
         $stmt = $db->prepare("SELECT $columns FROM index_hashes $whereClause ORDER BY $orderClause LIMIT ? OFFSET ?");
         $i = 1;
         foreach ($p as $v) $stmt->bindValue($i++, $v, PDO::PARAM_STR);
@@ -925,7 +997,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
 function indexStatus(PDO $db, array $cfg): array {
     $counts = ['total' => 0, 'in_grace' => 0, 'protected' => 0, 'promoted' => 0, 'meta_none' => 0, 'meta_pending' => 0, 'meta_fetching' => 0, 'meta_done' => 0, 'meta_failed' => 0, 'files' => 0];
     try {
-        $counts['total'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn();
+        $counts['total'] = indexTotalCached($db);
         $counts['in_grace'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status <> 'done' AND grace_until >= NOW()")->fetchColumn();
         $counts['protected'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE protected_until IS NOT NULL AND protected_until >= NOW()")->fetchColumn();
         $counts['promoted'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE promoted_at IS NOT NULL")->fetchColumn();

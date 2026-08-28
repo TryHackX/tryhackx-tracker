@@ -36,9 +36,7 @@ if (!trackerExecAvailable()) {
 }
 
 $password = (string)($input['password'] ?? '');
-if ($password === '' || ADMIN_PASSWORD_HASH === '' || !password_verify($password, ADMIN_PASSWORD_HASH)) {
-    jsonResponse(['error' => 'Incorrect password.'], 403);
-}
+requireAdminReauth($password, $cfg);
 
 $id     = trim((string)($input['id'] ?? ''));
 $dryRun = !empty($input['dry_run']);

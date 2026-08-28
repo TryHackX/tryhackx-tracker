@@ -115,6 +115,44 @@ if ($wlSched) {
         <textarea id="wl-input" name="input" rows="6" maxlength="<?= $wlMax * 2100 ?>" data-max="<?= $wlMax ?>" placeholder="magnet:?xt=urn:btih:a1b2c3d4e5f6…&#10;a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"></textarea>
         <div class="error-msg">Paste at least one valid magnet link or 40-hex info hash</div>
     </div>
+<?php
+    $wlSrcOn  = ($cfg['wl_allow_source_url'] ?? '0') === '1';
+    $wlDescOn = ($cfg['wl_allow_description'] ?? '0') === '1';
+    $wlFormats = function_exists('richtextFormats') ? richtextFormats($cfg) : ['bbcode'];
+    $wlReview = ($cfg['wl_content_review'] ?? '1') === '1';
+?>
+<?php if ($wlSrcOn || $wlDescOn): ?>
+    <div class="wl-extra">
+        <p class="wl-extra-head">Optional &mdash; only used when you register <strong>one</strong> torrent at a time.</p>
+        <?php if ($wlSrcOn): ?>
+        <div class="form-group">
+            <label for="wl-source">Source link <small class="form-hint">&mdash; the page this torrent came from</small></label>
+            <input type="url" id="wl-source" name="source_url" maxlength="500" placeholder="https://example.org/torrents/12345">
+            <div class="form-hint"><strong>https only.</strong> Shown next to the torrent, behind a confirmation &mdash; visitors are told we do not vouch for where it goes.</div>
+        </div>
+        <?php endif; ?>
+        <?php if ($wlDescOn): ?>
+        <div class="form-group">
+            <label for="wl-desc">Description
+                <?php if (count($wlFormats) > 1): ?>
+                <select id="wl-desc-format" name="description_format" class="wl-format-select">
+                    <option value="bbcode">BBCode</option>
+                    <option value="markdown">Markdown</option>
+                </select>
+                <?php else: ?>
+                <input type="hidden" id="wl-desc-format" name="description_format" value="<?= sanitize($wlFormats[0]) ?>">
+                <small class="form-hint">&mdash; <?= $wlFormats[0] === 'markdown' ? 'Markdown' : 'BBCode' ?></small>
+                <?php endif; ?>
+            </label>
+            <textarea id="wl-desc" name="description" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="What is it? Technical details are welcome &mdash; use a code block for anything that must keep its formatting."></textarea>
+            <div class="form-hint" id="wl-desc-help"></div>
+        </div>
+        <?php endif; ?>
+        <?php if ($wlReview): ?>
+        <p class="form-hint"><strong>The torrent registers immediately.</strong> The link and description are shown to a moderator first and appear once approved.</p>
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
     <div class="form-center">
         <button type="submit" class="btn" id="wl-submit">Register</button>
     </div>

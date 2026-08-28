@@ -33,9 +33,7 @@ if ($op === 'count') {
 if ($op !== 'run') jsonResponse(['error' => 'Unknown operation'], 400);
 
 $password = (string)($input['password'] ?? '');
-if ($password === '' || ADMIN_PASSWORD_HASH === '' || !password_verify($password, ADMIN_PASSWORD_HASH)) {
-    jsonResponse(['error' => 'Wrong admin password'], 403);
-}
+requireAdminReauth($password, $cfg);
 
 $done = 0;
 try {

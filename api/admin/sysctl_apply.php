@@ -75,9 +75,7 @@ if ($op === 'confirm') {
     $armed = sysctlState()['armed'] ?? null;
     if (!is_array($armed)) jsonResponse(['error' => 'Nothing is armed.'], 400);
     $password = (string)($input['password'] ?? '');
-    if ($password === '' || ADMIN_PASSWORD_HASH === '' || !password_verify($password, ADMIN_PASSWORD_HASH)) {
-        jsonResponse(['error' => 'Wrong admin password'], 403);
-    }
+    requireAdminReauth($password, $cfg);
     // A change that did not fully land must not be made permanent — the file would then describe a
     // machine state that never existed.
     if (empty($armed['all_landed'])) {
@@ -127,9 +125,7 @@ if ($op === 'preview') {
 /* ── arm ─────────────────────────────────────────────────────────────────── */
 
 $password = (string)($input['password'] ?? '');
-if ($password === '' || ADMIN_PASSWORD_HASH === '' || !password_verify($password, ADMIN_PASSWORD_HASH)) {
-    jsonResponse(['error' => 'Wrong admin password'], 403);
-}
+requireAdminReauth($password, $cfg);
 
 // Refusals that are about the machine rather than the numbers.
 if (empty($st['netns_shared'])) {

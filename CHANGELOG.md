@@ -4,6 +4,150 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.17.0] — 2026-08-28 (schema v19 + v20)
+
+### Added — a source link and a description on a registered torrent (schema v19)
+
+Two optional fields on the registration form: **where this came from**, and **what it is**. They
+appear on the Whitelist and Index detail panels and in the public search. **Both off by default**,
+because this is text an anonymous stranger types and the site then publishes under its own domain.
+
+- **The description renderer is written here, not imported** (`includes/richtext.php`). Every
+  general-purpose Markdown and BBCode parser is built to be permissive — they pass raw HTML through
+  by design, and the ones that filter it use a blacklist that has to be kept ahead of whoever is
+  trying. That is the wrong shape for text from a public form. So the input is **escaped in full
+  before a single rule runs**, and the only tags in the output are the ones this file writes. There
+  is no path — not a nesting, not a broken tag, not an encoding trick — by which a `<script>` in
+  becomes a `<script>` out, because by the time any rule sees it the brackets are already `&lt;`.
+- **Both syntaxes, and the writer picks.** `[b] [i] [u] [s] [code] [quote] [list] [url] [img]` and
+  the useful half of Markdown. `[code]` is pulled out first and put back last, so a description
+  explaining BBCode does not get its own example rendered.
+- **A review queue.** New links and descriptions wait under **Whitelist → To review** until somebody
+  publishes them; the torrent itself registers immediately and is never held up by its words. The
+  moderator sees the description **rendered**, exactly as a visitor would — reviewing the source is
+  how an image tag gets waved through because nobody saw what it pointed at. Can be switched off.
+- **Off-site links ask first.** Any link a submitter wrote opens a confirmation naming the URL and
+  saying plainly that the site has not checked it. Domains on `link_trusted_domains` skip it
+  (default: `tryhackx.org`) — warning about your own site only teaches people to click through. One
+  delegated listener on the document, in the panel and on the public pages, so the next place that
+  renders a description gets it without having to remember.
+- **The source link must be https.** Plain HTTP is refused rather than upgraded: the page is served
+  over TLS and must not hand anyone a downgrade. Credentials in the URL, private addresses and hosts
+  with no domain are refused too.
+- **An Info panel in the public search**, beside Copy: the source link, the description, the numbers
+  (first seen, last seen, swarm, peak seeders, size), and the file list at the bottom. The existing
+  "N files" chip still opens the plain tree on its own — somebody who only wants file names should
+  not have to read an essay to reach them. Optionally a **Refresh seeders** button, off by default
+  and rate-limited per hash across all visitors, because it turns a stranger's click into a request
+  to the tracker.
+
+### Added — writing to members: bulk mail and notifications
+
+**Users → Write to members.** A message to the accounts you ticked, to one group, or to everyone.
+
+- **Nothing is sent from a web request.** The panel writes rows into `mail_queue`; the janitor sends
+  them a few a minute. This server sends through `mail()` with no relay in front of it, and a burst
+  from a domain that normally sends a handful a day is what gets the *password-reset* mail filed as
+  spam. Rate, retries and back-off are settings.
+- **The real number, before and at the moment of committing.** "Everyone" that quietly means 41 of
+  53 is the kind of surprise that surfaces a week later as "why did I never hear about it", so the
+  panel shows who is excluded and why: no address, opted out, unsubscribed.
+- **Members can opt out** of announcements from their account page, and every bulk message carries an
+  unsubscribe link. Transactional mail — password resets, verification — is unaffected: somebody who
+  wants no newsletter still needs to get back into their account.
+- In-app notifications go through the same form and need no queue.
+- A send can be **stopped** while it is still going out. What has already left cannot be recalled,
+  and the panel says so rather than implying otherwise.
+
+### Added — live peer sync between two trackers (E7, the last stage of PLAN-federation)
+
+opentracker can gossip **live peers** to another opentracker: who is in which swarm, right now. It
+is not federation — federation moves metadata between panels over HTTPS with a key; this moves the
+swarm itself between trackers.
+
+- **It has no authentication and no encryption**, so the helper **refuses** to arm unless the port is
+  bound to a tunnel interface. There is no override flag, on purpose: an override is the only feature
+  anybody would regret adding here. A public bind address, a public peer, or an address on an
+  ordinary interface are all refusals with an explanation, not warnings.
+- **The panel does not configure WireGuard.** Generating a private key and writing it into `/etc` is
+  a larger claim on the machine than anything else here makes, and it would be doing it half-blind —
+  it cannot see the other end of a tunnel. Test prints the commands instead.
+- Verified against the shipped binary rather than assumed: this build takes livesync **only from the
+  command line**, its config parser knowing `listen.*`, `access.*` and `tracker.*` and nothing else.
+  So the helper overrides `ExecStart` in its own drop-in — the most invasive thing the panel does
+  anywhere — and therefore **records the command line it copied** and reports when the unit's own has
+  changed underneath it. A stale copied ExecStart is the failure mode of that technique, and it must
+  be visible rather than mysterious.
+- After arming, the helper **checks the port is actually listening, and on the tunnel address only**.
+  If it is not, it undoes its own change before answering, so a failure leaves nothing armed.
+
+### Fixed — the Index page's own first page was a full scan of 2.7 million rows
+
+Measured on the live table: `ORDER BY last_seeders DESC, last_seen DESC LIMIT 50` ran as
+`type=ALL … Using filesort` — every row, every time, **1 747 ms**. There was an index on
+`last_seeders` alone, and a single-column index cannot satisfy a two-column sort, so the optimiser
+discarded it. Two composite indexes later (v19, applied by the janitor because a FULLTEXT table
+rebuild must never run in a page view): **0.8 ms**, a covering read of exactly fifty rows. The public
+search, the same shape with a filter in front, went to 2.6 ms.
+
+This is also the answer to "should the tables be cached". Whitelist, users and banned hashes were
+measured at **0.3–1.0 ms** — a cache there buys nothing and costs correctness. The catalogue was
+slow for a reason a cache would have hidden, and hidden expensively: that scan also evicts a 512 MB
+InnoDB buffer pool with 2 GB of table, on a database shared with the mail, the forum and the file
+service. **One** query was worth caching: the unfiltered `COUNT(*)` behind the pager, which no index
+can help (557 ms, InnoDB keeps no row counter) and which draws a number that does not need to be
+exact. Thirty seconds, dropped the moment a poll, prune or delete changes the count — and never used
+where the number decides something, because a pager may be approximate and a delete may not.
+
+### Fixed — wrong password confirmations could be guessed for ever
+
+Every dangerous action asks for the password again. That check sat inline at **fourteen call sites**
+as a bare `password_verify()` with no counter between them, so somebody who already had a session —
+a borrowed laptop, an unlocked screen, a stolen cookie — could try as long as they liked. The session
+gate stops a stranger; it does nothing about the person already inside, which is the case the
+password prompt exists for.
+
+There is now one function and it is the only way to check that password. Every wrong answer costs
+progressively more time starting at once; after `admin_reauth_max_attempts` (default 5) **the session
+is destroyed**, so getting back in means the sign-in page with its CAPTCHA and address lockout; and
+failures count against that same lockout, so guessing here poisons the way back in rather than being
+a quiet side door around it. A test asserts the *property* — no endpoint may verify the admin
+password on its own — so an endpoint written next year gets the throttle because there is nowhere
+else to get the check from.
+
+### Fixed — smaller things that were reported
+
+- **The "Actions" column header was cut off** on the reports table. Measured: 64 px of content box
+  for a label needing 72, on a fixed-layout table with `overflow: hidden`. A column heading that
+  cannot show its own name is the one place a width may not save space.
+- **The Unban confirmation was unreadable.** A 40-character hash is one unbreakable token; dropped
+  into a centred sentence in a small dialog it either overflowed or broke at whatever letter the line
+  ended on. Identifiers now get their own line in a monospace box — something you can actually
+  compare against what you meant to unban.
+- **"HTTP 402" from the index poll now says what it is.** It is opentracker refusing a *full scrape*
+  asked for too soon, it clears itself on the next poll, and it has nothing to do with the UDP
+  throttle — which is UDP-only, while that request is HTTP. A bare status code sent whoever read it
+  hunting through rate limits that were not involved.
+- **The Test button said "Empty" about a field that looked filled.** The cluster card's *Helper
+  command* shows a grey `sudo -n …` placeholder; the field was empty and the Test was correct, and
+  still misleading enough that the person who knows this panel best read it as configured and
+  reported the Test as broken. Six fields whose placeholder is a ready-to-paste command now read
+  `e.g. …`, matching the convention the same file already used and applied unevenly, and the message
+  names the grey text rather than describing a field the reader cannot see.
+- The admin password prompt is a proper dialog now, not `window.prompt()` — unstyled, suppressible by
+  some browsers, and showing the password in clear.
+
+### Testing
+
+- `tests/richtext_test.php` (36 checks) is mostly attacks: fourteen injection techniques, eight
+  dangerous URL forms, and each checked against **output** rather than against the rule meant to stop
+  it — a rule can be right and still be reached too late.
+- `tests/livesync_test.php` (51 checks) is mostly refusals, driven against stub `ip`/`ss`/`systemctl`
+  so the helper's own address logic runs rather than being read.
+- Schema v20 is settings only, and needed its own number for the reason every "settings only" bump in
+  this project needed one: default rows are inserted by the migration block, and that block runs when
+  the version moves.
+
 ## [1.16.0] — 2026-08-28
 
 ### Added — extra opentracker instances finally receive traffic (E6, completed)

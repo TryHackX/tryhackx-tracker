@@ -119,7 +119,8 @@ if ($ipFilter !== '') {
 }
 
 $columns = "id, info_hash, name, source, source_ref, api_client_id, ip, ip_bucket, banned, meta_status, meta_error,
-            total_size, files_count, scrape_seeders, scrape_leechers, scrape_completed, scraped_at, created_at, updated_at";
+            total_size, files_count, scrape_seeders, scrape_leechers, scrape_completed, scraped_at, created_at, updated_at,
+            source_url, description, description_format, content_status, content_rejected_note";
 $orderClause = implode(', ', $orderParts);
 
 /** Run count + page query for a given extra search clause (null = none). Throws on SQL error. */

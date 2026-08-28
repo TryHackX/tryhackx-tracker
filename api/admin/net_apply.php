@@ -34,9 +34,7 @@ if (!trackerExecAvailable()) {
 // an admin has to be able to look at the ruleset before deciding to type a password.
 if ($op !== 'preview') {
     $password = (string)($input['password'] ?? '');
-    if ($password === '' || ADMIN_PASSWORD_HASH === '' || !password_verify($password, ADMIN_PASSWORD_HASH)) {
-        jsonResponse(['error' => 'Incorrect password.'], 403);
-    }
+    requireAdminReauth($password, $cfg);
 }
 
 $pps   = isset($input['pps'])   ? (int)$input['pps']   : netlimitPps($cfg);

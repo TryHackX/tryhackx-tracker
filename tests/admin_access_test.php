@@ -124,5 +124,41 @@ check('catalogue: no keyword entry for a setting that is not on the page', empty
 $noKeywords = array_diff($onPage, array_keys($kw), ['viewport']);
 check('catalogue: every setting on the page has keywords', empty($noKeywords), implode(', ', $noKeywords));
 
+/* ── re-confirming the password happens in exactly one place ──────────────── */
+//
+// The session gate keeps a stranger out of admin/*. It does nothing about somebody who already has a
+// session -- a borrowed laptop, an unlocked screen, a stolen cookie -- and that is precisely the case
+// the password prompt on every dangerous action exists for. It used to be fourteen separate inline
+// password_verify() calls with no counter between them, so that person could guess for ever.
+//
+// This checks the PROPERTY rather than the fix: no endpoint may verify the admin password by itself.
+// An endpoint written next year gets the throttle because there is nowhere else to get the check.
+
+$offenders = [];
+foreach (array_merge(glob($root . '/api/*.php') ?: [], glob($root . '/api/*/*.php') ?: []) as $f) {
+    if (preg_match('/password_verify[^;]*ADMIN_PASSWORD_HASH/', (string)file_get_contents($f))) {
+        $offenders[] = str_replace($root . '/', '', $f);
+    }
+}
+check('no endpoint checks the admin password on its own — they all go through adminReauth()',
+      $offenders === [], implode(', ', $offenders));
+
+$auth = (string)file_get_contents($root . '/includes/auth.php');
+check('a wrong confirmation costs progressively more time, starting at the first one',
+      str_contains($auth, 'function adminReauthDelayUs'));
+check('… and enough of them destroy the session rather than just refusing the action',
+      preg_match('/function adminReauth\(.*?logout\(\);/s', $auth) === 1);
+check('… and they also count against the sign-in lockout, so this is not a way around it',
+      preg_match('/function adminReauth\(.*?recordLoginFailure\(/s', $auth) === 1);
+check('the one-line helper exits rather than returning a value a caller could ignore',
+      preg_match('/function requireAdminReauth\(.*?jsonResponse\(/s', $auth) === 1);
+
+// A count, so that deleting call sites cannot quietly make the rule above vacuous.
+$gated = 0;
+foreach (glob($root . '/api/admin/*.php') ?: [] as $f) {
+    if (str_contains((string)file_get_contents($f), 'dminReauth(')) $gated++;
+}
+check('and the gate is actually used by the dangerous endpoints', $gated >= 12, (string)$gated);
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

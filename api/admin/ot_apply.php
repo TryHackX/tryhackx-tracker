@@ -25,9 +25,7 @@ if (!in_array($op, ['apply', 'workers', 'reset', 'restart'], true)) {
 // Same gate as the firewall's Apply: the constant, not a helper, because that is what the rest of
 // the panel uses and a second way of checking a password is a second way of getting it wrong.
 $password = (string)($input['password'] ?? '');
-if ($password === '' || ADMIN_PASSWORD_HASH === '' || !password_verify($password, ADMIN_PASSWORD_HASH)) {
-    jsonResponse(['error' => 'Invalid admin password'], 403);
-}
+requireAdminReauth($password, $cfg);
 
 switch ($op) {
     case 'apply':

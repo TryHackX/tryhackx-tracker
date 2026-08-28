@@ -98,9 +98,55 @@ if ($globalDaily > 0) {
     }
 }
 
+// ── the optional source link and description ────────────────────────────────
+//
+// Both are validated BEFORE anything is written. A submission that would be rejected for its
+// description must not leave the hash registered and the description lost: the person would have no
+// idea which half worked. So either the whole thing is acceptable, or nothing happens.
+//
+// They also only apply to a SINGLE torrent. One description cannot describe twelve of them, and
+// attaching it to all twelve would publish a claim about eleven torrents nobody made.
+$srcOn    = ($cfg['wl_allow_source_url'] ?? '0') === '1';
+$descOn   = ($cfg['wl_allow_description'] ?? '0') === '1';
+$sourceUrl = $srcOn ? trim((string)($input['source_url'] ?? '')) : '';
+$descText  = $descOn ? trim((string)($input['description'] ?? '')) : '';
+$descFmt   = (string)($input['description_format'] ?? 'bbcode');
+
+if (($sourceUrl !== '' || $descText !== '') && $validCount > 1) {
+    jsonResponse(['error' => 'A source link or description can only be added when you register one '
+                           . 'torrent at a time — it would otherwise be attached to all of them.'], 400);
+}
+if ($sourceUrl !== '') {
+    $e = richtextValidateSourceUrl($sourceUrl, $cfg);
+    if ($e !== null) jsonResponse(['error' => $e], 400);
+}
+if ($descText !== '') {
+    if (!in_array($descFmt, richtextFormats($cfg), true)) $descFmt = richtextFormats($cfg)[0];
+    $e = richtextValidate($descText, $descFmt, $cfg);
+    if ($e !== null) jsonResponse(['error' => $e], 400);
+}
+
 $addCtx = ['source' => 'web', 'ip' => $ip, 'auto_meta' => false];
 if ($submitUser !== null) $addCtx['ref'] = ['user' => $submitUser['username'], 'id' => (int)$submitUser['id']];
 $r = whitelistAddHashes($db, $cfg, $items, $addCtx);
+
+// Attach them to the row that was just created. `content_status` decides whether anybody but an
+// administrator ever sees them: with review on they wait, and the torrent works regardless.
+$contentSaved = false;
+if ($sourceUrl !== '' || $descText !== '') {
+    foreach ($r['results'] as $res) {
+        if (empty($res['hash']) || !in_array($res['status'], ['added', 'exists'], true)) continue;
+        $status = ($cfg['wl_content_review'] ?? '1') === '1' ? 'pending' : 'approved';
+        $db->prepare("UPDATE whitelist SET source_url = ?, description = ?, description_format = ?,
+                             content_status = ?, content_reviewed_at = NULL, content_rejected_note = NULL
+                       WHERE info_hash = ?")
+           ->execute([$sourceUrl !== '' ? $sourceUrl : null,
+                      $descText !== '' ? $descText : null,
+                      $descFmt, $status, $res['hash']]);
+        $contentSaved = true;
+        break;
+    }
+}
 
 $magnets = [];
 foreach ($r['results'] as $res) {
@@ -119,6 +165,8 @@ jsonResponse([
     // already reading this response has to change.
     'announce' => ['udp' => (string)($cfg['announce_url'] ?? ''), 'http' => (string)($cfg['announce_url_https'] ?? ''),
                    'all' => announceUrls($cfg)],
+    'content_saved' => $contentSaved,
+    'content_pending' => $contentSaved && ($cfg['wl_content_review'] ?? '1') === '1',
     'magnets' => $magnets,
     'active_in_seconds' => (int)$r['active_in_seconds'],
     'file_ok' => (bool)($r['file']['ok'] ?? true),

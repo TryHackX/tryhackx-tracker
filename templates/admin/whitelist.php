@@ -44,6 +44,19 @@
             <button class="source-tab" data-view="banned"><i class="bi bi-slash-circle"></i> Banned hashes <span id="tab-badge-banned" class="wl-tab-count"></span></button>
             <button class="source-tab" data-view="clients"><i class="bi bi-key"></i> API clients</button>
             <button class="source-tab" data-view="bans"><i class="bi bi-shield-x"></i> API bans</button>
+            <button class="source-tab" data-view="review"><i class="bi bi-eye"></i> To review <span id="tab-badge-review" class="wl-tab-count"></span></button>
+        </div>
+
+        <!-- ===== Review queue: source links and descriptions waiting to be published ===== -->
+        <div class="wl-view d-hidden" id="view-review">
+            <div class="admin-toolbar-card">
+                <div class="toolbar-row">
+                    <div class="toolbar-search"><span class="text-muted wl-small">Source links and descriptions written by submitters. <strong>The torrents are already registered</strong> &mdash; only the words are waiting. What you see below is rendered exactly as a visitor would see it, not as the source, because an image or a broken tag only shows itself after rendering.</span></div>
+                    <div class="toolbar-right"><span id="rv-total" class="text-muted wl-total"></span></div>
+                </div>
+            </div>
+            <div id="rv-list"></div>
+            <div class="admin-pagination" id="rv-pagination"></div>
         </div>
 
         <!-- ===== Whitelist view ===== -->

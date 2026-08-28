@@ -36,6 +36,9 @@ require_once $root . '/includes/opentracker.php';
 require_once $root . '/includes/sysctl.php';
 require_once $root . '/includes/cluster.php';
 require_once $root . '/includes/backup.php';
+require_once $root . '/includes/bulkmail.php';
+require_once $root . '/includes/richtext.php';
+require_once $root . '/includes/livesync.php';
 
 try {
     $db  = getDb();
@@ -119,6 +122,19 @@ try {
         echo sprintf('[users] expired=%d warned=%d pruned=%d%s', (int)$us['expired'], (int)$us['warned'], (int)$us['pruned'],
             $us['error'] !== null ? ' error=' . $us['error'] : ''), "\n";
     }
+    // bulk mail: a few messages a minute, and nothing at all while the feature is off. This is the
+    // only place they are sent — the panel writes rows and stops, because a burst of mail from a
+    // domain that normally sends a handful a day is what costs the password-reset messages.
+    $bm = bulkTick($db, $cfg);
+    if ($bm['sent'] || $bm['failed'] || in_array('-v', $argv ?? [], true)) {
+        echo sprintf('[bulkmail] sent=%d failed=%d left=%d', $bm['sent'], $bm['failed'], $bm['left']), "
+";
+    }
+    bulkPrune($db);
+
+    // live peer sync: refresh the cached view so the panel never forks a root script from a poll
+    livesyncTick($cfg);
+
     $after = whitelistStateRead();
     $msg = sprintf('mode=%s schedule=%s pending_reload=%s regen_needed=%s last_reload_ok=%s fail_count=%d count=%d',
         trackerMode($cfg), scheduleEnabled($cfg) ? ('on desired=' . (scheduleDesiredMode($cfg) ?? 'invalid')) : 'off',

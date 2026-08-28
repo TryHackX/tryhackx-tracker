@@ -11,6 +11,9 @@
     const state = {
         view: 'users',
         us: { page: 1, search: '', status: '', group: '', rows: [] },
+        // Ticked users survive paging and searching: an audience assembled across three pages is
+        // still one audience, and losing it on a filter change would be maddening.
+        picked: new Set(),
         groups: [],           // fetch_groups rows (shared by both views + the grant modal)
         permList: {},         // perm key => description
     };
@@ -73,10 +76,19 @@
         const tb = $('us-body');
         tb.textContent = '';
         if (!state.us.rows.length) {
-            tb.appendChild(el('tr', {}, el('td', { colSpan: 8, className: 'text-center text-muted py-4', text: 'No users match.' })));
+            tb.appendChild(el('tr', {}, el('td', { colSpan: 9, className: 'text-center text-muted py-4', text: 'No users match.' })));
         }
         state.us.rows.forEach(u => {
             const tr = el('tr', {});
+            const pick = el('input', { type: 'checkbox', className: 'us-pick' });
+            pick.checked = state.picked.has(u.id);
+            pick.addEventListener('change', () => {
+                if (pick.checked) state.picked.add(u.id); else state.picked.delete(u.id);
+                syncPickAll();
+                if (state.view === 'write') refreshPreview();
+            });
+            tr.appendChild(el('td', { className: 'us-c-pick' },
+                el('label', { className: 'search-check' }, [pick, el('span', { className: 'search-check-box' })])));
             tr.appendChild(el('td', { className: 'wl-id', text: String(u.id) }));
             tr.appendChild(el('td', {}, [el('strong', { text: u.username }), u.root_admin ? el('i', { className: 'bi bi-shield-lock-fill text-warning ms-1', title: 'Site owner (panel admin) — protected account' }) : null]));
             tr.appendChild(el('td', { className: 'wl-small', title: u.email ? (u.email_verified ? 'verified address' : 'not verified') : '' },
@@ -329,13 +341,148 @@
         }
     }
 
+
+    // -- writing to members --------------------------------------------------
+    //
+    // Two different things behind one form. A notification is a row in a table and costs nothing. An
+    // email leaves the machine, so it is queued and drained by the janitor a few a minute: this
+    // server sends through mail() with nothing in front of it, and a burst from a domain that
+    // normally sends a handful a day is what gets the password-reset mail filed as spam.
+    //
+    // Nothing here sends without showing the real number first. "Everyone" that quietly means 41 of
+    // 53 is the kind of surprise that surfaces a week later as "why did I never hear about it".
+
+    function syncPickAll() {
+        const all = $('us-pick-all');
+        if (!all) return;
+        const rows = state.us.rows || [];
+        all.checked = rows.length > 0 && rows.every(u => state.picked.has(u.id));
+        all.indeterminate = !all.checked && rows.some(u => state.picked.has(u.id));
+    }
+
+    function writeAudience() {
+        const mode = $('bm-mode').value;
+        if (mode === 'group') return { mode: 'group', group_id: parseInt($('bm-group').value, 10) || 0 };
+        if (mode === 'all') return { mode: 'all' };
+        return { mode: 'selected', ids: [...state.picked] };
+    }
+
+    function fillWriteGroups() {
+        const sel = $('bm-group');
+        if (!sel || sel.dataset.filled === '1') return;
+        sel.textContent = '';
+        (state.groups || []).forEach(g => sel.appendChild(el('option', { value: String(g.id), text: g.name })));
+        sel.dataset.filled = '1';
+    }
+
+    async function refreshPreview() {
+        const box = $('bm-preview');
+        if (!box) return;
+        $('bm-group-wrap').style.display = $('bm-mode').value === 'group' ? '' : 'none';
+        box.textContent = '';
+        box.appendChild(el('span', { className: 'text-muted', text: 'Counting...' }));
+        const r = await apiCall('admin/bulk_send', 'POST', { op: 'preview', audience: writeAudience() });
+        if (!r || !r.success) {
+            box.textContent = '';
+            box.appendChild(el('span', { className: 'text-danger', text: (r && r.error) || 'Could not count.' }));
+            return;
+        }
+        $('bm-off-note').style.display = r.enabled ? 'none' : '';
+        box.textContent = '';
+        box.appendChild(el('strong', { text: String(r.recipients) }));
+        const why = [];
+        if (r.no_email) why.push(r.no_email + ' with no address');
+        if (r.opted_out) why.push(r.opted_out + ' opted out of announcements');
+        if (r.unsubscribed) why.push(r.unsubscribed + ' unsubscribed');
+        box.appendChild(document.createTextNode(' of ' + r.audience + ' would receive the email'
+            + (why.length ? ' - ' + why.join(', ') : '') + '. '));
+        box.appendChild(el('span', { className: 'text-muted wl-small',
+            text: 'In-app notifications reach all ' + r.audience + ': there is nothing to opt out of, they only exist inside the site.' }));
+    }
+
+    async function loadBatches() {
+        const tb = $('bm-batches');
+        if (!tb) return;
+        const r = await apiCall('admin/bulk_send', 'POST', { op: 'batches' });
+        tb.textContent = '';
+        if (!r || !r.success) return;
+        $('bm-depth').textContent = r.depth ? (r.depth + ' still waiting - ' + r.per_minute + '/min') : '';
+        if (!(r.batches || []).length) {
+            tb.appendChild(el('tr', {}, el('td', { colSpan: 7, className: 'text-center text-muted py-4', text: 'Nothing sent yet.' })));
+            return;
+        }
+        r.batches.forEach(b => {
+            const tr = el('tr', {});
+            tr.appendChild(el('td', { className: 'wl-small', text: fmtDate(String(b.started).replace(' ', 'T')) }));
+            tr.appendChild(el('td', { text: b.subject || '-' }));
+            tr.appendChild(el('td', { text: String(b.total) }));
+            tr.appendChild(el('td', { text: String(b.sent) }));
+            tr.appendChild(el('td', { className: Number(b.failed) ? 'text-warning' : '', text: String(b.failed) }));
+            tr.appendChild(el('td', { text: String(b.pending) }));
+            const act = el('td', { className: 'td-actions' });
+            if (Number(b.pending) > 0) {
+                const stop = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning wl-act', title: 'Stop what has not gone out yet' },
+                    el('i', { className: 'bi bi-stop-circle' }));
+                stop.addEventListener('click', () => cancelBatch(b.batch_id, Number(b.pending)));
+                act.appendChild(stop);
+            }
+            tr.appendChild(act);
+            tb.appendChild(tr);
+        });
+    }
+
+    const askPassword = (title, message) => A.promptPassword(title, message);
+
+    async function cancelBatch(id, pending) {
+        const pw = await askPassword('Stop this send',
+            'Stop the ' + pending + ' message(s) that have not gone out yet? Anything already delivered cannot be recalled.');
+        if (!pw) return;
+        const r = await apiCall('admin/bulk_send', 'POST', { op: 'cancel', batch_id: id, password: pw });
+        showToast((r && (r.message || r.error)) || 'Done', r && r.success ? 'success' : 'error');
+        loadBatches();
+    }
+
+    async function sendTest() {
+        const r = await apiCall('admin/bulk_send', 'POST',
+            { op: 'test', subject: $('bm-subject').value, body: $('bm-body').value });
+        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+    }
+
+    async function sendWrite() {
+        const subject = $('bm-subject').value.trim();
+        const body = $('bm-body').value.trim();
+        if (!subject || !body) { showToast('A subject and a message are both required.', 'error'); return; }
+        const wantMail = $('bm-email').checked;
+        const wantNotify = $('bm-notify').checked;
+        if (!wantMail && !wantNotify) { showToast('Choose a notification, an email, or both.', 'error'); return; }
+        const pre = await apiCall('admin/bulk_send', 'POST', { op: 'preview', audience: writeAudience() });
+        if (!pre || !pre.success) { showToast((pre && pre.error) || 'Could not count the audience.', 'error'); return; }
+        const what = [];
+        if (wantNotify) what.push(pre.audience + ' notification(s)');
+        if (wantMail) what.push(pre.recipients + ' email(s)');
+        // The number again, at the moment of committing. This is the last point at which somebody can
+        // notice that "everyone" is larger than they had pictured.
+        if (!await confirmAction('Send to members',
+            'This sends ' + what.join(' and ') + '. Emails cannot be recalled once they leave.',
+            { okLabel: 'Send', danger: true })) return;
+        const pw = await askPassword('Send to members', 'Confirm with the admin password.');
+        if (!pw) return;
+        const r = await apiCall('admin/bulk_send', 'POST', {
+            op: 'queue', password: pw, audience: writeAudience(),
+            subject, body, notify: wantNotify, email: wantMail });
+        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        if (r && r.success) { $('bm-subject').value = ''; $('bm-body').value = ''; loadBatches(); }
+    }
+
     // ── wiring ──────────────────────────────────────────────────────────────
     function switchView(view) {
         state.view = view;
         document.querySelectorAll('#us-tabs .source-tab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
         $('view-users').classList.toggle('d-hidden', view !== 'users');
         $('view-groups').classList.toggle('d-hidden', view !== 'groups');
+        $('view-write').classList.toggle('d-hidden', view !== 'write');
         if (view === 'groups') renderGroups();
+        if (view === 'write') { fillWriteGroups(); refreshPreview(); loadBatches(); }
     }
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
     // Clicking a column header redraws the arrows immediately; only the fetch waits. The wait has to
@@ -362,6 +509,17 @@
         $('ug-duration').addEventListener('change', () => $('ug-custom').classList.toggle('d-hidden', $('ug-duration').value !== 'custom'));
         $('un-send').addEventListener('click', sendNotify);
         $('btn-group-new').addEventListener('click', () => openGroupEditor(null));
+        const pickAll = $('us-pick-all');
+        if (pickAll) pickAll.addEventListener('change', () => {
+            (state.us.rows || []).forEach(u => { if (pickAll.checked) state.picked.add(u.id); else state.picked.delete(u.id); });
+            document.querySelectorAll('#us-body .us-pick').forEach(b => { b.checked = pickAll.checked; });
+            if (state.view === 'write') refreshPreview();
+        });
+        $('bm-mode').addEventListener('change', refreshPreview);
+        $('bm-group').addEventListener('change', refreshPreview);
+        $('bm-refresh').addEventListener('click', refreshPreview);
+        $('bm-test').addEventListener('click', sendTest);
+        $('bm-send').addEventListener('click', sendWrite);
         $('ge-save').addEventListener('click', saveGroup);
         const logout = $('btn-logout');
         if (logout) logout.addEventListener('click', async () => { try { await apiCall('admin/logout', 'POST', {}); } catch (e) {} location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin'); });

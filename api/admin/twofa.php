@@ -55,9 +55,7 @@ $secondFactorOk = function (string $code): bool {
 $password = (string)($input['password'] ?? '');
 $needPassword = in_array($op, ['begin', 'disable', 'regen'], true);
 if ($needPassword) {
-    if ($password === '' || ADMIN_PASSWORD_HASH === '' || !password_verify($password, ADMIN_PASSWORD_HASH)) {
-        jsonResponse(['error' => 'Wrong admin password'], 403);
-    }
+    requireAdminReauth($password, $cfg);
 }
 
 if ($op === 'begin') {
