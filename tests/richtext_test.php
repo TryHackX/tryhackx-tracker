@@ -320,6 +320,12 @@ check('only the listed literal HTML tags survive, and only as a matched pair',
       // the attribute form must stay TEXT: escaped is fine, a real tag is not
       && strpos($md('<kbd onclick="x">y</kbd>'), '<kbd onclick') === false
       && strpos($md('<kbd onclick="x">y</kbd>'), '</kbd>') === false);
+// A block in the MIDDLE of a paragraph has to split it. `<p>a <div>b</div> c</p>` is invalid and a
+// browser closes the <p> itself, leaving the tail orphaned and a gap nobody typed.
+$midBlock = richtextRender('before [center]middle[/center] after [hr] end', 'bbcode', $cfg, false);
+check('a block in mid-paragraph splits the paragraph instead of sitting inside it',
+      preg_match('#<p>[^<]*<div#', $midBlock) === 0 && strpos($midBlock, '<p></p>') === false, $midBlock);
+
 check('paragraph tags come out balanced',
       substr_count($md("| A |\n|---|\n| 1 |\n\ntext\n\nmore"), '<p>')
       === substr_count($md("| A |\n|---|\n| 1 |\n\ntext\n\nmore"), '</p>'));

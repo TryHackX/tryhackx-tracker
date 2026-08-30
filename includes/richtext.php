@@ -721,6 +721,14 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
     // <p>, which browsers close early — producing an empty paragraph and a gap the author never
     // wrote. It bit the table, the alignment divs and the spoiler the moment they were added.
     $blocks = 'ul|ol|blockquote|pre|h[1-6]|div|table|details|hr';
+    // A block element in the MIDDLE of a paragraph needs the paragraph split around it, not just
+    // trimmed at its edges. `<p>a <div>b</div> c</p>` is invalid, and a browser does not render it as
+    // written: it closes the <p> before the <div> and leaves the tail orphaned, which shows up as a
+    // gap nobody typed. The rules below only ever handled a block at the START or the END.
+    $s = preg_replace('#(<(?:' . $blocks . ')\b)#', '</p>$1', $s);
+    $s = preg_replace('#(</(?:' . $blocks . ')>)#', '$1<p>', $s);
+    $s = preg_replace('#(<hr class="rt-hr">)#', '$1<p>', $s);   // void: it has no closing tag to hook on
+
     $s = preg_replace('#<p>\s*(<(?:' . $blocks . ')\b)#', '$1', $s);
     $s = preg_replace('#(</(?:' . $blocks . ')>)\s*</p>#', '$1', $s);
     $s = preg_replace('#(</(?:' . $blocks . ')>)\s*(?:<br>\s*)+#', '$1', $s);
