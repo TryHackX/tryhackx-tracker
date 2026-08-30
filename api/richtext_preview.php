@@ -48,7 +48,9 @@ if ($max > 0 && mb_strlen($text) > $max) {
 $counts = richtextCount($text);
 jsonResponse([
     'success' => true,
-    'html'    => richtextRender($text, $fmt, $cfg),
+    // The author previewing their own text sees their own hidden block; that is the only way to
+    // check it before submitting.
+    'html'    => richtextRender($text, $fmt, $cfg, richtextViewerSignedIn($db)),
     'format'  => $fmt,
     'length'  => mb_strlen($text),
     'limit'   => $max,

@@ -223,6 +223,22 @@ function richtextAutoSourceUrl(?string $sourceRefJson, array $cfg): ?string {
     return richtextIsTrusted($url, $cfg) ? $url : null;
 }
 
+/**
+ * Is the person this render is FOR signed in? One answer, so every caller gives the same one.
+ *
+ * Without this every caller left $signedIn at its default and [hide] hid its content from members
+ * too — the tag withheld from everybody, which is not what it means. A panel session counts: a
+ * moderator reviewing a description has to see what they are approving, or the review is of half a
+ * text.
+ */
+function richtextViewerSignedIn(?PDO $db = null): bool {
+    if (function_exists('isLoggedIn') && isLoggedIn()) return true;          // panel session
+    if ($db instanceof PDO && function_exists('currentUser')) {
+        return currentUser($db) !== null;
+    }
+    return false;
+}
+
 function richtextRenderForEmail(?string $text, string $format, array $cfg): string {
     $html = richtextRender($text, $format, $cfg);
     if ($html === '') return '';
@@ -797,6 +813,7 @@ function richtextContentFor(PDO $db, array $cfg, string $hash, bool $asAdmin = f
 
     $out['source_url'] = $r['source_url'] ?: null;
     $out['source_trusted'] = $out['source_url'] ? richtextIsTrusted((string)$out['source_url'], $cfg) : false;
-    $out['description_html'] = richtextRender($r['description'] ?? '', $out['format'], $cfg);
+    $out['description_html'] = richtextRender($r['description'] ?? '', $out['format'], $cfg,
+                                              richtextViewerSignedIn($db));
     return $out;
 }

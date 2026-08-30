@@ -96,7 +96,8 @@ $sourceAuto = false;
 $descHtml  = '';
 if ($wl && !(int)$wl['banned'] && ($wl['content_status'] ?? 'none') === 'approved') {
     $sourceUrl = $wl['source_url'] ?: null;
-    $descHtml  = richtextRender($wl['description'] ?? '', (string)$wl['description_format'], $cfg);
+    $descHtml  = richtextRender($wl['description'] ?? '', (string)$wl['description_format'], $cfg,
+                                richtextViewerSignedIn($db));
 }
 
 // A link the IMPORTER recorded (whitelist.source_ref, written by api/v1/whitelist_submit.php when the

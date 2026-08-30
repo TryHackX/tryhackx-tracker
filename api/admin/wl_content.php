@@ -69,7 +69,8 @@ if ($op === 'list') {
     // looking at exactly what a visitor would see — not at the source, where a broken tag or an
     // image that only appears after rendering would be easy to wave through.
     foreach ($rows as &$r) {
-        $r['description_html'] = richtextRender($r['description'] ?? '', (string)$r['description_format'], $cfg);
+        // A moderator must see what they are approving, hidden parts included.
+        $r['description_html'] = richtextRender($r['description'] ?? '', (string)$r['description_format'], $cfg, true);
         $r['source_trusted'] = $r['source_url'] ? richtextIsTrusted((string)$r['source_url'], $cfg) : false;
     }
     unset($r);
@@ -95,8 +96,8 @@ if ($op === 'edits') {
     // Both versions rendered, so the moderator compares what people will SEE rather than two blobs
     // of markup. A rewrite that looks tamer in source and worse on screen is the whole risk here.
     foreach ($rows as &$r) {
-        $r['new_html'] = richtextRender($r['description'] ?? '', (string)$r['description_format'], $cfg);
-        $r['cur_html'] = richtextRender($r['cur_description'] ?? '', (string)$r['cur_format'], $cfg);
+        $r['new_html'] = richtextRender($r['description'] ?? '', (string)$r['description_format'], $cfg, true);
+        $r['cur_html'] = richtextRender($r['cur_description'] ?? '', (string)$r['cur_format'], $cfg, true);
         $r['new_trusted'] = $r['source_url'] ? richtextIsTrusted((string)$r['source_url'], $cfg) : false;
     }
     unset($r);
