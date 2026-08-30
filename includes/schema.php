@@ -11,7 +11,10 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 24;  // 24 = grant the three permissions v1.19.0 registered but never
+const TRACKER_SCHEMA_VERSION = 25;  // 25 = panel permissions and a system `moderator` group: until
+                                    // now the admin panel had no permissions at all, so the only two
+                                    // states were owner and stranger.
+                                    // 24 = grant the three permissions v1.19.0 registered but never
                                     // gave to anybody: with the users feature ON, an absent key means
                                     // DENIED, so ratings and descriptions were admin-only in practice.
                                     // 23 = bulk messages carry their markup format, so the HTML part
@@ -724,6 +727,23 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // guest was a baseline for signed-in users too, which is no longer true)
     $db->prepare("UPDATE `user_groups` SET description = ? WHERE slug = 'guest' AND description = ?")
        ->execute(['Permissions of anonymous (not signed-in) visitors.', 'Baseline permissions for every visitor (anonymous included).']);
+    // v25: a system `moderator` group.
+    //
+    // The starting set is the LIMITED reading of the word: everything needed to work a queue —
+    // reports, appeals, the whitelist, submitted descriptions — plus seeing the user list and being
+    // able to message somebody. It deliberately does NOT include deleting whitelist rows, editing
+    // users, changing group membership, or the Traffic and Backups pages. A "full" moderator is the
+    // same group with more boxes ticked in Users → Groups; the panel has always rendered its
+    // checkbox list straight from userPermissionList(), so every panel permission appears there with
+    // no further work. That is the answer to "a mod can be limited or full": one group, and the
+    // operator decides how far it reaches.
+    //
+    // is_default is 0. Nobody becomes a moderator by signing up.
+    $db->exec("INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `color`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
+        ('moderator', 'Moderator', 'Works the queues: reports, appeals, the whitelist and submitted descriptions. Settings, backups, the machine controls and anything needing the owner password stay out of reach.', '#4a9eff', 500, 0, 1,
+         '{\"panel.access\":true,\"panel.reports.view\":true,\"panel.reports.status\":true,\"panel.reports.block\":true,\"panel.reports.email\":true,\"panel.reports.archive\":true,\"panel.appeals.resolve\":true,\"panel.whitelist.view\":true,\"panel.whitelist.add\":true,\"panel.whitelist.ban\":true,\"panel.whitelist.meta\":true,\"panel.whitelist.content\":true,\"panel.users.view\":true,\"panel.users.notify\":true,\"index.view\":true,\"index.files\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true,\"rating.vote\":true,\"content.submit\":true,\"content.propose\":true}')");
+    $db->exec("UPDATE `user_groups` SET is_system = 1 WHERE slug = 'moderator'");
+
     // v24: the permissions v1.19.0 registered and never granted.
     //
     // Before they existed, whether somebody could rate or attach a description was decided entirely by

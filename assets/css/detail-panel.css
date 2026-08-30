@@ -40,3 +40,72 @@
 .info-kv-value { font-size: 0.88rem; text-align: right; }
 .info-hash { font-size: 0.7rem; word-break: break-all; }
 
+
+/* ── the rich-text tags added in 1.21.0 ─────────────────────────────────────
+ *
+ * These live here rather than in style.css or admin.css because BOTH need them: descriptions are
+ * rendered on the public pages and in the moderation queue, and the existing .rt-* base rules were
+ * duplicated across the two files at different sizes. Anything new goes in one place.
+ *
+ * Everything is scoped to .rt-body so a class name can never leak into the surrounding page.
+ */
+.rt-body .rt-center { text-align: center; }
+.rt-body .rt-right  { text-align: right; }
+.rt-body .rt-left   { text-align: left; }
+.rt-body .rt-hr { border: 0; border-top: 1px solid rgba(255,255,255,0.16); margin: 0.9rem 0; }
+.rt-body .rt-font-mono  { font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+.rt-body .rt-font-serif { font-family: Georgia, "Times New Roman", serif; }
+.rt-body .rt-font-sans  { font-family: system-ui, "Segoe UI", Arial, sans-serif; }
+.rt-body .rt-mark { background: rgba(240,180,41,0.35); color: inherit; padding: 0 0.2em; border-radius: 2px; }
+.rt-body .rt-cite { display: block; font-style: normal; font-weight: 600; font-size: 0.85em; opacity: 0.8; margin-bottom: 0.2rem; }
+.rt-body sub, .rt-body sup { font-size: 0.75em; line-height: 0; }
+.rt-body kbd {
+    display: inline-block; padding: 0.05em 0.4em; border-radius: 3px; font-size: 0.85em;
+    font-family: SFMono-Regular, Menlo, Consolas, monospace;
+    background: rgba(255,255,255,0.09); border: 1px solid rgba(255,255,255,0.2); border-bottom-width: 2px;
+}
+
+/* Ordered lists keep their numbering style as a class — the author's `type=` never reaches an
+   attribute. */
+.rt-body ol.rt-list { list-style-type: decimal; }
+.rt-body ol.rt-list-alpha { list-style-type: lower-alpha; }
+.rt-body ol.rt-list-roman { list-style-type: lower-roman; }
+.rt-body ul.rt-list-task { list-style: none; margin-left: 0; padding-left: 0; }
+.rt-body .rt-task { display: flex; gap: 0.4rem; align-items: baseline; }
+.rt-body .rt-task-box { opacity: 0.8; }
+.rt-body .rt-task-done { opacity: 0.65; text-decoration: line-through; }
+
+/* Tables scroll inside their own box: a wide table must never widen the panel around it. */
+.rt-body .rt-table-wrap { overflow-x: auto; margin: 0.6rem 0; }
+.rt-body .rt-table { border-collapse: collapse; width: auto; min-width: 50%; font-size: 0.92em; }
+.rt-body .rt-table th, .rt-body .rt-table td { border: 1px solid rgba(255,255,255,0.14); padding: 0.3rem 0.6rem; text-align: left; }
+.rt-body .rt-table th { background: rgba(255,255,255,0.05); font-weight: 600; }
+.rt-body .rt-t-center { text-align: center; }
+.rt-body .rt-t-right  { text-align: right; }
+
+/* A spoiler is closed until somebody decides to open it — that is the whole feature, so it must not
+   be a block that merely looks collapsed. */
+.rt-body .rt-spoiler { border: 1px solid rgba(255,255,255,0.14); border-radius: 5px; margin: 0.6rem 0; }
+.rt-body .rt-spoiler > summary { cursor: pointer; padding: 0.35rem 0.7rem; font-weight: 600; list-style: none; }
+.rt-body .rt-spoiler > summary::-webkit-details-marker { display: none; }
+.rt-body .rt-spoiler > summary::before { content: '▸ '; opacity: 0.7; }
+.rt-body .rt-spoiler[open] > summary::before { content: '▾ '; }
+.rt-body .rt-spoiler-body { padding: 0 0.7rem 0.6rem; }
+
+/* Content the reader is not entitled to. The locked form carries no text from the author at all —
+   it is a notice written here, because the hidden bytes never left the server. */
+.rt-body .rt-hide { border-left: 3px solid rgba(74,158,255,0.6); padding: 0.3rem 0.7rem; margin: 0.6rem 0; }
+.rt-body .rt-hide-locked { opacity: 0.7; font-style: italic; }
+
+/* Callouts (> [!NOTE] and friends). */
+.rt-body .rt-callout { border-left: 3px solid; border-radius: 0 4px 4px 0; padding: 0.5rem 0.8rem; margin: 0.7rem 0; background: rgba(255,255,255,0.04); }
+.rt-body .rt-callout-k { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 700; margin-bottom: 0.2rem; }
+.rt-body .rt-callout-note      { border-color: #4a9eff; } .rt-body .rt-callout-note .rt-callout-k      { color: #4a9eff; }
+.rt-body .rt-callout-tip       { border-color: #3fa45b; } .rt-body .rt-callout-tip .rt-callout-k       { color: #6fce8b; }
+.rt-body .rt-callout-important { border-color: #a06fd8; } .rt-body .rt-callout-important .rt-callout-k { color: #c09ae8; }
+.rt-body .rt-callout-warning   { border-color: #c9a227; } .rt-body .rt-callout-warning .rt-callout-k   { color: #d8b13a; }
+.rt-body .rt-callout-caution   { border-color: #b4433c; } .rt-body .rt-callout-caution .rt-callout-k   { color: #ff8a8a; }
+
+.rt-body .rt-fn a { text-decoration: none; }
+.rt-body .rt-footnotes { font-size: 0.9em; opacity: 0.85; margin-top: 0.8rem; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.1); }
+.rt-body .rt-video { display: inline-block; padding: 0.15rem 0.5rem; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px; }

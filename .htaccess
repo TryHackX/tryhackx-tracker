@@ -41,7 +41,17 @@ RewriteBase /tracker/
     # a provider missing here loads no script, so its widget never appears and every protected form
     # fails with "CAPTCHA unavailable". The apex hcaptcha.com is listed next to the wildcard because
     # a CSP wildcard does not match the bare domain. Tighten if you self-host these.
-    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com https://www.recaptcha.net https://challenges.cloudflare.com https://js.hcaptcha.com https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://hcaptcha.com https://*.hcaptcha.com; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https://www.google.com https://www.gstatic.com https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://cdn.jsdelivr.net https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; frame-src https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+    #
+    # img-src carries `https:` so that IMAGES IN DESCRIPTIONS WORK. Without it the renderer emits a
+    # perfectly good <img> and the browser refuses to load it, which looks exactly like a broken
+    # feature and was reported as one: the setting said "up to 3 images" and the policy said none.
+    # The cost is real and worth stating: an author can embed a remote image, and whoever hosts it
+    # then sees the IP and user agent of everybody who reads that description. The renderer sets
+    # referrerpolicy="no-referrer" so the page they were on does not travel with it, and the image
+    # limit is per description. If you would rather not pay that at all, delete `https:` from
+    # img-src below and set "Images per description" to 0 in Settings, so the panel stops offering
+    # something the server forbids.
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com https://www.recaptcha.net https://challenges.cloudflare.com https://js.hcaptcha.com https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://hcaptcha.com https://*.hcaptcha.com; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https: https://www.google.com https://www.gstatic.com https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://cdn.jsdelivr.net https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; frame-src https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
 </IfModule>
 
 # Prevent directory listings

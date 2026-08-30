@@ -19,6 +19,20 @@ $group = ctype_digit($groupRef)
 if (!$group) jsonResponse(['error' => 'Group not found'], 404);
 if ($group['slug'] === 'guest') jsonResponse(['error' => 'The guest group is the implicit baseline — it cannot be granted'], 400);
 
+// A group that carries PANEL permissions may only be handed out by the owner.
+//
+// Without this, `panel.users.groups` is a licence to print administrators: a moderator grants
+// themselves the admin group, or a second moderator group, and the boundary is gone. The rule is
+// written against what a group CONTAINS rather than against its name, so a custom group somebody
+// builds with panel permissions in it is covered by the same sentence.
+$groupPerms = userGroupPermissions($group['permissions'] ?? '');
+$carriesPanel = false;
+foreach (array_keys($groupPerms) as $gp) { if (userIsPanelPermission($gp)) { $carriesPanel = true; break; } }
+if (($carriesPanel || $group['slug'] === 'admin') && !empty($_SESSION['admin_via_user'])
+    && !userIsAdminGroup($db, (int)$_SESSION['admin_via_user'])) {
+    jsonResponse(['error' => 'Only the site owner can grant a group that carries panel access.'], 403);
+}
+
 $parseDt = function (string $s, bool $endOfDay): ?string {
     $s = trim($s);
     if ($s === '') return null;

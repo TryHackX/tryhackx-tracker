@@ -233,8 +233,95 @@ if (!isset($apiRoutes[$endpoint])) {
 // its own gate instead: it only works from a session that has just passed the password step, only
 // for five minutes, it carries its own CSRF token in the body like admin/login, and every failure
 // counts against the same brute-force lockout.
+/**
+ * Which panel permission each admin endpoint needs.
+ *
+ * DEFAULT DENY: an endpoint that is not in this map can be reached only by the OWNER's own session.
+ * That is the safe direction — a new endpoint is admin-only until somebody deliberately decides
+ * otherwise, rather than quietly inheriting whatever a moderator happens to hold. It also means this
+ * table is the whole answer to "what can a moderator do", in one place, auditable by reading it.
+ *
+ * Everything absent is absent on purpose: Settings, the credential and 2FA endpoints, group editing,
+ * user deletion, API clients and bans, federation, the firewall / sysctl / opentracker helpers,
+ * tracker restarts, whitelist regeneration, backup restore-delete-download, and bulk mail. Most of
+ * those also demand the owner's password through adminReauth(), which a moderator does not have —
+ * this map simply agrees with that boundary instead of contradicting it.
+ */
+function adminEndpointPermission(string $endpoint): ?string {
+    static $map = [
+        // Reports
+        'admin/fetch_reports'      => 'panel.reports.view',
+        'admin/fetch_appeals'      => 'panel.reports.view',
+        'admin/change_status'      => 'panel.reports.status',
+        'admin/update_field'       => 'panel.reports.status',
+        'admin/block_hash'         => 'panel.reports.block',
+        'admin/unblock_hash'       => 'panel.reports.block',
+        'admin/check_blacklist'    => 'panel.reports.block',
+        'admin/block_archived'     => 'panel.reports.block',
+        'admin/send_email'         => 'panel.reports.email',
+        'admin/notify_review'      => 'panel.reports.email',
+        'admin/delete_report'      => 'panel.reports.archive',
+        'admin/restore_report'     => 'panel.reports.archive',
+        'admin/resolve_appeal'     => 'panel.appeals.resolve',
+        'admin/restore_appeal'     => 'panel.appeals.resolve',
+        // Whitelist + Index (one page each, one view permission)
+        'admin/whitelist_status'   => 'panel.whitelist.view',
+        'admin/fetch_whitelist'    => 'panel.whitelist.view',
+        'admin/whitelist_item'     => 'panel.whitelist.view',
+        'admin/index_status'       => 'panel.whitelist.view',
+        'admin/fetch_index'        => 'panel.whitelist.view',
+        'admin/index_item'         => 'panel.whitelist.view',
+        'admin/fetch_banned'       => 'panel.whitelist.view',
+        'admin/whitelist_add'      => 'panel.whitelist.add',
+        'admin/whitelist_delete'   => 'panel.whitelist.delete',
+        'admin/index_delete'       => 'panel.whitelist.delete',
+        'admin/index_promote'      => 'panel.whitelist.add',
+        'admin/whitelist_ban'      => 'panel.whitelist.ban',
+        'admin/whitelist_unban'    => 'panel.whitelist.ban',
+        'admin/banned_add'         => 'panel.whitelist.ban',
+        'admin/whitelist_fetch_meta' => 'panel.whitelist.meta',
+        'admin/whitelist_meta_queue' => 'panel.whitelist.meta',
+        'admin/whitelist_scrape'   => 'panel.whitelist.meta',
+        'admin/whitelist_scrape_bulk' => 'panel.whitelist.meta',
+        'admin/index_fetch_meta'   => 'panel.whitelist.meta',
+        'admin/index_scrape_bulk'  => 'panel.whitelist.meta',
+        'admin/index_scrape'       => 'panel.whitelist.meta',
+        'admin/wl_content'         => 'panel.whitelist.content',
+        // Users
+        'admin/fetch_users'        => 'panel.users.view',
+        'admin/fetch_groups'       => 'panel.users.view',
+        'admin/user_update'        => 'panel.users.edit',
+        'admin/user_notify'        => 'panel.users.notify',
+        'admin/user_grant'         => 'panel.users.groups',
+        'admin/user_revoke'        => 'panel.users.groups',
+        // Backups — see and run, never restore or delete
+        'admin/backup_status'      => 'panel.backups.view',
+        // backup_action is NOT here: its op decides. Running a backup is a moderator action,
+        // restoring or deleting one is not, and a single grant for the endpoint cannot tell them
+        // apart — so the endpoint checks its own op (api/admin/backup_action.php).
+        // Traffic, read-only
+        'admin/net_status'         => 'panel.traffic.view',
+        'admin/net_samples'        => 'panel.traffic.view',
+        'admin/ot_status'          => 'panel.traffic.view',
+        'admin/ot_cluster_status'  => 'panel.traffic.view',
+        'admin/sysctl_status'      => 'panel.traffic.view',
+        'admin/tracker_service_status' => 'panel.traffic.view',
+        // Shared chrome every panel page needs to render at all
+        'admin/logout'             => 'panel.access',
+    ];
+    return $map[$endpoint] ?? null;
+}
+
 if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login' && $endpoint !== 'admin/login_2fa') {
     requireAuth($cfg);
+    // The session is valid; now, is it allowed to do THIS? For the owner's own session panelCan()
+    // is always true and this costs one function call. For a moderator it is the whole boundary.
+    $needPerm = adminEndpointPermission($endpoint);
+    if (!panelCan($db, $cfg, $needPerm ?? 'panel.owner.__never__')) {
+        jsonResponse(['error' => $needPerm === null
+            ? 'That action is reserved for the site owner.'
+            : 'Your panel account does not have access to that.'], 403);
+    }
     // CSRF: every admin write (non-GET) must carry a valid X-CSRF-Token header.
     // Reads (GET: fetch_reports/fetch_appeals) are exempt. Login uses its own body token.
     if ($_SERVER['REQUEST_METHOD'] !== 'GET' && !verifyCsrfHeader()) {

@@ -411,8 +411,8 @@
                 </div>
             </div>
 
-            <div class="settings-section" id="section-whitelist" data-group="tracker" data-title="Tracker Mode &amp; Whitelist">
-                <h5>Tracker Mode &amp; Whitelist</h5>
+            <div class="settings-section" id="section-whitelist" data-group="tracker" data-title="Tracker mode &amp; the accesslist file">
+                <h5>Tracker mode &amp; the accesslist file</h5>
                 <p class="settings-hint mb-2">
                     <strong>Blacklist</strong> = OpenTracker built with <code>-DWANT_ACCESSLIST_BLACK</code>: everything is served except blocked hashes.
                     <strong>Whitelist</strong> = built with <code>-DWANT_ACCESSLIST_WHITE</code>: <em>only</em> registered hashes are served (public registration page, forum sync, API).
@@ -494,12 +494,16 @@
                 <div class="settings-hint mt-2">Manage the list itself (browse, add, ban, regenerate the file) on the <a href="<?= $baseUrl ?>?action=admin-whitelist">Whitelist page</a>.</div>
 
                 <!-- A submission has to prove itself (includes/wlprobe.php) -->
-                <h6 class="settings-subhead mt-4">Make submissions prove themselves</h6>
+            </div>
+
+            <div class="settings-section" id="section-probe" data-group="tracker" data-title="Submissions must prove themselves">
+                <h5>Submissions must prove themselves</h5>
+                <p class="settings-hint mb-2">Magnet check, peer verification and the proving queue</p>
                 <small class="settings-hint d-block mb-3">Anybody can paste forty hex characters. Most of what a public whitelist accumulates is not abuse &mdash; it is hashes nobody is seeding, and hashes whose torrent never named this tracker. Each one becomes a row the accesslist carries for ever.
                 <br><br>With this on, a new submission has to show two things before the tracker serves it: <strong>the metadata resolves</strong> (somebody really is sharing it) and <strong>a scrape finds at least one peer</strong> (and they are announcing here). It reuses the metadata worker rather than adding a second queue, but jumps the queue &mdash; a person is watching this one, and nothing else in the queue is. <strong>Off by default:</strong> it changes what registering <em>means</em>, and that is not something to inherit from an upgrade.</small>
                 <div class="row g-3">
                     <div class="col-md-3" data-setting="wl_probe_required">
-                        <label class="form-label">Check before serving</label>
+                        <label class="form-label">Verify the magnet before serving it</label>
                         <select class="form-select bg-dark text-light border-secondary" name="wl_probe_required">
                             <option value="0" <?= ($cfg['wl_probe_required'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
                             <option value="1" <?= ($cfg['wl_probe_required'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled</option>
@@ -507,12 +511,12 @@
                         <small class="settings-hint">Existing rows are unaffected: everything registered before this counts as already accepted, so turning it on never unpublishes anything.</small>
                     </div>
                     <div class="col-md-3" data-setting="wl_probe_timeout_minutes">
-                        <label class="form-label">Give it (minutes)</label>
+                        <label class="form-label">Verification timeout (minutes)</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_probe_timeout_minutes" value="<?= sanitize($cfg['wl_probe_timeout_minutes'] ?? '10') ?>" min="1" max="1440">
                         <small class="settings-hint">Fetching metadata from the DHT is not instant. Too short and honest submissions fail.</small>
                     </div>
                     <div class="col-md-3" data-setting="wl_probe_on_fail">
-                        <label class="form-label">If it never proves itself</label>
+                        <label class="form-label">If the magnet never verifies</label>
                         <select class="form-select bg-dark text-light border-secondary" name="wl_probe_on_fail">
                             <option value="delete" <?= ($cfg['wl_probe_on_fail'] ?? 'delete') === 'delete' ? 'selected' : '' ?>>Remove the row</option>
                             <option value="keep" <?= ($cfg['wl_probe_on_fail'] ?? 'delete') === 'keep' ? 'selected' : '' ?>>Keep it, unserved, with the reason</option>
@@ -520,14 +524,18 @@
                         <small class="settings-hint">Deleting is the default here, unlike the dead-row rule: this row was never served, and nobody has come to rely on it.</small>
                     </div>
                     <div class="col-md-3" data-setting="wl_probe_max_batch">
-                        <label class="form-label">Per submission, at most</label>
+                        <label class="form-label">Magnets verified at once, per submission</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_probe_max_batch" value="<?= sanitize($cfg['wl_probe_max_batch'] ?? '') ?>" min="1" max="64" placeholder="e.g. 8 (defaults to the worker's concurrency)">
                         <small class="settings-hint">Five hundred rows in the priority lane are not resolved faster &mdash; they just make everyone wait together. Keep this at or below <em>Worker parallel fetches</em>.</small>
                     </div>
                 </div>
 
                 <!-- Keeping the list honest over time (includes/wlmaint.php) -->
-                <h6 class="settings-subhead mt-4">Upkeep: refreshing and dead torrents</h6>
+            </div>
+
+            <div class="settings-section" id="section-wlupkeep" data-group="tracker" data-title="Whitelist upkeep">
+                <h5>Whitelist upkeep</h5>
+                <p class="settings-hint mb-2">Refreshing seeders and retiring dead torrents</p>
                 <small class="settings-hint d-block mb-3">A whitelist accumulates. Somebody registers a torrent, seeds it for a week and moves on, and years later the tracker is still serving a swarm with nobody in it. Both jobs below run from the <strong>janitor</strong>, never from a page view, and both are <strong>off by default</strong>.</small>
                 <div class="row g-3">
                     <div class="col-md-3" data-setting="wl_scrape_every_hours">
@@ -572,7 +580,11 @@
                 </div>
 
                 <!-- Source link + description on a whitelist row (includes/richtext.php) -->
-                <h6 class="settings-subhead mt-4">Source link &amp; description</h6>
+            </div>
+
+            <div class="settings-section" id="section-content" data-group="content" data-title="Descriptions &amp; source links">
+                <h5>Descriptions &amp; source links</h5>
+                <p class="settings-hint mb-2">What submitters may write, and who reviews it</p>
                 <small class="settings-hint d-block mb-3">Two optional fields on the registration form: <strong>where the torrent came from</strong>, and <strong>what it is</strong>. They appear on the public whitelist, the Index and the public search. Both are <strong>off by default</strong>, because this is text an anonymous stranger types and you then publish under your own domain &mdash; a description can carry images and a link goes wherever its author decided. With review on (the default when you switch these on), the torrent still registers <em>immediately</em>; only the link and the description wait for you.</small>
                 <div class="row g-3">
                     <div class="col-md-3" data-setting="wl_allow_source_url">
@@ -670,7 +682,11 @@
                 $schedTzGroups = [];
                 foreach ($schedTzList as $tzId) { $schedTzGroups[strpos($tzId, '/') !== false ? substr($tzId, 0, strpos($tzId, '/')) : 'Other'][] = $tzId; }
                 ?>
-                <h6 class="mt-4 mb-1" id="section-schedule">Scheduled mode <small class="settings-hint fw-normal">(whitelist hours)</small></h6>
+            </div>
+
+            <div class="settings-section" id="section-schedule" data-group="tracker" data-title="Scheduled tracker mode">
+                <h5>Scheduled tracker mode</h5>
+                <p class="settings-hint mb-2">Whitelist during set hours, open otherwise</p>
                 <p class="settings-hint mb-2">
                     Run the tracker in <strong>whitelist</strong> mode during the hours below and in <strong>open (blacklist)</strong> mode at every other moment.
                     The switch itself is done by the root helper below (it swaps the OpenTracker binary + config and restarts the service; argument <code>white</code> / <code>black</code>),

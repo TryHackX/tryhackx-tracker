@@ -2017,6 +2017,14 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .star-hit-r { right: 0; }
 .star-hit:focus-visible { outline: 2px solid #4a9eff; outline-offset: 1px; border-radius: 2px; }
 .search-rep-stars { color: #f0b429; white-space: nowrap; }
-/* Waiting for a moderator. Amber rather than green or red, because it is neither: somebody wrote
-   something and nobody has judged it yet. */
-.search-cs-pending { background: rgba(201,162,39,0.18); border-color: rgba(201,162,39,0.55); color: #d8b13a; }
+/* The review state, as an icon beside the name — the same place and rhythm as the WL badge.
+   The colour carries the meaning at a glance and the shape carries it for everybody else. */
+.search-cs-icon { display: inline-flex; align-items: center; margin-left: 0.35rem; vertical-align: -0.15em; }
+.search-cs-icon.search-cs-pending  { color: #4a9eff; }
+.search-cs-icon.search-cs-approved { color: #6fce8b; }
+.search-cs-icon.search-cs-rejected { color: #ff8a8a; }
+/* Toolbar groups: related buttons together, with a gap rather than a divider, so a group that hides
+   itself for a format leaves no empty separator behind. */
+.rt-tool-group { display: inline-flex; gap: 0.2rem; margin-right: 0.5rem; }
+.rt-tool-group[hidden] { display: none; }
+.rt-tools button[hidden] { display: none; }

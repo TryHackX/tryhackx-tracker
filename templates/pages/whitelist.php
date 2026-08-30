@@ -152,13 +152,38 @@ if ($wlSched) {
                     <span class="rt-format-fixed"><?= $wlFormats[0] === 'markdown' ? 'Markdown' : 'BBCode' ?></span>
                     <?php endif; ?>
                 </div>
+                <!-- A button whose syntax the chosen format cannot express hides itself (see
+                     syncFormat in assets/js/app.js) — BBCode has [color] and Markdown does not, and
+                     a button that inserts markup the renderer will not honour is worse than no
+                     button at all. -->
                 <div class="rt-tools" id="wl-desc-tools" role="toolbar" aria-label="Formatting">
-                    <button type="button" data-md="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
-                    <button type="button" data-md="italic" title="Italic (Ctrl+I)"><em>I</em></button>
-                    <button type="button" data-md="link" title="Link (Ctrl+K)">&#128279;</button>
-                    <button type="button" data-md="list" title="Bulleted list">&#8226;&nbsp;List</button>
-                    <button type="button" data-md="quote" title="Quote">&rdquo;</button>
-                    <button type="button" data-md="code" title="Code">&lt;/&gt;</button>
+                    <span class="rt-tool-group">
+                        <button type="button" data-md="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
+                        <button type="button" data-md="italic" title="Italic (Ctrl+I)"><em>I</em></button>
+                        <button type="button" data-md="underline" title="Underline"><u>U</u></button>
+                        <button type="button" data-md="strike" title="Strikethrough"><s>S</s></button>
+                    </span>
+                    <span class="rt-tool-group">
+                        <button type="button" data-md="color" title="Colour">&#127912;</button>
+                        <button type="button" data-md="size" title="Font size">A&#8593;</button>
+                        <button type="button" data-md="highlight" title="Highlight">&#9635;</button>
+                        <button type="button" data-md="sub" title="Subscript">X&#8322;</button>
+                        <button type="button" data-md="sup" title="Superscript">X&#178;</button>
+                    </span>
+                    <span class="rt-tool-group">
+                        <button type="button" data-md="link" title="Link (Ctrl+K)">&#128279;</button>
+                        <button type="button" data-md="image" title="Image">&#128444;</button>
+                        <button type="button" data-md="list" title="Bulleted list">&#8226;&nbsp;List</button>
+                        <button type="button" data-md="olist" title="Numbered list">1.&nbsp;List</button>
+                    </span>
+                    <span class="rt-tool-group">
+                        <button type="button" data-md="quote" title="Quote">&rdquo;</button>
+                        <button type="button" data-md="code" title="Code">&lt;/&gt;</button>
+                        <button type="button" data-md="table" title="Table">&#9636;</button>
+                        <button type="button" data-md="spoiler" title="Spoiler">&#128065;</button>
+                        <button type="button" data-md="center" title="Centre">&#8801;</button>
+                        <button type="button" data-md="hr" title="Horizontal rule">&mdash;</button>
+                    </span>
                 </div>
                 <textarea id="wl-desc" name="description" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="What is it? Technical details are welcome &mdash; use a code block for anything that must keep its formatting."></textarea>
                 <div class="rt-preview rt-body" id="wl-desc-preview" hidden></div>

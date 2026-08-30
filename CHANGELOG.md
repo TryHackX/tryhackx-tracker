@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [1.20.0] — 2026-08-28 (schema v24)
+## [1.20.0] — 2026-08-28 (schema v24 + v25)
 
 Six defects, four of them mine, three of them silently breaking things on a live tracker.
 

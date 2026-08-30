@@ -160,5 +160,100 @@ foreach (glob($root . '/api/admin/*.php') ?: [] as $f) {
 }
 check('and the gate is actually used by the dangerous endpoints', $gated >= 12, (string)$gated);
 
+/* == panel permissions: the moderator boundary ============================= */
+//
+// The panel had no permissions at all until 1.21.0 — every endpoint was gated by "is there a session"
+// — so these tests are about the boundary itself rather than about any single endpoint.
+
+require_once $root . '/includes/users.php';
+require_once $root . '/config/database.php';
+require_once $root . '/includes/settings.php';
+require_once $root . '/includes/schema.php';
+// This suite runs without a database for its earlier checks; the boundary checks need one, and the
+// live schema is the only place the seeded moderator group actually exists.
+$db = getDb();
+$cfg = array_merge($cfg, getSettings($db, true));
+ensureSchema($db, $cfg);
+
+$allPerms = userPermissionList();
+$panelIds = array_values(array_filter(array_keys($allPerms), 'userIsPanelPermission'));
+check('panel permissions exist at all', count($panelIds) >= 10, count($panelIds) . ' found');
+
+// A typo in the endpoint map denies an endpoint to every moderator FOREVER, silently — there is no
+// error, the permission simply never matches. So every id the map names must be a real one.
+$apiSrc = (string)file_get_contents($root . '/api.php');
+preg_match_all("/'(admin\/[a-z0-9_]+)'\s*=>\s*'(panel\.[a-z.]+)'/", $apiSrc, $mm, PREG_SET_ORDER);
+check('the endpoint map was found in api.php', count($mm) > 20, count($mm) . ' entries');
+$badIds = [];
+foreach ($mm as $row) if (!isset($allPerms[$row[2]])) $badIds[] = $row[1] . ' => ' . $row[2];
+check('every permission the endpoint map names is registered', $badIds === [], implode(', ', $badIds));
+
+// And every endpoint it names must be routed, or the entry is decoration.
+preg_match_all("/'(admin\/[a-z0-9_]+)'\s*=>\s*'api\/admin\//", $apiSrc, $rr);
+$routed = array_flip($rr[1]);
+$badEp = [];
+foreach ($mm as $row) if (!isset($routed[$row[1]])) $badEp[] = $row[1];
+check('every endpoint the map names is actually routed', $badEp === [], implode(', ', $badEp));
+
+// Default deny: the dangerous endpoints must NOT be in the map at any permission.
+$mapped = [];
+foreach ($mm as $row) $mapped[$row[1]] = $row[2];
+$mustBeOwnerOnly = ['admin/save_settings', 'admin/change_password', 'admin/account_email', 'admin/twofa',
+                    'admin/group_save', 'admin/group_delete', 'admin/user_delete', 'admin/backup_action',
+                    'admin/backup_download', 'admin/restart_tracker', 'admin/net_apply', 'admin/sysctl_apply',
+                    'admin/ot_apply', 'admin/api_client_create', 'admin/bulk_send', 'admin/tracker_mode',
+                    'admin/whitelist_regenerate', 'admin/delete_all', 'admin/delete_permanently'];
+$leaked = array_values(array_intersect(array_keys($mapped), $mustBeOwnerOnly));
+check('nothing that changes the machine or the owner credentials is grantable',
+      $leaked === [], implode(', ', $leaked));
+
+// The legacy fallback must never open the panel: with accounts off there is nobody to be a moderator,
+// and the fallback's final `return true` would otherwise hand out every panel id.
+$leakedLegacy = array_values(array_filter($panelIds, 'userLegacyDefault'));
+check('userLegacyDefault never grants a panel permission', $leakedLegacy === [], implode(', ', $leakedLegacy));
+
+// panelCan(), against real sessions.
+$_SESSION['loggedin'] = true;
+unset($_SESSION['admin_via_user']);
+check('the owner session passes every panel check',
+      panelCan($db, $cfg, 'panel.access') && panelCan($db, $cfg, 'panel.users.groups')
+      && panelCan($db, $cfg, 'panel.no.such.permission'));
+
+$modGroup = userGroupBySlug($db, 'moderator');
+check('the moderator group is seeded and is a system group',
+      $modGroup !== null && (int)$modGroup['is_system'] === 1);
+$modPerms = $modGroup ? userGroupPermissions($modGroup['permissions']) : [];
+check('it can open the panel and work the report queue',
+      isset($modPerms['panel.access'], $modPerms['panel.reports.status'], $modPerms['panel.whitelist.content']));
+check('it cannot edit users, change groups or reach Traffic or Backups by default',
+      !isset($modPerms['panel.users.edit']) && !isset($modPerms['panel.users.groups'])
+      && !isset($modPerms['panel.traffic.view']) && !isset($modPerms['panel.backups.view']));
+check('no permission exists for Settings at all, so it cannot be granted',
+      !array_key_exists('panel.settings', $allPerms)
+      && !count(array_filter(array_keys($allPerms), fn($k) => str_contains($k, 'settings'))));
+
+// A real moderator session: granted exactly what the group holds and nothing else.
+$db->prepare("INSERT INTO users (username, email, pass_hash, status, email_verified)
+              VALUES ('modprobe', 'modprobe@example.org', ?, 'active', 1)
+              ON DUPLICATE KEY UPDATE status = 'active'")->execute([password_hash('x', PASSWORD_DEFAULT)]);
+$modUid = (int)$db->query("SELECT id FROM users WHERE username = 'modprobe'")->fetchColumn();
+$db->prepare("INSERT IGNORE INTO user_group_members (user_id, group_id, granted_by, note) VALUES (?, ?, 'test', 'boundary')")
+   ->execute([$modUid, (int)$modGroup['id']]);
+$_SESSION['admin_via_user'] = $modUid;
+check('a moderator session may open the panel', panelCan($db, $cfg, 'panel.access'));
+check('… and may act on reports', panelCan($db, $cfg, 'panel.reports.status'));
+check('… but may NOT reach an ungranted area', !panelCan($db, $cfg, 'panel.users.edit'));
+check('… and may NOT pass a check for a permission that does not exist',
+      !panelCan($db, $cfg, 'panel.owner.__never__'));
+check('… so Settings is closed to them', !adminPageAllowed($db, $cfg, 'settings'));
+check('… while Reports is open', adminPageAllowed($db, $cfg, 'admin'));
+check('the nav shows only what they may open',
+      count(adminNavItemsFor($db, $cfg)) > 0
+      && count(adminNavItemsFor($db, $cfg)) < count(adminNavItems()));
+
+$db->prepare("DELETE FROM user_group_members WHERE user_id = ?")->execute([$modUid]);
+$db->prepare("DELETE FROM users WHERE id = ?")->execute([$modUid]);
+unset($_SESSION['admin_via_user']);
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

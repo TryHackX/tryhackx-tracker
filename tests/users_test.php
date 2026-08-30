@@ -308,9 +308,18 @@ check('no old address → direct set', ($r4['stage'] ?? '') === 'done_direct' &&
 // schemaGrantOnce call) or it is deliberately admin-only and named below with a reason. Adding a
 // permission without deciding which of those it is now fails here.
 
+// Panel permissions are NOT seeded to guest or member, and must not be: they are opt-in, granted by
+// the operator in Users -> Groups, and the `moderator` group seeds only the queue-working subset.
+// The property below is about the PUBLIC-site permissions, where an ungranted id silently switches a
+// feature off for everybody — which is the failure that made this test necessary.
+$PANEL_ONLY = array_values(array_filter(array_keys(userPermissionList()), 'userIsPanelPermission'));
+check('panel permissions are deliberately ungranted by default',
+      count($PANEL_ONLY) > 0);
+
 $ADMIN_ONLY = [
     // permission => why nobody but an admin should ever have it
 ];
+foreach ($PANEL_ONLY as $pp) $ADMIN_ONLY[$pp] = 'panel permission: granted by the operator, never seeded';
 
 $schemaSrc = (string)file_get_contents($root . '/includes/schema.php');
 
@@ -328,7 +337,9 @@ if (preg_match_all('/schemaGrantOnce\s*\(.*?\)\s*;/s', $schemaSrc, $m2)) {
 check('the permission-granting statements in schema.php were found at all',
       strlen($granting) > 200, 'found ' . strlen($granting) . ' chars');
 
-foreach (array_keys(userPermissionList()) as $perm) {
+$publicPerms = array_diff(array_keys(userPermissionList()), $PANEL_ONLY);
+check('there are still public-site permissions to check', count($publicPerms) >= 8);
+foreach ($publicPerms as $perm) {
     if (isset($ADMIN_ONLY[$perm])) {
         check("permission $perm is deliberately admin-only", true);
         continue;
@@ -360,6 +371,14 @@ $second = schemaGrantOnce($db, $marker, ['grantprobe' => ['rating.vote', 'conten
 $after2 = userGroupPermissions(userGroupBySlug($db, 'grantprobe')['permissions']);
 check('a second run changes nothing, so a removed permission stays removed',
       $second === 0 && !isset($after2['content.submit']));
+
+// The moderator group is the one place panel permissions ARE seeded, so that is where to check them.
+$modSeed = userGroupBySlug($db, 'moderator');
+$modHas = $modSeed ? userGroupPermissions($modSeed['permissions']) : [];
+check('the moderator seed grants the queue-working panel permissions',
+      isset($modHas['panel.access'], $modHas['panel.reports.view'], $modHas['panel.whitelist.content']));
+check('and grants no permission that does not exist',
+      array_diff(array_keys($modHas), array_keys(userPermissionList())) === []);
 
 check('an unknown slug is skipped rather than fatal',
       schemaGrantOnce($db, $marker . 'x', ['no-such-group' => ['rating.vote']]) === 0);

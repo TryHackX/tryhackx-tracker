@@ -37,14 +37,32 @@ function adminPanelActions(): array {
  * the section you were just looking at.
  */
 function adminNavItems(): array {
+    // `perm` is the panel permission that opens this page. Settings has none on purpose: no
+    // permission id exists for it, so only the owner's own session reaches it.
     return [
-        ['action' => 'admin',           'label' => 'Reports',   'icon' => 'bi-flag',        'anchor' => ''],
-        ['action' => 'admin-whitelist', 'label' => 'Whitelist', 'icon' => 'bi-list-check',  'anchor' => ''],
-        ['action' => 'admin-index',     'label' => 'Index',     'icon' => 'bi-collection',  'anchor' => '#section-index'],
-        ['action' => 'admin-traffic',   'label' => 'Traffic',   'icon' => 'bi-speedometer2','anchor' => '#section-netlimit'],
-        ['action' => 'admin-users',     'label' => 'Users',     'icon' => 'bi-people',      'anchor' => '#section-users'],
-        ['action' => 'admin-backups',   'label' => 'Backups',   'icon' => 'bi-archive',     'anchor' => '#section-backups'],
+        ['action' => 'admin',           'label' => 'Reports',   'icon' => 'bi-flag',        'anchor' => '',                  'perm' => 'panel.reports.view'],
+        ['action' => 'admin-whitelist', 'label' => 'Whitelist', 'icon' => 'bi-list-check',  'anchor' => '',                  'perm' => 'panel.whitelist.view'],
+        ['action' => 'admin-index',     'label' => 'Index',     'icon' => 'bi-collection',  'anchor' => '#section-index',    'perm' => 'panel.whitelist.view'],
+        ['action' => 'admin-traffic',   'label' => 'Traffic',   'icon' => 'bi-speedometer2','anchor' => '#section-netlimit', 'perm' => 'panel.traffic.view'],
+        ['action' => 'admin-users',     'label' => 'Users',     'icon' => 'bi-people',      'anchor' => '#section-users',    'perm' => 'panel.users.view'],
+        ['action' => 'admin-backups',   'label' => 'Backups',   'icon' => 'bi-archive',     'anchor' => '#section-backups',  'perm' => 'panel.backups.view'],
     ];
+}
+
+/** The nav items THIS panel session may open. The owner sees all of them. */
+function adminNavItemsFor(PDO $db, array $cfg): array {
+    if (!function_exists('panelCan')) return adminNavItems();
+    return array_values(array_filter(adminNavItems(), fn($i) => panelCan($db, $cfg, $i['perm'])));
+}
+
+/** May this panel session open ?action=<$action>? Settings and the dashboard are owner-only. */
+function adminPageAllowed(PDO $db, array $cfg, string $action): bool {
+    if (!function_exists('panelCan')) return true;
+    if ($action === 'settings') return panelCan($db, $cfg, 'panel.settings.__never__');
+    foreach (adminNavItems() as $i) {
+        if ($i['action'] === $action) return panelCan($db, $cfg, $i['perm']);
+    }
+    return panelCan($db, $cfg, 'panel.unknown.__never__');   // unknown page → owner only
 }
 
 /** The ?action= value that opens the admin sign-in form (default 'admin'; garbage falls back). */
@@ -95,7 +113,13 @@ function adminSessionValid(array $cfg): bool {
         try {
             $db = getDb();
             $u = userFindById($db, (int)$_SESSION['admin_via_user']);
-            if (!$u || $u['status'] !== 'active' || !userIsAdminGroup($db, (int)$u['id'])) {
+            // Admin group OR panel.access: a moderator holds a panel session on the strength of a
+            // granted permission rather than of admin membership. Losing either one closes the panel
+            // on the next request, which is the property this block existed for.
+            $stillAllowed = $u && $u['status'] === 'active'
+                && (userIsAdminGroup($db, (int)$u['id'])
+                    || (function_exists('userHasPanelAccess') && userHasPanelAccess($db, (int)$u['id'])));
+            if (!$stillAllowed) {
                 unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
                 return false;
             }

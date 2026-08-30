@@ -59,8 +59,48 @@ function userPermissionList(): array {
         'rating.vote'     => 'Rate torrents up or down (needs ratings switched on in Settings)',
         'content.submit'  => 'Attach a source link and a description when registering a torrent',
         'content.propose' => 'Propose a rewrite of a description somebody else wrote',
+
+        // ── the admin panel ──
+        //
+        // Everything above is about the PUBLIC site. Everything below is about the panel, and until
+        // now the panel had no permissions at all: every one of its endpoints was gated by
+        // "is there a panel session", so the only two states were owner and stranger. That is what
+        // made a moderator impossible — there was nothing to grant.
+        //
+        // What is deliberately ABSENT matters as much as what is here. There is no id for Settings,
+        // for restoring a backup, for deleting a user, for editing groups, for API clients, for the
+        // firewall/sysctl/opentracker helpers, or for anything that changes the machine. Those stay
+        // with the owner, and having no id means they cannot be granted by accident. The password
+        // confirmation those actions require is checked against the OWNER's password, so they are
+        // structurally out of a moderator's reach anyway — this list simply agrees with that.
+        'panel.access'           => 'PANEL — open the admin panel at all (every other panel permission needs this)',
+        'panel.reports.view'     => 'PANEL — see the Reports page and the appeals list',
+        'panel.reports.status'   => 'PANEL — change a report\'s status and notes',
+        'panel.reports.block'    => 'PANEL — block and unblock reported hashes',
+        'panel.reports.email'    => 'PANEL — email a reporter and send review notifications',
+        'panel.reports.archive'  => 'PANEL — archive, restore and delete reports',
+        'panel.appeals.resolve'  => 'PANEL — resolve and restore appeals',
+        'panel.whitelist.view'   => 'PANEL — see the Whitelist and Index pages',
+        'panel.whitelist.add'    => 'PANEL — register hashes from the panel',
+        'panel.whitelist.delete' => 'PANEL — delete whitelist rows',
+        'panel.whitelist.ban'    => 'PANEL — ban and unban hashes',
+        'panel.whitelist.meta'   => 'PANEL — queue metadata fetches and refresh seeders',
+        'panel.whitelist.content'=> 'PANEL — approve or reject submitted descriptions and rewrites',
+        'panel.users.view'       => 'PANEL — see the Users page',
+        'panel.users.edit'       => 'PANEL — change a user\'s status and email verification',
+        'panel.users.notify'     => 'PANEL — send a user an in-app notification',
+        'panel.users.groups'     => 'PANEL — grant and revoke groups (never the admin group)',
+        // Look, but not touch. EVERY operation in api/admin/backup_action.php demands the admin
+        // password, and adminReauth() checks it against the OWNER's hash — which a moderator does
+        // not have and must not be given. So there is no "run a backup" permission: one would be a
+        // promise the code cannot keep, and a checkbox that grants nothing is worse than no checkbox.
+        'panel.backups.view'     => 'PANEL — see the Backups page and the backup list (running, restoring and deleting stay with the owner)',
+        'panel.traffic.view'     => 'PANEL — see the Traffic page (read-only; the controls stay with the owner)',
     ];
 }
+
+/** Is this permission id one of the panel ones? */
+function userIsPanelPermission(string $perm): bool { return str_starts_with($perm, 'panel.'); }
 
 /**
  * What the site looks like with the user system disabled: index gated, the classic pages public.
@@ -74,6 +114,10 @@ function userPermissionList(): array {
  * means denied, which is why introducing a permission has to come with a grant in includes/schema.php.
  */
 function userLegacyDefault(string $perm): bool {
+    // The panel is never opened by a fallback. With accounts switched off there is nobody to BE a
+    // moderator, and the final `return true` below would otherwise hand every panel permission to
+    // the whole world the moment one was registered.
+    if (userIsPanelPermission($perm)) return false;
     if (str_starts_with($perm, 'rating.') || str_starts_with($perm, 'content.')) return true;
     return !str_starts_with($perm, 'index.');
 }
@@ -395,6 +439,43 @@ function userCan(PDO $db, array $cfg, string $perm): bool {
     $u = currentUser($db);
     $perms = userEffectivePermissions($db, $u ? (int)$u['id'] : null, $cfg);
     return !empty($perms[$perm]);
+}
+
+/** Does this user hold panel.access through any of their active groups? */
+function userHasPanelAccess(PDO $db, int $userId): bool {
+    $p = userEffectivePermissions($db, $userId);
+    return !empty($p['panel.access']);
+}
+
+/**
+ * THE PANEL permission check. Deliberately NOT userCan().
+ *
+ * userCan() begins with `if (isLoggedIn()) return true;` — any panel session passes every check,
+ * which is right for the public site (the owner should see everything) and catastrophic here: it
+ * would make a moderator omnipotent the moment they held a panel session, which is the whole point
+ * of having one.
+ *
+ * So this asks a different question. A CLASSIC panel session — signed in with the owner's password —
+ * keeps its total bypass; there is one owner and the panel is theirs. A session opened by
+ * piggy-backing on a user sign-in resolves that user's effective permissions, and gets exactly
+ * those. Anything not granted is denied, including every id that does not exist.
+ */
+function panelCan(PDO $db, array $cfg, string $perm): bool {
+    if (empty($_SESSION['loggedin'])) return false;
+    $viaUser = (int)($_SESSION['admin_via_user'] ?? 0);
+    if ($viaUser <= 0) return true;                 // the owner's own session
+    if (userIsAdminGroup($db, $viaUser)) return true;
+    $p = userEffectivePermissions($db, $viaUser);
+    return !empty($p[$perm]);
+}
+
+/** panelCan() or a 403. For endpoints; mirrors requireAuth()'s shape. */
+function panelRequire(string $perm): void {
+    global $db, $cfg;
+    if (!($db instanceof PDO) || !is_array($cfg)) { jsonResponse(['error' => 'Forbidden'], 403); }
+    if (!panelCan($db, $cfg, $perm)) {
+        jsonResponse(['error' => 'Your panel account does not have access to that.'], 403);
+    }
 }
 
 /**

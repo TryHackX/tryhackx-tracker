@@ -94,6 +94,16 @@ if (in_array($action, $adminPanelActions, true) || $action === $adminLoginAction
             header('Location: ' . $baseUrl . '?action=admin');
             exit;
         }
+        // A panel session is no longer the same thing as the owner's session: a moderator holds one
+        // too, and reaches only the pages their groups grant. Sending them to a page they may open
+        // beats a bare 403 — but if they may open none, the panel is not for them at all.
+        if (!adminPageAllowed($db, $cfg, $action)) {
+            $first = adminNavItemsFor($db, $cfg);
+            if ($first) { header('Location: ' . $baseUrl . '?action=' . $first[0]['action']); exit; }
+            adminPanelSessionExpire();
+            header('Location: ' . $baseUrl);
+            exit;
+        }
         if ($action === 'settings') {
             include __DIR__ . '/templates/admin/settings.php';
         } elseif ($action === 'admin-whitelist') {

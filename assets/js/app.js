@@ -2357,16 +2357,7 @@ const getJson = async (endpoint) => {
                 // The state of the words attached to it, not of the torrent. Only shown when there
                 // is a state to show: an index row nobody has written about has none.
                 if (r.content_status === 'approved' || r.content_status === 'rejected' || r.content_status === 'pending') {
-                    const cb = document.createElement('span');
-                    cb.className = 'search-wl-badge search-cs-' + r.content_status;
-                    const CS = {
-                        approved: ['OK',  'The description and source link were reviewed and published'],
-                        rejected: ['REJ', 'The description was reviewed and turned down — the torrent itself is unaffected'],
-                        pending:  ['?',   'Somebody wrote a description; a moderator has not looked at it yet'],
-                    }[r.content_status];
-                    cb.textContent = CS[0];
-                    cb.title = CS[1];
-                    nameTd.appendChild(cb);
+                    nameTd.appendChild(contentStatusIcon(r.content_status));
                 }
                 if (r.files_count) {
                     const fc = document.createElement(canFiles && r.info_hash ? 'button' : 'span');
@@ -2680,6 +2671,53 @@ const getJson = async (endpoint) => {
             // Redraw from the server's answer, never from an optimistic guess: the whole value of a
             // score is that it is the server's count and not the browser's.
             openInfo(hash, null);
+        }
+
+        /**
+         * The review state of a description, as an icon beside the name.
+         *
+         * Inline SVG rather than an icon font. The shapes are the familiar ones — a clock, a tick in
+         * a circle, a cross in a circle — but pulling in a whole font (and another CDN host, past a
+         * CSP that currently allows none for fonts) to draw three 14-pixel glyphs is a lot of
+         * machinery for very little. This renders identically, costs nothing, inherits its colour
+         * from the class, and cannot fail to load.
+         *
+         * Colour alone is never the message: each icon carries a title, and the shapes differ, so it
+         * still reads for somebody who cannot tell the three colours apart.
+         */
+        function contentStatusIcon(status) {
+            const PATHS = {
+                // clock — waiting
+                pending: 'M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z',
+                // check
+                approved: 'M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.235.235 0 0 1 .02-.022z',
+                // cross
+                rejected: 'M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z',
+            };
+            const TITLES = {
+                pending:  'Waiting for review — somebody wrote a description and a moderator has not looked at it yet',
+                approved: 'Reviewed and published',
+                rejected: 'Reviewed and turned down — the torrent itself is unaffected',
+            };
+            const NS = 'http://www.w3.org/2000/svg';
+            const svg = document.createElementNS(NS, 'svg');
+            svg.setAttribute('viewBox', '0 0 16 16');
+            svg.setAttribute('width', '13');
+            svg.setAttribute('height', '13');
+            svg.setAttribute('role', 'img');
+            svg.setAttribute('aria-label', TITLES[status]);
+            const ring = document.createElementNS(NS, 'circle');
+            ring.setAttribute('cx', '8'); ring.setAttribute('cy', '8'); ring.setAttribute('r', '7');
+            ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', 'currentColor'); ring.setAttribute('stroke-width', '1.2');
+            const path = document.createElementNS(NS, 'path');
+            path.setAttribute('d', PATHS[status]);
+            path.setAttribute('fill', 'currentColor');
+            svg.appendChild(ring); svg.appendChild(path);
+            const wrap = document.createElement('span');
+            wrap.className = 'search-cs-icon search-cs-' + status;
+            wrap.title = TITLES[status];
+            wrap.appendChild(svg);
+            return wrap;
         }
 
         async function openInfo(hash, name) {
@@ -3099,16 +3137,39 @@ const getJson = async (endpoint) => {
     let timer = null;
     let lastShown = null;          // {key, ok} — what the box is currently displaying
 
+    // What each button inserts, per format. A kind missing from a format's table means the format
+    // cannot express it, and the button hides — Markdown has no colour and no font size, and a
+    // button that writes markup the renderer will not honour teaches the wrong thing.
+    //
+    // A third element, when present, means "this is a whole block": it is inserted on its own lines
+    // rather than wrapped around the caret.
     const SYNTAX = {
-        markdown: { bold: ['**', '**'], italic: ['*', '*'], code: ['`', '`'],
-                    link: ['[', '](https://example.org)'], quote: ['> ', ''], list: ['- ', ''] },
-        bbcode:   { bold: ['[b]', '[/b]'], italic: ['[i]', '[/i]'], code: ['[code]', '[/code]'],
-                    link: ['[url=https://example.org]', '[/url]'], quote: ['[quote]', '[/quote]'],
-                    list: ['[list]\n[*] ', '\n[/list]'] },
+        markdown: {
+            bold: ['**', '**'], italic: ['*', '*'], strike: ['~~', '~~'], code: ['`', '`'],
+            highlight: ['==', '=='], sub: ['~', '~'], sup: ['^', '^'],
+            link: ['[', '](https://example.org)'], image: ['![](', ')'],
+            quote: ['> ', ''], list: ['- ', ''], olist: ['1. ', ''],
+            spoiler: ['||', '||'],
+            table: ['| A | B |\n|---|---|\n| 1 | 2 |', '', true],
+            hr: ['\n---\n', '', true],
+        },
+        bbcode: {
+            bold: ['[b]', '[/b]'], italic: ['[i]', '[/i]'], underline: ['[u]', '[/u]'],
+            strike: ['[s]', '[/s]'], code: ['[code]', '[/code]'],
+            color: ['[color=#e74c3c]', '[/color]'], size: ['[size=18]', '[/size]'],
+            highlight: ['[highlight=yellow]', '[/highlight]'],
+            sub: ['[sub]', '[/sub]'], sup: ['[sup]', '[/sup]'],
+            link: ['[url=https://example.org]', '[/url]'], image: ['[img]', '[/img]'],
+            quote: ['[quote]', '[/quote]'],
+            list: ['[list]\n[*] ', '\n[/list]'], olist: ['[list=1]\n[*] ', '\n[/list]'],
+            spoiler: ['[spoiler=Title]', '[/spoiler]'], center: ['[center]', '[/center]'],
+            table: ['[table]\n[tr][th]A[/th][th]B[/th][/tr]\n[tr][td]1[/td][td]2[/td][/tr]\n[/table]', '', true],
+            hr: ['\n[hr]\n', '', true],
+        },
     };
     const HINT = {
-        markdown: 'Markdown: **bold**, *italic*, # heading, - list, > quote, `code`, [text](url), ![](image). Ctrl+B, Ctrl+I and Ctrl+K work in the box.',
-        bbcode:   'BBCode: [b]bold[/b], [i]italic[/i], [url=…]text[/url], [quote], [code], [list], [img]. Ctrl+B, Ctrl+I and Ctrl+K work in the box.',
+        markdown: 'Markdown: **bold**, *italic*, ~~strike~~, ==mark==, # heading, - list, 1. list, - [ ] task, > quote, > [!NOTE], `code`, tables, [^footnote], ||spoiler||, :rocket:, [text](url), ![](image). Ctrl+B / Ctrl+I / Ctrl+K.',
+        bbcode:   'BBCode: [b] [i] [u] [s] [color=#hex] [size=18] [font] [center] [right] [hr] [quote=Name] [list] [list=1] [table] [spoiler=Title] [sub] [sup] [highlight] [url] [img] [email] [youtube] [hide]. Ctrl+B / Ctrl+I / Ctrl+K.',
     };
     const fmt = () => (fmtEl && fmtEl.value === 'markdown') ? 'markdown' : 'bbcode';
 
@@ -3116,9 +3177,18 @@ const getJson = async (endpoint) => {
     function wrap(kind) {
         const syn = SYNTAX[fmt()];
         if (!syn || !syn[kind]) return;
-        const [open, close] = syn[kind];
+        const [open, close, block] = syn[kind];
         const start = ta.selectionStart, end = ta.selectionEnd;
         const sel = ta.value.slice(start, end);
+        if (block) {
+            // A whole construct, dropped in as-is. Wrapping the selection in a table skeleton would
+            // produce a table with the author's sentence in its header, which nobody wants.
+            const pre = start > 0 && ta.value[start - 1] !== '\n' ? '\n' : '';
+            ta.setRangeText(pre + open + '\n', start, end, 'end');
+            ta.focus();
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            return;
+        }
         // A line-prefix mark (quote, and a Markdown list) belongs at the start of EVERY selected
         // line: wrapping the block instead would quote only its first line.
         const linewise = close === '';
@@ -3178,6 +3248,14 @@ const getJson = async (endpoint) => {
 
     function syncFormat() {
         if (syntax) syntax.textContent = HINT[fmt()];
+        // Hide the buttons this format has no syntax for, and the group that empties with them.
+        if (tools) {
+            const syn = SYNTAX[fmt()] || {};
+            tools.querySelectorAll('[data-md]').forEach(b => { b.hidden = !syn[b.dataset.md]; });
+            tools.querySelectorAll('.rt-tool-group').forEach(g => {
+                g.hidden = ![...g.querySelectorAll('[data-md]')].some(b => !b.hidden);
+            });
+        }
         lastShown = null;                       // the same text renders differently in the other syntax
         if (!box.hidden) render();
     }

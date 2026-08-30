@@ -237,5 +237,159 @@ check('auto source: an empty ref yields nothing', $auto('') === null && $auto(nu
 check('auto source: credentials in the URL are refused',
       $auto('{"url":"https://user:pw@tryhackx.org/x"}') === null);
 
+
+/* == [hide] must fail CLOSED ============================================== */
+//
+// Every case below leaked a secret to guests in the first version of the tag. The rule was one lazy
+// match with an alternation on the closing tag, so an outer [hide] paired with an INNER [/hide] and
+// everything after it was printed verbatim — beside a placeholder claiming it was hidden. None of
+// these needs an attacker: they are what happens when somebody pastes a template from another forum.
+//
+// The assertion is on the OUTPUT containing the secret, never on the rule that was meant to stop it.
+
+$hideCases = [
+    'nested hide'                  => '[hide]a[hide]b[/hide] SECRET-TOKEN[/hide]',
+    'hide closed by postshide'     => '[hide]a[postshide]b[/postshide] SECRET-TOKEN[/hide]',
+    'stray closing tag'            => '[hide]a[/hide] SECRET-TOKEN[/hide]',
+    'closer swallowed by [code]'   => '[hide]password SECRET-TOKEN[code]x[/hide][/code]',
+    'opened and never closed'      => '[hide]a SECRET-TOKEN',
+    'closer with no opener'        => 'SECRET-TOKEN [/hide]',
+    'mixed case tags'              => '[HIDE]a[/HIDE] SECRET-TOKEN[/hide]',
+    'hide with a title'            => '[hide=Title]SECRET-TOKEN[/hide]',
+    'hide inside a quote'          => '[quote][hide]a[/hide] SECRET-TOKEN[/hide][/quote]',
+];
+foreach ($hideCases as $name => $src) {
+    $out = richtextRender($src, 'bbcode', $cfg, false);
+    check("guest never sees the secret: $name", strpos($out, 'SECRET-TOKEN') === false, $out);
+}
+
+// …and the feature still works when the tags ARE balanced.
+$ok = richtextRender('before [hide]members only[/hide] after', 'bbcode', $cfg, false);
+check('a well-formed hide keeps the surrounding text visible',
+      strpos($ok, 'before') !== false && strpos($ok, 'after') !== false
+      && strpos($ok, 'members only') === false, $ok);
+$in = richtextRender('[hide]a[hide]b[/hide]c[/hide]', 'bbcode', $cfg, true);
+check('a signed-in reader sees nested hidden content, with no tag text left over',
+      strpos($in, 'a') !== false && strpos($in, 'b') !== false && strpos($in, 'c') !== false
+      && strpos($in, '[hide') === false, $in);
+
+/* == the new tags, and the values they carry =============================== */
+
+$bb = fn(string $t) => richtextRender($t, 'bbcode', $cfg, false);
+
+check('[color] accepts a hex value', strpos($bb('[color=#e74c3c]x[/color]'), 'color:#e74c3c') !== false);
+check('[color] accepts a named colour', strpos($bb('[color=blue]x[/color]'), 'color:blue') !== false);
+check('[color] drops anything that is not a colour, keeping the text',
+      strpos($bb('[color=expression(alert(1))]x[/color]'), 'expression') === false
+      && strpos($bb('[color=expression(alert(1))]x[/color]'), 'x') !== false);
+check('[color] cannot smuggle a second CSS property',
+      strpos($bb('[color=red;background:url(//evil)]x[/color]'), 'background') === false);
+check('[size] clamps rather than trusting the number',
+      strpos($bb('[size=9999]x[/size]'), 'font-size:32px') !== false);
+check('[size] understands percentages', strpos($bb('[size=150%]x[/size]'), 'font-size:24px') !== false);
+check('[font] maps to a class and never echoes the name',
+      strpos($bb('[font=Courier New]x[/font]'), 'rt-font-mono') !== false
+      && strpos($bb('[font=evil;x:1]y[/font]'), 'evil') === false);
+check('[table] builds only well-formed rows',
+      strpos($bb('[table][tr][td]A[/td][/tr][/table]'), '<td>A</td>') !== false
+      && strpos($bb('[table][tr][td]A[/tr][/table]'), '<td>') === false);
+check('[quote=name] renders the author, without a leftover quote entity',
+      strpos($bb('[quote="Jan"]x[/quote]'), '<cite class="rt-cite">Jan</cite>') !== false);
+check('[youtube] emits a link and never an iframe',
+      strpos($bb('[youtube]dQw4w9WgXcQ[/youtube]'), '<iframe') === false
+      && strpos($bb('[youtube]dQw4w9WgXcQ[/youtube]'), 'youtube.com/watch?v=dQw4w9WgXcQ') !== false);
+check('[youtube] refuses anything that is not a video id',
+      strpos($bb('[youtube]../../etc/passwd[/youtube]'), 'youtube.com') === false);
+check('[email] only accepts an address',
+      strpos($bb('[email]a@b.pl[/email]'), 'mailto:a@b.pl') !== false
+      && strpos($bb('[email]javascript:alert(1)[/email]'), 'mailto:') === false);
+check('[img] renders an image again', strpos($bb('[img]https://e.org/x.png[/img]'), '<img') !== false);
+
+$md = fn(string $t) => richtextRender($t, 'markdown', $cfg, false);
+check('markdown tables need a separator row, so a line of pipes stays a line of pipes',
+      strpos($md("| A | B |\n|---|---|\n| 1 | 2 |"), '<table') !== false
+      && strpos($md('a | b | c'), '<table') === false);
+check('task lists render as marks, not as form controls',
+      strpos($md("- [x] done"), '<input') === false && strpos($md("- [x] done"), 'rt-task-done') !== false);
+check('a callout keeps its kind', strpos($md("> [!WARNING]\n> careful"), 'rt-callout-warning') !== false);
+check('emoji come from the fixed map only',
+      strpos($md(':rocket:'), "\u{1F680}") !== false && strpos($md(':definitely_not_an_emoji:'), ':definitely_not_an_emoji:') !== false);
+check('only the listed literal HTML tags survive, and only as a matched pair',
+      strpos($md('<kbd>Ctrl</kbd>'), '<kbd>Ctrl</kbd>') !== false
+      && strpos($md('<script>alert(1)</script>'), '<script') === false
+      // the attribute form must stay TEXT: escaped is fine, a real tag is not
+      && strpos($md('<kbd onclick="x">y</kbd>'), '<kbd onclick') === false
+      && strpos($md('<kbd onclick="x">y</kbd>'), '</kbd>') === false);
+check('paragraph tags come out balanced',
+      substr_count($md("| A |\n|---|\n| 1 |\n\ntext\n\nmore"), '<p>')
+      === substr_count($md("| A |\n|---|\n| 1 |\n\ntext\n\nmore"), '</p>'));
+
+
+/* == the renderer must never emit an unbalanced block tag ================= */
+//
+// An unclosed <div> or <details> does not merely look wrong: it swallows the rest of the page for
+// every reader. Malformed input is the normal case here — people paste half a template — so this
+// runs the whole zoo of broken markup and counts tags rather than eyeballing one example.
+
+$broken = ['[center]a', '[center]a[/right]', '[/center]a', '[spoiler]a', '[spoiler=T]a', '[/spoiler]',
+           '[table][tr][td]a', '[table]junk[/table]', '[quote]a', '[/quote]a', '[list][*]a',
+           '[hide]a', '[hide]a[/hide]', '[center][spoiler][quote][table][tr][td]x',
+           "> [!NOTE]
+> a", "| a |
+|---|", '[color=red]a', str_repeat('[center]', 30) . 'x'];
+$blockTags = ['div', 'details', 'blockquote', 'table', 'ul', 'ol', 'p', 'summary', 'span', 'mark'];
+$unbalanced = [];
+foreach ([false, true] as $signedIn) {
+    foreach (['bbcode', 'markdown'] as $fmt) {
+        foreach ($broken as $src) {
+            $h = richtextRender($src, $fmt, $cfg, $signedIn);
+            foreach ($blockTags as $t) {
+                // The opener needs a boundary, or <p> also counts <pre> and the totals come out wrong in a
+                // way that reads exactly like a real imbalance. Written as a character class rather
+                // than as a backslash escape: a tool in this session turned \b into a literal
+                // backspace byte here, which is the trap HANDOFF.md already warns about.
+                $opens  = preg_match_all('#<' . $t . '(?=[ >/])#i', $h);
+                $closes = preg_match_all('#</' . $t . '>#i', $h);
+                if ($opens !== $closes) {
+                    $unbalanced[] = "$t $opens/$closes [$fmt] " . substr($src, 0, 24) . ' -> ' . substr($h, 0, 70);
+                }
+            }
+        }
+    }
+}
+check('no malformed input produces an unbalanced block tag',
+      $unbalanced === [], implode(' | ', array_slice($unbalanced, 0, 4)));
+
+// A visitor must not be able to hang the renderer with a pathological string.
+$slow = [];
+foreach ([['[b]', 4000], ['|', 4000], ['~', 4000], ['[hide]', 500], ['[center]', 2000]] as [$tok, $rep]) {
+    $t0 = microtime(true);
+    richtextRender(str_repeat($tok, $rep), 'bbcode', $cfg, false);
+    $ms = (microtime(true) - $t0) * 1000;
+    if ($ms > 2000) $slow[] = $tok . ' x' . $rep . ' = ' . round($ms) . 'ms';
+}
+check('pathological input does not hang the renderer', $slow === [], implode(', ', $slow));
+
+/* == the limits must count what a reader actually gets ==================== */
+//
+// The old counter looked for [img] and [url] and the two Markdown shapes, so every link made another
+// way — a pasted URL, [email], [youtube], one inside a table cell — was invisible to it. "At most 10
+// links" let fifty through.
+$mixed = 'https://a.org https://b.org [email]x@y.pl[/email] [youtube]dQw4w9WgXcQ[/youtube] [url=https://c.org]c[/url]';
+$cnt = richtextCount($mixed, 'bbcode', $cfg);
+check('every link the renderer makes is counted, whatever syntax made it', $cnt['links'] === 5, json_encode($cnt));
+check('the link limit actually refuses a description that exceeds it',
+      richtextValidate(str_repeat('https://x.org ', 20), 'bbcode', $cfg) !== null);
+check('hidden content still counts against the limits',
+      richtextCount('[hide]' . str_repeat('https://x.org ', 5) . '[/hide]', 'bbcode', $cfg)['links'] === 5);
+
+/* == an excerpt must not publish what [hide] withheld ===================== */
+check('an excerpt drops hidden blocks entirely',
+      strpos(richtextExcerpt('visible [hide]SECRET-TOKEN[/hide] end'), 'SECRET-TOKEN') === false);
+check('an unbalanced hide truncates the excerpt rather than exposing it',
+      strpos(richtextExcerpt('visible [hide]SECRET-TOKEN'), 'SECRET-TOKEN') === false);
+check('an ordinary excerpt still reads normally',
+      richtextExcerpt('visible [hide]x[/hide] end') === 'visible end');
+
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

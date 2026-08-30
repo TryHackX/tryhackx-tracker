@@ -15,7 +15,7 @@ $navExtra = $navExtra ?? null;   // an optional block rendered first, inside the
 ?>
 <div class="admin-header-actions">
     <?php if (!empty($navExtra) && is_file($navExtra)) include $navExtra; ?>
-    <?php foreach (adminNavItems() as $item): ?>
+    <?php foreach (adminNavItemsFor($db, $cfg) as $item): ?>
         <?php $isHere = $item['action'] === $current; ?>
         <a href="<?= $baseUrl ?>?action=<?= $item['action'] ?>"
            class="btn btn-sm btn-outline-info<?= $isHere ? ' active' : '' ?>"
@@ -27,8 +27,12 @@ $navExtra = $navExtra ?? null;   // an optional block rendered first, inside the
     $anchor = '';
     foreach (adminNavItems() as $item) { if ($item['action'] === $current) { $anchor = $item['anchor']; break; } }
     ?>
+    <?php // Settings has no permission id, so only the owner's own session can open it — and a button
+          // that leads to a 403 is worse than no button. ?>
+    <?php if (adminPageAllowed($db, $cfg, 'settings')): ?>
     <a href="<?= $baseUrl ?>?action=settings<?= $anchor ?>"
        class="btn btn-sm btn-outline-info<?= $current === 'settings' ? ' active' : '' ?>"
        <?= $current === 'settings' ? 'aria-current="page"' : '' ?>><i class="bi bi-gear"></i> Settings</a>
+    <?php endif; ?>
     <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
 </div>
