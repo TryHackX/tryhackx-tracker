@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.20.1] — 2026-08-28
+
+### Fixed
+
+- **A block element in the middle of a paragraph now splits it.** `<p>a <div>b</div> c</p>` is invalid
+  and a browser does not render it as written — it closes the paragraph before the block and orphans
+  the tail, which appears as a gap the author never typed. The tidy-up only ever handled a block at
+  the start or the end, so any `[center]` or `[hr]` in mid-sentence produced one.
+- The eight findings from the pre-release attack on the renderer, and the guards that came with them,
+  landed here rather than in 1.20.0: `[hide]` failing open on nested or stray tags, `[hide]` missing
+  from Markdown entirely, excerpts publishing hidden text, a link limit that could not see most
+  links, and emoji rewriting URLs after they had been validated.
+
 ## [1.20.0] — 2026-08-28 (schema v24 + v25)
 
 Six defects, four of them mine, three of them silently breaking things on a live tracker.
