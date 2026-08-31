@@ -1611,6 +1611,61 @@
                         <small class="settings-hint">How many hashes the metadata worker resolves at once (whitelist + index queues). The worker re-reads this every ~60&nbsp;s &mdash; no restart needed. <strong>1&ndash;64.</strong> Each fetch is one libtorrent handle holding a small set of DHT and peer connections, so the ceiling here is file descriptors and memory, not libtorrent: at the top end expect a few hundred sockets, a few hundred MB, and outbound traffic to match. Raise it because this machine has spare capacity, not because the number is available.</small>
                     </div>
                     <div class="col-md-3">
+                        <label class="form-label">Fetch order <small class="settings-hint">(index queue)</small></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="meta_order_mode" id="meta-order-mode">
+<?php require_once __DIR__ . '/../../includes/meta_order.php'; ?>
+<?php foreach (metaOrderModeLabels() as $ov => $ol): ?>
+                            <option value="<?= $ov ?>" <?= (($cfg['meta_order_mode'] ?? 'oldest') === $ov) ? 'selected' : '' ?>><?= $ol ?></option>
+<?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint">Which pending hash the worker takes next, on the <strong>index</strong> queue only &mdash; the whitelist always keeps &ldquo;admin priority, then longest waiting&rdquo;, because those rows are there because somebody asked for them by name. On a queue of millions this setting decides what the tracker knows anything about for months: <strong>longest waiting</strong> is fair and also the reason a new release sits behind a million hashes nobody has seeded since 2019. Every mode runs on an index that already exists, so none of them costs a scan. Applied within ~60&nbsp;s, no restart.</small>
+                    </div>
+                    <div class="col-12 meta-order-mix" id="meta-order-mix">
+                        <div class="p-3 rounded border border-secondary">
+                            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                <strong class="me-auto">Mix shares</strong>
+                                <span class="settings-hint" id="meta-order-sum"></span>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="meta-order-reset">Reset to 70/15/15</button>
+                            </div>
+                            <div class="row g-3">
+<?php $mixDefaults = metaOrderDefaultMix(); $mixLabels = metaOrderShareLabels(); ?>
+                                <div class="col-md-3">
+                                    <label class="form-label"><?= $mixLabels['seeders'] ?></label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="seeders" name="meta_order_mix_seeders" value="<?= sanitize((string)($cfg['meta_order_mix_seeders'] ?? $mixDefaults['seeders'])) ?>" min="0" max="100" step="1">
+                                        <span class="input-group-text bg-dark text-light border-secondary">%</span>
+                                    </div>
+                                    <small class="settings-hint meta-order-note" data-note="seeders"></small>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label"><?= $mixLabels['newest'] ?></label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="newest" name="meta_order_mix_newest" value="<?= sanitize((string)($cfg['meta_order_mix_newest'] ?? $mixDefaults['newest'])) ?>" min="0" max="100" step="1">
+                                        <span class="input-group-text bg-dark text-light border-secondary">%</span>
+                                    </div>
+                                    <small class="settings-hint meta-order-note" data-note="newest"></small>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label"><?= $mixLabels['random'] ?></label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="random" name="meta_order_mix_random" value="<?= sanitize((string)($cfg['meta_order_mix_random'] ?? $mixDefaults['random'])) ?>" min="0" max="100" step="1">
+                                        <span class="input-group-text bg-dark text-light border-secondary">%</span>
+                                    </div>
+                                    <small class="settings-hint meta-order-note" data-note="random"></small>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label"><?= $mixLabels['oldest'] ?></label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="oldest" name="meta_order_mix_oldest" value="<?= sanitize((string)($cfg['meta_order_mix_oldest'] ?? $mixDefaults['oldest'])) ?>" min="0" max="100" step="1">
+                                        <span class="input-group-text bg-dark text-light border-secondary">%</span>
+                                    </div>
+                                    <small class="settings-hint meta-order-note" data-note="oldest"></small>
+                                </div>
+                            </div>
+                            <small class="settings-hint d-block mt-2">The shares always add up to 100: raising one takes the difference from the others in proportion. The mix repeats over <strong>100 claims</strong>, interleaved rather than blocked &mdash; so 70/15/15 is not seventy of one kind followed by fifteen of the next, and any single wave of parallel fetches is already a proportional sample. One point is therefore one fetch in a hundred: small, but never zero. The note under each field says what that works out to at the parallel-fetch setting above, which is the number that decides whether a share is worth having.</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label">Keep File Lists</label>
                         <select class="form-select bg-dark text-light border-secondary" name="index_keep_files">
                             <option value="1" <?= ($cfg['index_keep_files'] ?? '1') === '1' ? 'selected' : '' ?>>Yes</option>

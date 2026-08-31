@@ -74,7 +74,11 @@ check("traffic: it says why it is waiting", 'Reading the outbound rule' in block
 inb = re.search(r'<div class="nl-tune" id="net-tune">(.*?)id="net-egress-tune"', traf, re.S)
 # "disabled" as an ATTRIBUTE inside a tag, not the word appearing in a comment
 inb_body = re.sub(r'<!--.*?-->', '', inb.group(1), flags=re.S) if inb else ''
-inb_disabled = re.findall(r'<(?:input|button|select)[^>]*disabled[^>]*>', inb_body)
+# Written with \s rather than a word-boundary escape on purpose. The boundary escape here was
+# silently turned into a literal backspace byte by an editing tool, which made the pattern match
+# nothing and left the check passing for the wrong reason — a green test that had stopped testing.
+# \s is not an escape any tool rewrites, and inside a tag an attribute always follows whitespace.
+inb_disabled = re.findall(r'<(?:input|button|select)[^>]*\sdisabled[\s>=]', inb_body)
 check("traffic: the inbound block is untouched and enabled", inb is not None and not inb_disabled, inb_disabled)
 check("traffic: the inbound number still comes from PHP",
       re.search(r'id="net-pps-input"[^>]*value="\d+"', traf) is not None)

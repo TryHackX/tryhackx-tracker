@@ -21,3 +21,12 @@
 *.gif   binary
 *.woff  binary
 *.woff2 binary
+
+# The opentracker builds. They have no extension, so `text=auto` would be left guessing from the
+# content -- and a wrong guess here means git rewriting line endings inside an ELF executable and
+# handing out a binary that will not run.
+tools/opentracker/bin/* binary
+
+# Patches must keep LF whatever the checkout does: `patch` counts bytes, and CRLF in a hunk makes
+# every line fail to match on a Linux source tree.
+*.patch text eol=lf

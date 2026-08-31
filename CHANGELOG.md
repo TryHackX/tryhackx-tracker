@@ -4,6 +4,88 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.24.0] — 2026-09-01
+
+### Added — which hash gets fetched next
+
+**Settings → Observed-hash index → Fetch order.** The metadata worker resolves a few hashes a second
+against a queue three million rows deep, so the order of that queue decides what the tracker knows
+anything about for months. "Longest waiting first" is fair, and it is also the reason a release added
+yesterday sits behind a million hashes nobody has seeded since 2019.
+
+Five modes: longest waiting (the default, and the order it has always used), newest, most seeders,
+random, and a balanced mix of those.
+
+Every mode runs on an index that **already exists**, and that constraint chose the list. A claim
+happens on every fetch slot, several times a second, so an ordering the database would have to
+compute — by file count, by name, by how often a hash has been seen — means a filesort over three
+million rows at that rate. Those orderings are absent on purpose.
+
+`ORDER BY RAND()` is the same trap, and is not what **random** does. Info hashes are SHA-1 digests
+and therefore uniform across the key space, so a random 20-byte point plus "the first pending row at
+or after it" is an index seek — and uniform for exactly the reason the digests are.
+
+The **mix** repeats over 100 claims, **interleaved rather than blocked**. That is the part worth
+explaining: the worker claims in waves the size of its parallel-fetch setting, so seventy of one kind
+followed by fifteen of the next would make each wave a single kind, with the balance appearing only
+over hours. Interleaved, one wave is already a proportional sample. One percentage point is one claim
+in a hundred — small, but never zero — and under each field the panel says what that works out to at
+the parallel-fetch setting above ("≈ 5 of every 32 fetches"), flagging a share too thin to make one
+per wave. The shares always total 100: raise one and the others give up the difference in proportion.
+
+The whitelist queue is never reordered. Those rows are there because a person asked for them by name.
+
+The worker re-reads all of it about once a minute, and reports what it is **doing** in its heartbeat
+— so a worker started from an older `worker.py`, which would ignore the setting entirely, produces a
+warning instead of a panel that reads the operator's own choice back to them.
+
+### Added — the tracker binaries, the patches, and how they were built
+
+`tools/opentracker/bin/` now carries the two opentracker builds this panel is developed against, and
+`tools/opentracker/README.md` carries everything needed to distrust them: the upstream commit
+(`1c7fac4`, 2026-05-26), the exact feature flags, what each one is for, what was deliberately left
+out, the two patches as unified diffs, and the build recipe.
+
+Two binaries because white or black is a **compile-time** choice in opentracker — mutually exclusive
+`#ifdef`s, no runtime switch — which is why changing mode moves a symlink and restarts the service.
+
+The recipe was verified rather than written from memory: both patches were applied to a pristine
+checkout of that commit and the result compared against the tree that produced the shipped binaries.
+`opentracker.c`, `trackerlogic.c` and `trackerlogic.h` came out byte-identical, and the tree built.
+
+INSTALL.md's build step is corrected accordingly — it was missing `-DWANT_RESTRICT_STATS`, without
+which `/stats` serves the entire torrent list to anyone who guesses the path.
+
+### Fixed — a yes/no question that cost 5.5 seconds of CPU, on every poll
+
+`status` in the netlimit helper asked whether the egress table existed by **dumping it**. That table
+holds a dynamic set of up to 262 144 client addresses, and `nft list table` serialises every one of
+them: measured on production with the set full, **5 547 ms of one core** — on every poll of the
+Traffic page. Listing the table *names* answers the same question in 26 ms.
+
+The test asserts the absence of the dump, not the presence of the answer, so a future edit that
+"just asks nft for the table" fails in the suite rather than on the live machine.
+
+### Changed — the index page's chunked-transfer error says what it means
+
+"cURL error: chunk hex-length char not a hex digit: 0x55" reads like a broken panel and is not one.
+The full scrape is tens of megabytes of gzip sent with `Transfer-Encoding: chunked`; when a busy
+tracker gets out of step with its own framing mid-transfer, the client lands in the middle of the
+body and reads a data byte where a length should be. Nothing is imported and nothing is corrupt.
+The message now says so — including why retrying immediately is worse than waiting for the next poll
+(opentracker rate-limits full scrapes to one per client per five minutes and answers the rest with
+HTTP 402).
+
+### Cleaned up
+
+- The operator's real server address is out of the test suite; the checks that needed a public IP use
+  the documentation range instead.
+- The binaries are excluded from the deploy: they belong in the package, not in a web root.
+- `.gitattributes` marks them binary and pins patches to LF — a checkout that "helpfully" rewrote
+  line endings would hand out an executable that does not run and patches that do not apply.
+- Every tag before this one was removed at the maintainer's request; the history itself is untouched
+  and each release is still described here.
+
 ## [1.23.0] — 2026-08-31
 
 ### Fixed — the chart dropped to hourly a month before it had to

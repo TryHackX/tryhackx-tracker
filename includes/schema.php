@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 29;  // 29 = settings only (the stability probe, off by default) —
+const TRACKER_SCHEMA_VERSION = 30;  // 30 = settings only (metadata fetch order + mix shares)
+// 29 = settings only (the stability probe, off by default) —
                                     // and settings-only STILL needs the number to move, because the
                                     // default rows are inserted by the migration block.
                                     // 28 = the audit log: who did what in the panel. It had none,
@@ -922,6 +923,18 @@ function trackerSchemaDefaultSettings(): array {
         // schema v8: metadata worker parallel fetches (empty = keep the worker's own config file
         // value; 1-16 overrides it live — the worker re-reads this setting every ~60 s)
         'meta_worker_concurrency'     => '',
+        // schema v30: which pending hash the metadata worker takes next. The index queue is
+        // millions of rows deep, so this decides what the tracker knows anything about for months.
+        // 'oldest' is the order it has always used, and stays the default: an upgrade must not
+        // silently reorder a running queue.
+        //   oldest | newest | seeders | random | mix
+        'meta_order_mode'             => 'oldest',
+        // The mix, in percent, always summing to 100 (the panel keeps them there and the worker
+        // re-normalises whatever it finds). Only consulted when the mode is 'mix'.
+        'meta_order_mix_oldest'       => '0',
+        'meta_order_mix_newest'       => '15',
+        'meta_order_mix_seeders'      => '70',
+        'meta_order_mix_random'       => '15',
         // sender address for outgoing mail (empty = use site_email); domain-validated on save
         'mail_from_email'             => '',
         // schema v9: registration requires an email + only verified accounts get their groups

@@ -42,7 +42,7 @@ check('an empty command is allowed — that is how the feature stays off', lives
 foreach (['10.9.0.1', '172.16.4.2', '192.168.1.5', '100.71.3.9', '127.0.0.1'] as $ip) {
     check('a private address is accepted as a tunnel address: ' . $ip, livesyncPrivateV4($ip));
 }
-foreach (['135.125.236.64', '8.8.8.8', '1.1.1.1', '172.32.0.1', '100.128.0.1'] as $ip) {
+foreach (['203.0.113.10', '8.8.8.8', '1.1.1.1', '172.32.0.1', '100.128.0.1'] as $ip) {
     check('a public address is NOT a tunnel address: ' . $ip, !livesyncPrivateV4($ip));
 }
 check('an IPv6 address is not accepted here (the helper is IPv4-only and says so)',
@@ -57,7 +57,7 @@ $p = livesyncValidate($base + ['livesync_bind_ip' => '', 'livesync_peer_ip' => '
 check('empty addresses are refused, and the message says what the field is for',
       count($p) >= 2 && str_contains($p[0], 'THIS machine'), implode(' | ', $p));
 
-$p = livesyncValidate($base + ['livesync_bind_ip' => '135.125.236.64', 'livesync_peer_ip' => '10.9.0.2']);
+$p = livesyncValidate($base + ['livesync_bind_ip' => '203.0.113.10', 'livesync_peer_ip' => '10.9.0.2']);
 check('a PUBLIC bind address is refused, and the reason is the missing authentication',
       count($p) === 1 && str_contains($p[0], 'no authentication'), implode(' | ', $p));
 
@@ -162,7 +162,7 @@ if ($bash === null) {
     @mkdir($tmp, 0700, true);
     file_put_contents($tmp . '/ip', "#!/bin/sh\n"
         . "case \"$*\" in\n"
-        . "  *'-o -4 addr show'*) printf '2: wg0    inet 10.9.0.1/24 scope global wg0\\n3: eth0    inet 135.125.236.64/24 scope global eth0\\n' ;;\n"
+        . "  *'-o -4 addr show'*) printf '2: wg0    inet 10.9.0.1/24 scope global wg0\\n3: eth0    inet 203.0.113.10/24 scope global eth0\\n' ;;\n"
         . "  *'link show type wireguard'*) printf '2: wg0: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420\\n' ;;\n"
         . "  *'link show wg0'*) printf '2: wg0: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420\\n' ;;\n"
         . "  *'link show eth0'*) printf '3: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\\n' ;;\n"
@@ -188,7 +188,7 @@ if ($bash === null) {
         return [json_decode(trim(implode('', $o)), true), trim(implode('', $o))];
     };
 
-    [$j, $raw] = $run('plan 135.125.236.64 9696 10.9.0.2');
+    [$j, $raw] = $run('plan 203.0.113.10 9696 10.9.0.2');
     check('helper: a public bind address is refused, naming the reason',
           is_array($j) && empty($j['ok']) && str_contains((string)$j['error'], 'no authentication'), $raw);
 

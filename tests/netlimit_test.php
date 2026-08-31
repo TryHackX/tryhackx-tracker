@@ -239,7 +239,8 @@ case "$1" in
                 if [ "$4" = "ottrack" ]; then [ -f "$S/t_out" ] || exit 1
                   printf '\t\tlimit rate over %s/second counter name capped drop\n' "$(cat "$S/epps" 2>/dev/null || echo 50000)"; exit 0; fi
                 exit 1 ;;
-        table)  case "$4" in ottrack_in) [ -f "$S/t_in" ] && exit 0 || exit 1 ;;
+        table)  touch "$S/dumped_$4"
+                case "$4" in ottrack_in) [ -f "$S/t_in" ] && exit 0 || exit 1 ;;
                              ottrack) [ -f "$S/t_out" ] && exit 0 || exit 1 ;;
                              filter) [ -f "$S/manual" ] && exit 0 || exit 1 ;; esac; exit 1 ;;
       esac; exit 1 ;;
@@ -349,6 +350,18 @@ STUB);
     check('helper: --brief keeps the counters', (int)($b['counters']['in_total']['packets'] ?? -1) === 1000);
     check('helper: --brief keeps the egress budget', (int)($b['egress']['pps'] ?? 0) === 50000);
     check('helper: --brief skips the expensive scan', ($b['brief'] ?? null) === true && !array_key_exists('manual_rules', $b), json_encode(array_keys($b ?: [])));
+
+    // …and it must not dump a table to find out whether that table exists. `nft list table` prints
+    // every element of every set in it, and the egress budget holds a dynamic set of up to 262 144
+    // client addresses: measured on production with the set full, the existence check alone cost
+    // 5.5 s of one core, on every poll. The name list costs 26 ms. The stub records any dump, so a
+    // future edit that "just asks nft for the table" fails here rather than on the live machine.
+    @unlink($tmp . '/state/dumped_ottrack');
+    @unlink($tmp . '/state/dumped_ottrack_in');
+    $run('status');
+    check('helper: status does not dump the egress table to test that it exists',
+          !is_file($tmp . '/state/dumped_ottrack'));
+    check('helper: nor the inbound one', !is_file($tmp . '/state/dumped_ottrack_in'));
 
     // ── counting-only mode ──
     // The counters live in the firewall, so "measure first, then pick a threshold" needs a table

@@ -109,7 +109,20 @@ read_rule_handle() {  # read_rule_handle <table> <chain>
     "$NFT" -a list chain inet "$1" "$2" 2>/dev/null | awk '
         /limit rate over/ { for (i = 1; i < NF; i++) if ($i == "handle") { print $(i+1); exit } }'
 }
-table_exists() { have_nft && "$NFT" list table inet "$1" >/dev/null 2>&1; }
+# Does a table exist? Asked by listing table NAMES, never by dumping the table.
+#
+# `nft list table inet ottrack` serialises every element of every set in it, and the egress budget
+# keeps a dynamic set of up to 262 144 client addresses with a 3 h timeout. Measured on production
+# with that set full: the existence test alone cost **5.5 s of one core** — and `status` runs it on
+# every poll of the Traffic page, so a core sat at 100 % answering a yes/no question. Listing the
+# names costs 26 ms and answers the same question exactly.
+#
+# The match is anchored (`grep -qx`) because `ottrack` is a prefix of `ottrack_in`: a substring match
+# would report the egress table as loaded whenever the inbound one was.
+table_exists() {
+    have_nft || return 1
+    "$NFT" list tables 2>/dev/null | grep -qx "table inet $1"
+}
 
 # The values we last wrote, read back from the "# tracker-netlimit:" header of the generated file.
 # nft omits `burst N packets` from its own output when the burst is its default (5), so the live

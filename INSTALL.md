@@ -130,28 +130,60 @@ limit to 0 in Settings), and each CAPTCHA provider needs its own host listed.
 
 ## 4. opentracker
 
-The panel does not include a tracker; it drives one. opentracker is built from source and its
-**accesslist mode is chosen at compile time**, which is the single most surprising thing about it.
+The panel does not include a tracker; it drives one — and the package ships the two builds it is
+developed against, so this step can be four commands or a full build from source. Either way,
+**opentracker's accesslist mode is chosen at compile time**, which is the single most surprising
+thing about it, and the reason there are two binaries.
 
 ```bash
 sudo useradd -r -m -d /home/tracker -s /usr/sbin/nologin tracker
-cd /usr/local/src
-sudo git clone git://erdgeist.org/libowfat
-sudo git clone git://erdgeist.org/opentracker
-cd libowfat && sudo make
+sudo mkdir -p /home/tracker/accesslist && sudo chown tracker:www-data /home/tracker/accesslist
+sudo chmod 2770 /home/tracker/accesslist
 ```
 
-Build **both** variants — one that serves everything except a blacklist, one that serves only a
-whitelist:
+### Either: use the builds in this package
 
 ```bash
-cd /usr/local/src/opentracker
-sudo make clean && sudo make FEATURES="-DWANT_ACCESSLIST_BLACK -DWANT_COMPRESSION_GZIP -DWANT_FULLSCRAPE -DWANT_IP_FROM_QUERY_STRING"
-sudo cp opentracker /home/tracker/opentracker.black
-
-sudo make clean && sudo make FEATURES="-DWANT_ACCESSLIST_WHITE -DWANT_COMPRESSION_GZIP -DWANT_FULLSCRAPE -DWANT_IP_FROM_QUERY_STRING"
-sudo cp opentracker /home/tracker/opentracker.white
+cd /var/www/tracker.example.org/tools/opentracker/bin   # or wherever you unpacked the release
+sha256sum -c <<'SUMS'
+399230797752f6d1e217a0b43d1d8ce3ea4451291664de6e79a2912fbd4259ac  opentracker.white
+4c6dc5f693ac9b083d751f5b563c4f83c722a278df70236f4e3a99f00dcf9baa  opentracker.black
+SUMS
+sudo install -o tracker -g tracker -m 0755 opentracker.white /home/tracker/opentracker.white
+sudo install -o tracker -g tracker -m 0755 opentracker.black /home/tracker/opentracker.black
 ```
+
+Debian 13 / x86-64, dynamically linked against `libz` and `libc` only.
+
+### Or: build them yourself
+
+The full recipe — upstream commit, the two patches, the feature flags and what each one is for —
+is in **[tools/opentracker/README.md](tools/opentracker/README.md)**. In short:
+
+```bash
+cd /usr/local/src
+sudo git clone git://git.fefe.de/libowfat && sudo make -C libowfat
+sudo git clone git://erdgeist.org/opentracker && cd opentracker
+sudo git checkout 1c7fac4cc23801ac81a2abd7d3110683831c4811
+
+P=/var/www/tracker.example.org/tools/opentracker
+sudo patch -p1 --forward < $P/sighup-udp-workers.patch     # else `systemctl reload` KILLS the tracker
+sudo patch -p1 --forward < $P/udp-reject-interval.patch    # else rejected clients retry for ever
+
+F="-DWANT_FULLSCRAPE -DWANT_COMPRESSION_GZIP -DWANT_RESTRICT_STATS -DWANT_MODEST_FULLSCRAPES"
+O=/usr/local/src/libowfat
+sudo make clean && sudo make FEATURES="$F -DWANT_ACCESSLIST_BLACK" LIBOWFAT_HEADERS=$O LIBOWFAT_LIBRARY=$O
+sudo install -o tracker -g tracker -m 0755 opentracker /home/tracker/opentracker.black
+sudo make clean && sudo make FEATURES="$F -DWANT_ACCESSLIST_WHITE" LIBOWFAT_HEADERS=$O LIBOWFAT_LIBRARY=$O
+sudo install -o tracker -g tracker -m 0755 opentracker /home/tracker/opentracker.white
+```
+
+⚠ `make clean` between the two is **not** optional: the object files carry the accesslist flag, and
+without it the second build silently keeps the first one's mode.
+
+⚠ Do not drop `-DWANT_RESTRICT_STATS`. Without it `/stats` — the whole torrent list, with counts —
+is served to anyone who asks, on a path they can guess. With it, `access.stats` limits it to named
+addresses and `access.stats_path` moves it somewhere unguessable. Both are used below.
 
 ⚠ **`-h` and `/stats` lie about what is compiled in.** opentracker prints one fixed usage text
 regardless of its build flags, and `/stats` shows a `<livesync>` section on a binary with no livesync
@@ -166,11 +198,18 @@ listen.udp.workers 4
 access.whitelist /home/tracker/accesslist/whitelist
 access.stats <your-ip>
 access.stats_path pick-something-unguessable
-tracker.redirect_url https://tracker.example.org/
+tracker.redirect_url https://tracker.example.org/?action=whitelist
+access.udp_reject_interval 86400
 
 # /home/tracker/opentracker.conf.black   — identical but:
 access.blacklist /home/tracker/accesslist/blacklist
 ```
+
+`access.udp_reject_interval` comes from the second patch and is the single biggest traffic saving on
+this machine: a UDP announce for a hash the accesslist rejects gets a well-formed "0 peers, come back
+in 86 400 s" reply instead of the 8-byte packet clients treat as a broken tracker and retry for ever.
+Leave it out and a whitelist tracker that inherited an open swarm spends most of its inbound
+bandwidth on clients asking again.
 
 Symlinks pick which pair is live, and the systemd unit never changes:
 

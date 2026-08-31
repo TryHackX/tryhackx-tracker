@@ -142,7 +142,11 @@
      */
     function syncRows(sec) {
         sec.rows.forEach(row => {
-            const anyVisible = [...row.children].some(c => !c.classList.contains('d-hidden'));
+            // `display:none` counts as hidden too: a cell a *feature* hid (the fetch-order mix,
+            // shown only in mix mode) is as invisible as one the search hid, and a row left
+            // standing for it keeps Bootstrap's negative gutter with no padding to balance it.
+            const anyVisible = [...row.children].some(c =>
+                !c.classList.contains('d-hidden') && c.style.display !== 'none');
             row.classList.toggle('d-hidden', !anyVisible);
         });
     }
@@ -340,4 +344,108 @@
     }
     window.addEventListener('hashchange', openHash);
     openHash();
+})();
+
+/* ── the metadata fetch-order mix ────────────────────────────────────────────
+ *
+ * Four shares that must add up to 100. The rule that makes this usable rather than a puzzle: you
+ * edit ONE number and the others absorb the difference in proportion to what they already had, so
+ * the total is never wrong and you are never asked to do arithmetic to make a change stick.
+ *
+ * The note under each field is the point of the whole control. A share is not meaningful in the
+ * abstract -- it is meaningful relative to how many hashes the worker fetches at once. At 32
+ * parallel fetches a 15 % share is roughly five of every wave; at 4 it is one wave in two. Rather
+ * than forbid a small number, the panel says what it will actually do, and calls out the case where
+ * it rounds to "less than one per wave" -- which is the shape of the "1 % means never" trap.
+ */
+(function () {
+    const mode = document.getElementById('meta-order-mode');
+    const wrap = document.getElementById('meta-order-mix');
+    if (!mode || !wrap) return;
+    const fields = Array.from(document.querySelectorAll('.meta-order-share'));
+    const notes = Array.from(document.querySelectorAll('.meta-order-note'));
+    const sumEl = document.getElementById('meta-order-sum');
+    const conc = document.querySelector('input[name="meta_worker_concurrency"]');
+    const DEFAULTS = { seeders: 70, newest: 15, random: 15, oldest: 0 };
+
+    const val = f => Math.max(0, Math.min(100, parseInt(f.value, 10) || 0));
+    const showMix = () => { wrap.style.display = mode.value === 'mix' ? '' : 'none'; };
+
+    /** How many parallel fetches the worker will really run: the panel override, else its own
+     *  config, which the panel does not know. 8 is the placeholder shown in that field. */
+    function concurrency() {
+        const raw = conc ? parseInt(conc.value, 10) : NaN;
+        return raw > 0 ? Math.min(64, raw) : 8;
+    }
+
+    function paint() {
+        const c = concurrency();
+        let total = 0;
+        fields.forEach(f => { total += val(f); });
+        if (sumEl) {
+            sumEl.textContent = total === 100 ? 'adds up to 100%' : 'adds up to ' + total + '% — will be corrected on save';
+            sumEl.classList.toggle('text-warning', total !== 100);
+        }
+        notes.forEach(n => {
+            const f = fields.find(x => x.dataset.share === n.dataset.note);
+            if (!f) return;
+            const p = val(f);
+            if (p === 0) { n.textContent = 'off'; n.classList.remove('text-warning'); return; }
+            const perWave = (p * c) / 100;
+            if (perWave >= 1) {
+                n.textContent = '≈ ' + (perWave >= 10 ? Math.round(perWave) : perWave.toFixed(1)) +
+                    ' of every ' + c + ' fetches';
+                n.classList.remove('text-warning');
+            } else {
+                // Not forbidden — but this is the case worth naming out loud.
+                n.textContent = 'one every ' + Math.round(1 / perWave) + ' waves — thin at ' + c + ' parallel fetches';
+                n.classList.add('text-warning');
+            }
+        });
+    }
+
+    /** Keep the total at 100 by moving the difference into the OTHER shares, proportionally.
+     *  When the others are all zero there is nothing to take from, so the remainder goes to the
+     *  first of them — otherwise a single field could never be lowered. */
+    function rebalance(changed) {
+        const others = fields.filter(f => f !== changed);
+        let want = val(changed);
+        const pool = 100 - want;
+        let have = 0;
+        others.forEach(f => { have += val(f); });
+        if (have <= 0) {
+            others.forEach((f, i) => { f.value = i === 0 ? pool : 0; });
+        } else {
+            let given = 0;
+            others.forEach((f, i) => {
+                const share = i === others.length - 1 ? pool - given : Math.round(val(f) * pool / have);
+                f.value = Math.max(0, share);
+                given += Math.max(0, share);
+            });
+        }
+        changed.value = want;
+        paint();
+    }
+
+    fields.forEach(f => {
+        f.addEventListener('change', () => rebalance(f));
+        // Clamped on the way in, not only on change: a number left at 150 inside a container the
+        // mode has since hidden fails HTML validation on a field the operator cannot see, and the
+        // browser then refuses to submit the form without saying where.
+        f.addEventListener('input', () => {
+            const v = parseInt(f.value, 10);
+            if (v > 100) f.value = 100;
+            if (v < 0) f.value = 0;
+            paint();
+        });
+    });
+    if (conc) conc.addEventListener('input', paint);
+    mode.addEventListener('change', showMix);
+    const reset = document.getElementById('meta-order-reset');
+    if (reset) reset.addEventListener('click', () => {
+        fields.forEach(f => { f.value = DEFAULTS[f.dataset.share] ?? 0; });
+        paint();
+    });
+    showMix();
+    paint();
 })();

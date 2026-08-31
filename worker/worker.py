@@ -17,7 +17,85 @@ import configparser, json, logging, os, secrets, signal, sys, time
 # The parallel-fetch ceiling, in ONE place. It used to be written as a literal in two of them, which
 # is how a build enforcing 16 and a panel offering 64 ended up in the same install.
 CONCURRENCY_MAX = 64
-WORKER_VERSION = 3
+WORKER_VERSION = 4
+
+# ── which pending hash goes next ─────────────────────────────────────────────
+#
+# The index queue is ~2.9 million rows deep and resolves at a few per second, so the ORDER of the
+# queue is not a detail: it decides which torrents this tracker knows anything about for the next
+# several months. "Oldest first" is fair, and it is also the reason a brand-new release sits behind
+# a million hashes nobody has seeded since 2019.
+#
+# Each selector below is one ORDER BY that an EXISTING index can serve. That constraint is the whole
+# design: a claim runs on every fetch slot, so a sort the database has to compute (seen_count, files,
+# name) would mean a filesort over three million rows several times a second. The ones offered here
+# are the ones that are free:
+#
+#   oldest   meta_priority DESC, meta_requested_at ASC   idx_index_meta       (the historical order)
+#   newest   meta_priority DESC, meta_requested_at DESC  idx_index_meta       (same index, backwards)
+#   seeders  meta_priority DESC, last_seeders  DESC      idx_index_meta_seed
+#   random   info_hash >= <random>, ORDER BY info_hash   PRIMARY KEY
+#
+# `random` deserves a note: `ORDER BY RAND()` reads and sorts the whole table, which is exactly what
+# must not happen here. Info hashes are SHA-1 digests, so they are uniformly spread across the key
+# space — picking a random 20-byte point and taking the first pending row at or after it is an index
+# seek, and it is uniform for the same reason the digests are.
+ORDER_SELECTORS = ("oldest", "newest", "seeders", "random")
+ORDER_MODES = ORDER_SELECTORS + ("mix",)
+# The mix repeats over this many claims, so one percentage point is one claim in a hundred — a share
+# can be small, but it can never round down to "never".
+ORDER_ROTATION = 100
+ORDER_MIX_DEFAULT = {"oldest": 0, "newest": 15, "seeders": 70, "random": 15}
+
+
+def order_rotation(shares, length=ORDER_ROTATION):
+    """Spread `shares` over `length` claims, interleaved rather than blocked.
+
+    70/15/15 laid out as seventy seeders, then fifteen newest, then fifteen random would be correct
+    on average and wrong in practice: the worker claims in waves the size of its parallel-fetch
+    setting, so a blocked plan makes each wave a single kind and the "balance" only appears over
+    hours. Each slot therefore goes to whichever selector is furthest behind its entitlement at that
+    point — the same rule proportional seat allocation uses, and it puts the two 15 % selectors at
+    even intervals through the 70 % one.
+
+    Ties go to the earliest selector in ORDER_SELECTORS, so the plan is deterministic: two workers
+    reading the same settings build the same rotation.
+    """
+    live = [n for n in ORDER_SELECTORS if int(shares.get(n, 0) or 0) > 0]
+    if not live:
+        return ["oldest"] * length
+    total = sum(int(shares[n]) for n in live)
+    assigned = dict.fromkeys(live, 0)
+    plan = []
+    for i in range(1, length + 1):
+        pick = max(live, key=lambda n: (int(shares[n]) * i / total - assigned[n], -ORDER_SELECTORS.index(n)))
+        assigned[pick] += 1
+        plan.append(pick)
+    return plan
+
+
+def order_normalise(mode, shares):
+    """Whatever is in the settings table -> (mode, shares) this worker can act on.
+
+    The panel keeps the shares adding up to 100 and refuses a share too small to mean anything; this
+    is the second line, for a value edited straight in the database or left behind by an older
+    release. An unknown mode is the DEFAULT one, not a crash and not "no ordering at all": a worker
+    that stops claiming because a string was misspelt is worse than one that falls back to the order
+    it has always used.
+    """
+    mode = (mode or "").strip().lower()
+    if mode not in ORDER_MODES:
+        mode = "oldest"
+    clean = {}
+    for n in ORDER_SELECTORS:
+        try:
+            v = int(shares.get(n, 0) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        clean[n] = max(0, min(100, v))
+    if mode == "mix" and sum(clean.values()) <= 0:
+        clean = dict(ORDER_MIX_DEFAULT)
+    return mode, clean
 
 try:
     import libtorrent as lt
@@ -105,6 +183,11 @@ class Worker:
         self.active = {}  # claim token -> dict(row, handle, deadline)
         self._conc_override = None   # live override from the settings table (panel), None = use config
         self._conc_checked_at = 0.0
+        self._order_mode = "oldest"  # live from the settings table, same 60 s refresh
+        self._order_shares = dict(ORDER_MIX_DEFAULT)
+        self._order_plan = ["oldest"] * ORDER_ROTATION
+        self._order_checked_at = 0.0
+        self._order_seq = 0          # which slot of the rotation the next claim takes
         self.running = True
         os.makedirs(cfg.tmp_dir, exist_ok=True)
         os.makedirs(os.path.dirname(cfg.heartbeat), exist_ok=True)
@@ -129,8 +212,12 @@ class Worker:
              "select": "id, info_hash, magnet_link", "gate": ""},
         ]
         if cfg.index_table:
+            # Only the index queue is orderable. The whitelist keeps "admin priority, then longest
+            # waiting" whatever the setting says: those rows are there because a person asked for
+            # them by name, and a share-based rotation would answer a direct request with a dice roll.
             self.queues.append({"table": cfg.index_table, "files": cfg.index_files_table, "key_col": "info_hash",
-                                "files_fk": "info_hash", "select": "info_hash", "gate": " AND meta_requested_at <= NOW()"})
+                                "files_fk": "info_hash", "select": "info_hash", "gate": " AND meta_requested_at <= NOW()",
+                                "orderable": True})
         log.info("session started (libtorrent %s), listen %s, concurrency %d, timeout %ds, queues %s",
                  lt.__version__, cfg.listen_port, cfg.concurrency, cfg.timeout, ",".join(q["table"] for q in self.queues))
 
@@ -177,6 +264,69 @@ class Worker:
         return self._conc_override or self.cfg.concurrency
 
     # ── queue ──────────────────────────────────────────────────────────────
+    def effective_order(self):
+        """(mode, shares, plan) from the settings table, re-read at most every 60 s.
+
+        Read the same way as the parallel-fetch override and for the same reason: an operator who
+        changes the order in the panel expects the next fetch to obey it, not the next restart.
+        A settings table that cannot be read leaves the last known value in place -- a database blip
+        is not an instruction to reorder a three-million-row queue.
+        """
+        now = time.time()
+        if now - self._order_checked_at >= 60:
+            self._order_checked_at = now
+            try:
+                rows = self.db.query(
+                    "SELECT `key`, `value` FROM settings WHERE `key` IN "
+                    "('meta_order_mode','meta_order_mix_oldest','meta_order_mix_newest',"
+                    "'meta_order_mix_seeders','meta_order_mix_random')", fetch=True)
+                got = {str(r["key"]): str(r["value"] or "") for r in (rows or [])}
+                mode, shares = order_normalise(
+                    got.get("meta_order_mode", ""),
+                    {n: got.get("meta_order_mix_" + n, "") for n in ORDER_SELECTORS})
+                if mode != self._order_mode or shares != self._order_shares:
+                    log.info("fetch order: %s%s", mode,
+                             "" if mode != "mix" else " (" + ", ".join(
+                                 "%s %d%%" % (n, shares[n]) for n in ORDER_SELECTORS if shares[n]) + ")")
+                    self._order_mode, self._order_shares = mode, shares
+                    self._order_plan = (order_rotation(shares) if mode == "mix"
+                                        else [mode] * ORDER_ROTATION)
+                    self._order_seq = 0
+            except Exception as e:
+                log.warning("effective_order: %s", e)
+        return self._order_mode, self._order_shares, self._order_plan
+
+    def next_selector(self):
+        """The selector for the claim about to happen, advancing the rotation by one slot."""
+        _mode, _shares, plan = self.effective_order()
+        sel = plan[self._order_seq % len(plan)]
+        self._order_seq += 1
+        return sel
+
+    def claim_query(self, q, selector):
+        """(sql, params) that picks ONE candidate row for this queue under this selector.
+
+        Every branch stays on an index that already exists -- see the table at the top of this file.
+        """
+        if not q.get("orderable") or selector == "oldest":
+            return ("SELECT %s FROM %s WHERE meta_status='pending'%s "
+                    "ORDER BY meta_priority DESC, meta_requested_at ASC LIMIT 1"
+                    % (q["select"], q["table"], q["gate"]), ())
+        if selector == "newest":
+            return ("SELECT %s FROM %s WHERE meta_status='pending'%s "
+                    "ORDER BY meta_priority DESC, meta_requested_at DESC LIMIT 1"
+                    % (q["select"], q["table"], q["gate"]), ())
+        if selector == "seeders":
+            return ("SELECT %s FROM %s WHERE meta_status='pending'%s "
+                    "ORDER BY meta_priority DESC, last_seeders DESC LIMIT 1"
+                    % (q["select"], q["table"], q["gate"]), ())
+        # random: a uniform point in the key space, then the first pending row at or after it.
+        # When the point lands past the last pending row the caller wraps to the start of the
+        # queue; without that wrap the tail of the key space would simply never be claimed.
+        return ("SELECT %s FROM %s WHERE meta_status='pending'%s AND info_hash >= %%s "
+                "ORDER BY info_hash LIMIT 1" % (q["select"], q["table"], q["gate"]),
+                (secrets.token_hex(20),))
+
     def heartbeat(self):
         """Touch the file the panel watches -- and write what this worker is actually doing.
 
@@ -196,6 +346,10 @@ class Worker:
                 "concurrency_config": self.cfg.concurrency,
                 "concurrency_max": CONCURRENCY_MAX,
                 "active": len(self.active),
+                # Reported for the same reason the effective concurrency is: the panel must be able
+                # to show what the worker is DOING, not read a setting back to the operator.
+                "order": self._order_mode,
+                "order_shares": dict(self._order_shares),
             }
             tmp = self.cfg.heartbeat + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
@@ -220,12 +374,18 @@ class Worker:
         # queue), then the UPDATE claims exactly that row by primary key with a status recheck; if
         # another actor won the race, retry with the next candidate.
         for q in self.queues:
+            selector = self.next_selector() if q.get("orderable") else "oldest"
             for _attempt in range(3):
                 token = secrets.token_hex(8)
                 try:
-                    rows = self.db.query(
-                        "SELECT %s FROM %s WHERE meta_status='pending'%s ORDER BY meta_priority DESC, meta_requested_at ASC LIMIT 1" % (q["select"], q["table"], q["gate"]),
-                        fetch=True)
+                    sql, params = self.claim_query(q, selector)
+                    # `or None`: pymysql runs `sql % args` for anything that is not None, so an
+                    # empty tuple would make a literal % in a future ORDER BY a runtime error.
+                    rows = self.db.query(sql, params or None, fetch=True)
+                    if not rows and selector == "random":
+                        # the random point landed past the last pending hash -- wrap to the start
+                        sql, params = self.claim_query(q, "oldest")
+                        rows = self.db.query(sql, params or None, fetch=True)
                     if not rows:
                         break                      # queue empty — fall through to the next queue
                     row = rows[0]

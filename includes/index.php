@@ -166,11 +166,31 @@ function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array 
     $ok = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err = curl_error($ch);
+    $errno = curl_errno($ch);
     curl_close($ch);
     fclose($fh);
     $out['ms'] = (int)round((microtime(true) - $t0) * 1000);
     if ($tooBig) { @unlink($tmp); $out['error'] = 'Full scrape exceeds ' . IDX_FETCH_MAX_BYTES . ' bytes'; return $out; }
-    if ($ok === false) { @unlink($tmp); $out['error'] = 'cURL error: ' . $err; return $out; }
+    if ($ok === false) {
+        @unlink($tmp);
+        // "chunk hex-length char not a hex digit" reads like a broken panel and is not one. The full
+        // scrape is tens of megabytes of gzip that opentracker sends with Transfer-Encoding: chunked,
+        // announcing each chunk's length before writing it; if the tracker gets out of step with its
+        // own framing mid-transfer — which is what a busy tracker rewriting its torrent list while
+        // serving a 30 MB snapshot can do — the client lands mid-body and reads a data byte where a
+        // length should be. Nothing was written, and the source is not corrupt.
+        //
+        // An immediate retry is worse than useless here: opentracker rate-limits FULL scrapes and
+        // answers the next one with 402 (see below), so it would spend the allowance and report a
+        // second, different-looking failure. The next poll gets a clean snapshot.
+        $out['error'] = ($errno === 56 && stripos($err, 'chunk') !== false)
+            ? 'The tracker’s reply lost its chunked framing part-way through (' . $err . '). '
+            . 'That is the tracker mis-framing a multi-megabyte full scrape while it is busy, not a '
+            . 'problem with this panel or with the data — nothing was imported. The next poll picks '
+            . 'it up; retrying now would only spend the full-scrape allowance and get an HTTP 402.'
+            : 'cURL error: ' . $err;
+        return $out;
+    }
     if ($code !== 200) {
         @unlink($tmp);
         // 402 is not a payment and not our firewall: it is opentracker's own refusal of a FULL

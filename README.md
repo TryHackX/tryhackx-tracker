@@ -119,6 +119,31 @@ Provides a public-facing website for tracker information, abuse report submissio
 
 ---
 
+## The tracker itself
+
+This is an admin panel for [opentracker](https://erdgeist.org/arts/software/opentracker/), and the
+package ships the two builds it is developed against — `tools/opentracker/bin/opentracker.white` and
+`opentracker.black` — together with the two patches applied to them, the exact commit and feature
+flags they were built from, and the recipe to rebuild them yourself.
+
+**Two binaries, because white or black is a compile-time choice in opentracker**, not a runtime one:
+`WANT_ACCESSLIST_WHITE` and `WANT_ACCESSLIST_BLACK` are mutually exclusive `#ifdef`s. Switching modes
+means switching which binary a symlink points at, which is exactly what the panel's mode switch does.
+
+The patches are small and both fix something that bites in production: one stops `systemctl reload`
+from **killing** the tracker (the UDP worker threads inherit an unblocked SIGHUP and die on it), and
+one adds `access.udp_reject_interval`, which answers a rejected UDP announce with a real "no peers,
+come back in N seconds" reply instead of the 8-byte packet clients read as a broken tracker and
+retry for ever. On a whitelist tracker that inherited an open swarm, the second one removes more
+traffic than everything else in this panel put together.
+
+Built and tested on **Debian 13 (trixie)**, x86-64, gcc 14.2.0. Details, checksums, feature flags,
+the build recipe and the install steps: **[tools/opentracker/README.md](tools/opentracker/README.md)**.
+
+> ⚠ opentracker's `-h` **and** its `/stats` page report features it was not built with — one fixed
+> usage string, printed whatever the flags were. Probe a binary by running it, never by reading its
+> help. The panel does this for you.
+
 ## Installation
 
 > **Setting up a Linux server from scratch?** [INSTALL.md](INSTALL.md) is the linear path — a bare
@@ -385,6 +410,51 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
 > whitelist hours the full scrape only contains the whitelisted torrents (tiny); during OPEN it is the
 > whole swarm. Poll from **localhost**, watch OpenTracker's single HTTP thread (`top`/`pidstat`), and
 > start with `index_meta_daily_budget = 0` (catalogue only, no DHT) until the CPU cost looks safe.
+
+### Which hash gets fetched next (1.23.0)
+
+**Settings → Observed-hash index → Fetch order.** The metadata worker resolves a few hashes a second
+against an index queue millions of rows deep, so the order of that queue is not a detail: it decides
+what the tracker knows anything about for the next several months.
+
+"Longest waiting first" is fair, and it is also the reason a release added yesterday sits behind a
+million hashes nobody has seeded since 2019. The alternatives:
+
+| Mode | Takes next | Runs on |
+| --- | --- | --- |
+| **Longest waiting** (default) | the hash queued earliest | `idx_index_meta` |
+| **Newest** | the hash queued most recently | the same index, backwards |
+| **Most seeders** | the biggest swarm | `idx_index_meta_seed` |
+| **Random** | a uniform sample of the whole queue | the primary key |
+| **Balanced mix** | shares of the above, interleaved | all of them |
+
+Every mode runs on an index that **already exists**, and that constraint shaped the list. A claim
+happens on every fetch slot, several times a second, so a sort the database would have to compute —
+by file count, by name, by how often a hash has been seen — means a filesort over three million rows
+at that rate. Those orderings are absent on purpose, not by oversight.
+
+`ORDER BY RAND()` is the same trap and is not what **Random** does. Info hashes are SHA-1 digests and
+therefore uniformly spread across the key space, so a random 20-byte point plus "the first pending row
+at or after it" is an index seek — and uniform for exactly the reason the digests are.
+
+**The mix** is where the useful setting is: mostly big swarms, with enough of new and random that
+nothing is starved. The shares always add up to 100 — raise one and the others give up the difference
+in proportion — and the rotation repeats over **100 claims, interleaved rather than blocked**. That
+matters more than it sounds: the worker claims in waves the size of its parallel-fetch setting, so a
+blocked plan (seventy of one kind, then fifteen of the next) makes each wave a single kind and the
+"balance" only appears over hours. Interleaved, a single wave is already a proportional sample.
+
+One percentage point is therefore one claim in a hundred — small, but never zero. Under each field
+the panel says what that works out to at the parallel-fetch setting above (*"≈ 5 of every 32
+fetches"*), and warns when a share is thin enough to be less than one per wave, because that is the
+number that decides whether a share is worth having.
+
+The **whitelist** queue is never reordered. Those rows are there because a person asked for them by
+name, and answering a direct request with a dice roll is not a feature.
+
+The worker re-reads all of this about once a minute — no restart. And because a worker started from
+an older `worker.py` would ignore the setting entirely, the panel compares what it asked for against
+what the worker's heartbeat says it is **doing**, and warns when they differ.
 
 ### User accounts, groups & permissions (1.6.0)
 

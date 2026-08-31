@@ -1241,6 +1241,19 @@ function whitelistStatus(PDO $db, array $cfg): array {
                         : ' — restart tracker-metadata if worker.py was updated since it started.')];
             }
         }
+        // Same question for the fetch order, and the same reason for asking it: an order changed in
+        // Settings reaches a worker that is running the code that knows about orders at all. One
+        // started from an older worker.py ignores the setting entirely and nothing would say so —
+        // the panel would show the operator their own choice and call it status.
+        $wantOrder = strtolower(trim((string)($cfg['meta_order_mode'] ?? 'oldest')));
+        if (is_array($wi) && $wantOrder !== '' && $wantOrder !== 'oldest') {
+            $runOrder = isset($wi['order']) ? strtolower((string)$wi['order']) : null;
+            if ($runOrder === null) {
+                $warnings[] = ['level' => 'warn', 'text' => 'Settings ask for the "' . htmlspecialchars($wantOrder, ENT_QUOTES) . '" fetch order, but the running metadata worker predates that option and is still taking the longest-waiting hash first — restart tracker-metadata.'];
+            } elseif ($runOrder !== $wantOrder) {
+                $warnings[] = ['level' => 'warn', 'text' => 'The metadata worker is fetching in "' . htmlspecialchars($runOrder, ENT_QUOTES) . '" order, not the "' . htmlspecialchars($wantOrder, ENT_QUOTES) . '" set in Settings — it re-reads this about once a minute.'];
+            }
+        }
     }
     // scheduled mode (includes/schedule.php): surface a failed / overdue switch in both modes
     $schedule = null;
