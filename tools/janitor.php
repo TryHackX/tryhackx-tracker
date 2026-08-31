@@ -38,6 +38,7 @@ require_once $root . '/includes/cluster.php';
 require_once $root . '/includes/backup.php';
 require_once $root . '/includes/bulkmail.php';
 require_once $root . '/includes/richtext.php';
+require_once $root . '/includes/audit.php';
 require_once $root . '/includes/livesync.php';
 require_once $root . '/includes/reputation.php';
 require_once $root . '/includes/wlmaint.php';
@@ -67,6 +68,10 @@ try {
             echo '[mode] could not read the running mode: ' . $agree['error'] . "
 ";
         }
+    }
+    if (function_exists('auditPrune')) {
+        $pruned = auditPrune($db, $cfg);
+        if ($pruned > 0 && in_array('-v', $argv ?? [], true)) echo "[audit] pruned $pruned rows\n";
     }
     whitelistJanitor($db, $cfg);
     // statistics timeline: sample / roll up / prune (no-op when disabled)

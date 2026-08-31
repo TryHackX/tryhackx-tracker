@@ -48,11 +48,14 @@ if (scheduleSwitchCommand($cfg) === '') {
 $out = ['ok' => true, 'changed' => false, 'from' => trackerMode($cfg), 'to' => $mode,
         'error' => null, 'output' => '', 'notes' => [], 'skipped' => null];
 if (!scheduleSwitchTo($db, $cfg, $mode, $out)) {
+    auditNote(['target_id' => $mode, 'summary' => 'switch to ' . $mode . ' failed']);
     // The setting was NOT flipped: scheduleSwitchTo only writes it after the service really changed.
     jsonResponse(['error' => $out['error'] ?? 'The switch failed.', 'output' => $out['output'],
                   'notes' => $out['notes']], 500);
 }
 scheduleRecordResult($out);
+auditNote(['target_id' => $mode, 'summary' => 'tracker switched to ' . $mode,
+           'detail' => ['from' => $out['from'], 'to' => $mode, 'notes' => $out['notes']]]);
 
 $agree = scheduleModeAgreement($cfg, true);
 jsonResponse([

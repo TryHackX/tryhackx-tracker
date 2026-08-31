@@ -43,7 +43,13 @@ const BACKUP_DAYS_MAX      = 3650;
 const BACKUP_GB_MAX        = 10000;
 const BACKUP_TOKEN_TTL     = 300;     // seconds a download link stays valid
 const BACKUP_STATUS_TTL    = 2;       // seconds the helper's status output is reused while polling
-const BACKUP_PROFILES      = ['tracker-lekki', 'tracker-pelny', 'tracker-baza', 'custom'];
+const BACKUP_PROFILES      = ['tracker-lekki', 'tracker-pelny', 'tracker-baza', 'tracker-baza-lekka', 'custom'];
+/**
+ * The profiles the ROOT HELPER knows by name. Anything else the panel offers is sent as `custom`
+ * with an explicit --items list, which the helper already supports — so a new profile is a change to
+ * this file alone and never a reinstall of a root script.
+ */
+const BACKUP_HELPER_PROFILES = ['tracker-lekki', 'tracker-pelny', 'tracker-baza', 'custom'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings (pure)
@@ -156,6 +162,10 @@ function backupProfileItems(string $profile, array $cfg): string {
             return 'tracker-db,tracker-config,tracker-listy,tracker-opentracker,tracker-worker,tracker-janitor,tracker-siec,tracker-sudoers';
         case 'tracker-baza':
             return 'tracker-db';
+        // The combination that was missing: the database on its own, WITHOUT the two tables that are
+        // most of its size. The other three cover full+everything, full-db-only and light+everything.
+        case 'tracker-baza-lekka':
+            return 'tracker-db-lekka';
         case 'custom':
             $items = backupSanitizeItems((string)($cfg['backup_items'] ?? ''));
             if ($items !== '') return $items;
@@ -169,11 +179,16 @@ function backupProfileItems(string $profile, array $cfg): string {
 
 /** Human label for a profile, for the UI and the log. */
 function backupProfileLabel(string $profile): string {
+    // The old labels described the wrong axis. "Database only" was in fact the FULL database
+    // including index_hashes and index_files — several GB — and nothing in its name said so, while
+    // "Full" sounded like the bigger of the two when it is the same database plus some small files.
+    // These say which database and what else, because those are the two questions.
     return [
-        'tracker-lekki' => 'Light — everything except the two huge index tables',
-        'tracker-pelny' => 'Full — the whole tracker database and its configuration',
-        'tracker-baza'  => 'Database only',
-        'custom'        => 'Custom selection',
+        'tracker-lekki'      => 'Light — config and lists, database without the two huge index tables',
+        'tracker-pelny'      => 'Everything — full database (several GB) plus config, lists and units',
+        'tracker-baza'       => 'Full database only — every table, including the index (several GB)',
+        'tracker-baza-lekka' => 'Light database only — without index_hashes and index_files',
+        'custom'             => 'Custom selection',
     ][$profile] ?? $profile;
 }
 
@@ -504,7 +519,17 @@ function backupStart(array $cfg, string $profile = '', string $source = 'admin')
              '--keep-days', (string)backupKeepDays($cfg),
              '--max-gb', (string)backupMaxGb($cfg),
              '--db', backupDbName($cfg)];
-    if ($profile === 'custom') { $args[] = '--items'; $args[] = backupProfileItems('custom', $cfg); }
+    // A profile the helper does not know is sent as `custom` plus the items it stands for. The helper
+    // validates its own profile names and rejects anything else, so translating here is what keeps a
+    // new profile from needing a root script reinstalled on every machine.
+    if (!in_array($profile, BACKUP_HELPER_PROFILES, true)) {
+        $args[2] = 'custom';
+        $args[] = '--items';
+        $args[] = backupProfileItems($profile, $cfg);
+    } elseif ($profile === 'custom') {
+        $args[] = '--items';
+        $args[] = backupProfileItems('custom', $cfg);
+    }
     if (backupVerifyAfter($cfg)) $args[] = '--verify';
     $rec = backupGpgRecipient($cfg);
     if ($rec !== '') { $args[] = '--gpg-recipient'; $args[] = $rec; }

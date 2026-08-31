@@ -96,6 +96,10 @@ function userPermissionList(): array {
         // promise the code cannot keep, and a checkbox that grants nothing is worse than no checkbox.
         'panel.backups.view'     => 'PANEL — see the Backups page and the backup list (running, restoring and deleting stay with the owner)',
         'panel.traffic.view'     => 'PANEL — see the Traffic page (read-only; the controls stay with the owner)',
+        // Reading the log is its own permission and is NOT in the moderator seed. A moderator who can
+        // see every action of every colleague is a different job from moderating, and the operator
+        // should decide whether it is the same person.
+        'panel.audit.view'       => 'PANEL — read the audit log (who did what in the panel)',
     ];
 }
 

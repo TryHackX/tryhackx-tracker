@@ -138,6 +138,9 @@ $REVIEWED = [
     'api/admin/fetch_banned.php:$from'         => 'a literal FROM/JOIN fragment defined in the file',
     'api/admin/fetch_reports.php:$countSql'    => 'built from literals with its params collected alongside',
     'api/admin/fetch_users.php:$orderParts'    => 'ORDER BY parts from a literal column map',
+    // LIMIT/OFFSET cannot be bound as parameters in a prepared statement with emulation off, so
+    // they are interpolated; both come from (int) casts clamped to a range in the lines above.
+    'includes/audit.php:$off'                  => 'int, computed from a clamped page and per_page',
     'includes/index.php:$conds'                => 'literal conditions, values bound',
     'includes/index.php:$scope'                => 'literal, chosen from a fixed set',
     'includes/whitelist.php:$cond'             => 'one of two literal conditions, picked by a bool',

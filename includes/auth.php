@@ -18,13 +18,13 @@ function adminReservedActions(): array {
     return ['home', 'info', 'tos', 'report', 'status', 'transparency', 'unsubscribe', 'stats',
             'whitelist', 'login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search',
             'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-backups',
-            'admin-traffic', 'notfound'];
+            'admin-traffic', 'admin-audit', 'notfound'];
 }
 
 /** The panel actions that exist regardless of where the sign-in form lives. */
 function adminPanelActions(): array {
     return ['admin', 'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-backups',
-            'admin-traffic'];
+            'admin-traffic', 'admin-audit'];
 }
 
 /**
@@ -46,6 +46,7 @@ function adminNavItems(): array {
         ['action' => 'admin-traffic',   'label' => 'Traffic',   'icon' => 'bi-speedometer2','anchor' => '#section-netlimit', 'perm' => 'panel.traffic.view'],
         ['action' => 'admin-users',     'label' => 'Users',     'icon' => 'bi-people',      'anchor' => '#section-users',    'perm' => 'panel.users.view'],
         ['action' => 'admin-backups',   'label' => 'Backups',   'icon' => 'bi-archive',     'anchor' => '#section-backups',  'perm' => 'panel.backups.view'],
+        ['action' => 'admin-audit',     'label' => 'Log',       'icon' => 'bi-journal-text','anchor' => '',                  'perm' => 'panel.audit.view'],
     ];
 }
 

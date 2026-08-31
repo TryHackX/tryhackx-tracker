@@ -11,7 +11,13 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 26;  // 26 = the timeline also records how many indexed hashes have
+const TRACKER_SCHEMA_VERSION = 28;  // 28 = the audit log: who did what in the panel. It had none,
+                                    // which was survivable with one administrator and stopped being
+                                    // so the moment the Moderator group existed.
+                                    // 27 = index_fetched becomes NULLABLE, so a sample taken before
+                                    // the column existed reads as "not measured" instead of as a
+                                    // confident zero the chart then drew as a flat line.
+                                    // 26 = the timeline also records how many indexed hashes have
                                     // their metadata resolved, so "fetched" can be drawn beside
                                     // "indexed" instead of inferred from the queue depth.
                                     // 25 = panel permissions and a system `moderator` group: until
@@ -160,7 +166,7 @@ function trackerSchemaStatements(): array {
             `mode` ENUM('whitelist','blacklist') NOT NULL DEFAULT 'blacklist',
             `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
             `index_rows` INT UNSIGNED NOT NULL DEFAULT 0,
-            `index_fetched` INT UNSIGNED NOT NULL DEFAULT 0
+            `index_fetched` INT UNSIGNED DEFAULT NULL
         ) $engine",
         "CREATE TABLE IF NOT EXISTS `stats_samples_5m` (
             `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
@@ -178,7 +184,7 @@ function trackerSchemaStatements(): array {
             `wl_share` TINYINT UNSIGNED NOT NULL DEFAULT 0,
             `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
             `index_rows` INT UNSIGNED NOT NULL DEFAULT 0,
-            `index_fetched` INT UNSIGNED NOT NULL DEFAULT 0
+            `index_fetched` INT UNSIGNED DEFAULT NULL
         ) $engine",
         "CREATE TABLE IF NOT EXISTS `stats_samples_1h` (
             `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
@@ -196,7 +202,7 @@ function trackerSchemaStatements(): array {
             `wl_share` TINYINT UNSIGNED NOT NULL DEFAULT 0,
             `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
             `index_rows` INT UNSIGNED NOT NULL DEFAULT 0,
-            `index_fetched` INT UNSIGNED NOT NULL DEFAULT 0
+            `index_fetched` INT UNSIGNED DEFAULT NULL
         ) $engine",
 
         // ── UDP traffic samples (schema v11, includes/netlimit.php): nftables counters turned into
@@ -461,6 +467,28 @@ function trackerSchemaStatements(): array {
         // at a configured rate, because this server sends through PHP's mail() with no relay in front
         // of it: fire fifty at once and the domain's reputation is what pays, which then costs the
         // password-reset messages that actually matter.
+        "CREATE TABLE IF NOT EXISTS `audit_log` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            -- owner = the panel password; admin/moderator = a user holding a panel session;
+            -- user = the public site; api = a server-to-server client; system = the janitor.
+            `actor_type` ENUM('owner','admin','moderator','user','api','system') NOT NULL DEFAULT 'system',
+            `actor_id` INT UNSIGNED DEFAULT NULL,
+            `actor_name` VARCHAR(64) NOT NULL DEFAULT '',
+            `action` VARCHAR(40) NOT NULL,
+            `action_group` VARCHAR(16) NOT NULL DEFAULT 'other',
+            `target_type` VARCHAR(24) NOT NULL DEFAULT '',
+            `target_id` VARCHAR(80) NOT NULL DEFAULT '',
+            `summary` VARCHAR(255) NOT NULL DEFAULT '',
+            -- JSON, capped by the writer. Credentials are recorded as \"changed\", never as values.
+            `detail` TEXT DEFAULT NULL,
+            `ip` VARCHAR(45) NOT NULL DEFAULT '',
+            `ok` TINYINT(1) NOT NULL DEFAULT 1,
+            KEY `idx_audit_at` (`at`),
+            KEY `idx_audit_group` (`action_group`, `id`),
+            KEY `idx_audit_actor` (`actor_name`, `id`)
+        ) $engine",
+
         "CREATE TABLE IF NOT EXISTS `mail_queue` (
             `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             `batch_id` CHAR(16) NOT NULL,
@@ -639,9 +667,19 @@ function trackerSchemaGuardedStatements(PDO $db): array {
 
     // v26: how many indexed hashes have their metadata resolved. Three small-to-medium tables; the
     // raw one is the only sizeable one and an INT column is an instant add on it.
+    //
+    // v27 makes it NULLABLE, and that is the whole point of the change: every row that existed before
+    // the column did was given 0, and 0 is a claim — "at that moment nothing had been fetched" — which
+    // was not true, nothing had been MEASURED. The chart drew that as a flat line at zero across all
+    // of history, which is exactly the shape of a broken feature. NULL says "no reading", the payload
+    // passes it through, and the line simply does not start until the data does.
     foreach (['stats_samples', 'stats_samples_5m', 'stats_samples_1h'] as $stTable) {
         if (!schemaColumnExists($db, $stTable, 'index_fetched')) {
-            $out[] = "ALTER TABLE `$stTable` ADD COLUMN `index_fetched` INT UNSIGNED NOT NULL DEFAULT 0";
+            $out[] = "ALTER TABLE `$stTable` ADD COLUMN `index_fetched` INT UNSIGNED DEFAULT NULL";
+        } elseif (!schemaColumnNullable($db, $stTable, 'index_fetched')) {
+            $out[] = "ALTER TABLE `$stTable` MODIFY COLUMN `index_fetched` INT UNSIGNED DEFAULT NULL";
+            // the zeros already written were never a measurement; say so
+            $out[] = "UPDATE `$stTable` SET `index_fetched` = NULL WHERE `index_fetched` = 0";
         }
     }
 
@@ -838,6 +876,8 @@ function trackerSchemaDefaultSettings(): array {
         'tracker_schedule'            => '{"mon":"none","tue":"none","wed":"none","thu":"none","fri":"none","sat":"none","sun":"none"}',
         'tracker_schedule_tz'         => 'Europe/Warsaw',
         'tracker_mode_switch_cmd'     => 'sudo -n /usr/local/sbin/tracker-mode.sh',
+        'audit_enabled'               => '1',
+        'audit_keep_days'             => '180',
         // schema v5: statistics timeline (includes/stats_timeline.php)
         'stats_timeline_enabled'      => '0',
         'stats_timeline_interval'     => '60',
@@ -1042,6 +1082,14 @@ function schemaColumnExists(PDO $db, string $table, string $column): bool {
     $st = $db->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
     $st->execute([$table, $column]);
     return (bool)$st->fetchColumn();
+}
+
+/** Is this column nullable? Used when a column's MEANING changes from "zero" to "no reading". */
+function schemaColumnNullable(PDO $db, string $table, string $column): bool {
+    $st = $db->prepare("SELECT IS_NULLABLE FROM information_schema.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
+    $st->execute([$table, $column]);
+    return strtoupper((string)$st->fetchColumn()) === 'YES';
 }
 
 function schemaIndexExists(PDO $db, string $table, string $index): bool {

@@ -158,7 +158,7 @@
                 <div class="wl-status-actions mt-2">
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="bm-refresh"><i class="bi bi-people"></i> Recount</button>
                     <button type="button" class="btn btn-sm btn-outline-info" id="bm-test"><i class="bi bi-send-check"></i> Send one to me</button>
-                    <button type="button" class="btn btn-sm btn-primary" id="bm-send"><i class="bi bi-send"></i> Send&hellip;</button>
+                    <button type="button" class="btn btn-sm btn-primary" id="bm-send"><i class="bi bi-send"></i> <span id="bm-send-label">Send&hellip;</span></button>
                 </div>
             </div>
 

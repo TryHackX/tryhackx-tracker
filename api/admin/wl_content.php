@@ -18,6 +18,8 @@
 requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? '');
+// Reading the queue is not an action; everything else changes what the public sees and is recorded
+// at the end of this file, once it has actually happened.
 if (!in_array($op, ['list', 'approve', 'reject', 'clear', 'edits', 'edit_apply', 'edit_reject'], true)) {
     jsonResponse(['error' => 'Unknown operation'], 400);
 }

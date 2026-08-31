@@ -18,6 +18,8 @@ $group = ctype_digit($groupRef)
     : userGroupBySlug($db, $groupRef);
 if (!$group) jsonResponse(['error' => 'Group not found'], 404);
 if ($group['slug'] === 'guest') jsonResponse(['error' => 'The guest group is the implicit baseline — it cannot be granted'], 400);
+auditNote(['target_type' => 'user', 'target_id' => (string)$u['username'],
+           'summary' => 'granted group "' . $group['slug'] . '" to ' . $u['username']]);
 
 // A group that carries PANEL permissions may only be handed out by the owner.
 //

@@ -1731,3 +1731,41 @@ input[type="number"] {
 /* The action row wraps rather than clipping its labels — "Send one to me" is a long button and the
    card is not always wide. */
 .bm-msg-head { row-gap: 0.35rem; }
+
+/* ── the audit log ─────────────────────────────────────────────────────────
+   Colour by AREA, not by action: one colour per action would be a legend, and a legend nobody reads
+   is decoration. The failed rows carry a word as well as a tint, because the tint alone is a claim
+   somebody with different colour vision cannot read. */
+.au-c-when { width: 12rem; white-space: nowrap; }
+.au-c-who  { width: 10rem; }
+.au-c-what { width: 15rem; }
+.au-c-ip   { width: 11rem; }
+.au-badge { display: inline-block; padding: 0.08rem 0.45rem; border-radius: 3px; font-size: 0.74rem;
+            font-family: SFMono-Regular, Menlo, Consolas, monospace; border: 1px solid; margin-right: 0.3rem; }
+.au-g-auth     { color: #9aa4b2; border-color: #4a5360; }
+.au-g-settings { color: #4a9eff; border-color: #3d6ea8; }
+.au-g-content  { color: #6fce8b; border-color: #3fa45b; }
+.au-g-hashes   { color: #d8b13a; border-color: #8a7220; }
+.au-g-reports  { color: #e08a5c; border-color: #96593a; }
+.au-g-users    { color: #c09ae8; border-color: #7a5aa0; }
+.au-g-machine  { color: #ff8a8a; border-color: #a04a4a; }
+.au-g-mail     { color: #7fd4d4; border-color: #3f8a8a; }
+.au-g-api      { color: #b0b8c4; border-color: #5a6270; }
+.au-g-other    { color: #8a929e; border-color: #4a5058; }
+.au-failed td { background: rgba(180,67,60,0.10); }
+.au-failed-badge { color: #ff8a8a; border-color: #b4433c; }
+.au-summary { overflow-wrap: anywhere; }
+.au-target { display: inline-block; margin-top: 0.15rem; font-size: 0.72rem; opacity: 0.75; word-break: break-all; }
+.au-detail { margin-top: 0.3rem; }
+.au-detail > summary { cursor: pointer; font-size: 0.75rem; color: #7f8c9a; list-style: none; }
+.au-detail > summary::-webkit-details-marker { display: none; }
+.au-detail > summary::before { content: '▸ '; }
+.au-detail[open] > summary::before { content: '▾ '; }
+.au-json { margin: 0.3rem 0 0; padding: 0.4rem 0.6rem; background: rgba(0,0,0,0.3); border-radius: 4px;
+           font-size: 0.72rem; max-height: 16rem; overflow: auto; }
+.au-diff { margin: 0.3rem 0 0; font-size: 0.74rem; border-collapse: collapse; }
+.au-diff td { padding: 0.12rem 0.5rem 0.12rem 0; vertical-align: top; }
+.au-diff-k code { color: #9aa4b2; }
+.au-diff-from code { color: #ff8a8a; text-decoration: line-through; opacity: 0.8; }
+.au-diff-to code { color: #6fce8b; }
+.au-diff-hidden { color: #7f8c9a; font-style: italic; }

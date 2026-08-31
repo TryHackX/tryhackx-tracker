@@ -616,7 +616,8 @@ function statsTimelineSeries(PDO $db, array $cfg, int $rangeSec, ?int $now = nul
         $out['completed'][] = (int)$r['completed'];
         $out['whitelist_count'][] = (int)$r['whitelist_count'];
         $out['index_rows'][] = (int)$r['index_rows'];
-        $out['index_fetched'][] = (int)($r['index_fetched'] ?? 0);
+        // NULL travels as null. Casting it to 0 here would put the confident zero straight back.
+        $out['index_fetched'][] = $r['index_fetched'] === null ? null : (int)$r['index_fetched'];
         $out['mode'][] = (int)$r['wl'] ? 1 : 0;
         $rates = [null, null, null, null];
         if ($prev !== null) {

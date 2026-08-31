@@ -76,6 +76,7 @@ $allowed = [
     'wl_content_autopublish', 'wl_edit_max_pending',
     'wl_scrape_every_hours', 'wl_scrape_batch', 'wl_dead_after_days', 'wl_dead_action', 'wl_dead_every_days',
     'wl_probe_required', 'wl_probe_timeout_minutes', 'wl_probe_on_fail', 'wl_probe_max_batch',
+    'audit_enabled', 'audit_keep_days',
     'rep_enabled', 'rep_mode', 'rep_who_can_vote', 'rep_show_in_results', 'rep_min_votes', 'rep_anon_weight', 'rep_rate_per_hour', 'captcha_pts_vote',
     'bulk_mail_enabled', 'bulk_mail_per_minute', 'bulk_mail_max_attempts',
     'wl_allow_source_url', 'wl_allow_description', 'wl_content_review',
@@ -435,7 +436,20 @@ if ($limitsChanged) {
 $modeWasChanged = array_key_exists('tracker_mode', $data)
     && (string)$data['tracker_mode'] !== (string)($cfg['tracker_mode'] ?? 'blacklist');
 
+// The BEFORE snapshot has to be taken while $cfg still holds it — after setSettings() there is
+// nothing left to compare against, and "what did this change" is the only question anybody asks of a
+// settings log.
+$auditDiff = function_exists('auditSettingsDiff') ? auditSettingsDiff($cfg, $data) : [];
+
 setSettings($db, $data);
+
+if ($auditDiff) {
+    auditNote([
+        'summary' => count($auditDiff) . ' setting' . (count($auditDiff) === 1 ? '' : 's') . ' changed: '
+                   . mb_substr(implode(', ', array_keys($auditDiff)), 0, 180),
+        'detail'  => $auditDiff,
+    ]);
+}
 
 // The panel bakes the sign-in address into <body data-login-path> at render time and the Logout
 // buttons read it from there; saving is pure AJAX, so hand the applied value back and let the page

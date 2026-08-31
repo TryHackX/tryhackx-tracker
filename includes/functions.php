@@ -493,6 +493,13 @@ function rateLimitAllow(string $action, string $ip, int $max, int $windowSec = 3
 }
 
 function jsonResponse(array $data, int $code = 200): void {
+    // Every response leaves through here, which makes it the one place the audit log can be written
+    // without thirty endpoints each remembering to do it — and without a new endpoint being invisible
+    // because somebody forgot. What the endpoint knows that this does not (which setting changed,
+    // which hash was banned) is added by the endpoint itself through auditNote(); this fills in the
+    // rest and records whether it worked.
+    if (function_exists('auditFinish')) auditFinish($data, $code);
+
     // Clean any stray output that might have been generated (e.g. PHP warnings)
     while (ob_get_level()) ob_end_clean();
     http_response_code($code);

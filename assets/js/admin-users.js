@@ -389,6 +389,20 @@
         }
         $('bm-off-note').style.display = r.enabled ? 'none' : '';
         bmFillFormats(r.formats);
+        // "Send…" said nothing about who is about to be written to, which is the one fact that
+        // matters before pressing it. The count comes from the same preview that fills the note
+        // below, so the label and the sentence can never disagree.
+        const lbl = $('bm-send-label');
+        if (lbl) {
+            const mode = $('bm-mode').value;
+            const who = mode === 'group'
+                ? ($('bm-group').options[$('bm-group').selectedIndex] || {}).text || 'the group'
+                : (mode === 'selected' ? 'the users you ticked' : 'everyone');
+            const n = $('bm-email').checked ? r.recipients : r.audience;
+            lbl.textContent = n > 0
+                ? 'Send to ' + who + ' (' + n + ')'
+                : 'Nobody to send to';
+        }
         box.textContent = '';
         box.appendChild(el('strong', { text: String(r.recipients) }));
         const why = [];
@@ -641,6 +655,12 @@
         $('bm-group').addEventListener('change', refreshPreview);
         $('bm-refresh').addEventListener('click', refreshPreview);
         $('bm-format').addEventListener('change', bmSyncFormatUi);
+        // The label carries a count that depends on which channel is ticked, so it is refreshed when
+        // that changes rather than only when the audience does.
+        ['bm-email', 'bm-notify'].forEach(id => {
+            const el2 = $(id);
+            if (el2) el2.addEventListener('change', refreshPreview);
+        });
         $('bm-tools').addEventListener('click', (e) => {
             const b = e.target.closest('[data-md]');
             if (b) bmWrap(b.dataset.md);

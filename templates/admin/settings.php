@@ -818,6 +818,26 @@
             </div>
 
             <!-- User accounts -->
+            <div class="settings-section" id="section-audit" data-group="users" data-title="Audit log">
+                <h5>Audit log</h5>
+                <p class="settings-hint mb-2">Who did what in the panel. The log is read-only from here on purpose &mdash; a record the panel it describes can edit is not a record. Credentials are never written to it: a setting that holds one appears as &ldquo;changed&rdquo;, never as its value.</p>
+                <div class="row g-3">
+                    <div class="col-md-4" data-setting="audit_enabled">
+                        <label class="form-label">Recording</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="audit_enabled">
+                            <option value="1" <?= ($cfg['audit_enabled'] ?? '1') === '1' ? 'selected' : '' ?>>Record panel actions</option>
+                            <option value="0" <?= ($cfg['audit_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>>Do not record</option>
+                        </select>
+                        <small class="settings-hint">Turning this off stops new entries; it does not remove the ones already written.</small>
+                    </div>
+                    <div class="col-md-4" data-setting="audit_keep_days">
+                        <label class="form-label">Keep for (days)</label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="audit_keep_days" value="<?= sanitize($cfg['audit_keep_days'] ?? '180') ?>" min="7" max="3650">
+                        <small class="settings-hint">The janitor removes anything older, a few thousand rows per run.</small>
+                    </div>
+                </div>
+            </div>
+
             <div class="settings-section" id="section-users" data-group="users" data-title="User Accounts">
                 <h5>User Accounts</h5>
                 <small class="settings-hint d-block mb-3">Optional member system: registration + login (CAPTCHA-protected), groups with per-feature permissions, timed access (sellable via the <code>v1/users/*</code> API with a <em>users</em>-scope key), in-app notifications and a member search over the Index. Users and groups are managed on the <a href="<?= $baseUrl ?>?action=admin-users">Users page</a>. The <strong>guest</strong> group defines what anonymous visitors may see — with accounts <em>disabled</em> everything behaves exactly as before (public pages public, Index admin-only).</small>

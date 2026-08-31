@@ -39,6 +39,7 @@ require_once __DIR__ . '/includes/wlmaint.php';
 require_once __DIR__ . '/includes/wlprobe.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
+require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/federation.php';
 require_once __DIR__ . '/includes/netlimit.php';
 require_once __DIR__ . '/includes/backup.php';
@@ -144,6 +145,7 @@ $apiRoutes = [
     'admin/check_whitelist_path' => 'api/admin/check_whitelist_path.php',
     'admin/whitelist_status'     => 'api/admin/whitelist_status.php',
     'admin/tracker_mode'         => 'api/admin/tracker_mode.php',
+    'admin/audit_log'            => 'api/admin/audit_log.php',
     'admin/fetch_whitelist'      => 'api/admin/fetch_whitelist.php',
     'admin/whitelist_item'       => 'api/admin/whitelist_item.php',
     'admin/whitelist_add'        => 'api/admin/whitelist_add.php',
@@ -293,6 +295,7 @@ function adminEndpointPermission(string $endpoint): ?string {
         'admin/user_update'        => 'panel.users.edit',
         'admin/user_notify'        => 'panel.users.notify',
         'admin/user_grant'         => 'panel.users.groups',
+        'admin/audit_log'          => 'panel.audit.view',
         'admin/user_revoke'        => 'panel.users.groups',
         // Backups — see and run, never restore or delete
         'admin/backup_status'      => 'panel.backups.view',
@@ -311,6 +314,8 @@ function adminEndpointPermission(string $endpoint): ?string {
     ];
     return $map[$endpoint] ?? null;
 }
+
+$GLOBALS['__audit_endpoint'] = $endpoint;
 
 if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login' && $endpoint !== 'admin/login_2fa') {
     requireAuth($cfg);
