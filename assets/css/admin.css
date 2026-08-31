@@ -1736,6 +1736,9 @@ input[type="number"] {
    Colour by AREA, not by action: one colour per action would be a legend, and a legend nobody reads
    is decoration. The failed rows carry a word as well as a tint, because the tint alone is a claim
    somebody with different colour vision cannot read. */
+/* The filter row's last control was sitting against the card's edge; the toolbar packs its children
+   tight and the checkbox has no margin of its own. */
+.au-filters-end { margin-right: 0.5rem; }
 .au-c-when { width: 12rem; white-space: nowrap; }
 .au-c-who  { width: 10rem; }
 .au-c-what { width: 15rem; }
@@ -1788,3 +1791,4 @@ input[type="number"] {
 .tn-report-summary { font-size: 0.88rem; line-height: 1.5; }
 .tn-report-acts { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.6rem; }
 @media (max-width: 900px) { .tn-step { grid-template-columns: 1fr 1fr; } }
+.tn-what { width: auto; display: inline-block; }

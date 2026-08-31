@@ -442,6 +442,11 @@
                 <h6><i class="bi bi-activity"></i> Stability probe
                     <span class="wl-status-updated" id="tn-updated"></span></h6>
                 <div class="wl-status-actions">
+                    <select class="form-select form-select-sm bg-dark text-light border-secondary tn-what" id="tn-what" title="Which limit the run moves. Kernel buffers are never ramped — a socket's buffer is fixed when it is created, so testing one means restarting the tracker at every step.">
+                        <option value="inbound">Receive limit</option>
+                        <option value="outbound">Reply budget</option>
+                        <option value="both">Both together</option>
+                    </select>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="tn-dry" title="Walk the same plan without touching the firewall — proves the plumbing works">Rehearse</button>
                     <button type="button" class="btn btn-sm btn-outline-warning" id="tn-start">Run it&hellip;</button>
                     <button type="button" class="btn btn-sm btn-outline-danger d-hidden" id="tn-cancel">Stop</button>

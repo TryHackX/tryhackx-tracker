@@ -58,6 +58,7 @@ $r = tunerRequest([
     'steps'   => (int)($input['steps'] ?? 6),
     'dwell'   => (int)($input['dwell'] ?? 180),
     'dry_run' => !empty($input['dry_run']),
+    'what'    => (string)($input['what'] ?? 'inbound'),
 ]);
 if (!empty($r['error'])) jsonResponse(['error' => $r['error']], 409);
 

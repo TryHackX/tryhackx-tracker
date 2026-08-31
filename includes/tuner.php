@@ -65,6 +65,7 @@ function tunerStatus(array $cfg): array {
         'started_at' => (int)($st['started_at'] ?? 0),
         'updated_at' => (int)($st['updated_at'] ?? 0),
         'eta_s'      => (int)($st['eta_s'] ?? 0),
+        'what'       => (string)($st['what'] ?? 'inbound'),
         'plan'       => $st['plan'] ?? [],
         'current_step' => (int)($st['current_step'] ?? 0),
         'steps'      => $st['steps'] ?? [],
@@ -87,6 +88,10 @@ function tunerRequest(array $opts): array {
             'steps'   => max(2, min(12, (int)($opts['steps'] ?? 6))),
             'dwell'   => max(30, min(1800, (int)($opts['dwell'] ?? 180))),
             'dry_run' => !empty($opts['dry_run']),
+            // Buffers are deliberately not an option: a socket's receive buffer is fixed when the
+            // socket is created, so ramping it means restarting the tracker at every step.
+            'what'    => in_array($opts['what'] ?? '', ['inbound', 'outbound', 'both'], true)
+                         ? $opts['what'] : 'inbound',
         ];
         $s['phase'] = 'requested';
         unset($s['error'], $s['report']);
@@ -121,7 +126,9 @@ function tunerSpawn(array $cfg): array {
     if (!preg_match('#^[A-Za-z0-9 _./-]{1,120}$#', $python)) $python = 'python3';
 
     $script = escapeshellarg(__DIR__ . '/../tools/tuner.py');
+    $what = in_array($req['what'] ?? '', ['inbound', 'outbound', 'both'], true) ? $req['what'] : 'inbound';
     $args = ' --run --steps ' . (int)$req['steps'] . ' --dwell ' . (int)$req['dwell']
+          . ' --what ' . escapeshellarg($what)
           . (!empty($req['dry_run']) ? ' --dry-run' : '');
     $cmd = $python . ' ' . $script . $args . ' > /dev/null 2>&1 &';
 

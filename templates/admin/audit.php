@@ -31,7 +31,7 @@
                     <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="au-actor" title="Who">
                         <option value="">Anybody</option>
                     </select>
-                    <label class="search-check" title="Only the attempts that did not work — a failed sign-in, a refused action">
+                    <label class="search-check au-filters-end" title="Only the attempts that did not work — a failed sign-in, a refused action">
                         <input type="checkbox" id="au-failed"><span class="search-check-box" aria-hidden="true"></span> Only failures
                     </label>
                 </div>

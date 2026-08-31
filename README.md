@@ -121,6 +121,16 @@ Provides a public-facing website for tracker information, abuse report submissio
 
 ## Installation
 
+> **Setting up a Linux server from scratch?** [INSTALL.md](INSTALL.md) is the linear path — a bare
+> Debian box to a running tracker, with opentracker, the janitor timer, the root helpers, the
+> metadata worker, the firewall limits and backups, in the order that works. It also carries the
+> handful of things that cost an afternoon if you meet them unwarned: opentracker's help text lying
+> about its own build flags, a socket buffer that ignores a live sysctl until the service restarts,
+> and one CPU core doing all of a VPS's packet processing.
+>
+> The steps below are the application on its own, which is all you need if the server is already set
+> up.
+
 ### 1. Download
 
 ```bash
@@ -531,6 +541,38 @@ internet. Headers can be, and this panel only reads one when the request arrived
 listed as a trusted proxy. What none of that fixes is one person with a VPN and a phone — IPv6 is
 bucketed to a /64, and the panel says anonymous votes are a weak signal rather than implying
 otherwise.
+
+### The panel's log (1.22.0)
+
+**Log** in the panel navigation, behind its own `panel.audit.view` permission. Who did what, when,
+and whether it worked — settings changes with a before/after per key, moderation decisions, machine
+actions, failed sign-ins.
+
+Written in one place: `jsonResponse()` is the single exit every endpoint takes, so a **new** endpoint
+is logged by default rather than forgotten. Credentials never appear: the settings diff matches on the
+key *name*, so one added later is covered without anybody remembering, and a match is recorded as
+"changed" with no value either side. There is no delete and no edit — a log the panel it records can
+rewrite is not evidence. Retention is a setting; the janitor enforces it.
+
+### The stability probe (1.22.0)
+
+**Settings → Stability probe**, off by default; the card appears at the bottom of **Traffic**.
+
+The Traffic page can suggest a limit from a formula over past traffic. It cannot answer the question
+an operator on a shared machine actually has — *if I raise this, does anything else here start to
+hurt?* The probe answers it by trying: it moves the limit through a few steps, holds each for a few
+minutes, and watches the drop counters of every other UDP socket on the machine while it does.
+
+- The way back is written down **before** the first change, so the settings return even if the run is
+  killed or the machine reboots — the janitor restores them. The revert does not depend on the
+  program surviving.
+- Harm stops the run, not you. It never needs watching.
+- It suggests, it does not apply. A run ends exactly where it started, and the report only offers
+  values the machine actually held.
+
+It can move the receive limit, the reply budget, or both. It deliberately does **not** ramp kernel
+buffers: a socket's buffer is fixed when the socket is created, so testing one means restarting the
+tracker at every step.
 
 ### Writing to members, with formatting (1.19.0)
 

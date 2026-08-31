@@ -526,7 +526,29 @@ function statsTimelineChooseTable(array $cfg, int $rangeSec, ?PDO $db = null, ?i
         }
         if ($ok) return [ST_RAW_TABLE, $interval, 'raw'];
     }
-    if ($rangeSec <= $keepDays * 86400 && intdiv($rangeSec, 300) <= ST_MAX_5M_POINTS) return [ST_5M_TABLE, 300, '5m'];
+    // The five-minute table, chosen on what EXISTS rather than on what was asked for.
+    //
+    // This used to decide from the nominal range alone: a one-month window is 8 640 five-minute
+    // buckets, which is over the cap, so it dropped to hourly — even on a machine whose history was
+    // eight days old and had only ~2 300 buckets to return. The result was a chart that fell from
+    // 2 382 points at two weeks to 198 at one month, and looked like the panel was throwing data
+    // away when the data was simply not there yet.
+    //
+    // The raw branch above has always counted the real rows. This one now does the same, and the
+    // count is cheap: the 5m table is small and `ts` is its primary key. When a month of five-minute
+    // history genuinely exists the count will exceed the cap and the hourly table takes over — which
+    // is the right moment for that to happen, rather than a month before it.
+    if ($rangeSec <= $keepDays * 86400) {
+        $fits = intdiv($rangeSec, 300) <= ST_MAX_5M_POINTS;
+        if (!$fits && $db !== null) {
+            try {
+                $st = $db->prepare("SELECT COUNT(*) FROM `" . ST_5M_TABLE . "` WHERE ts >= ?");
+                $st->execute([($now ?? time()) - $rangeSec]);
+                $fits = (int)$st->fetchColumn() <= ST_MAX_5M_POINTS;
+            } catch (\Throwable $e) { $fits = false; }
+        }
+        if ($fits) return [ST_5M_TABLE, 300, '5m'];
+    }
     return [ST_1H_TABLE, 3600, '1h'];
 }
 

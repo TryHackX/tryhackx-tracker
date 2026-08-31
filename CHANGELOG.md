@@ -4,6 +4,50 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.23.0] — 2026-08-31
+
+### Fixed — the chart dropped to hourly a month before it had to
+
+At one month the chart fell from 2,382 points to 198, on a machine whose history was eight days old.
+It was not truncating data — it was choosing the hourly table because a one-month window is 8,640
+five-minute buckets, which is over the cap. The buckets did not exist yet.
+
+The raw branch had always counted the rows that would actually be returned; the five-minute branch
+decided from the nominal range alone. It now counts too, so the finest resolution the stored data
+supports is the one you get: **1m went from 198 to 2,386 points**. When a real month of five-minute
+history exists the count will exceed the cap and hourly takes over — at the moment that becomes true,
+rather than a month early.
+
+Three months and "all" still return 198 points, and that is the honest answer: the hourly table holds
+198 rows because the history began 198 hours ago. It grows at 720 a month.
+
+### Added — the probe can move the reply budget too
+
+`--what inbound | outbound | both`, chosen on the card. `both` keeps the reply budget a fixed distance
+above the receive limit, because capping what arrives without capping what is answered moves the
+problem to the transmit path — the half that makes the whole machine unreachable.
+
+Kernel buffers remain deliberately out of scope, and the file says why: a socket's buffer is fixed
+when the socket is created, so ramping one means restarting the tracker at every step — six restarts
+of a live tracker to answer a question that has one obvious answer.
+
+The self-test grew from 23 checks to 38, covering what each mode actually touches, that a dry run
+touches nothing whatever it was asked to move, that restoring puts back *both* limits, that restoring
+twice is a no-op, and that a machine which had no limit before a run has none after it.
+
+### Added — INSTALL.md
+
+A linear path from a bare Debian box to a running tracker: the database, the panel, both opentracker
+builds, the janitor timer, the root helpers and their sudoers lines, the metadata worker, the tuning
+order, and backups. Written from the machine that runs it, with the traps marked — opentracker's help
+text lying about its own build flags, a socket buffer that ignores a live sysctl until the service
+restarts, one CPU core doing all of a VPS's packet processing, and a complete backup that looks far
+too small.
+
+### Fixed
+
+- "Only failures" in the audit log sat against the card's edge.
+
 ## [1.22.1] — 2026-08-31
 
 ### Added — the fetched-hash history really can be rebuilt

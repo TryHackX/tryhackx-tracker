@@ -68,6 +68,24 @@ SAMPLE_EVERY_S = 10
 # A run that cannot finish inside this is stopped and restored regardless of where it got to.
 HARD_DEADLINE_S = 6 * 3600
 
+# WHAT THIS PROGRAM WILL AND WILL NOT MOVE
+#
+#   inbound   the firewall's receive limit (nft, `tracker-netlimit.sh set`). Ramped.
+#   outbound  the egress budget on the tracker's replies (`tracker-netlimit.sh egress`). Ramped,
+#             either on its own or kept a fixed distance above the inbound limit.
+#   buffers   NOT ramped, and this is deliberate. A socket's receive buffer is fixed when the socket
+#             is CREATED, so testing a buffer size means restarting the tracker at every step — six
+#             restarts of a live tracker to answer a question that has one obvious answer (bigger, up
+#             to what the machine can spare). It is a decision, not a search, and the Traffic page
+#             already measures whether the current one is being hit.
+WHAT_INBOUND = 'inbound'
+WHAT_OUTBOUND = 'outbound'
+WHAT_BOTH = 'both'
+# When both move together, the reply budget is held this far above the inbound limit. The tracker
+# answers roughly one packet per announce, so the two are naturally close; the headroom covers the
+# replies that are larger than the question.
+OUTBOUND_HEADROOM = 1.35
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # State: one file, written atomically, readable by the panel while the run is live
@@ -321,10 +339,26 @@ def harm(baseline: dict, now: dict, prev: dict, cfg: dict) -> str:
 # The run
 # ─────────────────────────────────────────────────────────────────────────────
 
-def apply_limit(cfg: dict, pps: int, burst: int, port: int, dry: bool) -> dict:
+def apply_limit(cfg: dict, pps: int, burst: int, port: int, dry: bool, what: str = WHAT_INBOUND) -> dict:
+    """
+    Move whichever limit this run is about.
+
+    `both` moves the reply budget with the receive limit rather than instead of it, because capping
+    what arrives without capping what is answered only moves the problem to the transmit path — which
+    is the half that makes the whole machine unreachable.
+    """
     if dry:
         return {'ok': True, 'json': None, 'out': 'dry-run', 'rc': 0}
-    return run_helper(cfg, ['set', str(pps), str(burst), str(port)], timeout=60)
+    if what in (WHAT_INBOUND, WHAT_BOTH):
+        r = run_helper(cfg, ['set', str(pps), str(burst), str(port)], timeout=60)
+        if not r['ok']:
+            return r
+    if what in (WHAT_OUTBOUND, WHAT_BOTH):
+        out_pps = pps if what == WHAT_OUTBOUND else int(pps * OUTBOUND_HEADROOM)
+        r = run_helper(cfg, ['egress', str(out_pps)], timeout=60)
+        if not r['ok']:
+            return r
+    return {'ok': True, 'json': None, 'out': '', 'rc': 0}
 
 
 def restore(cfg: dict, dry: bool = False) -> dict:
@@ -345,6 +379,8 @@ def restore(cfg: dict, dry: bool = False) -> dict:
         r = run_helper(cfg, ['off'], timeout=60)
     else:
         r = run_helper(cfg, ['set', str(rec.get('pps')), str(rec.get('burst')), str(rec.get('port'))], timeout=60)
+    # The reply budget is restored whether or not this run moved it: a run that was cancelled between
+    # setting the two would otherwise leave one of them where it was put.
     if rec.get('egress_pps'):
         run_helper(cfg, ['egress', str(rec['egress_pps'])], timeout=60)
 
@@ -385,9 +421,17 @@ def run(args) -> int:
         state_update(phase='planning', baseline={'arriving_pps': arriving, 'at': baseline['at'],
                                                  'load': baseline.get('load'), 'softnet': baseline.get('softnet')})
 
-        plan = build_plan(arriving, current_limit, steps=int(args.steps))
+        # An outbound run is planned around the reply rate, not the arrival rate: they are different
+        # numbers and planning the wrong one would test a range the machine never operates in.
+        anchor = arriving
+        if args.what == WHAT_OUTBOUND:
+            sending = rate(first, baseline, 'egress_capped')
+            anchor = egress_pps or arriving
+            state_update(baseline_out={'capped_pps': sending})
+        plan = build_plan(anchor, current_limit if args.what != WHAT_OUTBOUND else egress_pps,
+                          steps=int(args.steps))
         dwell = max(30, int(args.dwell))
-        state_update(phase='running', plan=plan, dwell_s=dwell,
+        state_update(phase='running', plan=plan, dwell_s=dwell, what=args.what,
                      eta_s=len(plan) * dwell + 60)
 
         deadline = time.time() + min(HARD_DEADLINE_S, len(plan) * dwell + 600)
@@ -398,7 +442,7 @@ def run(args) -> int:
             if time.time() > deadline:
                 stopped = 'the run hit its deadline'
                 break
-            r = apply_limit(cfg, pps, current_burst, port, dry)
+            r = apply_limit(cfg, pps, current_burst, port, dry, args.what)
             if not r['ok'] and not dry:
                 stopped = 'could not set %d pps: %s' % (pps, r['out'][:160])
                 break
@@ -574,11 +618,70 @@ def self_test() -> int:
           busiest_share({'per_cpu': [5, 5]}, {'per_cpu': [5, 5]}) is None)
     check('mismatched readings yield nothing', busiest_share({'per_cpu': [1]}, {'per_cpu': [1, 2]}) is None)
 
+    # ── what it moves, and what it refuses to ──
+    calls = []
+
+    def fake_helper(cfg, args, timeout=30):
+        calls.append(list(args))
+        return {'ok': True, 'json': None, 'out': '', 'rc': 0}
+
+    real = globals()['run_helper']
+    globals()['run_helper'] = fake_helper
+    try:
+        calls.clear()
+        apply_limit({}, 100000, 100, 6969, False, WHAT_INBOUND)
+        check('an inbound run touches only the receive limit',
+              [c[0] for c in calls] == ['set'], calls)
+
+        calls.clear()
+        apply_limit({}, 100000, 100, 6969, False, WHAT_OUTBOUND)
+        check('an outbound run touches only the reply budget',
+              [c[0] for c in calls] == ['egress'], calls)
+
+        calls.clear()
+        apply_limit({}, 100000, 100, 6969, False, WHAT_BOTH)
+        check('a both run moves each of them once', [c[0] for c in calls] == ['set', 'egress'], calls)
+        check('and gives the reply budget headroom over the receive limit',
+              int(calls[1][1]) == int(100000 * OUTBOUND_HEADROOM), calls[1])
+
+        calls.clear()
+        apply_limit({}, 100000, 100, 6969, True, WHAT_BOTH)
+        check('a dry run touches NOTHING, whatever it was asked to move', calls == [], calls)
+
+        # The way back is written before the first step, and put back afterwards, including the
+        # budget this run may never have moved.
+        calls.clear()
+        state_write({'restore': {'mode': 'limit', 'pps': 80000, 'burst': 100, 'port': 6969,
+                                 'egress_pps': 110000}})
+        r = restore({})
+        check('restoring puts back both the limit and the reply budget',
+              [c[0] for c in calls] == ['set', 'egress'] and r['restored'] is True, calls)
+        check('and clears the marker, so it cannot be restored twice',
+              'restore' not in state_read())
+        calls.clear()
+        check('a second restore is a no-op', restore({})['restored'] is False and calls == [])
+
+        # A machine that was UNTHROTTLED before the run must end unthrottled, not at some limit.
+        calls.clear()
+        state_write({'restore': {'mode': 'off', 'pps': 0, 'burst': 100, 'port': 6969, 'egress_pps': 0}})
+        restore({})
+        check('a machine that had no limit before the run gets none after it',
+              [c[0] for c in calls] == ['off'], calls)
+    finally:
+        globals()['run_helper'] = real
+        state_write({})
+
+    # ── the plan is bounded ──
+    for arriving, current in [(0, 0), (1, 0), (10 ** 9, 10 ** 9)]:
+        pl = build_plan(arriving, current, steps=6)
+        check('a plan is always ascending and positive (%s/%s)' % (arriving, current),
+              len(pl) == 6 and all(x > 0 for x in pl) and pl == sorted(pl), pl)
+
     # ── the way back ──
     check('restore with nothing recorded does nothing and says so',
           restore({}, dry=True)['restored'] is False)
 
-    print('\n%d checks, %d failed' % (26, fails[0]))
+    print('\n%d checks, %d failed' % (38, fails[0]))
     return 1 if fails[0] else 0
 
 
@@ -591,6 +694,9 @@ def main() -> int:
     ap.add_argument('--self-test', action='store_true', help='check the properties, touching nothing')
     ap.add_argument('--steps', default=6, type=int, help='how many limits to try (default 6)')
     ap.add_argument('--dwell', default=DEFAULT_DWELL_S, type=int, help='seconds to hold each step (default 180)')
+    ap.add_argument('--what', default=WHAT_INBOUND, choices=[WHAT_INBOUND, WHAT_OUTBOUND, WHAT_BOTH],
+                    help='which limit to move (default inbound). Buffers are never ramped — see the '
+                         'note at the top of this file.')
     a = ap.parse_args()
 
     if a.self_test:

@@ -143,10 +143,35 @@ check('series 7d: 5m table (10080 raw points > cap)', $s7['table'] === '5m' && $
 check('series 7d: 36 bucket points, avg values, mode from wl_share', $s7['points'] === 36 && $s7['seeds'][0] === 302 && $s7['mode'][12] === 1 && $s7['mode'][0] === 0, json_encode([$s7['points'], $s7['seeds'][0] ?? null]));
 $s14 = statsTimelineSeries($db, $modeCfg, 14 * 86400, $nowS);
 check('series 14d: 5m table (4032 ≤ cap)', $s14['table'] === '5m');
+// The property is the POINT COUNT, not which table happens to serve it.
+//
+// These used to assert "30d is always the hourly table", which encoded the old rule: the resolution
+// was picked from the nominal range, so a one-month window dropped to hourly even on a machine whose
+// history was eight days old. The chart fell from 2 382 points at two weeks to 198 at one month and
+// looked like the panel was discarding data that was never there. What actually matters is that the
+// answer stays under the cap while giving the finest resolution the stored data supports.
 $s30 = statsTimelineSeries($db, $modeCfg, 30 * 86400, $nowS);
-check('series 30d: 1h table, 3 points', $s30['table'] === '1h' && $s30['points'] === 3);
+check('series 30d: stays within the point cap', $s30['points'] <= ST_MAX_5M_POINTS, (string)$s30['points']);
+check('series 30d: with only a few buckets stored, it does NOT fall back to hourly',
+      $s30['table'] === '5m', $s30['table'] . ' / ' . $s30['points'] . ' points');
 $s60 = statsTimelineSeries($db, $modeCfg, 60 * 86400, $nowS);
-check('series 60d: 1h table', $s60['table'] === '1h');
+check('series 60d: also within the cap', $s60['points'] <= ST_MAX_5M_POINTS, (string)$s60['points']);
+
+// …and the other direction. Tested by asking the decision function itself rather than by inserting
+// four and a half thousand rows into the table the rest of this suite is reading: the row count is
+// the INPUT to the decision, and filling a shared table to produce it left those rows behind for
+// every check that followed.
+//
+// With no database handle there is nothing to count, so the nominal rule applies — which is exactly
+// what a real month of five-minute history would also produce, because then the count agrees with it.
+$nominal = statsTimelineChooseTable($modeCfg, 30 * 86400, null, $nowS);
+check('without a row count to consult, a month falls back to hourly as before',
+      $nominal[2] === '1h', $nominal[2]);
+$withData = statsTimelineChooseTable($modeCfg, 30 * 86400, $db, $nowS);
+check('with a row count, the same month keeps five-minute detail while the data is sparse',
+      $withData[2] === '5m', $withData[2]);
+check('and a range beyond the retention window is hourly whatever the count says',
+      statsTimelineChooseTable(['stats_timeline_keep_days' => '7'] + $modeCfg, 30 * 86400, $db, $nowS)[2] === '1h');
 // interval 30 s → 24 h = 2880 raw points (≤ 3000) still raw; raw_days 1 with 7 d range → 5m
 check('choose: 24h @30s → raw', statsTimelineChooseTable(['stats_timeline_interval' => '30'] + $modeCfg, 86400)[2] === 'raw');
 check('choose: 7d @ raw_days=1 → 5m', statsTimelineChooseTable(['stats_timeline_raw_days' => '1'] + $modeCfg, 7 * 86400)[2] === '5m');

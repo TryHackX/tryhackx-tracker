@@ -50,6 +50,9 @@
 
         const g = $('tn-grid');
         g.textContent = '';
+        g.appendChild(kv('Moving', [el('span', { text: {
+            inbound: 'the receive limit', outbound: 'the reply budget', both: 'both together',
+        }[state.what] || 'the receive limit' })]));
         g.appendChild(kv('State', [
             el('span', { className: 'wl-badge ' + (state.running ? 'wl-b-warn' : 'wl-b-muted'),
                          text: state.running ? (state.phase || 'running') : (state.phase || 'idle') }),
@@ -167,7 +170,8 @@
         const pw = await promptPassword('Stability probe', 'Confirm with the admin password.');
         if (!pw) return;
         const r = await apiCall('admin/tuner', 'POST',
-            { op: 'start', dry_run: !!dry, steps: 6, dwell: dry ? 30 : 180, password: pw });
+            { op: 'start', dry_run: !!dry, steps: 6, dwell: dry ? 30 : 180,
+              what: $('tn-what').value, password: pw });
         showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
         load();
     }
