@@ -27,10 +27,24 @@ foreach (BACKUP_PROFILES as $pid) {
     ];
 }
 
+// How big the database actually is, so an archive size can be judged instead of guessed at.
+//
+// This exists because of a real doubt: a "back up everything" run produced a 158 MB file on a
+// machine whose database is 3.3 GB, and that reads as "it only did part of it". It did not — hex
+// hashes and repetitive names compress about twenty-fold — but the panel was showing a number with
+// nothing to compare it to. Now it shows both.
+$dbBytes = 0;
+try {
+    $dbBytes = (int)$db->query(
+        "SELECT SUM(DATA_LENGTH + INDEX_LENGTH) FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = DATABASE()")->fetchColumn();
+} catch (\Throwable $e) { /* a listing that cannot size the database still lists */ }
+
 $out = [
     'ok'          => true,
     'server_time' => $now,
     'profiles'    => $profiles,
+    'db_bytes'    => $dbBytes,
     'configured'  => [
         'enabled'      => backupEnabled($cfg),
         'dir'          => $dir,

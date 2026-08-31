@@ -179,7 +179,7 @@ def read_socket_drops(port: int) -> dict:
 
 
 def read_softnet() -> dict:
-    """Per-CPU processed/dropped, and how concentrated the processing is."""
+    """Per-CPU processed/dropped. The per-core numbers are kept so a SHARE can be computed later."""
     try:
         with open('/proc/net/softnet_stat', 'r', encoding='utf-8') as fh:
             rows = [ln.split() for ln in fh.read().strip().splitlines()]
@@ -187,10 +187,28 @@ def read_softnet() -> dict:
         return {}
     processed = [int(r[0], 16) for r in rows if r]
     dropped = [int(r[1], 16) for r in rows if r]
-    total = sum(processed) or 1
     return {'processed': sum(processed), 'dropped': sum(dropped),
-            'busiest_share': max(processed) / total if processed else None,
-            'cpus': len(processed)}
+            'per_cpu': processed, 'cpus': len(processed)}
+
+
+def busiest_share(a: dict, b: dict):
+    """
+    How concentrated packet processing was BETWEEN two samples.
+
+    The counters in /proc/net/softnet_stat are cumulative since boot, so the lifetime share is
+    dominated by whatever the machine did last month. It reported 0.95 here even in the minute after
+    RPS had spread the work evenly across six cores — a number that cannot show a change is not a
+    measurement of the present. The delta can.
+    """
+    pa = (a or {}).get('per_cpu') or []
+    pb = (b or {}).get('per_cpu') or []
+    if len(pa) != len(pb) or not pa:
+        return None
+    deltas = [max(0, y - x) for x, y in zip(pa, pb)]
+    total = sum(deltas)
+    if total <= 0:
+        return None
+    return max(deltas) / total
 
 
 def read_load() -> dict:
@@ -209,15 +227,23 @@ def sample(cfg: dict, port: int) -> dict:
     if st['json']:
         j = st['json']
         counters = j.get('counters') or {}
+
         def pkt(name):
             c = counters.get(name)
             return int(c.get('packets', 0)) if isinstance(c, dict) else None
+
+        # The helper's own names, read from its output rather than guessed. The first version invented
+        # arrived/served/dropped, which do not exist, so every one of these came back None and the
+        # report had nothing but load in it — a probe measuring the one thing it was not built for.
         s['limit_pps'] = j.get('pps')
-        s['arrived'] = pkt('arrived')
-        s['served'] = pkt('served')
-        s['dropped'] = pkt('dropped')
+        s['arrived'] = pkt('in_total')
+        s['served'] = pkt('in_passed')
+        s['dropped'] = pkt('in_capped')
         eg = j.get('egress') or {}
         s['egress_pps'] = eg.get('pps')
+        egc = eg.get('counters') or {}
+        ec = egc.get('capped')
+        s['egress_capped'] = int(ec.get('packets', 0)) if isinstance(ec, dict) else None
     s['sockets'] = read_socket_drops(port)
     s['softnet'] = read_softnet()
     s['load'] = read_load()
@@ -396,7 +422,7 @@ def run(args) -> int:
                 'served_pps': rate(step_start, last, 'served'),
                 'dropped_pps': rate(step_start, last, 'dropped'),
                 'load_per_core': (last.get('load') or {}).get('per_core'),
-                'busiest_core_share': (last.get('softnet') or {}).get('busiest_share'),
+                'busiest_core_share': busiest_share(step_start.get('softnet'), last.get('softnet')),
                 'samples': len(samples),
                 'harm': reason,
                 'ok': reason == '',
@@ -538,11 +564,21 @@ def self_test() -> int:
     check('every suggestion is a value that was actually held',
           rep['suggested_safe'] in [s['limit_pps'] for s in steps])
 
+    # ── the share is of the interval, not of all history ──
+    a = {'per_cpu': [100, 100, 1000]}
+    b = {'per_cpu': [200, 200, 1010]}      # this interval: 100, 100, 10 -> busiest is 100/210
+    got = busiest_share(a, b)
+    check('the busiest-core share is measured over the interval, not since boot',
+          got is not None and abs(got - (100 / 210)) < 1e-9, got)
+    check('a quiet interval yields nothing rather than a made-up share',
+          busiest_share({'per_cpu': [5, 5]}, {'per_cpu': [5, 5]}) is None)
+    check('mismatched readings yield nothing', busiest_share({'per_cpu': [1]}, {'per_cpu': [1, 2]}) is None)
+
     # ── the way back ──
     check('restore with nothing recorded does nothing and says so',
           restore({}, dry=True)['restored'] is False)
 
-    print('\n%d checks, %d failed' % (23, fails[0]))
+    print('\n%d checks, %d failed' % (26, fails[0]))
     return 1 if fails[0] else 0
 
 

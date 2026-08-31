@@ -242,8 +242,22 @@
                 el('td', {}, [el('span', { text: when(a.ts) }),
                               el('div', { className: 'wl-small text-muted', text: a.ts ? fmtAgo(Math.floor(j.server_time - a.ts)) + ' ago' : '' })]),
                 el('td', {}, [el('span', { text: a.profile || (a.mode === 'builtin' ? 'database only' : '—') }),
+                    // The built-in dump names every file tracker-db-*, whatever profile made it, so
+                    // the filename contradicts the choice. The items are the truth and are shown here.
+                    a.items ? el('div', { className: 'wl-small text-muted', title: a.items,
+                                          text: includesFullDb(a) ? 'full database + files' : String(a.items).split(',').length + ' items' }) : '',
                               a.mode === 'builtin' ? el('div', { className: 'wl-small text-warning', text: 'built-in dump' }) : null]),
-                el('td', { text: bytes(a.size || 0) }),
+                el('td', {}, [
+                    el('span', { text: bytes(a.size || 0) }),
+                    // An archive that holds the whole database looks alarmingly small next to it, so
+                    // the ratio is shown rather than left for the reader to doubt.
+                    (a.size && state.status && state.status.db_bytes && includesFullDb(a))
+                        ? el('div', { className: 'wl-small text-muted',
+                                      title: 'The database is ' + bytes(state.status.db_bytes)
+                                           + ' on disk; this archive is gzipped',
+                                      text: '≈' + Math.round(state.status.db_bytes / a.size) + '× compressed' })
+                        : '',
+                ]),
                 el('td', {}, [el('span', { className: 'wl-small text-muted', text: a.items || (a.mode === 'builtin' ? 'tracker database' : '—') })]),
                 el('td', {}, integrity),
                 el('td', { className: 'th-actions' }, [acts]),
@@ -252,6 +266,12 @@
     }
 
     // ── actions ──────────────────────────────────────────────────────────────
+    /** Does this archive's item list include the FULL database (not the light dump)? */
+    function includesFullDb(a) {
+        const items = String(a.items || '');
+        return items.indexOf('tracker-db') !== -1 && items.indexOf('tracker-db-lekka') === -1;
+    }
+
     const COPY = {
         run: {
             title: 'Make a backup now', ok: 'Back up now', cls: 'btn-outline-success',

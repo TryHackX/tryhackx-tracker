@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.22.1] — 2026-08-31
+
+### Added — the fetched-hash history really can be rebuilt
+
+`index_hashes.meta_fetched_at` records when each hash's metadata was resolved, so the value that
+would have been sampled at any past moment is a fact the database still holds: how many rows have a
+fetch time at or before it. `tools/backfill_fetched.php` walks both lists once with a pointer rather
+than running ten thousand COUNTs, and fills only where the value is NULL — a real measurement is
+never overwritten by a reconstruction.
+
+Run on production: **12,346 points rebuilt**, the curve now running from 4,931 on 24 August to 57,002
+on 31 August instead of a flat nothing. 95 points from before the first recorded fetch were left
+empty on purpose: "nobody had fetched anything yet" is a claim that data cannot support either.
+
+Stated where it is written down, and worth repeating: the rebuild counts hashes that are *still*
+resolved today, so it is a **lower bound** on what the real curve was.
+
+### Fixed — the stability probe was measuring the one thing it was not built for
+
+Its first version invented the netlimit counter names (`arrived`/`served`/`dropped`); the helper calls
+them `in_total`/`in_passed`/`in_capped`. Every traffic figure came back empty and the report contained
+nothing but load. Caught by rehearsing it on the real machine rather than by reading it.
+
+The busiest-core share was also being taken from the lifetime counters, so it read 0.95 even in the
+minute *after* the work had been spread evenly across six cores. A number that cannot show a change is
+not a measurement of the present; it is now the delta between two samples.
+
+### Fixed — an archive that holds everything looked as though it did not
+
+A "back up everything" run produced a 158 MB file on a machine whose database is 3.3 GB, and the
+built-in dump names every archive `tracker-db-*` whatever profile made it — so the filename
+contradicted the choice. The archive was complete (verified by reading it: `index_hashes` is in there,
+716 MB of it uncompressed). The list now shows what each archive actually contains and how far it
+compressed, so the size can be judged instead of doubted.
+
 ## [1.22.0] — 2026-08-31 (schema v27 + v28 + v29)
 
 ### Added — an audit log
