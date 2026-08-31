@@ -2,7 +2,7 @@
 /**
  * The stability probe, from the panel's side.
  *
- * The work is worker/tuner.py; this file is only the contract between the panel and it: one state
+ * The work is tools/tuner.py; this file is only the contract between the panel and it: one state
  * file, written atomically by whichever of them is acting. The panel never starts a long process from
  * a web request — it records that one was ASKED FOR, and the janitor starts it on its next tick. That
  * is the same shape the deferred sysctl writes use, and it means the tuner needs no new root path:
@@ -56,7 +56,7 @@ function tunerStatus(array $cfg): array {
     $alive = tunerIsAlive($st);
     return [
         'enabled'    => tunerEnabled($cfg),
-        'available'  => is_file(__DIR__ . '/../worker/tuner.py'),
+        'available'  => is_file(__DIR__ . '/../tools/tuner.py'),
         'running'    => $alive,
         'requested'  => !empty($st['requested']) && !$alive,
         'stale'      => !empty($st['running']) && !$alive,
@@ -120,7 +120,7 @@ function tunerSpawn(array $cfg): array {
     $python = trim((string)($cfg['tuner_python'] ?? 'python3'));
     if (!preg_match('#^[A-Za-z0-9 _./-]{1,120}$#', $python)) $python = 'python3';
 
-    $script = escapeshellarg(__DIR__ . '/../worker/tuner.py');
+    $script = escapeshellarg(__DIR__ . '/../tools/tuner.py');
     $args = ' --run --steps ' . (int)$req['steps'] . ' --dwell ' . (int)$req['dwell']
           . (!empty($req['dry_run']) ? ' --dry-run' : '');
     $cmd = $python . ' ' . $script . $args . ' > /dev/null 2>&1 &';
@@ -143,6 +143,6 @@ function tunerReap(array $cfg): array {
     if (!function_exists('trackerExecAvailable') || !trackerExecAvailable()) return ['reaped' => false];
     $python = trim((string)($cfg['tuner_python'] ?? 'python3'));
     if (!preg_match('#^[A-Za-z0-9 _./-]{1,120}$#', $python)) $python = 'python3';
-    @exec($python . ' ' . escapeshellarg(__DIR__ . '/../worker/tuner.py') . ' --restore 2>&1', $out, $rc);
+    @exec($python . ' ' . escapeshellarg(__DIR__ . '/../tools/tuner.py') . ' --restore 2>&1', $out, $rc);
     return ['reaped' => true, 'rc' => $rc, 'out' => implode(' ', array_slice($out, 0, 3))];
 }

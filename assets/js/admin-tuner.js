@@ -86,7 +86,7 @@
             note.textContent = 'The last run failed: ' + state.error;
         } else if (!state.available) {
             note.className = 'nl-note nl-note-warn';
-            note.textContent = 'worker/tuner.py is not on this server, so there is nothing to start.';
+            note.textContent = 'tools/tuner.py is not on this server, so there is nothing to start.';
         } else {
             note.className = 'nl-note nl-note-info';
             note.textContent = 'Each step holds a limit for a few minutes and watches what happens — to the tracker '

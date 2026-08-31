@@ -841,7 +841,7 @@
                     <div class="col-md-4" data-setting="tuner_python">
                         <label class="form-label">Python command</label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="tuner_python" value="<?= sanitize($cfg['tuner_python'] ?? 'python3') ?>" placeholder="python3">
-                        <small class="settings-hint">What the janitor runs <code>worker/tuner.py</code> with. Letters, digits and <code>_ . / -</code> only.</small>
+                        <small class="settings-hint">What the janitor runs <code>tools/tuner.py</code> with. Letters, digits and <code>_ . / -</code> only.</small>
                     </div>
                 </div>
             </div>

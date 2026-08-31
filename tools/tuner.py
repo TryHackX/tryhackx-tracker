@@ -32,10 +32,14 @@ THE THREE RULES IT IS BUILT AROUND
 
 RUNNING IT
 ----------
-    python3 worker/tuner.py --run            # normally started by the janitor from a panel request
-    python3 worker/tuner.py --dry-run        # walks the plan, changes nothing, useful anywhere
-    python3 worker/tuner.py --restore        # put the recorded settings back and clear the marker
-    python3 worker/tuner.py --status         # print the state file
+    python3 tools/tuner.py --run            # normally started by the janitor from a panel request
+    python3 tools/tuner.py --dry-run        # walks the plan, changes nothing, useful anywhere
+    python3 tools/tuner.py --restore        # put the recorded settings back and clear the marker
+    python3 tools/tuner.py --self-test      # check its properties, touching nothing
+
+It lives beside janitor.php in tools/ rather than in worker/ because worker/ is the METADATA worker's
+directory and is deployed to a different machine path; this runs from the web root, where the janitor
+that starts it also runs.
 
 Cross-platform on purpose: on anything that is not Linux it runs in dry-run and fabricates nothing —
 the samples come back marked unavailable rather than as zeros, because a zero that means "no reading"
