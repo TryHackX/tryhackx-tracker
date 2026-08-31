@@ -268,5 +268,29 @@ check('JS CUSTOM_STOPS mirrors the PHP stop list', (bool)preg_match('/const CUST
 foreach ([ST_RAW_TABLE, ST_5M_TABLE, ST_1H_TABLE] as $t) $db->exec("TRUNCATE TABLE `$t`");
 @unlink(statsTimelineStateFile());
 
+/* == "fetched hashes" travels the whole way, not just into the chart file == */
+//
+// A series is four things that have to agree: a column on three tables, a value in the sampler, a
+// key in the payload, and an entry in the chart. Checking only the last one is how a chart ends up
+// drawing a flat zero and nobody notices for a month.
+
+foreach (['stats_samples', 'stats_samples_5m', 'stats_samples_1h'] as $tbl) {
+    check("$tbl has index_fetched", schemaColumnExists($db, $tbl, 'index_fetched'));
+}
+
+$row = statsTimelineRowFromParsed($db, $cfg, ['torrents' => 5, 'peers' => 9, 'seeds' => 4,
+    'completed' => 1, 'uptime_seconds' => 60, 'connections' => []], time());
+check('the sampler produces index_fetched', array_key_exists('index_fetched', $row));
+check('and it is a count, not a flag', is_int($row['index_fetched']) && $row['index_fetched'] >= 0);
+
+$payload = statsTimelineSeries($db, $cfg, 3600, time());
+check('the payload carries the index_fetched series', array_key_exists('index_fetched', $payload));
+check('and it is the same length as every other series',
+      count($payload['index_fetched'] ?? []) === count($payload['t'] ?? []));
+
+$js = (string)file_get_contents($root . '/assets/js/stats-timeline.js');
+check('the chart declares the series and leaves it off by default',
+      preg_match("/key: 'index_fetched'.*?on: false/s", $js) === 1);
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

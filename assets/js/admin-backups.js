@@ -257,9 +257,10 @@
             title: 'Make a backup now', ok: 'Back up now', cls: 'btn-outline-success',
             text: () => {
                 const c = (state.status && state.status.configured) || {};
-                return 'Runs the "' + (c.profile_label || c.profile || 'configured') + '" profile into ' + (c.dir || 'the backup directory') +
+                return 'Writes into ' + (c.dir || 'the backup directory') +
                        (c.nice !== undefined ? ', niced to ' + c.nice + ' so it does not fight the tracker for disk' : '') +
-                       '. It continues on the server even if you close this page.';
+                       '. It continues on the server even if you close this page. Choosing a profile here '
+                       + 'affects this run only — the schedule keeps whatever Settings says.';
             },
         },
         cancel: { title: 'Cancel the running backup', ok: 'Stop it', cls: 'btn-outline-warning',
@@ -300,6 +301,26 @@
             el('span', { text: 'Archive: ' }), el('code', { text: state.pending.id })]));
         if (state.pending.items) extra.appendChild(el('div', { className: 'wl-small text-muted mb-2' }, [
             el('span', { text: 'Items: ' }), el('code', { text: state.pending.items })]));
+        // The profile picker appears for a manual run only. Every other operation acts on an archive
+        // that already exists, where "what to back up" is a question about the past.
+        const profRow = $('bk-confirm-profile-row');
+        const profSel = $('bk-confirm-profile');
+        profRow.classList.toggle('d-hidden', op !== 'run');
+        if (op === 'run') {
+            const cfgNow = (state.status && state.status.configured) || {};
+            const list = (state.status && state.status.profiles) || [];
+            profSel.textContent = '';
+            list.forEach(pr => profSel.appendChild(el('option', {
+                value: pr.id, text: pr.label + (pr.id === cfgNow.profile ? ' — configured' : '') })));
+            profSel.value = cfgNow.profile || (list[0] && list[0].id) || '';
+            const hint = $('bk-confirm-profile-hint');
+            const describe = () => {
+                const chosen = list.find(x => x.id === profSel.value);
+                hint.textContent = (chosen && chosen.hint) || '';
+            };
+            profSel.onchange = describe;
+            describe();
+        }
         $('bk-confirm-name-row').classList.toggle('d-hidden', !c.needsName);
         $('bk-confirm-name').value = '';
         if (c.needsName) $('bk-confirm-name').placeholder = state.dbName;
@@ -328,6 +349,12 @@
         const body = { op: p.op, password: $('bk-confirm-password').value };
         if (p.id) body.id = p.id;
         if (p.items) body.items = p.items;
+        // Send the profile only for a run, and only when it differs from nothing — the endpoint
+        // already falls back to the configured one for an empty value.
+        if (p.op === 'run') {
+            const chosen = $('bk-confirm-profile').value;
+            if (chosen) body.profile = chosen;
+        }
         if (p.dry_run) body.dry_run = true;
         if (p.op === 'restore-db') { body.db = state.dbName; body.confirm = $('bk-confirm-name').value.trim(); }
 

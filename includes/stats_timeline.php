@@ -281,6 +281,14 @@ function statsTimelineRowFromParsed(PDO $db, array $cfg, array $p, int $now): ar
     try { $wl = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 0")->fetchColumn(); } catch (\Throwable $e) {}
     $idx = 0;
     if (function_exists('indexRowsCount')) { try { $idx = (int)indexRowsCount($db); } catch (\Throwable $e) {} }
+    // How many of those have a name and a file list. Drawn beside the total so the gap between the
+    // two lines IS the backlog — which is the question people actually ask of this chart, and which
+    // the queue depth alone cannot answer once the queue has been drained and refilled.
+    // meta_status is indexed; this is a counted lookup, not a scan of the 2.5 M rows.
+    $idxFetched = 0;
+    try {
+        $idxFetched = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status = 'done'")->fetchColumn();
+    } catch (\Throwable $e) {}
     $peers = max(0, (int)($p['peers'] ?? 0));
     $seeds = max(0, (int)($p['seeds'] ?? 0));
     return [
@@ -297,6 +305,7 @@ function statsTimelineRowFromParsed(PDO $db, array $cfg, array $p, int $now): ar
         'mode' => trackerMode($cfg),
         'whitelist_count' => $wl,
         'index_rows' => $idx,
+        'index_fetched' => $idxFetched,
     ];
 }
 
@@ -369,11 +378,11 @@ function statsTimelineRollupTable(PDO $db, int $bucket, string $table, array &$s
     $to = min($end, $until + $bucket * ST_ROLLUP_MAX_BUCKETS);
     $sql = "INSERT INTO `$table` (ts, samples, torrents_avg, torrents_min, torrents_max, peers_avg, peers_min, peers_max,
                 seeds_avg, seeds_min, seeds_max, leechers_avg, leechers_min, leechers_max, completed, udp_announces, tcp_announces,
-                connects, scrapes, uptime, wl_share, whitelist_count, index_rows)
+                connects, scrapes, uptime, wl_share, whitelist_count, index_rows, index_fetched)
             SELECT FLOOR(ts / $bucket) * $bucket AS b, COUNT(*), ROUND(AVG(torrents)), MIN(torrents), MAX(torrents),
                 ROUND(AVG(peers)), MIN(peers), MAX(peers), ROUND(AVG(seeds)), MIN(seeds), MAX(seeds),
                 ROUND(AVG(leechers)), MIN(leechers), MAX(leechers), MAX(completed), MAX(udp_announces), MAX(tcp_announces),
-                MAX(connects), MAX(scrapes), MAX(uptime), ROUND(AVG(mode = 'whitelist') * 100), MAX(whitelist_count), MAX(index_rows)
+                MAX(connects), MAX(scrapes), MAX(uptime), ROUND(AVG(mode = 'whitelist') * 100), MAX(whitelist_count), MAX(index_rows), MAX(index_fetched)
             FROM `" . ST_RAW_TABLE . "` WHERE ts >= ? AND ts < ? GROUP BY b
             ON DUPLICATE KEY UPDATE samples = VALUES(samples), torrents_avg = VALUES(torrents_avg), torrents_min = VALUES(torrents_min),
                 torrents_max = VALUES(torrents_max), peers_avg = VALUES(peers_avg), peers_min = VALUES(peers_min), peers_max = VALUES(peers_max),
@@ -381,7 +390,7 @@ function statsTimelineRollupTable(PDO $db, int $bucket, string $table, array &$s
                 leechers_min = VALUES(leechers_min), leechers_max = VALUES(leechers_max), completed = VALUES(completed),
                 udp_announces = VALUES(udp_announces), tcp_announces = VALUES(tcp_announces), connects = VALUES(connects),
                 scrapes = VALUES(scrapes), uptime = VALUES(uptime), wl_share = VALUES(wl_share), whitelist_count = VALUES(whitelist_count),
-                index_rows = VALUES(index_rows)";
+                index_rows = VALUES(index_rows), index_fetched = VALUES(index_fetched)";
     $st = $db->prepare($sql);
     $st->execute([$until, $to]);
     $n = intdiv($to - $until, $bucket);
@@ -576,15 +585,15 @@ function statsTimelineSeries(PDO $db, array $cfg, int $rangeSec, ?int $now = nul
     }
     if ($kind === 'raw') {
         $sql = "SELECT ts, torrents, peers, seeds, leechers, completed, udp_announces, tcp_announces, connects, scrapes, uptime,
-                       (mode = 'whitelist') AS wl, whitelist_count, index_rows FROM `$table` WHERE ts >= ? AND ts <= ?$decimate ORDER BY ts";
+                       (mode = 'whitelist') AS wl, whitelist_count, index_rows, index_fetched FROM `$table` WHERE ts >= ? AND ts <= ?$decimate ORDER BY ts";
     } else {
         $sql = "SELECT ts, torrents_avg AS torrents, peers_avg AS peers, seeds_avg AS seeds, leechers_avg AS leechers, completed,
-                       udp_announces, tcp_announces, connects, scrapes, uptime, (wl_share >= 50) AS wl, whitelist_count, index_rows
+                       udp_announces, tcp_announces, connects, scrapes, uptime, (wl_share >= 50) AS wl, whitelist_count, index_rows, index_fetched
                 FROM `$table` WHERE ts >= ? AND ts <= ?$decimate ORDER BY ts";
     }
     $st = $db->prepare($sql);
     $st->execute([$from, $to]);
-    $keys = ['t', 'torrents', 'peers', 'seeds', 'leechers', 'completed', 'whitelist_count', 'index_rows', 'mode', 'udp_rps', 'tcp_rps', 'scrape_rps', 'connect_rps'];
+    $keys = ['t', 'torrents', 'peers', 'seeds', 'leechers', 'completed', 'whitelist_count', 'index_rows', 'index_fetched', 'mode', 'udp_rps', 'tcp_rps', 'scrape_rps', 'connect_rps'];
     $out = array_fill_keys($keys, []);
     $prev = null;
     $rows = 0;
@@ -607,6 +616,7 @@ function statsTimelineSeries(PDO $db, array $cfg, int $rangeSec, ?int $now = nul
         $out['completed'][] = (int)$r['completed'];
         $out['whitelist_count'][] = (int)$r['whitelist_count'];
         $out['index_rows'][] = (int)$r['index_rows'];
+        $out['index_fetched'][] = (int)($r['index_fetched'] ?? 0);
         $out['mode'][] = (int)$r['wl'] ? 1 : 0;
         $rates = [null, null, null, null];
         if ($prev !== null) {

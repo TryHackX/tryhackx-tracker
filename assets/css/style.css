@@ -1756,7 +1756,16 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .search-actions { white-space: nowrap; }
 /* The cell lays the buttons out, so a set that does not fit wraps onto a second line inside the
    column instead of spilling over the one beside it. */
-.search-c-actions-cell { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+/* The flex belongs to a wrapper INSIDE the cell, never to the cell itself.
+   `td { display: flex }` stops the cell being a table cell: it no longer stretches to the row's
+   height, so as soon as a long name wrapped to a second line the buttons stayed at their own height
+   and sat across the row's divider. The cell stays a cell; the div inside it does the laying out. */
+.search-c-actions-cell { vertical-align: middle; }
+.search-c-actions-inner { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+/* Every cell in the row lines up on the same baseline, so a two-line name does not leave the numeric
+   columns floating in the middle of it. */
+.search-table td { vertical-align: top; }
+.search-table td.search-c-actions-cell { vertical-align: middle; }
 .search-act-btn { min-width: 4.2em; text-align: center; padding: 0.25rem 0.4rem; }
 .search-act-btn.copied { color: var(--success); border-color: var(--success); }
 .search-note { margin-top: 0.5rem; }

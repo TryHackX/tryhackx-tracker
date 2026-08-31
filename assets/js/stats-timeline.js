@@ -26,6 +26,9 @@
         { key: 'torrents',        label: 'Torrents',             color: '#b388ff', scale: 'torrents', on: true  },
         { key: 'whitelist_count', label: 'Whitelisted torrents', color: '#9e9e9e', scale: 'torrents', on: false },
         { key: 'index_rows',      label: 'Indexed hashes',       color: '#26a69a', scale: 'torrents', on: false },
+        // Off by default like the one above it. The gap between the two lines is the metadata
+        // backlog; drawn together they answer "is the worker keeping up" without any arithmetic.
+        { key: 'index_fetched',   label: 'Fetched hashes',       color: '#7e57c2', scale: 'torrents', on: false },
     ];
     const RATES = [
         { key: 'udp_rps',     label: 'UDP announces/s',  color: '#26c6da', on: true  },

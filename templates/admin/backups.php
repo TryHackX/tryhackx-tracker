@@ -102,6 +102,16 @@
                     <div id="bk-modal-extra"></div>
                     <form id="bk-confirm-form">
                         <!-- shown only for the database restore: the exact name has to be typed -->
+                        <!-- Which profile this one run uses. Settings decides what the SCHEDULE does;
+                             a backup somebody starts by hand is usually a different question ("dump
+                             the database before I touch it"), and making them edit the schedule to
+                             ask it is the wrong shape. Defaults to the configured profile, changes
+                             nothing in Settings. -->
+                        <div class="mb-3 d-hidden" id="bk-confirm-profile-row">
+                            <label class="form-label wl-small" for="bk-confirm-profile">What to back up</label>
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary" id="bk-confirm-profile"></select>
+                            <div class="wl-small text-muted mt-1" id="bk-confirm-profile-hint"></div>
+                        </div>
                         <div class="mb-3 d-hidden" id="bk-confirm-name-row">
                             <label class="form-label" style="font-size:0.85rem;color:#bbb;">Type the database name to confirm *</label>
                             <input type="text" class="form-control bg-dark text-light border-secondary" id="bk-confirm-name" autocomplete="off" spellcheck="false">

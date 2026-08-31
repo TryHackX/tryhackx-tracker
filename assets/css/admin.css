@@ -1693,3 +1693,41 @@ input[type="number"] {
 /* The mode tile carries two actions; they sit under the badges rather than beside them, because the
    mismatch line above them is the thing that must be read first. */
 .wl-mode-acts { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.45rem; }
+
+/* ── the custom checkbox, which the panel was using without having ──────────
+ *
+ * templates/admin/users.php marks up .search-check / .search-check-box, and every rule for them
+ * lived in style.css — the PUBLIC stylesheet, which no admin page loads. The result on screen was
+ * the browser's own checkbox (because the rule that hides the real <input> was missing too),
+ * followed by an empty <span>, followed by the label with nothing between them. That is the
+ * "checkboxes merged with the text" in the report.
+ *
+ * Duplicated here rather than moved, because the two stylesheets already carry their own sizes for
+ * shared primitives and the public page must not start depending on the admin one.
+ */
+.search-check { display: inline-flex; align-items: center; gap: 0.45rem; color: #9aa4b2; font-size: 0.85rem; cursor: pointer; user-select: none; }
+.search-check input { position: absolute; opacity: 0; width: 0; height: 0; }
+.search-check-box {
+    display: inline-block; width: 1rem; height: 1rem; flex: 0 0 auto;
+    border: 1px solid #3a4149; border-radius: 3px; background: #14181d;
+    position: relative; transition: border-color 0.15s, background 0.15s;
+}
+.search-check:hover .search-check-box { border-color: #4a9eff; }
+.search-check input:focus-visible + .search-check-box { outline: 2px solid #4a9eff; outline-offset: 1px; }
+.search-check input:checked + .search-check-box { background: #4a9eff; border-color: #4a9eff; }
+.search-check input:checked + .search-check-box::after {
+    content: ''; position: absolute; left: 0.28rem; top: 0.08rem;
+    width: 0.3rem; height: 0.55rem;
+    border: solid #0b0e12; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.search-check input:checked ~ * { color: #e9eef5; }
+
+/* The two "Send as" boxes sit on one line with the label above them; without a little breathing room
+   they read as one control with two ticks. */
+#bm-sendas { display: flex; gap: 1.1rem; flex-wrap: wrap; align-items: center; }
+.bm-tool-group { display: inline-flex; gap: 0.2rem; margin-right: 0.5rem; }
+.bm-tool-group[hidden] { display: none; }
+.bm-tools button[hidden] { display: none; }
+/* The action row wraps rather than clipping its labels — "Send one to me" is a long button and the
+   card is not always wide. */
+.bm-msg-head { row-gap: 0.35rem; }

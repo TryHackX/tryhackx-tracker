@@ -11,7 +11,10 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 25;  // 25 = panel permissions and a system `moderator` group: until
+const TRACKER_SCHEMA_VERSION = 26;  // 26 = the timeline also records how many indexed hashes have
+                                    // their metadata resolved, so "fetched" can be drawn beside
+                                    // "indexed" instead of inferred from the queue depth.
+                                    // 25 = panel permissions and a system `moderator` group: until
                                     // now the admin panel had no permissions at all, so the only two
                                     // states were owner and stranger.
                                     // 24 = grant the three permissions v1.19.0 registered but never
@@ -156,7 +159,8 @@ function trackerSchemaStatements(): array {
             `uptime` INT UNSIGNED NOT NULL DEFAULT 0,
             `mode` ENUM('whitelist','blacklist') NOT NULL DEFAULT 'blacklist',
             `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
-            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0
+            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_fetched` INT UNSIGNED NOT NULL DEFAULT 0
         ) $engine",
         "CREATE TABLE IF NOT EXISTS `stats_samples_5m` (
             `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
@@ -173,7 +177,8 @@ function trackerSchemaStatements(): array {
             `uptime` INT UNSIGNED NOT NULL DEFAULT 0,
             `wl_share` TINYINT UNSIGNED NOT NULL DEFAULT 0,
             `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
-            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0
+            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_fetched` INT UNSIGNED NOT NULL DEFAULT 0
         ) $engine",
         "CREATE TABLE IF NOT EXISTS `stats_samples_1h` (
             `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
@@ -190,7 +195,8 @@ function trackerSchemaStatements(): array {
             `uptime` INT UNSIGNED NOT NULL DEFAULT 0,
             `wl_share` TINYINT UNSIGNED NOT NULL DEFAULT 0,
             `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
-            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0
+            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_fetched` INT UNSIGNED NOT NULL DEFAULT 0
         ) $engine",
 
         // ── UDP traffic samples (schema v11, includes/netlimit.php): nftables counters turned into
@@ -628,6 +634,14 @@ function trackerSchemaGuardedStatements(PDO $db): array {
             $out[] = [$alter . ", ALGORITHM=INSTANT", $alter . ", ALGORITHM=INPLACE", $alter];
         } else {
             schemaDeferHeavy('index_hashes: ' . implode(', ', $rparts));
+        }
+    }
+
+    // v26: how many indexed hashes have their metadata resolved. Three small-to-medium tables; the
+    // raw one is the only sizeable one and an INT column is an instant add on it.
+    foreach (['stats_samples', 'stats_samples_5m', 'stats_samples_1h'] as $stTable) {
+        if (!schemaColumnExists($db, $stTable, 'index_fetched')) {
+            $out[] = "ALTER TABLE `$stTable` ADD COLUMN `index_fetched` INT UNSIGNED NOT NULL DEFAULT 0";
         }
     }
 

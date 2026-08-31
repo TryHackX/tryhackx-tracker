@@ -426,5 +426,30 @@ if ($bash === null || !trackerExecAvailable() || !is_file($helper)) {
     foreach (['/proc/net/core', '/proc/net/ipv4', '/proc/net', '/proc', '/sysctl.d', '/state', '/bin', ''] as $d) @rmdir($tmp . $d);
 }
 
+/* == a socket older than the setting that was meant to change it ========== */
+//
+// Measured on production: rmem_default raised to 8 MiB, the tracker socket still 208 KiB two days
+// later, and 43.6 million packets discarded by that undersized queue in the meantime. The verdict
+// fell through to "asks for its own size", which tells the operator the buffers are none of their
+// business -- the exact opposite of what to do. A receive buffer is fixed when the socket is OPENED,
+// so a live sysctl change reaches nothing that is already running.
+
+$stale = sysctlSocketVerdict(['socket' => ['rb' => 212992],
+                              'values' => ['rmem_max' => 8388608, 'rmem_default' => 8388608]]);
+check('a socket smaller than the current default reads as stale, not as a request',
+      !empty($stale['stale']) && ($stale['asks'] ?? true) === false, $stale['text'] ?? '');
+check('and the verdict names the restart as the fix',
+      stripos($stale['text'] ?? '', 'restart') !== false);
+
+$fresh = sysctlSocketVerdict(['socket' => ['rb' => 8388608],
+                              'values' => ['rmem_max' => 8388608, 'rmem_default' => 8388608]]);
+check('a socket at exactly the default reads as never asking',
+      ($fresh['asks'] ?? true) === false && empty($fresh['stale']), $fresh['text'] ?? '');
+
+$clamped = sysctlSocketVerdict(['socket' => ['rb' => 16777216],
+                                'values' => ['rmem_max' => 8388608, 'rmem_default' => 212992]]);
+check('a socket at twice the ceiling reads as asking and clamped',
+      ($clamped['asks'] ?? false) === true && empty($clamped['stale']));
+
 echo "\n$n checks, $fails failed" . ($skips ? ", $skips skipped" : '') . "\n";
 exit($fails > 0 ? 1 : 0);

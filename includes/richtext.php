@@ -350,9 +350,47 @@ function richtextEmoji(): array {
  * "I do not know who is looking" is "assume a guest": hidden content is then removed on the server
  * rather than delivered and hidden with CSS, which is a hint rather than a rule.
  */
-function richtextRender(?string $text, string $format, array $cfg, bool $signedIn = false): string {
+function richtextRender(?string $text, string $format, array $cfg, bool $signedIn = false, int $depth = 0): string {
     $text = (string)$text;
     if (trim($text) === '') return '';
+
+    // ── [hide] comes out FIRST, on the raw text, before any other rule exists ──
+    //
+    // It used to run near the end, and that was the wrong place for a reason worth writing down: by
+    // then other passes had already MOVED the author's text. A Markdown footnote defined inside a
+    // hidden block was lifted out and re-parked at the end of the document, outside the block, and
+    // served to guests in full — link live, image fetched. A greedy `[^\]]*` parameter in [color=…]
+    // swallowed the opener so the block never matched at all. A [code] fence around the whole thing
+    // hid the tokens from the rule that was supposed to act on them. Every one of those is the same
+    // mistake: a pass that decides WHAT MAY BE PUBLISHED must run before any pass that rearranges it.
+    //
+    // Guests do not get a placeholder standing in for text that is still in the string — the bytes
+    // are dropped here and never enter the pipeline. Members get the block rendered on its own, one
+    // level down, so markup inside it still works.
+    $hidden = [];
+    // An opener OR a closer: a description containing only `[/hide]` has no opener to match, and the
+    // first version skipped the whole block for that reason — so the unbalanced check never ran and
+    // the text in front of the stray closer was published.
+    if ($depth < 4 && preg_match('/\[\/?(?:hide|postshide)\b/i', $text)) {
+        $tag = '/\[(hide|postshide)(?:=[^\]]*)?\]((?:(?!\[(?:hide|postshide)[\]=])[\s\S])*?)\[\/\1\]/i';
+        for ($pass = 0; $pass < 16; $pass++) {
+            $before = $text;
+            $text = preg_replace_callback($tag, function ($m) use (&$hidden, $format, $cfg, $signedIn, $depth) {
+                $hidden[] = $signedIn
+                    ? '<div class="rt-hide">' . richtextRender($m[2], $format, $cfg, true, $depth + 1) . '</div>'
+                    : '<div class="rt-hide rt-hide-locked">Hidden — sign in to read this part.</div>';
+                return "\x01HIDE" . (count($hidden) - 1) . "\x01";
+            }, $text);
+            if ($text === $before) break;
+        }
+        // Unbalanced fences: nothing is published to a guest at all. A stray closer leaves the secret
+        // in FRONT of it, so truncating at the token is not enough — there is no reading of a broken
+        // fence that is safe, and the author is signed in and can see their own text to fix it.
+        if (!$signedIn && preg_match('/\[\/?(?:hide|postshide)\b/i', $text)) {
+            return '<div class="rt-hide rt-hide-locked">This description uses a hidden block whose tags '
+                 . 'are not balanced, so none of it is shown. Sign in, or ask the author to fix it.</div>';
+        }
+    }
 
     // Everything is escaped before a single rule runs. This one line is the whole security model.
     $s = htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -575,8 +613,19 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
             '<details class="rt-spoiler"><summary>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s);
         $s = preg_replace_callback('/!\[([^\]]*)\]\(([^)\s]+)\)/', function ($m) {
             $u = richtextSafeUrl(html_entity_decode($m[2], ENT_QUOTES, 'UTF-8'));
-            return $u === null ? '' : '<img class="rt-img" loading="lazy" referrerpolicy="no-referrer" alt="'
-                                    . $m[1] . '" src="' . htmlspecialchars($u, ENT_QUOTES, 'UTF-8') . '">';
+            if ($u === null) return '';
+            // The alt text is put through the escaper AGAIN, from scratch.
+            //
+            // It reaches here after the inline rules have run, so it can already contain real markup:
+            // `![<kbd>x</kbd>](…)` produced alt="<kbd>x</kbd>", whose raw `>` closed the <img> tag
+            // early and left the rest of the attribute loose in the document — the linkifier then
+            // built an <a> inside what had been the src. An attribute is text, so it is treated as
+            // text: tags stripped, entities decoded once, then escaped for an attribute.
+            $alt = htmlspecialchars(
+                html_entity_decode(strip_tags($m[1]), ENT_QUOTES, 'UTF-8'),
+                ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            return '<img class="rt-img" loading="lazy" referrerpolicy="no-referrer" alt="' . $alt
+                 . '" src="' . htmlspecialchars($u, ENT_QUOTES, 'UTF-8') . '">';
         }, $s);
         $s = preg_replace_callback('/\[([^\]]+)\]\(([^)\s]+)\)/', function ($m) use ($cfg) {
             $a = richtextLinkAttrs(html_entity_decode($m[2], ENT_QUOTES, 'UTF-8'), $cfg);
@@ -649,54 +698,26 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
         // harmless in itself, but an unbalanced tag is how a renderer starts closing elements the
         // author never opened. Requiring the pair means the only thing this can emit is exactly the
         // tag it names, with nothing between the angle brackets.
+        // Only OUTSIDE tags. This pass un-escapes `&lt;kbd&gt;` into a real tag, and it used to run
+        // over the whole string — including the inside of attributes that earlier rules had already
+        // built. `![<kbd>x</kbd>](url)` therefore ended up with a raw `>` in the middle of alt="…",
+        // which closed the <img> early and left the rest of the attribute loose in the document; the
+        // linkifier then built an <a> inside what had been the src. Splitting on tags first means the
+        // replacement can only ever touch text a reader sees, never markup.
         $allow = ['kbd', 'mark', 'ins', 'sub', 'sup', 'small', 'abbr'];
-        foreach ($allow as $tag) {
-            $s = preg_replace('/&lt;' . $tag . '&gt;(.*?)&lt;\/' . $tag . '&gt;/is',
-                              '<' . $tag . '>$1</' . $tag . '>', $s);
+        $parts = preg_split('/(<[^>]*>)/', $s, -1, PREG_SPLIT_DELIM_CAPTURE);
+        foreach ($parts as $i => $chunk) {
+            if ($i % 2 === 1) continue;                 // odd indexes are the tags themselves
+            foreach ($allow as $tag) {
+                $chunk = preg_replace('/&lt;' . $tag . '&gt;(.*?)&lt;\/' . $tag . '&gt;/is',
+                                      '<' . $tag . '>$1</' . $tag . '>', $chunk);
+            }
+            $parts[$i] = $chunk;
         }
+        $s = implode('', $parts);
     }
 
 
-
-    // ── content only signed-in visitors may read ──
-    //
-    // Removed on the SERVER, not hidden with CSS. "Hidden from guests" has to mean the bytes
-    // never leave the building; a display:none block is a hint, not a rule.
-    //
-    // The first version of this was a single lazy match with an alternation on the closing tag,
-    // and it FAILED OPEN. `[hide]a[hide]b[/hide] SECRET[/hide]` paired the outer opener with the
-    // INNER closer, so everything after it — SECRET — fell outside the match and was printed to
-    // guests verbatim, next to a placeholder claiming the content was hidden. The same happened
-    // with a stray `[/hide]`, with a `[/postshide]` closing a `[hide]`, and when a `[code]` block
-    // swallowed the real closing tag into the code stash. Every one of those is an ordinary
-    // authoring mistake, and the person who loses the secret is the author who most wanted it
-    // kept — which is the worst possible direction for this particular rule to fail in.
-    //
-    // So: innermost-outward, closer must match its own opener, and anything left unbalanced is
-    // treated as unreadable rather than published. Guessing wrong here costs a secret; guessing
-    // wrong the other way costs a paragraph.
-    $hideTag = '/\[(hide|postshide)(?:=[^\]]*)?\]((?:(?!\[(?:hide|postshide)[\]=])[\s\S])*?)\[\/\1\]/i';
-    for ($pass = 0; $pass < 16; $pass++) {
-        $before = $s;
-        $s = preg_replace_callback($hideTag,
-            fn($m) => $signedIn ? '<div class="rt-hide">' . $m[2] . '</div>'
-                                : '<div class="rt-hide rt-hide-locked">Hidden — sign in to read this part.</div>', $s);
-        if ($s === $before) break;
-    }
-    // Anything still carrying a hide token is unbalanced, and for a guest the WHOLE description
-    // is then withheld — not merely the part after the token.
-    //
-    // Truncating at the token was the obvious thing and it was still wrong: in
-    // `[hide]a[/hide] SECRET[/hide]` the leftover is a stray CLOSER and the secret sits BEFORE
-    // it. A stray closer says the author believed they were inside a hidden block; a stray
-    // opener says they believed they were entering one. Either way the fences no longer say
-    // where the private part begins, and there is no reading of a broken fence that is safe to
-    // publish. So nothing is published. The author is signed in and still sees their own text,
-    // which is exactly who needs to notice and fix it.
-    if (!$signedIn && preg_match('/\[\/?(?:hide|postshide)\b/i', $s)) {
-        $s = '<div class="rt-hide rt-hide-locked">This description uses a hidden block whose tags '
-           . 'are not balanced, so none of it is shown. Sign in, or ask the author to fix it.</div>';
-    }
 
     // Bare URLs, in both syntaxes. Somebody who pastes a link expects it to be one.
     //
@@ -720,53 +741,174 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
     }
 
     // Paragraphs and breaks, last, so block tags above are not wrapped in <br>.
-    $s = preg_replace('/\n{2,}/', "</p><p>", $s);
+    //
+    // A blank line becomes a marker rather than a </p><p> pair. Where those pairs actually belong is
+    // not knowable yet: the code and hidden blocks are still opaque placeholders, and a placeholder
+    // that turns out to be a <pre> must not end up inside a paragraph.
+    $s = preg_replace('/\n{2,}/', "\x02PARA\x02", $s);
     $s = str_replace("\n", '<br>', $s);
-    $s = '<p>' . $s . '</p>';
 
-    // Put the code back BEFORE tidying blocks. The stash placeholders are opaque text while the
-    // rules run -- which is the point -- but that also means the paragraph tidy-up cannot see that a
-    // placeholder is really a <pre>, and would leave it wrapped in a <p> it is not allowed inside.
+    // Put the stashed blocks back BEFORE paragraphs are decided, so the pass below sees real tags.
     foreach ($stash as $i => $html) {
         $s = str_replace("\x00CODE" . $i . "\x00", $html, $s);
     }
+    // REVERSE order. Extraction is innermost-first, so block 0 is nested inside block 1; restoring
+    // forwards replaces 0 before 1 has put its placeholder back into the string, and the inner block
+    // then stays a placeholder in the output.
+    foreach (array_reverse($hidden, true) as $i => $html) {
+        $s = str_replace("\x01HIDE" . $i . "\x01", $html, $s);
+    }
 
-    // A block element may not sit inside a paragraph, and a <br> on either side of one is a gap the
-    // author never asked for.
-    // Every block-level tag this renderer can emit. A tag missing from this list ends up inside a
-    // <p>, which browsers close early — producing an empty paragraph and a gap the author never
-    // wrote. It bit the table, the alignment divs and the spoiler the moment they were added.
-    $blocks = 'ul|ol|blockquote|pre|h[1-6]|div|table|details|hr';
-    // A block element in the MIDDLE of a paragraph needs the paragraph split around it, not just
-    // trimmed at its edges. `<p>a <div>b</div> c</p>` is invalid, and a browser does not render it as
-    // written: it closes the <p> before the <div> and leaves the tail orphaned, which shows up as a
-    // gap nobody typed. The rules below only ever handled a block at the START or the END.
-    $s = preg_replace('#(<(?:' . $blocks . ')\b)#', '</p>$1', $s);
-    $s = preg_replace('#(</(?:' . $blocks . ')>)#', '$1<p>', $s);
-    $s = preg_replace('#(<hr class="rt-hr">)#', '$1<p>', $s);   // void: it has no closing tag to hook on
-
-    $s = preg_replace('#<p>\s*(<(?:' . $blocks . ')\b)#', '$1', $s);
-    $s = preg_replace('#(</(?:' . $blocks . ')>)\s*</p>#', '$1', $s);
-    $s = preg_replace('#(</(?:' . $blocks . ')>)\s*(?:<br>\s*)+#', '$1', $s);
-    $s = preg_replace('#(?:<br>\s*)+(<(?:' . $blocks . ')\b)#', '$1', $s);
-    $s = preg_replace('#(<hr class="rt-hr">)\s*(?:<br>\s*)+#', '$1', $s);
-    $s = preg_replace('#(?:<br>\s*)+(<hr class="rt-hr">)#', '$1', $s);
-    $s = preg_replace('#<p>\s*</p>#', '', $s);
-
-    // Drop UNMATCHED </p>. The rules above remove an opening <p> whenever a block element follows
-    // it, and that leaves the closing tag behind — a paragraph that starts with a table produces a
-    // stray </p> after it. Walking the tags is duller than another regex and cannot surprise anyone:
-    // a </p> with no <p> open is simply not written out.
-    $depth = 0;
-    $s = preg_replace_callback('#</?p>#', function ($m) use (&$depth) {
-        if ($m[0] === '<p>') { $depth++; return '<p>'; }
-        if ($depth <= 0) return '';
-        $depth--;
-        return '</p>';
-    }, $s);
-    if ($depth > 0) $s .= str_repeat('</p>', $depth);
-    return $s;
+    return richtextParagraphs($s);
 }
+
+/**
+ * Wrap loose text in paragraphs, at the TOP LEVEL only.
+ *
+ * The previous version did this with regexes: insert `</p>` before every block open, `<p>` after
+ * every block close, then strip whatever came out empty and drop unmatched tags. It worked for flat
+ * documents and produced nonsense for nested ones, because "before every block open" is wrong as
+ * soon as a block opens inside another block — a <div> inside a <details> got a `</p>` in front of
+ * it with no paragraph open, and a later pass then read that `</p>` as the closer of the <details>.
+ * The reported symptoms (a `</p>` closing a <blockquote>, an unclosed <details> swallowing the rest
+ * of the page, inline tags reparented across a block boundary) were all the same mistake.
+ *
+ * So this walks the string instead. Depth is counted over the block tags this renderer emits;
+ * anything at depth 0 that is not itself a block is loose text and gets a paragraph, split on the
+ * blank-line marker. Nothing inside a block is touched at all — the rule that built it already put
+ * its own children in the right place.
+ */
+function richtextParagraphs(string $html): string {
+    $blocks = ['ul', 'ol', 'blockquote', 'pre', 'div', 'table', 'details', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+    $isBlock = array_flip($blocks);
+    // Inline tags that may be left open when a block interrupts them. <br>, <img> and <hr> are void
+    // and never open anything.
+    $inlineTags = ['strong', 'em', 'u', 's', 'span', 'mark', 'sub', 'sup', 'a', 'code', 'kbd', 'ins', 'small', 'abbr'];
+    $isInline = array_flip($inlineTags);
+
+    $out = '';
+    $buf = '';
+    $depth = 0;
+    $open = [];          // inline tags currently open inside $buf, innermost last
+
+    // Close whatever is still open when a paragraph ends, and reopen it in the next one.
+    //
+    // `[b]before[center]x[/center]after[/b]` used to emit `<p><strong>before</p>…<p>after</strong></p>`
+    // — a <strong> opened in one paragraph and closed in another, which browsers repair by moving
+    // elements around and which reparents the surrounding DOM. Closing and reopening is what a
+    // browser would have done anyway, done deliberately and visibly.
+    $closers = function () use (&$open) {
+        $t = '';
+        foreach (array_reverse($open) as $tag) $t .= '</' . $tag . '>';
+        return $t;
+    };
+    $openers = function () use (&$open, $html) {
+        // Reopen by NAME only, and never an anchor. The attributes belong to the run that was
+        // interrupted; reopening <a> without its href produces a link that goes nowhere, and
+        // reopening it WITH the href would silently turn one link into two. Emphasis survives the
+        // interruption because a bare <strong> means the same thing; a link does not.
+        $t = '';
+        foreach ($open as $tag) { if ($tag !== 'a') $t .= '<' . $tag . '>'; }
+        return $t;
+    };
+
+    $flush = function () use (&$buf, &$out, $closers, $openers) {
+        if ($buf === '') return;
+        $chunks = explode("\x02PARA\x02", $buf);
+        foreach ($chunks as $chunk) {
+            $plain = trim(str_replace(['<br>', '&nbsp;'], ' ', strip_tags($chunk)));
+            if ($plain === '' && strpos($chunk, '<img') === false) continue;
+            $out .= '<p>' . trim($chunk, ' ') . $closers() . '</p>';
+        }
+        $buf = '';
+    };
+
+    $parts = preg_split('/(<\/?[a-z][a-z0-9]*\b[^>]*>)/i', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+    foreach ($parts as $i => $part) {
+        if ($i % 2 === 0) {
+            if ($depth !== 0) { $out .= $part; continue; }
+            // A stashed [hide] block is a BLOCK, even though at this moment it is still a token. It
+            // is restored after this pass, and a token treated as ordinary text ends up wrapped in a
+            // paragraph — so the <div> that replaces it lands inside a <p>, which is the invalid
+            // nesting this whole function exists to avoid. Nested blocks hit it every time.
+            if (strpos($part, "\x01HIDE") !== false) {
+                $bits = preg_split('/(\x01HIDE\d+\x01)/', $part, -1, PREG_SPLIT_DELIM_CAPTURE);
+                foreach ($bits as $k => $bit) {
+                    if ($k % 2 === 1) {
+                        $keep = $open;
+                        $flush();
+                        $out .= $bit;
+                        $open = $keep;
+                        $buf .= $openers();
+                    } else {
+                        $buf .= $bit;
+                    }
+                }
+                continue;
+            }
+            $buf .= $part;
+            continue;
+        }
+        if (!preg_match('#^<(/?)([a-z][a-z0-9]*)#i', $part, $m)) {
+            if ($depth === 0) $buf .= $part; else $out .= $part;
+            continue;
+        }
+        $closing = $m[1] === '/';
+        $name = strtolower($m[2]);
+
+        // <hr> is a block that never closes: it ends the paragraph before it and starts a new one.
+        if ($name === 'hr' && $depth === 0) {
+            $keep = $open;
+            $flush();
+            $out .= $part;
+            $open = $keep;
+            $buf .= $openers();
+            continue;
+        }
+
+        if (!isset($isBlock[$name])) {
+            if ($depth === 0) {
+                if (isset($isInline[$name])) {
+                    if ($closing) {
+                        $k = array_search($name, array_reverse($open, true), true);
+                        if ($k === false) continue;      // closes nothing: dropped, not emitted
+                        unset($open[$k]);
+                        $open = array_values($open);
+                    } elseif (substr($part, -2) !== '/>') {
+                        $open[] = $name;
+                    }
+                }
+                $buf .= $part;
+            } else {
+                $out .= $part;
+            }
+            continue;
+        }
+        if ($closing) {
+            $depth = max(0, $depth - 1);
+            $out .= $part;
+            if ($depth === 0 && $open) {
+                // an anchor is not resumed, so it is not "still open" either
+                $open = array_values(array_filter($open, fn($t) => $t !== 'a'));
+                $buf .= $openers();
+            }
+            continue;
+        }
+        if ($depth === 0) {
+            $keep = $open;
+            $flush();
+            $open = $keep;
+        }
+        $out .= $part;
+        $depth++;
+    }
+    $open = [];          // the document ends: nothing left to reopen
+    $flush();
+
+    $out = preg_replace('#<p>\s*</p>#', '', $out);
+    return str_replace("\x02PARA\x02", '', $out);
+}
+
 
 /** A short plain-text version, for listings and meta descriptions. */
 function richtextExcerpt(?string $text, int $len = 160): string {
@@ -777,9 +919,10 @@ function richtextExcerpt(?string $text, int $len = 160): string {
     // the secret stayed. Anything unbalanced drops the rest of the string for the same reason the
     // renderer withholds it.
     $s = preg_replace('/\[(hide|postshide)(?:=[^\]]*)?\][\s\S]*?\[\/\1\]/i', ' ', $s) ?? $s;
-    if (preg_match('/\[\/?(?:hide|postshide)\b/i', $s, $m, PREG_OFFSET_CAPTURE)) {
-        $s = substr($s, 0, $m[0][1]);
-    }
+    // Unbalanced fences: no excerpt at all, exactly as the renderer publishes nothing. Truncating
+    // at the token was not enough -- `[hide]a[/hide] SECRET[/hide]` leaves a stray CLOSER with the
+    // secret sitting in FRONT of it, so the cut kept precisely the part meant to be private.
+    if (preg_match('/\[\/?(?:hide|postshide)\b/i', $s)) return '';
     $s = trim(preg_replace('/\s+/', ' ', strip_tags($s)) ?? '');
     $s = preg_replace('/\[\/?[a-z][^\]]*\]/i', '', $s) ?? $s;
     $s = preg_replace('/[*_`#>~]+/', '', $s) ?? $s;

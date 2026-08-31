@@ -329,6 +329,29 @@ function sysctlSocketVerdict(array $st): array {
                     . 'other socket.',
         ];
     }
+    // The socket is SMALLER than the current default, so no socket created now could look like this.
+    //
+    // This is the case the verdict used to miss, and it mattered: it fell through to "asks for its
+    // own size", which tells the operator the buffers are none of their business — the exact opposite
+    // of the truth. A socket's receive buffer is fixed when the socket is CREATED. Change
+    // rmem_default afterwards and every socket already open keeps the size it was born with, so the
+    // setting is live in the kernel and invisible to the tracker until the service restarts.
+    //
+    // Seen on this machine: rmem_default raised to 8 MiB, the tracker socket still at 208 KiB two
+    // days later, and 43.6 million packets discarded by that undersized queue in the meantime.
+    if ($rmemDef > 0 && $rb < $rmemDef) {
+        return [
+            'known' => true, 'asks' => false, 'stale' => true, 'rb' => $rb,
+            'text' => 'This socket is SMALLER than the current default (' . sysctlHumanBytes($rb)
+                    . ' against ' . sysctlHumanBytes($rmemDef) . '), and no socket created now could '
+                    . 'be. A receive buffer is fixed when the socket is opened, so the tracker is '
+                    . 'still using the value that was in force when it last started — your change is '
+                    . 'live in the kernel and has not reached this socket. '
+                    . 'RESTART THE TRACKER and this socket becomes ' . sysctlHumanBytes($rmemDef)
+                    . '; until then the discarded-packet counter will keep climbing for the old reason.',
+        ];
+    }
+
     return ['known' => true, 'asks' => true, 'rb' => $rb,
             'text' => 'This tracker asks for its own receive buffer size (' . sysctlHumanBytes($rb)
                     . ') and is not being clamped by the ceiling.'];

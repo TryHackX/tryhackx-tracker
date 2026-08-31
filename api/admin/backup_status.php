@@ -15,9 +15,22 @@ $now = time();
 $dir = backupDir($cfg);
 $cmdSet = backupCommand($cfg) !== '';
 
+// Every profile the helper accepts, with what it means — so the run dialog can offer a choice
+// without the page having to know the list. `items` is what the profile actually asks for, which is
+// the only honest description of the difference between them.
+$profiles = [];
+foreach (BACKUP_PROFILES as $pid) {
+    $profiles[] = [
+        'id'    => $pid,
+        'label' => backupProfileLabel($pid),
+        'hint'  => backupProfileItems($pid, $cfg),
+    ];
+}
+
 $out = [
     'ok'          => true,
     'server_time' => $now,
+    'profiles'    => $profiles,
     'configured'  => [
         'enabled'      => backupEnabled($cfg),
         'dir'          => $dir,

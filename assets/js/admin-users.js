@@ -450,12 +450,30 @@
     // the selection in whichever syntax the chosen format uses. A contenteditable box would have
     // given Ctrl+B for free and cost a second renderer, a paste sanitiser and an HTML whitelist to
     // police — the markup the site already renders is the cheaper honest answer.
+    // Kept in step with SYNTAX in assets/js/app.js — the same renderer serves both, so a button here
+    // that writes something the public editor cannot would be a lie about what the site supports.
+    // A third element means "a whole block": inserted on its own lines instead of wrapped.
     const MD_SYNTAX = {
-        markdown: { bold: ['**', '**'], italic: ['*', '*'], code: ['`', '`'],
-                    link: ['[', '](https://example.org)'], quote: ['> ', ''], list: ['- ', ''] },
-        bbcode:   { bold: ['[b]', '[/b]'], italic: ['[i]', '[/i]'], code: ['[code]', '[/code]'],
-                    link: ['[url=https://example.org]', '[/url]'], quote: ['[quote]', '[/quote]'],
-                    list: ['[list]\n[*] ', '\n[/list]'] },
+        markdown: {
+            bold: ['**', '**'], italic: ['*', '*'], strike: ['~~', '~~'], code: ['`', '`'],
+            highlight: ['==', '=='],
+            link: ['[', '](https://example.org)'], image: ['![](', ')'],
+            quote: ['> ', ''], list: ['- ', ''], olist: ['1. ', ''],
+            table: ['| A | B |\n|---|---|\n| 1 | 2 |', '', true],
+            hr: ['\n---\n', '', true],
+        },
+        bbcode: {
+            bold: ['[b]', '[/b]'], italic: ['[i]', '[/i]'], underline: ['[u]', '[/u]'],
+            strike: ['[s]', '[/s]'], code: ['[code]', '[/code]'],
+            color: ['[color=#e74c3c]', '[/color]'], size: ['[size=18]', '[/size]'],
+            highlight: ['[highlight=yellow]', '[/highlight]'],
+            link: ['[url=https://example.org]', '[/url]'], image: ['[img]', '[/img]'],
+            quote: ['[quote]', '[/quote]'],
+            list: ['[list]\n[*] ', '\n[/list]'], olist: ['[list=1]\n[*] ', '\n[/list]'],
+            center: ['[center]', '[/center]'],
+            table: ['[table]\n[tr][th]A[/th][th]B[/th][/tr]\n[tr][td]1[/td][td]2[/td][/tr]\n[/table]', '', true],
+            hr: ['\n[hr]\n', '', true],
+        },
     };
 
     function bmFormat() { const f = $('bm-format'); return f ? f.value : 'plain'; }
@@ -465,9 +483,18 @@
         const ta = $('bm-body');
         const syn = MD_SYNTAX[bmFormat()];
         if (!ta || !syn || !syn[kind]) return;
-        const [open, close] = syn[kind];
+        const [open, close, block] = syn[kind];
         const start = ta.selectionStart, end = ta.selectionEnd;
         const sel = ta.value.slice(start, end);
+        if (block) {
+            // A whole construct. Wrapping a selection in a table skeleton would put the author's
+            // sentence in the header, which is never what they meant.
+            const pre = start > 0 && ta.value[start - 1] !== '\n' ? '\n' : '';
+            ta.setRangeText(pre + open + '\n', start, end, 'end');
+            ta.focus();
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            return;
+        }
         // Line-prefix marks (quote, list in Markdown) belong at the start of every selected line,
         // not wrapped around the block — otherwise a three-line quote quotes only its first line.
         const linewise = close === '' ;
@@ -507,14 +534,21 @@
     function bmSyncFormatUi() {
         const fmt = bmFormat();
         const tools = $('bm-tools');
-        if (tools) tools.classList.toggle('d-hidden', fmt === 'plain');
+        if (tools) {
+            tools.classList.toggle('d-hidden', fmt === 'plain');
+            const syn = MD_SYNTAX[fmt] || {};
+            tools.querySelectorAll('[data-md]').forEach(b => { b.hidden = !syn[b.dataset.md]; });
+            tools.querySelectorAll('.bm-tool-group').forEach(g => {
+                g.hidden = ![...g.querySelectorAll('[data-md]')].some(b => !b.hidden);
+            });
+        }
         const hint = $('bm-fmt-hint');
         if (hint) {
             hint.textContent = fmt === 'plain'
                 ? 'Plain text: line breaks are kept and nothing else is interpreted.'
                 : (fmt === 'markdown'
-                    ? 'Markdown: **bold**, *italic*, # heading, - list, > quote, `code`, [text](url). Ctrl+B, Ctrl+I and Ctrl+K work in the box.'
-                    : 'BBCode: [b], [i], [url=…], [quote], [code], [list]. Ctrl+B, Ctrl+I and Ctrl+K work in the box.');
+                    ? 'Markdown: **bold**, *italic*, ~~strike~~, ==mark==, # heading, - list, 1. list, > quote, `code`, tables, [text](url), ![](image). Ctrl+B / Ctrl+I / Ctrl+K.'
+                    : 'BBCode: [b] [i] [u] [s] [color=#hex] [size=18] [center] [hr] [quote] [list] [list=1] [table] [highlight] [url] [img]. Ctrl+B / Ctrl+I / Ctrl+K.');
         }
         bmRenderPreview();
     }

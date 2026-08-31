@@ -96,7 +96,7 @@
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">Send as</label>
-                        <div class="d-flex gap-3 pt-1">
+                        <div class="d-flex gap-3 pt-1" id="bm-sendas">
                             <label class="search-check"><input type="checkbox" id="bm-notify" checked><span class="search-check-box" aria-hidden="true"></span> Notification</label>
                             <label class="search-check"><input type="checkbox" id="bm-email"><span class="search-check-box" aria-hidden="true"></span> Email</label>
                         </div>
@@ -108,13 +108,34 @@
                     <div class="col-12">
                         <div class="bm-msg-head">
                             <label class="form-label mb-0" for="bm-body">Message</label>
+                            <!-- Same set as the public description editor, and the same rule: a button
+                                 whose syntax the chosen format cannot express hides itself, so the bar
+                                 never offers markup the renderer will ignore. -->
                             <div class="bm-tools d-hidden" id="bm-tools" role="toolbar" aria-label="Formatting">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="bold" title="Bold (Ctrl+B)"><i class="bi bi-type-bold"></i></button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="italic" title="Italic (Ctrl+I)"><i class="bi bi-type-italic"></i></button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="link" title="Link (Ctrl+K)"><i class="bi bi-link-45deg"></i></button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="list" title="Bulleted list"><i class="bi bi-list-ul"></i></button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="quote" title="Quote"><i class="bi bi-quote"></i></button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-md="code" title="Code"><i class="bi bi-code-slash"></i></button>
+                                <span class="bm-tool-group">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="bold" title="Bold (Ctrl+B)"><i class="bi bi-type-bold"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="italic" title="Italic (Ctrl+I)"><i class="bi bi-type-italic"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="underline" title="Underline"><i class="bi bi-type-underline"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="strike" title="Strikethrough"><i class="bi bi-type-strikethrough"></i></button>
+                                </span>
+                                <span class="bm-tool-group">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="color" title="Colour"><i class="bi bi-palette"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="size" title="Font size"><i class="bi bi-fonts"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="highlight" title="Highlight"><i class="bi bi-highlighter"></i></button>
+                                </span>
+                                <span class="bm-tool-group">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="link" title="Link (Ctrl+K)"><i class="bi bi-link-45deg"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="image" title="Image"><i class="bi bi-image"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="list" title="Bulleted list"><i class="bi bi-list-ul"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="olist" title="Numbered list"><i class="bi bi-list-ol"></i></button>
+                                </span>
+                                <span class="bm-tool-group">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="quote" title="Quote"><i class="bi bi-quote"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="code" title="Code"><i class="bi bi-code-slash"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="table" title="Table"><i class="bi bi-table"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="center" title="Centre"><i class="bi bi-text-center"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="hr" title="Horizontal rule"><i class="bi bi-dash-lg"></i></button>
+                                </span>
                             </div>
                             <select class="form-select form-select-sm bg-dark text-light border-secondary bm-fmt" id="bm-format" title="How the message is written">
                                 <option value="plain">Plain text</option>

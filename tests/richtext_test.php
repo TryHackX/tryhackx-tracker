@@ -397,5 +397,92 @@ check('an unbalanced hide truncates the excerpt rather than exposing it',
 check('an ordinary excerpt still reads normally',
       richtextExcerpt('visible [hide]x[/hide] end') === 'visible end');
 
+/* == the second attack round: [hide] ran too late ========================= */
+//
+// Every case below leaked to a guest because a pass that MOVES or CONSUMES text ran before the pass
+// that decides what may be published. [hide] is now resolved on the raw input, first, and its bytes
+// never enter the pipeline for a reader who may not see them.
+
+$leakCases = [
+    'footnote lifted out of the block' => ['markdown', "[hide]see[^a][/hide]\n\n[^a]: SECRET-TOKEN"],
+    'footnote defined inside it'       => ['markdown', "[hide]see[^a]\n\n[^a]: SECRET-TOKEN\n[/hide]"],
+    'greedy value-tag eats the opener' => ['bbcode',   '[color=x[hide]y]SECRET-TOKEN[/color]'],
+    'code fence hides the tokens'      => ['bbcode',   '[code][hide]SECRET-TOKEN[/hide][/code]'],
+    'img swallows the marker'          => ['bbcode',   '[img][hide]SECRET-TOKEN[/hide][/img]'],
+    'table swallows the marker'        => ['bbcode',   '[table][hide]SECRET-TOKEN[/hide][/table]'],
+    'link label eats both tokens'      => ['markdown', '[[hide]SECRET-TOKEN[/hide]](https://e.org)'],
+    'lone closing tag'                 => ['bbcode',   'SECRET-TOKEN [/hide]'],
+    'closer inside a code fence'       => ['bbcode',   '[hide]SECRET-TOKEN[code]x[/hide][/code]'],
+];
+foreach ($leakCases as $name => [$fmt, $src]) {
+    $out = richtextRender($src, $fmt, $cfg, false);
+    check("guest never sees the secret: $name", strpos($out, 'SECRET-TOKEN') === false, $out);
+}
+check('an excerpt of an unbalanced hide is empty, not truncated around the secret',
+      richtextExcerpt('[hide]a[/hide] SECRET-TOKEN[/hide]') === ''
+      && richtextExcerpt('SECRET-TOKEN [/hide]') === '');
+
+// …and a member still gets the content, with the markup inside it rendered.
+$inner = richtextRender('[hide][b]bold[/b] and [url=https://e.org]a link[/url][/hide]', 'bbcode', $cfg, true);
+check('a member sees hidden content with its markup rendered',
+      strpos($inner, '<strong>bold</strong>') !== false && strpos($inner, 'href="https://e.org"') !== false, $inner);
+$nested = richtextRender('[hide]a[hide]b[/hide]c[/hide]', 'bbcode', $cfg, true);
+check('nested hidden blocks nest as elements, not as text',
+      substr_count($nested, 'class="rt-hide"') === 2 && strpos($nested, 'HIDE') === false
+      && preg_match('#<p>[^<]*<div#', $nested) === 0, $nested);
+
+/* == an attribute is text, and stays text ================================= */
+//
+// The Markdown image alt was inserted unescaped, so a rule that had already produced real markup put
+// a raw `>` inside alt="…": the <img> closed early, the rest of the attribute fell into the document
+// and the linkifier built an <a> inside what had been the src.
+
+$altCases = [
+    '![<kbd>x</kbd>](https://e.org/a.png)',
+    '![||spoiler||](https://e.org/a.png)',
+    '![**b**](https://e.org/a.png)',
+    '![`code`](https://e.org/a.png)',
+];
+foreach ($altCases as $src) {
+    $out = richtextRender($src, 'markdown', $cfg, false);
+    check('the image alt cannot break out of its attribute: ' . substr($src, 0, 22),
+          preg_match('#alt="[^"]*<#', $out) === 0 && substr_count($out, '<img') === 1
+          && strpos($out, '<a href="<') === false, $out);
+}
+check('an allowed HTML tag still works in prose',
+      strpos(richtextRender('press <kbd>Ctrl</kbd>', 'markdown', $cfg, false), '<kbd>Ctrl</kbd>') !== false);
+
+/* == paragraphs must not be built by guessing ============================= */
+//
+// The old tidy-up inserted </p> before every block open and <p> after every close. That is wrong the
+// moment a block opens INSIDE another block: a </p> appeared with no paragraph open, and a later
+// pass read it as the closer of the <details> or <blockquote> around it.
+
+$nestCases = [
+    ['bbcode', '[spoiler=T][quote]q[/quote][list][*]a[/list][/spoiler]'],
+    ['bbcode', '[center][spoiler]x[/spoiler][/center]'],
+    ['bbcode', 'a[hide]b[/hide]c'],
+    ['bbcode', '[b]before[center]mid[/center]after[/b]'],
+    ['bbcode', '[url=https://e.org]l[center]x[/center]d[/url]'],
+    ['markdown', "> [!NOTE]\n> a\n\n| A |\n|---|\n| 1 |"],
+];
+$bad = [];
+foreach ($nestCases as [$fmt, $src]) {
+    foreach ([false, true] as $who) {
+        $h = richtextRender($src, $fmt, $cfg, $who);
+        foreach (['p', 'div', 'details', 'blockquote', 'table', 'ul', 'ol', 'strong', 'em', 'a', 'span'] as $t) {
+            if (preg_match_all('#<' . $t . '(?=[ >/])#i', $h) !== preg_match_all('#</' . $t . '>#i', $h)) {
+                $bad[] = "$t in " . substr($src, 0, 26);
+            }
+        }
+        if (preg_match('#<p>[^<]*<(?:div|table|details|blockquote|ul|ol|hr)#', $h)) {
+            $bad[] = 'block inside <p> in ' . substr($src, 0, 26);
+        }
+    }
+}
+check('nesting stays valid and balanced for every shape', $bad === [], implode(' | ', array_slice($bad, 0, 4)));
+check('an inline run interrupted by a block is closed and resumed, and a link is not duplicated',
+      substr_count(richtextRender('[url=https://e.org]l[center]x[/center]d[/url]', 'bbcode', $cfg, false), '<a ') === 1);
+
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

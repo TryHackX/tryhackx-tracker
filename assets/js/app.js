@@ -2408,13 +2408,16 @@ const getJson = async (endpoint) => {
                 if (canMagnet) {
                     const magTd = document.createElement('td');
                     magTd.className = 'search-actions search-c-actions-cell';
+                    // the flex lives on a wrapper, not on the <td> — see .search-c-actions-cell
+                    const actWrap = document.createElement('div');
+                    actWrap.className = 'search-c-actions-inner';
                     if (r.info_hash) {
                         const a = document.createElement('a');
                         a.href = magnetFor(r.info_hash, r.name);
                         a.className = 'btn btn-small search-act-btn';
                         a.title = 'Open in your torrent client';
                         a.textContent = 'Magnet';
-                        magTd.appendChild(a);
+                        actWrap.appendChild(a);
                         const copy = document.createElement('button');
                         copy.type = 'button';
                         copy.className = 'btn btn-secondary btn-small search-act-btn';
@@ -2426,15 +2429,16 @@ const getJson = async (endpoint) => {
                                 .then(() => { copy.textContent = '✓'; copy.classList.add('copied'); setTimeout(() => { copy.textContent = 'Copy'; copy.classList.remove('copied'); }, 1200); })
                                 .catch(() => {});
                         });
-                        magTd.appendChild(copy);
+                        actWrap.appendChild(copy);
                         const info = document.createElement('button');
                         info.type = 'button';
                         info.className = 'btn btn-secondary btn-small search-act-btn';
                         info.title = 'What this is, where it came from, and how the swarm looks';
                         info.textContent = 'Info';
                         info.addEventListener('click', () => openInfo(r.info_hash, r.name));
-                        magTd.appendChild(info);
+                        actWrap.appendChild(info);
                     }
+                    magTd.appendChild(actWrap);
                     tr.appendChild(magTd);
                 }
                 body.appendChild(tr);

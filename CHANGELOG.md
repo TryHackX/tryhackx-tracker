@@ -4,6 +4,74 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.21.0] — 2026-08-31 (schema v26)
+
+### Fixed — the second attack round found eight more, and they had one cause
+
+The renderer attack was re-run to completion (the first pass lost five of fourteen agents to a usage
+limit). Every new finding was the same mistake in a different costume: **`[hide]` ran too late**,
+after passes that move, consume or rewrite the author's text.
+
+- A Markdown **footnote defined inside a hidden block was lifted out** and re-parked at the end of the
+  document, outside it — served to guests with the link live and, with an image footnote, fetched by
+  their browser on load.
+- A greedy `[^\]]*` parameter in `[color=…]` **swallowed the opener**, so the block never matched.
+- A `[code]` fence around the whole thing **hid the tokens** from the rule meant to act on them.
+- Markdown link syntax **consumed both tokens as a label**.
+- `[img]`, `[table]` and `[list]` **deleted the marker with their own body**.
+- A description containing only `[/hide]` skipped the check entirely, because the guard looked for an
+  opener.
+
+`[hide]` is now resolved on the **raw input, before any other rule exists**. A guest's bytes are
+dropped there and never enter the pipeline; a member's block is rendered one level down so its markup
+still works. The excerpt follows the same rule: unbalanced fences produce no excerpt at all, because
+truncating at the token kept the secret that sat in front of a stray closer.
+
+### Fixed — an image alt could break out of its attribute
+
+`![<kbd>x</kbd>](url)` produced `alt="<kbd>x</kbd>"` with a raw `>` in it: the `<img>` closed early,
+the rest of the attribute fell into the document, and the linkifier built an `<a>` inside what had
+been the `src`. The alt is now re-escaped from scratch, and the pass that un-escapes allowed HTML tags
+runs **outside tags only** — it was rewriting the inside of attributes other rules had already built.
+
+### Fixed — paragraphs were built by guessing
+
+The tidy-up inserted `</p>` before every block open and `<p>` after every close. That is wrong as soon
+as a block opens inside another: a `</p>` appeared with no paragraph open and a later pass read it as
+the closer of the `<details>` or `<blockquote>` around it. Reported symptoms — an unclosed `<details>`
+swallowing the rest of the page, `</p>` closing a `<blockquote>`, inline tags reparenting the DOM —
+were all that one bug.
+
+Paragraphs are now built by a pass that walks the string and counts nesting, wrapping loose text at
+the top level only. An inline run interrupted by a block is closed and resumed; an anchor is closed
+and **not** resumed, because reopening it without its href makes a dead link and with it makes two.
+
+### Fixed — the buffer verdict told you to leave it alone
+
+The Traffic page said "This tracker asks for its own receive buffer size (208 KiB) and is not being
+clamped", which steered the operator away from the only knob that helps. The socket was not asking:
+it was **older than the setting**. A receive buffer is fixed when the socket is created, so raising
+`rmem_default` reaches nothing already running. Measured here: 8 MiB set, the tracker socket still at
+208 KiB two days later, 43.6 million packets discarded by that queue in the meantime. The verdict now
+recognises a socket smaller than the current default and names the restart.
+
+### Added
+
+- **Fetched hashes** on the swarm timeline, beside Indexed hashes and off by default. The gap between
+  the two lines is the metadata backlog.
+- **The backup type is chosen when you start a manual backup**, instead of only in Settings — the
+  schedule and a backup somebody runs by hand are usually different questions.
+
+### Fixed — the panel was using a checkbox it did not have
+
+`templates/admin/users.php` marks up `.search-check`, and every rule for it lived in the **public**
+stylesheet, which no admin page loads. On screen: the browser's own checkbox (the rule hiding the real
+input was missing too), an empty `<span>`, then the label with nothing between them.
+
+Also: the message toolbar in *Write to members* now carries the same nineteen buttons as the public
+editor, and the actions column in search results no longer breaks when a long name wraps — a
+`display:flex` on the `<td>` stopped it being a table cell, so it did not stretch with the row.
+
 ## [1.20.1] — 2026-08-28
 
 ### Fixed
