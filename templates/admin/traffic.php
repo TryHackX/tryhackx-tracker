@@ -434,6 +434,25 @@
             <div id="ls-notes"></div>
         </div>
         <?php endif; ?>
+        <!-- The stability probe. Hidden entirely until it is switched on in Settings: a control that
+             moves the firewall limit on a live machine should not sit there looking clickable on an
+             install that has never heard of it. -->
+        <div class="wl-status-card mt-3 d-hidden" id="tn-card">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-activity"></i> Stability probe
+                    <span class="wl-status-updated" id="tn-updated"></span></h6>
+                <div class="wl-status-actions">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="tn-dry" title="Walk the same plan without touching the firewall — proves the plumbing works">Rehearse</button>
+                    <button type="button" class="btn btn-sm btn-outline-warning" id="tn-start">Run it&hellip;</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger d-hidden" id="tn-cancel">Stop</button>
+                </div>
+            </div>
+            <div class="wl-status-grid" id="tn-grid"></div>
+            <div id="tn-progress" class="tn-progress d-hidden"></div>
+            <div id="tn-report" class="tn-report d-hidden"></div>
+            <div class="nl-note nl-note-info" id="tn-note"></div>
+        </div>
+
     </div>
 
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
@@ -441,6 +460,9 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-traffic.js<?= assetVer('assets/js/admin-traffic.js') ?>"></script>
+    <?php if (function_exists('tunerEnabled') && tunerEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/js/admin-tuner.js<?= assetVer('assets/js/admin-tuner.js') ?>"></script>
+    <?php endif; ?>
     <?php if ($tlOn || $netOn): ?>
     <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>
     <?php endif; ?>

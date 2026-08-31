@@ -158,6 +158,8 @@ function settingsCatalogKeywords(): array {
         'desc_allow_bbcode'      => 'description format bbcode tags code quote allowed',
         'desc_allow_markdown'    => 'description format markdown allowed',
         'rate_limit_preview'     => 'description preview rate limit per minute render bbcode markdown',
+        'tuner_enabled'          => 'stability probe tuner test limits ramp benchmark find maximum pps autotune experiment',
+        'tuner_python'           => 'stability probe python interpreter path tuner command',
         'audit_enabled'          => 'audit log history who did what actions record trail accountability moderator admin',
         'audit_keep_days'        => 'audit log retention keep days history how long prune delete old entries',
         'rep_enabled'            => 'reputation rating vote up down score percent thumbs',

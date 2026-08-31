@@ -372,6 +372,25 @@ function sysctlSocketVerdict(array $st): array {
  * Read straight from /proc and /sys, both world-readable, with every step allowed to fail: a panel
  * that cannot read them says so rather than guessing. Returns null when nothing could be measured.
  */
+/**
+ * The exact command that would spread receive processing, for this machine.
+ *
+ * The mask is built from the real core count rather than printed as a placeholder: an operator who
+ * has to work out that six cores means 3f is an operator who will get it wrong once. Every interface
+ * with a receive queue is listed, because a machine with two would otherwise have half the fix.
+ */
+function sysctlRpsCommand(int $cpus): string {
+    $mask = dechex((1 << max(1, min(32, $cpus))) - 1);
+    $lines = [];
+    foreach ((@glob('/sys/class/net/*/queues/rx-*/rps_cpus') ?: []) as $f) {
+        if (strpos($f, '/lo/') !== false) continue;      // loopback needs no steering
+        $lines[] = 'echo ' . $mask . ' > ' . $f;
+    }
+    if (!$lines) $lines[] = 'echo ' . $mask . ' > /sys/class/net/<iface>/queues/rx-0/rps_cpus';
+    return implode("
+", $lines);
+}
+
 function sysctlPacketSpread(): ?array {
     $raw = @file_get_contents('/proc/net/softnet_stat');
     if (!is_string($raw) || trim($raw) === '') return null;
@@ -468,9 +487,9 @@ function sysctlAdvice(array $st, array $cfg): array {
             . 'queue never overflows, and yet raising the inbound limit makes everything else on the '
             . 'box stutter — because everything else is waiting behind that one core.'
             . ($spread['rps_on'] ? '' :
-               ' Spreading it is a one-line change per receive queue and needs no restart: '
-               . 'echo 3f > /sys/class/net/<iface>/queues/rx-0/rps_cpus (a hex CPU mask; 3f = six cores). '
-               . 'It is system-wide, so the panel does not write it.')];
+               ' Spreading it needs no restart and takes effect immediately. It is system-wide, like '
+               . 'the sysctls beside it, so the panel does not write it.'),
+            'command' => $spread['rps_on'] ? null : sysctlRpsCommand($spread['cpus'])];
     } elseif ($spread !== null && !$spread['concentrated']) {
         $out[] = ['level' => 'info', 'text' =>
             'Receive processing is spread across ' . $spread['cpus'] . ' cores (the busiest has '

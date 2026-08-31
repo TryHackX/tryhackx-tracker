@@ -39,6 +39,7 @@ require_once $root . '/includes/backup.php';
 require_once $root . '/includes/bulkmail.php';
 require_once $root . '/includes/richtext.php';
 require_once $root . '/includes/audit.php';
+require_once $root . '/includes/tuner.php';
 require_once $root . '/includes/livesync.php';
 require_once $root . '/includes/reputation.php';
 require_once $root . '/includes/wlmaint.php';
@@ -72,6 +73,15 @@ try {
     if (function_exists('auditPrune')) {
         $pruned = auditPrune($db, $cfg);
         if ($pruned > 0 && in_array('-v', $argv ?? [], true)) echo "[audit] pruned $pruned rows\n";
+    }
+    // The stability probe: start one that was asked for, and restore one whose process has died.
+    // The reap is the important half — a tuner that is killed must not leave the machine on the limit
+    // it happened to be testing.
+    if (function_exists('tunerSpawn')) {
+        $reap = tunerReap($cfg);
+        if (!empty($reap['reaped'])) echo "[tuner] a run had stopped without restoring; settings put back\n";
+        $sp = tunerSpawn($cfg);
+        if (!empty($sp['started'])) echo "[tuner] started a requested run\n";
     }
     whitelistJanitor($db, $cfg);
     // statistics timeline: sample / roll up / prune (no-op when disabled)

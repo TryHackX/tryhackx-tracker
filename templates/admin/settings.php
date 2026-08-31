@@ -818,6 +818,34 @@
             </div>
 
             <!-- User accounts -->
+            <div class="settings-section" id="section-tuner" data-group="tracker" data-title="Stability probe">
+                <h5>Stability probe</h5>
+                <p class="settings-hint mb-2">
+                    Finds where this machine's limits actually are, by moving the inbound limit through a few steps and
+                    watching what happens &mdash; including to <strong>everything else on the box</strong>. A formula can
+                    suggest a number from past traffic; only a run can answer &ldquo;does raising this make the other
+                    services drop packets&rdquo;, which is usually the real question.
+                    <br><strong>Off by default.</strong> The way back is written down before the first change, so the
+                    settings return even if the run is killed or the machine reboots &mdash; the janitor restores them.
+                    Nothing is applied automatically: a run ends exactly where it started and leaves a report.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-4" data-setting="tuner_enabled">
+                        <label class="form-label">Stability probe</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="tuner_enabled">
+                            <option value="0" <?= ($cfg['tuner_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Disabled</option>
+                            <option value="1" <?= ($cfg['tuner_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>Enabled &mdash; the button appears on Traffic</option>
+                        </select>
+                        <small class="settings-hint">Enabling it only shows the control; a run still needs the admin password.</small>
+                    </div>
+                    <div class="col-md-4" data-setting="tuner_python">
+                        <label class="form-label">Python command</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="tuner_python" value="<?= sanitize($cfg['tuner_python'] ?? 'python3') ?>" placeholder="python3">
+                        <small class="settings-hint">What the janitor runs <code>worker/tuner.py</code> with. Letters, digits and <code>_ . / -</code> only.</small>
+                    </div>
+                </div>
+            </div>
+
             <div class="settings-section" id="section-audit" data-group="users" data-title="Audit log">
                 <h5>Audit log</h5>
                 <p class="settings-hint mb-2">Who did what in the panel. The log is read-only from here on purpose &mdash; a record the panel it describes can edit is not a record. Credentials are never written to it: a setting that holds one appears as &ldquo;changed&rdquo;, never as its value.</p>

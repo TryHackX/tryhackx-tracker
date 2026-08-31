@@ -37,7 +37,7 @@ function auditActionGroups(): array {
         'users'    => ['user.update', 'user.delete', 'user.grant', 'user.revoke', 'user.notify', 'group.save', 'group.delete'],
         'machine'  => ['tracker.mode', 'tracker.restart', 'tracker.reload', 'netlimit.apply', 'sysctl.apply',
                        'ot.apply', 'ot.cluster', 'livesync.apply', 'backup.run', 'backup.restore',
-                       'backup.delete', 'backup.download', 'tuner.start', 'tuner.stop', 'tuner.apply'],
+                       'backup.delete', 'backup.download', 'tuner.run'],
         'mail'     => ['bulk.queue', 'bulk.cancel'],
         'api'      => ['api_client.create', 'api_client.update', 'api_client.delete', 'api_ban.add', 'api_ban.lift'],
     ];
@@ -272,6 +272,7 @@ function auditEndpointAction(string $endpoint): ?string {
         'admin/api_client_delete'     => 'api_client.delete',
         'admin/api_ban_add'           => 'api_ban.add',
         'admin/api_ban_lift'          => 'api_ban.lift',
+        'admin/tuner'                 => 'tuner.run',
         'admin/fed_purge'             => 'fed.purge',
         'admin/fed_peer_save'         => 'fed.peer_save',
         'admin/fed_peer_delete'       => 'fed.peer_delete',

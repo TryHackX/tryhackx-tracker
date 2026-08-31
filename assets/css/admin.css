@@ -1769,3 +1769,22 @@ input[type="number"] {
 .au-diff-from code { color: #ff8a8a; text-decoration: line-through; opacity: 0.8; }
 .au-diff-to code { color: #6fce8b; }
 .au-diff-hidden { color: #7f8c9a; font-style: italic; }
+
+/* ── the stability probe ───────────────────────────────────────────────────
+   A step list rather than a chart: six rows of numbers are read faster than a plot with six points,
+   and the one thing the operator is looking for — which step went wrong — is a word, not a shape. */
+.tn-progress { margin-top: 0.7rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.tn-step { display: grid; grid-template-columns: 8rem 9rem 9rem 8rem 1fr; gap: 0.6rem; align-items: baseline;
+           padding: 0.3rem 0.5rem; border-radius: 4px; background: rgba(255,255,255,0.03);
+           border-left: 3px solid #3fa45b; font-size: 0.8rem; }
+.tn-step-bad { border-left-color: #b4433c; background: rgba(180,67,60,0.10); }
+.tn-step-pps { font-weight: 600; font-variant-numeric: tabular-nums; }
+.tn-step-fig { color: #9aa4b2; font-variant-numeric: tabular-nums; }
+.tn-step-verdict { color: #6fce8b; }
+.tn-step-bad .tn-step-verdict { color: #ff8a8a; }
+.tn-report { margin-top: 0.8rem; padding: 0.7rem 0.85rem; border: 1px solid #2a3a4c; border-radius: 6px;
+             background: rgba(74,158,255,0.06); }
+.tn-report-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.07em; color: #9aa4b2; margin-bottom: 0.3rem; }
+.tn-report-summary { font-size: 0.88rem; line-height: 1.5; }
+.tn-report-acts { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.6rem; }
+@media (max-width: 900px) { .tn-step { grid-template-columns: 1fr 1fr; } }

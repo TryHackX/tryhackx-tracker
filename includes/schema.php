@@ -11,7 +11,10 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 28;  // 28 = the audit log: who did what in the panel. It had none,
+const TRACKER_SCHEMA_VERSION = 29;  // 29 = settings only (the stability probe, off by default) —
+                                    // and settings-only STILL needs the number to move, because the
+                                    // default rows are inserted by the migration block.
+                                    // 28 = the audit log: who did what in the panel. It had none,
                                     // which was survivable with one administrator and stopped being
                                     // so the moment the Moderator group existed.
                                     // 27 = index_fetched becomes NULLABLE, so a sample taken before
@@ -876,6 +879,8 @@ function trackerSchemaDefaultSettings(): array {
         'tracker_schedule'            => '{"mon":"none","tue":"none","wed":"none","thu":"none","fri":"none","sat":"none","sun":"none"}',
         'tracker_schedule_tz'         => 'Europe/Warsaw',
         'tracker_mode_switch_cmd'     => 'sudo -n /usr/local/sbin/tracker-mode.sh',
+        'tuner_enabled'               => '0',
+        'tuner_python'                => 'python3',
         'audit_enabled'               => '1',
         'audit_keep_days'             => '180',
         // schema v5: statistics timeline (includes/stats_timeline.php)

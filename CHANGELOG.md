@@ -4,6 +4,81 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.22.0] — 2026-08-31 (schema v27 + v28 + v29)
+
+### Added — an audit log
+
+The panel had none. Every risky action asked for a password and then left no trace of having
+happened, which is workable with one administrator and stops being workable the moment the Moderator
+group exists: "who approved this description" and "who changed that setting" become questions
+somebody asks.
+
+Written in **one place**. `jsonResponse()` is the single exit every endpoint takes, so the line is
+recorded there rather than by thirty endpoints each remembering to — which means a new admin endpoint
+is logged **by default** and only becomes invisible if somebody puts it on the quiet list. Endpoints
+that know more (which settings moved, which mode was switched to) add detail through `auditNote()`.
+
+Three rules: writing a line never breaks the action it describes; credentials never go in (the
+settings diff matches on the key **name**, so one added later is covered without anybody remembering,
+and a match is recorded as "changed" with no value either side); and the actor is resolved from the
+session rather than passed in.
+
+No delete and no edit, deliberately — a log the panel it records can rewrite is not evidence.
+Retention is a setting and the janitor enforces it. Its own page behind `panel.audit.view`, which is
+**not** in the moderator seed.
+
+### Added — a stability probe
+
+`worker/tuner.py`, off by default. The Traffic page can suggest a number from a formula over past
+traffic; it cannot answer the question an operator on a shared box actually has — *if I raise the
+inbound limit, does anything else here start to hurt?* This answers it by trying, briefly, and
+watching everything else while it does.
+
+It walks a plan of candidate limits, holds each for a few minutes, and samples the tracker's counters
+**and the drop counters of every other UDP socket on the machine**, the softirq concentration and the
+load. It stops the moment a neighbour starts dropping.
+
+Built around three rules:
+
+- **The way back is arranged before anything changes.** The original settings are written down and
+  marked for restore before the first step, so the janitor puts them back if the run is killed,
+  crashes, or the machine reboots. The revert does not depend on the program surviving.
+- **Harm stops the run, not the operator.** Nothing needs watching.
+- **It suggests, it does not apply.** A run ends exactly where it started. Applying anything from the
+  report is a separate, password-confirmed decision, and only values the run actually held are
+  offered — a suggestion the machine never ran at would be a guess wearing a measurement's clothes.
+
+No new root path: it drives the netlimit helper through the sudoers entry the panel already has, and
+the janitor starts it from a request file, the same shape the deferred sysctl writes use.
+
+### Fixed — "Fetched hashes" was a flat zero
+
+The sampler was recording it correctly all along; every row that existed **before** the column did was
+given 0, and 0 is a claim — "at that moment nothing had been fetched" — when the truth was that
+nothing had been *measured*. The column is now nullable, the payload passes null through, and the
+line simply does not start until the data does.
+
+### Added — two backup profiles, and honest names for the others
+
+"Database only" was in fact the **full** database including the index tables, several GB, and nothing
+in its name said so. The labels now name which database and what else. The genuinely missing
+combination — the database *without* the two huge tables — is now there.
+
+### Fixed
+
+- Search cells are centred again; top-aligning them left the numbers floating beside a wrapped name.
+- **Send…** now says who it is about to write to and how many.
+- The buffer verdict's "restart the tracker" sentence has a **Restart** button next to it, password
+  confirmed. Advice with the action attached is the difference between a page that explains and a page
+  that works.
+- The RPS advice carries the exact command for **this** machine — the mask built from its real core
+  count, one line per receive queue — with a copy button. The panel still does not write it: `rps_cpus`
+  is system-wide, like the sysctls beside it.
+- The panel was marking up a custom checkbox whose every CSS rule lived in the **public** stylesheet,
+  which no admin page loads. On screen that was the browser's own checkbox, an empty `<span>`, and the
+  label with nothing between them.
+- The message toolbar in *Write to members* carries the same nineteen buttons as the public editor.
+
 ## [1.21.1] — 2026-08-31
 
 ### Added — the Traffic page now notices when one core is doing all the work

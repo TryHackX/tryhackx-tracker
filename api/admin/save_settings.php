@@ -77,6 +77,7 @@ $allowed = [
     'wl_scrape_every_hours', 'wl_scrape_batch', 'wl_dead_after_days', 'wl_dead_action', 'wl_dead_every_days',
     'wl_probe_required', 'wl_probe_timeout_minutes', 'wl_probe_on_fail', 'wl_probe_max_batch',
     'audit_enabled', 'audit_keep_days',
+    'tuner_enabled', 'tuner_python',
     'rep_enabled', 'rep_mode', 'rep_who_can_vote', 'rep_show_in_results', 'rep_min_votes', 'rep_anon_weight', 'rep_rate_per_hour', 'captcha_pts_vote',
     'bulk_mail_enabled', 'bulk_mail_per_minute', 'bulk_mail_max_attempts',
     'wl_allow_source_url', 'wl_allow_description', 'wl_content_review',

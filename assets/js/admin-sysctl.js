@@ -22,7 +22,7 @@
 
     const card = document.getElementById('sysctl-card');
     if (!card || typeof window.AdminCommon === 'undefined') return;
-    const { apiCall, el, showToast } = window.AdminCommon;
+    const { apiCall, el, showToast, confirmAction, promptPassword, copyToClipboard } = window.AdminCommon;
 
     const $ = (id) => document.getElementById(id);
     const POLL_MS = 15000;
@@ -307,10 +307,23 @@
 
         // The verdict first: it decides which of the rows below is even worth reading.
         if (state.verdict && state.verdict.known) {
-            g.appendChild(el('div', {
-                className: 'nl-note ' + (state.verdict.asks ? 'nl-note-info' : 'nl-note-warn'),
-                text: state.verdict.text,
-            }));
+            const note = el('div', {
+                className: 'nl-note ' + (state.verdict.stale ? 'nl-note-bad'
+                                       : (state.verdict.asks ? 'nl-note-info' : 'nl-note-warn')),
+            }, el('span', { text: state.verdict.text }));
+            // The verdict for a stale socket ends with "RESTART THE TRACKER", and until now there was
+            // no way to do that from the sentence saying to. Advice with the action attached is the
+            // difference between a page that explains and a page that works.
+            if (state.verdict.stale) {
+                const act = el('div', { className: 'sy-verdict-acts' });
+                const btn = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning',
+                    title: 'Restart the tracker so its socket is created with the buffer you have set' },
+                    [el('i', { className: 'bi bi-arrow-clockwise' }), ' Restart the tracker now']);
+                btn.addEventListener('click', restartForBuffer);
+                act.appendChild(btn);
+                note.appendChild(act);
+            }
+            g.appendChild(note);
         }
 
         const order = ['rmem_max', 'rmem_default', 'udp_rmem_min', 'wmem_max', 'wmem_default', 'udp_wmem_min', 'netdev_max_backlog', 'udp_mem'];
@@ -351,11 +364,46 @@
                 text: 'A change was put back automatically (' + (state.lastRevert.why || 'not confirmed') + ').' }));
         }
         (state.advice || []).forEach(a => {
-            notes.appendChild(el('div', {
+            const box2 = el('div', {
                 className: 'nl-note ' + (a.level === 'bad' ? 'nl-note-bad' : a.level === 'warn' ? 'nl-note-warn' : 'nl-note-info'),
-                text: a.text,
-            }));
+            }, el('span', { text: a.text }));
+            // Some advice ends in a command the panel deliberately does not run — rps_cpus is
+            // system-wide, like the sysctls beside it. A copy button is the honest middle: the panel
+            // does not touch the machine, and the operator does not retype a hex mask by hand.
+            if (a.command) {
+                const row = el('div', { className: 'sy-verdict-acts' });
+                row.appendChild(el('code', { className: 'sy-cmd', text: a.command }));
+                const cp = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary' },
+                    [el('i', { className: 'bi bi-clipboard' }), ' Copy']);
+                cp.addEventListener('click', () => {
+                    copyToClipboard(a.command);
+                    showToast('Command copied. Run it as root on the server.', 'success');
+                });
+                row.appendChild(cp);
+                box2.appendChild(row);
+            }
+            notes.appendChild(box2);
         });
+    }
+
+    /**
+     * Restart the tracker so its socket is recreated with the buffer size now in force.
+     *
+     * The same endpoint and the same password the Restart button on the performance card uses — this
+     * one is simply next to the sentence that asks for it. A restart drops the socket for a moment;
+     * peers retry on their own, which is why this is a warning and not a refusal.
+     */
+    async function restartForBuffer() {
+        if (!await confirmAction('Restart the tracker',
+            'The tracker service is restarted. Its receive buffer is fixed when the socket is created, '
+            + 'so this is what makes the size you have set take effect.',
+            { after: 'The swarm briefly has no tracker; peers announcing during the restart retry on their own.',
+              okLabel: 'Restart', danger: true })) return;
+        const pw = await promptPassword('Restart the tracker', 'Confirm with the admin password.');
+        if (!pw) return;
+        const r = await apiCall('admin/restart_tracker', 'POST', { password: pw });
+        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        setTimeout(load, 3000);
     }
 
     function renderArmed() {
