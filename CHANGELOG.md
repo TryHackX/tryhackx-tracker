@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.21.1] — 2026-08-31
+
+### Added — the Traffic page now notices when one core is doing all the work
+
+A single-queue virtio NIC delivers every interrupt to the same core, and Receive Packet Steering
+spreads that work in software. With it off, one core does all the receive processing however many the
+machine has.
+
+Measured on this server: **CPU2 has handled 99.9% of every packet the machine has ever received**,
+across six cores, with `rps_cpus` at zero. That is invisible in every other number on the page — the
+tracker's own load is about 15% of the box, the per-CPU queue has never overflowed — and it is the
+one thing that explains the symptom the operator actually hit: raising the inbound limit made other
+services on the same machine lose packets and made SSH sluggish, while nothing on the tracker looked
+busy. They were all queued behind one core.
+
+The panel reads `/proc/net/softnet_stat` and the receive queues' `rps_cpus` directly, says which core
+and what share, and gives the one-line change. It does not write it: `rps_cpus` is system-wide, like
+the sysctls next to it.
+
 ## [1.21.0] — 2026-08-31 (schema v26)
 
 ### Fixed — the second attack round found eight more, and they had one cause

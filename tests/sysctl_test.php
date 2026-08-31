@@ -451,5 +451,24 @@ $clamped = sysctlSocketVerdict(['socket' => ['rb' => 16777216],
 check('a socket at twice the ceiling reads as asking and clamped',
       ($clamped['asks'] ?? false) === true && empty($clamped['stale']));
 
+/* == one core doing all the receive work ================================== */
+//
+// Measured on production: CPU2 had processed 4.0 billion packets and every other core about 800 000,
+// on a single-queue virtio NIC with rps_cpus at zero. It is invisible in every other number on the
+// page — the tracker looks idle and the per-CPU queue never overflows — and it is why raising the
+// inbound limit made other services on the box stutter.
+
+$spread = sysctlPacketSpread();
+check('the measurement returns null rather than guessing when /proc is unreadable',
+      $spread === null || is_array($spread));
+if (is_array($spread)) {
+    check('it reports a share between 0 and 1', $spread['share'] > 0 && $spread['share'] <= 1);
+    check('and names which core is busiest', is_int($spread['busiest']));
+    check('and says whether RPS is on', is_bool($spread['rps_on']));
+} else {
+    $skips++;
+    echo "SKIP packet-spread detail (no /proc/net/softnet_stat on this machine)\n";
+}
+
 echo "\n$n checks, $fails failed" . ($skips ? ", $skips skipped" : '') . "\n";
 exit($fails > 0 ? 1 : 0);

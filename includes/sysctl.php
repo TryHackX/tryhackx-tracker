@@ -358,6 +358,56 @@ function sysctlSocketVerdict(array $st): array {
 }
 
 /**
+ * Is every inbound packet being processed by ONE core?
+ *
+ * A virtio NIC on a VPS usually has a single RX queue, and a single queue means a single interrupt,
+ * which means one core does all the softirq work no matter how many cores the machine has. Receive
+ * Packet Steering spreads that work in software; with `rps_cpus` at 0 it is off.
+ *
+ * This matters here in a way the other numbers do not show: the tracker's own load looks tiny (one
+ * instance at ~92% of 600%), the per-CPU queue never overflows, and yet raising the inbound limit
+ * makes OTHER services on the box stutter. That is what a saturated single core looks like from the
+ * outside — it is not bandwidth, and it is not the tracker's threads.
+ *
+ * Read straight from /proc and /sys, both world-readable, with every step allowed to fail: a panel
+ * that cannot read them says so rather than guessing. Returns null when nothing could be measured.
+ */
+function sysctlPacketSpread(): ?array {
+    $raw = @file_get_contents('/proc/net/softnet_stat');
+    if (!is_string($raw) || trim($raw) === '') return null;
+
+    $perCpu = [];
+    foreach (preg_split('/\R/', trim($raw)) as $line) {
+        $cols = preg_split('/\s+/', trim($line));
+        if (!$cols || !isset($cols[0])) continue;
+        $perCpu[] = (int)hexdec($cols[0]);       // column 1 = packets processed
+    }
+    if (count($perCpu) < 2) return null;
+
+    $total = array_sum($perCpu);
+    if ($total <= 0) return null;
+    $top = max($perCpu);
+    $share = $top / $total;
+
+    // Is RPS switched on for any receive queue? An all-zero mask means no.
+    $rpsOn = false;
+    $queues = @glob('/sys/class/net/*/queues/rx-*/rps_cpus') ?: [];
+    foreach ($queues as $f) {
+        $mask = trim((string)@file_get_contents($f));
+        if ($mask !== '' && preg_replace('/[0,\s]/', '', $mask) !== '') { $rpsOn = true; break; }
+    }
+
+    return [
+        'cpus'      => count($perCpu),
+        'busiest'   => (int)array_search($top, $perCpu, true),
+        'share'     => $share,
+        'rps_on'    => $rpsOn,
+        'queues'    => count($queues),
+        'concentrated' => $share >= 0.9 && count($perCpu) >= 2,
+    ];
+}
+
+/**
  * Advice, and the measurement that would falsify each piece of it. Nothing here is folklore: every
  * suggestion names the counter it came from, and a suggestion whose counter is flat is not made.
  */
@@ -401,6 +451,30 @@ function sysctlAdvice(array $st, array $cfg): array {
             'The per-CPU packet queue has overflowed ' . number_format($softDrop) . ' times. This is '
             . 'the only measurement that justifies raising it — and remember the value is per CPU, so '
             . 'on ' . $cpus . ' cores it multiplies.'];
+    }
+
+    // One core doing all the receive work is invisible in every other number on this page.
+    $spread = sysctlPacketSpread();
+    if ($spread !== null && $spread['concentrated']) {
+        $pct = round($spread['share'] * 100);
+        $out[] = ['level' => 'warn', 'text' =>
+            'ALL inbound packets are being processed by one core: CPU ' . $spread['busiest'] . ' has handled '
+            . $pct . '% of everything this machine has received, across ' . $spread['cpus'] . ' cores. '
+            . 'That is a single-queue NIC delivering every interrupt to the same core, and '
+            . ($spread['rps_on']
+                ? 'Receive Packet Steering is on, so this is as spread as it gets here.'
+                : 'Receive Packet Steering is OFF (rps_cpus is zero on every receive queue).')
+            . ' It explains a symptom none of the buffers can: the tracker looks idle, the per-CPU '
+            . 'queue never overflows, and yet raising the inbound limit makes everything else on the '
+            . 'box stutter — because everything else is waiting behind that one core.'
+            . ($spread['rps_on'] ? '' :
+               ' Spreading it is a one-line change per receive queue and needs no restart: '
+               . 'echo 3f > /sys/class/net/<iface>/queues/rx-0/rps_cpus (a hex CPU mask; 3f = six cores). '
+               . 'It is system-wide, so the panel does not write it.')];
+    } elseif ($spread !== null && !$spread['concentrated']) {
+        $out[] = ['level' => 'info', 'text' =>
+            'Receive processing is spread across ' . $spread['cpus'] . ' cores (the busiest has '
+            . round($spread['share'] * 100) . '% of the packets), so no single core is the bottleneck.'];
     }
 
     // udp_mem only matters when the global pool is actually being approached.
