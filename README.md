@@ -432,8 +432,30 @@ nobody has seeded since 2019.
 
 Every mode runs on an index that **already exists**, and that constraint shaped the list. A claim
 happens on every fetch slot, several times a second, so a sort the database would have to compute —
-by name, by size, by file count — means a filesort over three million rows at that rate. The panel
-lists what was left out and why, rather than leaving it to look like an oversight: *last seen* would
+by name, by size, by file count — means a filesort over three million rows at that rate.
+
+That constraint turned out to have a sharper edge than "which columns are indexed". `meta_priority`
+is `-1` for everything the daily budget queued and `0` or higher for the rows somebody asked for by
+name — so the obvious query, *priority first, then whatever the mode says*, leaves `meta_priority`
+free under a fixed `meta_status` and **no index can supply that order**. Measured on the production
+table, per claim:
+
+| Query | Time |
+| --- | --- |
+| `ORDER BY meta_priority DESC, meta_requested_at ASC` | **3 722 ms** |
+| `ORDER BY meta_priority DESC, seen_count DESC` | **23 689 ms** |
+| `ORDER BY meta_priority DESC, last_seeders DESC` | **54 448 ms** |
+
+The fix is to ask the same question in two lanes. First the rows somebody asked for
+(`meta_priority > -1`, forty-three thousand of them, where any ordering is affordable), and only if
+that lane is empty, the bulk queue with `meta_priority` pinned to a single value — which makes both
+leading index columns equalities, so the *next* column in the index supplies the order with no sort
+at all. **66–99 ms, filesort gone**, and the meaning is unchanged: everything requested by a person,
+then the rest in the chosen order. A third lane with no priority predicate runs only when the other
+two are empty, so a row with an unexpected priority can never be stranded.
+
+The panel lists what was left out of the mode list and why, rather than leaving it to look like an
+oversight: *last seen* would
 sort three million rows that are all stamped with the same poll time; *peak seeders* gives nearly the
 same ranking as *most seeders* for the cost of another index on a table rewritten every poll; and
 name, size and file count are not known until the metadata has been fetched, which is the thing being

@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.25.1] — 2026-09-01
+
+### Fixed — every claim was filesorting three million rows
+
+Adding two indexes gave a reason to run `EXPLAIN` against the real table, and the answer was worse
+than the thing being added. `meta_priority` is `-1` for everything the daily budget queued and `0` or
+higher for the rows somebody asked for by name, so *priority first, then whatever the mode says*
+leaves `meta_priority` free under a fixed `meta_status` — and **no index supplies that order**.
+MariaDB filesorted the whole table, on every claim:
+
+```
+ORDER BY meta_priority DESC, meta_requested_at ASC     3 722 ms    <- the historical default
+ORDER BY meta_priority DESC, seen_count      DESC     23 689 ms
+ORDER BY meta_priority DESC, last_seeders    DESC     54 448 ms
+```
+
+The first line is not new; it is what the worker has always done, several times a second, against a
+shared database. The other two are what 1.25.0 would have done the moment somebody picked one of the
+new modes.
+
+Same question, two lanes:
+
+- **asked-for** — `meta_priority > -1`, forty-three thousand rows, any ordering affordable: **89 ms**
+- **bulk** — `meta_priority = -1`, which makes both leading index columns equalities, so the next
+  column in the index provides the sequence: **66–99 ms, no filesort at all**
+
+The meaning is identical — everything a person requested, then the rest in the chosen order — and a
+third lane with no priority predicate runs only when the other two come back empty, so a row with an
+unexpected priority is never stranded. The suite asserts the property that was worth the 54 seconds:
+the bulk lane must **not** mention `meta_priority` in its `ORDER BY`.
+
+Measured, not assumed: the `EXPLAIN` and the timings above are from the production table, before and
+after.
+
 ## [1.25.0] — 2026-09-01
 
 ### Added — five more ways to choose which hash gets fetched next

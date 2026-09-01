@@ -112,40 +112,79 @@ IDX = {'table': 'index_hashes', 'select': 'info_hash', 'gate': ' AND meta_reques
        'key_col': 'info_hash', 'orderable': True}
 WL = {'table': 'whitelist', 'select': 'id, info_hash, magnet_link', 'gate': '', 'key_col': 'id'}
 q = W.Worker.claim_query.__get__(types.SimpleNamespace())
+# every call below names its lane explicitly -- the default exists for callers, not for tests
 
+# The two lanes are the whole performance story, so they get the most checks. Measured on the real
+# 2.9 M-row table before this shape existed:
+#
+#     ORDER BY meta_priority DESC, meta_requested_at ASC    3 722 ms   (the historical default)
+#     ORDER BY meta_priority DESC, seen_count      DESC    23 689 ms
+#     ORDER BY meta_priority DESC, last_seeders    DESC    54 448 ms   (once per claim!)
+#
+# ...because with meta_status fixed and meta_priority still free, no index supplies that order and
+# MariaDB filesorts the table. Pinning meta_priority to one value in the bulk lane makes the next
+# index column supply the order for free: 66-99 ms, filesort gone.
 COLUMN = {'oldest': 'meta_requested_at ASC', 'newest': 'meta_requested_at DESC',
           'seeders': 'last_seeders DESC', 'seen': 'seen_count DESC', 'completed': 'last_completed DESC'}
 for sel, frag in COLUMN.items():
-    sql, params = q(IDX, sel)
-    check('%s sorts by %s' % (sel, frag), 'ORDER BY meta_priority DESC, ' + frag in sql, sql)
-    check('%s passes no parameters' % sel, params == (), params)
+    sql, params = q(IDX, sel, 'bulk')
+    check('bulk lane: %s sorts by %s' % (sel, frag), sql.endswith('ORDER BY ' + frag + ' LIMIT 1'), sql)
+    check('bulk lane: %s passes no parameters' % sel, params == (), params)
+    # THE property. meta_priority in the ORDER BY is what costs the filesort; it must be an equality
+    # in the WHERE instead, which is what lets the index provide the sequence.
+    order = sql[sql.index('ORDER BY'):]
+    check('bulk lane: %s does NOT order by meta_priority' % sel, 'meta_priority' not in order, order)
+    check('bulk lane: %s pins meta_priority to one value' % sel,
+          'meta_priority = %d' % W.META_PRIORITY_BULK in sql, sql)
 
-sql_rand, p_rand = q(IDX, 'random')
+# The priority lane is the same for every selector: what a person asked for is not subject to a
+# preference about swarm size.
+for sel in W.ORDER_SELECTORS:
+    sql, params = q(IDX, sel, 'priority')
+    check('priority lane ignores the "%s" selector' % sel,
+          sql.endswith('ORDER BY meta_priority DESC, meta_requested_at ASC LIMIT 1'), sql)
+    check('priority lane looks only ABOVE the bulk value (%s)' % sel,
+          'meta_priority > %d' % W.META_PRIORITY_BULK in sql, sql)
+    check('priority lane takes no parameters (%s)' % sel, params == (), params)
+
+# The safety net: no priority predicate at all, so a row with an unexpected priority — one neither
+# lane matches — is still reachable rather than stranded for ever.
+for sel in W.ORDER_SELECTORS:
+    sql, _ = q(IDX, sel, 'any')
+    check('the "any" lane constrains no priority at all (%s)' % sel, 'meta_priority >' not in sql
+          and 'meta_priority =' not in sql, sql)
+check('the lanes are tried asked-for first, then bulk, then the net',
+      W.CLAIM_LANES == ('priority', 'bulk', 'any'), W.CLAIM_LANES)
+check('the bulk value is the one the panel writes for auto-queued rows', W.META_PRIORITY_BULK == -1)
+
+sql_rand, p_rand = q(IDX, 'random', 'bulk')
 check('random seeks on the primary key instead of sorting the table',
       'info_hash >= %s' in sql_rand and 'ORDER BY info_hash' in sql_rand and 'RAND()' not in sql_rand, sql_rand)
 check('…and it passes a full-width random hash',
       len(p_rand) == 1 and re.fullmatch(r'[0-9a-f]{40}', p_rand[0]) is not None, p_rand)
-check('two random claims do not ask for the same point', q(IDX, 'random')[1] != q(IDX, 'random')[1])
+check('two random claims do not ask for the same point',
+      q(IDX, 'random', 'bulk')[1] != q(IDX, 'random', 'bulk')[1])
 
-# The expensive thing this design exists to avoid.
+# The expensive things this design exists to avoid, across every lane.
 for sel in W.ORDER_SELECTORS:
-    sql, _ = q(IDX, sel)
-    check('%s never sorts by an unindexed column' % sel,
-          'RAND()' not in sql and 'ORDER BY name' not in sql and 'total_size' not in sql, sql)
-    check('%s still claims only ONE row' % sel, sql.rstrip().endswith('LIMIT 1'), sql)
-    check('%s keeps the pending filter and the queue gate' % sel,
-          "meta_status='pending'" in sql and 'meta_requested_at <= NOW()' in sql, sql)
+    for lane in W.CLAIM_LANES:
+        sql, _ = q(IDX, sel, lane)
+        check('%s/%s never sorts by an unindexed column' % (sel, lane),
+              'RAND()' not in sql and 'ORDER BY name' not in sql and 'total_size' not in sql, sql)
+        check('%s/%s still claims only ONE row' % (sel, lane), sql.rstrip().endswith('LIMIT 1'), sql)
+        check('%s/%s keeps the pending filter and the queue gate' % (sel, lane),
+              "meta_status='pending'" in sql and 'meta_requested_at <= NOW()' in sql, sql)
     check('%s names an index this project actually creates' % sel,
           W.ORDER_INDEX[sel] is None or W.ORDER_INDEX[sel].startswith('idx_index_'), W.ORDER_INDEX[sel])
 
 # The whitelist is NOT reorderable: those rows are there because a person asked for them by name.
 for sel in W.ORDER_SELECTORS:
-    sql, params = q(WL, sel)
-    check('the whitelist ignores the "%s" selector' % sel,
-          'ORDER BY meta_priority DESC, meta_requested_at ASC' in sql and params == (), sql)
-    check('…and never gets an index-only column in its SQL (%s)' % sel,
-          'last_seeders' not in sql and 'seen_count' not in sql and 'info_hash >=' not in sql, sql)
-
+    for lane in W.CLAIM_LANES:
+        sql, params = q(WL, sel, lane)
+        check('the whitelist ignores "%s" in the %s lane' % (sel, lane),
+              'last_seeders' not in sql and 'seen_count' not in sql and 'info_hash >=' not in sql
+              and 'meta_requested_at' in sql, sql)
+        check('…and takes no parameters (%s/%s)' % (sel, lane), params == (), params)
 
 # ── which queue a claim goes to ──────────────────────────────────────────────
 # claim_targets is the subtlest thing here: it decides whether the whitelist keeps the absolute

@@ -28,15 +28,35 @@ WORKER_VERSION = 4
 #
 # Each selector below is one ORDER BY that an EXISTING index can serve. That constraint is the whole
 # design: a claim runs on every fetch slot, so a sort the database has to compute (name, size, file
-# count) would mean a filesort over three million rows several times a second. The ones offered here
-# are the ones an index covers:
+# count) would mean a filesort over three million rows several times a second.
 #
-#   oldest     meta_priority DESC, meta_requested_at ASC   idx_index_meta            (queue order)
-#   newest     meta_priority DESC, meta_requested_at DESC  idx_index_meta            (same, backwards)
-#   seeders    meta_priority DESC, last_seeders  DESC      idx_index_meta_seed
-#   seen       meta_priority DESC, seen_count    DESC      idx_index_meta_seen       (schema v31)
-#   completed  meta_priority DESC, last_completed DESC     idx_index_meta_completed  (schema v31)
-#   random     info_hash >= <random>, ORDER BY info_hash   PRIMARY KEY
+# TWO LANES, AND THIS IS THE PART THAT COSTS 54 SECONDS IF YOU GET IT WRONG
+# -------------------------------------------------------------------------
+# `meta_priority` is -1 for everything the daily budget queued (2.91 M rows here) and 0 or 5 for the
+# 43 k rows somebody asked for by name. The obvious query -- "priority first, then X" over the whole
+# queue -- cannot use any index for its order, because with meta_status fixed and meta_priority still
+# free, no index gives the sequence. MariaDB filesorts the entire table. MEASURED on production:
+#
+#     ORDER BY meta_priority DESC, meta_requested_at ASC   3 722 ms   <- the historical default
+#     ORDER BY meta_priority DESC, seen_count      DESC   23 689 ms
+#     ORDER BY meta_priority DESC, last_seeders    DESC   54 448 ms
+#
+# ...on EVERY claim. Splitting the same question into two lanes makes both halves cheap, and means
+# exactly the same thing: everything somebody asked for, then the bulk queue in the chosen order.
+#
+#     lane 1   meta_priority > -1   43 k rows; any ordering is affordable          89 ms
+#     lane 2   meta_priority = -1   now BOTH leading index columns are equalities,
+#                                   so the NEXT column in the index supplies the
+#                                   order for free -- no filesort at all       66-99 ms
+#
+# The orderings, as they run in lane 2:
+#
+#   oldest     meta_requested_at ASC    idx_index_meta            (queue order, as added to pending)
+#   newest     meta_requested_at DESC   idx_index_meta            (same index, backwards)
+#   seeders    last_seeders   DESC      idx_index_meta_seed
+#   seen       seen_count     DESC      idx_index_meta_seen       (schema v31)
+#   completed  last_completed DESC      idx_index_meta_completed  (schema v31)
+#   random     info_hash >= <random>    PRIMARY KEY
 #
 # `random` deserves a note: `ORDER BY RAND()` reads and sorts the whole table, which is exactly what
 # must not happen here. Info hashes are SHA-1 digests, so they are uniformly spread across the key
@@ -69,6 +89,16 @@ ORDER_INDEX = {
 # The mix repeats over this many claims, so one percentage point is one claim in a hundred — a share
 # can be small, but it can never round down to "never".
 ORDER_ROTATION = 100
+
+# What the auto-queue and the daily budget write. Everything above it was asked for by a person, and
+# that is the only thing the two lanes are dividing on. Written once here because the panel writes
+# the same value from five places and a disagreement would strand rows in a lane nobody reads.
+META_PRIORITY_BULK = -1
+
+# Tried in this order for every claim. `any` exists only as a safety net: it is the un-split query,
+# so it can see a row with a priority BELOW the bulk value that neither lane would match. It costs
+# nothing in normal running because it is only reached when both real lanes came back empty.
+CLAIM_LANES = ("priority", "bulk", "any")
 # whitelist 0 = keep absolute priority (the behaviour every earlier release had).
 ORDER_MIX_DEFAULT = {"whitelist": 0, "oldest": 0, "newest": 15, "seeders": 70,
                      "seen": 0, "completed": 0, "random": 15}
@@ -395,29 +425,46 @@ class Worker:
             return [(q, slot) for q in idx] + [(q, "oldest") for q in wl]
         return [(q, "oldest") for q in wl] + [(q, slot) for q in idx]
 
-    def claim_query(self, q, selector):
-        """(sql, params) that picks ONE candidate row for this queue under this selector.
+    def claim_query(self, q, selector, lane="bulk"):
+        """(sql, params) picking ONE candidate row for this queue, selector and lane.
 
-        Every branch stays on an index that already exists -- see the table at the top of this file.
+        See the table at the top of this file for why the lane matters more than the selector does.
         """
-        if not q.get("orderable") or selector == "oldest":
+        gate = q["gate"]
+        if lane == "priority":
+            # Everything a person asked for, newest priority first, then longest waiting. Small
+            # enough that the filesort here is free -- 43 k rows against three million.
+            return ("SELECT %s FROM %s WHERE meta_status='pending'%s AND meta_priority > %d "
+                    "ORDER BY meta_priority DESC, meta_requested_at ASC LIMIT 1"
+                    % (q["select"], q["table"], gate, META_PRIORITY_BULK), ())
+
+        if lane == "any":
+            # The safety net: no priority predicate at all, so a row with an unexpected priority is
+            # still reachable. Slow, and only ever reached when both lanes above are empty.
             return ("SELECT %s FROM %s WHERE meta_status='pending'%s "
                     "ORDER BY meta_priority DESC, meta_requested_at ASC LIMIT 1"
-                    % (q["select"], q["table"], q["gate"]), ())
+                    % (q["select"], q["table"], gate), ())
+
+        # lane == "bulk": meta_priority is pinned to one value, which is what lets the next column of
+        # each index provide the ordering with no sort at all.
+        bulk = " AND meta_priority = %d" % META_PRIORITY_BULK
+        if not q.get("orderable") or selector == "oldest":
+            return ("SELECT %s FROM %s WHERE meta_status='pending'%s%s "
+                    "ORDER BY meta_requested_at ASC LIMIT 1"
+                    % (q["select"], q["table"], gate, bulk), ())
         if selector == "newest":
-            return ("SELECT %s FROM %s WHERE meta_status='pending'%s "
-                    "ORDER BY meta_priority DESC, meta_requested_at DESC LIMIT 1"
-                    % (q["select"], q["table"], q["gate"]), ())
+            return ("SELECT %s FROM %s WHERE meta_status='pending'%s%s "
+                    "ORDER BY meta_requested_at DESC LIMIT 1"
+                    % (q["select"], q["table"], gate, bulk), ())
         if selector in ("seeders", "seen", "completed"):
             col = {"seeders": "last_seeders", "seen": "seen_count", "completed": "last_completed"}[selector]
-            return ("SELECT %s FROM %s WHERE meta_status='pending'%s "
-                    "ORDER BY meta_priority DESC, %s DESC LIMIT 1"
-                    % (q["select"], q["table"], q["gate"], col), ())
+            return ("SELECT %s FROM %s WHERE meta_status='pending'%s%s ORDER BY %s DESC LIMIT 1"
+                    % (q["select"], q["table"], gate, bulk, col), ())
         # random: a uniform point in the key space, then the first pending row at or after it.
         # When the point lands past the last pending row the caller wraps to the start of the
         # queue; without that wrap the tail of the key space would simply never be claimed.
-        return ("SELECT %s FROM %s WHERE meta_status='pending'%s AND info_hash >= %%s "
-                "ORDER BY info_hash LIMIT 1" % (q["select"], q["table"], q["gate"]),
+        return ("SELECT %s FROM %s WHERE meta_status='pending'%s%s AND info_hash >= %%s "
+                "ORDER BY info_hash LIMIT 1" % (q["select"], q["table"], gate, bulk),
                 (secrets.token_hex(20),))
 
     def heartbeat(self):
@@ -461,37 +508,51 @@ class Worker:
                 log.warning("reset_stale(%s): %s", q["table"], e)
 
     def claim(self):
-        # try each queue in order; the whitelist must be empty before an index row is claimed.
-        # Two-step claim: a plain SELECT picks the candidate (consistent read, NO row locks — the old
-        # single UPDATE ... ORDER BY ... LIMIT 1 filesorted AND X-locked the whole pending set on a big
-        # queue), then the UPDATE claims exactly that row by primary key with a status recheck; if
-        # another actor won the race, retry with the next candidate.
+        """Claim one pending row, or None.
+
+        Three nested choices, outermost first: which QUEUE (whitelist or index, decided by the
+        rotation), which LANE (asked-for, then bulk, then the safety net), and then up to three
+        attempts inside a lane in case another worker takes the candidate first.
+
+        Two-step within a lane: a plain SELECT picks the candidate (consistent read, NO row locks --
+        the old single UPDATE ... ORDER BY ... LIMIT 1 filesorted AND X-locked the whole pending set),
+        then the UPDATE claims exactly that row by primary key with a status recheck.
+        """
         for q, selector in self.claim_targets():
-            for _attempt in range(3):
-                token = secrets.token_hex(8)
-                try:
-                    sql, params = self.claim_query(q, selector)
-                    # `or None`: pymysql runs `sql % args` for anything that is not None, so an
-                    # empty tuple would make a literal % in a future ORDER BY a runtime error.
+            for lane in CLAIM_LANES:
+                row = self.claim_from(q, selector, lane)
+                if row is not None:
+                    return row
+        return None
+
+    def claim_from(self, q, selector, lane):
+        """One (queue, selector, lane) combination. None means "nothing here, try the next"."""
+        for _attempt in range(3):
+            token = secrets.token_hex(8)
+            try:
+                sql, params = self.claim_query(q, selector, lane)
+                # `or None`: pymysql runs `sql % args` for anything that is not None, so an empty
+                # tuple would make a literal % in a future ORDER BY a runtime error.
+                rows = self.db.query(sql, params or None, fetch=True)
+                if not rows and selector == "random" and lane == "bulk":
+                    # the random point landed past the last pending hash -- wrap to the start
+                    sql, params = self.claim_query(q, "oldest", lane)
                     rows = self.db.query(sql, params or None, fetch=True)
-                    if not rows and selector == "random":
-                        # the random point landed past the last pending hash -- wrap to the start
-                        sql, params = self.claim_query(q, "oldest")
-                        rows = self.db.query(sql, params or None, fetch=True)
-                    if not rows:
-                        break                      # queue empty — fall through to the next queue
-                    row = rows[0]
-                    n = self.db.query(
-                        "UPDATE %s SET meta_status='fetching', meta_claim=%%s, meta_claimed_at=NOW() WHERE %s=%%s AND meta_status='pending'" % (q["table"], q["key_col"]),
-                        (token, row[q["key_col"]]))
-                    if not n:
-                        continue                   # raced — pick a fresh candidate
-                except Exception as e:
-                    log.warning("claim(%s): %s", q["table"], e)
-                    break
-                row["token"] = token
-                row["_q"] = q
-                return row
+                if not rows:
+                    return None
+                row = rows[0]
+                n = self.db.query(
+                    "UPDATE %s SET meta_status='fetching', meta_claim=%%s, meta_claimed_at=NOW() "
+                    "WHERE %s=%%s AND meta_status='pending'" % (q["table"], q["key_col"]),
+                    (token, row[q["key_col"]]))
+                if not n:
+                    continue                       # raced -- pick a fresh candidate
+            except Exception as e:
+                log.warning("claim(%s/%s): %s", q["table"], lane, e)
+                return None
+            row["token"] = token
+            row["_q"] = q
+            return row
         return None
 
     def start(self, row):
