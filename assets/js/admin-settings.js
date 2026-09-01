@@ -348,7 +348,7 @@
 
 /* ── the metadata fetch-order mix ────────────────────────────────────────────
  *
- * Four shares that must add up to 100. The rule that makes this usable rather than a puzzle: you
+ * Seven shares that must add up to 100. The rule that makes this usable rather than a puzzle: you
  * edit ONE number and the others absorb the difference in proportion to what they already had, so
  * the total is never wrong and you are never asked to do arithmetic to make a change stick.
  *
@@ -365,8 +365,21 @@
     const fields = Array.from(document.querySelectorAll('.meta-order-share'));
     const notes = Array.from(document.querySelectorAll('.meta-order-note'));
     const sumEl = document.getElementById('meta-order-sum');
+    const liveEl = document.getElementById('meta-order-live');
     const conc = document.querySelector('input[name="meta_worker_concurrency"]');
-    const DEFAULTS = { seeders: 70, newest: 15, random: 15, oldest: 0 };
+    const DEFAULTS = { whitelist: 0, seeders: 70, newest: 15, seen: 0, completed: 0, random: 15, oldest: 0 };
+
+    /* Which index each ordering rides on — the same table as includes/meta_order.php and
+     * worker/worker.py. Shown so a mode reads as a query plan rather than a preference. */
+    const PLAN = {
+        oldest:    ['idx_index_meta', 'meta_priority DESC, meta_requested_at ASC'],
+        newest:    ['idx_index_meta', 'meta_priority DESC, meta_requested_at DESC'],
+        seeders:   ['idx_index_meta_seed', 'meta_priority DESC, last_seeders DESC'],
+        seen:      ['idx_index_meta_seen', 'meta_priority DESC, seen_count DESC'],
+        completed: ['idx_index_meta_completed', 'meta_priority DESC, last_completed DESC'],
+        random:    ['PRIMARY', 'info_hash >= (random point), ORDER BY info_hash'],
+        whitelist: ['—', 'the whitelist queue, in admin-priority order'],
+    };
 
     const val = f => Math.max(0, Math.min(100, parseInt(f.value, 10) || 0));
     const showMix = () => { wrap.style.display = mode.value === 'mix' ? '' : 'none'; };
@@ -376,6 +389,22 @@
     function concurrency() {
         const raw = conc ? parseInt(conc.value, 10) : NaN;
         return raw > 0 ? Math.min(64, raw) : 8;
+    }
+
+    function paintLive() {
+        if (!liveEl) return;
+        if (mode.value === 'mix') {
+            const live = fields.filter(f => val(f) > 0)
+                .sort((a, b) => val(b) - val(a))
+                .map(f => val(f) + '% ' + f.dataset.share);
+            liveEl.innerHTML = '<span class="settings-hint">Rotating over 100 claims: <strong>' +
+                (live.length ? live.join(' · ') : 'nothing — set a share below') + '</strong>. ' +
+                'A slot whose queue is empty falls through to the other queue.</span>';
+            return;
+        }
+        const p = PLAN[mode.value] || ['—', '—'];
+        liveEl.innerHTML = '<span class="settings-hint">Runs on <code>' + p[0] + '</code> as ' +
+            '<code>' + p[1] + '</code>. The whitelist queue still drains first.</span>';
     }
 
     function paint() {
@@ -390,7 +419,14 @@
             const f = fields.find(x => x.dataset.share === n.dataset.note);
             if (!f) return;
             const p = val(f);
-            if (p === 0) { n.textContent = 'off'; n.classList.remove('text-warning'); return; }
+            f.classList.remove('is-thin');
+            if (p === 0) {
+                // Zero means two different things, and saying which one matters: for the whitelist
+                // it is not "never" but "absolute priority", which is the default and the safe case.
+                n.textContent = f.dataset.share === 'whitelist' ? 'whitelist drains first (default)' : 'off';
+                n.classList.remove('text-warning');
+                return;
+            }
             const perWave = (p * c) / 100;
             if (perWave >= 1) {
                 n.textContent = '≈ ' + (perWave >= 10 ? Math.round(perWave) : perWave.toFixed(1)) +
@@ -400,8 +436,10 @@
                 // Not forbidden — but this is the case worth naming out loud.
                 n.textContent = 'one every ' + Math.round(1 / perWave) + ' waves — thin at ' + c + ' parallel fetches';
                 n.classList.add('text-warning');
+                f.classList.add('is-thin');
             }
         });
+        paintLive();
     }
 
     /** Keep the total at 100 by moving the difference into the OTHER shares, proportionally.
@@ -440,7 +478,7 @@
         });
     });
     if (conc) conc.addEventListener('input', paint);
-    mode.addEventListener('change', showMix);
+    mode.addEventListener('change', () => { showMix(); paint(); });
     const reset = document.getElementById('meta-order-reset');
     if (reset) reset.addEventListener('click', () => {
         fields.forEach(f => { f.value = DEFAULTS[f.dataset.share] ?? 0; });

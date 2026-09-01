@@ -230,6 +230,40 @@ is the point: the panel writes one accesslist file and the tracker's mode decide
 
 ---
 
+## A full scrape that loses its own framing
+
+The panel's Index page reads `/scrape` — tens of megabytes of gzip, sent with
+`Transfer-Encoding: chunked` — and intermittently the transfer dies with:
+
+```
+cURL error: chunk hex-length char not a hex digit: 0x55
+```
+
+**It is not the panel and it is not the data.** The bytes that arrive where a chunk length should be
+are a heap pointer: `70 0c aa 56 6d 7f` is `0x7f6d56aa0c70`, and what follows it is valid bencode
+again. That is freed memory being transmitted — the buffer went back to the allocator, its first
+bytes became an allocator link, and the socket sent it anyway.
+
+It is reproducible on demand, on a tracker of your own, without waiting for a 29 MB scrape or the
+five-minute full-scrape limiter. Two constants set the scale, and scaling **both** keeps the
+production ratio while making the trigger reachable with a few thousand torrents:
+
+```c
+ot_fullscrape.c:  #define OT_SCRAPE_CHUNK_SIZE  (16 * 1024)     /* was 1 MiB   */
+ot_http.c:        #define OT_BATCH_LIMIT        (256 * 1024)    /* was 16 MiB  */
+```
+
+Build without `-DWANT_COMPRESSION_GZIP` so the scrape stays large, announce a few thousand hashes,
+then read `/scrape` slowly (a small `SO_RCVBUF` and a sleep in the read loop) and walk the chunk
+headers. On the unpatched build that corrupts every time.
+
+⚠ Scaling only `OT_BATCH_LIMIT` reproduces **nothing** — the whole scrape arrives as one chunk and
+the interesting path never runs. That cost an hour: a lab that does not reproduce is not evidence of
+a fix.
+
+The panel no longer depends on the outcome either way: a transfer that ends early is parsed for what
+arrived and the poll resumes at the tail, the same as when the poll-time budget stops it mid-file.
+
 ## After the first start
 
 Three things this project learned the hard way, in the order they bite:

@@ -66,6 +66,18 @@
         grid.appendChild(kv('Last error', st.last_error
             ? [badge('error', 'wl-b-bad'), ' ', el('span', { className: 'wl-small', text: st.last_error })]
             : [badge('none', 'wl-b-ok')]));
+        // A transfer that ended early is NOT an error: what arrived was parsed and the resume cursor
+        // moved, exactly as it does when the time budget stops a pass. Showing it as an error would
+        // train the operator to ignore the error line; showing nothing would hide a tracker that is
+        // mis-framing its own replies. So it gets its own row, and only while it is the last thing
+        // that happened.
+        const par = st.last_partial;
+        if (par) {
+            grid.appendChild(kv('Partial fetch', [
+                badge('kept what arrived', 'wl-b-pending'), ' ',
+                el('span', { className: 'wl-small', text: `${num(par.entries)} entries from ${(par.bytes / 1048576).toFixed(1)} MiB — ${par.reason}. The next poll resumes at the tail.` }),
+            ]));
+        }
         $('idx-status-updated').textContent = 'source ' + (s.source_url || '').replace(/^https?:\/\//, '');
     }
 

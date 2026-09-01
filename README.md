@@ -411,35 +411,47 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
 > whole swarm. Poll from **localhost**, watch OpenTracker's single HTTP thread (`top`/`pidstat`), and
 > start with `index_meta_daily_budget = 0` (catalogue only, no DHT) until the CPU cost looks safe.
 
-### Which hash gets fetched next (1.23.0)
+### Which hash gets fetched next (1.23.0, expanded in 1.25.0)
 
-**Settings → Observed-hash index → Fetch order.** The metadata worker resolves a few hashes a second
-against an index queue millions of rows deep, so the order of that queue is not a detail: it decides
-what the tracker knows anything about for the next several months.
+**Settings → Metadata fetch order.** The metadata worker resolves a few hashes a second against an
+index queue millions of rows deep, so the order of that queue is not a detail: it decides what the
+tracker knows anything about for the next several months.
 
-"Longest waiting first" is fair, and it is also the reason a release added yesterday sits behind a
-million hashes nobody has seeded since 2019. The alternatives:
+Queue order is fair, and it is also the reason a release added yesterday sits behind a million hashes
+nobody has seeded since 2019.
 
 | Mode | Takes next | Runs on |
 | --- | --- | --- |
-| **Longest waiting** (default) | the hash queued earliest | `idx_index_meta` |
+| **Queue order** (default) | as they were added to pending, admin priority first | `idx_index_meta` |
 | **Newest** | the hash queued most recently | the same index, backwards |
-| **Most seeders** | the biggest swarm | `idx_index_meta_seed` |
+| **Most seeders** | the biggest swarm right now | `idx_index_meta_seed` |
+| **Seen most often** | the most persistent swarm across polls | `idx_index_meta_seen` |
+| **Most completed** | the most downloaded of all time | `idx_index_meta_completed` |
 | **Random** | a uniform sample of the whole queue | the primary key |
 | **Balanced mix** | shares of the above, interleaved | all of them |
 
 Every mode runs on an index that **already exists**, and that constraint shaped the list. A claim
 happens on every fetch slot, several times a second, so a sort the database would have to compute —
-by file count, by name, by how often a hash has been seen — means a filesort over three million rows
-at that rate. Those orderings are absent on purpose, not by oversight.
+by name, by size, by file count — means a filesort over three million rows at that rate. The panel
+lists what was left out and why, rather than leaving it to look like an oversight: *last seen* would
+sort three million rows that are all stamped with the same poll time; *peak seeders* gives nearly the
+same ranking as *most seeders* for the cost of another index on a table rewritten every poll; and
+name, size and file count are not known until the metadata has been fetched, which is the thing being
+ordered.
 
 `ORDER BY RAND()` is the same trap and is not what **Random** does. Info hashes are SHA-1 digests and
 therefore uniformly spread across the key space, so a random 20-byte point plus "the first pending row
 at or after it" is an index seek — and uniform for exactly the reason the digests are.
 
-**The mix** is where the useful setting is: mostly big swarms, with enough of new and random that
-nothing is starved. The shares always add up to 100 — raise one and the others give up the difference
-in proportion — and the rotation repeats over **100 claims, interleaved rather than blocked**. That
+Two of these need an index that a fresh upgrade builds out of band on a table of several million
+rows. The panel asks the database which orderings it can serve before offering them, so a mode whose
+index is still being built shows as *building* instead of quietly becoming a full scan.
+
+#### The mix, and the whitelist share
+
+The mix is where the useful setting is: mostly big swarms, with enough of new and random that nothing
+is starved. The shares always add up to 100 — raise one and the others give up the difference in
+proportion — and the rotation repeats over **100 claims, interleaved rather than blocked**. That
 matters more than it sounds: the worker claims in waves the size of its parallel-fetch setting, so a
 blocked plan (seventy of one kind, then fifteen of the next) makes each wave a single kind and the
 "balance" only appears over hours. Interleaved, a single wave is already a proportional sample.
@@ -449,8 +461,13 @@ the panel says what that works out to at the parallel-fetch setting above (*"≈
 fetches"*), and warns when a share is thin enough to be less than one per wave, because that is the
 number that decides whether a share is worth having.
 
-The **whitelist** queue is never reordered. Those rows are there because a person asked for them by
-name, and answering a direct request with a dice roll is not a feature.
+**Whitelist (registered)** is a share of the mix and deliberately not a mode. At **0 — the default —
+the whitelist keeps absolute priority**: it drains completely before any index row, exactly as in
+every other mode and every earlier release, because those rows are there because somebody asked for
+them by name. Give it a number and it becomes a guaranteed slice of the rotation instead, which is
+what you want when a bulk import has put fifty thousand rows in front of the index and you need both
+to move. A slot whose queue turns out to be empty falls through to the other queue, so the share is a
+floor for the whitelist and never a ceiling on throughput.
 
 The worker re-reads all of this about once a minute — no restart. And because a worker started from
 an older `worker.py` would ignore the setting entirely, the panel compares what it asked for against

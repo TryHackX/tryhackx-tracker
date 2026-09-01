@@ -23,29 +23,55 @@ WORKER_VERSION = 4
 #
 # The index queue is ~2.9 million rows deep and resolves at a few per second, so the ORDER of the
 # queue is not a detail: it decides which torrents this tracker knows anything about for the next
-# several months. "Oldest first" is fair, and it is also the reason a brand-new release sits behind
+# several months. "Queue order" is fair, and it is also the reason a brand-new release sits behind
 # a million hashes nobody has seeded since 2019.
 #
 # Each selector below is one ORDER BY that an EXISTING index can serve. That constraint is the whole
-# design: a claim runs on every fetch slot, so a sort the database has to compute (seen_count, files,
-# name) would mean a filesort over three million rows several times a second. The ones offered here
-# are the ones that are free:
+# design: a claim runs on every fetch slot, so a sort the database has to compute (name, size, file
+# count) would mean a filesort over three million rows several times a second. The ones offered here
+# are the ones an index covers:
 #
-#   oldest   meta_priority DESC, meta_requested_at ASC   idx_index_meta       (the historical order)
-#   newest   meta_priority DESC, meta_requested_at DESC  idx_index_meta       (same index, backwards)
-#   seeders  meta_priority DESC, last_seeders  DESC      idx_index_meta_seed
-#   random   info_hash >= <random>, ORDER BY info_hash   PRIMARY KEY
+#   oldest     meta_priority DESC, meta_requested_at ASC   idx_index_meta            (queue order)
+#   newest     meta_priority DESC, meta_requested_at DESC  idx_index_meta            (same, backwards)
+#   seeders    meta_priority DESC, last_seeders  DESC      idx_index_meta_seed
+#   seen       meta_priority DESC, seen_count    DESC      idx_index_meta_seen       (schema v31)
+#   completed  meta_priority DESC, last_completed DESC     idx_index_meta_completed  (schema v31)
+#   random     info_hash >= <random>, ORDER BY info_hash   PRIMARY KEY
 #
 # `random` deserves a note: `ORDER BY RAND()` reads and sorts the whole table, which is exactly what
 # must not happen here. Info hashes are SHA-1 digests, so they are uniformly spread across the key
 # space — picking a random 20-byte point and taking the first pending row at or after it is an index
 # seek, and it is uniform for the same reason the digests are.
-ORDER_SELECTORS = ("oldest", "newest", "seeders", "random")
+ORDER_SELECTORS = ("oldest", "newest", "seeders", "seen", "completed", "random")
 ORDER_MODES = ORDER_SELECTORS + ("mix",)
+
+# `whitelist` is a share of the mix and NOT a mode. Outside the mix the whitelist always drains
+# first; and there is nothing to sort by inside the index, because a hash that reaches the whitelist
+# is deleted from the index on the next poll. As a share it answers the real question — "a bulk
+# import just put fifty thousand rows in front of my index, can both move?" — by giving the whitelist
+# a guaranteed slice of the rotation instead of all of it.
+ORDER_MIX_KEYS = ("whitelist",) + ORDER_SELECTORS
+
+# The index each selector rides on. Checked against the live database before the plan is built: the
+# v31 indexes are created by a heavy ALTER the janitor runs out of band, so there is a window where
+# the setting exists and the index does not. Starting a filesort over three million rows in that
+# window would not look like a missing index; it would look like a dead worker.
+ORDER_INDEX = {
+    "oldest": "idx_index_meta",
+    "newest": "idx_index_meta",
+    "seeders": "idx_index_meta_seed",
+    "seen": "idx_index_meta_seen",
+    "completed": "idx_index_meta_completed",
+    "random": None,
+    "whitelist": None,
+}
+
 # The mix repeats over this many claims, so one percentage point is one claim in a hundred — a share
 # can be small, but it can never round down to "never".
 ORDER_ROTATION = 100
-ORDER_MIX_DEFAULT = {"oldest": 0, "newest": 15, "seeders": 70, "random": 15}
+# whitelist 0 = keep absolute priority (the behaviour every earlier release had).
+ORDER_MIX_DEFAULT = {"whitelist": 0, "oldest": 0, "newest": 15, "seeders": 70,
+                     "seen": 0, "completed": 0, "random": 15}
 
 
 def order_rotation(shares, length=ORDER_ROTATION):
@@ -58,17 +84,17 @@ def order_rotation(shares, length=ORDER_ROTATION):
     point — the same rule proportional seat allocation uses, and it puts the two 15 % selectors at
     even intervals through the 70 % one.
 
-    Ties go to the earliest selector in ORDER_SELECTORS, so the plan is deterministic: two workers
-    reading the same settings build the same rotation.
+    Ties go to the earliest key in ORDER_MIX_KEYS, so the plan is deterministic: two workers reading
+    the same settings build the same rotation.
     """
-    live = [n for n in ORDER_SELECTORS if int(shares.get(n, 0) or 0) > 0]
+    live = [n for n in ORDER_MIX_KEYS if int(shares.get(n, 0) or 0) > 0]
     if not live:
         return ["oldest"] * length
     total = sum(int(shares[n]) for n in live)
     assigned = dict.fromkeys(live, 0)
     plan = []
     for i in range(1, length + 1):
-        pick = max(live, key=lambda n: (int(shares[n]) * i / total - assigned[n], -ORDER_SELECTORS.index(n)))
+        pick = max(live, key=lambda n: (int(shares[n]) * i / total - assigned[n], -ORDER_MIX_KEYS.index(n)))
         assigned[pick] += 1
         plan.append(pick)
     return plan
@@ -87,7 +113,7 @@ def order_normalise(mode, shares):
     if mode not in ORDER_MODES:
         mode = "oldest"
     clean = {}
-    for n in ORDER_SELECTORS:
+    for n in ORDER_MIX_KEYS:
         try:
             v = int(shares.get(n, 0) or 0)
         except (TypeError, ValueError):
@@ -188,6 +214,8 @@ class Worker:
         self._order_plan = ["oldest"] * ORDER_ROTATION
         self._order_checked_at = 0.0
         self._order_seq = 0          # which slot of the rotation the next claim takes
+        self._order_indexes = None   # which selectors the database can actually serve
+        self._order_indexes_at = 0.0
         self.running = True
         os.makedirs(cfg.tmp_dir, exist_ok=True)
         os.makedirs(os.path.dirname(cfg.heartbeat), exist_ok=True)
@@ -264,6 +292,40 @@ class Worker:
         return self._conc_override or self.cfg.concurrency
 
     # ── queue ──────────────────────────────────────────────────────────────
+    def usable_selectors(self):
+        """Which orderings this database can serve right now, checked rather than assumed.
+
+        The two v31 indexes are built by a heavy ALTER the janitor runs out of band, so there is a
+        window -- minutes on a table this size -- where the setting exists and the index does not.
+        Running `ORDER BY seen_count DESC` in that window is not a slower setting, it is a filesort
+        over three million rows several times a second. So the worker asks, and falls back.
+
+        A failed check claims everything is usable: an unreadable information_schema says nothing
+        about the indexes, and disabling every selector over a permissions error would be worse than
+        the thing being guarded against.
+        """
+        now = time.time()
+        if self._order_indexes is not None and now - self._order_indexes_at < 600:
+            return self._order_indexes
+        self._order_indexes_at = now
+        have = set()
+        ok = True
+        if self.cfg.index_table:
+            try:
+                rows = self.db.query(
+                    "SELECT DISTINCT INDEX_NAME n FROM information_schema.STATISTICS "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s", (self.cfg.index_table,),
+                    fetch=True)
+                have = {str(r["n"]) for r in (rows or [])}
+            except Exception as e:
+                log.warning("usable_selectors: %s", e)
+                ok = False
+        usable = {}
+        for sel, idx in ORDER_INDEX.items():
+            usable[sel] = True if (not ok or idx is None or not self.cfg.index_table) else (idx in have)
+        self._order_indexes = usable
+        return usable
+
     def effective_order(self):
         """(mode, shares, plan) from the settings table, re-read at most every 60 s.
 
@@ -276,18 +338,32 @@ class Worker:
         if now - self._order_checked_at >= 60:
             self._order_checked_at = now
             try:
+                keys = ",".join("'meta_order_mix_" + n + "'" for n in ORDER_MIX_KEYS)
                 rows = self.db.query(
-                    "SELECT `key`, `value` FROM settings WHERE `key` IN "
-                    "('meta_order_mode','meta_order_mix_oldest','meta_order_mix_newest',"
-                    "'meta_order_mix_seeders','meta_order_mix_random')", fetch=True)
+                    "SELECT `key`, `value` FROM settings WHERE `key` IN ('meta_order_mode'," + keys + ")",
+                    fetch=True)
                 got = {str(r["key"]): str(r["value"] or "") for r in (rows or [])}
                 mode, shares = order_normalise(
                     got.get("meta_order_mode", ""),
-                    {n: got.get("meta_order_mix_" + n, "") for n in ORDER_SELECTORS})
+                    {n: got.get("meta_order_mix_" + n, "") for n in ORDER_MIX_KEYS})
+
+                # An ordering whose index is missing becomes queue order rather than a filesort.
+                usable = self.usable_selectors()
+                if not usable.get(mode, True):
+                    log.warning("fetch order %r needs index %s, which does not exist yet -- "
+                                "using queue order until it does", mode, ORDER_INDEX.get(mode))
+                    mode = "oldest"
+                for n in list(shares):
+                    if shares[n] and not usable.get(n, True):
+                        log.warning("mix share %r (%d%%) needs index %s, which does not exist yet -- "
+                                    "folding it into queue order", n, shares[n], ORDER_INDEX.get(n))
+                        shares["oldest"] = shares.get("oldest", 0) + shares[n]
+                        shares[n] = 0
+
                 if mode != self._order_mode or shares != self._order_shares:
                     log.info("fetch order: %s%s", mode,
                              "" if mode != "mix" else " (" + ", ".join(
-                                 "%s %d%%" % (n, shares[n]) for n in ORDER_SELECTORS if shares[n]) + ")")
+                                 "%s %d%%" % (n, shares[n]) for n in ORDER_MIX_KEYS if shares[n]) + ")")
                     self._order_mode, self._order_shares = mode, shares
                     self._order_plan = (order_rotation(shares) if mode == "mix"
                                         else [mode] * ORDER_ROTATION)
@@ -296,12 +372,28 @@ class Worker:
                 log.warning("effective_order: %s", e)
         return self._order_mode, self._order_shares, self._order_plan
 
-    def next_selector(self):
-        """The selector for the claim about to happen, advancing the rotation by one slot."""
-        _mode, _shares, plan = self.effective_order()
-        sel = plan[self._order_seq % len(plan)]
+    def claim_targets(self):
+        """The queues to try for THIS claim, in order, as (queue, selector) pairs.
+
+        Two rules, and the second one is the whole reason this is a list rather than a choice:
+
+          * Outside the mix -- and inside it whenever the whitelist share is 0 -- the whitelist
+            drains FIRST, absolutely. That is what every release before this one did, and those rows
+            are there because a person asked for them by name.
+          * With a whitelist share, the rotation decides which queue a slot belongs to. A slot whose
+            queue turns out to be empty is not wasted: it falls through to the other one. So the
+            share is a floor for the whitelist and never a ceiling on total throughput.
+        """
+        mode, shares, plan = self.effective_order()
+        slot = plan[self._order_seq % len(plan)]
         self._order_seq += 1
-        return sel
+        wl = [q for q in self.queues if not q.get("orderable")]
+        idx = [q for q in self.queues if q.get("orderable")]
+        if slot == "whitelist":
+            return [(q, "oldest") for q in wl] + [(q, "oldest") for q in idx]
+        if mode == "mix" and int(shares.get("whitelist", 0) or 0) > 0:
+            return [(q, slot) for q in idx] + [(q, "oldest") for q in wl]
+        return [(q, "oldest") for q in wl] + [(q, slot) for q in idx]
 
     def claim_query(self, q, selector):
         """(sql, params) that picks ONE candidate row for this queue under this selector.
@@ -316,10 +408,11 @@ class Worker:
             return ("SELECT %s FROM %s WHERE meta_status='pending'%s "
                     "ORDER BY meta_priority DESC, meta_requested_at DESC LIMIT 1"
                     % (q["select"], q["table"], q["gate"]), ())
-        if selector == "seeders":
+        if selector in ("seeders", "seen", "completed"):
+            col = {"seeders": "last_seeders", "seen": "seen_count", "completed": "last_completed"}[selector]
             return ("SELECT %s FROM %s WHERE meta_status='pending'%s "
-                    "ORDER BY meta_priority DESC, last_seeders DESC LIMIT 1"
-                    % (q["select"], q["table"], q["gate"]), ())
+                    "ORDER BY meta_priority DESC, %s DESC LIMIT 1"
+                    % (q["select"], q["table"], q["gate"], col), ())
         # random: a uniform point in the key space, then the first pending row at or after it.
         # When the point lands past the last pending row the caller wraps to the start of the
         # queue; without that wrap the tail of the key space would simply never be claimed.
@@ -373,8 +466,7 @@ class Worker:
         # single UPDATE ... ORDER BY ... LIMIT 1 filesorted AND X-locked the whole pending set on a big
         # queue), then the UPDATE claims exactly that row by primary key with a status recheck; if
         # another actor won the race, retry with the next candidate.
-        for q in self.queues:
-            selector = self.next_selector() if q.get("orderable") else "oldest"
+        for q, selector in self.claim_targets():
             for _attempt in range(3):
                 token = secrets.token_hex(8)
                 try:

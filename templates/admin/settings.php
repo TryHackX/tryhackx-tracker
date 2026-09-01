@@ -1608,53 +1608,106 @@
                     <div class="col-md-3">
                         <label class="form-label">Worker parallel fetches <small class="settings-hint">(empty = worker config)</small></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="meta_worker_concurrency" value="<?= sanitize($cfg['meta_worker_concurrency'] ?? '') ?>" min="1" max="64" placeholder="e.g. 8">
-                        <small class="settings-hint">How many hashes the metadata worker resolves at once (whitelist + index queues). The worker re-reads this every ~60&nbsp;s &mdash; no restart needed. <strong>1&ndash;64.</strong> Each fetch is one libtorrent handle holding a small set of DHT and peer connections, so the ceiling here is file descriptors and memory, not libtorrent: at the top end expect a few hundred sockets, a few hundred MB, and outbound traffic to match. Raise it because this machine has spare capacity, not because the number is available.</small>
+                        <small class="settings-hint">How many hashes the worker resolves at once, across both queues. <strong>1&ndash;64</strong>, applied within ~60&nbsp;s &mdash; no restart.
+                            <details class="settings-more"><summary>What it costs</summary>Each fetch is one libtorrent handle holding a small set of DHT and peer connections, so the ceiling here is file descriptors and memory, not libtorrent: at the top end expect a few hundred sockets, a few hundred MB, and outbound traffic to match. Raise it because this machine has spare capacity, not because the number is available.</details></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label">Fetch order <small class="settings-hint">(index queue)</small></label>
+                </div>
+            </div>
+
+            <!-- Metadata fetch order -->
+            <div class="settings-section" id="section-fetch-order" data-group="tracker" data-title="Metadata Fetch Order">
+                <h5>Metadata fetch order</h5>
+<?php
+require_once __DIR__ . '/../../includes/meta_order.php';
+$mixDefaults = metaOrderDefaultMix();
+$mixLabels   = metaOrderShareLabels();
+// Which orderings the database can serve. Guarded rather than trusted: metaOrderAvailable()
+// already swallows a failed query, but getDb() itself can throw, and a settings page that fatals
+// because information_schema was unreadable would be a worse bug than the one being reported.
+$mixOk = array_fill_keys(metaOrderMixKeys(), true);
+if (function_exists('getDb')) {
+    try { $mixOk = metaOrderAvailable(getDb()); } catch (\Throwable $e) { /* keep the optimistic default */ }
+}
+$modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
+?>
+                <small class="settings-hint d-block mb-3">Which pending hash the worker takes next, on the <strong>index</strong> queue. On a queue of millions this decides what the tracker knows anything about for months: <em>queue order</em> is fair, and it is also the reason a release added yesterday sits behind a million hashes nobody has seeded since 2019. Applied within ~60&nbsp;s, no restart.
+                    <details class="settings-more"><summary>Why these orderings and not others</summary>A claim runs on every fetch slot &mdash; several times a second &mdash; so every mode here has to be a sort an <strong>existing index</strong> can serve; anything else is a filesort over three million rows at that rate. Left out on purpose:<?php foreach (metaOrderRejected() as $rk => $rv): ?> <strong><?= sanitize($rk) ?></strong> &mdash; <?= $rv ?><?php endforeach; ?> And <em>Random</em> is not <code>ORDER BY RAND()</code>, which would read and sort the whole table: info hashes are SHA-1 digests and therefore uniform across the key space, so a random point plus &ldquo;the first pending row at or after it&rdquo; is an index seek.</details>
+                </small>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Fetch order</label>
                         <select class="form-select bg-dark text-light border-secondary" name="meta_order_mode" id="meta-order-mode">
-<?php require_once __DIR__ . '/../../includes/meta_order.php'; ?>
 <?php foreach (metaOrderModeLabels() as $ov => $ol): ?>
-                            <option value="<?= $ov ?>" <?= (($cfg['meta_order_mode'] ?? 'oldest') === $ov) ? 'selected' : '' ?>><?= $ol ?></option>
+                            <option value="<?= $ov ?>" <?= $modeNow === $ov ? 'selected' : '' ?><?= empty($mixOk[$ov]) ? ' disabled' : '' ?>><?= $ol ?><?= empty($mixOk[$ov]) ? ' — index still building' : '' ?></option>
 <?php endforeach; ?>
                         </select>
-                        <small class="settings-hint">Which pending hash the worker takes next, on the <strong>index</strong> queue only &mdash; the whitelist always keeps &ldquo;admin priority, then longest waiting&rdquo;, because those rows are there because somebody asked for them by name. On a queue of millions this setting decides what the tracker knows anything about for months: <strong>longest waiting</strong> is fair and also the reason a new release sits behind a million hashes nobody has seeded since 2019. Every mode runs on an index that already exists, so none of them costs a scan. Applied within ~60&nbsp;s, no restart.</small>
+                        <small class="settings-hint">The <strong>whitelist</strong> queue is not affected: outside the mix it always drains first, because those rows are there because somebody asked for them by name.</small>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label">What the worker is actually doing</label>
+                        <div class="meta-order-live" id="meta-order-live">
+                            <span class="settings-hint">A mode is a query plan, not a preference. This one runs on
+                                <code id="meta-order-index">idx_index_meta</code>.</span>
+                        </div>
                     </div>
                     <div class="col-12 meta-order-mix" id="meta-order-mix">
                         <div class="p-3 rounded border border-secondary">
                             <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
                                 <strong class="me-auto">Mix shares</strong>
                                 <span class="settings-hint" id="meta-order-sum"></span>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" id="meta-order-reset">Reset to 70/15/15</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="meta-order-reset">Reset to default</button>
                             </div>
                             <div class="row g-3">
-<?php $mixDefaults = metaOrderDefaultMix(); $mixLabels = metaOrderShareLabels(); ?>
-                                <div class="col-md-3">
-                                    <label class="form-label"><?= $mixLabels['seeders'] ?></label>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label"><?= $mixLabels['whitelist'] ?><?= empty($mixOk['whitelist']) ? ' <span class="badge bg-secondary" title="the index this ordering needs is still being built">building</span>' : '' ?></label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="whitelist" name="meta_order_mix_whitelist" value="<?= sanitize((string)($cfg['meta_order_mix_whitelist'] ?? $mixDefaults['whitelist'])) ?>" min="0" max="100" step="1">
+                                        <span class="input-group-text bg-dark text-light border-secondary">%</span>
+                                    </div>
+                                    <small class="settings-hint meta-order-note" data-note="whitelist"></small>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label"><?= $mixLabels['seeders'] ?><?= empty($mixOk['seeders']) ? ' <span class="badge bg-secondary" title="the index this ordering needs is still being built">building</span>' : '' ?></label>
                                     <div class="input-group input-group-sm">
                                         <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="seeders" name="meta_order_mix_seeders" value="<?= sanitize((string)($cfg['meta_order_mix_seeders'] ?? $mixDefaults['seeders'])) ?>" min="0" max="100" step="1">
                                         <span class="input-group-text bg-dark text-light border-secondary">%</span>
                                     </div>
                                     <small class="settings-hint meta-order-note" data-note="seeders"></small>
                                 </div>
-                                <div class="col-md-3">
-                                    <label class="form-label"><?= $mixLabels['newest'] ?></label>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label"><?= $mixLabels['newest'] ?><?= empty($mixOk['newest']) ? ' <span class="badge bg-secondary" title="the index this ordering needs is still being built">building</span>' : '' ?></label>
                                     <div class="input-group input-group-sm">
                                         <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="newest" name="meta_order_mix_newest" value="<?= sanitize((string)($cfg['meta_order_mix_newest'] ?? $mixDefaults['newest'])) ?>" min="0" max="100" step="1">
                                         <span class="input-group-text bg-dark text-light border-secondary">%</span>
                                     </div>
                                     <small class="settings-hint meta-order-note" data-note="newest"></small>
                                 </div>
-                                <div class="col-md-3">
-                                    <label class="form-label"><?= $mixLabels['random'] ?></label>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label"><?= $mixLabels['seen'] ?><?= empty($mixOk['seen']) ? ' <span class="badge bg-secondary" title="the index this ordering needs is still being built">building</span>' : '' ?></label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="seen" name="meta_order_mix_seen" value="<?= sanitize((string)($cfg['meta_order_mix_seen'] ?? $mixDefaults['seen'])) ?>" min="0" max="100" step="1">
+                                        <span class="input-group-text bg-dark text-light border-secondary">%</span>
+                                    </div>
+                                    <small class="settings-hint meta-order-note" data-note="seen"></small>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label"><?= $mixLabels['completed'] ?><?= empty($mixOk['completed']) ? ' <span class="badge bg-secondary" title="the index this ordering needs is still being built">building</span>' : '' ?></label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="completed" name="meta_order_mix_completed" value="<?= sanitize((string)($cfg['meta_order_mix_completed'] ?? $mixDefaults['completed'])) ?>" min="0" max="100" step="1">
+                                        <span class="input-group-text bg-dark text-light border-secondary">%</span>
+                                    </div>
+                                    <small class="settings-hint meta-order-note" data-note="completed"></small>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label"><?= $mixLabels['random'] ?><?= empty($mixOk['random']) ? ' <span class="badge bg-secondary" title="the index this ordering needs is still being built">building</span>' : '' ?></label>
                                     <div class="input-group input-group-sm">
                                         <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="random" name="meta_order_mix_random" value="<?= sanitize((string)($cfg['meta_order_mix_random'] ?? $mixDefaults['random'])) ?>" min="0" max="100" step="1">
                                         <span class="input-group-text bg-dark text-light border-secondary">%</span>
                                     </div>
                                     <small class="settings-hint meta-order-note" data-note="random"></small>
                                 </div>
-                                <div class="col-md-3">
-                                    <label class="form-label"><?= $mixLabels['oldest'] ?></label>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label"><?= $mixLabels['oldest'] ?><?= empty($mixOk['oldest']) ? ' <span class="badge bg-secondary" title="the index this ordering needs is still being built">building</span>' : '' ?></label>
                                     <div class="input-group input-group-sm">
                                         <input type="number" class="form-control bg-dark text-light border-secondary meta-order-share" data-share="oldest" name="meta_order_mix_oldest" value="<?= sanitize((string)($cfg['meta_order_mix_oldest'] ?? $mixDefaults['oldest'])) ?>" min="0" max="100" step="1">
                                         <span class="input-group-text bg-dark text-light border-secondary">%</span>
@@ -1662,9 +1715,18 @@
                                     <small class="settings-hint meta-order-note" data-note="oldest"></small>
                                 </div>
                             </div>
-                            <small class="settings-hint d-block mt-2">The shares always add up to 100: raising one takes the difference from the others in proportion. The mix repeats over <strong>100 claims</strong>, interleaved rather than blocked &mdash; so 70/15/15 is not seventy of one kind followed by fifteen of the next, and any single wave of parallel fetches is already a proportional sample. One point is therefore one fetch in a hundred: small, but never zero. The note under each field says what that works out to at the parallel-fetch setting above, which is the number that decides whether a share is worth having.</small>
+                            <small class="settings-hint d-block mt-2">The shares always add up to 100: raising one takes the difference from the others in proportion. The mix repeats over <strong>100 claims</strong>, interleaved rather than blocked &mdash; so 70/15/15 is not seventy of one kind followed by fifteen of the next, and any single wave of parallel fetches is already a proportional sample. One point is therefore one fetch in a hundred: small, but never zero. The note under each field says what that works out to at the parallel-fetch setting above, which is the number that decides whether a share is worth having.
+                                <details class="settings-more"><summary>What the whitelist share does</summary><strong>0 means the whitelist keeps absolute priority</strong> &mdash; it drains completely before any index row, exactly as in every other mode and every earlier release, so leaving it alone changes nothing. Give it a number and it becomes a guaranteed slice of the rotation instead: use that when a bulk import has put fifty thousand rows in front of the index and you want both to move. A slot whose queue turns out to be empty is not wasted &mdash; it falls through to the other queue &mdash; so the share is a floor for the whitelist, never a ceiling on throughput.</details>
+                            </small>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Index, continued -->
+            <div class="settings-section" id="section-index-files" data-group="tracker" data-title="Index File Lists">
+                <h5>Index file lists</h5>
+                <div class="row g-3">
                     <div class="col-md-3">
                         <label class="form-label">Keep File Lists</label>
                         <select class="form-select bg-dark text-light border-secondary" name="index_keep_files">

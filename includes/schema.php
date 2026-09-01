@@ -11,7 +11,10 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 30;  // 30 = settings only (metadata fetch order + mix shares)
+const TRACKER_SCHEMA_VERSION = 31;  // 31 = two index_hashes indexes (seen_count, last_completed)
+// so the fetch order can offer "seen most often" and "most completed" without a filesort,
+// plus the three settings that go with them. HEAVY: the ALTER is deferred to the janitor.
+// 30 = settings only (metadata fetch order + mix shares)
 // 29 = settings only (the stability probe, off by default) —
                                     // and settings-only STILL needs the number to move, because the
                                     // default rows are inserted by the migration block.
@@ -711,6 +714,22 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_seed')) {
         $iparts[] = "ADD KEY `idx_index_meta_seed` (`meta_status`, `last_seeders`, `last_seen`)";
     }
+    // schema v31: two more, for the fetch-order selectors "seen most often" and "most completed".
+    //
+    // These exist so that choosing an order in the panel stays a query plan rather than a wish. A
+    // claim runs on every fetch slot — several times a second on a queue of three million rows — so
+    // `ORDER BY seen_count DESC` without an index is a filesort of the whole table at that rate,
+    // which is not a slow setting but a stopped machine.
+    //
+    // The cost is honest and worth stating: two more secondary indexes on a table the index poll
+    // rewrites wholesale every 30 minutes. That is the reason the list of selectors stops here
+    // rather than offering every column — see metaOrderRejected() for the ones left out.
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_seen')) {
+        $iparts[] = "ADD KEY `idx_index_meta_seen` (`meta_status`, `seen_count`)";
+    }
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_completed')) {
+        $iparts[] = "ADD KEY `idx_index_meta_completed` (`meta_status`, `last_completed`)";
+    }
     if ($iparts) {
         // Same reasoning as the ALTER above: FULLTEXT on this table means a rebuild, minutes long,
         // holding a shared lock — never inside a page view. The janitor picks it up on its next tick.
@@ -935,6 +954,12 @@ function trackerSchemaDefaultSettings(): array {
         'meta_order_mix_newest'       => '15',
         'meta_order_mix_seeders'      => '70',
         'meta_order_mix_random'       => '15',
+        // schema v31: three more shares. `whitelist` at 0 does NOT mean "never" — it means the
+        // whitelist keeps ABSOLUTE priority, exactly as in every non-mix mode, so an upgrade
+        // changes nothing. Give it a number and it becomes a guaranteed share of the rotation.
+        'meta_order_mix_whitelist'    => '0',
+        'meta_order_mix_seen'         => '0',
+        'meta_order_mix_completed'    => '0',
         // sender address for outgoing mail (empty = use site_email); domain-validated on save
         'mail_from_email'             => '',
         // schema v9: registration requires an email + only verified accounts get their groups

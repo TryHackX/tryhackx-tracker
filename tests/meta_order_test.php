@@ -28,6 +28,16 @@ foreach (metaOrderModes() as $m) {
     check('mode "' . $m . '" is accepted', metaOrderNormalise($m, [])[0] === $m);
 }
 
+// ── the whitelist share, which means something different at zero ─────────────
+// 0 is not "never": it is "keep absolute priority", the behaviour of every release before this one.
+// A test for it exists because that is the kind of meaning a later refactor flattens into "off".
+[, $wl0] = metaOrderNormalise('mix', ['whitelist' => 0, 'seeders' => 100]);
+check('a whitelist share of zero is preserved, not rounded away', $wl0['whitelist'] === 0, json_encode($wl0));
+[, $wl30] = metaOrderNormalise('mix', ['whitelist' => 30, 'seeders' => 70]);
+check('a whitelist share survives normalisation', $wl30['whitelist'] === 30, json_encode($wl30));
+check('the shipped default leaves the whitelist on absolute priority',
+      metaOrderDefaultMix()['whitelist'] === 0);
+
 // ── the shares always total 100 ──────────────────────────────────────────────
 // The property, checked over every shape a form can produce rather than over a handful of examples.
 $cases = [
@@ -48,8 +58,8 @@ foreach ($cases as $what => $in) {
     check('shares total exactly 100 (' . $what . ')', array_sum($out) === 100, json_encode($out));
     check('no share is out of range (' . $what . ')',
           count(array_filter($out, fn($v) => $v < 0 || $v > 100)) === 0, json_encode($out));
-    check('every selector is present (' . $what . ')',
-          array_keys($out) === metaOrderSelectors(), json_encode(array_keys($out)));
+    check('every mix key is present (' . $what . ')',
+          array_keys($out) === metaOrderMixKeys(), json_encode(array_keys($out)));
 }
 
 // Empty is not a configuration — it would leave the worker with nothing to rotate through, so it
@@ -74,15 +84,41 @@ check('a share left at zero stays at zero after rescaling', $thirds['random'] ==
 check('the remainder lands on the largest share', max($thirds) === 34, json_encode($thirds));
 
 // ── the definitions the rest of the panel builds on ──────────────────────────
-check('there are four selectors', count(metaOrderSelectors()) === 4, json_encode(metaOrderSelectors()));
+check('there are six selectors', count(metaOrderSelectors()) === 6, json_encode(metaOrderSelectors()));
+check('the mix distributes over the selectors plus the whitelist',
+      metaOrderMixKeys() === array_merge(['whitelist'], metaOrderSelectors()), json_encode(metaOrderMixKeys()));
+// `whitelist` is a share and NOT a mode: outside the mix the whitelist always drains first, and
+// there is nothing in the index to sort by it — a whitelisted hash is deleted from the index on the
+// next poll. Offering it as a mode would be offering an ordering of an empty set.
+check('whitelist is not offered as a mode', !in_array('whitelist', metaOrderModes(), true));
+// A lookup table, so the KEYS must match the mix keys but the order of a map is not meaningful —
+// comparing sequences here would fail on a reordering that changes nothing.
+check('every ordering names the index it rides on',
+      count(array_diff(metaOrderMixKeys(), array_keys(metaOrderIndexes()))) === 0
+      && count(array_diff(array_keys(metaOrderIndexes()), metaOrderMixKeys())) === 0,
+      json_encode(array_keys(metaOrderIndexes())));
+check('only random and whitelist need no secondary index',
+      array_keys(array_filter(metaOrderIndexes(), fn($v) => $v === null)) === ['random', 'whitelist'],
+      json_encode(metaOrderIndexes()));
+// An index named here that the schema never creates would leave the worker refusing that selector
+// for ever, and the panel showing "building" that never finishes.
+$schemaSrc = (string)file_get_contents(dirname(__DIR__) . '/includes/schema.php');
+foreach (metaOrderIndexes() as $sel => $idx) {
+    if ($idx === null) continue;
+    check("schema.php creates $idx (needed by \"$sel\")", str_contains($schemaSrc, '`' . $idx . '`'));
+}
+check('the orderings left out are written down with a reason', count(metaOrderRejected()) >= 3);
+foreach (metaOrderRejected() as $rk => $rv) {
+    check("the reason given for leaving out \"$rk\" is a sentence, not a shrug", strlen($rv) > 40);
+}
 check('the modes are the selectors plus "mix"',
       metaOrderModes() === array_merge(metaOrderSelectors(), ['mix']), json_encode(metaOrderModes()));
 check('every mode has a label',
       array_keys(metaOrderModeLabels()) === metaOrderModes(), json_encode(array_keys(metaOrderModeLabels())));
-check('every selector has a share label',
-      count(array_diff(metaOrderSelectors(), array_keys(metaOrderShareLabels()))) === 0);
-check('the default mix names exactly the selectors',
-      array_keys(metaOrderDefaultMix()) === metaOrderSelectors(), json_encode(array_keys(metaOrderDefaultMix())));
+check('every mix key has a share label',
+      count(array_diff(metaOrderMixKeys(), array_keys(metaOrderShareLabels()))) === 0);
+check('the default mix names exactly the mix keys',
+      array_keys(metaOrderDefaultMix()) === metaOrderMixKeys(), json_encode(array_keys(metaOrderDefaultMix())));
 check('the rotation is 100 claims, so one point is one claim', META_ORDER_ROTATION === 100);
 
 // ── every key is registered where it has to be ───────────────────────────────
@@ -93,7 +129,7 @@ $save   = (string)file_get_contents($root . '/api/admin/save_settings.php');
 $cat    = (string)file_get_contents($root . '/includes/settings_catalog.php');
 $tpl    = (string)file_get_contents($root . '/templates/admin/settings.php');
 $keys = ['meta_order_mode'];
-foreach (metaOrderSelectors() as $sel) $keys[] = 'meta_order_mix_' . $sel;
+foreach (metaOrderMixKeys() as $sel) $keys[] = 'meta_order_mix_' . $sel;
 foreach ($keys as $k) {
     check($k . ': has a schema default', str_contains($schema, "'" . $k . "'"));
     check($k . ': is in the save allow-list', str_contains($save, "'" . $k . "'"));
@@ -105,7 +141,7 @@ check('the save path normalises through this file', str_contains($save, 'metaOrd
 // A settings-only change still needs a schema bump: the default rows are written by the migration
 // block, which only runs when the VERSION moves.
 check('the schema version was bumped for these defaults',
-      preg_match('/TRACKER_SCHEMA_VERSION = (\d+)/', $schema, $m) && (int)$m[1] >= 30, $m[1] ?? '?');
+      preg_match('/TRACKER_SCHEMA_VERSION = (\d+)/', $schema, $m) && (int)$m[1] >= 31, $m[1] ?? '?');
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

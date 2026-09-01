@@ -4,6 +4,62 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.25.0] — 2026-09-01
+
+### Added — five more ways to choose which hash gets fetched next
+
+**Settings → Metadata fetch order** is now its own section, and the list of orderings grew to six
+plus the mix:
+
+- **Queue order** — as they were added to pending. The default, and the order every earlier release
+  used; renamed from "longest waiting" because that is what it actually means.
+- **Seen most often** — the most persistent swarm, by how many polls a hash has appeared in.
+- **Most completed** — the most downloaded of all time.
+- …alongside newest, most seeders and random.
+
+The two new ones needed indexes that did not exist, so schema v31 adds them
+(`idx_index_meta_seen`, `idx_index_meta_completed`) through the deferred-heavy path — the janitor
+builds them out of band rather than a page view rebuilding a two-gigabyte table. Until an index
+exists the panel shows that mode as *building* and the worker refuses it, falling back to queue
+order: a missing index would not look like a missing index, it would look like a dead worker
+filesorting three million rows several times a second.
+
+What is still not offered is now written down in the panel with the reason, because an absent option
+with no explanation reads as an oversight: *last seen* would sort three million rows all stamped with
+the same poll time; *peak seeders* gives nearly the same ranking as *most seeders* for the cost of
+another index on a table rewritten every poll; and name, size and file count are not known until the
+metadata has been fetched, which is the thing being ordered.
+
+### Added — the whitelist can take a share of the mix
+
+**Whitelist (registered)** is a share, not a mode. At **0 — the default — nothing changes**: the
+whitelist drains completely before any index row, exactly as in every earlier release, because those
+rows are there because a person asked for them by name. Give it a number and it becomes a guaranteed
+slice of the rotation, which is what you want when a bulk import has put fifty thousand rows in front
+of the index and both need to move. A slot whose queue turns out to be empty falls through to the
+other queue, so the share is a floor for the whitelist and never a ceiling on throughput.
+
+### Fixed — the Index page's cURL error, from both ends
+
+A full scrape that dies part-way is no longer thrown away. The parser has always been built for
+partial passes — the poll-time budget stops it mid-file whenever the scrape is big, records how far
+it got and resumes there next time — so a transfer that ends early is the same situation arriving by
+a different route. What arrived is now parsed, the resume cursor advances, and the panel reports it
+as **Partial fetch — kept what arrived** rather than as an error. Below a megabyte, or a body that
+does not start like a scrape, it is still a failure and still says so.
+
+### Changed — the settings layout
+
+One field with a paragraph of explanation under it stretched a Bootstrap row to 400 px and left three
+short fields sitting beside a hole; the user's screenshot made that plain. The reasoning is worth
+keeping — it is usually the answer to "why can I not just…" — so it moved behind a disclosure rather
+than being cut. Measured after: the tallest and shortest cell in that row now differ by 72 px instead
+of ~400, and the fetch-order controls have their own section with the seven mix shares in two tidy
+rows.
+
+The mode select is also now paired with **what the worker is actually doing**: the index and the
+`ORDER BY` the chosen mode runs on, so a mode reads as a query plan rather than a preference.
+
 ## [1.24.0] — 2026-09-01
 
 ### Added — which hash gets fetched next

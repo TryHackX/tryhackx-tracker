@@ -22,6 +22,10 @@
  * is keyed by info_hash (no numeric row id).
  */
 
+// A transfer that dies part-way is still worth what arrived — but only if what arrived is a
+// meaningful slice rather than a few kilobytes of a handshake. One MiB of gzipped scrape is roughly
+// twenty thousand torrents; below that the resume cursor would inch forward for nothing.
+const IDX_PARTIAL_MIN_BYTES = 1048576;
 const IDX_BATCH            = 2000;    // rows per upsert (batch size barely affects throughput; ~18k rows/s)
 const IDX_ENTRY_RE         = '/20:(.{20})d8:completei(\d+)e10:downloadedi(\d+)e10:incompletei(\d+)ee/s';
 const IDX_PRUNE_EVERY      = 3600;    // seconds between prune runs
@@ -105,6 +109,8 @@ function indexPruneLockFile(): string { return __DIR__ . '/../config/index_prune
 function indexStateDefaults(): array {
     return [
         'last_poll_at' => 0, 'last_poll' => null, 'last_error' => null, 'last_error_at' => 0,
+        // set when a transfer ended early but enough arrived to parse; cleared by the next clean poll
+        'last_partial' => null,
         'meta_budget_day' => '', 'meta_budget_used' => 0, 'poll_skip' => 0,
         'last_prune_at' => 0, 'last_prune' => null, 'last_tick_at' => 0,
     ];
@@ -144,7 +150,7 @@ function indexStateUpdate(callable $fn): array {
  */
 function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array {
     $t0 = microtime(true);
-    $out = ['file' => null, 'gzip' => false, 'bytes' => 0, 'ms' => 0, 'error' => null];
+    $out = ['file' => null, 'gzip' => false, 'bytes' => 0, 'ms' => 0, 'error' => null, 'partial' => null];
     if ($url === '' || !preg_match('#^https?://#i', $url)) { $out['error'] = 'Invalid source URL'; return $out; }
     if (!function_exists('curl_init')) { $out['error'] = 'curl is required for the full scrape'; return $out; }
     $tmp = rtrim($tmpDir, '/\\') . '/index_scrape_' . getmypid() . '_' . bin2hex(random_bytes(4)) . '.bin';
@@ -172,6 +178,25 @@ function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array 
     $out['ms'] = (int)round((microtime(true) - $t0) * 1000);
     if ($tooBig) { @unlink($tmp); $out['error'] = 'Full scrape exceeds ' . IDX_FETCH_MAX_BYTES . ' bytes'; return $out; }
     if ($ok === false) {
+        // KEEP WHAT ARRIVED. A full scrape that dies at 90 % is 90 % of the catalogue, and this
+        // parser is built for partial passes already — the poll-time budget stops it mid-file every
+        // time the scrape is big, records how far it got, and resumes there on the next poll. A
+        // transfer that ends early is the same situation arriving by a different route, so throwing
+        // the file away would discard good data for no reason other than how the reading stopped.
+        //
+        // The floor matters: this only applies when enough arrived to be worth a pass. Anything
+        // smaller, or a body that does not start like a scrape, is a failure and is treated as one.
+        $have = (int)@filesize($tmp);
+        $head = '';
+        if ($have > 0 && ($hf = @fopen($tmp, 'rb'))) { $head = (string)fread($hf, 8); fclose($hf); }
+        $looksReal = (strncmp($head, "\x1f\x8b", 2) === 0) || (strncmp($head, 'd5:files', 8) === 0);
+        if ($have >= IDX_PARTIAL_MIN_BYTES && $looksReal && $code === 200) {
+            $out['bytes'] = $have;
+            $out['gzip'] = strncmp($head, "\x1f\x8b", 2) === 0;
+            $out['file'] = $tmp;
+            $out['partial'] = $err !== '' ? $err : 'the transfer ended early';
+            return $out;
+        }
         @unlink($tmp);
         // "chunk hex-length char not a hex digit" reads like a broken panel and is not one. The full
         // scrape is tens of megabytes of gzip that opentracker sends with Transfer-Encoding: chunked,
@@ -184,10 +209,11 @@ function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array 
         // answers the next one with 402 (see below), so it would spend the allowance and report a
         // second, different-looking failure. The next poll gets a clean snapshot.
         $out['error'] = ($errno === 56 && stripos($err, 'chunk') !== false)
-            ? 'The tracker’s reply lost its chunked framing part-way through (' . $err . '). '
-            . 'That is the tracker mis-framing a multi-megabyte full scrape while it is busy, not a '
-            . 'problem with this panel or with the data — nothing was imported. The next poll picks '
-            . 'it up; retrying now would only spend the full-scrape allowance and get an HTTP 402.'
+            ? 'The tracker’s reply lost its chunked framing before enough of it had arrived to be '
+            . 'worth keeping (' . $err . '). That is the tracker mis-framing a multi-megabyte full '
+            . 'scrape while it is busy, not a problem with this panel or with the data. The next '
+            . 'poll picks it up; retrying now would only spend the full-scrape allowance and get an '
+            . 'HTTP 402.'
             : 'cURL error: ' . $err;
         return $out;
     }
@@ -232,7 +258,9 @@ function indexParseScrapeFile(string $file, bool $gzip, int $minSeeders, callabl
     $first = true;
     try {
         while (!$eof($fh)) {
-            $chunk = $read($fh, 1 << 20);
+            // @: a gzip stream that ends mid-member is now an ordinary case (a transfer kept after
+            // it was cut short), and PHP's warning about it says nothing the return value does not.
+            $chunk = @$read($fh, 1 << 20);
             if ($chunk === false || $chunk === '') break;
             $buf = $carry . $chunk;
             if ($first) {
@@ -303,7 +331,8 @@ function indexUpsertBatch(PDO $db, array $rows, int $graceDays, int $protectDays
  */
 function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = null, ?string $tmpDir = null): array {
     $now = $now ?? time();
-    $out = ['ok' => false, 'entries' => 0, 'kept' => 0, 'truncated' => false, 'removed_wl' => 0, 'removed_ban' => 0, 'bytes' => 0, 'ms' => 0, 'error' => null];
+    $out = ['ok' => false, 'entries' => 0, 'kept' => 0, 'truncated' => false, 'removed_wl' => 0,
+            'removed_ban' => 0, 'bytes' => 0, 'ms' => 0, 'error' => null, 'partial' => null];
     // one poll at a time across processes (janitor CLI + web "Poll now" + a double click). Non-blocking:
     // a second caller returns immediately instead of starting a duplicate full scrape.
     $lockH = @fopen(indexPollLockFile(), 'c');
@@ -325,6 +354,7 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
             $fetched = indexFetchFullScrape(indexSourceUrl($cfg), min(90, max(5, indexPollBudget($cfg))), $tmpDir);
             $file = $fetched['file']; $gzip = $fetched['gzip']; $out['bytes'] = $fetched['bytes']; $out['ms'] = $fetched['ms'];
             $ownFile = $file !== null;
+            $out['partial'] = $fetched['partial'] ?? null;
             // a fatal (execution-time limit, OOM) skips finally blocks — make sure the temp scrape
             // is removed at shutdown regardless (unlink of an already-removed file is a no-op)
             if ($ownFile) register_shutdown_function(static function () use ($file) { @unlink($file); });
@@ -343,7 +373,10 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
                 catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
             };
             $p = indexParseScrapeFile($file, $gzip, $minSeeders, $onBatch, $deadline, $skip);
-            $out['entries'] = $p['entries']; $out['kept'] = $p['kept']; $out['truncated'] = $p['truncated'];
+            $out['entries'] = $p['entries']; $out['kept'] = $p['kept'];
+            // A file that arrived incomplete is a truncated pass by definition, whatever the parser
+            // thought: it ran out of file rather than out of time, and the tail is still unread.
+            $out['truncated'] = $p['truncated'] || $out['partial'] !== null;
             if (isset($p['error'])) $out['error'] = $p['error'];
             // drop anything that lives in the whitelist or the ban list — those have their own tables
             $out['removed_wl'] = (int)$db->exec("DELETE i FROM index_hashes i JOIN whitelist w ON w.info_hash = i.info_hash");
@@ -362,6 +395,8 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
             $s['poll_skip'] = $skipNext;
             $s['last_poll'] = ['at' => $now, 'entries' => $out['entries'], 'kept' => $out['kept'], 'truncated' => $out['truncated'],
                                'removed_wl' => $out['removed_wl'], 'removed_ban' => $out['removed_ban'], 'bytes' => $out['bytes'], 'ms' => $out['ms']];
+            $s['last_partial'] = $out['partial'] === null ? null
+                : ['at' => $now, 'bytes' => $out['bytes'], 'entries' => $out['entries'], 'reason' => $out['partial']];
             if ($out['error'] !== null) { $s['last_error'] = $out['error']; $s['last_error_at'] = $now; }
             elseif ($out['ok']) { $s['last_error'] = null; }
             return true;

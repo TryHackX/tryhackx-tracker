@@ -262,11 +262,14 @@ function settingsCatalogKeywords(): array {
         'index_poll_budget'        => 'seconds per poll run time budget truncated resume',
         'index_meta_auto_queue'    => 'automatic metadata queue names resolve background',
         'meta_worker_concurrency'  => 'worker parallel fetches threads concurrency metadata speed',
-        'meta_order_mode'          => 'fetch order queue priority newest oldest seeders random mix balance metadata worker which first',
+        'meta_order_mode'          => 'fetch order queue priority newest oldest seeders seen completed random mix balance whitelist registered metadata worker which first',
         'meta_order_mix_oldest'    => 'fetch order mix share oldest longest waiting percent',
         'meta_order_mix_newest'    => 'fetch order mix share newest recent percent',
         'meta_order_mix_seeders'   => 'fetch order mix share seeders popular biggest swarm percent',
         'meta_order_mix_random'    => 'fetch order mix share random sample percent',
+        'meta_order_mix_whitelist' => 'fetch order mix share whitelist registered submitted first priority percent',
+        'meta_order_mix_seen'      => 'fetch order mix share seen count most often persistent percent',
+        'meta_order_mix_completed' => 'fetch order mix share completed downloads popular all time percent',
 
         // ── API & federation ──
         'api_enabled'              => 'server to server api endpoints clients integration on off',

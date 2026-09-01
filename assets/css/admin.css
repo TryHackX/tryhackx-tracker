@@ -1792,3 +1792,32 @@ input[type="number"] {
 .tn-report-acts { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.6rem; }
 @media (max-width: 900px) { .tn-step { grid-template-columns: 1fr 1fr; } }
 .tn-what { width: auto; display: inline-block; }
+
+/* ── Settings: a long explanation that is not in the way ─────────────────────
+ *
+ * Some hints on this page are three sentences and some are a paragraph, and Bootstrap stretches a
+ * .row to its tallest cell — so one field with a essay under it left a 400 px hole beside three
+ * short ones. The reasoning is worth keeping (it is usually the answer to "why can I not just…"),
+ * so it moves behind a disclosure instead of being cut: two lines by default, the rest on demand. */
+.settings-more { margin-top: 0.35rem; }
+.settings-more > summary {
+    cursor: pointer;
+    list-style: none;
+    color: #8ab4d8;
+    font-size: 0.78rem;
+}
+.settings-more > summary::-webkit-details-marker { display: none; }
+.settings-more > summary::before { content: '▸ '; opacity: 0.75; }
+.settings-more[open] > summary::before { content: '▾ '; }
+.settings-more[open] { padding-bottom: 0.2rem; }
+
+/* The fetch-order card: what the chosen mode actually runs on, next to the choice itself. */
+.meta-order-live {
+    border: 1px solid #2c3440;
+    border-radius: 0.35rem;
+    padding: 0.55rem 0.7rem;
+    background: rgba(255, 255, 255, 0.02);
+    min-height: 38px;
+}
+.meta-order-live code { color: #9ecbff; }
+.meta-order-share.is-thin { border-color: #b8860b !important; }
