@@ -261,6 +261,47 @@ headers. On the unpatched build that corrupts every time.
 the interesting path never runs. That cost an hour: a lab that does not reproduce is not evidence of
 a fix.
 
+### What has been ruled out, and where the evidence points
+
+Worth writing down, because each of these looked convincing enough to spend an hour on:
+
+| Suspect | Verdict |
+| --- | --- |
+| The `io_batch` split in `http_sendiovecdata` (a stale pointer across `realloc`, and the wrong batch initialised) | **Not it.** Both defects are real and worth fixing, but instrumentation shows the split path never runs during a corrupted transfer. |
+| libowfat freeing buffers as it sends them (`iob_addbuf_free` + autofree) | **Not it.** A build with `-DWANT_NO_AUTO_FREE`, where nothing is freed at all, corrupts identically. |
+| `MSG_ZEROCOPY` — the kernel still reading pages the application has freed | **Not it.** A standalone program driving `iob_send` the same way got **zero** `SO_EE_ORIGIN_ZEROCOPY` completions on `MSG_ERRQUEUE`; the sends are ordinary copies. Patching libowfat to skip zerocopy for autofree batches changes nothing. |
+
+Where it does point: the corrupted run is **exactly six bytes** long and sits **exactly** where the
+next chunk's length header belongs — the scrape data immediately after it is intact bencode. Six
+bytes is the size of a chunk header like `3f2a
+`, and the bytes found there are a heap pointer,
+which is what glibc writes into a freed block of that size. `MALLOC_PERTURB_` cannot show it: in a
+block that small the tcache link overwrites the poison.
+
+So the buffer being clobbered is the little `asprintf`'d chunk header, not the 16 KiB payload — and
+the payload buffers are visibly recycled between chunks (the same two addresses alternate through a
+whole scrape).
+
+Two one-line builds confirm it and separate the two explanations:
+
+| Variant | Result |
+| --- | --- |
+| **D** — the chunk header queued with `iob_addbuf` (no cleanup registered, so it is never freed) | **0 of 5 corrupted** |
+| **E** — the header copied into a 4 KiB block, still queued with `iob_addbuf_free` | **5 of 5 corrupted** |
+
+D fixes it; E does not. So it is **the free itself, not the size class** — the header's cleanup runs
+before the bytes have left, and the block comes back with an allocator link written over it.
+
+Note that the free survives `-DWANT_NO_AUTO_FREE`, which is why that build was not clean either:
+`iob_reset()` calls every entry's `cleanup` regardless of the `autofree` flag, so registering a
+cleanup at all is enough. Only D, which registers none, avoids it.
+
+**What is not yet known** is why the cleanup is premature — the sends are ordinary copies, and a
+buffer whose bytes `sendmsg` has accepted should be safe to free. That is the remaining thread. It is
+one function: libowfat's `iob_send` accounting, and its interaction with `iob_reset`. Nothing here
+ships a fix for it: D leaks a few bytes per chunk, which is the wrong trade for a tracker, and
+guessing at the accounting without understanding it is how a framing bug becomes a crash.
+
 The panel no longer depends on the outcome either way: a transfer that ends early is parsed for what
 arrived and the poll resumes at the tail, the same as when the poll-time budget stops it mid-file.
 
