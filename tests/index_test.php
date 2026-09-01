@@ -120,6 +120,42 @@ $got = [];
 indexParseScrapeFile($file5, true, 1, function ($rows) use (&$got) { foreach ($rows as $r) $got[] = $r[0]; }, microtime(true) + 5, (int)indexStateRead()['poll_skip']);
 check('resume pass processes only entries after the cursor', count($got) === 7);
 
+// ── a truncated DOWNLOAD must not be skipped past ────────────────────────────
+// The regression this exists for, exactly as production hit it: one poll's transfer dies part-way
+// and leaves the cursor at N; the next poll's transfer dies EARLIER, so every entry in the short
+// file sits below the cursor. Carrying the cursor over means the poll keeps nothing at all — and
+// with the tracker mis-framing every scrape, that is every poll, for ever. The index stops being
+// refreshed and nothing in the panel says why.
+$db->exec("TRUNCATE TABLE index_hashes"); @unlink(indexStateFile());
+$long = []; for ($i = 1; $i <= 20; $i++) $long[] = [h(6000 + $i), 4, 0, 0];
+$short = array_slice($long, 0, 8);
+$fileLong  = $tmp . '/idx_part_long.gz';  makeScrape($long, true, $fileLong);
+$fileShort = $tmp . '/idx_part_short.gz'; makeScrape($short, true, $fileShort);
+
+// first poll: the transfer ends early after 20 entries
+$pa = indexPoll($db, $cfg, function () use ($fileLong) {
+    return ['file' => $fileLong, 'gzip' => true, 'partial' => 'the transfer ended early'];
+}, 1000700);
+check('partial poll keeps what arrived', $pa['ok'] && $pa['kept'] === 20, json_encode($pa));
+check('partial poll is marked truncated', $pa['truncated'] === true);
+check('…and leaves a resume cursor', (int)indexStateRead()['poll_skip'] === 20, (string)indexStateRead()['poll_skip']);
+
+// second poll: the transfer dies EARLIER — 8 entries, all of them below the cursor
+$pb = indexPoll($db, $cfg, function () use ($fileShort) {
+    return ['file' => $fileShort, 'gzip' => true, 'partial' => 'the transfer ended early'];
+}, 1000710);
+check('a SHORTER partial file is read from the start, not skipped past',
+      $pb['kept'] === 8, json_encode($pb));
+check('…and the cursor does not walk backwards',
+      (int)indexStateRead()['poll_skip'] === 20, (string)indexStateRead()['poll_skip']);
+
+// third poll: the transfer completes. The cursor still applies — this file DOES reach past it.
+$pc = indexPoll($db, $cfg, function () use ($fileLong) {
+    return ['file' => $fileLong, 'gzip' => true];
+}, 1000720);
+check('a complete file still honours the cursor', $pc['entries'] === 20 && $pc['kept'] === 0, json_encode($pc));
+check('…and a complete pass clears the cursor', (int)indexStateRead()['poll_skip'] === 0);
+
 // poll lock: while the lock is held, indexPoll returns "already polling" and does nothing
 $lh = fopen(indexPollLockFile(), 'c'); flock($lh, LOCK_EX);
 $blocked = indexPoll($db, $cfg, function () use ($file5) { return ['file' => $file5, 'gzip' => true]; }, 1000360);

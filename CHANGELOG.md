@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.25.2] — 2026-09-01
+
+### Fixed — "386 870 seen · 0 kept", and an index that stopped being refreshed
+
+1.25.1 started keeping what a truncated transfer delivered. It did not stop the resume cursor from
+applying to it, and that turned out to matter: the cursor counts entries into the **complete** scrape,
+and a transfer that ends early cannot contain anything past where it stopped.
+
+One poll's transfer died at 10 MiB and left the cursor at 483 691. The next died at 8 MiB — 386 870
+entries, every one of them below the cursor. The poll skipped the entire download and kept nothing,
+and because the tracker mis-frames every scrape at the moment, so did the one after it. Measured on
+production before the fix: **not one row of 2 957 958 had been refreshed in two hours.**
+
+A short file is now read from the start, and the cursor moves to the **further** of the two rather
+than backwards, so a later complete transfer still resumes where the last one really got to. The
+suite drives exactly the production sequence — partial, then a *shorter* partial, then a complete one
+— and asserts the middle poll keeps its rows and the cursor does not walk back.
+
+The test stub for the fetch now speaks the same language as the real one (`partial`), because a path
+this easy to get wrong should not be the one path the tests cannot reach.
+
 ## [1.25.1] — 2026-09-01
 
 ### Fixed — every claim was filesorting three million rows

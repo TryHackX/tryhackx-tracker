@@ -344,12 +344,16 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
     try {
         $tmpDir = $tmpDir ?? sys_get_temp_dir();
         $graceDays = indexGraceDays($cfg); $protectDays = indexProtectDays($cfg); $minSeeders = indexMinSeeders($cfg);
-        $skip = max(0, (int)indexStateRead()['poll_skip']);   // resume cursor from the previous truncated pass
+        $stateSkip = max(0, (int)indexStateRead()['poll_skip']);  // resume cursor from the previous truncated pass
+        $skip = $stateSkip;
         $ownFile = false;
         if ($fetcher !== null) {
             $f = $fetcher();
             $file = $f['file'] ?? null; $gzip = (bool)($f['gzip'] ?? false); $out['bytes'] = (int)($f['bytes'] ?? (($file && is_file($file)) ? filesize($file) : 0));
             if (!$file || !is_file($file)) { $out['error'] = $f['error'] ?? 'fetch failed'; }
+            // the stub speaks the same language as the real fetch, or the tests cannot exercise the
+            // path that matters most here
+            $out['partial'] = $f['partial'] ?? null;
         } else {
             $fetched = indexFetchFullScrape(indexSourceUrl($cfg), min(90, max(5, indexPollBudget($cfg))), $tmpDir);
             $file = $fetched['file']; $gzip = $fetched['gzip']; $out['bytes'] = $fetched['bytes']; $out['ms'] = $fetched['ms'];
@@ -359,6 +363,19 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
             // is removed at shutdown regardless (unlink of an already-removed file is a no-op)
             if ($ownFile) register_shutdown_function(static function () use ($file) { @unlink($file); });
             if ($fetched['error']) $out['error'] = $fetched['error'];
+        }
+        if ($out['partial'] !== null) {
+            // A SHORT FILE IS NOT THE SAME FILE, so the resume cursor does not apply to it.
+            //
+            // The cursor counts entries into the COMPLETE scrape, and a truncated download cannot
+            // contain anything past the point where it stopped. Carrying the cursor over means every
+            // entry in the short file falls below it and the poll keeps nothing. That is not
+            // hypothetical: production did exactly this twice in a row — 386 870 entries seen,
+            // 0 kept, and not one row in the index refreshed for two hours.
+            //
+            // So read all of what arrived. Coverage is reconciled below, where the cursor moves to
+            // the FURTHER of the two: it must never walk backwards onto ground already covered.
+            $skip = 0;
         }
         if ($out['error'] !== null || !$file) {
             indexStateUpdate(function (array &$s) use ($out, $now) { $s['last_error'] = $out['error']; $s['last_error_at'] = $now; return true; });
@@ -389,7 +406,13 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
             if ($ownFile) @unlink($file);
         }
         $out['ms'] = $out['ms'] + (int)round((microtime(true) - $t0) * 1000);
-        $skipNext = ($out['ok'] && $out['truncated']) ? $out['entries'] : 0;   // resume at the tail next time; reset once the whole file was covered
+        // Resume at the tail next time; reset once the whole file was covered. After a truncated
+        // DOWNLOAD the cursor takes the further of the two, because this pass restarted at zero and
+        // an earlier pass may well have reached further into the scrape than this short file goes.
+        $skipNext = 0;
+        if ($out['ok'] && $out['truncated']) {
+            $skipNext = $out['partial'] !== null ? max($stateSkip, $out['entries']) : $out['entries'];
+        }
         indexStateUpdate(function (array &$s) use ($out, $now, $skipNext) {
             $s['last_poll_at'] = $now;
             $s['poll_skip'] = $skipNext;
