@@ -187,6 +187,71 @@
         }
     }
 
+    // ── add user ────────────────────────────────────────────────────────────
+    //
+    // The one decision worth making explicit is what happens to the email address, because
+    // `users_require_email_verify` decides what an unverified account may DO and an admin creating
+    // an account by hand should not have to guess which of the three states they just produced.
+    function uaHint() {
+        const v = $('ua-verify').value;
+        const req = $('ua-email-req');
+        req.textContent = v === 'none' ? '(optional)' : '(required)';
+        $('ua-verify-hint').textContent = {
+            auto: 'Nothing is emailed. The address is trusted as typed and the account can sign in immediately — for an account you are handing over in person.',
+            send: 'The account is created unverified and a verification link goes out. Until it is clicked the account acts as a guest.',
+            none: 'Created unverified and nothing is sent. Use this for an account with no address, or when you will send the link yourself.',
+        }[v] || '';
+    }
+    function uaGenerate() {
+        // Generated in the browser and shown in clear: this password has to be passed on to a person,
+        // and a value the admin cannot read is a value they will replace with "Password1!".
+        const sets = ['abcdefghijkmnopqrstuvwxyz', 'ABCDEFGHJKLMNPQRSTUVWXYZ', '23456789', '!@#$%^&*?-_=+'];
+        const rnd = n => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; };
+        let out = sets.map(s => s[rnd(s.length)]);              // one of each class, guaranteed
+        const all = sets.join('');
+        while (out.length < 18) out.push(all[rnd(all.length)]);
+        for (let i = out.length - 1; i > 0; i--) { const j = rnd(i + 1); [out[i], out[j]] = [out[j], out[i]]; }
+        $('ua-password').value = out.join('');
+    }
+    function openAdd() {
+        ['ua-username', 'ua-email', 'ua-password'].forEach(id => { $(id).value = ''; });
+        $('ua-verify').value = 'auto';
+        $('ua-status').value = 'active';
+        $('ua-error').classList.add('d-none');
+        uaGenerate();
+        uaHint();
+        bootstrap.Modal.getOrCreateInstance($('userAddModal')).show();
+        setTimeout(() => $('ua-username').focus(), 200);
+    }
+    async function saveAdd() {
+        const err = $('ua-error');
+        err.classList.add('d-none');
+        const body = {
+            username: $('ua-username').value.trim(),
+            email: $('ua-email').value.trim(),
+            password: $('ua-password').value,
+            verify: $('ua-verify').value,
+            status: $('ua-status').value,
+        };
+        const btn = $('ua-save');
+        btn.disabled = true;
+        try {
+            const r = await apiCall('admin/user_create', 'POST', body);
+            if (r.success) {
+                // The message distinguishes "created and verified" from "created but the mail did not
+                // go out", because those need different things from the admin next.
+                showToast(r.message || 'Account created');
+                bootstrap.Modal.getOrCreateInstance($('userAddModal')).hide();
+                loadUsers();
+            } else {
+                err.textContent = r.error || 'Could not create the account';
+                err.classList.remove('d-none');
+            }
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     // ── grant modal ─────────────────────────────────────────────────────────
     function openGrant(u) {
         grantUser = u;
@@ -678,6 +743,14 @@
         $('ge-save').addEventListener('click', saveGroup);
         const logout = $('btn-logout');
         if (logout) logout.addEventListener('click', async () => { try { await apiCall('admin/logout', 'POST', {}); } catch (e) {} location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin'); });
+        const addBtn = $('us-add-btn');
+        if (addBtn) addBtn.addEventListener('click', openAdd);
+        const uaSave = $('ua-save');
+        if (uaSave) uaSave.addEventListener('click', saveAdd);
+        const uaGen = $('ua-gen');
+        if (uaGen) uaGen.addEventListener('click', uaGenerate);
+        const uaVerify = $('ua-verify');
+        if (uaVerify) uaVerify.addEventListener('change', uaHint);
         loadGroups().then(loadUsers);
     });
 })();

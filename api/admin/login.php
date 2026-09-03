@@ -27,7 +27,14 @@ if (adminLoginPathCustom($cfg)) {
 
 if (isCaptchaRequired($cfg, 'login')) {
     // v3 scores per action: the sign-in page mints its token with action 'admin_login'
-    if (!verifyCaptcha(captchaTokenFromInput($input), $cfg, 'admin_login')) {
+    $capToken = captchaTokenFromInput($input);
+    if (!verifyCaptcha($capToken, $cfg, 'admin_login')) {
+        // A post that carried NO token is a CHALLENGE, not a failed sign-in: nobody has offered a
+        // credential yet, and the page is being told to go and solve one. Logging it as `login.fail`
+        // put a security event in the audit log before every single successful login — which is
+        // exactly how an operator learns to scroll past the line that matters. A token that was
+        // supplied and REJECTED is different, and still recorded.
+        if ($capToken === '') auditSuppress();
         jsonResponse(['error' => 'CAPTCHA verification failed', 'captcha_required' => true], 400);
     }
     onCaptchaSolved();

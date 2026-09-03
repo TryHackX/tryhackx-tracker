@@ -4,6 +4,66 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.27.0] — 2026-09-03
+
+### Fixed — the panel wrote a failed sign-in into its own audit log before every successful one
+
+`login.fail — CAPTCHA verification failed`, four seconds before `login.ok`, almost every time. Not an
+attacker and not the operator mistyping: the sign-in page posted the credentials **first, with no
+CAPTCHA token**, waited for the server to demand one, and only then solved it. The rejection on that
+first post was recorded as a failed login.
+
+A security log that cries wolf before each correct sign-in is a log people learn to scroll past — and
+it made a real CAPTCHA failure indistinguishable from the noise.
+
+Both ends fixed. The page now knows whether a CAPTCHA is required (the server renders the flag) and
+mints the token **before** the first post, so there is one round trip instead of two. And a post that
+carried no token at all is treated as what it is — a challenge, before anyone has offered a
+credential — and is not written to the log. A token that was supplied and *rejected* still is.
+
+### Fixed — a Test button wired to nothing
+
+**Live peer sync → Test** had existed for releases with no handler behind it: markup, a `data-test`
+attribute, and no listener. Pressing it did nothing at all. There is now one delegated handler for
+every `data-test` button, so a button cannot be added again without working.
+
+### Changed — "not configured" is no longer reported as a fault
+
+**OpenTracker instances → Test** answered a switched-off feature with a red *"✗ Something on the path
+is missing"*. Nothing was missing; the feature was simply off. The test endpoints now report whether
+the feature is **configured** separately from whether it **passed**, and an unconfigured one comes
+back in neutral blue with *"Not set up — this feature is off, and nothing here is broken"*, its
+outstanding steps as circles rather than crosses. Red that does not mean broken is red people stop
+reading.
+
+### Added — the Users page can create an account
+
+**Users → Add user.** Same creation path as registration, so password rules and default groups are
+identical, with the one decision an admin should not have to guess made explicit:
+
+- **Already verified** — nothing emailed, can sign in now. For an account handed over in person.
+- **Send a verification link** — the public flow, driven from the panel; a guest until it is clicked.
+- **No email at all** — unverified and nothing sent, for an account with no address.
+
+It matters because `users_require_email_verify` decides what an unverified account may *do*. A
+generated password is offered and shown in clear, because it has to be passed to a person — a value
+the admin cannot read is a value they replace with something weak.
+
+### Added — search tells you where the setting lives
+
+Searching lifts one field out of a page of a hundred and shows it alone. That answers *is it there*;
+it never answered *where is it*, and clearing the search hid it again. Every section a search leaves
+visible now carries its group and section name — `Index › Index (observed hashes)` — and a **Show me
+where** button that clears the search, switches to that group and scrolls to the section in place with
+the same highlight the anchor links use.
+
+### Changed — the index grace window is 7 days
+
+Was 3, against a queue that takes ~51 days to walk once. Measured cost of the change: the table holds
+~1 551 bytes a row, so the extra rows are a few hundred MB against 44 GB free, and the longer window
+means *less* write amplification — a hash that survives is a hash that is not deleted and re-inserted
+every three days.
+
 ## [1.26.0] — 2026-09-03
 
 ### Added — addresses the rate limit never drops

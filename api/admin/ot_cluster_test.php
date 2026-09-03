@@ -12,6 +12,7 @@ $add = function (string $name, bool $ok, string $detail = '', bool $info = false
 $add('PHP can run a command', trackerExecAvailable(),
      trackerExecAvailable() ? '' : 'exec() is disabled in php.ini.');
 if ($cmd === '') {
+    $out['configured'] = false;
     $add('A helper command is configured', false, 'Nothing is saved here, so the feature is off and no card is rendered. The grey text in the '
          . 'field is a suggestion, not a value — type it in and press Save to switch this on.');
     $out['suggestions'][] = 'sudo install -m 0755 /var/www/tracker.tryhackx.org/tools/opentracker/tracker-cluster.sh /usr/local/sbin/tracker-cluster.sh';

@@ -1821,3 +1821,25 @@ input[type="number"] {
 }
 .meta-order-live code { color: #9ecbff; }
 .meta-order-share.is-thin { border-color: #b8860b !important; }
+
+/* ── Settings search: where the hit lives ────────────────────────────────────
+ *
+ * A search lifts one field out of a page of a hundred and shows it alone. That answers "is it
+ * there"; it does not answer "where is it", and clearing the search hides it again. So each visible
+ * section says which group and section it belongs to, with a button that puts the page back and
+ * scrolls to it in place. */
+.settings-where {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin: -0.15rem 0 0.6rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px dashed #2c3440;
+}
+.settings-where-path {
+    font-size: 0.78rem;
+    color: #8ab4d8;
+    letter-spacing: 0.02em;
+}
+.settings-where-jump { padding: 0.1rem 0.5rem; font-size: 0.74rem; }

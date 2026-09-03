@@ -47,6 +47,11 @@ $_SESSION['admin_login_form_at'] = time();
 
 <script>
 (function () {
+    // Rendered by the server, because the page cannot otherwise know whether to mint a token before
+    // posting or to post plainly. Getting this wrong in either direction is visible: ask when the
+    // feature is off and the modal appears for nothing, do not ask when it is on and every login
+    // writes a phantom failure into the audit log.
+    const CAPTCHA_ON = <?= isCaptchaRequired($cfg, 'login') ? 'true' : 'false' ?>;
     const form = document.getElementById('admin-login-form');
     const alertEl = document.getElementById('admin-login-alert');
     const api = '<?= $baseUrl ?>api.php?endpoint=';
@@ -75,9 +80,27 @@ $_SESSION['admin_login_form_at'] = time();
             // a form left open past the marker's lifetime would otherwise be told the password is
             // wrong. Re-fetching our own URL re-stamps it and costs one cheap GET.
             try { await fetch(window.location.href, { credentials: 'same-origin', cache: 'no-store' }); } catch {}
+
+            // Solve the CAPTCHA BEFORE the first post when the server says one is required.
+            //
+            // Posting first and letting the server demand a token cost a round trip nobody needed and
+            // -- worse -- wrote a "CAPTCHA verification failed" line into the audit log immediately
+            // before every successful sign-in. A security log that cries wolf before each correct
+            // login is a log people learn to scroll past.
+            if (CAPTCHA_ON) {
+                const first = await window.showCaptchaModal({ action: 'admin_login' });
+                if (!first) {
+                    fail(window.captchaWasUnavailable && window.captchaWasUnavailable()
+                        ? 'CAPTCHA could not load — reload the page or try again later.'
+                        : 'CAPTCHA cancelled');
+                    return;
+                }
+                data['captcha_token'] = first;
+                data['g-recaptcha-response'] = first;
+            }
             let json = await post();
-            // CAPTCHA may be demanded up to twice (a solved token can expire while typing) — re-show it.
-            // (reCAPTCHA v3: no modal — showCaptchaModal() fetches a score token silently.)
+            // Still retried: a token can expire between minting it and the post landing, and the
+            // server is entitled to say so. This loop is now the exception rather than the rule.
             for (let attempt = 0; attempt < 2 && json.captcha_required; attempt++) {
                 const token = await window.showCaptchaModal({ action: 'admin_login' });
                 if (!token) { fail(window.captchaWasUnavailable && window.captchaWasUnavailable() ? 'CAPTCHA could not load — reload the page or try again later.' : 'CAPTCHA cancelled'); return; }

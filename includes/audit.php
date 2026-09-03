@@ -249,6 +249,7 @@ function auditEndpointAction(string $endpoint): ?string {
         'admin/delete_all'            => 'report.delete_all',
         'admin/send_email'            => 'report.email',
         'admin/resolve_appeal'        => 'appeal.resolve',
+        'admin/user_create'           => 'user.create',
         'admin/user_update'           => 'user.update',
         'admin/user_delete'           => 'user.delete',
         'admin/user_grant'            => 'user.grant',

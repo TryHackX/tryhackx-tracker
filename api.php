@@ -199,6 +199,7 @@ $apiRoutes = [
     'whitelist_probe'            => 'api/whitelist_probe.php',
     // ── User accounts (admin) ──
     'admin/fetch_users'          => 'api/admin/fetch_users.php',
+    'admin/user_create'          => 'api/admin/user_create.php',
     'admin/user_update'          => 'api/admin/user_update.php',
     'admin/user_delete'          => 'api/admin/user_delete.php',
     'admin/user_grant'           => 'api/admin/user_grant.php',
@@ -294,6 +295,7 @@ function adminEndpointPermission(string $endpoint): ?string {
         // Users
         'admin/fetch_users'        => 'panel.users.view',
         'admin/fetch_groups'       => 'panel.users.view',
+        'admin/user_create'        => 'panel.users.edit',
         'admin/user_update'        => 'panel.users.edit',
         'admin/user_notify'        => 'panel.users.notify',
         'admin/user_grant'         => 'panel.users.groups',

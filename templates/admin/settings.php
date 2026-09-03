@@ -406,7 +406,7 @@
                     </div>
                 </div>
                 <div class="settings-test mt-3">
-                    <button type="button" class="btn btn-sm btn-outline-info settings-test-btn" data-test="admin/livesync_test"><i class="bi bi-diagram-3"></i> Test</button>
+                    <button type="button" class="btn btn-sm btn-outline-info settings-test-btn" data-test="admin/livesync_test" data-ok-text="Live peer sync can be armed from here."><i class="bi bi-diagram-3"></i> Test</button>
                     <div class="settings-test-out"></div>
                 </div>
             </div>
@@ -2675,6 +2675,73 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     // --- OpenTracker restart/reload permission test -------------------------
     // Calls the read-only `sudo -n -l` check on the server. It never restarts or reloads anything;
     // it only reports whether the web user is allowed to, plus copy-paste sudoers fixes on failure.
+
+    /**
+     * One renderer for every Test button.
+     *
+     * Two things were wrong before. A test whose only finding was "you have not configured this yet"
+     * came back as a red "Something on the path is missing", which reads as a broken installation
+     * rather than as an unused feature — and red that does not mean broken is red people stop
+     * reading. And the Live peer sync button had no handler at all: it was wired in the markup,
+     * bound to nothing, and pressing it did exactly nothing for as long as it has existed.
+     */
+    function renderTestResult(j, okText) {
+        const esc2 = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        let html;
+        if (j.ok) {
+            html = '<span class="text-success">&#10003; ' + esc2(okText) + '</span>';
+        } else if (j.configured === false) {
+            html = '<span class="text-info">&#9432; Not set up &mdash; this feature is off, and nothing here is broken. '
+                 + 'The steps below switch it on.</span>';
+        } else {
+            html = '<span class="text-danger">&#10007; Something on the path is missing.</span>';
+        }
+        html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
+        (j.checks || []).forEach(c => {
+            // A failed check on an unconfigured feature is a step still to take, not a fault.
+            const bad = j.configured === false
+                ? '<span class="text-info">&#9675;</span>'
+                : '<span class="text-danger">&#10007;</span>';
+            const mark = c.ok ? '<span class="text-success">&#10003;</span>'
+                              : (c.info ? '<span style="color:#a0a0b0;">&#8226;</span>' : bad);
+            html += '<li>' + mark + ' ' + esc2(c.name)
+                 + (c.detail ? ' <small style="color:#a0a0b0;">&mdash; ' + esc2(c.detail) + '</small>' : '') + '</li>';
+        });
+        html += '</ul>';
+        (j.errors || []).forEach(x => { html += '<div class="text-warning" style="font-size:.85rem;">' + esc2(x) + '</div>'; });
+        if ((j.suggestions || []).length) {
+            html += '<div class="settings-hint mt-2">Run these once, as root:</div>';
+            html += '<pre class="nl-preview" style="white-space:pre-wrap;">' + esc2(j.suggestions.join(String.fromCharCode(10))) + '</pre>';
+        }
+        return html;
+    }
+
+    // Every button that carries data-test, whether or not somebody remembered to wire it up.
+    document.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('.settings-test-btn[data-test]');
+        if (!btn) return;
+        let box = btn.parentNode.querySelector('.settings-test-result');
+        if (!box) {
+            box = document.createElement('div');
+            box.className = 'settings-test-result mt-2';
+            btn.parentNode.appendChild(box);
+        }
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
+        box.innerHTML = '<span class="text-info">Asking the helper&hellip;</span>';
+        try {
+            const res = await fetch(API_BASE + btn.dataset.test, { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
+            const j = await res.json();
+            box.innerHTML = renderTestResult(j, btn.dataset.okText || 'Everything this needs is in place.');
+        } catch {
+            box.innerHTML = '<span class="text-danger">Network error</span>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
+    });
+
     async function runTrackerPermTest(op, btn) {
         const el = document.getElementById('tracker-perm-result');
         const label = op === 'reload' ? 'reload' : 'restart';
@@ -2877,9 +2944,8 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         try {
             const res = await fetch(API_BASE + 'admin/ot_cluster_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
-            let html = j.ok
-                ? '<span class="text-success">&#10003; The panel can manage extra instances from here.</span>'
-                : '<span class="text-danger">&#10007; Something on the path is missing.</span>';
+            box.innerHTML = renderTestResult(j, 'The panel can manage extra instances from here.');
+            let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {
                 const mark = c.ok ? '<span class="text-success">&#10003;</span>'
@@ -2892,7 +2958,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             if ((j.suggestions || []).length) {
                 html += '<pre class="nl-preview mt-2" style="white-space:pre-wrap;">' + esc(j.suggestions.join(String.fromCharCode(10))) + '</pre>';
             }
-            box.innerHTML = html;
+            if (html) box.innerHTML = html;
         } catch {
             box.innerHTML = '<span class="text-danger">Network error</span>';
         } finally {
@@ -2915,9 +2981,8 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         try {
             const res = await fetch(API_BASE + 'admin/sysctl_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
-            let html = j.ok
-                ? '<span class="text-success">&#10003; The panel can reach the kernel-buffer helper.</span>'
-                : '<span class="text-danger">&#10007; Something on the path is missing.</span>';
+            box.innerHTML = renderTestResult(j, 'The panel can reach the kernel-buffer helper.');
+            let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {
                 const mark = c.ok ? '<span class="text-success">&#10003;</span>'
@@ -2930,7 +2995,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             if ((j.suggestions || []).length) {
                 html += '<pre class="nl-preview mt-2" style="white-space:pre-wrap;">' + esc(j.suggestions.join(String.fromCharCode(10))) + '</pre>';
             }
-            box.innerHTML = html;
+            if (html) box.innerHTML = html;
         } catch {
             box.innerHTML = '<span class="text-danger">Network error</span>';
         } finally {

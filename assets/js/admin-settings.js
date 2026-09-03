@@ -70,6 +70,9 @@
             rows: [...el.querySelectorAll('.row')],
             group: el.dataset.group || '',
             title: norm(el.dataset.title || textOf(el.querySelector('h5'))),
+            // The title as WRITTEN, for showing back to the reader. `title` above is lower-cased and
+            // stripped for matching, which is the wrong thing to put in front of a person.
+            label: (el.dataset.title || textOf(el.querySelector('h5')) || '').trim(),
             groupText: '',
             inForm: anchor.parentNode === form,
         };
@@ -125,10 +128,63 @@
     divider.className = 'settings-divider d-hidden';
     divider.id = 'settings-divider';
 
+    /**
+     * Where a search hit LIVES, said on the hit itself.
+     *
+     * Searching pulls a field out of a page of a hundred and shows it on its own — and then the
+     * reader has what they were looking for and no idea where it came from. Clearing the search puts
+     * the page back the way it was and the setting disappears again. So every visible section gets a
+     * line naming its group and its own title, with a button that clears the search and takes you to
+     * the section in place.
+     */
+    function groupTitle(id) {
+        const btn = groupBar && groupBar.querySelector('.settings-group-btn[data-group="' + id + '"]');
+        if (!btn) return id;
+        // The button carries a count badge; the group's name is the text before it.
+        return (btn.textContent || id).replace(/\s*\d+\s*$/, '').trim();
+    }
+
+    function breadcrumbFor(sec) {
+        let bc = sec.el.querySelector(':scope > .settings-where');
+        if (bc) return bc;
+        bc = document.createElement('div');
+        bc.className = 'settings-where d-hidden';
+        const path = document.createElement('span');
+        path.className = 'settings-where-path';
+        const jump = document.createElement('button');
+        jump.type = 'button';
+        jump.className = 'btn btn-sm btn-outline-secondary settings-where-jump';
+        jump.textContent = 'Show me where';
+        jump.addEventListener('click', () => {
+            // Clear the search, switch to the section's own group, and scroll it into view with the
+            // same highlight the #hash links use. This is the "…and now where was it?" button.
+            input.value = '';
+            group = sec.group || 'all';
+            applyGroup();
+            sec.el.scrollIntoView({ block: 'center' });
+            sec.el.classList.add('settings-section-hit');
+            setTimeout(() => sec.el.classList.remove('settings-section-hit'), 2500);
+        });
+        bc.appendChild(path);
+        bc.appendChild(jump);
+        sec.el.insertBefore(bc, sec.el.firstChild);
+        return bc;
+    }
+
+    function showWhere(sec, on) {
+        const bc = breadcrumbFor(sec);
+        bc.classList.toggle('d-hidden', !on);
+        if (on) {
+            bc.querySelector('.settings-where-path').textContent =
+                groupTitle(sec.group) + '  ›  ' + (sec.label || sec.title);
+        }
+    }
+
     function resetSection(sec, visible) {
         sec.items.forEach(it => it.el.classList.remove('d-hidden', 'settings-hit'));
         sec.rows.forEach(r => r.classList.remove('d-hidden'));
         sec.el.classList.remove('settings-section-hit');
+        showWhere(sec, false);
         show(sec.el, visible);
     }
     /**
@@ -207,6 +263,7 @@
         const visible = new Set(ranked.map(r => r.sec));
         sections.forEach(sec => resetSection(sec, visible.has(sec)));
         ranked.forEach(({ sec, whole }) => {
+            showWhere(sec, true);
             if (whole) { sec.el.classList.add('settings-section-hit'); return; }
             sec.items.forEach(item => {
                 // An item can sit inside another one (the donation rows inside the donation list, the
