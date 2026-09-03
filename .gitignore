@@ -72,3 +72,9 @@ config/index_*_cache.json
 config/login_attempts.lock
 config/iplist_overlap_*.json
 config/iplist_overlap_*.json.tmp.*
+
+# Local test harnesses rendered from a logged-in session — never part of the package.
+_i.html
+_t.html
+_u.html
+_s.html
