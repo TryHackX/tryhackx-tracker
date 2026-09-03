@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.27.3] — 2026-09-03
+
+Three things I had shipped that did not work.
+
+### Fixed — the stability probe was invisible on the Traffic page
+
+`includes/tuner.php` was required by `api.php` and **not** by `index.php`. The Traffic template
+decides whether to load `admin-tuner.js` with `function_exists('tunerEnabled')` — which is false on
+every page render without that include — so the `<script>` was never emitted and the card stayed
+hidden for ever. Meanwhile the endpoint answered `enabled: true` to anyone who asked it directly,
+and Settings said "Enabled — the button appears on Traffic".
+
+A feature can be switched on, reachable, correctly configured, and still invisible. One missing
+`require_once`.
+
+### Fixed — the search breadcrumb appeared under categories and not under All settings
+
+The first attempt gated it on `group === 'all'`, which is wrong twice over. A search **ignores the
+group filter entirely** — it always ranks every section — so `group` says nothing about what is on
+screen. And `openHash()` sets `group` behind the reader's back whenever the page is opened at a
+`#section` anchor, which is how the Traffic and Index pages link into Settings. The result was
+exactly the inversion reported.
+
+It is now tied to the only thing that matters: whether a search is running. Verified across every
+entry path — fresh load, after a group click, after a `#anchor` entry — breadcrumbs appear only with
+a query typed and disappear the moment it is cleared.
+
+### Fixed — the Add user dialog did not match the panel
+
+`border-secondary` on `.modal-content` overrode the panel's own `#2a2a2a` border with Bootstrap's
+light grey — the pale line across the dialog — and the same class on the header and footer overrode
+`--bs-modal-header-border-color`. The controls were also full-size where every other dialog here uses
+`-sm`. Measured after: all three borders are `rgb(42,42,42)`, the panel's own tone.
+
 ## [1.27.2] — 2026-09-03
 
 The rest of the audit, plus three things from the last release that were wrong on arrival.

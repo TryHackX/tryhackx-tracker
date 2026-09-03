@@ -35,6 +35,12 @@ require_once __DIR__ . '/includes/backup.php';
 require_once __DIR__ . '/includes/opentracker.php';
 require_once __DIR__ . '/includes/sysctl.php';
 require_once __DIR__ . '/includes/cluster.php';
+// The page needs this too, not only api.php: templates/admin/traffic.php decides whether to load
+// admin-tuner.js with `function_exists('tunerEnabled')`, and without the include that test is false
+// on every page render — so the probe's card stayed hidden for ever while its endpoint answered
+// "enabled: true" to anyone who asked it directly. A feature can be switched on, reachable, and
+// still invisible.
+require_once __DIR__ . '/includes/tuner.php';
 
 $db = getDb();
 // A ceiling on how long ONE query may run inside a web request. Not a substitute for writing the

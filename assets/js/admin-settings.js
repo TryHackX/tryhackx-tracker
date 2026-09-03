@@ -262,12 +262,18 @@
         ranked.sort((a, b) => (b.score - a.score) || (a.sec.i - b.sec.i));
         const visible = new Set(ranked.map(r => r.sec));
         sections.forEach(sec => resetSection(sec, visible.has(sec)));
-        // Only while the whole page is in view. Once a group is selected the reader already knows
-        // which one they are in, and a breadcrumb repeating it on every section is noise — the
-        // question "where was this" only exists when the search has pulled fields out of everywhere.
-        const showCrumbs = group === 'all';
+        // Shown while a SEARCH is running, and only then.
+        //
+        // The first attempt tied this to `group === 'all'`, which was wrong twice over: a search
+        // ignores the group filter entirely — it always ranks every section — so `group` says
+        // nothing about what is on screen, and it is also set behind the reader's back by
+        // openHash() when the page is opened at a #section anchor. The result was breadcrumbs
+        // appearing under a category and missing under All settings, which is the opposite of the
+        // ask. Whether a search is running is the actual question: that is when fields have been
+        // pulled out of everywhere and "where was this" has no other answer. With no search,
+        // applyGroup() has already hidden them.
         ranked.forEach(({ sec, whole }) => {
-            showWhere(sec, showCrumbs);
+            showWhere(sec, true);
             if (whole) { sec.el.classList.add('settings-section-hit'); return; }
             sec.items.forEach(item => {
                 // An item can sit inside another one (the donation rows inside the donation list, the
