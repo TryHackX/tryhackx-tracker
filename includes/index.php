@@ -1190,6 +1190,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             $arms[0][2] .= " AND info_hash NOT IN (SELECT info_hash FROM whitelist WHERE banned = 0)";
             $arms[] = $buildArm(true, $useFt);
         }
+        $countArms = static function () use ($db, $arms, $withWl, $search, $searchFiles, $contentFilter): int {
         $total = 0;
         foreach ($arms as $k => $a) {
             // The unfiltered count is "how many rows are listable at all" — a number that moves with
@@ -1208,6 +1209,8 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                 $total += (int)($count()['n'] ?? 0);
             }
         }
+        return $total;
+        };
 
         if (count($arms) === 1) {
             // ONE arm: no derived table. Wrapping a single SELECT in `SELECT * FROM (…) cat` forces
@@ -1232,7 +1235,16 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         $st->bindValue($i++, $perPage, PDO::PARAM_INT);
         $st->bindValue($i, $offset, PDO::PARAM_INT);
         $st->execute();
-        return [$total, $st->fetchAll(PDO::FETCH_ASSOC)];
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        // COUNT LAST, AND ONLY WHEN THE ANSWER IS NOT ALREADY IN FRONT OF US.
+        //
+        // A first page that came back short means every arm was exhausted, so the number of rows IS
+        // the total — there is nothing left to count. That is the shape of most searches, and on this
+        // table the COUNT(*) it replaces is a second full-text pass costing about as much as the
+        // search itself (1 951 ms measured for a query that matched seventy rows).
+        $total = ($offset === 0 && count($rows) < $perPage) ? count($rows) : $countArms();
+        return [$total, $rows];
     };
 
     try { [$total, $rows] = $run(true); }
