@@ -999,13 +999,53 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     }
     if (!$orderParts) $orderParts = ['score' => 'score DESC', 'seeders' => 'seeders DESC'];
     elseif (count($orderParts) === 1 && isset($orderParts['score'])) $orderParts['seeders'] = 'seeders DESC';
-    // Same reasoning as the admin listing: a tie-break that runs against the sort's direction turns
-    // an index scan into a filesort over the whole catalogue.
-    $order = implode(', ', $orderParts) . ', info_hash '
-           . (str_ends_with(end($orderParts), 'DESC') ? 'DESC' : 'ASC');
 
     $isHash = $search !== '' && preg_match('/^[a-f0-9]{6,40}$/i', $search);
     $ft = ($search !== '' && !$isHash && mb_strlen($search) >= 3) ? indexFulltextTerm($search) : '';
+
+    /**
+     * The ORDER BY, written so a query plan can actually serve it.
+     *
+     * TWO THINGS HAD TO CHANGE, and both were only visible on the real table.
+     *
+     * 1. `seeders` is the alias of COALESCE(scrape_seeders, last_seeders). No index can serve an
+     *    ORDER BY over an expression, so the catalogue's own default first page — no search typed,
+     *    the state a visitor arrives in — was a full scan and a filesort of 1.9 M rows: 2 890 ms
+     *    measured on production. index_hashes now carries `eff_seeders`, a VIRTUAL column holding
+     *    exactly that expression, with an index on it. Naming the column instead of the expression
+     *    is what lets the optimiser walk the index and stop after a page: the same query is 1 ms.
+     *    The whitelist arm keeps the alias — it is a few thousand rows and has no such column.
+     *
+     * 2. With no search, `score` is the literal 0. Leading an ORDER BY with a constant sorts nothing
+     *    and stops the optimiser recognising the rest as an index order, so it is left out entirely
+     *    rather than carried along as decoration.
+     *
+     * The trailing tie-break runs in the same direction as the sort for the reason the admin listing
+     * documents: InnoDB carries the primary key inside every secondary index, so a tie-break the
+     * other way round turns an index walk back into a filesort over the whole catalogue.
+     */
+    $orderFor = static function (bool $wl, bool $scored) use ($orderParts): string {
+        $parts = [];
+        foreach ($orderParts as $key => $frag) {
+            if ($key === 'score') { if ($scored) $parts[] = $frag; continue; }
+            if ($key === 'seeders' && !$wl) $frag = 'eff_' . $frag;      // eff_seeders, the indexed one
+            $parts[] = $frag;
+        }
+        if (!$parts) $parts[] = $wl ? 'seeders DESC' : 'eff_seeders DESC';
+        return implode(', ', $parts) . ', info_hash '
+             . (str_ends_with((string)end($parts), 'DESC') ? 'DESC' : 'ASC');
+    };
+    // What the outer merge orders by when there are two arms: the aliases, which both arms expose.
+    $orderMerged = static function (bool $scored) use ($orderParts): string {
+        $parts = [];
+        foreach ($orderParts as $key => $frag) {
+            if ($key === 'score' && !$scored) continue;
+            $parts[] = $frag;
+        }
+        if (!$parts) $parts[] = 'seeders DESC';
+        return implode(', ', $parts) . ', info_hash '
+             . (str_ends_with((string)end($parts), 'DESC') ? 'DESC' : 'ASC');
+    };
 
     // ── "search inside file lists": resolve the file half FIRST, and bound it ────────────────
     //
@@ -1140,7 +1180,9 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         ];
     };
 
-    $run = function (bool $useFt) use ($db, $buildArm, $withWl, $order, $perPage, $offset): array {
+    $run = function (bool $useFt) use ($db, $buildArm, $withWl, $orderFor, $orderMerged, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter): array {
+        // Whether the relevance column is a real score or the literal 0 — see $orderFor.
+        $scored = $search !== '' && !$isHash && ($useFt && $ft !== '');
         $arms = [$buildArm(false, $useFt)];
         if ($withWl) {
             // a hash can sit in BOTH tables between polls — prefer the whitelist row
@@ -1149,15 +1191,41 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             $arms[] = $buildArm(true, $useFt);
         }
         $total = 0;
-        foreach ($arms as $a) {
-            $c = $db->prepare($a[2]);
-            $c->execute($a[3]);
-            $total += (int)$c->fetchColumn();
+        foreach ($arms as $k => $a) {
+            // The unfiltered count is "how many rows are listable at all" — a number that moves with
+            // the index poll, not with the reader. Counting it on every page view cost 1 102 ms of
+            // full scan for an answer that was the same as a minute ago.
+            $count = static function () use ($db, $a): array {
+                $c = $db->prepare($a[2]); $c->execute($a[3]);
+                return ['n' => (int)$c->fetchColumn()];
+            };
+            if ($search === '' && !$searchFiles) {
+                // The key has to carry everything that changes the answer, or one reader's filter
+                // becomes another reader's total.
+                $key = 'cat_total_' . $k . ($withWl ? '_wl' : '') . '_' . $contentFilter;
+                $total += (int)(indexStatusCached($db, $key, $count, 120)['n'] ?? 0);
+            } else {
+                $total += (int)($count()['n'] ?? 0);
+            }
         }
-        $sql = count($arms) === 1 ? $arms[0][0] : '(' . $arms[0][0] . ') UNION ALL (' . $arms[1][0] . ')';
-        $sql = "SELECT * FROM ($sql) cat ORDER BY $order LIMIT ? OFFSET ?";
-        $params = $arms[0][1];
-        if (count($arms) === 2) $params = array_merge($params, $arms[1][1]);
+
+        if (count($arms) === 1) {
+            // ONE arm: no derived table. Wrapping a single SELECT in `SELECT * FROM (…) cat` forces
+            // the whole result into a temporary table before the ORDER BY can look at it, which on
+            // the empty search meant materialising 184 000 rows to return 25 of them.
+            $sql = $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored) . ' LIMIT ? OFFSET ?';
+            $params = $arms[0][1];
+        } else {
+            // TWO arms: the merge needs a derived table, but each arm can be ordered and cut short
+            // FIRST — no arm can contribute a row past position offset+perPage to the merged page,
+            // so nothing beyond that has to be materialised or sorted.
+            $cut = $offset + $perPage;
+            $sql = '(' . $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored) . ' LIMIT ' . (int)$cut . ')'
+                 . ' UNION ALL '
+                 . '(' . $arms[1][0] . ' ORDER BY ' . $orderFor(true, $scored) . ' LIMIT ' . (int)$cut . ')';
+            $sql = "SELECT * FROM ($sql) cat ORDER BY " . $orderMerged($scored) . ' LIMIT ? OFFSET ?';
+            $params = array_merge($arms[0][1], $arms[1][1]);
+        }
         $st = $db->prepare($sql);
         $i = 1;
         foreach ($params as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);

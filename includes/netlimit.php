@@ -483,6 +483,12 @@ function netlimitApply(array $cfg, int $pps, int $burst, int $port, bool $dryRun
     $args  = ['set', (string)$pps, (string)$burst, (string)$port];
     $trusted = netlimitTrusted($cfg);
     if ($trusted) $args[] = '--trusted=' . implode(',', $trusted);
+    // The address lists are far too large for argv, so they travel as a file the helper reads and
+    // copies to its own spool. Passed whenever the file exists — including when it is EMPTY, which
+    // is how the master switch clears the sets instead of leaving them loaded.
+    if (function_exists('ipListSetsFile') && is_file(ipListSetsFile())) {
+        $args[] = '--sets=' . ipListSetsFile();
+    }
     if ($dryRun) $args[] = '--dry-run';
     $r = netlimitRun($cfg, $args);
     if ($r['ok'] && !$dryRun) {

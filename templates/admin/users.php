@@ -210,11 +210,13 @@
                     <div class="mb-3">
                         <label class="form-label wl-label">Username</label>
                         <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ua-username" autocomplete="off" maxlength="32">
-                        <small class="text-muted wl-small">3&ndash;32 characters: letters, digits, dot, dash or underscore.</small>
+                        <div class="invalid-feedback ua-msg" id="ua-username-msg"></div>
+                    <small class="text-muted wl-small">3&ndash;32 characters: letters, digits, dot, dash or underscore.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label wl-label">Email <small class="text-muted wl-small" id="ua-email-req">(required)</small></label>
                         <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="ua-email" autocomplete="off" maxlength="190">
+                    <div class="invalid-feedback ua-msg" id="ua-email-msg"></div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label wl-label">Password</label>
@@ -224,8 +226,8 @@
                                 <i class="bi bi-shuffle"></i> Generate
                             </button>
                         </div>
-                        <small class="text-muted wl-small">At least 8 characters with a lowercase and an uppercase letter, a digit and a special character.
-                            Shown in clear on purpose &mdash; you have to be able to pass it on.</small>
+                        <div class="ua-reqs" id="ua-pw-reqs"></div>
+                        <small class="text-muted wl-small">Shown in clear on purpose &mdash; you have to be able to pass it on.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label wl-label">Email verification</label>

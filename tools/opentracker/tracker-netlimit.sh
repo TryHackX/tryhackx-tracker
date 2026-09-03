@@ -17,8 +17,10 @@
 #                                                  --brief skips the foreign-rule scan (see below)
 #   tracker-netlimit.sh check                      JSON: is this machine able to run the feature at all
 #   tracker-netlimit.sh monitor [port] [--dry-run]  load the COUNTERS ONLY — no drop rule at all
-#   tracker-netlimit.sh set <pps> [burst] [port] [--dry-run]
-#                                                  write + atomically load the ruleset
+#   tracker-netlimit.sh set <pps> [burst] [port] [--trusted=a,b] [--sets=<file>] [--dry-run]
+#                                                  write + atomically load the ruleset.
+#                                                  --sets takes a file of "allow|block|soft <cidr>"
+#                                                  lines; omitting it keeps the lists already loaded.
 #   tracker-netlimit.sh off [--dry-run]            delete the table and the file (traffic unthrottled)
 #   tracker-netlimit.sh egress <pps> [--dry-run]   change the rate of the EXISTING `inet ottrack` budget
 #
@@ -82,15 +84,22 @@ read_counters() {
 }
 
 # The rate currently programmed in our input chain, or empty.
+# THE limit is the one with no address match in front of it.
+#
+# Since 1.28.0 the chain can hold three `limit rate over` rules: the two "under pressure" budgets for
+# the soft sets, and the general one. The soft rules come FIRST (they have to: they are a tighter
+# budget for a subset), so a plain "first limit rate over wins" read here reported a fifth of the
+# real limit — the panel showed 8 000 pps on a port limited to 40 000. `saddr` is what tells them
+# apart: the general limit applies to everyone and therefore matches no address.
 read_limit() {
     have_nft || return 0
     "$NFT" list chain inet "$TABLE" input 2>/dev/null | awk '
-        /limit rate over/ { for (i = 1; i < NF; i++) if ($i == "rate" && $(i+1) == "over") { split($(i+2), a, "/"); print a[1]; exit } }'
+        /limit rate over/ && !/saddr/ { for (i = 1; i < NF; i++) if ($i == "rate" && $(i+1) == "over") { split($(i+2), a, "/"); print a[1]; exit } }'
 }
 read_burst() {
     have_nft || return 0
     "$NFT" list chain inet "$TABLE" input 2>/dev/null | awk '
-        /limit rate over/ { for (i = 1; i < NF; i++) if ($i == "burst") { print $(i+1); exit } }'
+        /limit rate over/ && !/saddr/ { for (i = 1; i < NF; i++) if ($i == "burst") { print $(i+1); exit } }'
 }
 read_port() {
     have_nft || return 0
@@ -104,10 +113,15 @@ read_egress_limit() {
 }
 
 # Handle of the rate-limit rule in a chain, for a targeted `nft replace` (empty when not found).
+# The handle of the GENERAL limit — the rule `set` swaps in place when only the rate changes.
+#
+# Same `saddr` test as read_limit(), and here getting it wrong would not merely misreport: the
+# targeted `nft replace` would overwrite a soft set's tighter budget with the general one, quietly
+# turning "dropped first under pressure" into "treated like everybody else".
 read_rule_handle() {  # read_rule_handle <table> <chain>
     have_nft || return 0
     "$NFT" -a list chain inet "$1" "$2" 2>/dev/null | awk '
-        /limit rate over/ { for (i = 1; i < NF; i++) if ($i == "handle") { print $(i+1); exit } }'
+        /limit rate over/ && !/saddr/ { for (i = 1; i < NF; i++) if ($i == "handle") { print $(i+1); exit } }'
 }
 # Does a table exist? Asked by listing table NAMES, never by dumping the table.
 #
@@ -319,6 +333,128 @@ read_trusted_live() {
     done
 }
 
+# ── address LISTS (allow / block / block-under-pressure) ─────────────────────
+#
+# `--trusted=` carries a handful of addresses on the command line. Whole countries do not fit in
+# argv, so lists arrive as a FILE of "kind address" lines, one per line:
+#
+#     allow 203.0.113.0/24
+#     block 5.188.0.0/16
+#     soft  45.0.0.0/8
+#
+# The file is validated here, line by line, exactly like every other argument: it is written by the
+# panel, and the panel is not root. Whatever fails a check is dropped with a note, never loaded.
+#
+# WHY A SPOOL COPY
+#   The panel's file lives under the web root and php-fpm's mount namespace; `persist` runs from the
+#   janitor a minute later and must render the SAME ruleset. Reading a 250 000-element set back out
+#   of nftables to do that is exactly the mistake that cost 5.5 s of a core per poll in 1.25.1, so
+#   the accepted file is copied to a spool that root owns and re-read from there instead.
+SETS_SPOOL_DIR="${NETLIMIT_SPOOL:-/var/lib/tracker-netlimit}"
+SETS_SPOOL="$SETS_SPOOL_DIR/sets.txt"
+LIST_MAX=300000
+setdir=""       # temp dir holding the six rendered element lists; cleaned by the EXIT trap
+
+# Validate and split one sets file into six comma-joined element lists.
+#
+# Done in ONE awk pass, not in shell. The shell validators above are called once per manual entry
+# and there are at most 256 of those; a country file is tens of thousands of lines, and a shell
+# function per line would turn an apply into a minutes-long job.
+parse_sets() {  # parse_sets <file>
+    local src="${1:-}" f
+    setdir="$(mktemp -d "${TMPDIR:-/tmp}/otnl-sets.XXXXXX")" || fail "cannot create a temporary directory"
+    for f in allow4 allow6 block4 block6 soft4 soft6; do : > "$setdir/$f"; done
+    [ -n "$src" ] && [ -f "$src" ] || return 0
+    awk -v dir="$setdir" -v max="$LIST_MAX" '
+        function ok4(a,   p, i, bits, n) {
+            if (a !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/) return 0
+            if (index(a, "/")) {
+                bits = substr(a, index(a, "/") + 1) + 0
+                if (bits > 32) return 0
+                a = substr(a, 1, index(a, "/") - 1)
+            }
+            n = split(a, p, ".")
+            if (n != 4) return 0
+            for (i = 1; i <= 4; i++) { if (p[i] == "" || p[i] + 0 > 255) return 0 }
+            return 1
+        }
+        function ok6(a,   bits) {
+            if (a !~ /:/) return 0
+            if (a ~ /[^0-9A-Fa-f:\/]/) return 0
+            if (index(a, "/")) { bits = substr(a, index(a, "/") + 1) + 0; if (bits > 128) return 0 }
+            return 1
+        }
+        function put(name, item) {
+            f = dir "/" name
+            printf "%s%s", (c[name]++ ? ", " : ""), item >> f
+        }
+        { sub(/\r$/, "") }
+        NF < 2 { next }
+        {
+            if (total++ >= max) { over = 1; exit }
+            kind = $1; item = $2
+            if      (ok4(item)) fam = "4"
+            else if (ok6(item)) fam = "6"
+            else { bad++; next }
+            if      (kind == "allow") put("allow" fam, item)
+            else if (kind == "block") put("block" fam, item)
+            else if (kind == "soft")  put("soft"  fam, item)
+            else bad++
+        }
+        END {
+            if (bad)  printf "tracker-netlimit: dropped %d list entries that were not addresses\n", bad > "/dev/stderr"
+            if (over) printf "tracker-netlimit: more than %d list entries, ignoring the rest\n", max > "/dev/stderr"
+        }
+    ' "$src"
+    return 0
+}
+
+# How many elements ended up in each set — for the status JSON, counted from the rendered lists
+# rather than by asking nftables, which would mean serialising every element.
+count_set() { [ -s "$setdir/$1" ] && awk -v RS=", " 'END { print NR }' "$setdir/$1" || echo 0; }
+
+emit_set() {  # emit_set <name> <nft type> <file>
+    printf "    set %s { type %s; flags interval;" "$1" "$2"
+    if [ -s "$3" ]; then printf " elements = { "; cat "$3"; printf " };"; fi
+    printf " }\n"
+}
+
+render_list_sets() {
+    emit_set allow4 ipv4_addr "$setdir/allow4"
+    emit_set allow6 ipv6_addr "$setdir/allow6"
+    emit_set block4 ipv4_addr "$setdir/block4"
+    emit_set block6 ipv6_addr "$setdir/block6"
+    emit_set soft4  ipv4_addr "$setdir/soft4"
+    emit_set soft6  ipv6_addr "$setdir/soft6"
+}
+
+# The list rules, in the order the panel documents.
+#
+#   allow  wins over everything, so it comes first and is not even counted against the budget.
+#   block  is unconditional.
+#   soft   gets a budget of its own, a fifth of the main one. nftables has no way to say "drop this
+#          only while some other rule is dropping" -- rules share no state -- so "refused when the
+#          machine is under pressure" is written as a tighter limit: at rest these sources are
+#          nowhere near a fifth of the allowance, and as arrivals climb they are the first to hit one.
+render_list_rules() {  # render_list_rules <soft_pps> <burst>
+    printf "        ip  saddr @allow4 counter name in_passed accept\n"
+    printf "        ip6 saddr @allow6 counter name in_passed accept\n"
+    printf "        ip  saddr @block4 counter name in_blocked drop\n"
+    printf "        ip6 saddr @block6 counter name in_blocked drop\n"
+    printf "        ip  saddr @soft4 limit rate over %s/second burst %s packets counter name in_softcap drop\n" "$1" "$2"
+    printf "        ip6 saddr @soft6 limit rate over %s/second burst %s packets counter name in_softcap drop\n" "$1" "$2"
+}
+
+# A short digest of the six element lists, written into the header line so a later `set` can tell
+# whether the lists changed without holding two copies of them in memory to compare.
+list_fingerprint() {
+    [ -n "${setdir:-}" ] || { printf 'none'; return 0; }
+    local h
+    h="$(cat "$setdir/allow4" "$setdir/allow6" "$setdir/block4" "$setdir/block6" \
+             "$setdir/soft4" "$setdir/soft6" 2>/dev/null | cksum | tr -d ' ')"
+    printf '%s' "${h:-none}"
+}
+
 # The two sets, always emitted so the chain can reference them even when empty.
 render_trusted_sets() {
     printf '    set trusted4 { type ipv4_addr; flags interval;%s }\n' \
@@ -368,21 +504,24 @@ table inet $TABLE {
 EOF
 }
 
-render() {  # render <pps> <burst> <port>
+render() {  # render <pps> <burst> <port> <soft_pps>
     cat <<EOF
 #!/usr/sbin/nft -f
 # $RULES_FILE — generated by tracker-netlimit.sh, do not edit by hand.
 # Inbound rate limit for the tracker's UDP port: packets over the budget are dropped BEFORE
 # opentracker sees them. Own table, own file — nothing else in the ruleset is touched.
-# tracker-netlimit: pps=$1 burst=$2 port=$3 trusted=$(printf '%s' "$TRUSTED4$([ -n "$TRUSTED4" ] && [ -n "$TRUSTED6" ] && printf ', ')$TRUSTED6" | tr -d ' ' | tr ',' '|') generated=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+# tracker-netlimit: pps=$1 burst=$2 port=$3 soft=$4 lists=$(list_fingerprint) trusted=$(printf '%s' "$TRUSTED4$([ -n "$TRUSTED4" ] && [ -n "$TRUSTED6" ] && printf ', ')$TRUSTED6" | tr -d ' ' | tr ',' '|') generated=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 # Undo: tracker-netlimit.sh off   (or: nft delete table inet $TABLE && rm $RULES_FILE)
 table inet $TABLE {}
 delete table inet $TABLE
 table inet $TABLE {
-    counter in_total  {}
-    counter in_passed {}
-    counter in_capped {}
+    counter in_total   {}
+    counter in_passed  {}
+    counter in_capped  {}
+    counter in_blocked {}
+    counter in_softcap {}
 $(render_trusted_sets)
+$(render_list_sets)
     chain input {
         type filter hook input priority filter - 5; policy accept;
         # Only the tracker's UDP port is in scope. Both guards are required: on a non-UDP packet the
@@ -392,6 +531,7 @@ $(render_trusted_sets)
         udp dport != $3 accept
         counter name in_total
 $(render_trusted_rules)
+$(render_list_rules "$4" "$2")
         limit rate over $1/second burst $2 packets counter name in_capped drop
         counter name in_passed
     }
@@ -517,16 +657,17 @@ emit_check() {
 }
 
 action_set() {
-    local pps="${1-}" burst="${2-100}" port="${3-6969}" dry="" trusted=""
-    # The two optional tails may arrive in either order and either may be absent, so they are matched
-    # by shape rather than by position: --dry-run is a flag, --trusted=... carries a value.
+    local pps="${1-}" burst="${2-100}" port="${3-6969}" dry="" trusted="" sets="" sets_given=0
+    # The optional tails may arrive in any order and any of them may be absent, so they are matched
+    # by shape rather than by position: --dry-run is a flag, the other two carry a value.
     local a
-    for a in "${4-}" "${5-}"; do
+    for a in "${4-}" "${5-}" "${6-}"; do
         case "$a" in
             --dry-run)   dry="--dry-run" ;;
             --trusted=*) trusted="${a#--trusted=}" ;;
+            --sets=*)    sets="${a#--sets=}"; sets_given=1 ;;
             "")          : ;;
-            *) fail "unknown option '$a' — use --dry-run and/or --trusted=<comma-separated>" 1 ;;
+            *) fail "unknown option '$a' — use --dry-run, --trusted=<comma-separated> and/or --sets=<file>" 1 ;;
         esac
     done
     want_range "$pps"   "$PPS_MIN"   "$PPS_MAX"   "Rate (packets/second)"
@@ -534,16 +675,25 @@ action_set() {
     want_range "$port"  1            65535        "Port"
     have_nft || fail "nftables (nft) is not installed — cannot apply a rate limit."
     parse_trusted "$trusted"
+    # No --sets on this call means "leave the lists alone": an automatic rate change every ten
+    # minutes must not quietly drop the country blocks somebody loaded. Passing an EMPTY file is how
+    # you clear them, which is what the panel does when every list is off.
+    [ "$sets_given" = 1 ] || sets="$SETS_SPOOL"
+    parse_sets "$sets"
+    local soft_pps=$((pps / 5)); [ "$soft_pps" -lt 100 ] && soft_pps=100
 
     tmp="$(mktemp "${TMPDIR:-/tmp}/ottrack-in.XXXXXX")" || fail "cannot create a temporary file"
-    trap 'rm -f "${tmp:-}"' EXIT
-    render "$pps" "$burst" "$port" >"$tmp"
+    trap 'rm -f "${tmp:-}" ; [ -n "${setdir:-}" ] && rm -rf "$setdir"' EXIT
+    render "$pps" "$burst" "$port" "$soft_pps" >"$tmp"
 
     local chk; chk="$("$NFT" -c -f "$tmp" 2>&1)" || fail "nft rejected the generated ruleset: $chk" 3
 
     if [ "$dry" = "--dry-run" ]; then
-        printf '{"ok":true,"dry_run":true,"pps":%s,"burst":%s,"port":%s,"trusted":%s,"file":%s,"ruleset":%s}\n' \
-            "$pps" "$burst" "$port" "$(jstr "$TRUSTED4$([ -n "$TRUSTED4" ] && [ -n "$TRUSTED6" ] && printf ', ')$TRUSTED6")" \
+        printf '{"ok":true,"dry_run":true,"pps":%s,"burst":%s,"port":%s,"soft_pps":%s,"trusted":%s,"lists":{"allow4":%s,"allow6":%s,"block4":%s,"block6":%s,"soft4":%s,"soft6":%s},"file":%s,"ruleset":%s}\n' \
+            "$pps" "$burst" "$port" "$soft_pps" \
+            "$(jstr "$TRUSTED4$([ -n "$TRUSTED4" ] && [ -n "$TRUSTED6" ] && printf ', ')$TRUSTED6")" \
+            "$(count_set allow4)" "$(count_set allow6)" "$(count_set block4)" \
+            "$(count_set block6)" "$(count_set soft4)" "$(count_set soft6)" \
             "$(jstr "$RULES_FILE")" "$(jstr "$(cat "$tmp")")"
         return 0
     fi
@@ -559,10 +709,15 @@ action_set() {
     # The fast path swaps ONE rule and leaves the rest of the table alone -- including the trusted
     # sets. So it is only available when the exemptions are unchanged; otherwise the table has to be
     # rebuilt, counters and all, or the panel would report a trusted list the firewall never got.
-    local trusted_now trusted_was
+    local trusted_now trusted_was lists_now lists_was
     trusted_now="$(printf '%s' "$TRUSTED4$([ -n "$TRUSTED4" ] && [ -n "$TRUSTED6" ] && printf ', ')$TRUSTED6" | tr -d ' ' | tr ',' '|')"
     trusted_was="$(read_header trusted)"
-    if [ "$trusted_now" = "$trusted_was" ] && table_exists "$TABLE" && [ "$(read_port)" = "$port" ]; then
+    # Same reasoning for the lists, and it cannot be the same test: they are far too large to compare
+    # element by element in a header line, so the fingerprint is a digest of the six rendered sets.
+    lists_now="$(list_fingerprint)"
+    lists_was="$(read_header lists)"
+    if [ "$trusted_now" = "$trusted_was" ] && [ "$lists_now" = "$lists_was" ] \
+       && table_exists "$TABLE" && [ "$(read_port)" = "$port" ]; then
         handle="$(read_rule_handle "$TABLE" input)"
         if [ -n "$handle" ]; then
             if out="$("$NFT" replace rule inet "$TABLE" input handle "$handle" \
@@ -575,12 +730,22 @@ action_set() {
         out="$("$NFT" -f "$tmp" 2>&1)" || fail "nft failed to load the ruleset: $out" 3
     fi
     # The rule is in the kernel from here on. Saving it can still fail for a reason that is NOT a
+    # The lists are in the kernel; keep the copy `persist` will re-render from. Done AFTER the load,
+    # so a ruleset nft rejected never becomes the thing a reboot restores.
+    if [ "$sets_given" = 1 ] && [ "$sets" != "$SETS_SPOOL" ]; then
+        mkdir -p "$SETS_SPOOL_DIR" 2>/dev/null || true
+        if [ -f "$sets" ]; then cp -f "$sets" "$SETS_SPOOL.new" 2>/dev/null && mv -f "$SETS_SPOOL.new" "$SETS_SPOOL" 2>/dev/null || true
+        else : > "$SETS_SPOOL" 2>/dev/null || true; fi
+    fi
+
     # failed apply and NOT the admin's doing: see dir_writable().
     local rc=0; save_rules "$tmp" || rc=$?
     [ "$rc" = 2 ] && fail "ruleset is live but could not be saved to $RULES_FILE (it will be lost on reboot)" 4
 
-    printf '{"ok":true,"applied":true,"mode":%s,"pps":%s,"burst":%s,"port":%s,"file":%s,"saved":%s,"persist_deferred":%s,"persist_hint":%s,"persistent":%s}\n' \
-        "$(jstr "$mode")" "$pps" "$burst" "$port" "$(jstr "$RULES_FILE")" \
+    printf '{"ok":true,"applied":true,"mode":%s,"pps":%s,"burst":%s,"port":%s,"lists":{"allow4":%s,"allow6":%s,"block4":%s,"block6":%s,"soft4":%s,"soft6":%s},"file":%s,"saved":%s,"persist_deferred":%s,"persist_hint":%s,"persistent":%s}\n' \
+        "$(jstr "$mode")" "$pps" "$burst" "$port" \
+        "$(count_set allow4)" "$(count_set allow6)" "$(count_set block4)" \
+        "$(count_set block6)" "$(count_set soft4)" "$(count_set soft6)" "$(jstr "$RULES_FILE")" \
         "$([ "$rc" = 0 ] && echo true || echo false)" "$([ "$rc" = 1 ] && echo true || echo false)" \
         "$(jstr "$([ "$rc" = 1 ] && printf '%s' "$PERSIST_HINT")")" \
         "$([ "$rc" = 0 ] && include_ok && echo true || echo false)"
@@ -650,14 +815,18 @@ action_persist() {
 
     local m port; m="$(read_mode)"; port="$(read_port)"; is_uint "$port" || port=6969
     tmp="$(mktemp "${TMPDIR:-/tmp}/ottrack-in.XXXXXX")" || fail "cannot create a temporary file"
-    trap 'rm -f "${tmp:-}"' EXIT
+    trap 'rm -f "${tmp:-}" ; [ -n "${setdir:-}" ] && rm -rf "$setdir"' EXIT
     if [ "$m" = count ]; then
         render_monitor "$port" >"$tmp"
     else
         local pps burst; pps="$(read_limit)"; burst="$(read_burst)"; [ -n "$burst" ] || burst=5
         is_uint "$pps" || fail "cannot read the live limit back from the ruleset"
         read_trusted_live
-        render "$pps" "$burst" "$port" >"$tmp"
+        # The lists come from the spool, never from the loaded table: reading a set of a quarter of a
+        # million elements back out of nftables is the 5.5-second mistake 1.25.1 already paid for.
+        parse_sets "$SETS_SPOOL"
+        local soft_pps=$((pps / 5)); [ "$soft_pps" -lt 100 ] && soft_pps=100
+        render "$pps" "$burst" "$port" "$soft_pps" >"$tmp"
     fi
     # The outbound budget lives in its own file and drifts for the same reason, so the janitor
     # reconciles both in one visit — otherwise an admin fixes one and is surprised by the other.
@@ -753,5 +922,5 @@ case "${1:-status}" in
     egress)  shift; action_egress "${1-}" "${2-}" ;;
     -h|--help|help)
         sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//' ; exit 0 ;;
-    *) fail "unknown action '${1:-}' — use: status | check | monitor [port] | set <pps> [burst] [port] [--trusted=a,b] [--dry-run] | persist | off | egress <pps>" 1 ;;
+    *) fail "unknown action '${1:-}' — use: status | check | monitor [port] | set <pps> [burst] [port] [--trusted=a,b] [--sets=file] [--dry-run] | persist | off | egress <pps>" 1 ;;
 esac

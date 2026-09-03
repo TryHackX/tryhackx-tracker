@@ -756,10 +756,32 @@ function whitelistBan(PDO $db, array $cfg, array $hashes, array $ctx = []): arra
     $reason = mb_substr((string)($ctx['reason'] ?? ''), 0, 255) ?: null;
     $src = in_array($ctx['source'] ?? '', ['report', 'appeal', 'admin', 'import'], true) ? $ctx['source'] : 'admin';
     $srcId = isset($ctx['source_id']) ? (int)$ctx['source_id'] : null;
-    $ins = $db->prepare("INSERT INTO banned_hashes (info_hash, reason, source, source_id) VALUES (?, ?, ?, ?)
-                         ON DUPLICATE KEY UPDATE reason = COALESCE(VALUES(reason), reason), source = VALUES(source), source_id = VALUES(source_id)");
+    // ONE statement per chunk, not one per hash.
+    //
+    // A ban is usually one hash typed by a moderator, and for that the loop this replaces was fine.
+    // But the same function serves the import path, where a list of tens of thousands is ordinary —
+    // and there it was tens of thousands of round-trips to MariaDB, on a server that shares that
+    // MariaDB with the mail, the forum and the file service.
+    //
+    // The count of NEW bans cannot come from rowCount() on a multi-row INSERT … ON DUPLICATE KEY:
+    // MySQL reports 1 per insert and 2 per update, and 0 for an update that changed nothing, so the
+    // three cases are not separable from the total. Asking first is one extra query per chunk and is
+    // exact.
     $newBans = 0;
-    foreach ($hashes as $h) { $ins->execute([$h, $reason, $src, $srcId]); if ($ins->rowCount() === 1) $newBans++; }
+    foreach (array_chunk($hashes, 1000) as $chunk) {
+        $ph = implode(',', array_fill(0, count($chunk), '?'));
+        $have = $db->prepare("SELECT COUNT(*) FROM banned_hashes WHERE info_hash IN ($ph)");
+        $have->execute($chunk);
+        $newBans += count($chunk) - (int)$have->fetchColumn();
+
+        $rows = implode(',', array_fill(0, count($chunk), '(?, ?, ?, ?)'));
+        $args = [];
+        foreach ($chunk as $h) { $args[] = $h; $args[] = $reason; $args[] = $src; $args[] = $srcId; }
+        $db->prepare("INSERT INTO banned_hashes (info_hash, reason, source, source_id) VALUES $rows
+                      ON DUPLICATE KEY UPDATE reason = COALESCE(VALUES(reason), reason),
+                                              source = VALUES(source), source_id = VALUES(source_id)")
+           ->execute($args);
+    }
     $affected = 0;
     foreach (array_chunk($hashes, WL_SQL_IN_CHUNK) as $chunk) {
         $ph = implode(',', array_fill(0, count($chunk), '?'));
@@ -782,7 +804,16 @@ function whitelistBan(PDO $db, array $cfg, array $hashes, array $ctx = []): arra
                            WHERE status = 'pending' AND info_hash IN ($ph)")->execute($chunk);
             // And the ratings go with it: a score left behind on a banned hash is a number about
             // something nobody can reach any more.
-            if (function_exists('repClear')) foreach ($chunk as $h) repClear($db, $h);
+            //
+            // ASK WHICH ONES HAVE VOTES FIRST. repClear() is three statements for a hash that has
+            // votes and one wasted DELETE for a hash that does not, and almost none of them do —
+            // hash_votes holds the handful of things people bothered to rate, while a ban can carry
+            // a whole imported blocklist. One SELECT replaces thousands of no-op deletes.
+            if (function_exists('repClear')) {
+                $voted = $db->prepare("SELECT DISTINCT info_hash FROM hash_votes WHERE info_hash IN ($ph)");
+                $voted->execute($chunk);
+                foreach ($voted->fetchAll(PDO::FETCH_COLUMN) as $h) repClear($db, (string)$h);
+            }
         } catch (\Throwable $e) {
             // Older schema without these tables: the ban itself is what matters and must not fail.
         }

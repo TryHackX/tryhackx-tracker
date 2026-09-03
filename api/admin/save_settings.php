@@ -57,6 +57,7 @@ $allowed = [
     'net_monitor_enabled', 'net_sample_seconds', 'net_keep_days',
     'net_limit_enabled', 'net_limit_pps', 'net_limit_burst', 'net_limit_port', 'net_limit_cmd',
     'net_auto_enabled', 'net_auto_min', 'net_auto_max', 'net_auto_target', 'net_auto_target_cpu',
+    'net_lists_enabled', 'net_lists_ttl_default',
     // schema v11: panel-driven backups (includes/backup.php). Running, restoring and downloading
     // all live behind the admin password in admin/backup_action — saving only records the policy.
     'backup_enabled', 'backup_dir', 'backup_profile', 'backup_items', 'backup_schedule',
@@ -86,7 +87,7 @@ $allowed = [
     'whitelist_submit_mode', 'meta_worker_concurrency',
     'meta_order_mode', 'meta_order_mix_oldest', 'meta_order_mix_newest',
     'meta_order_mix_seeders', 'meta_order_mix_random', 'meta_order_mix_whitelist',
-    'meta_order_mix_seen', 'meta_order_mix_completed', 'net_limit_trusted',
+    'meta_order_mix_seen', 'meta_order_mix_completed', 'net_limit_trusted', 'tuner_load_headroom', 'tuner_load_hard',
     // schema v9: verification gate, terms, email-change cooldown, member-search switches
     'users_require_email_verify', 'users_terms_text', 'users_email_change_cooldown_days',
     'index_search_enabled', 'index_search_include_whitelist',
@@ -205,6 +206,7 @@ $intClamp = [
     'net_limit_port' => [1, 65535, 6969],
     'net_auto_min' => [NET_PPS_MIN, NET_PPS_MAX, 10000], 'net_auto_max' => [NET_PPS_MIN, NET_PPS_MAX, 80000],
     'net_auto_target' => [NET_PPS_MIN, NET_PPS_MAX, 30000], 'net_auto_target_cpu' => [10, 100, 70],
+    'net_lists_ttl_default' => [IPLIST_TTL_MIN, IPLIST_TTL_MAX, IPLIST_TTL_DEFAULT],
     // backups (includes/backup.php)
     'backup_keep' => [0, BACKUP_KEEP_MAX, 7], 'backup_keep_days' => [0, BACKUP_DAYS_MAX, 30],
     'backup_max_size_gb' => [0, BACKUP_GB_MAX, 20], 'backup_nice' => [0, 19, 15],

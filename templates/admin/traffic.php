@@ -170,6 +170,100 @@
         </div>
         <?php endif; ?>
 
+        <?php if (netlimitCommand($cfg) !== ''): ?>
+        <!-- Address lists. Directly under the limit card because they live INSIDE that table: the
+             sets are part of the same ruleset, and with no limit (or counters) loaded there is
+             nowhere for them to go. -->
+        <div class="wl-status-card nl-card" id="iplists-card" data-iplists
+             data-enabled="<?= ($cfg['net_lists_enabled'] ?? '0') === '1' ? '1' : '0' ?>"
+             data-ttl="<?= (int)($cfg['net_lists_ttl_default'] ?? IPLIST_TTL_DEFAULT) ?>"
+             data-max="<?= IPLIST_MAX_TOTAL ?>">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-shield-slash"></i> Address lists <span class="wl-status-updated" id="ipl-updated"></span></h6>
+                <div class="wl-status-actions">
+                    <a href="<?= $baseUrl ?>?action=settings#section-iplists" class="btn btn-sm btn-outline-secondary" title="Address list settings"><i class="bi bi-gear"></i> Settings</a>
+                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-ipl-add"><i class="bi bi-plus-lg"></i> Add a list</button>
+                    <button type="button" class="btn btn-sm btn-outline-warning" id="btn-ipl-push" title="Load what is below into the firewall"><i class="bi bi-upload"></i> Push to firewall&hellip;</button>
+                </div>
+            </div>
+            <div id="iplists-body">
+                <p class="wl-small text-muted mb-2">
+                    Whole networks and whole countries, from a file you paste or upload or from a URL that is re-downloaded on a timer.
+                    <strong class="text-light">Allow</strong> is never dropped &middot;
+                    <strong class="text-light">Block</strong> is always dropped &middot;
+                    <strong class="text-light">Under pressure</strong> is dropped only when the machine is busy.
+                    Your <a href="<?= $baseUrl ?>?action=settings#section-netlimit">trusted addresses</a> beat every list here.
+                    Changes are saved as you make them and reach the firewall when you press <em>Push</em>.
+                </p>
+                <div id="ipl-list"><div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading the lists&hellip;</div></div>
+                <div id="ipl-notes"></div>
+            </div>
+        </div>
+
+        <!-- add / edit a list -->
+        <div class="modal fade" id="iplAddModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content bg-dark text-light">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-shield-plus text-info"></i> Add an address list</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-2">
+                            <label class="form-label wl-small">Name</label>
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ipl-name" maxlength="64" placeholder="China (ipdeny)">
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-6">
+                                <label class="form-label wl-small">What it does</label>
+                                <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ipl-kind">
+                                    <option value="block">Block</option>
+                                    <option value="allow">Allow &mdash; never rate-limited</option>
+                                </select>
+                            </div>
+                            <div class="col-6" id="ipl-mode-wrap">
+                                <label class="form-label wl-small">When</label>
+                                <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ipl-mode">
+                                    <option value="hard">Always</option>
+                                    <option value="soft">Only under pressure</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label wl-small">Where the addresses come from</label>
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ipl-source">
+                                <option value="url">A URL, re-downloaded on a timer</option>
+                                <option value="manual">A file or pasted text</option>
+                            </select>
+                        </div>
+                        <div class="mb-2" id="ipl-url-wrap">
+                            <label class="form-label wl-small">URL</label>
+                            <input type="url" class="form-control form-control-sm bg-dark text-light border-secondary" id="ipl-url"
+                                   maxlength="500" placeholder="https://www.ipdeny.com/ipblocks/data/countries/cn.zone">
+                            <div class="mt-2">
+                                <label class="form-label wl-small">Re-download every (minutes)</label>
+                                <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary" id="ipl-ttl"
+                                       min="<?= IPLIST_TTL_MIN ?>" max="<?= IPLIST_TTL_MAX ?>" step="15" value="<?= (int)($cfg['net_lists_ttl_default'] ?? IPLIST_TTL_DEFAULT) ?>">
+                            </div>
+                        </div>
+                        <div class="mb-2 d-none" id="ipl-text-wrap">
+                            <label class="form-label wl-small">Upload a file&hellip;</label>
+                            <input type="file" class="form-control form-control-sm bg-dark text-light border-secondary" id="ipl-file" accept=".txt,.zone,.list,.cidr,text/plain">
+                            <label class="form-label wl-small mt-2">&hellip; or paste addresses, one per line</label>
+                            <textarea class="form-control form-control-sm bg-dark text-light border-secondary" id="ipl-text" rows="6"
+                                      placeholder="1.2.3.0/24&#10;2001:db8::/32&#10;# lines starting with # or ; are ignored"></textarea>
+                        </div>
+                        <div class="alert alert-danger py-2 wl-small d-none" id="ipl-error"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-sm btn-info" id="ipl-save">Add the list</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <?php if (otPerfCommand($cfg) !== ''): ?>
         <!-- How the tracker itself is tuned to handle what the two cards above measure. The knobs
              live in Settings; this card shows what is IN FORCE, which is not the same thing, and is
@@ -476,6 +570,9 @@
     <?php endif; ?>
     <?php if ($netOn): ?>
     <script src="<?= $baseUrl ?>assets/js/admin-netlimit.js<?= assetVer('assets/js/admin-netlimit.js') ?>"></script>
+    <?php endif; ?>
+    <?php if (netlimitCommand($cfg) !== ''): ?>
+    <script src="<?= $baseUrl ?>assets/js/admin-iplists.js<?= assetVer('assets/js/admin-iplists.js') ?>"></script>
     <?php endif; ?>
     <?php if (otPerfCommand($cfg) !== ''): ?>
     <script src="<?= $baseUrl ?>assets/js/admin-otperf.js<?= assetVer('assets/js/admin-otperf.js') ?>"></script>

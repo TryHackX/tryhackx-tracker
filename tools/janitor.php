@@ -32,6 +32,7 @@ require_once $root . '/includes/index.php';
 require_once $root . '/includes/mail.php';
 require_once $root . '/includes/users.php';
 require_once $root . '/includes/netlimit.php';
+require_once $root . '/includes/iplist.php';
 require_once $root . '/includes/opentracker.php';
 require_once $root . '/includes/sysctl.php';
 require_once $root . '/includes/cluster.php';
@@ -113,6 +114,30 @@ try {
             $nl['panic'] ? ' panic=restored' : '',
             $nl['persisted'] ? ' saved=ruleset' : '', (int)$nl['pruned'],
             $nl['error'] !== null ? ' error=' . $nl['error'] : ''), "\n";
+    }
+    // Address lists: re-download the URL ones whose cache has expired, and push the result to the
+    // firewall if anything actually changed. A country zone that stops being downloadable changes
+    // nothing — the last good copy stays loaded and the failure is shown on the Traffic page.
+    if (($cfg['net_lists_enabled'] ?? '0') === '1') {
+        $il = ipListTick($db);
+        $sets = ipListWriteSetsFile($db, $cfg);
+        // Only re-apply when the file's content moved. The helper would notice anyway (it compares a
+        // fingerprint), but calling it every minute for nothing means a fork and an nft syntax check
+        // every minute for nothing.
+        $stamp = $sets['written'] ? md5_file($sets['path']) : '';
+        $prev = (string)($cfg['net_lists_stamp'] ?? '');
+        if ($stamp !== '' && $stamp !== $prev && netlimitEnabled($cfg)) {
+            $r = netlimitApply($cfg, netlimitPps($cfg), netlimitBurst($cfg), netlimitPort($cfg), false, 'lists');
+            if (!empty($r['ok'])) setSettings($db, ['net_lists_stamp' => $stamp]);
+            echo sprintf('[iplists] refreshed=%d failed=%d entries=%d reloaded=%s%s', (int)$il['refreshed'],
+                (int)$il['failed'], (int)$sets['lines'], !empty($r['ok']) ? 'yes' : 'no',
+                empty($r['ok']) ? ' error=' . ($r['error'] ?? '?') : ''), "
+";
+        } elseif ($il['refreshed'] || $il['failed'] || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[iplists] refreshed=%d failed=%d entries=%d reloaded=no',
+                (int)$il['refreshed'], (int)$il['failed'], (int)$sets['lines']), "
+";
+        }
     }
     // an OpenTracker drop-in the panel could not write itself (php-fpm cannot write /etc)
     $ot = otTick($cfg);

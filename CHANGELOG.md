@@ -4,6 +4,113 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.28.0] — 2026-09-03
+
+Address lists, live validation where an admin creates an account, and four things the audit found
+that were slow for reasons only the real table could show.
+
+### Added — address lists: whole networks and whole countries
+
+**Admin → Traffic → Address lists.** `net_limit_trusted` (1.26.0) is a box for a handful of
+addresses. This is the same idea at the scale an operator needs: a country zone file from ipdeny, an
+uploaded blocklist, a pasted range — with three behaviours whose order *is* the feature.
+
+- **Allow** — never dropped, whatever else says.
+- **Block** — dropped always.
+- **Block under pressure** — dropped only when the machine is busy.
+
+nftables rules share no state, so "only when busy" cannot be written as a condition on another rule.
+It is a **tighter budget**: a fifth of the general limit. At rest those sources are nowhere near it;
+as arrivals climb they are the first to hit one. The card says exactly that on the row rather than
+implying something cleverer is going on.
+
+Manual trusted addresses beat every list — matched first, so an imported country file can never shut
+out a host you typed in yourself. When an address is on both sides the card says so, because the
+alternative is somebody concluding the block is broken.
+
+A URL list refreshes on its own timer (12 h by default). **A failed download changes nothing**: the
+last good copy stays in force and the failure is shown. A 404 must not silently open a door that was
+closed — or close one that was open.
+
+Nothing reaches the firewall until **Push to firewall**, which is the one action that asks for the
+password; everything before it touches the panel only. Lists travel to the root helper as a file, not
+as arguments — a country zone does not fit in argv — validated line by line on both sides, in one awk
+pass rather than a shell function per line: 60 000 entries parse and syntax-check in 1.2 s.
+
+Bounded on purpose: 250 000 entries enabled at once, 100 000 per list, 8 MiB per upload. Schema 34.
+
+### Added — the add-user dialog validates while you type
+
+The public registration form has had live validation since 1.8.0; the admin dialog was posting blind
+and finding out from a 400. The password rules in particular are not guessable from a sentence — you
+found out which of the five you had missed only after pressing the button. Username, address and all
+five password requirements are now checked as you type, against the same rules the server enforces,
+and Save stays disabled until they pass. The generated password satisfies them on open.
+
+### Fixed — the public catalogue's own first page was a 2 890 ms full scan
+
+No search typed, no filter, the state a visitor arrives in: a full scan and a filesort of 1.9 M rows.
+Two causes, both only visible on the real table.
+
+`seeders` is the alias of `COALESCE(scrape_seeders, last_seeders)` — an expression, and no index can
+serve an ORDER BY over one. `index_hashes` now carries `eff_seeders`, a **VIRTUAL** column holding
+exactly that expression, with an index on it: virtual means stored nowhere and written never, so
+adding it touched no rows and cost no space, and what it buys is the right to index the expression.
+The catalogue names the column instead of the expression, and the same page is **1 ms** (11 ms at
+page 40). The index build took 8.8 s, online.
+
+Two more things went with it. The single-arm query no longer wraps itself in `SELECT * FROM (…) cat`,
+which was forcing 184 000 rows into a temporary table to return 25; when the whitelist arm is
+included, each arm is now ordered and cut to `offset + per_page` **before** the merge, since no arm
+can contribute a row past that position. And with no search the relevance column is the literal `0` —
+leading an ORDER BY with a constant sorts nothing and stops the optimiser recognising the rest as an
+index order, so it is dropped rather than carried along.
+
+The unfiltered total is cached for two minutes (it was 1 102 ms of full scan per page view for an
+answer that changes when the index poll runs, not when the reader clicks).
+
+### Fixed — "times seen" on the admin index listing, 2 311 ms → 1 ms
+
+One index, `(seen_count)`. Deliberately one and not nine: every unindexed sort on that table costs
+about the same (name 2 186 ms, peak_seeders 1 986 ms, files_count 1 951 ms, scrape_seeders 1 966 ms,
+total_size 1 930 ms, last_leechers 1 876 ms, first_seen 1 870 ms, meta_status 1 846 ms), and the
+table already carries **2 738 MiB of index against 584 MiB of data** while the index poll rewrites
+hundreds of thousands of rows every thirty minutes and pays for every index on every row. The line is
+drawn at the column the fetch-order work made worth looking at. The rest stay a filesort on a
+deliberate click — recorded in `includes/schema.php` as a choice, with the numbers, rather than left
+as an oversight. Schema 35.
+
+### Fixed — banning a list of hashes was one round-trip per hash
+
+`whitelistBan()` serves a moderator banning one hash and the import path banning tens of thousands
+through the same code. It ran one INSERT per hash and then called `repClear()` per hash — a DELETE
+that finds nothing for almost every one of them, because `hash_votes` holds the handful of things
+people actually rated. Both are now chunked: measured over 2 000 hashes on a local database,
+**1 276 ms → 27 ms** for the insert and **316 ms → 57 ms** for the vote clean-up, and the count of
+genuinely new bans is asked for rather than inferred from `rowCount()` (a multi-row
+`INSERT … ON DUPLICATE KEY` reports 1 per insert and 2 per update, which does not separate).
+
+### Fixed — the blacklist file's read-modify-write had no lock across the read
+
+`addHashToBlacklist()` checked whether the hash was present and then appended with `LOCK_EX`; the
+check itself held nothing, so two requests banning the same hash could both read "absent" and both
+append it. `removeHashFromBlacklist()` rewrites the whole file, so a delete could equally throw away
+an append that landed between its read and its rename. Both now hold an exclusive lock across the
+read **and** the write. It cannot live on the file being replaced — `rename()` swaps the inode out
+from under it — so it is a sibling `.lock` file, and where the directory cannot hold one the work
+still runs unlocked, exactly as before: a missing lock must not turn a ban into a failure.
+
+### Fixed — the firewall helper read the wrong rate back
+
+Found by the existing suite the moment the soft budgets were added, which is what the suite is for.
+The chain now holds three `limit rate over` rules — two per-address budgets and the general one — and
+`read_limit()` took the first, so the panel reported 8 000 pps on a port limited to 40 000. Worse,
+`read_rule_handle()` had the same bug, and it drives the targeted `nft replace` used when only the
+rate changes: it would have overwritten a soft set's tighter budget with the general one, quietly
+turning "dropped first under pressure" into "treated like everybody else". Both now match on the
+absence of `saddr` — the general limit is the one that applies to everyone and therefore names no
+address.
+
 ## [1.27.3] — 2026-09-03
 
 Three things I had shipped that did not work.

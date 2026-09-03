@@ -143,6 +143,7 @@ $REVIEWED = [
     'includes/audit.php:$off'                  => 'int, computed from a clamped page and per_page',
     'includes/index.php:$conds'                => 'literal conditions, values bound',
     'includes/index.php:$scope'                => 'literal, chosen from a fixed set',
+    'includes/whitelist.php:$rows'             => 'a run of (?, ?, ?, ?) placeholder groups, one per hash in the chunk — no value is interpolated',
     'includes/whitelist.php:$cond'             => 'one of two literal conditions, picked by a bool',
     'includes/whitelist.php:$conds'            => 'literal conditions from a fixed map',
     'includes/whitelist.php:$scope'            => 'a key into that map, rejected if absent',

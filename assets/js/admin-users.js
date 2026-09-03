@@ -192,6 +192,72 @@
     // The one decision worth making explicit is what happens to the email address, because
     // `users_require_email_verify` decides what an unverified account may DO and an admin creating
     // an account by hand should not have to guess which of the three states they just produced.
+    // Live validation, the same rules the server enforces.
+    //
+    // The public registration form has had this since 1.8.0; the admin dialog was posting blind and
+    // finding out from a 400. An admin creating an account for somebody else has no more patience
+    // for that than a visitor does, and the password rules in particular are not guessable from a
+    // sentence — you find out which of the five you missed only after pressing the button.
+    const UA_PW_REQS = [
+        ['At least 8 characters', (p) => p.length >= 8 && p.length <= 200],
+        ['A lowercase letter', (p) => /[a-z]/.test(p)],
+        ['An uppercase letter', (p) => /[A-Z]/.test(p)],
+        ['A digit', (p) => /[0-9]/.test(p)],
+        ['A special character', (p) => /[^a-zA-Z0-9]/.test(p)],
+    ];
+    // Mirrors userValidUsername() and userValidEmail() in includes/users.php.
+    const uaUserOk = (v) => /^[A-Za-z0-9_.-]{3,32}$/.test(v);
+    const uaMailOk = (v) => v.length <= 190 && /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(v);
+    let uaPwItems = null;
+
+    function uaBuildPwList() {
+        const box = $('ua-pw-reqs');
+        if (!box || uaPwItems) return;
+        uaPwItems = UA_PW_REQS.map(([label]) => {
+            const li = el('div', { className: 'ua-req' }, [
+                el('span', { className: 'ua-req-ic', text: '✗' }),
+                el('span', { text: ' ' + label }),
+            ]);
+            box.appendChild(li);
+            return li;
+        });
+    }
+
+    function uaValidate() {
+        uaBuildPwList();
+        const user = $('ua-username').value.trim();
+        const mail = $('ua-email').value.trim();
+        const pw = $('ua-password').value;
+        const needMail = $('ua-verify').value !== 'none';
+
+        const userOk = user === '' ? null : uaUserOk(user);
+        $('ua-username').classList.toggle('is-invalid', userOk === false);
+        $('ua-username-msg').textContent = userOk === false
+            ? '3–32 characters, and only letters, digits, dot, dash or underscore.' : '';
+
+        // An address is required unless verification is "no email", because the panel would
+        // otherwise promise a verified address or a sent link for something that does not exist.
+        let mailOk = null;
+        if (mail !== '') mailOk = uaMailOk(mail);
+        else if (needMail) mailOk = false;
+        $('ua-email').classList.toggle('is-invalid', mailOk === false);
+        $('ua-email-msg').textContent = mailOk === false
+            ? (mail === '' ? 'Required unless verification is set to "no email at all".'
+                           : 'That does not look like an email address.') : '';
+
+        let pwOk = true;
+        UA_PW_REQS.forEach(([, test], i) => {
+            const ok = test(pw);
+            if (!ok) pwOk = false;
+            uaPwItems[i].classList.toggle('ok', ok);
+            uaPwItems[i].querySelector('.ua-req-ic').textContent = ok ? '✓' : '✗';
+        });
+
+        const allOk = userOk === true && mailOk !== false && pwOk;
+        $('ua-save').disabled = !allOk;
+        return allOk;
+    }
+
     function uaHint() {
         const v = $('ua-verify').value;
         const req = $('ua-email-req');
@@ -212,20 +278,23 @@
         while (out.length < 18) out.push(all[rnd(all.length)]);
         for (let i = out.length - 1; i > 0; i--) { const j = rnd(i + 1); [out[i], out[j]] = [out[j], out[i]]; }
         $('ua-password').value = out.join('');
+        if (uaPwItems) uaValidate();
     }
     function openAdd() {
-        ['ua-username', 'ua-email', 'ua-password'].forEach(id => { $(id).value = ''; });
+        ['ua-username', 'ua-email', 'ua-password'].forEach(id => { $(id).value = ''; $(id).classList.remove('is-invalid'); });
         $('ua-verify').value = 'auto';
         $('ua-status').value = 'active';
         $('ua-error').classList.add('d-none');
         uaGenerate();
         uaHint();
+        uaValidate();
         bootstrap.Modal.getOrCreateInstance($('userAddModal')).show();
         setTimeout(() => $('ua-username').focus(), 200);
     }
     async function saveAdd() {
         const err = $('ua-error');
         err.classList.add('d-none');
+        if (!uaValidate()) return;
         const body = {
             username: $('ua-username').value.trim(),
             email: $('ua-email').value.trim(),
@@ -750,7 +819,11 @@
         const uaGen = $('ua-gen');
         if (uaGen) uaGen.addEventListener('click', uaGenerate);
         const uaVerify = $('ua-verify');
-        if (uaVerify) uaVerify.addEventListener('change', uaHint);
+        if (uaVerify) uaVerify.addEventListener('change', () => { uaHint(); uaValidate(); });
+        ['ua-username', 'ua-email', 'ua-password'].forEach(id => {
+            const f = $(id);
+            if (f) { f.addEventListener('input', uaValidate); f.addEventListener('blur', uaValidate); }
+        });
         loadGroups().then(loadUsers);
     });
 })();

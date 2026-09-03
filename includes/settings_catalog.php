@@ -235,6 +235,8 @@ function settingsCatalogKeywords(): array {
         'net_auto_max'             => 'automatic mode upper bound ceiling maximum pps band',
         'net_auto_target'          => 'automatic mode target packets per second goal setpoint how much traffic to accept',
         'net_auto_target_cpu'      => 'automatic mode cpu load per core percentage guard overload tighten',
+        'net_lists_enabled'        => 'address lists whitelist blacklist allow block countries zone file url import ipdeny firewall sets master switch',
+        'net_lists_ttl_default'    => 'address list cache refresh hours how often downloaded url list re-fetched country zone',
 
         // ── Statistics ──
         'tracker_stats_enabled'    => 'statistics page numbers swarm live counters on off',
@@ -279,6 +281,8 @@ function settingsCatalogKeywords(): array {
         'meta_order_mix_seen'      => 'fetch order mix share seen count most often persistent percent',
         'meta_order_mix_completed' => 'fetch order mix share completed downloads popular all time percent',
         'net_limit_trusted'        => 'trusted ip addresses whitelist exempt bypass udp rate limit never dropped allow list cidr',
+        'tuner_load_headroom'      => 'stability probe load headroom rise allowed per core stop ceiling',
+        'tuner_load_hard'          => 'stability probe hard stop load per core absolute ceiling',
 
         // ── API & federation ──
         'api_enabled'              => 'server to server api endpoints clients integration on off',

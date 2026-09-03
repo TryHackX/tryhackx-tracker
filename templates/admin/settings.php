@@ -843,6 +843,16 @@
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="tuner_python" value="<?= sanitize($cfg['tuner_python'] ?? 'python3') ?>" placeholder="python3">
                         <small class="settings-hint">What the janitor runs <code>tools/tuner.py</code> with. Letters, digits and <code>_ . / -</code> only.</small>
                     </div>
+                    <div class="col-md-4" data-setting="tuner_load_headroom">
+                        <label class="form-label">Load a run may add <small class="settings-hint">(per core)</small></label>
+                        <input type="number" step="0.05" min="0.05" max="4" class="form-control bg-dark text-light border-secondary" name="tuner_load_headroom" value="<?= sanitize($cfg['tuner_load_headroom'] ?? '0.35') ?>">
+                        <small class="settings-hint">A run stops when load climbs more than this <strong>above where it started</strong>. Judged against the baseline on purpose: an absolute ceiling is meaningless on a machine whose ordinary working load is already near it &mdash; that is how every run here used to stop on its first step.</small>
+                    </div>
+                    <div class="col-md-4" data-setting="tuner_load_hard">
+                        <label class="form-label">Hard stop <small class="settings-hint">(load per core)</small></label>
+                        <input type="number" step="0.1" min="0.5" max="20" class="form-control bg-dark text-light border-secondary" name="tuner_load_hard" value="<?= sanitize($cfg['tuner_load_hard'] ?? '2.0') ?>">
+                        <small class="settings-hint">An absolute floor under the whole thing, for a machine genuinely being driven into the ground. Well above anything normal here.</small>
+                    </div>
                 </div>
             </div>
 
@@ -1940,6 +1950,53 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <small class="settings-hint">
                             When the 1-minute load average per core is above this, the automatic mode tightens even if the packet rate is under target.
                             <?php $nlCpus = netlimitCpuCount(); if ($nlCpus > 0): ?>This machine has <strong><?= (int)$nlCpus ?></strong> cores, so <?= (int)netlimitAutoTargetCpu($cfg) ?> % means a load average above <strong><?= number_format($nlCpus * netlimitAutoTargetCpu($cfg) / 100, 1) ?></strong>.<?php endif; ?>
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Address lists — includes/iplist.php -->
+            <div class="settings-section" id="section-iplists" data-group="tracker" data-title="Address lists">
+                <h5>Address lists (allow / block)</h5>
+                <p class="settings-hint mb-2">
+                    <strong>Trusted addresses</strong> above is a box you type a handful of addresses into. This is the same idea at the scale
+                    an operator needs: whole networks, whole countries, kept in a file or fetched from a URL such as
+                    <code>ipdeny.com/ipblocks/data/countries/cn.zone</code> and refreshed on a timer.
+                    The lists themselves are managed on the <a href="<?= $baseUrl ?>?action=admin-traffic#section-iplists-card">Traffic page</a> &mdash;
+                    this is only the master switch and the default refresh interval.
+                </p>
+                <p class="settings-hint mb-2">
+                    Three kinds, applied in this order: <strong>allow</strong> is never dropped whatever else says;
+                    <strong>block</strong> is dropped always; <strong>block under pressure</strong> is dropped only when the machine is busy &mdash;
+                    those addresses get a budget a fifth the size of everyone else&rsquo;s, so at rest they are untouched and under load they are
+                    refused first. Anything you typed into Trusted addresses wins over every list.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Address lists</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="net_lists_enabled">
+                            <option value="0" <?= ($cfg['net_lists_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>>Off &mdash; the firewall carries no lists</option>
+                            <option value="1" <?= ($cfg['net_lists_enabled'] ?? '0') === '1' ? 'selected' : '' ?>>On &mdash; enforce the enabled lists</option>
+                        </select>
+                        <small class="settings-hint">
+                            Off clears the sets from the firewall without deleting anything you imported. The lists live inside the inbound
+                            limit&rsquo;s table, so the limit (or the counters) has to be running for them to be loaded at all.
+                        </small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Refresh downloaded lists every <small class="settings-hint">(minutes)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_lists_ttl_default"
+                               value="<?= (int)($cfg['net_lists_ttl_default'] ?? IPLIST_TTL_DEFAULT) ?>" min="<?= IPLIST_TTL_MIN ?>" max="<?= IPLIST_TTL_MAX ?>" step="15">
+                        <small class="settings-hint">
+                            The default offered when you add a URL list; each list keeps its own value. 720 is twelve hours.
+                            A country zone changes a few times a year, so downloading it more often than that is rude to whoever is hosting it.
+                        </small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Ceiling</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" value="<?= number_format(IPLIST_MAX_TOTAL) ?> entries" readonly disabled>
+                        <small class="settings-hint">
+                            Across every enabled list. A ruleset loads as one transaction, and this is what bounds it. Not adjustable from here.
                         </small>
                     </div>
                 </div>

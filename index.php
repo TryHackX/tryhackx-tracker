@@ -31,6 +31,7 @@ require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/federation.php';
 require_once __DIR__ . '/includes/netlimit.php';
+require_once __DIR__ . '/includes/iplist.php';
 require_once __DIR__ . '/includes/backup.php';
 require_once __DIR__ . '/includes/opentracker.php';
 require_once __DIR__ . '/includes/sysctl.php';

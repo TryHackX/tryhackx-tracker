@@ -1874,3 +1874,10 @@ input[type="number"] {
 .rv-empty-icon { font-size: 2.1rem; opacity: 0.45; display: block; margin-bottom: 0.6rem; }
 .rv-empty-title { font-size: 0.98rem; color: #c3ccd8; margin-bottom: 0.3rem; }
 .rv-empty-hint { font-size: 0.82rem; max-width: 46rem; margin: 0 auto; line-height: 1.5; }
+
+/* Address lists (Traffic page). A disabled list stays visible and readable — you have to be able to
+   see what you switched off, or "disable" becomes indistinguishable from "delete". */
+.ipl-table th { font-weight: 500; color: #8a94a2; font-size: 0.78rem; }
+.ipl-table td { font-size: 0.82rem; }
+.ipl-table tr.ipl-off td { opacity: 0.45; }
+.ipl-table tr.ipl-off td:first-child { opacity: 1; }

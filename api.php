@@ -43,6 +43,7 @@ require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/tuner.php';
 require_once __DIR__ . '/includes/federation.php';
 require_once __DIR__ . '/includes/netlimit.php';
+require_once __DIR__ . '/includes/iplist.php';
 require_once __DIR__ . '/includes/backup.php';
 require_once __DIR__ . '/includes/opentracker.php';
 require_once __DIR__ . '/includes/sysctl.php';
@@ -131,6 +132,8 @@ $apiRoutes = [
     'admin/ot_cluster_status' => 'api/admin/ot_cluster_status.php',
     'admin/ot_cluster_apply'  => 'api/admin/ot_cluster_apply.php',
     'admin/ot_cluster_test'   => 'api/admin/ot_cluster_test.php',
+    'admin/ip_lists'        => 'api/admin/ip_lists.php',
+    'admin/ip_list_action'  => 'api/admin/ip_list_action.php',
     'admin/net_samples'     => 'api/admin/net_samples.php',
     'admin/net_apply'       => 'api/admin/net_apply.php',
     'admin/net_test'        => 'api/admin/net_test.php',
@@ -312,6 +315,9 @@ function adminEndpointPermission(string $endpoint): ?string {
         // apart — so the endpoint checks its own op (api/admin/backup_action.php).
         // Traffic, read-only
         'admin/net_status'         => 'panel.traffic.view',
+        // Reading the address lists is part of reading the Traffic page. Changing them is not: like
+        // every other control on that page, admin/ip_list_action has no entry here and is owner-only.
+        'admin/ip_lists'           => 'panel.traffic.view',
         'admin/net_samples'        => 'panel.traffic.view',
         'admin/ot_status'          => 'panel.traffic.view',
         'admin/ot_cluster_status'  => 'panel.traffic.view',

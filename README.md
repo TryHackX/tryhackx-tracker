@@ -910,6 +910,50 @@ writes them into the firewall — it runs as root, and a caller is not a reason 
 Anything unrecognised is dropped with a note rather than failing the apply, so one mistyped address
 cannot leave the tracker unprotected.
 
+### Address lists — whole networks, whole countries (1.28.0)
+
+**Admin → Traffic → Address lists**, master switch in **Settings → Tracker & whitelist → Address
+lists**. Trusted addresses above is a box you type a handful of addresses into. This is the same idea
+at the scale an operator actually needs: import a country zone file from
+`https://www.ipdeny.com/ipblocks/data/countries/cn.zone`, upload a blocklist, paste a range.
+
+**Three kinds, and the order they are applied in is the feature:**
+
+| Kind | What happens | When you want it |
+|---|---|---|
+| **Allow** | never dropped, whatever else says | a peer network you never want throttled |
+| **Block** | dropped always | a source that has no business here at all |
+| **Block under pressure** | dropped **only when the machine is busy** | traffic you tolerate but would sacrifice first |
+
+"Under pressure" is not a mood — nftables rules share no state, so there is no way to say "drop this
+if some *other* rule is currently dropping". It is written as a **tighter budget**: those addresses
+get a fifth of the general limit. At rest they are nowhere near it and nothing happens to them; as
+arrivals climb they are the first thing to hit a budget. That is the honest description, and it is
+what the card says on the row.
+
+**Precedence, stated once:** your manual trusted addresses beat every list. They are matched first,
+so a country file somebody downloaded can never shut out a host you typed in yourself. The card says
+so out loud when it spots an address on both sides, because otherwise you would work it out by
+wondering why a block "does not work". Within blocks, always beats under-pressure.
+
+**Sources.** A URL list is re-downloaded on its own timer (12 h by default, per list). A failed
+download **changes nothing**: the last good copy stays loaded and the failure is shown on the row —
+a zone file that 404s must not silently open a door that was closed. A manual list is a file you
+upload or text you paste; comments (`#`, `;`), blank lines, CRLF, and a trailing note or country code
+after the address are all handled, because that is what published lists actually look like.
+
+**Nothing reaches the firewall until you press "Push to firewall"**, and that is the one action that
+asks for the admin password. Everything before it — creating, importing, enabling, deleting — writes
+to the panel only, so you can build a list, see what it parsed to, and decide afterwards. After that
+the janitor keeps URL lists fresh and reloads the firewall **only when the content actually changed**.
+
+Bounded on purpose: 250 000 entries across every enabled list, 100 000 in one, 8 MiB per upload. The
+whole ruleset loads as a single nftables transaction, and that is what bounds it. 60 000 entries
+parse and syntax-check in about 1.2 s.
+
+Turning the master switch off clears the sets from the firewall without deleting anything you
+imported.
+
 ### Kernel network buffers — the eight knobs, armed rather than applied (1.13.0)
 
 **Admin → Traffic → Kernel network buffers** (helper and window in Settings → *Kernel network
@@ -1559,6 +1603,8 @@ tracker/
 │       ├── test_tracker_permission.php # GET — test sudo perms for restart/reload (read-only)
 │       ├── net_status.php     # GET — firewall state + live packets/second + measured suggestion
 │       ├── net_samples.php    # GET — the packets/second series behind the UDP traffic chart
+│       ├── ip_lists.php       # GET — the address lists and what the firewall is carrying
+│       ├── ip_list_action.php # POST — create / import / refresh / enable / delete / push (owner only)
 │       ├── net_apply.php      # POST — load/remove/throttle-hard/restore the inbound limit (password)
 │       ├── net_test.php       # GET — can this machine run the inbound limit at all (read-only)
 │       ├── backup_status.php  # GET — what this machine can back up, the run state, the archives
@@ -1575,6 +1621,7 @@ tracker/
 │   │   ├── admin.js           # Admin panel JavaScript
 │   │   ├── admin-index.js     # Observed-hash index page (?action=admin-index)
 │   │   ├── admin-netlimit.js  # UDP traffic card: live counters, chart, throttle slider
+│   │   ├── admin-iplists.js   # Address lists card: import, enable/disable, push to the firewall
 │   │   ├── admin-backups.js   # Backups page: run/verify/restore/download, live progress
 │   │   ├── admin-traffic.js   # Traffic page (?action=admin-traffic) — page furniture only
 │   │   └── stats-timeline.js  # Swarm timeline chart (public stats page + admin whitelist page)
@@ -1604,6 +1651,7 @@ tracker/
 │   ├── mail.php               # Email system (sending, templates, preferences)
 │   ├── settings.php           # Database settings management (getSettings, setSettings)
 │   ├── netlimit.php           # UDP traffic monitor + inbound rate limit (drives the root helper)
+│   ├── iplist.php             # address lists: allow / block / block-under-pressure, file + URL import
 │   ├── backup.php             # Panel-driven backups (drives Backup-serwera.sh via the root helper)
 │   └── .htaccess              # Deny all access
 │

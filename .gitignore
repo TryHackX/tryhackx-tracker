@@ -30,6 +30,10 @@ config/index_poll.lock
 config/index_prune.lock
 config/users_state.json
 config/net_state.json
+# The address lists handed to the root firewall helper: generated from the database, and it
+# names real networks somebody chose to block — not something to publish with the source.
+config/net_sets.txt
+config/net_sets.txt.tmp
 config/net_state.json.tmp.*
 config/net_state.lock
 config/backup_state.json

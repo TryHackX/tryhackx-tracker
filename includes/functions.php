@@ -690,13 +690,44 @@ function isHashInBlacklist(string $hash, string $blacklistPath): bool {
  * Add a hash to the blacklist file (skip if already present).
  * Returns true if written, false if already existed or error.
  */
+/**
+ * Run $fn while holding an exclusive lock on the blacklist.
+ *
+ * WHY A SEPARATE LOCK FILE
+ * ------------------------
+ * Both writers below are read-modify-write: check whether the hash is there, then append or rewrite.
+ * `LOCK_EX` on the write alone does not make that atomic — two requests banning the same hash could
+ * both read "absent" and both append it, and a delete that rewrites the whole file could throw away
+ * an append that landed between its read and its rename. The lock has to span the read AND the write,
+ * so it cannot live on the file being replaced: rename() swaps the inode out from under it.
+ *
+ * If the directory cannot hold a lock file (the legacy layout where the file is writable and its
+ * directory is not), the work still runs — unlocked, exactly as before. A missing lock must not turn
+ * a ban into a failure.
+ */
+function withBlacklistLock(string $blacklistPath, callable $fn) {
+    $lock = @fopen($blacklistPath . '.lock', 'c');
+    if ($lock === false) return $fn();
+    try {
+        @flock($lock, LOCK_EX);
+        return $fn();
+    } finally {
+        @flock($lock, LOCK_UN);
+        @fclose($lock);
+    }
+}
+
+/**
+ * Add a hash to the blacklist file (skip if already present).
+ * Returns true if written, false if already existed or error.
+ */
 function addHashToBlacklist(string $hash, string $blacklistPath): bool {
     $blacklistPath = normalizeBlacklistPath($blacklistPath);
     if (empty($blacklistPath)) return false;
     $hashLower = strtolower(trim($hash));
     // Only ever write a valid 40-hex info hash — blocks line-injection via crafted input.
     if (!isValidInfoHash($hashLower)) return false;
-
+    return withBlacklistLock($blacklistPath, static function () use ($blacklistPath, $hashLower): bool {
     if (file_exists($blacklistPath)) {
         if (!is_writable($blacklistPath)) return false;
         $lines = file($blacklistPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
@@ -714,6 +745,7 @@ function addHashToBlacklist(string $hash, string $blacklistPath): bool {
     // so record the change — the dashboard uses this to recommend a tracker restart.
     recordBlacklistChange('add');
     return true;
+    });
 }
 
 /**
@@ -726,6 +758,7 @@ function removeHashFromBlacklist(string $hash, string $blacklistPath): bool {
         return false;
     }
     $hashLower = strtolower(trim($hash));
+    return withBlacklistLock($blacklistPath, static function () use ($blacklistPath, $hashLower): bool {
     $lines = file($blacklistPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     $filtered = array_filter($lines, fn($line) => strtolower(trim($line)) !== $hashLower);
 
@@ -749,6 +782,7 @@ function removeHashFromBlacklist(string $hash, string $blacklistPath): bool {
         recordBlacklistChange('del');
     }
     return true;
+    });
 }
 
 // --- Tracker service: restart recommendations -------------------------------

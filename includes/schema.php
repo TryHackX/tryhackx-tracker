@@ -11,7 +11,10 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 32;  // 32 = settings only (db_time_zone, net_limit_trusted)
+const TRACKER_SCHEMA_VERSION = 35;  // 35 = index_hashes.eff_seeders (virtual) + its index — the catalogue's own first page was a 2 890 ms scan
+// 34 = address lists for the inbound limit (ip_lists, ip_list_entries)
+// 33 = settings only (probe load headroom / hard stop)
+// 32 = settings only (db_time_zone, net_limit_trusted)  // 32 = settings only (db_time_zone, net_limit_trusted)
 // 31 = two index_hashes indexes (seen_count, last_completed)
 // so the fetch order can offer "seen most often" and "most completed" without a filesort,
 // plus the three settings that go with them. HEAVY: the ALTER is deferred to the janitor.
@@ -276,6 +279,15 @@ function trackerSchemaStatements(): array {
             `scrape_leechers` INT UNSIGNED DEFAULT NULL,
             `scrape_completed` INT UNSIGNED DEFAULT NULL,
             `scraped_at` DATETIME DEFAULT NULL,
+            -- The seeder count the catalogue actually sorts by: the scrape figure when there is one,
+            -- otherwise the last announce. VIRTUAL, so it costs no row space and no write — it exists
+            -- purely so the expression can be INDEXED. Sorting by the COALESCE directly cannot use an
+            -- index, and the catalogue's own default first page was therefore a full scan and a
+            -- filesort of the whole table: measured at 2 890 ms on 1.9 M rows, on a page any member
+            -- can open. With the index below the same page is 1 ms.
+            `eff_seeders` INT UNSIGNED GENERATED ALWAYS AS (COALESCE(`scrape_seeders`, `last_seeders`)) VIRTUAL,
+            KEY `idx_index_eff_seed` (`eff_seeders`, `info_hash`),
+            KEY `idx_index_seen` (`seen_count`),
             KEY `idx_index_meta_fetched` (`meta_fetched_at`),
             KEY `idx_index_last_seen` (`last_seen`),
             KEY `idx_index_grace` (`grace_until`),
@@ -517,6 +529,39 @@ function trackerSchemaStatements(): array {
             KEY `idx_mq_due` (`status`, `next_attempt_at`),
             KEY `idx_mq_batch` (`batch_id`, `status`)
         ) $engine",
+
+        // schema v34: address lists for the inbound UDP limit — allow, block, block-under-pressure.
+        // See includes/iplist.php for what the three kinds mean and the order they are applied in.
+        "CREATE TABLE IF NOT EXISTS `ip_lists` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `name` VARCHAR(64) NOT NULL,
+            `kind` ENUM('allow','block') NOT NULL DEFAULT 'block',
+            -- Only meaningful for a block list. 'hard' drops always; 'soft' gives the addresses a
+            -- budget a fifth the size of everyone else's, so they are refused first under load.
+            `mode` ENUM('hard','soft') NOT NULL DEFAULT 'hard',
+            `source` ENUM('manual','url') NOT NULL DEFAULT 'manual',
+            `url` VARCHAR(500) NOT NULL DEFAULT '',
+            -- How long a fetched copy stays fresh. A country zone changes a few times a year;
+            -- re-downloading it every janitor tick would be rude to the people hosting it.
+            `ttl_minutes` INT UNSIGNED NOT NULL DEFAULT 720,
+            `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            `last_fetch_at` DATETIME DEFAULT NULL,
+            `last_try_at` DATETIME DEFAULT NULL,
+            -- A failed refresh changes no entries: the last good copy stays in force and this says
+            -- why, because a 404 must not silently open a door that was closed.
+            `last_error` VARCHAR(190) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_ipl_name` (`name`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `ip_list_entries` (
+            `list_id` INT UNSIGNED NOT NULL,
+            `cidr` VARCHAR(64) NOT NULL,
+            `family` TINYINT UNSIGNED NOT NULL DEFAULT 4,
+            PRIMARY KEY (`list_id`, `cidr`),
+            KEY `idx_ipe_list` (`list_id`, `family`)
+        ) $engine",
     ];
 }
 
@@ -730,6 +775,46 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     }
     if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_completed')) {
         $iparts[] = "ADD KEY `idx_index_meta_completed` (`meta_status`, `last_completed`)";
+    }
+    // schema v35: the column the catalogue sorts by, so that it can be indexed.
+    //
+    // The public catalogue orders by COALESCE(scrape_seeders, last_seeders) — an expression, which no
+    // index can serve. Its own default first page, with no search typed at all, was therefore a full
+    // scan plus a filesort of the whole table: 2 890 ms measured on 1.9 M rows, on a page any member
+    // can open and reload. Not a cache problem; a plan problem.
+    //
+    // A VIRTUAL column is stored nowhere and written never — it is computed when read — so adding it
+    // is instant and costs no row space. What it buys is the right to put an INDEX on the expression,
+    // which turns the sort into an index walk that stops after 25 rows: 1 ms for the same page, and
+    // 11 ms at page 40. The index build itself took 8.8 s online on production.
+    if (!schemaColumnExists($db, 'index_hashes', 'eff_seeders')) {
+        // Adding a VIRTUAL column touches no rows, so this one is safe outside the janitor even on a
+        // table this size — unlike the stored columns above, which mean a rebuild.
+        $out[] = "ALTER TABLE `index_hashes` ADD COLUMN `eff_seeders` INT UNSIGNED "
+               . "GENERATED ALWAYS AS (COALESCE(`scrape_seeders`, `last_seeders`)) VIRTUAL";
+    }
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_eff_seed')) {
+        $iparts[] = "ADD KEY `idx_index_eff_seed` (`eff_seeders`, `info_hash`)";
+    }
+    // schema v35: "times seen" on the admin index listing.
+    //
+    // ONE of the nine unindexed sorts, not all of them, and the choice is deliberate. Measured on the
+    // 1.9 M-row production table, every sort without an index costs about the same:
+    //
+    //     seen_count      2 311 ms        name             2 186 ms
+    //     peak_seeders    1 986 ms        scrape_seeders   1 966 ms
+    //     files_count     1 951 ms        total_size       1 930 ms
+    //     first_seen      1 870 ms        last_leechers    1 876 ms
+    //     meta_status     1 846 ms        (last_seen and last_seeders are already 1 ms)
+    //
+    // Indexing all of them would fix all of them — and this table already carries 2 738 MiB of index
+    // against 584 MiB of data, and the index poll rewrites hundreds of thousands of rows every thirty
+    // minutes, paying for every one of those indexes on every row. So the line is drawn at the column
+    // the fetch-order work made worth looking at: "times seen" is how an operator decides what the
+    // swarm actually cares about. The rest stay a filesort on a deliberate click, and that is a
+    // choice recorded here rather than an oversight.
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_seen')) {
+        $iparts[] = "ADD KEY `idx_index_seen` (`seen_count`)";
     }
     if ($iparts) {
         // Same reasoning as the ALTER above: FULLTEXT on this table means a rebuild, minutes long,
@@ -970,6 +1055,13 @@ function trackerSchemaDefaultSettings(): array {
         // schema v32: addresses the inbound UDP rate limit must never drop. Comma or newline
         // separated, IPv4/IPv6, plain or CIDR. Empty = nobody is exempt (the shipped default).
         'net_limit_trusted'           => '',
+        // schema v33: how the stability probe judges load. The first number is what a run is allowed
+        // to ADD to the load it found when it started -- an absolute ceiling is meaningless on a
+        // machine whose normal working load is already near it, which is how every run on this box
+        // stopped on its first step. The second is a hard stop for a machine genuinely being driven
+        // into the ground, and is deliberately far above anything normal.
+        'tuner_load_headroom'         => '0.35',
+        'tuner_load_hard'             => '2.0',
         // sender address for outgoing mail (empty = use site_email); domain-validated on save
         'mail_from_email'             => '',
         // schema v9: registration requires an email + only verified accounts get their groups
@@ -1110,6 +1202,14 @@ function trackerSchemaDefaultSettings(): array {
         'net_auto_max'                => '80000',
         'net_auto_target'             => '30000',
         'net_auto_target_cpu'         => '70',
+        // schema v34: address lists. `net_lists_enabled` is the master switch — with it off the
+        // firewall carries no list sets at all, whatever the individual lists say, so one click
+        // undoes the whole feature without deleting anything anybody spent time importing.
+        'net_lists_enabled'           => '0',
+        'net_lists_ttl_default'       => '720',
+        // A digest of the file the firewall was last loaded from, so the janitor can tell whether
+        // anything actually changed instead of re-applying the ruleset every minute for nothing.
+        'net_lists_stamp'             => '',
         // schema v11: panel-driven backups (includes/backup.php + tools/opentracker/tracker-backup.sh).
         // Off by default; the archives live outside the web root and are only ever read through the
         // root helper, so nothing here is reachable without the admin password.

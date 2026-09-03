@@ -309,10 +309,27 @@ def harm(baseline: dict, now: dict, prev: dict, cfg: dict) -> str:
     Only counters the run itself watched from a baseline are used. "Load is high" is not harm if it
     was high before the run started — the question is whether THIS step made it worse.
     """
-    max_per_core = float(cfg.get('tuner_max_load_per_core') or 0.9)
+    # LOAD IS JUDGED AGAINST WHERE IT STARTED, not against a fixed number.
+    #
+    # This function's own docstring has always said that, and the code did the opposite: it compared
+    # against an absolute 0.90 per core. On a machine that idles at 0.73-0.88 -- a tracker plus a game
+    # server -- every run therefore stopped on its FIRST step with "load reached 1.04 per core
+    # (ceiling 0.90)" and never got far enough to suggest anything. The ceiling was below the
+    # machine's normal working load, so the probe was measuring the machine's existence rather than
+    # the effect of the step.
+    #
+    # What matters is the RISE this run caused. The absolute stop stays, far above anything normal,
+    # for the case where the machine really is being driven into the ground.
+    headroom = float(cfg.get('tuner_load_headroom') or 0.35)
+    hard = float(cfg.get('tuner_load_hard') or 2.0)
     load = (now.get('load') or {}).get('per_core')
-    if load is not None and load > max_per_core:
-        return 'load reached %.2f per core (ceiling %.2f)' % (load, max_per_core)
+    base_load = (baseline.get('load') or {}).get('per_core')
+    if load is not None:
+        if load > hard:
+            return 'load reached %.2f per core, over the hard stop of %.2f' % (load, hard)
+        if base_load is not None and load > base_load + headroom:
+            return ('load rose from %.2f to %.2f per core, more than the %.2f this run is allowed to add'
+                    % (base_load, load, headroom))
 
     # Any OTHER socket that started discarding during this step. The tracker's own socket is expected
     # to drop when the limit is below what arrives; a neighbour's is the thing to stop for.
@@ -569,8 +586,10 @@ def self_test() -> int:
     and leaving the machine on a limit it was only trying out.
     """
     fails = [0]
+    ran = [0]
 
     def check(name, ok, info=''):
+        ran[0] += 1
         print(('PASS ' if ok else 'FAIL ') + name + ('' if ok or not info else '  -> ' + str(info)))
         if not ok:
             fails[0] += 1
@@ -592,8 +611,24 @@ def self_test() -> int:
           harm(base, quiet, base, cfg) == '', harm(base, quiet, base, cfg))
     collateral = {'sockets': {'6969': 900, '2302': 400}, 'softnet': {'dropped': 0}, 'load': {'per_core': 0.4}}
     check('another service dropping IS harm', 'port 2302' in harm(base, collateral, base, cfg))
+    # Load is judged against the BASELINE, so these cases have to name a baseline load to mean
+    # anything. The old test compared against a fixed ceiling and passed while the shipped default
+    # made every real run stop on its first step: the check agreed with the code and both were wrong
+    # about the machine.
+    warm_base = dict(base); warm_base['load'] = {'per_core': 0.8}
     hot = {'sockets': {'6969': 100, '2302': 5}, 'softnet': {'dropped': 0}, 'load': {'per_core': 1.4}}
-    check('load past the ceiling is harm', 'load reached' in harm(base, hot, base, cfg))
+    check('a big RISE in load is harm', 'load rose' in harm(warm_base, hot, warm_base, cfg),
+          harm(warm_base, hot, warm_base, cfg))
+    # The case that made the probe useless here: a machine already working hard, a step that adds
+    # almost nothing. That is not harm, and calling it harm means never finishing a run.
+    busy = {'sockets': {'6969': 100, '2302': 5}, 'softnet': {'dropped': 0}, 'load': {'per_core': 0.95}}
+    check('a machine that was ALREADY busy is not harmed by a step that adds little',
+          harm(warm_base, busy, warm_base, cfg) == '', harm(warm_base, busy, warm_base, cfg))
+    check('…and the same reading IS harm when the machine started idle',
+          'load rose' in harm(base, busy, base, cfg), harm(base, busy, base, cfg))
+    huge = {'sockets': {'6969': 100, '2302': 5}, 'softnet': {'dropped': 0}, 'load': {'per_core': 3.0}}
+    check('the hard stop still fires whatever the baseline was',
+          'hard stop' in harm(warm_base, huge, warm_base, cfg), harm(warm_base, huge, warm_base, cfg))
     squeezed = {'sockets': {'6969': 100, '2302': 5}, 'softnet': {'dropped': 7}, 'load': {'per_core': 0.3}}
     check('a per-CPU queue that overflowed is harm', 'queue overflowed' in harm(base, squeezed, base, cfg))
     check('a socket that did not exist at baseline is not counted against the run',
@@ -699,7 +734,9 @@ def self_test() -> int:
     check('restore with nothing recorded does nothing and says so',
           restore({}, dry=True)['restored'] is False)
 
-    print('\n%d checks, %d failed' % (38, fails[0]))
+    # Counted, not typed in. A hardcoded total drifts from the file the first time a check is added
+    # or a loop changes length, and then the suite reports a number nobody has verified.
+    print('\n%d checks, %d failed' % (ran[0], fails[0]))
     return 1 if fails[0] else 0
 
 
