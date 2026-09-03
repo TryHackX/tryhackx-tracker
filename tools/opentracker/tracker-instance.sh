@@ -367,14 +367,28 @@ action_reset() {
         return 0
     fi
     is_root || fail "must run as root"
-    local removed=false
-    [ -f "$DROPIN" ] && { rm -f "$DROPIN" && removed=true; }
+    # A failed removal was reported as ok:true, removed:false — which the panel renders as "nothing
+    # to remove" about a file that is still in force and still overriding the unit. The three cases
+    # are different and are now said differently: removed, deferred (this process cannot write /etc,
+    # so the janitor finishes it), or a genuine failure.
+    local removed=false deferred=false
+    if [ -f "$DROPIN" ]; then
+        if rm -f "$DROPIN" 2>/dev/null; then
+            removed=true
+        elif dir_writable 2>/dev/null; then
+            fail "could not remove $DROPIN — it is still overriding the unit" 4
+        else
+            deferred=true
+        fi
+    fi
     have_systemctl && "$SYSTEMCTL" daemon-reload >/dev/null 2>&1
     # Deliberately NOT touching listen.udp.workers: it is opentracker's own setting and may well
     # have been what the installer chose. "Reset" means "forget what the panel did to the unit".
-    printf '{"ok":true,"removed":%s,"file":%s,"note":%s}\n' \
-        "$removed" "$(jstr "$DROPIN")" \
-        "$(jstr "The unit drop-in is gone; listen.udp.workers is left as it is, since it is opentracker's own setting.")"
+    printf '{"ok":true,"removed":%s,"deferred":%s,"file":%s,"note":%s}\n' \
+        "$removed" "$deferred" "$(jstr "$DROPIN")" \
+        "$(jstr "$([ "$deferred" = true ] \
+            && printf '%s' "The drop-in is still there: this process cannot write /etc, so the janitor removes it within a minute." \
+            || printf '%s' "The unit drop-in is gone; listen.udp.workers is left as it is, since it is opentracker's own setting.")")"
 }
 
 action_restart() {

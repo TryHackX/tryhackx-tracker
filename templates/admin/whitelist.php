@@ -81,11 +81,15 @@
             </div>
 
             <div id="rv-pane-edits" class="d-hidden">
-                <div class="admin-toolbar-card">
-                    <div class="toolbar-row">
-                        <div class="toolbar-search"><span class="text-muted wl-small">Rewrites proposed for descriptions that are already published. <strong>Nothing changes until you apply one</strong>, and applying keeps the version it replaces, so an accepted rewrite can be undone by accepting the old text back.</span></div>
-                        <div class="toolbar-right"><span id="rv-edits-total" class="text-muted wl-total"></span></div>
+                <div class="rv-pane-intro">
+                    <div class="rv-pane-intro-icon"><i class="bi bi-pencil-square"></i></div>
+                    <div class="rv-pane-intro-text">
+                        <strong>Proposed rewrites</strong>
+                        <span>Someone has suggested different wording for a description that is already published.
+                            <strong>Nothing changes until you apply one</strong> &mdash; and applying keeps the version it
+                            replaces, so an accepted rewrite can be undone by accepting the old text back.</span>
                     </div>
+                    <span id="rv-edits-total" class="rv-pane-intro-count"></span>
                 </div>
                 <div id="rv-edits-list"></div>
             </div>

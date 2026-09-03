@@ -4,6 +4,94 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.27.2] — 2026-09-03
+
+The rest of the audit, plus three things from the last release that were wrong on arrival.
+
+### Fixed — the Add user modal never appeared
+
+It was inserted **inside** another modal's `modal-content`. Bootstrap drew the backdrop and nothing
+else. Moved out to be a sibling; all three user modals now sit at the same depth and the dialog
+renders (500 × 682, seven fields, one backdrop).
+
+### Fixed — a tie-break that cost 2.3 seconds a page
+
+The admin index listing ordered by `last_seen DESC, info_hash ASC`. InnoDB carries the primary key
+inside every secondary index, so `idx_index_last_seen` is really `(last_seen, info_hash)` — ordering
+both the same way is a backward scan, and mixing the directions is a sort no index can serve.
+Measured on the 2 M-row table:
+
+```
+last_seen DESC, info_hash ASC     2 327 ms   filesort
+last_seen DESC, info_hash DESC      112 ms   no filesort
+```
+
+The tie-break now takes the direction of the sort it is breaking ties for. Determinism is what it is
+for and is unchanged.
+
+### Fixed — the cap-prune materialised its whole work list
+
+`SELECT` every excess hash into one PHP array, then delete in chunks. With the cap at 3 500 000 and
+the table having run at 2.9 M, a lowered cap makes that array arbitrarily large — a million hashes is
+~100 MB inside php-fpm, whose memory limit decides whether the prune finishes or the request dies
+half-way. Now deleted in bounded passes; identical work, bounded peak.
+
+### Fixed — parallel sign-in failures collapsed into one
+
+`recordLoginFailure` read the attempt file, appended, and wrote it back with `LOCK_EX` on the *write*
+only. Two failures arriving together both read the same array and the second write won — so a burst
+of parallel guesses counted as one, and the lockout never tripped. That is precisely the case the
+lockout exists for. Now one lock across the whole read-modify-write, like every other state file
+here. Verified: eight parallel failures used to collapse, now all eight are recorded.
+
+### Fixed — "Throttle hard" could become permanent
+
+`netlimitPanicRestore` cleared the panic record **before** checking whether the restore worked. A
+failed restore therefore left the emergency 10 000 pps clamp in force with nothing left for the
+janitor to retry — while it went on reporting `panic=restored`. The record is now cleared only on
+success, and a failure is recorded so the next tick tries again.
+
+### Fixed — reporting a failure as success, and a success as failure
+
+- `tracker-netlimit.sh off` deleted the table and *then* failed on the file removal, reporting the
+  whole operation as failed — while the firewall had in fact been opened. The limit being off is not
+  a failure; failing to make that permanent is a different thing, and it is the normal deferred case
+  on this machine. Now said separately.
+- `tracker-instance.sh reset` reported `ok:true, removed:false` when the removal failed, which the
+  panel renders as "nothing to remove" about a file still overriding the unit.
+- `tracker-cluster.sh create` left the per-instance systemd drop-in behind when it rolled back a
+  failed instance — invisible until the same name is created again, and then yesterday's CPU
+  affinity silently applies to a fresh one.
+
+### Security — a systemd drop-in written from an unvalidated argument
+
+`tracker-cluster.sh create` wrote its affinity argument verbatim into a root-owned drop-in. A newline
+in it is a new directive, and `ExecStartPre=` in a unit is a root shell. `CPUAffinity` takes CPU
+numbers, commas and ranges; that is now all it accepts. Verified both ways: an injected
+`[Service]
+ExecStartPre=…` is refused and `0-3,5` still passes.
+
+### Fixed — a moderation decision the audit log was dropping
+
+`auditIsNoise()` suppressed anything ending in `_status`, which is right for the pollers a page runs
+every few seconds and wrong for `admin/change_status` — a moderation write that is listed in the
+action map. Named as an exception rather than widening the rule, because a rule matching by name will
+do this again to the next endpoint somebody names that way.
+
+### Fixed — `whitelist_cli add` recorded the wrong source
+
+`in_array($opts['source'] ?? 'admin', …) ? $opts['source'] : 'admin'` tests the default and then
+returns the *undefined* key, so `add` without `--source` stored an empty source instead of `admin`.
+
+### Changed — where a search hit lives, and what an empty queue looks like
+
+The **Show me where** line now appears only while the group filter is *All settings* — once a group
+is chosen the reader knows where they are, and a breadcrumb on every section is noise.
+
+The **Rewrites** tab was a sentence squeezed into a search toolbar it does not use, above a bordered
+box reading "Nobody has proposed a rewrite" — which looks like something failed to load. An empty
+moderation queue is the normal state and now looks like one.
+
 ## [1.27.1] — 2026-09-03
 
 An audit across six lenses raised 32 candidates; 27 survived an adversarial verification pass. These

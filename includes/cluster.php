@@ -226,9 +226,18 @@ function otClusterTick(array $cfg): array {
             'ok' => !empty($x['ok']), 'state' => (string)($x['state'] ?? '?'), 'at' => time(),
         ];
     }
-    $state['last_reload_at'] = $newest;
-    $state['last_reload_units'] = $units;
-    $state['last_reload_failed'] = $failed;
+    // Only record a distribution that actually happened. A helper that never ran returns no results,
+    // and writing `last_reload_at` anyway told the next tick the accesslist was already distributed —
+    // so it never retried — while `last_reload_units` was overwritten with an empty map, erasing the
+    // per-instance record of what had failed. The one case where the panel most needs to remember.
+    if ($r['ok'] || $results) {
+        $state['last_reload_at'] = $newest;
+        $state['last_reload_units'] = $units;
+        $state['last_reload_failed'] = $failed;
+    } else {
+        $state['last_reload_error'] = (string)($r['error'] ?? 'the reload helper did not run');
+        $state['last_reload_error_at'] = time();
+    }
     otClusterStateSet($state);
     return ['did' => 'reload', 'reloaded' => count($results) - $failed, 'failed' => $failed,
             'error' => $r['ok'] ? null : $r['error']];

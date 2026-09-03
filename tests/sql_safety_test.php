@@ -154,7 +154,6 @@ $REVIEWED = [
 
     // Integers by the time they arrive. LIMIT/OFFSET cannot be bound in every driver mode.
     'includes/index.php:$remaining'            => 'cast with (int) at the concatenation',
-    'includes/index.php:$excess'               => 'cast with (int) at the concatenation',
     'includes/index.php:$cfg'                  => 'not in the SQL: the argument to indexProtectDays(), which returns an int',
     'api/admin/wl_content.php:$off'            => 'computed from (int)$page, never from input directly',
 
@@ -190,6 +189,10 @@ $seen = [];
 foreach ($offenders as $o) {
     if (preg_match('/^(.+?):\d+\s+\$(\S+)/', str_replace('\\', '/', $o), $m)) $seen[$m[1] . ':$' . $m[2]] = true;
 }
+// The index cap-prune used to interpolate $excess into a single-line query() and had an entry here.
+// It is now a multi-line prepare() with `(int)$batch`, which this scanner does not flag — so the
+// entry was removed rather than renamed: a baseline line for something the scan never reports is a
+// line nobody will ever check again.
 $stale = array_values(array_diff(array_keys($REVIEWED), array_keys($seen)));
 check('the reviewed baseline has no entries for code that is gone',
       $stale === [], implode(', ', $stale));

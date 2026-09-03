@@ -262,8 +262,12 @@
         ranked.sort((a, b) => (b.score - a.score) || (a.sec.i - b.sec.i));
         const visible = new Set(ranked.map(r => r.sec));
         sections.forEach(sec => resetSection(sec, visible.has(sec)));
+        // Only while the whole page is in view. Once a group is selected the reader already knows
+        // which one they are in, and a breadcrumb repeating it on every section is noise — the
+        // question "where was this" only exists when the search has pulled fields out of everywhere.
+        const showCrumbs = group === 'all';
         ranked.forEach(({ sec, whole }) => {
-            showWhere(sec, true);
+            showWhere(sec, showCrumbs);
             if (whole) { sec.el.classList.add('settings-section-hit'); return; }
             sec.items.forEach(item => {
                 // An item can sit inside another one (the donation rows inside the donation list, the

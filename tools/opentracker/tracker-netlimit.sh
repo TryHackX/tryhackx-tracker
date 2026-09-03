@@ -686,8 +686,23 @@ action_off() {
     if table_exists "$TABLE"; then
         "$NFT" delete table inet "$TABLE" 2>/dev/null && deleted=true || fail "could not delete table inet $TABLE" 3
     fi
-    if [ -f "$RULES_FILE" ]; then rm -f "$RULES_FILE" && removed=true || fail "could not remove $RULES_FILE" 4; fi
-    printf '{"ok":true,"table_deleted":%s,"file_removed":%s}\n' "$deleted" "$removed"
+    # The table is already gone by the time this runs, so a failed file removal is NOT a failed
+    # operation — the limit is off. It failed only to become PERMANENTLY off. Saying "could not
+    # remove" here made the panel report the whole thing as failed while the firewall had in fact
+    # been opened, which is the most dangerous shape a message can take. The deferred case is the
+    # normal one on this machine: php-fpm cannot write /etc, and the janitor finishes it.
+    local unpersist_deferred=false
+    if [ -f "$RULES_FILE" ]; then
+        if rm -f "$RULES_FILE" 2>/dev/null; then
+            removed=true
+        elif dir_writable; then
+            fail "the table was deleted but $RULES_FILE could not be removed — the limit will come back at the next reboot" 4
+        else
+            unpersist_deferred=true
+        fi
+    fi
+    printf '{"ok":true,"table_deleted":%s,"file_removed":%s,"unpersist_deferred":%s}\n' \
+        "$deleted" "$removed" "$unpersist_deferred"
 }
 
 # Change ONLY the rate of the existing egress budget. Done with a handle-targeted `nft replace` so

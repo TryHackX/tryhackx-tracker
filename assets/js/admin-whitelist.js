@@ -470,7 +470,14 @@
         $('rv-edits-total').textContent = r.total ? (r.total + ' waiting') : '';
         $('rv-edits-count').textContent = r.total ? String(r.total) : '';
         if (!(r.rows || []).length) {
-            box.appendChild(el('div', { className: 'nl-note', text: 'Nobody has proposed a rewrite.' }));
+            // An empty queue is the normal state here, not a problem, and a bare grey note in a box
+            // reads like something failed to load. Say what the empty state MEANS instead.
+            box.appendChild(el('div', { className: 'rv-empty' }, [
+                el('i', { className: 'bi bi-inbox rv-empty-icon' }),
+                el('div', { className: 'rv-empty-title', text: 'No rewrites waiting' }),
+                el('div', { className: 'rv-empty-hint',
+                            text: 'Proposals appear here when a signed-in member suggests different wording for a description that is already published.' }),
+            ]));
             return;
         }
         r.rows.forEach(row => box.appendChild(editCard(row)));

@@ -65,3 +65,4 @@ HANDOFF*.md
 SPEC-*.md
 config/index_count.json
 config/index_*_cache.json
+config/login_attempts.lock

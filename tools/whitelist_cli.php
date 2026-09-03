@@ -51,7 +51,11 @@ switch ($cmd) {
         break;
 
     case 'add':
-        $source = in_array($opts['source'] ?? 'admin', ['web', 'api', 'admin', 'forum'], true) ? $opts['source'] : 'admin';
+        // Bound once. The old form tested `$opts['source'] ?? 'admin'` and then returned
+        // `$opts['source']` — so with no --source the test passed on the default and the RESULT was
+        // an undefined index, which lands as '' rather than as 'admin'.
+        $srcIn = (string)($opts['source'] ?? 'admin');
+        $source = in_array($srcIn, ['web', 'api', 'admin', 'forum'], true) ? $srcIn : 'admin';
         $text = stream_get_contents(STDIN);
         $parsed = parseHashInput((string)$text, 1000000);
         $items = $parsed['items'];

@@ -1843,3 +1843,34 @@ input[type="number"] {
     letter-spacing: 0.02em;
 }
 .settings-where-jump { padding: 0.1rem 0.5rem; font-size: 0.74rem; }
+
+/* ── Review panes: the intro line, and what an empty queue looks like ────────
+ *
+ * The Rewrites tab was a grey sentence squeezed into a search toolbar it does not use, above a
+ * bordered box saying "Nobody has proposed a rewrite." — which reads like something failed to load.
+ * An empty moderation queue is the NORMAL state and should look like it. */
+.rv-pane-intro {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.9rem;
+    border: 1px solid #2c3440;
+    border-left: 3px solid #4a7fb5;
+    border-radius: 0.4rem;
+    background: rgba(74, 127, 181, 0.06);
+}
+.rv-pane-intro-icon { color: #6ea8dc; font-size: 1.15rem; line-height: 1.4; }
+.rv-pane-intro-text { flex: 1 1 auto; font-size: 0.84rem; color: #b6bfcc; }
+.rv-pane-intro-text strong { color: #dfe6ee; }
+.rv-pane-intro-text span { display: block; margin-top: 0.2rem; }
+.rv-pane-intro-count { color: #8a94a2; font-size: 0.8rem; white-space: nowrap; }
+
+.rv-empty {
+    text-align: center;
+    padding: 2.4rem 1rem 2.6rem;
+    color: #8a94a2;
+}
+.rv-empty-icon { font-size: 2.1rem; opacity: 0.45; display: block; margin-bottom: 0.6rem; }
+.rv-empty-title { font-size: 0.98rem; color: #c3ccd8; margin-bottom: 0.3rem; }
+.rv-empty-hint { font-size: 0.82rem; max-width: 46rem; margin: 0 auto; line-height: 1.5; }

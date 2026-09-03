@@ -197,64 +197,66 @@
         </div>
     </div>
 
+    <!-- Add user -->
+    <div class="modal fade" id="userAddModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-person-plus"></i> Add user</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger d-none" id="ua-error"></div>
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" id="ua-username" autocomplete="off" maxlength="32">
+                        <small class="text-muted">3&ndash;32 characters: letters, digits, dot, dash or underscore.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email <small class="text-muted" id="ua-email-req">(required)</small></label>
+                        <input type="email" class="form-control bg-dark text-light border-secondary" id="ua-email" autocomplete="off" maxlength="190">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" id="ua-password" autocomplete="new-password">
+                            <button type="button" class="btn btn-outline-secondary" id="ua-gen" title="Generate a strong one">
+                                <i class="bi bi-shuffle"></i> Generate
+                            </button>
+                        </div>
+                        <small class="text-muted">At least 8 characters with a lowercase and an uppercase letter, a digit and a special character.
+                            Shown in clear on purpose &mdash; you have to be able to pass it on.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email verification</label>
+                        <select class="form-select bg-dark text-light border-secondary" id="ua-verify">
+                            <option value="auto" selected>Already verified &mdash; no email sent, can sign in now</option>
+                            <option value="send">Send a verification link &mdash; acts as a guest until clicked</option>
+                            <option value="none">No email at all &mdash; unverified, verify later</option>
+                        </select>
+                        <small class="text-muted" id="ua-verify-hint"></small>
+                    </div>
+                    <div class="mb-1">
+                        <label class="form-label">Status</label>
+                        <select class="form-select bg-dark text-light border-secondary" id="ua-status">
+                            <option value="active" selected>Active</option>
+                            <option value="banned">Banned (created, but cannot sign in)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-success" id="ua-save"><i class="bi bi-person-plus"></i> Create account</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- User edit modal -->
     <div class="modal fade" id="usEditModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content bg-dark">
-                <!-- Add user -->
-<div class="modal fade" id="userAddModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content bg-dark text-light border-secondary">
-            <div class="modal-header border-secondary">
-                <h5 class="modal-title"><i class="bi bi-person-plus"></i> Add user</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div class="alert alert-danger d-none" id="ua-error"></div>
-                <div class="mb-3">
-                    <label class="form-label">Username</label>
-                    <input type="text" class="form-control bg-dark text-light border-secondary" id="ua-username" autocomplete="off" maxlength="32">
-                    <small class="text-muted">3&ndash;32 characters: letters, digits, dot, dash or underscore.</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Email <small class="text-muted" id="ua-email-req">(required)</small></label>
-                    <input type="email" class="form-control bg-dark text-light border-secondary" id="ua-email" autocomplete="off" maxlength="190">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Password</label>
-                    <div class="input-group">
-                        <input type="text" class="form-control bg-dark text-light border-secondary" id="ua-password" autocomplete="new-password">
-                        <button type="button" class="btn btn-outline-secondary" id="ua-gen" title="Generate a strong one">
-                            <i class="bi bi-shuffle"></i> Generate
-                        </button>
-                    </div>
-                    <small class="text-muted">At least 8 characters with a lowercase and an uppercase letter, a digit and a special character.
-                        Shown in clear on purpose &mdash; you have to be able to pass it on.</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Email verification</label>
-                    <select class="form-select bg-dark text-light border-secondary" id="ua-verify">
-                        <option value="auto" selected>Already verified &mdash; no email sent, can sign in now</option>
-                        <option value="send">Send a verification link &mdash; acts as a guest until clicked</option>
-                        <option value="none">No email at all &mdash; unverified, verify later</option>
-                    </select>
-                    <small class="text-muted" id="ua-verify-hint"></small>
-                </div>
-                <div class="mb-1">
-                    <label class="form-label">Status</label>
-                    <select class="form-select bg-dark text-light border-secondary" id="ua-status">
-                        <option value="active" selected>Active</option>
-                        <option value="banned">Banned (created, but cannot sign in)</option>
-                    </select>
-                </div>
-            </div>
-            <div class="modal-footer border-secondary">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-success" id="ua-save"><i class="bi bi-person-plus"></i> Create account</button>
-            </div>
-        </div>
-    </div>
-</div>
+                
 
 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-person-gear"></i> Edit user <span id="ue-name" class="text-info"></span></h5>

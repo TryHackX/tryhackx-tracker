@@ -564,13 +564,26 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
     $total = (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn();
     if ($total > $max && (int)indexStateRead()['poll_skip'] === 0) {
         $excess = $total - $max;
-        $ids = $db->query("SELECT info_hash FROM index_hashes WHERE protected_until IS NULL OR protected_until < NOW()
-                           ORDER BY last_seen ASC LIMIT " . (int)$excess)->fetchAll(PDO::FETCH_COLUMN);
-        foreach (array_chunk($ids, 5000) as $chunk) {
-            $in = implode(',', array_fill(0, count($chunk), '?'));
-            $d = $db->prepare("DELETE FROM index_hashes WHERE info_hash IN ($in)");
-            $d->execute($chunk);
-            $res['capped'] += $d->rowCount();
+        // Deleted in bounded passes rather than by materialising the whole excess first.
+        //
+        // The cap is 3 500 000 and the table has run at 2.9 M; a poll that overshoots by a wide
+        // margin — or an operator lowering the cap — makes `$excess` arbitrarily large, and the old
+        // shape pulled every one of those hashes into a single PHP array before deleting any of
+        // them. A million 40-character hashes is ~100 MB of PHP memory inside php-fpm, whose
+        // memory_limit is the thing that decides whether the prune finishes or the request dies
+        // half-way through. The work is identical; only the peak is bounded.
+        $left = $excess;
+        while ($left > 0) {
+            $batch = min(5000, $left);
+            $d = $db->prepare("DELETE FROM index_hashes
+                                WHERE protected_until IS NULL OR protected_until < NOW()
+                                ORDER BY last_seen ASC LIMIT " . (int)$batch);
+            $d->execute();
+            $n = $d->rowCount();
+            $res['capped'] += $n;
+            $left -= $batch;
+            // Nothing matched: everything left over the cap is protected, and looping would spin.
+            if ($n < $batch) break;
         }
     }
     // orphaned files (index_files has no FK cascade)
@@ -828,7 +841,18 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         $orderParts[] = "$col $dir";
     }
     if (!$orderParts) $orderParts[] = 'last_seen DESC';
-    $orderParts[] = 'info_hash ASC'; // deterministic tie-break
+    // The tie-break takes the DIRECTION of the sort it is breaking ties for.
+    //
+    // InnoDB carries the primary key inside every secondary index, so `idx_index_last_seen` is really
+    // (last_seen, info_hash): ordering by both in the SAME direction is a plain backward scan, and
+    // mixing them is a sort no index can serve. Measured on the 2 M-row table:
+    //
+    //     last_seen DESC, info_hash ASC    2 327 ms   filesort
+    //     last_seen DESC, info_hash DESC     112 ms   no filesort
+    //
+    // Determinism is what the tie-break is for and it is unchanged — the order is still total.
+    $lastDir = str_ends_with(end($orderParts), 'DESC') ? 'DESC' : 'ASC';
+    $orderParts[] = 'info_hash ' . $lastDir;
 
     $where = [];
     $params = [];
@@ -975,7 +999,10 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     }
     if (!$orderParts) $orderParts = ['score' => 'score DESC', 'seeders' => 'seeders DESC'];
     elseif (count($orderParts) === 1 && isset($orderParts['score'])) $orderParts['seeders'] = 'seeders DESC';
-    $order = implode(', ', $orderParts) . ", info_hash ASC";
+    // Same reasoning as the admin listing: a tie-break that runs against the sort's direction turns
+    // an index scan into a filesort over the whole catalogue.
+    $order = implode(', ', $orderParts) . ', info_hash '
+           . (str_ends_with(end($orderParts), 'DESC') ? 'DESC' : 'ASC');
 
     $isHash = $search !== '' && preg_match('/^[a-f0-9]{6,40}$/i', $search);
     $ft = ($search !== '' && !$isHash && mb_strlen($search) >= 3) ? indexFulltextTerm($search) : '';

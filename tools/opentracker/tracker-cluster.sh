@@ -391,6 +391,13 @@ action_create() {
 
     [ -f "$TEMPLATE_UNIT" ] || write_template
     if [ -n "$affinity" ]; then
+        # VALIDATED HERE, not only in the caller. This string is written verbatim into a systemd
+        # drop-in owned by root: a newline in it is a new directive, and `Environment=` or
+        # `ExecStartPre=` in a unit the tracker runs under is a root shell. CPUAffinity takes a list
+        # of CPU numbers and ranges and nothing else, so that is all that is accepted.
+        case "$affinity" in
+            *[!0-9,\ -]*) fail "CPU affinity may contain only numbers, commas, spaces and ranges" 1 ;;
+        esac
         mkdir -p "/etc/systemd/system/$(unit_of "$name").d" 2>/dev/null
         printf '# written by tracker-cluster.sh\n[Service]\nCPUAffinity=%s\n' "$affinity" \
             >"/etc/systemd/system/$(unit_of "$name").d/90-tracker-panel.conf"
@@ -400,8 +407,13 @@ action_create() {
     sleep 1
     local st; st="$(unit_state "$name")"
     if [ "$st" != "active" ]; then
-        # Do not leave a half-made instance behind that somebody has to find later.
+        # Do not leave a half-made instance behind that somebody has to find later — including the
+        # drop-in, which `disable` does not touch. A leftover CPUAffinity file under a unit name that
+        # no longer exists is invisible until the same name is created again, and then it silently
+        # applies yesterday's affinity to a fresh instance.
         "$SYSTEMCTL_BIN" disable --now "$(unit_of "$name")" >/dev/null 2>&1
+        rm -rf "/etc/systemd/system/$(unit_of "$name").d" 2>/dev/null
+        "$SYSTEMCTL_BIN" daemon-reload >/dev/null 2>&1
         printf '{"ok":false,"error":%s,"journal":%s}\n' \
             "$(jstr "instance $name did not start; it has been removed again")" \
             "$(jstr "$("$SYSTEMCTL_BIN" status "$(unit_of "$name")" --no-pager -n 8 2>&1 | tail -8)")"

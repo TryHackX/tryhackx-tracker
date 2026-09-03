@@ -641,8 +641,23 @@ function netlimitPanicRestore(PDO $db, array $cfg): array {
     $r = $wasOn
         ? netlimitApply($cfg, $pps, netlimitBurst($cfg), netlimitPort($cfg), false, 'panic-restore')
         : netlimitOff($cfg, false, 'panic-restore');
-    netlimitStateUpdate(function (array &$s) { $s['panic'] = ['until' => 0, 'restore_pps' => 0, 'restore_enabled' => 0]; return true; });
-    if ($r['ok']) setSettings($db, ['net_limit_enabled' => $wasOn ? '1' : '0', 'net_limit_pps' => (string)$pps]);
+    // The record is cleared ONLY when the restore worked.
+    //
+    // "Throttle hard" clamps the port to 10 000 pps and relies on this to put the previous setting
+    // back. Clearing the marker after a FAILED restore made the emergency throttle permanent: the
+    // janitor had nothing left to retry, and it went on reporting panic=restored. A failed restore
+    // now leaves the window in place so the next tick tries again — an emergency measure that cannot
+    // be undone is worse than one that is undone late.
+    if ($r['ok']) {
+        netlimitStateUpdate(function (array &$s) { $s['panic'] = ['until' => 0, 'restore_pps' => 0, 'restore_enabled' => 0]; return true; });
+        setSettings($db, ['net_limit_enabled' => $wasOn ? '1' : '0', 'net_limit_pps' => (string)$pps]);
+    } else {
+        netlimitStateUpdate(function (array &$s) use ($r) {
+            $s['last_error'] = 'panic restore failed: ' . ($r['error'] ?? 'unknown');
+            $s['last_error_at'] = time();
+            return true;
+        });
+    }
     return ['ok' => (bool)$r['ok'], 'restored' => true, 'enabled' => $wasOn, 'pps' => $pps, 'error' => $r['error'] ?? null];
 }
 

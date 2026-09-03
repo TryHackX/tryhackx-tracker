@@ -291,6 +291,11 @@ function auditIsNoise(string $endpoint): bool {
         'admin/index_scrape', 'admin/index_scrape_bulk', 'admin/whitelist_fetch_meta',
         'admin/index_fetch_meta', 'admin/whitelist_meta_queue', 'admin/index_poll_now',
     ];
+    // The suffix rule is for the pollers a page runs every few seconds. `admin/change_status` ends
+    // the same way and is not one of them: it is a moderation decision, listed in the action map,
+    // and the log was quietly dropping it. A rule that matches by NAME will keep doing this to the
+    // next endpoint somebody names *_status, so the exception is stated rather than the rule widened.
+    if ($endpoint === 'admin/change_status') return false;
     return in_array($endpoint, $quiet, true) || str_ends_with($endpoint, '_status');
 }
 

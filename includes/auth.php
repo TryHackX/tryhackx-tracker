@@ -247,11 +247,40 @@ function isLoginLocked(string $ip, array $cfg): bool {
     return count($times) >= $max;
 }
 
+/**
+ * Read-modify-write the attempt file under one lock.
+ *
+ * `LOCK_EX` on the WRITE alone does not make the sequence atomic: two failed sign-ins arriving
+ * together both read the same array, both append their own timestamp, and the second write wins —
+ * so a burst of parallel guesses is recorded as one failure and the lockout never trips. That is the
+ * exact case the lockout exists for. Every other state file in this panel is updated this way; this
+ * one was not.
+ */
+function loginAttemptsUpdate(callable $fn): void {
+    $file = loginAttemptsFile();
+    $lock = $file . '.lock';
+    $h = @fopen($lock, 'c');
+    if ($h) @flock($h, LOCK_EX);
+    try {
+        $raw  = is_file($file) ? @file_get_contents($file) : '';
+        $data = $raw ? (json_decode($raw, true) ?: []) : [];
+        if ($fn($data) === false) return;
+        $tmp = $file . '.tmp.' . getmypid();
+        if (@file_put_contents($tmp, json_encode($data)) !== false) @rename($tmp, $file);
+    } finally {
+        if ($h) { @flock($h, LOCK_UN); @fclose($h); }
+    }
+}
+
 function recordLoginFailure(string $ip, array $cfg): void {
-    [$data, $times] = loginThrottleState($ip, loginLockWindowSec($cfg));
-    $times[] = time();
-    $data[$ip] = $times;
-    @file_put_contents(loginAttemptsFile(), json_encode($data), LOCK_EX);
+    $window = loginLockWindowSec($cfg);
+    loginAttemptsUpdate(function (array &$data) use ($ip, $window) {
+        $cut = time() - $window;
+        $times = array_values(array_filter((array)($data[$ip] ?? []), fn($t) => (int)$t >= $cut));
+        $times[] = time();
+        $data[$ip] = $times;
+        return true;
+    });
 }
 
 function clearLoginFailures(string $ip): void {
