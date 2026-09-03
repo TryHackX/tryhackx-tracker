@@ -4,6 +4,78 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.27.1] — 2026-09-03
+
+An audit across six lenses raised 32 candidates; 27 survived an adversarial verification pass. These
+are the ones confirmed against the code by hand and fixed here.
+
+### Security — two ways to take over the panel through a "user" permission
+
+**A moderator could set any account's password.** `panel.users.edit` is a grantable permission whose
+promise is status and email verification; `admin/user_update` also wrote `pass_hash` and `email` for
+any user id. The panel owner is mirrored into `users` as a member of the admin group, and signing in
+as an admin-group member opens a **full panel session** where `panelCan()` is unconditionally true.
+So a moderator could set that account's password, sign in as it, and reach Settings, the backups
+(whose archives carry every database password on the box) and every sudo-backed helper.
+`api/admin/user_grant.php` already refused to let a non-owner grant a panel-carrying group — the same
+sentence now guards password, email and verification changes, written against what the target
+*holds* rather than against its name.
+
+**A server-to-server API key could grant the admin group.** `v1/users/grant` and
+`v1/users/provision` are outside the panel's permission map (it applies to `admin/` routes only) and
+their only group filter was the `guest` slug. A `users`-scope key — the kind issued to a shop or a
+forum — could put an account in the admin group, and that account gets a panel session at its next
+sign-in. Both now refuse any group carrying a `panel.*` permission.
+
+### Fixed — the stability probe drove the wrong port
+
+`tools/tuner.py` and `api/admin/tuner.php` both read a setting called `tracker_port`. **There is no
+such setting** — the port is `net_limit_port` — so the read always fell through to 6969. On a tracker
+running anywhere else, a probe run would rebuild the firewall table for a port nothing uses: the real
+limit torn down, every measurement taken on an empty port, and the restore putting the baseline back
+on 6969 as well, while the panel reported the run finished and the settings were restored.
+
+### Fixed — Stop did not stop
+
+The panel's Stop button wrote a `cancel` key into the probe's state file. **Nothing read it.** The
+run carried on stepping the firewall limit while the API answered that it was stopping — the one
+control an operator reaches for when a probe is hurting the machine did nothing. It is now checked
+between samples, so a stop takes effect within one sample interval and still leaves through the
+restore path.
+
+### Fixed — a long dwell was reaped as a dead run
+
+Liveness is "the state file was touched recently" (300 s), and the file was written once per *step*.
+A dwell over ~270 s therefore looked dead to the janitor, which reaped the run, consumed its restore
+marker, and left the test limit in force. The heartbeat is now written with every sample.
+
+### Fixed — saving the ruleset dropped the trusted addresses
+
+A regression from 1.26.0, and on the normal path: php-fpm cannot write `/etc`, so an apply defers and
+the janitor calls `persist` a minute later — which re-rendered the ruleset **without** the exemption
+sets. Live rules kept them; the file that survives a reboot did not. `persist` now reads the sets
+back out of the loaded table.
+
+### Fixed — `persist_deferred` was always false
+
+The closure that writes it never captured `$r`, so it read an undefined variable. The panel could
+never say "the rule is live but the file was not written", which is exactly the state a reboot
+silently undoes. Confirmed by running the same shape in isolation before changing it.
+
+### Fixed — the Index status card cost 13.9 seconds
+
+Measured on production, per poll, on a database shared with the mail, the forum and the file service:
+
+```
+in_grace  1 060 ms · by_status 1 287 ms · files 9 593 ms · expiring_24h 1 432 ms
+resolved_24h 468 ms · protected 82 ms · promoted 1 ms      TOTAL 13 921 ms
+```
+
+Eight full-table aggregates over 2 M and 6.1 M rows, on every poll of the page — and two of them were
+added yesterday by me. Cached for 30 s and dropped whenever a poll or a prune moves the numbers. The
+prune's own row count stays uncached, deliberately: a number that decides a delete is not a number to
+serve from a cache.
+
 ## [1.27.0] — 2026-09-03
 
 ### Fixed — the panel wrote a failed sign-in into its own audit log before every successful one

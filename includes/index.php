@@ -76,6 +76,49 @@ function indexTotalCached(PDO $db, int $ttl = 30): int {
     return $total;
 }
 
+/**
+ * The status card's counts, cached for a few seconds.
+ *
+ * MEASURED on production before this existed, one poll of the Index page:
+ *
+ *     in_grace      1 060 ms      by_status     1 287 ms
+ *     protected        82 ms      files         9 593 ms   (COUNT(*) over 6.1 M rows)
+ *     promoted          1 ms      expiring_24h  1 432 ms
+ *                                 resolved_24h    468 ms
+ *     ---------------------------------------------------
+ *     TOTAL        13 921 ms, on a database shared with the mail, the forum and the file service
+ *
+ * Every one of these is a full-table aggregate on a 2 M-row table, and the admin page polls them.
+ * This project's own rule is to measure before caching and never to cache a number that DECIDES
+ * something — the prune's row count is deliberately left uncached for exactly that reason. These
+ * are display: what the card shows a few seconds late is still true, and thirteen seconds of a
+ * shared database is not.
+ */
+// KEYED, because there is more than one block cached here and a shared file would have the second
+// caller read back the first one's array. That is the kind of bug a cache is supposed to not have.
+function indexStatusCacheFile(string $key = 'counts'): string {
+    return __DIR__ . '/../config/index_' . preg_replace('/[^a-z0-9_]/', '', $key) . '_cache.json';
+}
+
+function indexStatusCached(PDO $db, string $key, callable $compute, int $ttl = 30): array {
+    $file = indexStatusCacheFile($key);
+    if (is_file($file)) {
+        $c = json_decode((string)@file_get_contents($file), true);
+        if (is_array($c) && isset($c['at'], $c['v']) && (time() - (int)$c['at']) < $ttl) return $c['v'];
+    }
+    $v = $compute();
+    // A tmp+rename so a reader never sees half a file; a failed write just means the next caller
+    // recomputes, which is the correct way for a cache to fail.
+    $tmp = $file . '.tmp.' . getmypid();
+    if (@file_put_contents($tmp, json_encode(['at' => time(), 'v' => $v])) !== false) @rename($tmp, $file);
+    return $v;
+}
+
+/** Drop them when a poll or a prune has just changed the numbers. */
+function indexStatusCacheDrop(): void {
+    foreach (['counts', 'flow'] as $k) @unlink(indexStatusCacheFile($k));
+}
+
 function indexPollMinutes(array $cfg): int { return max(5, min(1440, (int)($cfg['index_poll_minutes'] ?? 30) ?: 30)); }
 function indexMinSeeders(array $cfg): int { return max(0, min(100000, (int)($cfg['index_min_seeders'] ?? 1))); }
 function indexMaxRows(array $cfg): int { return max(10, min(5000000, (int)($cfg['index_max_rows'] ?? 200000) ?: 200000)); }
@@ -427,6 +470,7 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
         // The row count has just changed, probably by a lot. Anything that shows a total must ask
         // again rather than answering from a cache filled before the poll ran.
         indexTotalCacheDrop();
+        indexStatusCacheDrop();
         return $out;
     } finally {
         @flock($lockH, LOCK_UN); @fclose($lockH);
@@ -534,7 +578,7 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
         $res['orphan_files'] = (int)$db->exec("DELETE f FROM index_files f LEFT JOIN index_hashes h ON h.info_hash = f.info_hash WHERE h.info_hash IS NULL");
     }
     indexStateUpdate(function (array &$s) use ($now, $res) { $s['last_prune_at'] = $now; $s['last_prune'] = $res; return true; });
-    if ($res['expired'] > 0 || $res['capped'] > 0) indexTotalCacheDrop();
+    if ($res['expired'] > 0 || $res['capped'] > 0) { indexTotalCacheDrop(); indexStatusCacheDrop(); }
     return $res;
     } finally {
         @flock($lockH, LOCK_UN); @fclose($lockH);
@@ -1109,17 +1153,21 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
 
 /** Row counts + state for the admin status card / CLI. */
 function indexStatus(PDO $db, array $cfg): array {
-    $counts = ['total' => 0, 'in_grace' => 0, 'protected' => 0, 'promoted' => 0, 'meta_none' => 0, 'meta_pending' => 0, 'meta_fetching' => 0, 'meta_done' => 0, 'meta_failed' => 0, 'files' => 0];
-    try {
-        $counts['total'] = indexTotalCached($db);
-        $counts['in_grace'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status <> 'done' AND grace_until >= NOW()")->fetchColumn();
-        $counts['protected'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE protected_until IS NOT NULL AND protected_until >= NOW()")->fetchColumn();
-        $counts['promoted'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE promoted_at IS NOT NULL")->fetchColumn();
-        foreach ($db->query("SELECT meta_status, COUNT(*) c FROM index_hashes GROUP BY meta_status") as $r) {
-            $k = 'meta_' . $r['meta_status']; if (isset($counts[$k])) $counts[$k] = (int)$r['c'];
-        }
-        $counts['files'] = (int)$db->query("SELECT COUNT(*) FROM index_files")->fetchColumn();
-    } catch (\Throwable $e) {}
+    $counts = indexStatusCached($db, 'counts', function () use ($db) {
+        $c = ['total' => 0, 'in_grace' => 0, 'protected' => 0, 'promoted' => 0, 'meta_none' => 0,
+              'meta_pending' => 0, 'meta_fetching' => 0, 'meta_done' => 0, 'meta_failed' => 0, 'files' => 0];
+        try {
+            $c['total'] = indexTotalCached($db);
+            $c['in_grace'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status <> 'done' AND grace_until >= NOW()")->fetchColumn();
+            $c['protected'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE protected_until IS NOT NULL AND protected_until >= NOW()")->fetchColumn();
+            $c['promoted'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE promoted_at IS NOT NULL")->fetchColumn();
+            foreach ($db->query("SELECT meta_status, COUNT(*) c FROM index_hashes GROUP BY meta_status") as $r) {
+                $k = 'meta_' . $r['meta_status']; if (isset($c[$k])) $c[$k] = (int)$r['c'];
+            }
+            $c['files'] = (int)$db->query("SELECT COUNT(*) FROM index_files")->fetchColumn();
+        } catch (\Throwable $e) {}
+        return $c;
+    });
     // WHY THE TABLE SHRINKS, answered on the page instead of left to be inferred.
     //
     // grace_until is set when a row is first inserted and is never extended: a hash that does not get
@@ -1127,8 +1175,9 @@ function indexStatus(PDO $db, array $cfg): array {
     // with a queue of millions and a worker resolving tens of thousands a day, the two numbers can be
     // wildly mismatched — and the only visible symptom is a total that falls for days. So put both
     // rates next to each other: what is about to expire, and what is actually being resolved.
-    $flow = ['expiring_24h' => 0, 'resolved_24h' => 0, 'days_to_cover' => null];
-    try {
+    $flow = indexStatusCached($db, 'flow', function () use ($db, $counts) {
+      $flow = ['expiring_24h' => 0, 'resolved_24h' => 0, 'days_to_cover' => null];
+      try {
         $flow['expiring_24h'] = (int)$db->query(
             "SELECT COUNT(*) FROM index_hashes
               WHERE meta_status <> 'done' AND grace_until IS NOT NULL
@@ -1142,7 +1191,9 @@ function indexStatus(PDO $db, array $cfg): array {
         if ($flow['resolved_24h'] > 0 && $queued > 0) {
             $flow['days_to_cover'] = (int)ceil($queued / $flow['resolved_24h']);
         }
-    } catch (\Throwable $e) {}
+      } catch (\Throwable $e) {}
+      return $flow;
+    });
 
     return [
         'flow' => $flow,

@@ -490,7 +490,12 @@ function netlimitApply(array $cfg, int $pps, int $burst, int $port, bool $dryRun
         // counters running; only a full reload restarts them, and only then is the previous reading
         // worthless. Throwing the cursor away needlessly would cost a chart sample per change.
         $reloaded = (string)($r['json']['mode'] ?? 'reload') !== 'replace';
-        netlimitStateUpdate(function (array &$s) use ($pps, $source, $reloaded) {
+        // $r is READ inside this closure and must therefore be captured. It was not: PHP closures
+        // bind by an explicit `use` list, so `$r['json']['persist_deferred']` was reading an
+        // undefined variable and `persist_deferred` was written false on every apply — the panel
+        // could never say "the rule is live but the file was not written", which is precisely the
+        // state a reboot silently undoes.
+        netlimitStateUpdate(function (array &$s) use ($pps, $source, $reloaded, $r) {
             $s['last_apply_at'] = time();
             $s['last_apply_pps'] = $pps;
             $s['last_apply_source'] = $source;

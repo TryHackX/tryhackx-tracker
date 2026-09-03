@@ -393,7 +393,11 @@ def restore(cfg: dict, dry: bool = False) -> dict:
 
 def run(args) -> int:
     cfg = read_settings()
-    port = int(cfg.get('tracker_port') or 6969)
+    # `net_limit_port`, not `tracker_port` -- the latter is not a setting this panel has ever had, so
+    # this read was always the 6969 default. On a tracker running anywhere else that meant the probe
+    # rebuilt the firewall table for a port nothing uses: the real limit torn down, every measurement
+    # taken on an empty port, and the restore putting the baseline back on 6969 as well.
+    port = int(cfg.get('net_limit_port') or 6969)
     cfg['_tracker_port'] = port
     dry = args.dry_run or not IS_LINUX
 
@@ -453,8 +457,21 @@ def run(args) -> int:
             reason = ''
             while time.time() < t_end:
                 time.sleep(min(SAMPLE_EVERY_S, max(1, t_end - time.time())))
+                # The panel's Stop button writes `cancel` into the state file. Nothing read it, so
+                # Stop reported that the run was stopping while the run carried on moving the
+                # firewall limit -- the one control an operator reaches for when a probe is hurting
+                # the machine did nothing at all. Checked here, between samples, so a stop takes
+                # effect within one sample interval and still goes out through the restore path.
+                if state_read().get('cancel'):
+                    reason = 'stopped from the panel'
+                    break
                 s = sample(cfg, port)
                 samples.append(s)
+                # A heartbeat per sample, not per step. Liveness is judged by how recently this file
+                # was touched (TUNER_STALE_S), so a dwell longer than that looked like a dead process
+                # to the janitor -- which then reaped the run, consumed its restore marker, and left
+                # the test limit in force on a machine nobody was watching.
+                state_update(phase='running', current_step=idx, samples_in_step=len(samples))
                 reason = harm(baseline, s, samples[-2] if len(samples) > 1 else step_start, cfg)
                 if reason:
                     break
@@ -474,7 +491,8 @@ def run(args) -> int:
             steps.append(step)
             state_update(steps=steps, phase='running', current_step=idx + 1)
             if reason:
-                stopped = 'stopped at %d pps: %s' % (pps, reason)
+                stopped = ('stopped from the panel at %d pps' % pps) if reason == 'stopped from the panel' \
+                    else 'stopped at %d pps: %s' % (pps, reason)
                 break
 
         report = summarise(steps, arriving, current_limit, stopped)

@@ -34,6 +34,16 @@ $grant = null;
 $groupSlug = trim((string)($payload['group'] ?? ''));
 if ($groupSlug !== '') {
     $group = userGroupBySlug($db, $groupSlug);
+    // Same sentence as api/v1/users_grant.php and api/admin/user_grant.php: a machine-to-machine key
+    // moves members between ordinary groups. A group that carries panel access is not one of those —
+    // an account in it gets a full panel session at its next sign-in.
+    $gPerms = $group ? userGroupPermissions($group['permissions'] ?? '') : [];
+    $gCarriesPanel = $group && $group['slug'] === 'admin';
+    foreach (array_keys($gPerms) as $gp) { if (userIsPanelPermission($gp)) { $gCarriesPanel = true; break; } }
+    if ($gCarriesPanel) {
+        jsonResponse(['ok' => false, 'error' => 'group_not_grantable',
+                      'detail' => 'A group that carries panel access can only be granted by the site owner.'], 403);
+    }
     if ($group && $group['slug'] !== 'guest') {
         $expiresAt = userDurationExpiry($db, (int)$u['id'], (int)$group['id'], (string)($payload['duration'] ?? 'permanent'));
         if ($expiresAt !== '') {

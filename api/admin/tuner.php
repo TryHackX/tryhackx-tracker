@@ -43,7 +43,11 @@ if ($op === 'apply') {
     if (!in_array($pps, $tried, true)) {
         jsonResponse(['error' => 'That limit was not one of the steps this run measured.'], 400);
     }
-    $r = netlimitApply($cfg, $pps, (int)($cfg['net_limit_burst'] ?? 100), (int)($cfg['tracker_port'] ?? 6969));
+    // Through the same accessors the Traffic page uses, so the clamps apply and the port is the one
+    // actually configured. `tracker_port` was never a setting: this always applied to 6969, and on a
+    // tracker running elsewhere the report's "apply" button would have moved the wrong port's limit
+    // while answering that it had set the limit.
+    $r = netlimitApply($cfg, $pps, netlimitBurst($cfg), netlimitPort($cfg));
     auditNote(['target_id' => (string)$pps, 'summary' => 'applied ' . $pps . ' pps from a stability probe']);
     jsonResponse(['success' => !empty($r['ok']), 'message' => !empty($r['ok'])
         ? 'Inbound limit set to ' . number_format($pps) . ' pps.'

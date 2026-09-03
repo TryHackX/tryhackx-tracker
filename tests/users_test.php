@@ -386,5 +386,30 @@ check('an unknown slug is skipped rather than fatal',
 $db->prepare("DELETE FROM user_groups WHERE slug = 'grantprobe'")->execute();
 $db->prepare("DELETE FROM settings WHERE `key` LIKE ?")->execute(['schema_grant_test_%']);
 
+
+// ── audit 1.27.1: two ways to take over the panel through a "user" permission ────────────────
+// Both were real, and both had the SAME shape: an endpoint that edits users, reachable by an actor
+// who is not the owner, with no check on what the TARGET carries. api/admin/user_grant.php had the
+// guard already; these two did not.
+$src = (string)file_get_contents(dirname(__DIR__) . '/api/admin/user_update.php');
+check('user_update refuses password/email changes against a panel-carrying target from a moderator',
+      str_contains($src, 'admin_via_user') && str_contains($src, 'userIsPanelPermission')
+      && str_contains($src, 'carries panel access'));
+check('…and it checks what the target HOLDS, not just its group name',
+      str_contains($src, 'userEffectivePermissions') && str_contains($src, 'userIsRootAdmin'));
+
+foreach (['users_grant', 'users_provision'] as $f) {
+    $v = (string)file_get_contents(dirname(__DIR__) . "/api/v1/$f.php");
+    check("v1/$f refuses to grant a group that carries panel access",
+          str_contains($v, 'userIsPanelPermission') && str_contains($v, 'group_not_grantable'));
+    check("v1/$f names the admin slug explicitly too", str_contains($v, "'admin'"));
+}
+
+// The escalation only mattered because of this chain; if it ever stops being true the guards above
+// can be revisited, and if it stays true they must not be removed.
+check('signing in as an admin-group user still opens a panel session (the reason the guards exist)',
+      str_contains((string)file_get_contents(dirname(__DIR__) . '/includes/users.php'),
+                   "\$_SESSION['admin_via_user'] = (int)\$user['id'];"));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

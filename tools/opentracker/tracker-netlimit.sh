@@ -299,6 +299,26 @@ parse_trusted() {  # parse_trusted <comma-separated>
     return 0
 }
 
+# Read the exemptions back out of the LOADED table.
+#
+# `persist` re-renders the ruleset from what is live and saves it, and it is the NORMAL path on this
+# machine: php-fpm cannot write /etc, so an apply defers and the janitor calls persist a minute
+# later. Re-rendering without reading the sets back would save a file with the exemptions stripped —
+# the live rules keep them, the reboot does not. These sets are capped at 256 elements, so listing
+# them is cheap; this is not the 262 144-element egress set.
+read_trusted_live() {
+    TRUSTED4=""; TRUSTED6=""
+    have_nft || return 0
+    local setname els
+    for setname in trusted4 trusted6; do
+        els="$("$NFT" list set inet "$TABLE" "$setname" 2>/dev/null | tr -d '\n' \
+               | sed -n 's/.*elements[[:space:]]*=[[:space:]]*{\([^}]*\)}.*/\1/p' | tr -d ' ')"
+        [ -n "$els" ] || continue
+        els="$(printf '%s' "$els" | sed 's/,/, /g')"
+        if [ "$setname" = trusted4 ]; then TRUSTED4="$els"; else TRUSTED6="$els"; fi
+    done
+}
+
 # The two sets, always emitted so the chain can reference them even when empty.
 render_trusted_sets() {
     printf '    set trusted4 { type ipv4_addr; flags interval;%s }\n' \
@@ -636,6 +656,7 @@ action_persist() {
     else
         local pps burst; pps="$(read_limit)"; burst="$(read_burst)"; [ -n "$burst" ] || burst=5
         is_uint "$pps" || fail "cannot read the live limit back from the ruleset"
+        read_trusted_live
         render "$pps" "$burst" "$port" >"$tmp"
     fi
     # The outbound budget lives in its own file and drifts for the same reason, so the janitor

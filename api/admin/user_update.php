@@ -25,6 +25,33 @@ $password = (string)($input['password'] ?? '');
 if ($password !== '' && !userValidPassword($password)) {
     jsonResponse(['error' => 'Password: ' . USER_PASSWORD_RULES], 400);
 }
+
+// TAKING OVER AN ACCOUNT IS NOT "EDITING" IT.
+//
+// `panel.users.edit` is a grantable moderator permission whose promise is status and email
+// verification. Setting a PASSWORD or an EMAIL is a different act: the panel admin is mirrored into
+// `users` as a member of the admin group, and userMaybeOpenPanelSession() opens a full panel session
+// for anyone in that group at their next sign-in — where panelCan() is unconditionally true. So a
+// moderator who could set that account's password could sign in as it and own the panel, including
+// every sudo-backed helper. An email is the same door with one more step, through password reset.
+//
+// api/admin/user_grant.php already refuses to let a non-owner grant a group that CARRIES panel
+// access; this is the same sentence for the same reason. Written against what the target holds
+// rather than against its name, so a custom group with panel permissions in it is covered too.
+$viaUser = (int)($_SESSION['admin_via_user'] ?? 0);
+$actorIsOwner = $viaUser <= 0 || userIsAdminGroup($db, $viaUser);
+if (!$actorIsOwner && ($password !== '' || $emailSet || isset($input['email_verified']))) {
+    $targetCarriesPanel = userIsRootAdmin($u, $cfg) || userIsAdminGroup($db, $id);
+    if (!$targetCarriesPanel) {
+        foreach (array_keys(userEffectivePermissions($db, $id)) as $tp) {
+            if (userIsPanelPermission($tp)) { $targetCarriesPanel = true; break; }
+        }
+    }
+    if ($targetCarriesPanel) {
+        jsonResponse(['error' => 'Only the site owner can change the password or email of an account '
+                               . 'that carries panel access.'], 403);
+    }
+}
 if ($status === null && !$emailSet && $password === '' && !isset($input['email_verified'])) {
     jsonResponse(['error' => 'Nothing to change'], 400);
 }

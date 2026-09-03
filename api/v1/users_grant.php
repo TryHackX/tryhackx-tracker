@@ -23,6 +23,21 @@ $group = userGroupBySlug($db, trim((string)($payload['group'] ?? '')));
 if (!$group) jsonResponse(['ok' => false, 'error' => 'group_not_found'], 404);
 if ($group['slug'] === 'guest') jsonResponse(['ok' => false, 'error' => 'group_not_grantable'], 422);
 
+// A machine-to-machine key exists to move members between ordinary groups after a purchase or a
+// forum action. Handing out PANEL access is not that: userMaybeOpenPanelSession() gives any member
+// of the admin group a full panel session at their next sign-in, where panelCan() is unconditionally
+// true — Settings, backups (whose archives carry every database password on this box) and the
+// sudo-backed helpers. api/admin/user_grant.php refuses this for a moderator with a session; a
+// bearer token in somebody else's shop is not a stronger actor than that.
+$gPerms = userGroupPermissions($group['permissions'] ?? '');
+$gCarriesPanel = ($group['slug'] === 'admin');
+foreach (array_keys($gPerms) as $gp) { if (userIsPanelPermission($gp)) { $gCarriesPanel = true; break; } }
+if ($gCarriesPanel) {
+    jsonResponse(['ok' => false, 'error' => 'group_not_grantable',
+                  'detail' => 'A group that carries panel access can only be granted by the site owner.'], 403);
+}
+
+
 $until = trim((string)($payload['until'] ?? ''));
 if ($until !== '') {
     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $until)) $until .= ' 23:59:59';
