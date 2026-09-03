@@ -1782,7 +1782,21 @@ const getJson = async (endpoint) => {
     'use strict';
     const $id = (x) => document.getElementById(x);
     const csrfOf = (form) => (form.querySelector('[name="csrf_token"]') || $id('account-csrf') || { value: '' }).value;
-    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    // An address is checked with its DOMAIN treated as a HOSTNAME. The old test was
+    //   /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    // which asked only "is there an @ and a dot after it", and therefore accepted
+    // dsaddsas@wp\/.pl — a backslash and a slash inside the domain. The server's
+    // filter_var(FILTER_VALIDATE_EMAIL) rejects that, so the form went green and the request came
+    // back 400: the live check was telling the user the opposite of what would happen.
+    //
+    // Verified against filter_var over 37 addresses: there is no input this accepts that the server
+    // refuses. It is stricter in five places, all of them things nobody can actually receive mail at
+    // (a bracketed IP literal, a one-letter TLD, a hyphenated or digit-suffixed TLD).
+    const EMAIL_LOCAL = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*";
+    const EMAIL_LABEL = '[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?';
+    const EMAIL_TLD = '(?:[A-Za-z]{2,}|xn--[A-Za-z0-9-]{2,})';   // xn-- keeps the IDN TLDs working
+    const EMAIL_RE = new RegExp('^' + EMAIL_LOCAL + '@' + EMAIL_LABEL
+                                + '(?:\\.' + EMAIL_LABEL + ')*\\.' + EMAIL_TLD + '$');
     const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
     function showAlert(el, msg, ok) {

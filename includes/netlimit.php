@@ -134,6 +134,83 @@ function netlimitLoadPerCore(): ?float {
     return round(((float)$la[0]) / $cpus, 3);
 }
 
+/**
+ * The metadata worker's CPU, as RAW CUMULATIVE COUNTERS.
+ *
+ * WHY THIS DOES NOT RETURN A PERCENTAGE
+ * ------------------------------------
+ * A percentage needs two readings and the time between them. Taking the second one here would mean
+ * sleeping inside a web request — so this returns the same two counters `top` reads, and the browser
+ * subtracts consecutive polls. That is exactly how the OpenTracker card already does it
+ * (tools/opentracker/tracker-instance.sh + assets/js/admin-otperf.js), and it is the only way to
+ * measure a share of a CPU without either blocking or guessing.
+ *
+ * WHICH PROCESS
+ * -------------
+ * The worker is ONE ordinary process — `python3 worker.py <conf>` under `tracker-metadata.service`.
+ * Its "concurrency" is the number of simultaneous libtorrent fetches INSIDE that process, so its
+ * threads are already summed into utime+stime and there is nothing to add up across processes.
+ *
+ * It is identified by its systemd unit from /proc/<pid>/cgroup, not by the string "worker.py" in a
+ * command line — an editor with the file open, a pager, or a copy started by hand all carry that
+ * substring, and attributing an admin's `less worker.py` to the worker would be a lie that looks
+ * like data. A second check on the executable keeps a same-named unit elsewhere from matching.
+ *
+ * php-fpm's ProtectKernelTunables makes /proc/sys read-only; /proc/<pid>/ is untouched by it and
+ * these files are world-readable, so this works from the web request as well as from the janitor.
+ *
+ * @return array{pid:int,ticks:int,total:int,idle:int,hz:int,started:int}|null
+ */
+function netlimitWorkerCpu(?string $unit = null): ?array {
+    if (!is_dir('/proc')) return null;
+    $unit = $unit ?: 'tracker-metadata.service';
+
+    $pid = 0;
+    foreach (@scandir('/proc') ?: [] as $e) {
+        if (!ctype_digit($e)) continue;
+        $cg = @file_get_contents('/proc/' . $e . '/cgroup');
+        if ($cg === false || !str_contains($cg, $unit)) continue;
+        // The unit's cgroup also contains the shell systemd used to start it on some setups, so the
+        // one that is actually running Python is the one wanted.
+        $exe = @readlink('/proc/' . $e . '/exe');
+        $cmd = (string)@file_get_contents('/proc/' . $e . '/cmdline');
+        if ($exe !== false && !str_contains((string)$exe, 'python')
+            && !str_contains($cmd, 'python')) continue;
+        $pid = (int)$e;
+        break;
+    }
+    if ($pid <= 0) return null;
+
+    $stat = (string)@file_get_contents('/proc/' . $pid . '/stat');
+    if ($stat === '') return null;
+    // The command field is in parentheses and may itself contain spaces, so fields are counted from
+    // AFTER the closing bracket. Splitting the whole line on spaces is the classic way to read the
+    // wrong numbers out of this file.
+    $close = strrpos($stat, ')');
+    if ($close === false) return null;
+    $rest = preg_split('/\s+/', trim(substr($stat, $close + 1)));
+    // After the state character, field 14 (utime) and 15 (stime) of the man page are index 11 and 12
+    // here; starttime (field 22) is index 19.
+    if (!isset($rest[11], $rest[12], $rest[19])) return null;
+    $ticks = (int)$rest[11] + (int)$rest[12];
+    $started = (int)$rest[19];
+
+    $cpu = (string)@file_get_contents('/proc/stat');
+    if (!preg_match('/^cpu\s+(.+)$/m', $cpu, $m)) return null;
+    $f = array_map('intval', preg_split('/\s+/', trim($m[1])));
+    // Every field is time the machine spent somewhere, so the sum is the wall clock times the cores.
+    $total = array_sum($f);
+    if ($total <= 0) return null;
+
+    $hz = 100;
+    if (function_exists('shell_exec') && trackerExecAvailable()) {
+        $g = @shell_exec('getconf CLK_TCK 2>/dev/null');
+        if (is_string($g) && ctype_digit(trim($g))) $hz = max(1, (int)trim($g));
+    }
+    return ['pid' => $pid, 'ticks' => $ticks, 'total' => $total,
+            'idle' => (int)($f[3] ?? 0), 'hz' => $hz, 'started' => $started];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // State file (config/net_state.json) — same locking discipline as the whitelist state
 // ─────────────────────────────────────────────────────────────────────────────
@@ -435,7 +512,26 @@ function netlimitAutoDecide(array $autoState, int $observedPps, int $currentPps,
  * @return list<string> plain addresses and CIDRs, de-duplicated, order preserved
  */
 function netlimitTrusted(array $cfg): array {
-    $raw = (string)($cfg['net_limit_trusted'] ?? '');
+    return netlimitAddressBox((string)($cfg['net_limit_trusted'] ?? ''));
+}
+
+/**
+ * Addresses the inbound limit must ALWAYS drop, from `net_limit_blocked`.
+ *
+ * The mirror image of the box above, and it exists because a list cannot be more specific than
+ * another list. "Allow all of Poland" is an allow list; "except these three hosts" has nowhere to
+ * live — put those hosts in a block list and the allow list, which is matched first, lets them
+ * through anyway. So this is matched BEFORE every list and after the trusted box, which is the one
+ * thing that still outranks it.
+ *
+ * @return list<string> plain addresses and CIDRs, de-duplicated, order preserved
+ */
+function netlimitBlocked(array $cfg): array {
+    return netlimitAddressBox((string)($cfg['net_limit_blocked'] ?? ''));
+}
+
+/** The shared parser for both hand-typed boxes: commas, spaces or newlines, capped, de-duplicated. */
+function netlimitAddressBox(string $raw): array {
     if (trim($raw) === '') return [];
     $out = [];
     foreach (preg_split('/[\s,;]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) as $item) {
@@ -466,7 +562,12 @@ function netlimitValidAddress(string $item): bool {
 
 /** Which entries in the raw setting were thrown away, so the panel can say so instead of silently dropping them. */
 function netlimitTrustedRejected(array $cfg): array {
-    $raw = (string)($cfg['net_limit_trusted'] ?? '');
+    return netlimitAddressBoxRejected((string)($cfg['net_limit_trusted'] ?? ''));
+}
+function netlimitBlockedRejected(array $cfg): array {
+    return netlimitAddressBoxRejected((string)($cfg['net_limit_blocked'] ?? ''));
+}
+function netlimitAddressBoxRejected(string $raw): array {
     if (trim($raw) === '') return [];
     $bad = [];
     foreach (preg_split('/[\s,;]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) as $item) {
@@ -483,6 +584,9 @@ function netlimitApply(array $cfg, int $pps, int $burst, int $port, bool $dryRun
     $args  = ['set', (string)$pps, (string)$burst, (string)$port];
     $trusted = netlimitTrusted($cfg);
     if ($trusted) $args[] = '--trusted=' . implode(',', $trusted);
+    // Hand-typed and capped at the same 256, so argv carries it — unlike the lists, which are a file.
+    $blocked = netlimitBlocked($cfg);
+    if ($blocked) $args[] = '--blocked=' . implode(',', $blocked);
     // The address lists are far too large for argv, so they travel as a file the helper reads and
     // copies to its own spool. Passed whenever the file exists — including when it is EMPTY, which
     // is how the master switch clears the sets instead of leaving them loaded.

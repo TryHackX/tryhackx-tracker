@@ -40,6 +40,58 @@
     const textOf = (el) => norm(el ? el.textContent : '');
     const show = (el, on) => { if (el) el.classList.toggle('d-hidden', !on); };
 
+    /**
+     * A byte-valued setting shown as a number plus a unit.
+     *
+     * "5368709120" is a true statement about a limit and an unreadable one. The stored value stays
+     * bytes — every consumer of these settings expects bytes and none of them are changing — so the
+     * hidden input keeps the setting's real name and its real value, and this pair only edits it.
+     * If this function never runs (a JS error earlier in the file, an old cached bundle), the form
+     * still posts the value it was rendered with. A visible field carrying the real name would
+     * instead post "5" and silently cut the budget by a factor of a billion.
+     *
+     * The unit chosen on load is the largest one that divides the value exactly, so 5368709120 shows
+     * as 5 GiB and 5368709121 shows as 5242880.0009765625 KiB — no, as bytes: a value that is not a
+     * whole number of any larger unit is shown in bytes rather than rounded into a lie.
+     */
+    function bindSizeFields() {
+        const UNITS = [1099511627776, 1073741824, 1048576, 1024, 1];
+        [...document.querySelectorAll('input[type="hidden"][id$="-raw"][data-size-max]')].forEach(raw => {
+            const num = document.getElementById(raw.id.replace(/-raw$/, '-num'));
+            const unit = document.getElementById(raw.id.replace(/-raw$/, '-unit'));
+            if (!num || !unit) return;
+            const lo = Number(raw.dataset.sizeMin || 0);
+            const hi = Number(raw.dataset.sizeMax || 0);
+
+            const load = () => {
+                const v = Math.max(0, Number(raw.value) || 0);
+                const u = UNITS.find(x => v !== 0 && v % x === 0) || 1;
+                unit.value = String(u);
+                num.value = String(v / u);
+            };
+            const store = () => {
+                const u = Number(unit.value) || 1;
+                let v = Math.round((Number(num.value) || 0) * u);
+                // Clamped here as well as on the server, so the reader sees the value that will
+                // actually be saved instead of finding out after a reload.
+                if (hi && v > hi) v = hi;
+                if (lo && v < lo && v !== 0) v = lo;
+                raw.value = String(v);
+                if (Math.round((Number(num.value) || 0) * u) !== v) load();
+            };
+            load();
+            num.addEventListener('input', store);
+            unit.addEventListener('change', () => {
+                // Changing the unit re-reads the stored bytes rather than reinterpreting the number:
+                // switching MiB to GiB must not silently multiply the limit by 1024.
+                const bytes = Number(raw.value) || 0;
+                const u = Number(unit.value) || 1;
+                num.value = String(bytes / u);
+            });
+        });
+    }
+    bindSizeFields();
+
     // ── model ───────────────────────────────────────────────────────────────
     // Every section is a list of "items": one per settings cell (.row > div) plus one per block that
     // is not a plain cell (donation rows, the schedule table, the federation peer card). Indexing the

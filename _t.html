@@ -3,56 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Traffic &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
+    <title>Traffic &mdash; Local Tracker</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
-    <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
-    <?php
-    // Both charts are drawn by the same vendored uPlot; either one on is enough to need it.
-    $tlOn  = statsTimelineEnabled($cfg);
-    $netOn = netlimitMonitorEnabled($cfg) || netlimitEnabled($cfg);
-    ?>
-    <?php if ($tlOn || $netOn): ?>
-    <link rel="stylesheet" href="<?= $baseUrl ?>assets/vendor/uplot/uPlot.min.css<?= assetVer('assets/vendor/uplot/uPlot.min.css') ?>">
-    <?php endif; ?>
-</head>
-<body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
+    <link rel="stylesheet" href="/assets/css/admin.css?v=1788475796">
+            <link rel="stylesheet" href="/assets/vendor/uplot/uPlot.min.css?v=1787153281">
+    </head>
+<body class="admin-body admin-hc wl-body" data-api-base="/api.php?endpoint=" data-csrf="3b40bf431b678b2a4a376517b5f091de6a50bfa222d959a994468a9598ae4bdd" data-login-path="admin">
     <div class="admin-container admin-wide wl-page">
         <div class="admin-header">
             <h2><i class="bi bi-speedometer2"></i> Traffic <span class="idx-subtitle">what the swarm sends and what the firewall lets through</span></h2>
-            <?php $current = 'admin-traffic'; include __DIR__ . '/_header_actions.php'; ?>
+            <div class="admin-header-actions">
+                        <a href="/?action=admin"
+           class="btn btn-sm btn-outline-info"
+           ><i class="bi bi-flag"></i> Reports</a>
+                    <a href="/?action=admin-whitelist"
+           class="btn btn-sm btn-outline-info"
+           ><i class="bi bi-list-check"></i> Whitelist</a>
+                    <a href="/?action=admin-index"
+           class="btn btn-sm btn-outline-info"
+           ><i class="bi bi-collection"></i> Index</a>
+                    <a href="/?action=admin-traffic"
+           class="btn btn-sm btn-outline-info active"
+           aria-current="page"><i class="bi bi-speedometer2"></i> Traffic</a>
+                    <a href="/?action=admin-users"
+           class="btn btn-sm btn-outline-info"
+           ><i class="bi bi-people"></i> Users</a>
+                    <a href="/?action=admin-backups"
+           class="btn btn-sm btn-outline-info"
+           ><i class="bi bi-archive"></i> Backups</a>
+                    <a href="/?action=admin-audit"
+           class="btn btn-sm btn-outline-info"
+           ><i class="bi bi-journal-text"></i> Log</a>
+                    <a href="/?action=settings#section-netlimit"
+       class="btn btn-sm btn-outline-info"
+       ><i class="bi bi-gear"></i> Settings</a>
+        <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> Logout</button>
+</div>
         </div>
 
-        <?php if ($tlOn): ?>
-        <!-- Swarm timeline (assets/js/stats-timeline.js + vendored uPlot; samples by tools/janitor.php) -->
-        <div class="wl-status-card tl-card" id="wl-timeline-card">
-            <div class="wl-status-head">
-                <h6><i class="bi bi-graph-up"></i> Swarm timeline <span class="wl-status-updated">one sample / <?= (int)statsTimelineInterval($cfg) ?> s · raw <?= (int)statsTimelineRawDays($cfg) ?> d · 5-min <?= (int)statsTimelineKeepDays($cfg) ?> d · <?= statsTimelinePublic($cfg) ? 'public' : 'admins only' ?></span></h6>
-                <div class="wl-status-actions">
-                    <a href="<?= $baseUrl ?>?action=settings#section-timeline" class="btn btn-sm btn-outline-secondary" title="Timeline settings"><i class="bi bi-gear"></i> Settings</a>
-                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-tl-toggle" data-tl-collapse="wl-timeline" aria-expanded="true" aria-controls="wl-timeline"><i class="bi bi-chevron-up"></i> <span>Collapse</span></button>
-                </div>
-            </div>
-            <div id="wl-timeline"<?= statsTimelineMountAttrs($cfg, true) ?>></div>
-        </div>
-        <?php endif; ?>
-
-        <?php if ($netOn): ?>
-        <!-- Inbound UDP traffic + rate limit (assets/js/admin-netlimit.js; samples by tools/janitor.php) -->
+        
+                <!-- Inbound UDP traffic + rate limit (assets/js/admin-netlimit.js; samples by tools/janitor.php) -->
         <div class="wl-status-card nl-card" id="net-card"
              data-net
-             data-monitor="<?= netlimitMonitorEnabled($cfg) ? '1' : '0' ?>"
-             data-limit="<?= netlimitEnabled($cfg) ? '1' : '0' ?>"
-             data-auto="<?= netlimitAutoEnabled($cfg) ? '1' : '0' ?>"
-             data-pps="<?= (int)netlimitPps($cfg) ?>"
-             data-burst="<?= (int)netlimitBurst($cfg) ?>"
-             data-port="<?= (int)netlimitPort($cfg) ?>"
-             data-min="<?= NET_PPS_MIN ?>" data-max="<?= NET_PPS_MAX ?>"
-             data-sample="<?= (int)netlimitSampleSeconds($cfg) ?>">
+             data-monitor="1"
+             data-limit="1"
+             data-auto="0"
+             data-pps="85000"
+             data-burst="100"
+             data-port="6969"
+             data-min="1000" data-max="1000000"
+             data-sample="60">
             <div class="wl-status-head">
-                <h6><i class="bi bi-speedometer2"></i> UDP traffic <span class="wl-status-updated" id="net-updated">port <?= (int)netlimitPort($cfg) ?> · sample <?= (int)netlimitSampleSeconds($cfg) ?> s · keep <?= (int)netlimitKeepDays($cfg) ?> d</span></h6>
+                <h6><i class="bi bi-speedometer2"></i> UDP traffic <span class="wl-status-updated" id="net-updated">port 6969 · sample 60 s · keep 14 d</span></h6>
                 <div class="wl-status-actions">
-                    <a href="<?= $baseUrl ?>?action=settings#section-netlimit" class="btn btn-sm btn-outline-secondary" title="UDP traffic settings"><i class="bi bi-gear"></i> Settings</a>
+                    <a href="/?action=settings#section-netlimit" class="btn btn-sm btn-outline-secondary" title="UDP traffic settings"><i class="bi bi-gear"></i> Settings</a>
                     <button type="button" class="btn btn-sm btn-outline-danger" id="btn-net-panic" title="Clamp the port to 10 000 packets/second for 15 minutes; the janitor puts the previous setting back automatically"><i class="bi bi-exclamation-octagon"></i> Throttle hard&hellip;</button>
                     <!-- bound by admin-netlimit.js, NOT by the timeline's [data-tl-collapse] handler:
                          that file is only loaded when the swarm timeline is on, and two handlers on
@@ -71,7 +76,7 @@
                 <div class="nl-tune" id="net-tune">
                     <div class="nl-tune-head">
                         <span class="nl-tune-title">Inbound limit</span>
-                        <span class="nl-tune-value"><input type="number" id="net-pps-input" class="form-control form-control-sm bg-dark text-light border-secondary" value="<?= (int)netlimitPps($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000" aria-label="Packets per second"> <span class="nl-unit">pps</span></span>
+                        <span class="nl-tune-value"><input type="number" id="net-pps-input" class="form-control form-control-sm bg-dark text-light border-secondary" value="85000" min="1000" max="1000000" step="1000" aria-label="Packets per second"> <span class="nl-unit">pps</span></span>
                     </div>
                     <div class="nl-slider-wrap">
                         <input type="range" class="form-range nl-slider" id="net-pps-range" min="0" max="1000" value="0" aria-label="Inbound packets/second limit">
@@ -103,7 +108,7 @@
                 <div class="nl-tune nl-tune-pending" id="net-egress-tune">
                     <div class="nl-tune-head">
                         <span class="nl-tune-title">Outbound budget <span class="nl-unit">(replies the tracker sends)</span></span>
-                        <span class="nl-tune-value"><input type="number" id="net-epps-input" class="form-control form-control-sm bg-dark text-light border-secondary" value="" placeholder="&mdash;" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000" aria-label="Outbound packets per second" disabled> <span class="nl-unit">pps</span></span>
+                        <span class="nl-tune-value"><input type="number" id="net-epps-input" class="form-control form-control-sm bg-dark text-light border-secondary" value="" placeholder="&mdash;" min="1000" max="1000000" step="1000" aria-label="Outbound packets per second" disabled> <span class="nl-unit">pps</span></span>
                     </div>
                     <div class="nl-slider-wrap">
                         <input type="range" class="form-range nl-slider" id="net-epps-range" min="0" max="1000" value="0" aria-label="Outbound packets/second budget" disabled>
@@ -168,20 +173,18 @@
                 </div>
             </div>
         </div>
-        <?php endif; ?>
-
-        <?php if (netlimitCommand($cfg) !== ''): ?>
-        <!-- Address lists. Directly under the limit card because they live INSIDE that table: the
+        
+                <!-- Address lists. Directly under the limit card because they live INSIDE that table: the
              sets are part of the same ruleset, and with no limit (or counters) loaded there is
              nowhere for them to go. -->
         <div class="wl-status-card nl-card" id="iplists-card" data-iplists
-             data-enabled="<?= ($cfg['net_lists_enabled'] ?? '0') === '1' ? '1' : '0' ?>"
-             data-ttl="<?= (int)($cfg['net_lists_ttl_default'] ?? IPLIST_TTL_DEFAULT) ?>"
-             data-max="<?= IPLIST_MAX_TOTAL ?>">
+             data-enabled="1"
+             data-ttl="720"
+             data-max="250000">
             <div class="wl-status-head">
                 <h6><i class="bi bi-shield-slash"></i> Address lists <span class="wl-status-updated" id="ipl-updated"></span></h6>
                 <div class="wl-status-actions">
-                    <a href="<?= $baseUrl ?>?action=settings#section-iplists" class="btn btn-sm btn-outline-secondary" title="Address list settings"><i class="bi bi-gear"></i> Settings</a>
+                    <a href="/?action=settings#section-iplists" class="btn btn-sm btn-outline-secondary" title="Address list settings"><i class="bi bi-gear"></i> Settings</a>
                     <button type="button" class="btn btn-sm btn-outline-info" id="btn-ipl-add"><i class="bi bi-plus-lg"></i> Add a list</button>
                     <button type="button" class="btn btn-sm btn-outline-warning" id="btn-ipl-push" title="Load what is below into the firewall"><i class="bi bi-upload"></i> Push to firewall&hellip;</button>
                 </div>
@@ -192,7 +195,7 @@
                     <strong class="text-light">Allow</strong> is never dropped &middot;
                     <strong class="text-light">Block</strong> is always dropped &middot;
                     <strong class="text-light">Under pressure</strong> is dropped only when the machine is busy.
-                    Your <a href="<?= $baseUrl ?>?action=settings#section-netlimit">trusted addresses</a> beat every list here.
+                    Your <a href="/?action=settings#section-netlimit">trusted addresses</a> beat every list here.
                     Changes are saved as you make them and reach the firewall when you press <em>Push</em>.
                 </p>
                 <div id="ipl-list"><div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading the lists&hellip;</div></div>
@@ -243,7 +246,7 @@
                             <div class="mt-2">
                                 <label class="form-label wl-small">Re-download every (minutes)</label>
                                 <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary" id="ipl-ttl"
-                                       min="<?= IPLIST_TTL_MIN ?>" max="<?= IPLIST_TTL_MAX ?>" step="15" value="<?= (int)($cfg['net_lists_ttl_default'] ?? IPLIST_TTL_DEFAULT) ?>">
+                                       min="15" max="43200" step="15" value="720">
                             </div>
                         </div>
                         <div class="mb-2 d-none" id="ipl-text-wrap">
@@ -276,17 +279,15 @@
                 </div>
             </div>
         </div>
-        <?php endif; ?>
-
-        <?php if (otPerfCommand($cfg) !== ''): ?>
-        <!-- How the tracker itself is tuned to handle what the two cards above measure. The knobs
+        
+                <!-- How the tracker itself is tuned to handle what the two cards above measure. The knobs
              live in Settings; this card shows what is IN FORCE, which is not the same thing, and is
              where the difference between the two becomes visible. -->
         <div class="wl-status-card nl-card" id="ot-card">
             <div class="wl-status-head">
                 <h6><i class="bi bi-cpu"></i> OpenTracker &mdash; performance <span class="wl-status-updated" id="ot-updated"></span></h6>
                 <div class="wl-status-actions">
-                    <a href="<?= $baseUrl ?>?action=settings#section-ot-perf" class="btn btn-sm btn-outline-secondary" title="Performance settings"><i class="bi bi-gear"></i> Settings</a>
+                    <a href="/?action=settings#section-ot-perf" class="btn btn-sm btn-outline-secondary" title="Performance settings"><i class="bi bi-gear"></i> Settings</a>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-ot-preview" title="Render the drop-in without writing it"><i class="bi bi-eye"></i> Preview drop-in</button>
                     <button type="button" class="btn btn-sm btn-outline-success" id="btn-ot-apply"><i class="bi bi-check2-circle"></i> Apply&hellip;</button>
                     <button type="button" class="btn btn-sm btn-outline-warning" id="btn-ot-workers"><i class="bi bi-diagram-3"></i> Set workers&hellip;</button>
@@ -345,204 +346,11 @@
                 </div>
             </div>
         </div>
-        <?php endif; ?>
-
-        <?php if (!$tlOn && !$netOn && otPerfCommand($cfg) === ''): ?>
-        <!-- Both halves are off. An empty page would just look broken, so say which switch turns
-             each one on — same shape as the "index disabled" note on the Index page. -->
-        <div class="wl-status-card">
-            <div class="wl-status-head"><h6><i class="bi bi-speedometer2"></i> Nothing is being measured</h6></div>
-            <div class="wl-status-grid">
-                <div class="wl-kv-item">
-                    <div class="wl-kv-k">Swarm timeline</div>
-                    <div class="wl-kv-v"><span class="wl-small text-muted">off &mdash; <a href="<?= $baseUrl ?>?action=settings#section-timeline">Settings &rarr; Swarm timeline</a></span></div>
-                </div>
-                <div class="wl-kv-item">
-                    <div class="wl-kv-k">UDP traffic</div>
-                    <div class="wl-kv-v"><span class="wl-small text-muted">off &mdash; <a href="<?= $baseUrl ?>?action=settings#section-netlimit">Settings &rarr; UDP traffic &amp; rate limit</a></span></div>
-                </div>
-            </div>
-        </div>
-        <?php endif; ?>
-
-        <?php if (sysctlEnabled($cfg)): ?>
-        <!-- Kernel network buffers. Deliberately the LAST card on this page: the two above measure
-             the loss, this one is the only thing that can do something about it, and it is the only
-             thing here that changes a setting belonging to the whole machine rather than to the
-             tracker. Gated on the feature being both configured and enabled, so an install that
-             never turned it on never renders it and never polls it. -->
-        <div class="wl-status-card nl-card" id="sysctl-card"
-             data-confirm-seconds="<?= (int)sysctlConfirmSeconds($cfg) ?>">
-            <div class="wl-status-head">
-                <h6><i class="bi bi-sliders2"></i> Kernel network buffers <span class="wl-status-updated" id="sy-updated"></span></h6>
-                <div class="wl-status-actions">
-                    <a href="<?= $baseUrl ?>?action=settings#section-sysctl" class="btn btn-sm btn-outline-secondary" title="Helper and confirmation window"><i class="bi bi-gear"></i> Settings</a>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-sy-suggest" title="Fill in what the measurements above actually support"><i class="bi bi-magic"></i> Use suggested</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-sy-preview" title="Render the file without writing it"><i class="bi bi-eye"></i> Preview file</button>
-                    <button type="button" class="btn btn-sm btn-outline-success" id="btn-sy-arm"><i class="bi bi-stopwatch"></i> Apply for a while&hellip;</button>
-                    <!-- Always here, not only inside the armed banner. Once a change is confirmed the
-                         banner is gone, and the way back went with it. -->
-                    <button type="button" class="btn btn-sm btn-outline-warning" id="btn-sy-restore" disabled><i class="bi bi-arrow-counterclockwise"></i><span class="sy-restore-label"> Restore defaults</span></button>
-                </div>
-            </div>
-
-            <!-- Shown only while a change is in force and unconfirmed. Confirm and Revert are kept
-                 apart on purpose: one of them makes the change survive a reboot, and it would be read
-                 on a page that may be stuttering at the time. -->
-            <div class="sy-armed d-hidden" id="sy-armed">
-                <div class="sy-armed-head">
-                    <i class="bi bi-exclamation-triangle"></i>
-                    <span id="sy-armed-text">A change is in force and will undo itself.</span>
-                </div>
-                <div class="sy-countdown" id="sy-countdown"></div>
-                <div class="sy-armed-keys" id="sy-armed-keys"></div>
-                <div class="sy-armed-actions">
-                    <button type="button" class="btn btn-sm btn-outline-danger" id="btn-sy-revert"><i class="bi bi-arrow-counterclockwise"></i> Put it back now</button>
-                    <span class="sy-armed-gap"></span>
-                    <button type="button" class="btn btn-sm btn-outline-success" id="btn-sy-confirm"><i class="bi bi-check2-circle"></i> Keep it (survives a reboot)&hellip;</button>
-                </div>
-            </div>
-
-            <!-- NOT .wl-status-grid: that is repeat(auto-fill, minmax(250px, 1fr)), so every row here
-                 landed inside one 250-pixel column and every sentence wrapped one word per line. These
-                 rows want the full width of the card and lay themselves out. -->
-            <div class="sy-body" id="sy-grid">
-                <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading the kernel&hellip;</div>
-            </div>
-            <div id="sy-notes"></div>
-        </div>
-
-        <!-- One password gate, one acknowledgement per dangerous key -->
-        <div class="modal fade" id="syConfirmModal" tabindex="-1">
-            <div class="modal-dialog">
-                <div class="modal-content bg-dark">
-                    <div class="modal-header border-secondary">
-                        <h5 class="modal-title"><i class="bi bi-shield-lock text-warning"></i> <span id="sy-modal-title">Apply the kernel buffers</span></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p class="text-light mb-2" style="font-size:0.9rem;" id="sy-modal-text"></p>
-                        <div class="nl-undo" id="sy-modal-undo"></div>
-                        <div id="sy-modal-warnings"></div>
-                        <form id="sy-confirm-form">
-                            <div id="sy-modal-acks"></div>
-                            <div class="mb-3">
-                                <label class="form-label" style="font-size:0.85rem;color:#bbb;">Admin Password *</label>
-                                <input type="password" class="form-control bg-dark text-light border-secondary" id="sy-confirm-password" autocomplete="current-password" required>
-                            </div>
-                            <div class="d-flex justify-content-end gap-2">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><i class="bi bi-x-lg"></i> Cancel</button>
-                                <button type="submit" class="btn btn-sm btn-outline-success" id="sy-confirm-ok"><i class="bi bi-check-lg"></i> Confirm</button>
-                            </div>
-                        </form>
-                        <div id="sy-confirm-alert" class="mt-2"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="modal fade" id="syPreviewModal" tabindex="-1">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content bg-dark">
-                    <div class="modal-header border-secondary">
-                        <h5 class="modal-title"><i class="bi bi-file-earmark-code"></i> <span id="sy-preview-title">File preview</span></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body"><pre class="nl-preview" id="sy-preview-body"></pre></div>
-                </div>
-            </div>
-        </div>
-        <?php endif; ?>
-
-        <?php if (otClusterEnabled($cfg)): ?>
-        <!-- Extra opentracker instances. Last card on the page on purpose: everything above measures
-             whether this is needed, and on most machines the answer is no. The installer's own unit is
-             shown here but is never managed from here -- it is listed so the roster is the whole truth
-             rather than only the part the panel created. -->
-        <div class="wl-status-card nl-card" id="cluster-card">
-            <div class="wl-status-head">
-                <h6><i class="bi bi-diagram-3"></i> OpenTracker instances <span class="wl-status-updated" id="cl-updated"></span></h6>
-                <div class="wl-status-actions">
-                    <a href="<?= $baseUrl ?>?action=settings#section-cluster" class="btn btn-sm btn-outline-secondary"><i class="bi bi-gear"></i> Settings</a>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-cl-reload" title="SIGHUP every instance so it re-reads the shared accesslist"><i class="bi bi-arrow-repeat"></i> Reload all</button>
-                    <button type="button" class="btn btn-sm btn-outline-success" id="btn-cl-add"><i class="bi bi-plus-lg"></i> Add instance&hellip;</button>
-                </div>
-            </div>
-            <div class="sy-body" id="cl-body">
-                <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading the roster&hellip;</div>
-            </div>
-            <div id="cl-notes"></div>
-        </div>
-
-        <div class="modal fade" id="clAddModal" tabindex="-1">
-            <div class="modal-dialog">
-                <div class="modal-content bg-dark">
-                    <div class="modal-header border-secondary">
-                        <h5 class="modal-title"><i class="bi bi-plus-circle text-success"></i> Add a tracker instance</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p class="text-light mb-2" style="font-size:0.9rem;">A new instance starts answering announces as soon as it exists. It shares this tracker&rsquo;s accesslist and its white/black mode, and runs the same binary &mdash; only the ports differ. Clients reach it only if you publish the extra announce URL below.</p>
-                        <form id="cl-add-form">
-                            <div class="row g-2">
-                                <div class="col-6">
-                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;">Name</label>
-                                    <input type="text" class="form-control bg-dark text-light border-secondary" id="cl-name" maxlength="16" placeholder="edge-a" required>
-                                    <small class="settings-hint">a&ndash;z, 0&ndash;9 and -, up to 16.</small>
-                                </div>
-                                <div class="col-3">
-                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;">UDP port</label>
-                                    <input type="number" class="form-control bg-dark text-light border-secondary" id="cl-udp" min="1024" max="65535" required>
-                                </div>
-                                <div class="col-3">
-                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;">TCP port</label>
-                                    <input type="number" class="form-control bg-dark text-light border-secondary" id="cl-tcp" min="1024" max="65535" required>
-                                </div>
-                                <div class="col-6">
-                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;">CPU affinity <small class="settings-hint">(optional)</small></label>
-                                    <input type="text" class="form-control bg-dark text-light border-secondary" id="cl-affinity" placeholder="e.g. 2-3">
-                                </div>
-                                <div class="col-6">
-                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;">UDP workers <small class="settings-hint">(0 = copy the primary&rsquo;s)</small></label>
-                                    <input type="number" class="form-control bg-dark text-light border-secondary" id="cl-workers" min="0" max="64" value="0">
-                                </div>
-                            </div>
-                            <div id="cl-plan" class="mt-2"></div>
-                            <div class="mb-3 mt-2">
-                                <label class="form-label" style="font-size:0.85rem;color:#bbb;">Admin Password *</label>
-                                <input type="password" class="form-control bg-dark text-light border-secondary" id="cl-password" autocomplete="current-password" required>
-                            </div>
-                            <div class="d-flex justify-content-end gap-2">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><i class="bi bi-x-lg"></i> Cancel</button>
-                                <button type="button" class="btn btn-sm btn-outline-info" id="btn-cl-plan"><i class="bi bi-search"></i> Check the ports</button>
-                                <button type="submit" class="btn btn-sm btn-outline-success" id="cl-add-ok"><i class="bi bi-check-lg"></i> Create</button>
-                            </div>
-                        </form>
-                        <div id="cl-add-alert" class="mt-2"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <?php endif; ?>
-
-        <?php if (function_exists('livesyncEnabled') && livesyncEnabled($cfg)): ?>
-        <div class="wl-status-card nl-card" id="livesync-card">
-            <div class="wl-status-head">
-                <h6><i class="bi bi-arrow-left-right"></i> Live peer sync <span class="wl-status-updated" id="ls-updated"></span></h6>
-                <div class="wl-status-actions">
-                    <a href="<?= $baseUrl ?>?action=settings#section-livesync" class="btn btn-sm btn-outline-secondary"><i class="bi bi-gear"></i> Settings</a>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-ls-plan"><i class="bi bi-eye"></i> Preview</button>
-                    <button type="button" class="btn btn-sm btn-outline-success" id="btn-ls-arm"><i class="bi bi-play-circle"></i> Turn on&hellip;</button>
-                    <button type="button" class="btn btn-sm btn-outline-warning" id="btn-ls-off"><i class="bi bi-stop-circle"></i> Turn off&hellip;</button>
-                </div>
-            </div>
-            <div class="sy-body" id="ls-body">
-                <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reading the tunnel&hellip;</div>
-            </div>
-            <div id="ls-notes"></div>
-        </div>
-        <?php endif; ?>
-        <!-- The stability probe. Hidden entirely until it is switched on in Settings: a control that
+        
+        
+        
+        
+                <!-- The stability probe. Hidden entirely until it is switched on in Settings: a control that
              moves the firewall limit on a live machine should not sit there looking clickable on an
              install that has never heard of it. -->
         <div class="wl-status-card mt-3 d-hidden" id="tn-card">
@@ -571,34 +379,23 @@
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
-    <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
-    <script src="<?= $baseUrl ?>assets/js/admin-traffic.js<?= assetVer('assets/js/admin-traffic.js') ?>"></script>
-    <?php if (function_exists('tunerEnabled') && tunerEnabled($cfg)): ?>
-    <script src="<?= $baseUrl ?>assets/js/admin-tuner.js<?= assetVer('assets/js/admin-tuner.js') ?>"></script>
-    <?php endif; ?>
-    <?php if ($tlOn || $netOn): ?>
-    <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>
-    <?php endif; ?>
-    <?php if ($tlOn): ?>
-    <script src="<?= $baseUrl ?>assets/js/stats-timeline.js<?= assetVer('assets/js/stats-timeline.js') ?>"></script>
-    <?php endif; ?>
-    <?php if ($netOn): ?>
-    <script src="<?= $baseUrl ?>assets/js/admin-netlimit.js<?= assetVer('assets/js/admin-netlimit.js') ?>"></script>
-    <?php endif; ?>
-    <?php if (netlimitCommand($cfg) !== ''): ?>
-    <script src="<?= $baseUrl ?>assets/js/admin-iplists.js<?= assetVer('assets/js/admin-iplists.js') ?>"></script>
-    <?php endif; ?>
-    <?php if (otPerfCommand($cfg) !== ''): ?>
-    <script src="<?= $baseUrl ?>assets/js/admin-otperf.js<?= assetVer('assets/js/admin-otperf.js') ?>"></script>
-    <?php if (sysctlEnabled($cfg)): ?>
-    <script src="<?= $baseUrl ?>assets/js/admin-sysctl.js<?= assetVer('assets/js/admin-sysctl.js') ?>"></script>
-    <?php endif; ?>
-    <?php if (otClusterEnabled($cfg)): ?>
-    <script src="<?= $baseUrl ?>assets/js/admin-cluster.js<?= assetVer('assets/js/admin-cluster.js') ?>"></script>
-    <?php if (function_exists('livesyncEnabled') && livesyncEnabled($cfg)): ?>
-    <script src="<?= $baseUrl ?>assets/js/admin-livesync.js<?= assetVer('assets/js/admin-livesync.js') ?>"></script>
-    <?php endif; ?>
-    <?php endif; ?>
-    <?php endif; ?>
-</body>
+    <script src="/assets/js/admin-common.js?v=1787925657"></script>
+    <script src="/assets/js/admin-traffic.js?v=1787832441"></script>
+        <script src="/assets/js/admin-tuner.js?v=1788475496"></script>
+            <script src="/assets/vendor/uplot/uPlot.iife.min.js?v=1787153281"></script>
+                <script src="/assets/js/admin-netlimit.js?v=1787939769"></script>
+            <script>
+(function () {
+  var real = window.AdminCommon.apiCall;
+  window.__canned = {"success": true, "enabled": true, "lists": [{"id": 10, "name": "My office", "kind": "allow", "mode": "hard", "source": "manual", "url": "", "ttl_minutes": 720, "enabled": true, "entries": 2, "addr4": 256, "nets6": 1, "last_fetch_at": "2026-09-03 22:51:01", "last_error": null}, {"id": 9, "name": "China (ipdeny)", "kind": "block", "mode": "hard", "source": "manual", "url": "", "ttl_minutes": 720, "enabled": true, "entries": 8810, "addr4": 342983424, "nets6": 0, "last_fetch_at": "2026-09-03 22:51:01", "last_error": null}, {"id": 11, "name": "Noisy ASN", "kind": "block", "mode": "soft", "source": "manual", "url": "", "ttl_minutes": 720, "enabled": true, "entries": 1, "addr4": 256, "nets6": 0, "last_fetch_at": "2026-09-03 22:51:01", "last_error": null}], "counts": {"allow": 2, "hard": 8810, "soft": 1}, "cover": {"allow": 256, "hard": 342983424, "soft": 256}, "max": 250000, "manual": ["5.188.0.0/16", "198.51.100.7"], "conflicts": [], "file_at": 1788475861, "ttl_default": 720};
+  window.AdminCommon.apiCall = async function (ep, method, body) {
+    if (ep === 'admin/ip_lists') return JSON.parse(JSON.stringify(window.__canned));
+    if (ep === 'admin/ip_list_action') { window.__lastAction = body; return { success: true, message: 'stubbed: ' + body.op }; }
+    return real.apply(this, arguments);
+  };
+})();
+</script>
+<script src="/assets/js/admin-iplists.js?v=1788475797"></script>
+            <script src="/assets/js/admin-otperf.js?v=1787942025"></script>
+            </body>
 </html>

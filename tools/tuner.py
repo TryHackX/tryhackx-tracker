@@ -254,6 +254,12 @@ def sample(cfg: dict, port: int) -> dict:
         # arrived/served/dropped, which do not exist, so every one of these came back None and the
         # report had nothing but load in it — a probe measuring the one thing it was not built for.
         s['limit_pps'] = j.get('pps')
+        # WHICH KIND OF TABLE IS LOADED. `status` falls back to the saved FILE's header when it cannot
+        # read a rate out of the kernel (tracker-netlimit.sh: `[ -n "$limit" ] || limit=...read_header`)
+        # — and `set` writes that file with the value it was asked for. So pps alone can confirm
+        # itself out of a file even when no rule is loaded. `mode` comes from the live ruleset, so
+        # requiring it to say "limit" is what makes the readback about the kernel.
+        s['mode'] = j.get('mode')
         s['arrived'] = pkt('in_total')
         s['served'] = pkt('in_passed')
         s['dropped'] = pkt('in_capped')
@@ -469,6 +475,39 @@ def run(args) -> int:
                 break
 
             step_start = sample(cfg, port)
+
+            # DID THE FIREWALL ACTUALLY TAKE IT?
+            #
+            # This check exists because a run without it produced six steps from 130 000 to 293 000
+            # pps in which served and dropped never moved by more than a percent, and every step was
+            # honestly reported "no harm". Nothing had changed: the helper's fast path was editing
+            # the wrong rule, so the general limit stayed where it was and the probe spent twenty
+            # minutes measuring a machine nobody was touching. A report that confident and that wrong
+            # is worse than no report.
+            #
+            # `sample()` already reads the live limit back out of the ruleset, so this costs nothing
+            # extra — it is only a matter of looking at what was already fetched.
+            if not dry:
+                # An outbound-only run moves the reply budget and leaves the receive limit alone, so
+                # that is the number to read back. `both` moves the receive limit to exactly `pps`
+                # and the reply budget to a multiple of it — checking the receive side is enough.
+                got = step_start.get('egress_pps') if args.what == WHAT_OUTBOUND else step_start.get('limit_pps')
+                want = pps
+                if got is None:
+                    stopped = ('could not read the limit back after setting %d pps, so nothing '
+                               'measured from here would mean anything' % pps)
+                    break
+                if int(got) != int(want):
+                    stopped = ('asked the firewall for %s pps and it reports %s — the change did not '
+                               'take, so every measurement after it would be about a machine that was '
+                               'never altered' % (f'{want:,}', f'{int(got):,}'))
+                    break
+                if args.what != WHAT_OUTBOUND and step_start.get('mode') not in (None, 'limit'):
+                    stopped = ('the firewall is in "%s" mode, which has no rate rule at all — the '
+                               'number read back came from the saved file, not from the kernel'
+                               % step_start.get('mode'))
+                    break
+
             samples = []
             t_end = time.time() + dwell
             reason = ''
@@ -544,6 +583,33 @@ def summarise(steps, arriving, current_limit, stopped) -> dict:
     """
     ok_steps = [s for s in steps if s['ok']]
     safe = max((s['limit_pps'] for s in ok_steps), default=None)
+
+    # A SECOND, INDEPENDENT WAY TO NOTICE THAT NOTHING HAPPENED.
+    #
+    # The per-step check above catches a limit that never reached the kernel. This catches the wider
+    # case — a run whose limits span more than twice over and whose served and dropped rates are
+    # nevertheless flat. Whatever the cause, those numbers are not a measurement of those limits, and
+    # the report has to say so instead of recommending the largest one.
+    flat = ''
+    served = [x.get('served_pps') for x in steps if x.get('served_pps')]
+    limits = [x['limit_pps'] for x in steps]
+    # AND EVERY STEP MUST HAVE BEEN DROPPING SOMETHING.
+    #
+    # Without this, a perfectly good run whose whole plan sits ABOVE the arrival rate — nothing
+    # refused at any step, served flat because the machine is serving everything — was branded
+    # inconclusive and had its suggestion withheld. That is the best possible outcome being reported
+    # as a broken run. A limit can only prove it is taking effect by changing what it refuses, so the
+    # verdict is about steps that were refusing something in the first place.
+    dropping = [x.get('dropped_pps') for x in steps]
+    all_dropping = len(dropping) == len(steps) and all(d is not None and d > 0 for d in dropping)
+    if all_dropping and len(served) >= 3 and len(limits) >= 3 and min(limits) > 0:
+        spread = max(limits) / min(limits)
+        wobble = (max(served) - min(served)) / max(served) if max(served) else 0
+        if spread >= 1.5 and wobble < 0.05:
+            flat = ('The limits in this run span %.1fx and the served rate moved by less than %d%% '
+                    'across all of them. That is not what a limit that is taking effect looks like — '
+                    'treat this run as inconclusive and check the firewall before trusting it.'
+                    % (spread, int(wobble * 100) + 1))
     minimum = None
     for s in sorted(steps, key=lambda x: x['limit_pps']):
         d = s.get('dropped_pps')
@@ -555,6 +621,23 @@ def summarise(steps, arriving, current_limit, stopped) -> dict:
     lines = []
     if arriving:
         lines.append('About %s packets a second were arriving while this ran.' % f'{int(arriving):,}')
+
+    # WHAT IS HAPPENING RIGHT NOW, not only what this run changed.
+    #
+    # "No harm" is a statement about the DELTA: this step did not make things worse than the baseline.
+    # On a machine already refusing 60% of everything that arrives, six of those in a row read as
+    # "all is well", which is the opposite of the truth. The absolute share belongs at the top of the
+    # report, before any suggestion.
+    ref = next((x for x in steps if x.get('served_pps') and x.get('dropped_pps') is not None), None)
+    if ref:
+        tot = (ref['served_pps'] or 0) + (ref['dropped_pps'] or 0)
+        if tot > 0 and ref['dropped_pps'] > 0:
+            share = 100.0 * ref['dropped_pps'] / tot
+            if share >= 1:
+                lines.append('Of everything arriving, %d%% is being refused by the limit right now '
+                             '(%s of %s packets a second). "No harm" below means only that a step did '
+                             'not make that worse.'
+                             % (round(share), f"{int(ref['dropped_pps']):,}", f'{int(tot):,}'))
     if safe is not None:
         lines.append('The highest limit that hurt nothing was %s pps.' % f'{safe:,}')
     if minimum is not None:
@@ -563,6 +646,8 @@ def summarise(steps, arriving, current_limit, stopped) -> dict:
         lines.append('At %s pps: %s' % (f"{harmed['limit_pps']:,}", harmed['harm']))
     if stopped:
         lines.append(stopped)
+    if flat:
+        lines.append(flat)
     if not steps:
         lines.append('No step completed, so there is nothing to suggest.')
 
@@ -570,8 +655,11 @@ def summarise(steps, arriving, current_limit, stopped) -> dict:
         'at': int(time.time()),
         'arriving_pps': arriving,
         'was': current_limit,
-        'suggested_safe': safe,
-        'suggested_minimum': minimum,
+        # A run that could not tell its limits apart must not hand the panel a button to apply the
+        # largest of them, so the suggestions are withheld rather than merely annotated.
+        'suggested_safe': None if flat else safe,
+        'suggested_minimum': None if flat else minimum,
+        'inconclusive': flat,
         'stopped_because': stopped,
         'steps': steps,
         'summary': ' '.join(lines),
@@ -660,6 +748,49 @@ def self_test() -> int:
     check('the harmful step is named in the summary', '180,000' in rep['summary'], rep['summary'])
     check('every suggestion is a value that was actually held',
           rep['suggested_safe'] in [s['limit_pps'] for s in steps])
+
+    # ── a run that could not tell its limits apart ──
+    #
+    # This is the exact shape of the run that produced a confident, meaningless report: six limits
+    # spanning 2.25x, and served/dropped identical across all of them because the change was never
+    # reaching the kernel.
+    flat_steps = [
+        {'limit_pps': 130000, 'ok': True, 'served_pps': 81864, 'dropped_pps': 127855, 'harm': ''},
+        {'limit_pps': 163000, 'ok': True, 'served_pps': 81273, 'dropped_pps': 127077, 'harm': ''},
+        {'limit_pps': 196000, 'ok': True, 'served_pps': 81369, 'dropped_pps': 128031, 'harm': ''},
+        {'limit_pps': 228000, 'ok': True, 'served_pps': 80493, 'dropped_pps': 128116, 'harm': ''},
+        {'limit_pps': 261000, 'ok': True, 'served_pps': 81259, 'dropped_pps': 127824, 'harm': ''},
+        {'limit_pps': 293000, 'ok': True, 'served_pps': 80533, 'dropped_pps': 126516, 'harm': ''},
+    ]
+    flat = summarise(flat_steps, 217334, 90000, '')
+    check('a run whose limits changed nothing is called inconclusive', bool(flat['inconclusive']), flat)
+    check('… and it withholds the suggestion instead of recommending the largest step',
+          flat['suggested_safe'] is None and flat['suggested_minimum'] is None, flat)
+    check('… and the summary says why', 'inconclusive' in flat['summary'], flat['summary'])
+
+    # The same numbers, but the limits actually did something: the suggestion must come back.
+    real_steps = [dict(x) for x in flat_steps]
+    for i, x in enumerate(real_steps):
+        x['served_pps'] = 60000 + i * 25000
+        x['dropped_pps'] = max(0, 217334 - x['served_pps'])
+    real = summarise(real_steps, 217334, 90000, '')
+    check('a run where the limits DID move the numbers still suggests one',
+          not real['inconclusive'] and real['suggested_safe'] == 293000, real)
+
+    # A run that never refused anything is not inconclusive — it is the best possible answer.
+    above = [{'limit_pps': 130000 + i * 33000, 'ok': True, 'served_pps': 217000.0,
+              'dropped_pps': 0.0, 'harm': ''} for i in range(6)]
+    ab = summarise(above, 217334, 90000, '')
+    check('a run whose every step refused nothing is NOT called inconclusive',
+          not ab['inconclusive'] and ab['suggested_safe'] == 130000 + 5 * 33000, ab)
+
+    # ── the absolute situation, not only the delta ──
+    check('the report states the share being refused right now',
+          'is being refused by the limit right now' in flat['summary'], flat['summary'])
+    calm = summarise([{'limit_pps': 300000, 'ok': True, 'served_pps': 200000, 'dropped_pps': 0, 'harm': ''}],
+                     200000, 90000, '')
+    check('… and says nothing of the sort when nothing is being refused',
+          'refused by the limit right now' not in calm['summary'], calm['summary'])
 
     # ── the share is of the interval, not of all history ──
     a = {'per_cpu': [100, 100, 1000]}

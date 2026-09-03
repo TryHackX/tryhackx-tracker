@@ -7,6 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
+    <link rel="stylesheet" href="<?= $baseUrl ?>assets/vendor/uplot/uPlot.min.css<?= assetVer('assets/vendor/uplot/uPlot.min.css') ?>">
     <!-- the same detail-panel primitives the public Info panel uses -->
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/detail-panel.css<?= assetVer('assets/css/detail-panel.css') ?>">
 </head>
@@ -30,6 +31,36 @@
                 <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading status&hellip;</div>
             </div>
             <p class="idx-note" id="idx-disabled-note" style="display:none">The index is <strong>disabled</strong>. Enable it in <a href="<?= $baseUrl ?>?action=settings#section-index">Settings &rarr; Index</a> (measure the full-scrape cost during OPEN hours first).</p>
+        </div>
+
+        <!-- Scrape coverage. The index is built from one file the tracker hands over every half hour,
+             and until now the only visible fact about that was the last poll's line of text. A poll
+             that quietly started arriving truncated, or a tracker that grew past what a poll can
+             carry, looked exactly like a healthy one. -->
+        <div class="wl-status-card" id="idx-cov-card">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-graph-up"></i> Scrape coverage <span class="wl-status-updated" id="idx-cov-updated"></span></h6>
+                <div class="wl-status-actions">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Range" id="idx-cov-ranges">
+                        <button type="button" class="btn btn-outline-secondary" data-range="6h">6h</button>
+                        <button type="button" class="btn btn-outline-secondary active" data-range="24h">24h</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="7d">7d</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="2w">2w</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="1m">1m</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="all">All</button>
+                    </div>
+                </div>
+            </div>
+            <p class="wl-small text-muted mb-2">
+                What each poll actually delivered, against how many torrents the tracker said it had.
+                <strong class="text-light">Delivered</strong> is entries past the resume cursor &mdash; a poll that resumes
+                walks past everything an earlier one already handled, and counting those again would read as coverage it
+                did not achieve. A gap in the coverage line means the tracker&rsquo;s own count was not available then;
+                a marked point is a poll that arrived <strong class="text-light">truncated</strong>.
+            </p>
+            <div id="idx-cov-summary" class="wl-status-grid"></div>
+            <div id="idx-cov-chart" class="idx-cov-chart"></div>
+            <div id="idx-cov-note"></div>
         </div>
 
 
@@ -160,6 +191,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-index.js<?= assetVer('assets/js/admin-index.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-index-coverage.js<?= assetVer('assets/js/admin-index-coverage.js') ?>"></script>
 </body>
 </html>

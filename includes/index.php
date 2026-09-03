@@ -456,6 +456,39 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
         if ($out['ok'] && $out['truncated']) {
             $skipNext = $out['partial'] !== null ? max($stateSkip, $out['entries']) : $out['entries'];
         }
+        // ONE ROW PER POLL, kept.
+        //
+        // `skip_from` is the cursor this pass began at, and it is the difference between "this poll
+        // delivered 386 870 entries" and the truth, which is that it walked past 386 870 and only the
+        // ones beyond the cursor were new. Written before the state file so a crash between the two
+        // leaves a recorded poll rather than a silent one.
+        try {
+            // The tracker's own torrent count, from the same reading the swarm timeline took. Not
+            // fetched here: a poll must not depend on a second network call, and a number from a few
+            // minutes ago is the right denominator for a scrape that took minutes to walk.
+            $rowsTotal = null;
+            if (function_exists('statsTimelineStateRead')) {
+                $ls = statsTimelineStateRead()['last_sample'] ?? null;
+                if (is_array($ls) && !empty($ls['torrents'])) $rowsTotal = (int)$ls['torrents'];
+            }
+            $db->prepare("INSERT INTO index_polls
+                          (ts, entries, skip_from, kept, bytes, ms, truncated, partial,
+                           removed_wl, removed_ban, rows_total, index_rows, error)
+                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                          ON DUPLICATE KEY UPDATE entries = VALUES(entries), kept = VALUES(kept)")
+               ->execute([$now, $out['entries'], $stateSkip, $out['kept'], $out['bytes'], $out['ms'],
+                          $out['truncated'] ? 1 : 0, $out['partial'] !== null ? mb_substr((string)$out['partial'], 0, 64) : null,
+                          $out['removed_wl'], $out['removed_ban'], $rowsTotal, indexTotalCached($db),
+                          $out['error'] !== null ? mb_substr((string)$out['error'], 0, 190) : null]);
+            // Pruned here rather than on a timer: this is the only thing that writes the table, so it
+            // is the only place that can leave it too big.
+            $keep = max(1, min(3650, (int)($cfg['index_poll_keep_days'] ?? 90)));
+            $db->prepare("DELETE FROM index_polls WHERE ts < ?")->execute([$now - $keep * 86400]);
+        } catch (\Throwable $e) {
+            // A poll that ran must not fail because its bookkeeping did.
+            error_log('[index poll history] ' . $e->getMessage());
+        }
+
         indexStateUpdate(function (array &$s) use ($out, $now, $skipNext) {
             $s['last_poll_at'] = $now;
             $s['poll_skip'] = $skipNext;

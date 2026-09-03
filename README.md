@@ -954,6 +954,48 @@ parse and syntax-check in about 1.2 s.
 Turning the master switch off clears the sets from the firewall without deleting anything you
 imported.
 
+### Addresses blocked by hand — the exception a list cannot express (1.29.0)
+
+**Settings → Network & limits → Blocked addresses.** Allow lists and block lists cannot express
+*allow all of Poland, except these three hosts*: the allow list is matched first, so nothing later can
+stop a host inside it. This box can, because it is matched before every list and after nothing except
+Trusted addresses.
+
+The full order, which the Traffic page also states: **trusted → blocked by hand → allow lists → block
+lists → block-under-pressure → the inbound limit.** An address in both boxes is trusted, and the page
+says so rather than leaving you to work it out. Same cap of 256, same validation here and again in the
+root helper, whole countries belong in a list rather than in this box.
+
+The Traffic page also reports **containment**, not string equality: a trusted `5.188.1.7` sitting
+inside a blocked `5.188.0.0/16` is named, because otherwise the only symptom is one host that keeps
+getting through a block that looks correct.
+
+### Scrape coverage — how much of the tracker each poll actually saw (1.29.0)
+
+**Admin → Index → Scrape coverage.** The index is built from one file the tracker hands over every
+half hour, and until this chart the only visible fact about it was the last poll's line of text — so a
+poll that quietly started arriving truncated looked exactly like a healthy one.
+
+One row per poll, kept for `index_poll_keep_days` (90 by default; at a 30-minute poll that is 48 rows
+a day). The chart draws what each poll **delivered**, what it **kept**, and the **coverage** against
+the tracker's own torrent count, over six hours to a month.
+
+**Delivered is not the same as entries.** A poll that resumes at a cursor walks past everything an
+earlier pass already handled and counts all of it, so raw entries would show a resumed poll as a
+triumph and the fresh one after it as a collapse. Delivered is entries past the cursor. Where the
+tracker's own count was unavailable the coverage line has a gap, not a zero.
+
+### The metadata worker's CPU (1.29.0)
+
+**Admin → Traffic → UDP traffic**, beside the machine load. Load says the box is busy and never says
+who; on this machine the metadata worker is the heaviest thing after the tracker itself.
+
+The server returns raw cumulative counters and deliberately refuses to compute a percentage — the
+second reading would mean sleeping inside a web request — and the browser subtracts two polls, the
+same arrangement the OpenTracker card uses. The process is identified by its systemd unit in
+`/proc/<pid>/cgroup`, not by a substring of its command line, so an editor with `worker.py` open is
+never mistaken for the worker.
+
 ### Kernel network buffers — the eight knobs, armed rather than applied (1.13.0)
 
 **Admin → Traffic → Kernel network buffers** (helper and window in Settings → *Kernel network
@@ -1603,6 +1645,7 @@ tracker/
 │       ├── test_tracker_permission.php # GET — test sudo perms for restart/reload (read-only)
 │       ├── net_status.php     # GET — firewall state + live packets/second + measured suggestion
 │       ├── net_samples.php    # GET — the packets/second series behind the UDP traffic chart
+│       ├── index_polls.php    # GET — one row per scrape poll, behind the coverage chart
 │       ├── ip_lists.php       # GET — the address lists and what the firewall is carrying
 │       ├── ip_list_action.php # POST — create / import / refresh / enable / delete / push (owner only)
 │       ├── net_apply.php      # POST — load/remove/throttle-hard/restore the inbound limit (password)
@@ -1622,6 +1665,7 @@ tracker/
 │   │   ├── admin-index.js     # Observed-hash index page (?action=admin-index)
 │   │   ├── admin-netlimit.js  # UDP traffic card: live counters, chart, throttle slider
 │   │   ├── admin-iplists.js   # Address lists card: import, enable/disable, push to the firewall
+│   │   ├── admin-index-coverage.js  # Scrape coverage chart: what each poll delivered vs the tracker's count
 │   │   ├── admin-backups.js   # Backups page: run/verify/restore/download, live progress
 │   │   ├── admin-traffic.js   # Traffic page (?action=admin-traffic) — page furniture only
 │   │   └── stats-timeline.js  # Swarm timeline chart (public stats page + admin whitelist page)

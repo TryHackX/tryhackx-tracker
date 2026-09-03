@@ -1828,7 +1828,16 @@ input[type="number"] {
  * there"; it does not answer "where is it", and clearing the search hides it again. So each visible
  * section says which group and section it belongs to, with a button that puts the page back and
  * scrolls to it in place. */
-.settings-where {
+/* :not(.d-hidden) is not decoration — it is the whole reason this rule works.
+ *
+ * `.d-hidden { display: none }` is defined ~1 400 lines EARLIER in this file and carries exactly the
+ * same specificity (one class). Later wins, so a bare `.settings-where { display: flex }` silently
+ * beat every `classList.toggle('d-hidden')` the JS did: the breadcrumb was permanently visible, in
+ * every category, search or no search. Three rounds of "fix the JS condition" chased a bug that was
+ * never in the JS — showWhere(sec, false) was running and doing nothing.
+ *
+ * Five other components in this file already carry the same guard for the same reason. */
+.settings-where:not(.d-hidden) {
     display: flex;
     align-items: center;
     gap: 0.6rem;
@@ -1881,3 +1890,92 @@ input[type="number"] {
 .ipl-table td { font-size: 0.82rem; }
 .ipl-table tr.ipl-off td { opacity: 0.45; }
 .ipl-table tr.ipl-off td:first-child { opacity: 1; }
+
+/* The add-user dialog's password checklist and inline messages.
+ *
+ * The markup and the JS for this shipped in 1.28.0 and the stylesheet block did not — so the five
+ * requirements rendered as a bare unstyled column. Same shape as the PUBLIC REGISTRATION FORM
+ * (assets/css/style.css .pw-checklist): two columns, and the odd fifth requirement spans both and
+ * sits in the middle. Same class names inside, so the two are not two implementations of one idea
+ * that drift apart. */
+.ua-reqs {
+    margin: 0.4rem 0 0.15rem;
+    font-size: 0.76rem;
+    line-height: 1.6;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.1rem 0.8rem;
+}
+.ua-reqs .pw-req:last-child { grid-column: 1 / -1; justify-self: center; }
+@media (max-width: 480px) {
+    .ua-reqs { grid-template-columns: 1fr; }
+    .ua-reqs .pw-req:last-child { grid-column: auto; justify-self: start; }
+}
+.ua-reqs .pw-req { color: #8a94a2; }
+.ua-reqs .pw-req.ok { color: #6cc38a; }
+.ua-reqs .pw-req-ic { display: inline-block; width: 1.1em; text-align: center; font-weight: 700; }
+.ua-reqs .pw-req:not(.ok) .pw-req-ic { color: #e0798a; }
+
+.ua-msg { font-size: 0.76rem; }
+.ua-msg:not(:empty) { display: block; color: #e0798a; }
+
+
+/* A byte-valued setting: a number and its unit, sized so the pair reads as one control. */
+.settings-size { flex-wrap: nowrap; }
+.settings-size .form-control { flex: 1 1 auto; min-width: 0; }
+.settings-size .form-select { flex: 0 0 auto; width: auto; min-width: 5.2rem; }
+
+
+/* Address lists: the upload area. The native file input is kept in the DOM (it is what actually opens
+   the picker and what carries the FileList) and covered by a label-shaped box, rather than replaced
+   by a button that fakes one. */
+.ipl-drop {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 1.1rem 0.8rem;
+    border: 1px dashed #3a4657;
+    border-radius: 8px;
+    background: #131b25;
+    color: #8a94a2;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.ipl-drop:hover, .ipl-drop:focus-visible { border-color: #4d9fd6; background: #16202c; outline: none; }
+.ipl-drop.dragging { border-color: #6cc38a; background: #17241d; color: #c3ccd8; }
+.ipl-drop.has-file { border-style: solid; border-color: #3f5c48; }
+.ipl-drop-icon { font-size: 1.4rem; opacity: 0.7; }
+.ipl-drop-main { font-size: 0.84rem; color: #c3ccd8; }
+.ipl-drop-main u { text-decoration-color: #4d9fd6; }
+.ipl-drop-sub { font-size: 0.73rem; }
+/* The real input, still clickable, still keyboard-reachable, just invisible. */
+.ipl-drop-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+.ipl-preview {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: 6px;
+    background: #131b25;
+    border: 1px solid #2a3a4c;
+    font-size: 0.76rem;
+    color: #8a94a2;
+}
+.ipl-preview strong { color: #c3ccd8; }
+.ipl-preview .ipl-preview-bad { color: #e0b96c; }
+.ipl-preview code { color: #8ab4d8; font-size: 0.72rem; }
+
+
+/* Scrape coverage chart (Index page). Height is fixed so the card does not jump as the series
+   loads; uPlot is told the width by the JS on resize. */
+.idx-cov-chart { min-height: 240px; margin-top: 0.4rem; }
+.idx-cov-chart .u-legend { font-size: 0.76rem; }
+.idx-cov-empty { padding: 2rem 1rem; text-align: center; color: #8a94a2; font-size: 0.84rem; }

@@ -61,6 +61,29 @@ function ipListFamily(string $cidr): int {
 }
 
 /**
+ * How much of the internet a set of entries actually covers.
+ *
+ * "8 810 entries" and "343 million addresses" are the same China zone file described two ways, and
+ * only the second one answers "is this enough to block a country". IPv4 is counted exactly. IPv6 is
+ * not counted at all — a single /32 there is 2^96 addresses, a number with no meaning to anyone — so
+ * its entries are reported as ranges and left at that.
+ *
+ * @return array{addr4:int,nets6:int}
+ */
+function ipListCoverage(array $entries): array {
+    $addr4 = 0;
+    $nets6 = 0;
+    foreach ($entries as $c) {
+        if (ipListFamily($c) === 6) { $nets6++; continue; }
+        $bits = str_contains($c, '/') ? (int)explode('/', $c, 2)[1] : 32;
+        if ($bits < 0 || $bits > 32) continue;
+        // PHP integers are 64-bit here, so 2^32 for a /0 is exact rather than a float.
+        $addr4 += 1 << (32 - $bits);
+    }
+    return ['addr4' => $addr4, 'nets6' => $nets6];
+}
+
+/**
  * Text -> unique, valid entries. Accepts what the sources in the wild actually produce: one entry
  * per line, `#` and `;` comments, blank lines, trailing whitespace, and CRLF.
  *
@@ -104,6 +127,8 @@ function ipListAll(PDO $db): array {
         $r['enabled']  = (int)$r['enabled'] === 1;
         $r['entries']  = (int)$r['entries'];
         $r['ttl_minutes'] = (int)$r['ttl_minutes'];
+        $r['addr4']    = (int)($r['addr4'] ?? 0);
+        $r['nets6']    = (int)($r['nets6'] ?? 0);
     }
     return $rows;
 }
@@ -209,8 +234,10 @@ function ipListSetEntries(PDO $db, int $id, string $text): array {
         foreach (array_chunk($p['entries'], 1000) as $chunk) {
             foreach ($chunk as $c) $ins->execute([$id, $c, ipListFamily($c)]);
         }
-        $db->prepare("UPDATE ip_lists SET last_fetch_at = NOW(), last_error = NULL, updated_at = NOW() WHERE id = ?")
-           ->execute([$id]);
+        $cov = ipListCoverage($p['entries']);
+        $db->prepare("UPDATE ip_lists SET last_fetch_at = NOW(), last_error = NULL, updated_at = NOW(),
+                             addr4 = ?, nets6 = ? WHERE id = ?")
+           ->execute([$cov['addr4'], $cov['nets6'], $id]);
         $db->commit();
     } catch (\Throwable $e) {
         if ($db->inTransaction()) $db->rollBack();
@@ -306,6 +333,187 @@ function ipListTick(PDO $db): array {
         elseif (empty($r['skipped'])) $out['refreshed']++;
     }
     return $out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Do two entries cover any of the same addresses?
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One CIDR as [packed network address, prefix length, family], or null.
+ *
+ * inet_pton gives the address as raw bytes, which is the only representation that works for IPv6
+ * without arbitrary-precision arithmetic: comparison is then a byte-and-bit comparison rather than
+ * a number PHP cannot hold.
+ */
+function ipListPack(string $cidr): ?array {
+    $addr = $cidr;
+    $bits = null;
+    if (str_contains($cidr, '/')) {
+        [$addr, $b] = explode('/', $cidr, 2);
+        if ($b === '' || !ctype_digit($b)) return null;
+        $bits = (int)$b;
+    }
+    $bin = @inet_pton($addr);
+    if ($bin === false) return null;
+    $len = strlen($bin);                       // 4 for IPv4, 16 for IPv6
+    $max = $len * 8;
+    if ($bits === null) $bits = $max;
+    if ($bits < 0 || $bits > $max) return null;
+    return [$bin, $bits, $len];
+}
+
+/**
+ * Do two CIDRs share any address at all?
+ *
+ * Two blocks overlap exactly when the shorter prefix contains the longer one's network address —
+ * there is no partial case: CIDR blocks are either nested or disjoint. So the test is "compare the
+ * first min(bits) bits". `/0` therefore contains everything of its family, `/32` and `/128` are
+ * single hosts, and a v4 entry can never meet a v6 one, which is settled by the length check before
+ * any bit is looked at.
+ */
+function ipListOverlaps(string $a, string $b): bool {
+    $pa = ipListPack($a);
+    $pb = ipListPack($b);
+    if ($pa === null || $pb === null) return false;
+    if ($pa[2] !== $pb[2]) return false;                  // different families never meet
+    $bits = min($pa[1], $pb[1]);
+    if ($bits === 0) return true;                         // one of them is /0
+    $whole = intdiv($bits, 8);
+    $rest = $bits % 8;
+    if ($whole > 0 && strncmp($pa[0], $pb[0], $whole) !== 0) return false;
+    if ($rest === 0) return true;
+    $mask = (0xFF << (8 - $rest)) & 0xFF;
+    return (ord($pa[0][$whole]) & $mask) === (ord($pb[0][$whole]) & $mask);
+}
+
+/**
+ * Which hand-typed trusted addresses are also covered by something that would drop them.
+ *
+ * Not an error — the chain matches trusted first, so the trusted entry wins exactly as documented.
+ * It is worth saying out loud because the alternative is somebody importing a country file, watching
+ * one host keep getting through, and concluding the block does not work.
+ *
+ * COST. The block side can hold 250 000 entries and the trusted side at most 256, which is 64 million
+ * comparisons done naively. Instead the trusted entries are packed ONCE and each block entry is
+ * tested against those 256 — and the families are split first, so a v4-only list never touches the
+ * v6 entries. That is a pass over the block list with a small constant, not a product.
+ *
+ * @param list<string> $manual  trusted or blocked entries, already validated
+ * @param list<string> $against block/soft entries
+ * @return list<array{manual:string,covered_by:string}>
+ */
+function ipListOverlapsWith(array $manual, array $against, int $cap = 12): array {
+    if (!$manual || !$against) return [];
+
+    // The manual side is INDEXED, and the block side is walked once.
+    //
+    // The obvious way round — for each block entry, try every manual entry — is a product, and it
+    // was measured: 256 manual entries against 250 000 blocks took 71 SECONDS, on a card that polls
+    // every few seconds. Two blocks overlap exactly when their first min(prefix) bits agree, which
+    // is a lookup rather than a search once the manual side is keyed by the two lengths that can
+    // matter:
+    //
+    //   $atPm[pm]  truncations of every manual entry to ITS OWN prefix — for the case where the block
+    //              is the more specific of the two (pb >= pm), i.e. the block sits inside the manual.
+    //   $byLen[L]  truncations of every manual entry with pm >= L to L — for the case where the BLOCK
+    //              is the wider one (pb <= pm), i.e. the manual sits inside the block.
+    //
+    // Distinct manual prefix lengths are a handful, so each block entry costs a handful of lookups.
+    // Same 250 000 blocks: a few hundred milliseconds regardless of how many manual entries there are.
+    $packed = [];
+    foreach ($manual as $m) {
+        $p = ipListPack($m);
+        if ($p !== null) $packed[] = [$m, $p];
+    }
+    if (!$packed) return [];
+
+    $trunc = static function (string $bin, int $bits): string {
+        if ($bits <= 0) return '';
+        $whole = intdiv($bits, 8);
+        $rest = $bits % 8;
+        $out = substr($bin, 0, $whole);
+        if ($rest !== 0) $out .= chr(ord($bin[$whole]) & ((0xFF << (8 - $rest)) & 0xFF));
+        return $out;
+    };
+
+    $atPm = [];     // [family][pm][key] = manual entry
+    $byLen = [];    // [family][len][key] = manual entry
+    $lens = [];     // [family] => distinct pm values, ascending
+    $maxPm = [];
+    foreach ($packed as [$m, $p]) {
+        [$bin, $pm, $fam] = $p;
+        $atPm[$fam][$pm][$trunc($bin, $pm)] = $m;
+        $lens[$fam][$pm] = true;
+        $maxPm[$fam] = max($maxPm[$fam] ?? 0, $pm);
+        for ($L = 0; $L <= $pm; $L++) {
+            $byLen[$fam][$L][$trunc($bin, $L)] = $m;
+        }
+    }
+    foreach ($lens as $fam => $set) { $lens[$fam] = array_keys($set); sort($lens[$fam]); }
+
+    $hits = [];
+    $seen = [];
+    $want = count($packed);
+    foreach ($against as $b) {
+        $pb = ipListPack($b);
+        if ($pb === null) continue;
+        [$bbin, $pbits, $fam] = $pb;
+        if (!isset($atPm[$fam])) continue;                   // no manual entry of this family
+
+        $found = null;
+        // (1) the block is inside a manual entry: compare on the MANUAL prefix
+        foreach ($lens[$fam] as $pm) {
+            if ($pm > $pbits) break;                          // the list is ascending
+            $k = $trunc($bbin, $pm);
+            if (isset($atPm[$fam][$pm][$k])) { $found = $atPm[$fam][$pm][$k]; break; }
+        }
+        // (2) the manual entry is inside the block: compare on the BLOCK's prefix
+        if ($found === null && $pbits <= ($maxPm[$fam] ?? -1) && isset($byLen[$fam][$pbits])) {
+            $k = $trunc($bbin, $pbits);
+            if (isset($byLen[$fam][$pbits][$k])) $found = $byLen[$fam][$pbits][$k];
+        }
+        if ($found === null || isset($seen[$found])) continue;
+
+        $seen[$found] = true;
+        $hits[] = ['manual' => $found, 'covered_by' => $b];
+        // Each manual entry is reported once, so once they have all been found there is nothing left
+        // to look for.
+        if (count($hits) >= $cap || count($seen) === $want) return $hits;
+    }
+    return $hits;
+}
+
+/**
+ * The same answer, cached, because the card asking for it refreshes every few seconds.
+ *
+ * The key carries everything that can change the answer — the manual entries themselves and a stamp
+ * of the list side — so a stale answer is impossible rather than merely unlikely. A cache that can
+ * outlive its inputs would be worse than no cache here: it would tell an operator their trusted
+ * address is safe from a block they added a minute ago.
+ */
+function ipListOverlapsCached(PDO $db, array $manual, array $against, string $tag): array {
+    if (!$manual || !$against) return [];
+    try {
+        $stamp = (string)$db->query("SELECT CONCAT(COALESCE(MAX(updated_at),''), ':', COUNT(*)) FROM ip_lists")->fetchColumn();
+    } catch (\Throwable $e) {
+        $stamp = '';
+    }
+    $key = md5($tag . '|' . implode(',', $manual) . '|' . $stamp . '|' . count($against));
+    $file = __DIR__ . '/../config/iplist_overlap_' . $key . '.json';
+    $now = time();
+    if (is_file($file) && ($now - (int)@filemtime($file)) < 300) {
+        $c = json_decode((string)@file_get_contents($file), true);
+        if (is_array($c)) return $c;
+    }
+    // One stale key per change is enough; older ones are swept so this cannot grow without bound.
+    foreach (glob(__DIR__ . '/../config/iplist_overlap_*.json') ?: [] as $old) {
+        if ($now - (int)@filemtime($old) > 3600) @unlink($old);
+    }
+    $r = ipListOverlapsWith($manual, $against);
+    $tmp = $file . '.tmp.' . getmypid();
+    if (@file_put_contents($tmp, json_encode($r)) !== false) @rename($tmp, $file);
+    return $r;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

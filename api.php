@@ -174,6 +174,7 @@ $apiRoutes = [
     'admin/index_scrape'         => 'api/admin/index_scrape.php',
     'admin/index_scrape_bulk'    => 'api/admin/index_scrape_bulk.php',
     'admin/index_status'         => 'api/admin/index_status.php',
+    'admin/index_polls'          => 'api/admin/index_polls.php',
     'admin/index_poll_now'       => 'api/admin/index_poll_now.php',
     // ── API clients / bans (admin) ──
     'admin/fetch_api_clients'    => 'api/admin/fetch_api_clients.php',
@@ -277,6 +278,9 @@ function adminEndpointPermission(string $endpoint): ?string {
         'admin/fetch_whitelist'    => 'panel.whitelist.view',
         'admin/whitelist_item'     => 'panel.whitelist.view',
         'admin/index_status'       => 'panel.whitelist.view',
+        // The same permission as the Index page it is drawn on: this is a chart of that page's
+        // own poll, and reading it is reading the page.
+        'admin/index_polls'        => 'panel.whitelist.view',
         'admin/fetch_index'        => 'panel.whitelist.view',
         'admin/index_item'         => 'panel.whitelist.view',
         'admin/fetch_banned'       => 'panel.whitelist.view',

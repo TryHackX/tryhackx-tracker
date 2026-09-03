@@ -11,7 +11,10 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 35;  // 35 = index_hashes.eff_seeders (virtual) + its index — the catalogue's own first page was a 2 890 ms scan
+const TRACKER_SCHEMA_VERSION = 38;  // 38 = net_limit_blocked — hand-typed addresses that beat an allow list
+// 37 = index_polls — what each scrape poll actually delivered, kept as a series
+// 36 = ip_lists.addr4 — an "entry" is a network, not an address, and the page has to say which
+// 35 = index_hashes.eff_seeders (virtual) + its index — the catalogue's own first page was a 2 890 ms scan
 // 34 = address lists for the inbound limit (ip_lists, ip_list_entries)
 // 33 = settings only (probe load headroom / hard stop)
 // 32 = settings only (db_time_zone, net_limit_trusted)  // 32 = settings only (db_time_zone, net_limit_trusted)
@@ -221,6 +224,40 @@ function trackerSchemaStatements(): array {
         //    rates so a gap (or a counter reset after "Apply") can always be told apart from a lull.
         //    Retention is net_keep_days; there is no roll-up — at one minute and 14 days that is
         //    ~20 000 rows, small enough to read raw.
+        // schema v37: one row per scrape poll, so "how much of the tracker did we actually see" can be
+        // asked about last week and not only about the last half hour.
+        //
+        // Everything in here was already being computed — indexPoll() returns all of it — and thrown
+        // away: the state file keeps a single `last_poll` key and the next poll overwrites it. At a
+        // poll every 30 minutes this is 48 rows a day.
+        //
+        // The distinction that makes the whole table worth having: `entries` is a FILE POSITION, not
+        // a delivery count. A pass that resumes at a cursor counts every entry it walks past,
+        // including the ones a previous pass already handled, so `entries` alone reads as though a
+        // resumed poll delivered the whole file again. `skip_from` is the cursor this pass started
+        // at, and `entries - skip_from` is what it actually contributed.
+        "CREATE TABLE IF NOT EXISTS `index_polls` (
+            `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `entries` INT UNSIGNED NOT NULL DEFAULT 0,
+            `skip_from` INT UNSIGNED NOT NULL DEFAULT 0,
+            `kept` INT UNSIGNED NOT NULL DEFAULT 0,
+            `bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `ms` INT UNSIGNED NOT NULL DEFAULT 0,
+            `truncated` TINYINT(1) NOT NULL DEFAULT 0,
+            `partial` VARCHAR(64) DEFAULT NULL,
+            `removed_wl` INT UNSIGNED NOT NULL DEFAULT 0,
+            `removed_ban` INT UNSIGNED NOT NULL DEFAULT 0,
+            -- How many torrents the TRACKER said it had at that moment, from the same stats fetch the
+            -- swarm timeline uses. NULL when that number was not available: a coverage ratio with an
+            -- invented denominator is worse than no ratio, so the chart leaves a gap instead.
+            `rows_total` INT UNSIGNED DEFAULT NULL,
+            -- What the index held afterwards, so the chart can show the catalogue growing next to
+            -- what each poll delivered.
+            `index_rows` INT UNSIGNED DEFAULT NULL,
+            `error` VARCHAR(190) DEFAULT NULL,
+            KEY `idx_ipoll_ts` (`ts`)
+        ) $engine",
+
         "CREATE TABLE IF NOT EXISTS `net_samples` (
             `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
             `span` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
@@ -545,6 +582,15 @@ function trackerSchemaStatements(): array {
             -- re-downloading it every janitor tick would be rude to the people hosting it.
             `ttl_minutes` INT UNSIGNED NOT NULL DEFAULT 720,
             `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            -- How many IPv4 ADDRESSES the entries cover, and how many of the entries are IPv6.
+            --
+            -- An entry is a NETWORK, not an address: China's zone file is 8 810 entries and covers
+            -- 342 983 424 addresses. Somebody reading 8 810 and wondering whether that is enough to
+            -- block a country is asking a reasonable question about the wrong number, so both are
+            -- kept. Computed once when the entries are stored — summing 250 000 rows on every poll of
+            -- a page that refreshes every few seconds is not a thing to do.
+            `addr4` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `nets6` INT UNSIGNED NOT NULL DEFAULT 0,
             `last_fetch_at` DATETIME DEFAULT NULL,
             `last_try_at` DATETIME DEFAULT NULL,
             -- A failed refresh changes no entries: the last good copy stays in force and this says
@@ -776,6 +822,15 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_completed')) {
         $iparts[] = "ADD KEY `idx_index_meta_completed` (`meta_status`, `last_completed`)";
     }
+    // schema v36: what a list covers, not merely how many lines it has.
+    foreach (['addr4' => "ADD COLUMN `addr4` BIGINT UNSIGNED NOT NULL DEFAULT 0",
+              'nets6' => "ADD COLUMN `nets6` INT UNSIGNED NOT NULL DEFAULT 0"] as $col => $sql) {
+        if (!schemaColumnExists($db, 'ip_lists', $col)) {
+            // ip_lists is tens of rows; this is instant and needs no janitor.
+            $out[] = "ALTER TABLE `ip_lists` " . $sql;
+        }
+    }
+
     // schema v35: the column the catalogue sorts by, so that it can be indexed.
     //
     // The public catalogue orders by COALESCE(scrape_seeders, last_seeders) — an expression, which no
@@ -1009,6 +1064,9 @@ function trackerSchemaDefaultSettings(): array {
         'index_protect_days'          => '10',
         'index_meta_daily_budget'     => '500',
         'index_keep_files'            => '1',
+        // schema v37: how long the per-poll history is kept. 90 days of a 30-minute poll is 4 320
+        // rows — small enough that there is no roll-up and never will be.
+        'index_poll_keep_days'        => '90',
         'index_poll_budget'           => '45',
         // schema v7: index metadata auto-queue + admin near-pages radius
         'index_meta_auto_queue'       => '0',
@@ -1055,6 +1113,11 @@ function trackerSchemaDefaultSettings(): array {
         // schema v32: addresses the inbound UDP rate limit must never drop. Comma or newline
         // separated, IPv4/IPv6, plain or CIDR. Empty = nobody is exempt (the shipped default).
         'net_limit_trusted'           => '',
+        // schema v38: the mirror image of the box above. Addresses typed here are ALWAYS dropped, and
+        // they beat an allow list — which is the whole point: "allow all of Poland, except these
+        // three hosts" cannot be said with lists alone, because a list has no way to be more specific
+        // than another list. Only trusted addresses beat these.
+        'net_limit_blocked'           => '',
         // schema v33: how the stability probe judges load. The first number is what a run is allowed
         // to ADD to the load it found when it started -- an absolute ceiling is meaningless on a
         // machine whose normal working load is already near it, which is how every run on this box

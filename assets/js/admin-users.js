@@ -136,7 +136,21 @@
     }
 
     // ── user edit modal ─────────────────────────────────────────────────────
-    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    // An address is checked with its DOMAIN treated as a HOSTNAME. The old test was
+    //   /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    // which asked only "is there an @ and a dot after it", and therefore accepted
+    // dsaddsas@wp\/.pl — a backslash and a slash inside the domain. The server's
+    // filter_var(FILTER_VALIDATE_EMAIL) rejects that, so the form went green and the request came
+    // back 400: the live check was telling the user the opposite of what would happen.
+    //
+    // Verified against filter_var over 37 addresses: there is no input this accepts that the server
+    // refuses. It is stricter in five places, all of them things nobody can actually receive mail at
+    // (a bracketed IP literal, a one-letter TLD, a hyphenated or digit-suffixed TLD).
+    const EMAIL_LOCAL = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*";
+    const EMAIL_LABEL = '[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?';
+    const EMAIL_TLD = '(?:[A-Za-z]{2,}|xn--[A-Za-z0-9-]{2,})';   // xn-- keeps the IDN TLDs working
+    const EMAIL_RE = new RegExp('^' + EMAIL_LOCAL + '@' + EMAIL_LABEL
+                                + '(?:\\.' + EMAIL_LABEL + ')*\\.' + EMAIL_TLD + '$');
     const passOk = (p) => p.length >= 8 && p.length <= 200 && /[a-z]/.test(p) && /[A-Z]/.test(p) && /[0-9]/.test(p) && /[^a-zA-Z0-9]/.test(p);
     function ueValidate() {
         const email = $('ue-email'), email2 = $('ue-email2'), p1 = $('ue-password'), p2 = $('ue-password2');
@@ -202,20 +216,20 @@
         ['At least 8 characters', (p) => p.length >= 8 && p.length <= 200],
         ['A lowercase letter', (p) => /[a-z]/.test(p)],
         ['An uppercase letter', (p) => /[A-Z]/.test(p)],
-        ['A digit', (p) => /[0-9]/.test(p)],
         ['A special character', (p) => /[^a-zA-Z0-9]/.test(p)],
+        ['A digit', (p) => /[0-9]/.test(p)],
     ];
     // Mirrors userValidUsername() and userValidEmail() in includes/users.php.
     const uaUserOk = (v) => /^[A-Za-z0-9_.-]{3,32}$/.test(v);
-    const uaMailOk = (v) => v.length <= 190 && /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(v);
+    const uaMailOk = (v) => v.length <= 190 && EMAIL_RE.test(v);
     let uaPwItems = null;
 
     function uaBuildPwList() {
         const box = $('ua-pw-reqs');
         if (!box || uaPwItems) return;
         uaPwItems = UA_PW_REQS.map(([label]) => {
-            const li = el('div', { className: 'ua-req' }, [
-                el('span', { className: 'ua-req-ic', text: '✗' }),
+            const li = el('div', { className: 'pw-req' }, [
+                el('span', { className: 'pw-req-ic', text: '✗' }),
                 el('span', { text: ' ' + label }),
             ]);
             box.appendChild(li);
@@ -250,7 +264,7 @@
             const ok = test(pw);
             if (!ok) pwOk = false;
             uaPwItems[i].classList.toggle('ok', ok);
-            uaPwItems[i].querySelector('.ua-req-ic').textContent = ok ? '✓' : '✗';
+            uaPwItems[i].querySelector('.pw-req-ic').textContent = ok ? '✓' : '✗';
         });
 
         const allOk = userOk === true && mailOk !== false && pwOk;

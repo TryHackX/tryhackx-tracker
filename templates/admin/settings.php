@@ -811,8 +811,23 @@
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Bytes per day <small class="settings-hint">(per key)</small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="api_rate_limit_bytes_day" value="<?= sanitize($cfg['api_rate_limit_bytes_day'] ?? '5368709120') ?>" min="0" max="1099511627776" step="1073741824">
-                        <small class="settings-hint">0 = unlimited. 5368709120 = 5 GB. Counts what we <em>send</em> as well as what we receive, so a runaway export is caught.</small>
+                        <div class="input-group settings-size">
+                            <input type="number" class="form-control bg-dark text-light border-secondary"
+                                   id="api-rate-limit-bytes-day-num" min="0" step="1" aria-label="Size">
+                            <select class="form-select bg-dark text-light border-secondary" id="api-rate-limit-bytes-day-unit" aria-label="Unit">
+                                <option value="1">bytes</option>
+                                <option value="1024">KiB</option>
+                                <option value="1048576">MiB</option>
+                                <option value="1073741824">GiB</option>
+                                <option value="1099511627776">TiB</option>
+                            </select>
+                        </div>
+                        <!-- The setting itself. Bytes, named literally, never edited by hand:
+                             the pair above writes into it. -->
+                        <input type="hidden" name="api_rate_limit_bytes_day" id="api-rate-limit-bytes-day-raw"
+                               data-size-min="0" data-size-max="1099511627776"
+                               value="<?= sanitize($cfg['api_rate_limit_bytes_day'] ?? '5368709120') ?>">
+                        <small class="settings-hint">0 = unlimited. Counts what we <em>send</em> as well as what we receive, so a runaway export is caught. Stored in bytes; the unit here is only how it is shown to you.</small>
                     </div>
                 </div>
             </div>
@@ -1139,8 +1154,23 @@
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Bytes per export page</label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_export_max_bytes" value="<?= sanitize($cfg['fed_export_max_bytes'] ?? '8388608') ?>" min="0" max="1073741824" step="1048576">
-                        <small class="settings-hint">0 = no limit. 8388608 = 8 MB, measured on the wire.</small>
+                        <div class="input-group settings-size">
+                            <input type="number" class="form-control bg-dark text-light border-secondary"
+                                   id="fed-export-max-bytes-num" min="0" step="1" aria-label="Size">
+                            <select class="form-select bg-dark text-light border-secondary" id="fed-export-max-bytes-unit" aria-label="Unit">
+                                <option value="1">bytes</option>
+                                <option value="1024">KiB</option>
+                                <option value="1048576">MiB</option>
+                                <option value="1073741824">GiB</option>
+                                <option value="1099511627776">TiB</option>
+                            </select>
+                        </div>
+                        <!-- The setting itself. Bytes, named literally, never edited by hand:
+                             the pair above writes into it. -->
+                        <input type="hidden" name="fed_export_max_bytes" id="fed-export-max-bytes-raw"
+                               data-size-min="0" data-size-max="1073741824"
+                               value="<?= sanitize($cfg['fed_export_max_bytes'] ?? '8388608') ?>">
+                        <small class="settings-hint">0 = no limit, measured on the wire.</small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Import batch (rows)</label>
@@ -1149,7 +1179,22 @@
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Import batch (bytes)</label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_import_batch_bytes" value="<?= sanitize($cfg['fed_import_batch_bytes'] ?? '33554432') ?>" min="1048576" max="268435456" step="1048576">
+                        <div class="input-group settings-size">
+                            <input type="number" class="form-control bg-dark text-light border-secondary"
+                                   id="fed-import-batch-bytes-num" min="0" step="1" aria-label="Size">
+                            <select class="form-select bg-dark text-light border-secondary" id="fed-import-batch-bytes-unit" aria-label="Unit">
+                                <option value="1">bytes</option>
+                                <option value="1024">KiB</option>
+                                <option value="1048576">MiB</option>
+                                <option value="1073741824">GiB</option>
+                                <option value="1099511627776">TiB</option>
+                            </select>
+                        </div>
+                        <!-- The setting itself. Bytes, named literally, never edited by hand:
+                             the pair above writes into it. -->
+                        <input type="hidden" name="fed_import_batch_bytes" id="fed-import-batch-bytes-raw"
+                               data-size-min="1048576" data-size-max="268435456"
+                               value="<?= sanitize($cfg['fed_import_batch_bytes'] ?? '33554432') ?>">
                         <small class="settings-hint">Whichever fills first ends the batch. 33554432 = 32 MB.</small>
                     </div>
                     <div class="col-md-3">
@@ -1745,6 +1790,17 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                         </select>
                         <small class="settings-hint">The worker also honours <code>index_keep_files</code> in its own conf.</small>
                     </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Keep poll history <small class="settings-hint">(days)</small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_poll_keep_days"
+                               value="<?= (int)($cfg['index_poll_keep_days'] ?? 90) ?>" min="1" max="3650">
+                        <small class="settings-hint">
+                            One row per poll, behind the <strong>scrape coverage</strong> chart on the
+                            <a href="<?= $baseUrl ?>?action=admin-index">Index page</a>: how much of the tracker each poll actually
+                            delivered. At a 30-minute poll that is 48 rows a day &mdash; 90 days is about 4&nbsp;300 rows, so this
+                            costs nothing worth thinking about.
+                        </small>
+                    </div>
                 </div>
             </div>
 
@@ -1864,6 +1920,30 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                             <?php if ($trOk): ?><span class="text-info">In force: <?= count($trOk) ?> — <code><?= sanitize(implode(', ', array_slice($trOk, 0, 6))) ?><?= count($trOk) > 6 ? ' …' : '' ?></code>.</span><?php endif; ?>
                             <?php if ($trBad): ?><span class="text-warning">Not an address, ignored: <code><?= sanitize(implode(', ', array_slice($trBad, 0, 4))) ?></code>.</span><?php endif; ?>
                             <details class="settings-more"><summary>What this is for, and what it costs</summary>A rate limit cannot tell which packets matter. If this machine also runs a game server, or is monitored from a fixed address, or you reach it over SSH from one place, those sources should never be collateral damage of a swarm. Each entry becomes an element of an nftables set and costs one hash lookup, so the list is free at any size worth having &mdash; the cap is <strong><?= NET_TRUSTED_MAX ?></strong>, and it is a cap on judgement rather than on performance: this is an exemption from the machine's own protection, and a list nobody reviews is a hole. A source listed here can send at any rate it likes. The addresses are validated here <em>and again</em> in the root helper, which is what actually writes them into the firewall; anything unrecognised is dropped with a note rather than failing the whole apply.</details>
+                        </small>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Blocked addresses <small class="settings-hint">(always dropped)</small></label>
+                        <textarea class="form-control bg-dark text-light border-secondary" name="net_limit_blocked" rows="2" placeholder="5.188.1.7, 45.9.148.0/24, 2a02:c207::/32"><?= sanitize($cfg['net_limit_blocked'] ?? '') ?></textarea>
+<?php $blOk = function_exists('netlimitBlocked') ? netlimitBlocked($cfg) : []; $blBad = function_exists('netlimitBlockedRejected') ? netlimitBlockedRejected($cfg) : []; ?>
+                        <small class="settings-hint">
+                            The mirror image of the box above, and it exists for one case lists cannot express:
+                            <strong>&ldquo;allow all of Poland, except these three hosts&rdquo;</strong>. An allow list is matched before a
+                            block list, so a host inside an allowed range can never be stopped by another list &mdash; but it is stopped here.
+                            <?php if ($blOk): ?><span class="text-info">In force: <?= count($blOk) ?> — <code><?= sanitize(implode(', ', array_slice($blOk, 0, 6))) ?><?= count($blOk) > 6 ? ' …' : '' ?></code>.</span><?php endif; ?>
+                            <?php if ($blBad): ?><span class="text-warning">Not an address, ignored: <code><?= sanitize(implode(', ', array_slice($blBad, 0, 4))) ?></code>.</span><?php endif; ?>
+                            <details class="settings-more"><summary>The order everything is matched in</summary>
+                                <strong>1. Trusted addresses</strong> &mdash; accepted, whatever anything else says.
+                                <strong>2. Blocked addresses (this box)</strong> &mdash; dropped, ahead of every list.
+                                <strong>3. Allow lists</strong> &mdash; accepted.
+                                <strong>4. Block lists</strong> &mdash; dropped.
+                                <strong>5. Block-under-pressure lists</strong> &mdash; given a fifth of the general budget.
+                                <strong>6. The inbound limit</strong> &mdash; everyone else.
+                                So an address in both boxes is trusted: the first match wins and the panel says so on the
+                                <a href="<?= $baseUrl ?>?action=admin-traffic#iplists-card">Traffic page</a> rather than leaving you to work it out.
+                                Same cap as above (<?= NET_TRUSTED_MAX ?>), same validation here and again in the root helper. Whole
+                                countries belong in a <em>list</em> on the Traffic page, not in this box.
+                            </details>
                         </small>
                     </div>
                 </div>
@@ -1993,10 +2073,15 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         </small>
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label">Ceiling</label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" value="<?= number_format(IPLIST_MAX_TOTAL) ?> entries" readonly disabled>
+                        <label class="form-label">How much this can hold</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" value="<?= number_format(IPLIST_MAX_TOTAL) ?> networks" readonly disabled>
                         <small class="settings-hint">
-                            Across every enabled list. A ruleset loads as one transaction, and this is what bounds it. Not adjustable from here.
+                            <strong>A network, not an address.</strong> China&rsquo;s zone file from ipdeny is <strong>8&nbsp;810</strong> lines
+                            and covers <strong>343&nbsp;million</strong> addresses &mdash; so this ceiling holds about
+                            <strong>28 countries that size</strong>, and blocking one costs 3&nbsp;% of it.
+                            The limit is on the ruleset, which nftables loads as a single transaction; it is not a limit on how much
+                            of the internet you can refuse. Each list shows both numbers on the
+                            <a href="<?= $baseUrl ?>?action=admin-traffic#iplists-card">Traffic page</a>.
                         </small>
                     </div>
                 </div>

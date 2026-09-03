@@ -56,7 +56,7 @@
         g.appendChild(kv('State', [
             el('span', { className: 'wl-badge ' + (state.running ? 'wl-b-warn' : 'wl-b-muted'),
                          text: state.running ? (state.phase || 'running') : (state.phase || 'idle') }),
-            state.dry_run ? el('span', { className: 'wl-badge wl-b-muted', text: 'rehearsal' }) : '',
+            state.dry_run ? el('span', { className: 'wl-badge wl-b-muted', text: 'test run' }) : '',
         ]));
         if (state.baseline && state.baseline.arriving_pps) {
             g.appendChild(kv('Arriving when it started', num(Math.round(state.baseline.arriving_pps)) + ' pps'));
@@ -125,12 +125,23 @@
         if (!rep || state.running) return;
         box.textContent = '';
         box.appendChild(el('div', { className: 'tn-report-head', text: 'What the last run found' }));
+        // A run whose limits changed nothing is not a quiet result, it is a broken one — and it is
+        // the shape that already produced a confident recommendation nobody should have followed.
+        // It gets a warning of its own rather than a sentence buried in the summary.
+        if (rep.inconclusive) {
+            box.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small mb-2',
+                text: rep.inconclusive }));
+        }
         box.appendChild(el('div', { className: 'tn-report-summary', text: rep.summary || '' }));
 
         const acts = el('div', { className: 'tn-report-acts' });
         // Only the values the run held. A suggestion the machine never actually ran at would be a
         // guess wearing a measurement's clothes.
-        [['suggested_safe', 'Apply the safe limit'], ['suggested_minimum', 'Apply the minimum that refuses nothing']]
+        // The label names what the button will move. An outbound run's values go to the reply budget,
+        // and calling that "the limit" was how the same number could be applied to the wrong one.
+        const target = state.what === 'outbound' ? ' to the reply budget' : '';
+        [['suggested_safe', 'Apply the safe value' + target],
+         ['suggested_minimum', 'Apply the minimum that refuses nothing' + target]]
             .forEach(([key, label]) => {
                 const v = rep[key];
                 if (!v) return;
@@ -141,7 +152,9 @@
             });
         if (!acts.children.length) {
             acts.appendChild(el('span', { className: 'wl-small text-muted',
-                text: 'The run did not get far enough to suggest a value.' }));
+                text: rep.inconclusive
+                    ? 'No value is offered from a run that could not tell its own steps apart.'
+                    : 'The run did not get far enough to suggest a value.' }));
         }
         box.appendChild(acts);
     }
@@ -163,10 +176,10 @@
             ? 'Walks the whole plan and changes nothing. Useful for checking the plumbing before a real run.'
             : 'Moves the inbound firewall limit through several values, holding each for a few minutes on a LIVE '
               + 'machine. It stops early if anything else starts losing packets.';
-        if (!await confirmAction(dry ? 'Rehearse the probe' : 'Run the stability probe', what, {
+        if (!await confirmAction(dry ? 'Test the probe' : 'Run the stability probe', what, {
             after: dry ? '' : 'The current settings are written down before the first change, so they go back even if '
                           + 'this is interrupted or the machine reboots.',
-            okLabel: dry ? 'Rehearse' : 'Run it', danger: !dry })) return;
+            okLabel: dry ? 'Test' : 'Run it', danger: !dry })) return;
         const pw = await promptPassword('Stability probe', 'Confirm with the admin password.');
         if (!pw) return;
         const r = await apiCall('admin/tuner', 'POST',

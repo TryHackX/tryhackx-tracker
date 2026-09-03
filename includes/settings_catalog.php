@@ -235,7 +235,9 @@ function settingsCatalogKeywords(): array {
         'net_auto_max'             => 'automatic mode upper bound ceiling maximum pps band',
         'net_auto_target'          => 'automatic mode target packets per second goal setpoint how much traffic to accept',
         'net_auto_target_cpu'      => 'automatic mode cpu load per core percentage guard overload tighten',
+        'net_limit_blocked'        => 'blocked addresses always dropped deny ban manual beats allow list exception inside a country whitelist',
         'net_lists_enabled'        => 'address lists whitelist blacklist allow block countries zone file url import ipdeny firewall sets master switch',
+        'index_poll_keep_days'     => 'scrape coverage chart history how long poll results kept retention delivered entries per poll',
         'net_lists_ttl_default'    => 'address list cache refresh hours how often downloaded url list re-fetched country zone',
 
         // ── Statistics ──

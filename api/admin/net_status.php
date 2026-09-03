@@ -36,6 +36,8 @@ $out = [
     'exec_available' => trackerExecAvailable(),
     'cpus'          => netlimitCpuCount(),
     'load_per_core' => netlimitLoadPerCore(),
+    // Raw counters, not a percentage — the card subtracts two polls. See netlimitWorkerCpu().
+    'worker_cpu'    => netlimitWorkerCpu(),
     'firewall'      => null,
     'live'          => null,
     'panic'         => null,

@@ -285,7 +285,7 @@ function auditEndpointAction(string $endpoint): ?string {
 /** Endpoints that write but are not worth a line: polls, tests, previews. */
 function auditIsNoise(string $endpoint): bool {
     static $quiet = [
-        'admin/settings_catalog', 'admin/net_samples', 'admin/net_test', 'admin/sysctl_test',
+        'admin/settings_catalog', 'admin/net_samples', 'admin/index_polls', 'admin/net_test', 'admin/sysctl_test',
         'admin/ot_test', 'admin/ot_cluster_test', 'admin/livesync_test', 'admin/backup_test_path',
         'admin/check_whitelist_path', 'admin/test_tracker_permission', 'admin/fed_peer_test',
         'admin/check_blacklist', 'admin/whitelist_scrape', 'admin/whitelist_scrape_bulk',

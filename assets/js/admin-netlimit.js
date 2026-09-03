@@ -295,11 +295,67 @@
             ]));
         }
 
+        // The metadata worker's share of the machine, from two polls of raw counters.
+        //
+        // Machine load says the box is busy; it never says WHO. On this server the worker is the
+        // heaviest thing after the tracker itself, and "is the fetcher eating the machine" was a
+        // question the page could not answer.
+        const wcpu = workerCpuShare(j.worker_cpu, j.cpus);
+        if (wcpu !== null) {
+            grid.appendChild(kv('Metadata worker', [
+                el('span', { className: wcpu.core > 90 ? 'text-warning' : '',
+                             text: wcpu.core.toFixed(0) + '% of a core' }), ' ',
+                el('span', { className: 'wl-small text-muted',
+                             text: '(' + wcpu.box.toFixed(1) + '% of the box, over ' + wcpu.window + ' s)' }),
+            ]));
+        } else if (j.worker_cpu) {
+            grid.appendChild(kv('Metadata worker', [
+                el('span', { className: 'wl-small text-muted', text: 'measuring…' }),
+            ]));
+        } else if (j.worker_cpu === null) {
+            grid.appendChild(kv('Metadata worker', [
+                el('span', { className: 'wl-small text-muted', text: 'not running here' }),
+            ]));
+        }
+
         renderNotes(j);
         $('net-updated').textContent = 'port ' + (fw.port || cfg.port) + ' · updated ' + new Date().toLocaleTimeString();
     }
 
     /** Warnings that need a sentence, not a tile: foreign rules on the same port, persistence, errors. */
+    /**
+     * Two readings of the worker's counters into a share of a CPU.
+     *
+     * The previous reading is kept here rather than on the server for the reason the OpenTracker card
+     * documents: computing it server-side would mean sleeping inside a web request. The guards are
+     * the ones that can actually fire — a restart (the pid or its start time changed, so the counter
+     * went backwards), a window too short to divide by, and a machine whose core count is unknown.
+     * A ">100 % of the box" clamp is not among them: numerator and denominator come from the same
+     * /proc/stat clock, so that cannot happen.
+     */
+    const MIN_WINDOW_S = 8;
+    let prevWorker = null;
+    function workerCpuShare(now, cpus) {
+        if (!now || !now.pid || !now.total) { prevWorker = null; return null; }
+        const prev = prevWorker;
+        prevWorker = now;
+        if (!prev) return null;
+        // A restart resets the process's own clock; carrying the old reading across it would show a
+        // enormous negative or a nonsensical spike.
+        if (prev.pid !== now.pid || prev.started !== now.started) return null;
+        const dProc = now.ticks - prev.ticks;
+        const dTotal = now.total - prev.total;
+        if (dTotal <= 0 || dProc < 0 || dProc > dTotal) return null;
+        const hz = now.hz || 100;
+        const windowS = dTotal / hz / (cpus || 1);
+        // At 100 Hz and a five-second poll, a worker using a few per cent of a core is quantised into
+        // steps of tens of per cent. Waiting for a wider window is the difference between a number and
+        // a jitter generator.
+        if (windowS < MIN_WINDOW_S) { prevWorker = prev; return null; }
+        const box = 100 * dProc / dTotal;
+        return { box, core: box * (cpus || 1), window: Math.round(windowS) };
+    }
+
     function renderNotes(j) {
         const box = $('net-notes');
         box.textContent = '';

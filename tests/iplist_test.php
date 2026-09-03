@@ -67,6 +67,50 @@ $cfgManual = ['net_limit_trusted' => "203.0.113.10, 198.51.100.0/24\n2001:db8::5
 $manual = netlimitTrusted($cfgManual);
 check('manual entries parse into the allow side', count($manual) === 3, json_encode($manual));
 
+// ── 3b. containment: which manual entries a list actually covers ─────────────
+//
+// The question the card answers is "why is this host still getting through?", and the answer is
+// almost never that two strings were equal — it is that a /32 sits inside a /16 somebody imported.
+foreach ([
+    [['5.188.1.7'],       ['5.188.0.0/16'],   1, 'a host inside a /16'],
+    [['5.188.0.0/16'],    ['5.188.1.7'],      1, 'and the block inside the manual entry'],
+    [['10.0.0.0/8'],      ['10.1.0.0/16'],    1, 'a /8 contains a /16'],
+    [['10.1.0.0/16'],     ['10.0.0.0/8'],     1, 'and a /16 sits inside a /8'],
+    [['1.2.3.4'],         ['1.2.3.5'],        0, 'two different hosts'],
+    [['1.2.3.0/24'],      ['1.2.4.0/24'],     0, 'adjacent /24s'],
+    [['203.0.113.7'],     ['0.0.0.0/0'],      1, '/0 covers everything of its family'],
+    [['0.0.0.0/0'],       ['203.0.113.7'],    1, 'from either side'],
+    [['1.2.3.4/32'],      ['1.2.3.4'],        1, '/32 and the bare host are the same address'],
+    [['2001:db8::1'],     ['2001:db8::/32'],  1, 'IPv6 nests the same way'],
+    [['2001:db8::/32'],   ['2001:db9::/32'],  0, 'two different v6 blocks'],
+    [['1.2.3.4'],         ['2001:db8::1'],    0, 'a v4 entry can never meet a v6 one'],
+    [['0.0.0.0/0'],       ['::/0'],           0, 'not even the two /0s'],
+    [['1.2.3.128/25'],    ['1.2.3.0/25'],     0, 'the two halves of a /24 do not touch'],
+    [['1.2.3.128/25'],    ['1.2.3.129'],      1, 'but the upper half holds its own host'],
+    [['1.2.3.128/25'],    ['1.2.3.127'],      0, 'and not the address below it'],
+    [['1.2.3.4', '9.9.9.9'], ['1.2.3.0/24', '8.8.8.0/24'], 1, 'only the one that actually overlaps'],
+] as [$m, $b, $want, $why]) {
+    check('overlap: ' . $why, count(ipListOverlapsWith($m, $b)) === $want,
+          json_encode([$m, $b, ipListOverlapsWith($m, $b)]));
+}
+check('overlap: nothing on either side is not a conflict',
+      ipListOverlapsWith([], ['1.2.3.0/24']) === [] && ipListOverlapsWith(['1.2.3.4'], []) === []);
+check('overlap: an unparseable entry is skipped, not treated as a match',
+      ipListOverlapsWith(['not-an-address'], ['0.0.0.0/0']) === []);
+check('overlap: each manual entry is reported at most once',
+      count(ipListOverlapsWith(['1.2.3.4'], ['1.2.3.0/24', '1.2.0.0/16', '1.0.0.0/8'])) === 1);
+
+// The cost is the reason it is an index and not a product: 71 seconds became under a second, on a
+// card that refreshes every few seconds.
+$bigManual = [];
+for ($i = 0; $i < 256; $i++) $bigManual[] = '203.0.' . ($i % 256) . '.7';
+$bigBlock = [];
+for ($i = 0; $i < 60000; $i++) $bigBlock[] = sprintf('%d.%d.%d.0/24', 10 + intdiv($i, 65536), intdiv($i, 256) % 256, $i % 256);
+$t0 = microtime(true);
+ipListOverlapsWith($bigManual, $bigBlock);
+$ms = (microtime(true) - $t0) * 1000;
+check('overlap: 256 manual entries against 60 000 blocks stays under a second', $ms < 1000, round($ms) . ' ms');
+
 // ── 4. the file handed to the helper ─────────────────────────────────────────
 check('the sets file lives under config/', str_ends_with(str_replace('\\', '/', ipListSetsFile()), '/config/net_sets.txt'),
       ipListSetsFile());
@@ -152,7 +196,13 @@ if ($bash === null || !trackerExecAvailable()) {
           str_contains($rules, 'limit rate over 30000/second burst 100 packets counter name in_capped drop'), $rules);
     check('helper: the two new counters exist',
           str_contains($rules, 'counter in_blocked') && str_contains($rules, 'counter in_softcap'), $rules);
-    check('helper: eight sets are emitted, empty ones included', substr_count($rules, 'flags interval') === 8, $rules);
+    // Ten since 1.29.0: trusted4/6, denied4/6 (the hand-typed block box), and the six list sets.
+    check('helper: ten sets are emitted, empty ones included', substr_count($rules, 'flags interval') === 10, $rules);
+    // The order IS the feature — a hand-typed block must outrank an allow list, or "allow a country
+    // except these hosts" cannot be said at all.
+    $pDenied = strpos($rules, '@denied4');
+    check('helper: the hand-typed block is matched after trusted and before every list',
+          $pTrust !== false && $pDenied !== false && $pa !== false && $pTrust < $pDenied && $pDenied < $pa, $rules);
     check('helper: the header carries a list fingerprint',
           (bool)preg_match('/# tracker-netlimit:.*lists=\d+/', $rules), $rules);
 
@@ -202,6 +252,19 @@ if ($bash === null || !trackerExecAvailable()) {
           (bool)preg_match('/read_rule_handle\(\).{0,600}?!\/saddr\//s', $src));
 }
 
+// ── 5b. what a list covers, not merely how many lines it has ────────────────
+$cov = ipListCoverage(['1.0.1.0/24', '1.0.2.0/23', '2001:db8::/32', '5.5.5.5']);
+check('coverage: a /24 is 256 addresses and a /23 is 512', $cov['addr4'] === 256 + 512 + 1, json_encode($cov));
+check('coverage: IPv6 entries are counted as ranges, not as addresses', $cov['nets6'] === 1, json_encode($cov));
+check('coverage: /0 is the whole of IPv4', ipListCoverage(['0.0.0.0/0'])['addr4'] === 4294967296);
+check('coverage: a bare host is one address', ipListCoverage(['1.2.3.4'])['addr4'] === 1);
+check('coverage: nothing covers nothing', ipListCoverage([]) === ['addr4' => 0, 'nets6' => 0]);
+// The number that answers the operator's actual question — "is 250 000 enough to block China?"
+$cnLike = [];
+for ($i = 0; $i < 8810; $i++) $cnLike[] = sprintf('%d.%d.%d.0/24', 1 + intdiv($i, 65536), intdiv($i, 256) % 256, $i % 256);
+check('coverage: 8 810 /24s are 2.25 million addresses, so entries and addresses are not the same number',
+      ipListCoverage($cnLike)['addr4'] === 8810 * 256);
+
 // ── 6. registration: four places, or it does not exist ───────────────────────
 $schema  = (string)file_get_contents($root . '/includes/schema.php');
 $save    = (string)file_get_contents($root . '/api/admin/save_settings.php');
@@ -219,6 +282,19 @@ check('the schema version was bumped for the new tables',
       (bool)preg_match('/TRACKER_SCHEMA_VERSION = (\d+)/', $schema, $m) && (int)$m[1] >= 34, $m[1] ?? '?');
 check('both tables are created', str_contains($schema, 'CREATE TABLE IF NOT EXISTS `ip_lists`')
     && str_contains($schema, 'CREATE TABLE IF NOT EXISTS `ip_list_entries`'));
+
+foreach (['net_limit_blocked'] as $key) {
+    check("$key: has a schema default", str_contains($schema, "'$key'"));
+    check("$key: is saveable", str_contains($save, "'$key'"));
+    check("$key: is findable in the settings search", str_contains($catalog, "'$key'"));
+    check("$key: has a control on the settings page", str_contains($tpl, 'name="' . $key . '"'));
+}
+$helper = (string)file_get_contents($root . '/tools/opentracker/tracker-netlimit.sh');
+check('the helper accepts --blocked', str_contains($helper, '--blocked=*)'));
+check('… and forwards all four optional arguments',
+      str_contains($helper, 'action_set "${1-}" "${2-100}" "${3-6969}" "${4-}" "${5-}" "${6-}" "${7-}"'));
+check('the hand-typed block is its own set, not mixed into the lists',
+      str_contains($helper, 'set denied4') && str_contains($helper, 'set denied6'));
 
 $api = (string)file_get_contents($root . '/api.php');
 check('the read endpoint is routed', str_contains($api, "'admin/ip_lists'"));

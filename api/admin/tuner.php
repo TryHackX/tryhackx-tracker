@@ -47,6 +47,32 @@ if ($op === 'apply') {
     // actually configured. `tracker_port` was never a setting: this always applied to 6969, and on a
     // tracker running elsewhere the report's "apply" button would have moved the wrong port's limit
     // while answering that it had set the limit.
+    // A run that could not tell its own steps apart measured nothing, so there is no measured value
+    // to apply — the report withholds the suggestion and this refuses the number even if it is asked
+    // for directly.
+    if (!empty($st['report']['inconclusive'])) {
+        jsonResponse(['error' => 'That run could not tell its steps apart, so none of its values were '
+                               . 'measured. Run the probe again before applying anything.'], 409);
+    }
+
+    // WHICH LIMIT THE RUN WAS MOVING.
+    //
+    // An outbound run's steps are anchored on the REPLY BUDGET, not on the receive limit — so writing
+    // one of its values through netlimitApply() would take a number measured about what the tracker
+    // sends and impose it on what it is allowed to receive, while the button says "the inbound
+    // firewall limit". `both` moves two limits at once and there is no single honest thing to apply.
+    $what = (string)($st['what'] ?? 'inbound');
+    if ($what === 'both') {
+        jsonResponse(['error' => 'That run moved the receive limit and the reply budget together, so '
+                               . 'there is no single value to apply. Set them from their own cards.'], 400);
+    }
+    if ($what === 'outbound') {
+        $r = netlimitEgress($cfg, $pps, false);
+        auditNote(['target_id' => (string)$pps, 'summary' => 'applied ' . $pps . ' pps egress from a stability probe']);
+        jsonResponse(['success' => !empty($r['ok']), 'message' => !empty($r['ok'])
+            ? 'Reply budget set to ' . number_format($pps) . ' packets/second.'
+            : ($r['error'] ?? 'The helper refused it.')] + tunerStatus($cfg));
+    }
     $r = netlimitApply($cfg, $pps, netlimitBurst($cfg), netlimitPort($cfg));
     auditNote(['target_id' => (string)$pps, 'summary' => 'applied ' . $pps . ' pps from a stability probe']);
     jsonResponse(['success' => !empty($r['ok']), 'message' => !empty($r['ok'])

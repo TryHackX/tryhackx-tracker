@@ -4,6 +4,129 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.29.0] — 2026-09-04
+
+The scrape-coverage chart, the worker's CPU, addresses blocked by hand, and a probe that can tell
+when it measured nothing.
+
+### Fixed — the settings breadcrumb was never a JavaScript bug
+
+Three rounds of "fix the condition" chased a bug that was not in the JavaScript. `.d-hidden
+{ display: none }` sits about 1 400 lines earlier in `admin.css` than `.settings-where
+{ display: flex }`, and the two have identical specificity — so the later rule won and
+`classList.toggle('d-hidden')` had no effect at all. `showWhere(sec, false)` was running perfectly
+and doing nothing. The guard is now `.settings-where:not(.d-hidden)`, which five other components in
+that file already carry for exactly this reason. Verified: 0 breadcrumbs in All settings, 0 inside a
+category, 6 while a search is running, 0 after clearing it.
+
+### Fixed — the add-user dialog said an address was fine when the server would refuse it
+
+`dsaddsas@wp\/.pl` lit up green. The client's test was `/^[^@\s]+@[^@\s.]+\.[^@\s]+$/`, which
+describes the domain only by what it is *not* — so a backslash and a forward slash were, to it,
+ordinary domain characters. The server rejects that string, so nothing bad could be stored; the
+defect was a form that told the admin the opposite of what would happen. The domain is now checked as
+a hostname, and the same regex replaced two more copies of the weak one — the user-edit dialog and
+`app.js`, which is the public registration and account forms. Verified against `filter_var` over 37
+addresses: **no input the client accepts is refused by the server.** It is stricter in five places,
+all of them things nobody can receive mail at.
+
+### Fixed — the password checklist had no stylesheet at all
+
+The markup and the logic shipped in 1.28.0 and the CSS block did not, so the five requirements
+rendered as an unstyled column and the `.ok` class toggled nothing visible. It now uses the public
+registration form's own shape — two columns with the odd fifth requirement spanning both and centred
+— and the same class names, so they cannot drift apart. The order was also wrong: the admin dialog
+had the digit and the special character the other way round from the form an admin had just used.
+
+### Added — the scrape coverage chart
+
+**Index → Scrape coverage.** What each poll actually delivered, against how many torrents the tracker
+said it had, over six hours to a month. The numbers were already being computed and thrown away: the
+state file kept one `last_poll` key and the next poll overwrote it. `index_polls` keeps one row per
+poll, pruned to `index_poll_keep_days` (90 by default — 48 rows a day).
+
+The distinction the whole table exists for: **`entries` is a file position, not a delivery count.**
+A pass that resumes at a cursor counts every entry it walks past, including the ones an earlier pass
+already handled, so plotting raw entries shows a resumed poll as a triumph and the fresh one after it
+as a collapse. `skip_from` is recorded with every row and `delivered = entries − skip_from`. Where the
+tracker's own count was not available the coverage line has a gap rather than a zero.
+
+### Added — the metadata worker's CPU on the Traffic page
+
+Machine load says the box is busy; it never said who. The worker is one process under
+`tracker-metadata.service`, and the panel now shows its share of a core beside the load. It follows
+the pattern the OpenTracker card already established: the server returns **raw cumulative counters**
+and refuses to compute a percentage, because the second reading would mean sleeping inside a web
+request; the browser subtracts two polls. The process is found by its systemd unit in
+`/proc/<pid>/cgroup`, never by the string "worker.py" in a command line — an editor with the file
+open carries that too. Measured against `top` on production: 60 % of a core against its 54.5 %,
+which is the difference between a ten-second average and an instant.
+
+### Added — addresses blocked by hand, which beat an allow list
+
+**Settings → UDP traffic → Blocked addresses.** The mirror image of Trusted addresses, and it exists
+for the one case lists cannot express: *allow all of Poland, except these three hosts*. An allow list
+is matched before a block list, so a host inside an allowed range can never be stopped by another
+list. The chain is now, in order: trusted → **blocked by hand** → allow lists → block lists →
+under-pressure lists → the general limit. Verified on production with `nft -c`.
+
+### Added — the address lists say what they cover, not only how many lines they have
+
+"8 810 entries" is a true and useless answer to *is this enough to block China*. Each list now
+carries the number of IPv4 addresses its networks cover, computed once at import: China's zone file
+is 8 810 networks and **342 983 424 addresses**. The ceiling is on networks and it holds about 28
+countries that size, which is what the setting now says instead of "250,000 entries".
+
+### Added — the upload says what it understood before anything is stored
+
+A drop zone that takes a dragged file, and a read-back under it: how many entries were recognised,
+how many addresses they cover, and which lines were ignored, with examples. Files with a NUL byte are
+refused as binary. None of this is the security boundary — the text is parsed for addresses and
+everything else discarded, on the server, and validated again in awk inside the root helper — it is
+so that a file which is not what you think it is says so before it is saved.
+
+### Fixed — conflicting addresses were compared as strings
+
+The card only noticed a conflict when a trusted address and a blocked one were the *same string*,
+which almost never happens. What happens is `5.188.1.7` sitting inside a blocked `5.188.0.0/16`. It
+now tests containment, for IPv4 and IPv6, with the /0, /32 and /128 cases and mixed families covered
+by 17 tests. The naive version was measured at **71 seconds** for 256 manual entries against 250 000
+blocks, on a card that polls every few seconds; indexing the manual side by prefix length makes it
+flat at under a second, and the answer is cached against a stamp of both inputs.
+
+### Fixed — three things about the stability probe
+
+**A run that changes nothing is no longer reported as a success.** After each step the probe reads the
+limit back and stops if the kernel does not have the value it asked for — and it now requires the
+firewall to be in `limit` mode, because `status` falls back to the saved file's header, and `set`
+writes that file with the value it was asked for, so the number could confirm itself out of a file.
+
+**The flatness verdict no longer fires on a good run.** It branded a run inconclusive when served was
+flat, which is also what a plan sitting entirely *above* the arrival rate looks like — the best
+possible outcome reported as a broken one. It now requires every step to have been dropping something.
+
+**Apply writes to the limit the run was actually moving.** An outbound run's steps are anchored on the
+reply budget; the button wrote them into the *receive* limit while the label said "the inbound
+firewall limit". Outbound values now go through the egress path, `both` is refused as having no single
+value to apply, and a run marked inconclusive refuses to be applied at all.
+
+The dry run is called **Test**, like every other card on this page, and its badge no longer says
+"rehearsal".
+
+### Fixed — the firewall helper dropped arguments
+
+`set` forwards four optional tails now (`--dry-run`, `--trusted=`, `--blocked=`, `--sets=`) and was
+still forwarding two. Whichever came last was silently ignored — including `--dry-run`, which means a
+preview could have touched the real firewall.
+
+### Added — byte settings carry a unit
+
+`5368709120` is a true statement about a limit and an unreadable one. The three byte-valued settings
+(the API's daily budget and the two federation page sizes) are now a number plus a unit, defaulting to
+the largest that divides the value exactly. The stored value stays bytes and the field carrying the
+setting's name stays in the form as a hidden input holding exactly that — so a JavaScript failure
+posts what it was rendered with, rather than turning 5 GiB into 5 bytes.
+
 ## [1.28.0] — 2026-09-03
 
 Address lists, live validation where an admin creates an account, and four things the audit found
