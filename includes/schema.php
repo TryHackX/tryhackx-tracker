@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 31;  // 31 = two index_hashes indexes (seen_count, last_completed)
+const TRACKER_SCHEMA_VERSION = 32;  // 32 = settings only (db_time_zone, net_limit_trusted)
+// 31 = two index_hashes indexes (seen_count, last_completed)
 // so the fetch order can offer "seen most often" and "most completed" without a filesort,
 // plus the three settings that go with them. HEAVY: the ALTER is deferred to the janitor.
 // 30 = settings only (metadata fetch order + mix shares)
@@ -960,6 +961,15 @@ function trackerSchemaDefaultSettings(): array {
         'meta_order_mix_whitelist'    => '0',
         'meta_order_mix_seen'         => '0',
         'meta_order_mix_completed'    => '0',
+        // schema v32: the time zone the panel's own database session runs in, published so that
+        // OTHER processes on the same database can match it. config/database.php sets the session
+        // to PHP's zone, so every DATETIME the panel writes is in that zone -- and anything reading
+        // those rows in a different one is silently hours out. Written by the janitor, read by the
+        // metadata worker. Empty = never published yet; a reader must then leave its clock alone.
+        'db_time_zone'                => '',
+        // schema v32: addresses the inbound UDP rate limit must never drop. Comma or newline
+        // separated, IPv4/IPv6, plain or CIDR. Empty = nobody is exempt (the shipped default).
+        'net_limit_trusted'           => '',
         // sender address for outgoing mail (empty = use site_email); domain-validated on save
         'mail_from_email'             => '',
         // schema v9: registration requires an email + only verified accounts get their groups

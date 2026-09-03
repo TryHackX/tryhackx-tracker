@@ -4,6 +4,64 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.26.0] — 2026-09-03
+
+### Added — addresses the rate limit never drops
+
+**Settings → Network & limits → Trusted addresses.** IPv4 or IPv6, plain or CIDR. Packets from these
+sources are counted but never dropped: they skip the budget entirely.
+
+A rate limit cannot tell which packets matter. On a machine that also runs a game server, is
+monitored from a fixed address, or is reached over SSH from one place, those sources should not be
+collateral damage of a swarm shouting at the tracker.
+
+Each entry becomes an element of an nftables set — one hash lookup whatever the size — placed after
+the arrival counter and **before** the drop rule, so a trusted packet still shows up in the arrival
+rate on the Traffic page and simply never meets the budget. The cap of 256 is a cap on judgement
+rather than on performance: this is an exemption from the machine's own protection, and a list nobody
+reviews is a hole.
+
+Validated in the panel **and again** in the root helper, which is what actually writes them into the
+firewall — the helper runs as root and a caller is not a reason to skip a check. Anything
+unrecognised is dropped with a note on stderr rather than failing the whole apply, so one
+fat-fingered address cannot leave the tracker unprotected. Verified against the real `nft` parser on
+the production machine with `--dry-run`, including the rule order.
+
+One subtlety worth naming: applying a limit normally swaps a single rule by handle, to keep the
+counters running. That fast path leaves the rest of the table alone — including the trusted sets — so
+it is now taken only when the exemptions are unchanged. Otherwise the panel would report a list the
+firewall never received.
+
+### Fixed — the worker and the panel were two hours apart
+
+`config/database.php` sets the panel's MySQL session to PHP's time zone, so `NOW()` and `date()`
+agree for every panel request. That is right on its own, and it makes the zone a property of PHP's
+configuration that nothing else connecting to the same database can know. The metadata worker uses
+pymysql and got the server's SYSTEM zone: **CEST while the panel was UTC**.
+
+Everything still "worked", which is what made it nasty. `meta_fetched_at` written by the worker read
+two hours in the future to the panel, and the panel's `meta_requested_at <= NOW()` gate — the one
+that spreads an auto-queue over an hour — opened two hours early.
+
+Neither side guesses now. The panel publishes the zone it is using (`db_time_zone`, written by the
+janitor when it changes), and the worker adopts it on every connection and reconnection. An
+unrecognised value is logged and ignored rather than interpolated into a `SET` statement.
+
+### Changed — "Tracker & whitelist" was fourteen sections
+
+Half of them were about the machine rather than about the whitelist. Split three ways:
+
+- **Tracker & whitelist** — what the tracker serves: mode and accesslist, the schedule, whitelist
+  upkeep, submissions that must prove themselves.
+- **OpenTracker service** — the unit that runs it: service, performance, extra instances, live peer
+  sync.
+- **Network & limits** — the network it runs on: UDP traffic and the rate limit, kernel buffers, the
+  stability probe.
+
+Ratings moved to *Descriptions & review* and the two metadata sections to *Index*, where they were
+always looking for. The keywords went with them, so a search for "nftables" no longer lands on the
+accesslist. Biggest group is now five sections instead of fourteen.
+
 ## [1.25.2] — 2026-09-01
 
 ### Fixed — "386 870 seen · 0 kept", and an index that stopped being refreshed

@@ -49,6 +49,10 @@ try {
     $db  = getDb();
     $cfg = getSettings($db);
     ensureSchema($db, $cfg);
+    // Publish which zone the panel's database session runs in, so the metadata worker can match it
+    // rather than guess. See includes/db_clock.php for what guessing cost.
+    require_once __DIR__ . '/../includes/db_clock.php';
+    dbClockPublish($db);
     $GLOBALS['db'] = $db; $GLOBALS['cfg'] = $cfg;
     $before = whitelistStateRead();
     // scheduled mode first: it may flip tracker_mode (in $cfg too), which the whitelist janitor honours

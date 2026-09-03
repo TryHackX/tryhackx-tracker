@@ -86,7 +86,7 @@ $allowed = [
     'whitelist_submit_mode', 'meta_worker_concurrency',
     'meta_order_mode', 'meta_order_mix_oldest', 'meta_order_mix_newest',
     'meta_order_mix_seeders', 'meta_order_mix_random', 'meta_order_mix_whitelist',
-    'meta_order_mix_seen', 'meta_order_mix_completed',
+    'meta_order_mix_seen', 'meta_order_mix_completed', 'net_limit_trusted',
     // schema v9: verification gate, terms, email-change cooldown, member-search switches
     'users_require_email_verify', 'users_terms_text', 'users_email_change_cooldown_days',
     'index_search_enabled', 'index_search_include_whitelist',

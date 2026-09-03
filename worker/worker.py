@@ -12,7 +12,7 @@ web app can stat. Runs as the unprivileged `tracker` user under systemd (see tra
 
 Requires: python3-libtorrent (libtorrent-rasterbar 2.x bindings), python3-pymysql.
 """
-import configparser, json, logging, os, secrets, signal, sys, time
+import configparser, json, logging, os, re, secrets, signal, sys, time
 
 # The parallel-fetch ceiling, in ONE place. It used to be written as a literal in two of them, which
 # is how a build enforcing 16 and a panel offering 64 ended up in the same install.
@@ -201,14 +201,51 @@ class Config:
 
 
 class Db:
+    # A named zone or a numeric offset, and nothing else: this value is interpolated into a SET
+    # statement, and it arrives from a settings table the panel writes.
+    TZ_RE = re.compile(r"^(?:[+-](?:[01]\d|2[0-3]):[0-5]\d|[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+){0,2})$")
+
     def __init__(self, params):
         self.params = params
         self.conn = None
+        self.time_zone = None    # what the panel says its own session uses; None = leave the server default
 
     def _connect(self):
         if self.conn is None:
             self.conn = pymysql.connect(**self.params)
+            self._apply_time_zone(self.conn)
         return self.conn
+
+    def _apply_time_zone(self, conn):
+        """Match the panel's session clock, on this connection and on every reconnection.
+
+        Without this the worker runs in the SERVER's zone while the panel runs in PHP's, and on this
+        machine those are two hours apart. Everything still "works", which is what makes it nasty:
+        `meta_fetched_at` written by the worker reads two hours in the future to the panel, and the
+        panel's `meta_requested_at <= NOW()` gate -- the one that spreads an auto-queue over an hour
+        -- opens two hours early because the worker compares UTC values against a CEST clock.
+        """
+        if not self.time_zone:
+            return
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET time_zone = %s", (self.time_zone,))
+        except Exception as e:
+            log.warning("could not adopt the panel's time zone %r: %s", self.time_zone, e)
+
+    def adopt_time_zone(self, tz):
+        """Take the panel's published zone. Returns True when it changed."""
+        tz = (tz or "").strip()
+        if tz and not self.TZ_RE.match(tz):
+            log.warning("db_time_zone %r does not look like a time zone -- ignoring it", tz[:40])
+            return False
+        if tz == (self.time_zone or ""):
+            return False
+        self.time_zone = tz or None
+        if self.conn is not None:
+            self._apply_time_zone(self.conn)
+        log.info("database session clock: %s (published by the panel)", tz or "server default")
+        return True
 
     def query(self, sql, args=None, fetch=False):
         for attempt in (1, 2):
@@ -370,9 +407,12 @@ class Worker:
             try:
                 keys = ",".join("'meta_order_mix_" + n + "'" for n in ORDER_MIX_KEYS)
                 rows = self.db.query(
-                    "SELECT `key`, `value` FROM settings WHERE `key` IN ('meta_order_mode'," + keys + ")",
-                    fetch=True)
+                    "SELECT `key`, `value` FROM settings WHERE `key` IN "
+                    "('meta_order_mode','db_time_zone'," + keys + ")", fetch=True)
                 got = {str(r["key"]): str(r["value"] or "") for r in (rows or [])}
+                # Read here rather than in its own query: this is the one place that already asks the
+                # settings table on a timer, and the clock is exactly as live a setting as the order.
+                self.db.adopt_time_zone(got.get("db_time_zone", ""))
                 mode, shares = order_normalise(
                     got.get("meta_order_mode", ""),
                     {n: got.get("meta_order_mix_" + n, "") for n in ORDER_MIX_KEYS})

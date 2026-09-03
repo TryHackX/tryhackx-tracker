@@ -892,6 +892,24 @@ sudo install -m 0755 tools/opentracker/tracker-mode.sh /usr/local/sbin/tracker-m
 Remove every trace: `tracker-cluster.sh remove <name>` per instance, which takes the systemd template
 with the last one.
 
+### Addresses the rate limit never drops (1.26.0)
+
+**Settings → Network & limits → Trusted addresses.** A rate limit cannot tell which packets matter.
+If the machine also runs a game server, is monitored from a fixed address, or you reach it over SSH
+from one place, those sources should not be collateral damage of a swarm shouting at the tracker.
+
+IPv4 or IPv6, plain or CIDR, separated by commas, spaces or newlines. Each entry becomes an element
+of an nftables set — one hash lookup whatever the size — placed **after** the arrival counter and
+**before** the drop rule, so a trusted packet still appears in the arrival rate on the Traffic page
+and simply never meets the budget.
+
+The cap of 256 is a cap on judgement rather than on performance. This is an exemption from the
+machine's own protection: a source listed here can send at any rate it likes, and a list nobody
+reviews is a hole. The addresses are validated in the panel **and again** in the root helper that
+writes them into the firewall — it runs as root, and a caller is not a reason to skip a check.
+Anything unrecognised is dropped with a note rather than failing the apply, so one mistyped address
+cannot leave the tracker unprotected.
+
 ### Kernel network buffers — the eight knobs, armed rather than applied (1.13.0)
 
 **Admin → Traffic → Kernel network buffers** (helper and window in Settings → *Kernel network

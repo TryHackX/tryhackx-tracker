@@ -312,7 +312,7 @@
             </div>
 
             <!-- Tracker mode & whitelist -->
-            <div class="settings-section" id="section-reputation" data-group="tracker" data-title="Ratings">
+            <div class="settings-section" id="section-reputation" data-group="content" data-title="Ratings">
                 <h5><i class="bi bi-hand-thumbs-up"></i> Ratings</h5>
                 <small class="settings-hint d-block mb-3">Up or down on a torrent, shown in the Info panel and optionally beside every search result. <strong>Off by default.</strong>
                 <br><br><strong>What a public voting button really is:</strong> the easiest thing on a site to automate. One loop, a thousand negatives, and the score means nothing for ever. Four things stand in the way here, because no single one holds: one vote per identity enforced by a <strong>unique key in the database</strong> (not a check in PHP, which is a race two requests can walk straight through), the shared rate limiter, the CAPTCHA points scheme this site already uses, and a weight that makes an anonymous vote count for less than an account's.
@@ -372,7 +372,7 @@
                 </div>
             </div>
 
-            <div class="settings-section" id="section-livesync" data-group="tracker" data-title="Live peer sync (second machine)">
+            <div class="settings-section" id="section-livesync" data-group="opentracker" data-title="Live peer sync (second machine)">
                 <h5><i class="bi bi-diagram-3"></i> Live peer sync</h5>
                 <small class="settings-hint d-block mb-3">Two opentrackers on <strong>two machines</strong> telling each other who is in which swarm, live. This is <em>not</em> federation: federation moves metadata between panels over HTTPS with a key, this moves the peers themselves between trackers. Neither replaces the other, and on a single machine this does nothing at all &mdash; there is nobody to sync with. <strong>Off by default.</strong>
                 <br><br><strong>The protocol has no authentication and no encryption.</strong> Anything that can reach the port can inject peers into every swarm this tracker serves, so the helper <strong>refuses</strong> to arm unless the address belongs to a tunnel interface. There is no override for that, on purpose. The panel does not set up WireGuard for you either &mdash; generating a private key and writing it into <code>/etc</code> is a bigger claim on the machine than anything else here makes, and it would be doing it without being able to see the other end. Press <strong>Test</strong> and it prints the commands.</small>
@@ -818,7 +818,7 @@
             </div>
 
             <!-- User accounts -->
-            <div class="settings-section" id="section-tuner" data-group="tracker" data-title="Stability probe">
+            <div class="settings-section" id="section-tuner" data-group="network" data-title="Stability probe">
                 <h5>Stability probe</h5>
                 <p class="settings-hint mb-2">
                     Finds where this machine's limits actually are, by moving the inbound limit through a few steps and
@@ -977,7 +977,7 @@
             </div>
 
             <!-- OpenTracker performance -->
-            <div class="settings-section" id="section-ot-perf" data-group="tracker" data-title="OpenTracker Performance">
+            <div class="settings-section" id="section-ot-perf" data-group="opentracker" data-title="OpenTracker Performance">
                 <h5>OpenTracker &mdash; performance</h5>
                 <p class="settings-hint mb-2">
                     The knobs that already exist on any systemd machine, and they are worth nearly all of the
@@ -1030,7 +1030,7 @@
 
             <!-- Kernel network buffers -->
             <!-- Extra opentracker instances -->
-            <div class="settings-section" id="section-cluster" data-group="tracker" data-title="OpenTracker instances">
+            <div class="settings-section" id="section-cluster" data-group="opentracker" data-title="OpenTracker instances">
                 <h5>OpenTracker instances</h5>
                 <small class="settings-hint d-block mb-3">Run <strong>more than one</strong> opentracker on this machine, on extra UDP ports, when one has genuinely run out of CPU. Check the <a href="<?= $baseUrl ?>?action=admin-traffic#ot-card">performance card</a> first: it says outright whether this would help, and on most machines it will not &mdash; the cheap knobs (worker count, priority, socket buffers) are worth nearly all of the available gain at nearly none of the risk. The installer&rsquo;s own <code>opentracker.service</code> is <strong>never touched</strong>; extras are added beside it, share the same accesslist and the same white/black mode, and removing them removes every trace. Off by default.</small>
                 <div class="row g-3">
@@ -1061,7 +1061,7 @@
             </div>
 
 
-            <div class="settings-section" id="section-sysctl" data-group="tracker" data-title="Kernel network buffers">
+            <div class="settings-section" id="section-sysctl" data-group="network" data-title="Kernel network buffers">
                 <h5>Kernel network buffers</h5>
                 <small class="settings-hint d-block mb-3">The eight kernel settings that decide how many announces survive a burst &mdash; the socket buffers, the per-CPU packet queue and the machine-wide UDP memory pool. This is the first thing the panel touches that is <strong>not</strong> the tracker&rsquo;s own: these belong to the whole machine, which here also runs mail, the forum, the file service and the database they share. So nothing is applied by saving. A change is <em>armed</em>, takes effect while you watch it, and <strong>puts itself back automatically unless you confirm</strong> &mdash; the undo is scheduled through systemd before the change is made, so it does not need this panel, the database, or an administrator who can still log in. Nothing is written to <code>/etc</code> until you confirm either, so until then a reboot also undoes it. The values live on the <a href="<?= $baseUrl ?>?action=admin-traffic#sysctl-card">Traffic page</a>, next to the counters that say which of them is worth touching at all.</small>
                 <div class="row g-3">
@@ -1615,7 +1615,7 @@
             </div>
 
             <!-- Metadata fetch order -->
-            <div class="settings-section" id="section-fetch-order" data-group="tracker" data-title="Metadata Fetch Order">
+            <div class="settings-section" id="section-fetch-order" data-group="index" data-title="Metadata Fetch Order">
                 <h5>Metadata fetch order</h5>
 <?php
 require_once __DIR__ . '/../../includes/meta_order.php';
@@ -1724,7 +1724,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
             </div>
 
             <!-- Index, continued -->
-            <div class="settings-section" id="section-index-files" data-group="tracker" data-title="Index File Lists">
+            <div class="settings-section" id="section-index-files" data-group="index" data-title="Index File Lists">
                 <h5>Index file lists</h5>
                 <div class="row g-3">
                     <div class="col-md-3">
@@ -1739,7 +1739,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
             </div>
 
             <!-- OpenTracker Service -->
-            <div class="settings-section" id="section-service" data-group="tracker" data-title="OpenTracker Service">
+            <div class="settings-section" id="section-service" data-group="opentracker" data-title="OpenTracker Service">
                 <h5>OpenTracker Service</h5>
                 <small class="settings-hint d-block mb-3">Define the systemd unit of your tracker (e.g. <code>opentracker</code> or <code>opentracker.service</code>). When set, <strong>Reload</strong> and <strong>Restart tracker</strong> buttons appear on the Dashboard, together with smart recommendations that turn <span class="text-warning">orange</span> or <span class="text-danger">red</span> when a restart is advisable (after blacklist changes, or a long uptime). <strong>Reload</strong> runs <code>systemctl reload &lt;name&gt;</code> &mdash; a <strong>SIGHUP</strong> that makes OpenTracker re-read its white/blacklist with <em>no downtime</em>; <strong>Restart</strong> runs <code>systemctl restart &lt;name&gt;</code> (brief downtime). The web/PHP user must be allowed to run those commands &mdash; use the <strong>Test</strong> buttons below and see the README (sudoers). Leave the name empty to hide the buttons entirely.</small>
                 <div class="row g-3">
@@ -1802,7 +1802,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
             </div>
 
             <!-- UDP traffic & rate limit — includes/netlimit.php + tools/opentracker/tracker-netlimit.sh -->
-            <div class="settings-section" id="section-netlimit" data-group="tracker" data-title="UDP traffic &amp; rate limit">
+            <div class="settings-section" id="section-netlimit" data-group="network" data-title="UDP traffic &amp; rate limit">
                 <h5>UDP traffic &amp; rate limit</h5>
                 <p class="settings-hint mb-2">
                     Two different problems, two different levers.
@@ -1843,6 +1843,18 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                         <label class="form-label">Tracker UDP port</label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="net_limit_port" value="<?= (int)netlimitPort($cfg) ?>" min="1" max="65535">
                         <small class="settings-hint">The port in your announce URL (<code>6969</code> by default). Only this port is touched.</small>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Trusted addresses <small class="settings-hint">(never rate-limited)</small></label>
+                        <textarea class="form-control bg-dark text-light border-secondary" name="net_limit_trusted" rows="2" placeholder="203.0.113.10, 198.51.100.0/24, 2001:db8::/32"><?= sanitize($cfg['net_limit_trusted'] ?? '') ?></textarea>
+<?php $trOk = function_exists('netlimitTrusted') ? netlimitTrusted($cfg) : []; $trBad = function_exists('netlimitTrustedRejected') ? netlimitTrustedRejected($cfg) : []; ?>
+                        <small class="settings-hint">
+                            IPv4 or IPv6, plain or CIDR, separated by commas, spaces or newlines. Packets from these sources are
+                            <strong>counted but never dropped</strong> &mdash; they skip the budget entirely.
+                            <?php if ($trOk): ?><span class="text-info">In force: <?= count($trOk) ?> — <code><?= sanitize(implode(', ', array_slice($trOk, 0, 6))) ?><?= count($trOk) > 6 ? ' …' : '' ?></code>.</span><?php endif; ?>
+                            <?php if ($trBad): ?><span class="text-warning">Not an address, ignored: <code><?= sanitize(implode(', ', array_slice($trBad, 0, 4))) ?></code>.</span><?php endif; ?>
+                            <details class="settings-more"><summary>What this is for, and what it costs</summary>A rate limit cannot tell which packets matter. If this machine also runs a game server, or is monitored from a fixed address, or you reach it over SSH from one place, those sources should never be collateral damage of a swarm. Each entry becomes an element of an nftables set and costs one hash lookup, so the list is free at any size worth having &mdash; the cap is <strong><?= NET_TRUSTED_MAX ?></strong>, and it is a cap on judgement rather than on performance: this is an exemption from the machine's own protection, and a list nobody reviews is a hole. A source listed here can send at any rate it likes. The addresses are validated here <em>and again</em> in the root helper, which is what actually writes them into the firewall; anything unrecognised is dropped with a note rather than failing the whole apply.</details>
+                        </small>
                     </div>
                 </div>
 

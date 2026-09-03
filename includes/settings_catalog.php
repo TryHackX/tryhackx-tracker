@@ -26,8 +26,16 @@ function settingsCatalogGroups(): array {
          'keywords' => 'security captcha recaptcha hcaptcha turnstile bot spam abuse rate limit throttle lockout brute force proxy ip admin session timeout hardening panel address hidden url'],
         ['id' => 'users',        'title' => 'User accounts',      'icon' => 'bi-people',
          'keywords' => 'users accounts registration login members groups permissions verification terms email change cooldown search'],
+        // "Tracker & whitelist" had grown to fourteen sections -- half of them about the machine
+        // rather than about the whitelist. Split three ways: what the tracker SERVES (here), the
+        // SERVICE that runs it, and the NETWORK it runs on. The keywords are split with it, so a
+        // search for "nftables" no longer lands on the accesslist.
         ['id' => 'tracker',      'title' => 'Tracker & whitelist','icon' => 'bi-hdd-network',
-         'keywords' => 'tracker opentracker mode blacklist whitelist accesslist schedule open hours service systemd restart reload scrape torrents hashes firewall nftables rate limit throttle udp packets pps traffic flood'],
+         'keywords' => 'tracker mode blacklist whitelist accesslist schedule open hours scrape torrents hashes submissions prove magnet upkeep dead removal'],
+        ['id' => 'opentracker',  'title' => 'OpenTracker service','icon' => 'bi-hdd-stack',
+         'keywords' => 'opentracker service systemd unit restart reload sighup performance workers threads nice scheduling open files instances extra ports livesync live peer sync cluster second machine'],
+        ['id' => 'network',      'title' => 'Network & limits',   'icon' => 'bi-speedometer2',
+         'keywords' => 'firewall nftables rate limit throttle udp packets pps traffic flood inbound outbound egress budget trusted exempt kernel buffers rmem wmem sysctl backlog stability probe tuner'],
         ['id' => 'stats',        'title' => 'Statistics',         'icon' => 'bi-graph-up',
          'keywords' => 'statistics stats numbers chart graph timeline history samples roll-up retention peers seeds leechers uptime live refresh ranges'],
         ['id' => 'content',      'title' => 'Descriptions & review', 'icon' => 'bi-card-text',
@@ -270,6 +278,7 @@ function settingsCatalogKeywords(): array {
         'meta_order_mix_whitelist' => 'fetch order mix share whitelist registered submitted first priority percent',
         'meta_order_mix_seen'      => 'fetch order mix share seen count most often persistent percent',
         'meta_order_mix_completed' => 'fetch order mix share completed downloads popular all time percent',
+        'net_limit_trusted'        => 'trusted ip addresses whitelist exempt bypass udp rate limit never dropped allow list cidr',
 
         // ── API & federation ──
         'api_enabled'              => 'server to server api endpoints clients integration on off',

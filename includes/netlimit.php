@@ -42,6 +42,9 @@
 
 const NET_PPS_MIN        = 1000;
 const NET_PPS_MAX        = 1000000;
+// A short list, deliberately. This is an exemption from the machine's own protection, and a
+// hundred of them is not a list any more -- it is a hole nobody reviews.
+const NET_TRUSTED_MAX = 256;
 const NET_BURST_MIN      = 1;
 const NET_BURST_MAX      = 65535;
 const NET_SAMPLE_MIN     = 30;
@@ -418,11 +421,68 @@ function netlimitAutoDecide(array $autoState, int $observedPps, int $currentPps,
  * whether the value in force came from the admin, the automatic mode or the panic button.
  * $dryRun asks the helper to render and syntax-check the ruleset without touching the firewall.
  */
+/**
+ * Addresses the inbound limit must never drop, from `net_limit_trusted`.
+ *
+ * A rate limit is a blunt instrument: it does not know which packets matter. On a machine that also
+ * runs a game server, or that is monitored from a fixed address, or that the admin reaches over SSH
+ * from one place, the one thing you want is a short list of sources the budget never applies to.
+ *
+ * Parsed here and validated AGAIN in the root helper. Not because the helper distrusts this file
+ * specifically, but because it runs as root and puts these strings inside a firewall ruleset: a
+ * caller is not a reason to skip a check.
+ *
+ * @return list<string> plain addresses and CIDRs, de-duplicated, order preserved
+ */
+function netlimitTrusted(array $cfg): array {
+    $raw = (string)($cfg['net_limit_trusted'] ?? '');
+    if (trim($raw) === '') return [];
+    $out = [];
+    foreach (preg_split('/[\s,;]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) as $item) {
+        if (count($out) >= NET_TRUSTED_MAX) break;
+        $item = trim($item);
+        if ($item === '' || !netlimitValidAddress($item)) continue;
+        if (!in_array($item, $out, true)) $out[] = $item;
+    }
+    return $out;
+}
+
+/** One address or CIDR, v4 or v6. Rejects anything the firewall would not accept as an element. */
+function netlimitValidAddress(string $item): bool {
+    $addr = $item; $bits = null;
+    if (str_contains($item, '/')) {
+        [$addr, $b] = explode('/', $item, 2);
+        if ($b === '' || !ctype_digit($b)) return false;
+        $bits = (int)$b;
+    }
+    if (filter_var($addr, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+        return $bits === null || ($bits >= 0 && $bits <= 32);
+    }
+    if (filter_var($addr, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
+        return $bits === null || ($bits >= 0 && $bits <= 128);
+    }
+    return false;
+}
+
+/** Which entries in the raw setting were thrown away, so the panel can say so instead of silently dropping them. */
+function netlimitTrustedRejected(array $cfg): array {
+    $raw = (string)($cfg['net_limit_trusted'] ?? '');
+    if (trim($raw) === '') return [];
+    $bad = [];
+    foreach (preg_split('/[\s,;]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) as $item) {
+        $item = trim($item);
+        if ($item !== '' && !netlimitValidAddress($item)) $bad[] = $item;
+    }
+    return $bad;
+}
+
 function netlimitApply(array $cfg, int $pps, int $burst, int $port, bool $dryRun = false, string $source = 'admin'): array {
     $pps   = netlimitClampInt($pps, NET_PPS_MIN, NET_PPS_MAX, 30000);
     $burst = netlimitClampInt($burst, NET_BURST_MIN, NET_BURST_MAX, 100);
     $port  = netlimitClampInt($port, 1, 65535, 6969);
     $args  = ['set', (string)$pps, (string)$burst, (string)$port];
+    $trusted = netlimitTrusted($cfg);
+    if ($trusted) $args[] = '--trusted=' . implode(',', $trusted);
     if ($dryRun) $args[] = '--dry-run';
     $r = netlimitRun($cfg, $args);
     if ($r['ok'] && !$dryRun) {

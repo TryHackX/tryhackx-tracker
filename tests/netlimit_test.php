@@ -60,6 +60,37 @@ check('over-long command refused', !netlimitValidCommand(str_repeat('a', 256)));
 check('command getter blanks an invalid value', netlimitCommand(['net_limit_cmd' => 'x; rm -rf /']) === '');
 check('command getter keeps a valid value', netlimitCommand(['net_limit_cmd' => 'sudo -n /opt/t.sh']) === 'sudo -n /opt/t.sh');
 
+// ── trusted addresses: the exemption list ────────────────────────────────────
+// A rate limit cannot tell which packets matter, so a short allow-list is the difference between
+// throttling a swarm and throttling the admin's own SSH. Validated in TWO places -- here and in the
+// root helper -- because the helper runs as root and writes these strings into a firewall ruleset.
+check('no trusted addresses by default', netlimitTrusted([]) === []);
+check('blank is not an address', netlimitTrusted(['net_limit_trusted' => "  
+ , ; "]) === []);
+$mixed = ['net_limit_trusted' => "203.0.113.10, 198.51.100.0/24
+2001:db8::/32 ::1"];
+check('v4, v4 CIDR, v6 CIDR and bare v6 all survive',
+      netlimitTrusted($mixed) === ['203.0.113.10', '198.51.100.0/24', '2001:db8::/32', '::1'],
+      json_encode(netlimitTrusted($mixed)));
+check('duplicates collapse', netlimitTrusted(['net_limit_trusted' => '1.2.3.4, 1.2.3.4']) === ['1.2.3.4']);
+foreach (['999.1.1.1', '1.2.3', '1.2.3.4/33', '2001:db8::/129', 'example.com', '1.2.3.4/', '; nft flush ruleset',
+          '$(id)', '1.2.3.4 -o /etc/passwd'] as $bad) {
+    check('refused: ' . $bad, !netlimitValidAddress($bad));
+}
+foreach (['0.0.0.0/0', '10.0.0.1', '255.255.255.255', '::', 'fe80::1/64', '2001:db8:85a3::8a2e:370:7334'] as $good) {
+    check('accepted: ' . $good, netlimitValidAddress($good));
+}
+// A caller who types nonsense should be told, not silently ignored.
+check('the rejected entries are reported back',
+      netlimitTrustedRejected(['net_limit_trusted' => '1.2.3.4, nope, 5.6.7.8']) === ['nope']);
+check('a valid list reports nothing rejected',
+      netlimitTrustedRejected(['net_limit_trusted' => '1.2.3.4, 5.6.7.8']) === []);
+// The cap is on judgement, not on nftables: 0.0.0.0/0 would already exempt everything, so a list
+// long enough that nobody reads it is the real risk.
+$many = implode(',', array_map(fn($i) => '10.0.' . intdiv($i, 256) . '.' . ($i % 256), range(0, NET_TRUSTED_MAX + 50)));
+check('the list is capped', count(netlimitTrusted(['net_limit_trusted' => $many])) === NET_TRUSTED_MAX,
+      (string)count(netlimitTrusted(['net_limit_trusted' => $many])));
+
 // ── 3. counters → rates ──────────────────────────────────────────────────────
 $prev = ['in_total' => 1000, 'in_passed' => 900, 'in_capped' => 100];
 $cur  = ['in_total' => 7000, 'in_passed' => 6300, 'in_capped' => 700];
