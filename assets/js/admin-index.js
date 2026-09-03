@@ -57,6 +57,26 @@
             el('span', { text: `${num(c.meta_failed)} failed` }),
             el('div', { className: 'wl-small text-muted', text: (s.meta_auto_queue ? 'auto-queue ON (budget ignored)' : `budget ${num(st.meta_budget_used)} / ${num(s.meta_daily_budget)} today`) + ` · ${num(c.files)} file entries` }),
         ]));
+        // The lifecycle, as two rates side by side. A total that falls for days looks like data loss
+        // until you can see that expiry and resolution are simply running at different speeds — and
+        // that the grace window is the setting that decides which one wins.
+        const fl = s.flow || {};
+        if (fl.expiring_24h !== undefined) {
+            const win = Number(s.grace_days) || 0;
+            const cover = fl.days_to_cover;
+            const mismatch = cover && win && cover > win;
+            grid.appendChild(kv('Lifecycle rates', [
+                el('span', { text: `${num(fl.resolved_24h)} resolved / 24 h` }), ' · ',
+                el('span', { className: mismatch ? 'text-warning' : '', text: `${num(fl.expiring_24h)} expiring / 24 h` }),
+                el('div', {
+                    className: 'wl-small text-muted',
+                    text: cover
+                        ? `at this rate a full pass over the queue takes ~${cover} d, against a ${win} d grace window` +
+                          (mismatch ? ' — most rows are dropped before the worker reaches them' : '')
+                        : 'nothing queued, or nothing resolving yet',
+                }),
+            ]));
+        }
         const lp = st.last_poll;
         grid.appendChild(kv('Poll', [
             st.last_poll_at ? el('span', { text: fmtDate(new Date(st.last_poll_at * 1000).toISOString()) }) : badge('never', 'wl-b-muted'),

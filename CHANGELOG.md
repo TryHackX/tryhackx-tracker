@@ -47,6 +47,21 @@ Neither side guesses now. The panel publishes the zone it is using (`db_time_zon
 janitor when it changes), and the worker adopts it on every connection and reconnection. An
 unrecognised value is logged and ignored rather than interpolated into a `SET` statement.
 
+### Added — why the index total is falling, said on the page
+
+A row's grace window is set when it is first inserted and never extended: a hash whose metadata does
+not resolve within `index_grace_days` is dropped. That is the designed lifecycle, and with a queue of
+millions it can be wildly out of step with what the worker actually manages — measured here, 34 647
+resolved in a day against 449 426 about to expire, with a **three day** grace window and a queue that
+would take **fifty days** to walk once.
+
+Nothing on the page said any of that. The only visible symptom was a total that fell for days, which
+reads as data loss. The Index card now shows both rates side by side, with how long a full pass would
+take against the grace window, and says plainly when the window is the shorter of the two: *"most
+rows are dropped before the worker reaches them"*.
+
+The lever, once you can see it, is one setting.
+
 ### Changed — "Tracker & whitelist" was fourteen sections
 
 Half of them were about the machine rather than about the whitelist. Split three ways:

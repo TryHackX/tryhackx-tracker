@@ -1120,7 +1120,32 @@ function indexStatus(PDO $db, array $cfg): array {
         }
         $counts['files'] = (int)$db->query("SELECT COUNT(*) FROM index_files")->fetchColumn();
     } catch (\Throwable $e) {}
+    // WHY THE TABLE SHRINKS, answered on the page instead of left to be inferred.
+    //
+    // grace_until is set when a row is first inserted and is never extended: a hash that does not get
+    // its metadata resolved within index_grace_days is dropped. That is the designed lifecycle, but
+    // with a queue of millions and a worker resolving tens of thousands a day, the two numbers can be
+    // wildly mismatched — and the only visible symptom is a total that falls for days. So put both
+    // rates next to each other: what is about to expire, and what is actually being resolved.
+    $flow = ['expiring_24h' => 0, 'resolved_24h' => 0, 'days_to_cover' => null];
+    try {
+        $flow['expiring_24h'] = (int)$db->query(
+            "SELECT COUNT(*) FROM index_hashes
+              WHERE meta_status <> 'done' AND grace_until IS NOT NULL
+                AND grace_until < NOW() + INTERVAL 1 DAY")->fetchColumn();
+        $flow['resolved_24h'] = (int)$db->query(
+            "SELECT COUNT(*) FROM index_hashes
+              WHERE meta_status = 'done' AND meta_fetched_at > NOW() - INTERVAL 1 DAY")->fetchColumn();
+        // At the current rate, how long a full pass over the queue would take. This is the number
+        // that has to be compared against the grace window, and nothing else on the page shows it.
+        $queued = $counts['meta_pending'] + $counts['meta_fetching'];
+        if ($flow['resolved_24h'] > 0 && $queued > 0) {
+            $flow['days_to_cover'] = (int)ceil($queued / $flow['resolved_24h']);
+        }
+    } catch (\Throwable $e) {}
+
     return [
+        'flow' => $flow,
         'enabled' => indexEnabled($cfg), 'source_url' => indexSourceUrl($cfg), 'poll_minutes' => indexPollMinutes($cfg),
         'min_seeders' => indexMinSeeders($cfg), 'max_rows' => indexMaxRows($cfg), 'grace_days' => indexGraceDays($cfg),
         'protect_days' => indexProtectDays($cfg), 'meta_daily_budget' => indexMetaDailyBudget($cfg), 'meta_auto_queue' => indexMetaAutoQueue($cfg), 'poll_budget' => indexPollBudget($cfg),
