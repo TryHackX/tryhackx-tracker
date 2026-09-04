@@ -382,11 +382,49 @@ else
 use-after-free that fires whenever one batch passes 16 MiB, and it should go in whenever the binaries
 are next rebuilt.
 
+### Round two (2026-09-04): the lifetime is sound, and that makes it stranger
+
+A minimal in-memory ring — one record per queue, free and writev, no I/O on the hot path — traced a
+whole corrupted transfer. Everything it measured says the server is right:
+
+| Measured | Result |
+|---|---|
+| Buffers queued vs handed to `writev` | **73 / 73** |
+| Buffers sent AFTER their cleanup ran | **0** |
+| Chunk headers whose declared size matched the bytes queued behind them | **all of them** (`3f2a` = 16 170, every time) |
+| Buffers whose first bytes changed between queue and send | **0** |
+| Total handed to `writev` vs total the client received | **420 271 / 420 271, exactly** |
+
+And the transfer is still corrupt — at offset 48 630, which is exactly a chunk-header boundary:
+93 (HTTP head) + 16 179 + 2 + 6 + 16 170 + 2 + 6 + 16 170 + 2. The 32 bytes before it are a perfectly
+formed chunk end (`…incompletei1ee
+`); the six bytes that should be the next header are a heap
+pointer followed by NULs, and valid bencode resumes a few bytes later.
+
+So the process hands the kernel a correctly framed stream, byte for byte, and the client receives the
+same number of bytes with a freed pointer sitting exactly where a header should be. Those two
+statements cannot both be true of the same bytes, which means one of the probes is measuring
+something subtly different from what it claims — the next round has to close that gap before adding
+any more theories.
+
+**Also ruled out this round:** re-entrancy. `iob_send` was bracketed with enter/leave records to see
+whether the fullscrape callback appends to a batch mid-send; the run that produced a usable trace
+showed no queue inside a send and no unsent buffer. (One later run produced an empty trace — the
+destructor did not fire — and its "all clean" reading is void; a harness that can report success
+without data is a harness to fix before it is a result to believe.)
+
 ### The next experiment
 
-Log every buffer address at the moment it is queued and again at the moment it is handed to
-`writev`, plus every cleanup, and find the entry that is sent after its cleanup ran. A first attempt
-crashed under its own instrumentation and needs redoing with less of it.
+Close the gap between "the trace says the stream is correct" and "the wire says it is not". The
+probe fires when the **iovec is built**, not when `writev` returns, so it cannot see anything that
+happens to a buffer between those two moments. Capture the iovec contents again immediately AFTER
+`writev` returns, and hash each buffer rather than sampling eight bytes — a corruption further into a
+16 KiB payload is invisible to the current probe, and the header at a boundary may be collateral
+rather than the cause.
+
+Worth pairing with: run the same lab under `valgrind --tool=memcheck` (the address sanitiser build
+did not link here), which reports a write to freed memory at the moment it happens rather than
+leaving it to be inferred from what came out of the socket.
 
 **Nothing has been swapped on production.** The backup taken before any of this is at
 `/home/debian/opentracker-backup-20260903-185859` with `SHA256SUMS` and `ACTIVE-BINARY.txt`.

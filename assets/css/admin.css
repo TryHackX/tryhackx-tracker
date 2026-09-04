@@ -2009,4 +2009,6 @@ input[type="number"] {
 /* The coverage card with too little history to draw. */
 .idx-cov-empty-one { margin-top: 0.5rem; color: #c3ccd8; font-size: 0.82rem; }
 .idx-cov-empty-hint { margin-top: 0.3rem; font-size: 0.76rem; }
-.idx-cov-note-inline { display: block; margin-top: 0.1rem; line-height: 1.3; }
+/* The coverage tiles use the panel's own .wl-kv-item, so they need no rules of their own —
+   only the sub-line under a value wants a little air. */
+.wl-status-grid .wl-kv-value > .wl-small { margin-top: 0.15rem; line-height: 1.35; }

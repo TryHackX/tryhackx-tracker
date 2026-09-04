@@ -33,12 +33,19 @@
     const fmt = (n) => Number(n || 0).toLocaleString();
     const pct = (v) => (v === null || v === undefined) ? '—' : v.toFixed(1) + ' %';
 
+    // THE PANEL'S OWN TILE, not one that merely looks like it in the source.
+    //
+    // The first version used `.wl-kv` with `.wl-kv-k` / `.wl-kv-v`. `.wl-kv` is the CONTAINER for a
+    // list of tiles (the shape modals use), and the other two have no rules in admin.css at all — so
+    // the tiles came out as bare dark boxes with the text welded to the border and the label in body
+    // type. The card next to this one on Traffic uses `.wl-kv-item` / `.wl-kv-label` /
+    // `.wl-kv-value`, which is where the padding, the border and the small-caps label live.
     function tile(label, value, cls, note) {
-        return el('div', { className: 'wl-kv' }, [
-            el('div', { className: 'wl-kv-k', text: label }),
-            el('div', { className: 'wl-kv-v' }, [
+        return el('div', { className: 'wl-kv-item' }, [
+            el('div', { className: 'wl-kv-label', text: label }),
+            el('div', { className: 'wl-kv-value' }, [
                 el('span', { className: cls || '', text: value }),
-                note ? el('span', { className: 'wl-small text-muted idx-cov-note-inline', text: note }) : '',
+                note ? el('div', { className: 'wl-small text-muted', text: note }) : '',
             ]),
         ]);
     }
