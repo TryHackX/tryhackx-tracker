@@ -318,3 +318,75 @@ Three things this project learned the hard way, in the order they bite:
    exact command.
 3. **Full scrapes are rate-limited to one per client per 5 minutes** (`WANT_MODEST_FULLSCRAPES`), and
    the answer to an early one is HTTP 402. That is not a payment and not a firewall; poll less often.
+
+## The chunked-framing bug: what is now known (2026-09-04)
+
+A full scrape large enough to be sent in more than one chunk arrives corrupted: the client hits a
+chunk-size header that is not hexadecimal, part-way through the body. Reproduced 8/8 and then 3/3 in
+a lab by scaling `OT_SCRAPE_CHUNK_SIZE` and `OT_BATCH_LIMIT` down together, so a small tracker
+crosses the same boundaries a real one does.
+
+### What the bytes on the wire actually are
+
+Not scrambled payload — a **pointer**. `0x00007f1e75980c44`, in the same place on every run. glibc
+writes the tcache free-list `fd` pointer into the first eight bytes of a chunk when it is freed, so a
+buffer that reads back as a heap address is a buffer that has been **freed and not yet reused**.
+
+The question is therefore not "what writes garbage" but "who frees this while it is still queued".
+
+### What has been ruled out, with evidence
+
+| Theory | How it was killed |
+|---|---|
+| The `io_batch` split at `OT_BATCH_LIMIT` | Instrumented: the split never runs at the offset where framing breaks. |
+| libowfat's autofree | `-DWANT_NO_AUTO_FREE` corrupts identically — `iob_reset` runs cleanups regardless of the flag. |
+| `MSG_ZEROCOPY` | Zero `SO_EE_ORIGIN_ZEROCOPY` completions. |
+| A thread race on the batch | Thread ids logged at queue, send and reset: **one thread** does all three. |
+| Undefined behaviour exposed by optimisation | Built at `-O3` and at `-O0`, fixed and unfixed: 3/3 bad in all four. |
+
+An earlier round concluded "`iob_send` is never called". That was wrong, and the reason is worth
+recording: the instrumentation had landed on the `#ifdef __MINGW32__` copy of `iob_send`, which does
+not compile on Linux. Every conclusion drawn from that line was void.
+
+### A real bug found on the way, not this one
+
+`ot_http.c`, the batch-splitting path:
+
+```c
+if (current->bytesleft > OT_BATCH_LIMIT) {
+  io_batch *new_batch = realloc(cookie->batch, (cookie->batches + 1) * sizeof(io_batch));
+  if (new_batch) {
+    cookie->batch = new_batch;          /* the array may have MOVED */
+    if (OT_IOB_INIT(current) != -1)     /* `current` still points into the OLD allocation, and this */
+      current = cookie->batch + cookie->batches++;   /* initialises the FULL batch, not the new one */
+  }
+}
+```
+
+`current` is a pointer **into** `cookie->batch`. `realloc` is free to move that array, after which
+every use of `current` is a use of freed memory — and `OT_IOB_INIT(current)` wipes the batch that
+already holds the chunk header and everything queued so far, instead of preparing the new slot.
+
+The fix is to rebase before touching anything and to initialise the new slot:
+
+```c
+cookie->batch = new_batch;
+current = cookie->batch + cookie->batches;
+if (OT_IOB_INIT(current) != -1)
+  cookie->batches++;
+else
+  current = cookie->batch + cookie->batches - 1;
+```
+
+**It does not fix the framing corruption** — tested, 3/3 still bad — but it is a genuine
+use-after-free that fires whenever one batch passes 16 MiB, and it should go in whenever the binaries
+are next rebuilt.
+
+### The next experiment
+
+Log every buffer address at the moment it is queued and again at the moment it is handed to
+`writev`, plus every cleanup, and find the entry that is sent after its cleanup ran. A first attempt
+crashed under its own instrumentation and needs redoing with less of it.
+
+**Nothing has been swapped on production.** The backup taken before any of this is at
+`/home/debian/opentracker-backup-20260903-185859` with `SHA256SUMS` and `ACTIVE-BINARY.txt`.
