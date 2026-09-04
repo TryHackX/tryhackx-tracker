@@ -1979,3 +1979,34 @@ input[type="number"] {
 .idx-cov-chart { min-height: 240px; margin-top: 0.4rem; }
 .idx-cov-chart .u-legend { font-size: 0.76rem; }
 .idx-cov-empty { padding: 2rem 1rem; text-align: center; color: #8a94a2; font-size: 0.84rem; }
+
+
+/* Where the backup archives live. Shaped like the search shell it used to borrow, but with the
+   padding a box needs when its content is text rather than an <input>. */
+.bk-dir {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 300px;
+    max-width: 600px;
+    padding: 0.35rem 0.7rem;
+    background: #212529;
+    border: 1px solid #495057;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.bk-dir-icon { color: #8a94a2; font-size: 0.85rem; flex-shrink: 0; }
+.bk-dir-label { color: #8a94a2; font-size: 0.78rem; flex-shrink: 0; }
+.bk-dir-path {
+    color: #8ab4d8;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The coverage card with too little history to draw. */
+.idx-cov-empty-one { margin-top: 0.5rem; color: #c3ccd8; font-size: 0.82rem; }
+.idx-cov-empty-hint { margin-top: 0.3rem; font-size: 0.76rem; }
+.idx-cov-note-inline { display: block; margin-top: 0.1rem; line-height: 1.3; }

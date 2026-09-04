@@ -33,10 +33,13 @@
     const fmt = (n) => Number(n || 0).toLocaleString();
     const pct = (v) => (v === null || v === undefined) ? '—' : v.toFixed(1) + ' %';
 
-    function tile(label, value, cls) {
+    function tile(label, value, cls, note) {
         return el('div', { className: 'wl-kv' }, [
             el('div', { className: 'wl-kv-k', text: label }),
-            el('div', { className: 'wl-kv-v' }, [el('span', { className: cls || '', text: value })]),
+            el('div', { className: 'wl-kv-v' }, [
+                el('span', { className: cls || '', text: value }),
+                note ? el('span', { className: 'wl-small text-muted idx-cov-note-inline', text: note }) : '',
+            ]),
         ]);
     }
 
@@ -51,16 +54,24 @@
         if (s.avg_coverage !== null && s.avg_coverage !== undefined) {
             covCls = s.avg_coverage >= 95 ? 'text-success' : s.avg_coverage >= 70 ? 'text-warning' : 'text-danger';
         }
-        box.appendChild(tile('Average coverage', pct(s.avg_coverage), covCls));
+        // An average over one poll is not an average, and colouring it red says something the
+        // number cannot support. Below three polls the figures are shown plainly.
+        const thin = (s.polls || 0) < 3;
+        box.appendChild(tile('Average coverage', pct(s.avg_coverage), thin ? '' : covCls,
+            thin ? 'over ' + fmt(s.polls) + ' poll' + (s.polls === 1 ? '' : 's') + ' — too few to average'
+                 : 'over ' + fmt(s.polls) + ' polls'));
         box.appendChild(tile('Worst poll', pct(s.min_coverage),
-            (s.min_coverage !== null && s.min_coverage < 70) ? 'text-warning' : ''));
+            (!thin && s.min_coverage !== null && s.min_coverage < 70) ? 'text-warning' : ''));
         box.appendChild(tile('Polls in this window', fmt(s.polls)));
         box.appendChild(tile('Arrived truncated', fmt(s.truncated),
-            s.truncated ? 'text-warning' : 'text-muted'));
+            s.truncated ? 'text-warning' : 'text-muted',
+            s.truncated ? 'the scrape did not fit in one poll' : null));
         box.appendChild(tile('Failed', fmt(s.failed), s.failed ? 'text-danger' : 'text-muted'));
         if (l) {
             box.appendChild(tile('Last poll delivered', fmt(l.delivered)
-                + (l.rows_total ? ' of ' + fmt(l.rows_total) : '')));
+                + (l.rows_total ? ' of ' + fmt(l.rows_total) : ''),
+                l.delivered === 0 ? 'text-muted' : '',
+                l.delivered === 0 ? 'nothing new — it resumed past what an earlier poll had' : null));
         }
 
         // A note only when there is something to say. "Everything is fine" does not need a sentence.
@@ -84,12 +95,29 @@
         }
     }
 
-    function draw(points) {
+    function draw(points, from) {
         const box = $('idx-cov-chart');
-        if (!points.length) {
+        // FEWER THAN TWO POINTS IS NOT A CHART.
+        //
+        // uPlot given a single x value has no range to work with and invents one — the first live
+        // poll produced an axis running from Oct 2026 to May 2029 with one dot pinned to the left
+        // edge, which looks like a broken chart rather than like a table with one row in it. A line
+        // needs two points; until then this says so.
+        if (points.length < 2) {
             box.textContent = '';
-            box.appendChild(el('div', { className: 'idx-cov-empty',
-                text: 'No polls recorded in this window yet. The first one lands on the next scrape poll.' }));
+            const one = points[0] || null;
+            box.appendChild(el('div', { className: 'idx-cov-empty' }, [
+                el('div', { text: points.length
+                    ? 'One poll so far in this window — a line needs two. The next one draws it.'
+                    : 'No polls recorded in this window yet. The first one lands on the next scrape poll.' }),
+                one ? el('div', { className: 'idx-cov-empty-one',
+                    text: new Date(one.ts * 1000).toLocaleString() + ' · '
+                        + fmt(one.delivered) + ' delivered · ' + fmt(one.kept) + ' kept'
+                        + (one.coverage !== null ? ' · ' + pct(one.coverage) + ' coverage' : '')
+                        + (one.truncated ? ' · arrived truncated' : '') }) : '',
+                points.length ? el('div', { className: 'idx-cov-empty-hint',
+                    text: 'Try a wider range if there should be more.' }) : '',
+            ]));
             chart = null;
             return;
         }
@@ -102,10 +130,16 @@
         const coverage = points.map(p => (p.coverage === null || p.coverage === undefined) ? null : p.coverage);
         const data = [xs, delivered, kept, coverage];
 
+        // The x axis is the WINDOW THAT WAS ASKED FOR, not the spread of whatever came back. A
+        // 24-hour range with three polls in it should still be drawn as a day, or the reader is
+        // looking at a differently-shaped chart every time a poll lands.
+        const now = Math.floor(Date.now() / 1000);
+        const xFrom = Math.min(from || xs[0], xs[0]);
         const opts = {
             width: box.clientWidth || 800,
             height: 240,
-            scales: { x: { time: true }, y: { auto: true }, pct: { auto: false, range: [0, 105] } },
+            scales: { x: { time: true, range: [xFrom, Math.max(now, xs[xs.length - 1])] },
+                      y: { auto: true }, pct: { auto: false, range: [0, 105] } },
             axes: [
                 { stroke: '#8a94a2', grid: { stroke: '#22303f' }, ticks: { stroke: '#22303f' } },
                 { stroke: '#8a94a2', grid: { stroke: '#22303f' }, ticks: { stroke: '#22303f' },
@@ -121,9 +155,17 @@
             ],
         };
 
-        if (chart) { chart.setData(data); chart.setSize({ width: box.clientWidth || 800, height: 240 }); return; }
+        // A range change alters the x scale, which uPlot fixes at construction — so the chart is
+        // rebuilt when the window moves and only re-fed when it has not.
+        if (chart && chart.__from === xFrom) {
+            chart.setData(data);
+            chart.setSize({ width: box.clientWidth || 800, height: 240 });
+            return;
+        }
+        if (chart) { chart.destroy(); chart = null; }
         box.textContent = '';
         chart = new uPlot(opts, data, box);
+        chart.__from = xFrom;
     }
 
     async function load() {
@@ -141,7 +183,7 @@
         const u = $('idx-cov-updated');
         if (u) u.textContent = (r.points || []).length + ' polls · ' + range;
         renderSummary(r);
-        draw(r.points || []);
+        draw(r.points || [], r.from || 0);
     }
 
     $('idx-cov-ranges').addEventListener('click', (e) => {

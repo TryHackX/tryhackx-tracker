@@ -46,8 +46,14 @@
         <!-- The archives themselves -->
         <div class="admin-toolbar-card">
             <div class="toolbar-row">
-                <div class="toolbar-search">
-                    <span class="text-muted wl-small" id="bk-dir-label"></span>
+                <!-- This is where the archives LIVE, not a search box. It used to sit inside
+                     .toolbar-search, which is the input-shaped shell every other page puts a search
+                     field in — border, radius, overflow hidden, and all of its padding on the icon
+                     and the input. A bare span in there ends up welded to the left edge. -->
+                <div class="bk-dir">
+                    <i class="bi bi-folder2-open bk-dir-icon"></i>
+                    <span class="bk-dir-label">Archives</span>
+                    <code class="bk-dir-path" id="bk-dir-label"></code>
                 </div>
                 <div class="toolbar-right">
                     <span id="bk-total" class="text-muted wl-total"></span>

@@ -4,6 +4,48 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.29.1] — 2026-09-04
+
+Four things about the 1.29.0 cards, from looking at them on the real machine.
+
+### Fixed — the coverage chart drew a three-year axis for one poll
+
+The first live poll produced an x axis running from October 2026 to May 2029 with a single dot
+pinned to the left edge. uPlot given one x value has no range and invents one. Two changes: the axis
+is now anchored to **the window that was asked for** rather than to the spread of what came back, so
+24h is drawn as a day whatever lands in it; and below two points there is no chart at all, just the
+one poll written out in words — a line needs two points, and saying so is better than drawing
+something that looks broken. Switching range rebuilds the chart rather than re-feeding it, because
+uPlot fixes the x scale at construction.
+
+The tiles no longer colour an "average" taken over a single poll, and the two figures that read as
+alarms when they are not — 0 % coverage, 0 delivered — now say why underneath: *nothing new, it
+resumed past what an earlier poll had*.
+
+### Fixed — the backups directory was wearing an empty search box
+
+`/var/backups/tracker` sat welded to the left edge of a rounded box. It was inside
+`.toolbar-search`, the input-shaped shell every other page puts a search field in — border, radius,
+`overflow: hidden`, and all of its padding on the icon and the input, neither of which a bare span
+has. It is now what it always was: a labelled path, with an icon and its own padding.
+
+### Fixed — "Show me where" was missing from All settings
+
+It was made search-only, which was half the ask. Inside a category the heading already says which
+category you are in, so the breadcrumb is noise; in **All settings** every section of the panel is on
+one page in one column and "which group is this in" has no other answer. It shows in All settings and
+during a search, and nowhere else. A plain page load now goes through the same pass as clicking All
+settings — it did not before, so the breadcrumbs appeared when you clicked the button and not when
+you arrived on the view it selects.
+
+### Fixed — the worker CPU tile blanked itself every few seconds
+
+A share of a CPU needs two readings a few seconds apart, and between them the tile was replacing the
+number with "measuring…" — taking away the thing the reader was looking at, on every refresh. It now
+keeps the last figure it measured and swaps in the new one when it is ready. Only a worker that has
+never been measured says anything else, and a restart (new pid, new start time) clears the carried
+value rather than showing a number that belongs to a dead process.
+
 ## [1.29.0] — 2026-09-04
 
 The scrape-coverage chart, the worker's CPU, addresses blocked by hand, and a probe that can tell

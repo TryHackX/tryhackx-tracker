@@ -276,6 +276,13 @@
         show(divider, false);
         groupBar.classList.remove('settings-groups-muted');
         sections.forEach(sec => resetSection(sec, group === 'all' || sec.group === group));
+        // ALL SETTINGS IS THE OTHER PLACE THE BREADCRUMB EARNS ITS KEEP.
+        //
+        // Inside a category the heading above already says which category you are in, so a line
+        // repeating it is noise. In All settings every section of the panel is on one page in one
+        // column, and "which group is this one in" has no other answer — which is exactly the
+        // question the breadcrumb was added for. So: All settings, or a search. Not categories.
+        if (group === 'all') sections.forEach(sec => showWhere(sec, true));
         show(emptyEl, false);
         countEl.textContent = '';
         [...groupBar.querySelectorAll('.settings-group-btn')].forEach(b => {
@@ -451,9 +458,15 @@
     /** #section-… links (e.g. from the Traffic page's "Timeline settings" button) still work. */
     function openHash() {
         const id = (location.hash || '').replace('#', '');
-        if (!id) return;
+        // A PLAIN LOAD IS "ALL SETTINGS", AND HAS TO GO THROUGH THE SAME PASS AS CLICKING IT.
+        //
+        // Without this the page was left exactly as PHP rendered it and applyGroup() never ran on
+        // startup, so the breadcrumbs appeared the moment you clicked "All settings" and not when
+        // you arrived on it — the same view behaving two different ways depending on how you got
+        // there.
+        if (!id) { applyGroup(); return; }
         const sec = sections.find(s => s.el.id === id);
-        if (!sec) return;
+        if (!sec) { applyGroup(); return; }
         group = sec.group;
         input.value = '';
         applyGroup();

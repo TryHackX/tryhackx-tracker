@@ -300,19 +300,31 @@
         // Machine load says the box is busy; it never says WHO. On this server the worker is the
         // heaviest thing after the tracker itself, and "is the fetcher eating the machine" was a
         // question the page could not answer.
+        // THE TILE KEEPS THE LAST NUMBER IT HAD.
+        //
+        // A share of a CPU needs two readings a few seconds apart, so between them there is nothing
+        // new to say — and saying "measuring…" replaces a number the reader was looking at with a
+        // word, every time the card refreshes. The measurement carries on in the background and the
+        // figure is swapped in when it is ready; only a worker that has never been measured shows
+        // anything else.
         const wcpu = workerCpuShare(j.worker_cpu, j.cpus);
-        if (wcpu !== null) {
+        if (wcpu !== null) lastWorkerCpu = wcpu;
+        const shown = wcpu || lastWorkerCpu;
+        if (shown) {
             grid.appendChild(kv('Metadata worker', [
-                el('span', { className: wcpu.core > 90 ? 'text-warning' : '',
-                             text: wcpu.core.toFixed(0) + '% of a core' }), ' ',
+                el('span', { className: shown.core > 90 ? 'text-warning' : '',
+                             text: shown.core.toFixed(0) + '% of a core' }), ' ',
                 el('span', { className: 'wl-small text-muted',
-                             text: '(' + wcpu.box.toFixed(1) + '% of the box, over ' + wcpu.window + ' s)' }),
+                             text: '(' + shown.box.toFixed(1) + '% of the box, over ' + shown.window + ' s)' }),
             ]));
         } else if (j.worker_cpu) {
+            // First reading of the session: there is genuinely nothing to show yet, and a row that
+            // appears from nowhere a moment later is worse than a row that says what it is waiting for.
             grid.appendChild(kv('Metadata worker', [
-                el('span', { className: 'wl-small text-muted', text: 'measuring…' }),
+                el('span', { className: 'wl-small text-muted', text: 'running · first reading in a few seconds' }),
             ]));
         } else if (j.worker_cpu === null) {
+            lastWorkerCpu = null;
             grid.appendChild(kv('Metadata worker', [
                 el('span', { className: 'wl-small text-muted', text: 'not running here' }),
             ]));
@@ -335,6 +347,9 @@
      */
     const MIN_WINDOW_S = 8;
     let prevWorker = null;
+    // The last share actually measured, so a poll that lands mid-window redraws the tile with the
+    // figure it already had instead of blanking it.
+    let lastWorkerCpu = null;
     function workerCpuShare(now, cpus) {
         if (!now || !now.pid || !now.total) { prevWorker = null; return null; }
         const prev = prevWorker;
@@ -342,7 +357,7 @@
         if (!prev) return null;
         // A restart resets the process's own clock; carrying the old reading across it would show a
         // enormous negative or a nonsensical spike.
-        if (prev.pid !== now.pid || prev.started !== now.started) return null;
+        if (prev.pid !== now.pid || prev.started !== now.started) { lastWorkerCpu = null; return null; }
         const dProc = now.ticks - prev.ticks;
         const dTotal = now.total - prev.total;
         if (dTotal <= 0 || dProc < 0 || dProc > dTotal) return null;
