@@ -34,7 +34,12 @@ if (empty($representative)) $errors[] = 'representative';
 if (empty($company)) $errors[] = 'company';
 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'email';
 if (empty($objectTitle)) $errors[] = 'objectTitle';
-if (!filter_var($link, FILTER_VALIDATE_URL)) $errors[] = 'link';
+// FILTER_VALIDATE_URL is not a safety check: it accepts `javascript://x/%0aalert(1)` and it
+// accepts a double quote inside the URL. This field is echoed into an href in the panel, so it
+// goes through the project's own validator instead -- http/s only, control characters stripped,
+// a host required (includes/richtext.php).
+$link = richtextSafeUrl($link) ?? '';
+if ($link === '') $errors[] = 'link';
 if (!isValidInfoHash($infoHash)) $errors[] = 'infoHash';
 
 // Validate magnet link (optional, but if provided must be valid and match infoHash)

@@ -4,6 +4,97 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.31.0] — 2026-09-04
+
+Two features that both come down to the same thing: the front page and the words on it stop being
+something only a code change can alter.
+
+### Added — the home page can be rearranged from the panel
+
+**Settings → Home page layout.** The front page is built from seven sections; they can now be
+dragged into any order, hidden, and their headings renamed, with the line under the site name
+editable too.
+
+The interesting part is what did *not* change. Every section still renders exactly where it always
+did, with its own conditions intact — the statistics widget still needs a setting, a permission and
+a cache file, and tracker mode still rewrites two of the sections three ways. The template captures
+each one into a buffer and `includes/homelayout.php` only decides the order those buffers are
+emitted in. Reordering by moving markup would have meant duplicating every one of those conditions,
+and a duplicated condition is one that goes stale.
+
+**Hiding a section here is not the same as switching its feature off**, and dragging one back does
+not switch it on. A section whose own setting is off says so on its row, with the setting named —
+without that, an operator drags a block into view and then wonders why nothing appeared.
+
+Reordering is offered three ways: drag, and ↑ / ↓ buttons on every row. Not belt-and-braces —
+native HTML5 drag-and-drop fires no events at all on a touch screen and cannot be driven from a
+keyboard, so a list that only drags is a list some people cannot use.
+
+The stored layout is **repaired against the catalogue** on every read: every known section appears
+exactly once, unknown keys are dropped, and a section added in a later version lands where the
+catalogue puts it rather than at the end. That is what stops an upgrade from quietly losing a
+section off the front page. `home_layout` is written only by its own endpoint and is deliberately
+absent from the settings allow-list, so an unrelated settings save cannot blank it.
+
+### Added — the interface speaks Polish
+
+Ported from **TryHackX-Files**, which has been running this design for a while, and kept
+behaviourally identical — the shape is different because that project has a `Lang` class and this
+one has procedural includes.
+
+**Settings → Languages** installs, copies, exports and removes translations. English and Polish
+ship; anything dropped into `lang/` is a language without a code change. A **switcher** sits at the
+end of the nav bar (only when there is more than one language to choose, and it keeps you on the
+page you were reading), an account can **pin its own language** so the choice follows it to another
+browser, and the site default can be a language or **Automatic**, which hands the choice to
+`Accept-Language`.
+
+Resolution order, highest first: `?lang=` → the signed-in account → the cookie → the site default →
+the browser → English.
+
+**Three lists, and they are not the same question.** *Offered* decides which languages exist for
+visitors at all; *in the switcher* decides what the header control shows; *for accounts* decides
+what a user may pin — and bounds automatic browser matching. A language kept out of the last two is
+still reachable by an explicit `?lang=` link: hiding a control is not withdrawing a translation.
+Each list is stored as a positive allow-list and an **empty list means "no restriction"**, so a bug
+that empties one would not show as a site with no languages but as a site quietly offering all of
+them. Every guard in `tests/lang_test.php` exists because that failure is invisible.
+
+**Uploads are JSON, never PHP**, and that is the security design: a `lang/*.php` is `require`d on
+every request, so accepting one as an upload would hand an admin form a way to put code on the
+include path. The payload is parsed as data, every pair is checked to be a flat string→string, and
+the file is written from `var_export()` — what lands on disk is a literal array this code generated.
+The two shipped languages are never replaced by an upload (every other translation falls back to
+them, and a partial file would hollow that out) — copy one to a free code and edit that.
+
+The two dictionaries are generated from **one source** (`tools/lang_src.py`) holding each string as
+an (English, Polish) pair, because a key added to one file and forgotten in the other is the normal
+way a translation rots. The test checks they still agree: same keys, same `:name` placeholders,
+nothing blank.
+
+Translated so far: the navigation and footer, the home page, Info, Terms, the whitelist page, the
+report form, search, sign-in, registration, the account page, password reset, email verification
+and change, the transparency report, and the 404. **Stats, Unsubscribe, the admin sign-in page and
+the admin panel are still English** — the mechanism is in place for them, the strings are not
+written yet. A missing key falls back to English, so a partial translation reads as English rather
+than as blanks.
+
+Schema 40 (`users.language`).
+
+### Changed — the built-in home page headings follow the language
+
+A consequence of shipping both features together: `homeSectionCatalog()` stores heading *keys*
+rather than literal English, so "the built-in heading" means "whatever this language calls it".
+A heading an operator renamed is shown verbatim in every language — they said what it should say,
+and translating that would be overruling them.
+
+### Fixed — the account page decided you had an email address by reading a word
+
+`app.js` worked out whether an account had an address by comparing the visible text to the literal
+string `none`. Translating that one word would have made every address-less account look like it
+had an address called "brak". The signal moved to `data-has-email`, which is not prose anybody may
+reword.
+
 ## [1.30.0] — 2026-09-04
 
 ### Added — Terms and Info are editable from the panel

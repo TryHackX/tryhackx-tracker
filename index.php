@@ -31,6 +31,8 @@ require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/federation.php';
 require_once __DIR__ . '/includes/pagecontent.php';
+require_once __DIR__ . '/includes/homelayout.php';
+require_once __DIR__ . '/includes/lang.php';
 require_once __DIR__ . '/includes/netlimit.php';
 require_once __DIR__ . '/includes/iplist.php';
 require_once __DIR__ . '/includes/backup.php';
@@ -65,6 +67,13 @@ autoArchiveOldAppeals($db, $cfg);
 pruneOldSentEmails($db, $cfg);
 whitelistJanitor($db, $cfg);
 $csrfToken = generateCsrfToken();
+
+// BEFORE any output: langInit() may set the language cookie, and a cookie after the first byte
+// is a cookie that never arrives. The signed-in user's saved choice is passed in so the
+// language follows the account rather than the browser -- currentUser() is already cached by
+// includes/users.php, so this costs nothing extra.
+$langUser = usersEnabled($cfg) ? currentUser($db) : null;
+langInit($cfg, $langUser['language'] ?? null);
 
 $action = $_GET['action'] ?? 'home';
 $action = preg_replace('/[^a-z0-9_-]/', '', strtolower($action));

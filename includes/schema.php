@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 39;  // 39 = page_content — Terms and Info editable through the panel's own editor
+const TRACKER_SCHEMA_VERSION = 40;  // 40 = users.language — the interface language follows the account
+// 39 = page_content — Terms and Info editable through the panel's own editor
 // 38 = net_limit_blocked — hand-typed addresses that beat an allow list
 // 37 = index_polls — what each scrape poll actually delivered, kept as a series
 // 36 = ip_lists.addr4 — an "entry" is a network, not an address, and the page has to say which
@@ -360,6 +361,7 @@ function trackerSchemaStatements(): array {
             `last_login_ip` VARCHAR(45) DEFAULT NULL,
             `pending_email` VARCHAR(190) DEFAULT NULL,
             `email_changed_at` DATETIME DEFAULT NULL,
+            `language` VARCHAR(3) DEFAULT NULL,
             UNIQUE KEY `uq_users_username` (`username`),
             UNIQUE KEY `uq_users_email` (`email`),
             KEY `idx_users_status` (`status`),
@@ -704,6 +706,11 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'users', 'email_changed_at')) $uparts[] = "ADD COLUMN `email_changed_at` DATETIME DEFAULT NULL";
     // v19: whoever does not want the newsletter must be able to say so once and be believed.
     if (!schemaColumnExists($db, 'users', 'bulk_optout')) $uparts[] = "ADD COLUMN `bulk_optout` TINYINT(1) NOT NULL DEFAULT 0";
+    // v40: the interface language, so it follows the account to another browser rather than living
+    // in a cookie that a different machine does not have. NULL means "whatever the site default is",
+    // which is not the same as any particular language -- change the site default and these accounts
+    // follow it, while an account that picked English stays English.
+    if (!schemaColumnExists($db, 'users', 'language')) $uparts[] = "ADD COLUMN `language` VARCHAR(3) DEFAULT NULL";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
 
     // v19: a source link and a description on a whitelist row. The table is small (hundreds of rows),

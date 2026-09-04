@@ -489,7 +489,9 @@ async function handleStatusCheck(e) {
             document.getElementById('res-representative').textContent = json.representative || '—';
             const linkEl = document.getElementById('res-link');
             if (json.link) {
-                linkEl.innerHTML = '<a href="' + escHtml(json.link) + '" target="_blank" class="status-link">' + escHtml(json.link) + '</a>';
+                // escHtml() does not escape quotes, and this value is a URL a stranger submitted.
+                const safeHref = escHtml(json.link).replace(/"/g, '&quot;');
+                linkEl.innerHTML = '<a href="' + safeHref + '" rel="noopener noreferrer" target="_blank" class="status-link">' + escHtml(json.link) + '</a>';
             } else {
                 linkEl.textContent = '—';
             }
@@ -2151,6 +2153,17 @@ const getJson = async (endpoint) => {
             bind(mailPref, label, 'account');
             bind(bulkPref, bulkLabel, 'bulk');
         }
+        // The interface language. The whole UI is server-rendered, so the page is reloaded once the
+        // choice is stored -- swapping the strings in place would need a second copy of every one of
+        // them in JavaScript, and two copies of a translation is one that goes out of date.
+        const langSel = $id('acc-language');
+        if (langSel) langSel.addEventListener('change', async () => {
+            langSel.disabled = true;
+            const r = await postJson('user_language', {
+                csrf_token: $id('account-csrf').value, language: langSel.value });
+            if (r && r.success) { window.location.reload(); return; }
+            langSel.disabled = false;
+        });
         const verifyBtn = $id('acc-verify-send');
         if (verifyBtn) verifyBtn.addEventListener('click', async () => {
             verifyBtn.disabled = true;
@@ -2166,9 +2179,12 @@ const getJson = async (endpoint) => {
         const emailIn = $id('acc-new-email'), email2In = $id('acc-new-email2'), passIn = $id('acc-new-pass'), pass2In = $id('acc-new-pass2');
         const pass2Group = $id('acc-new-pass2-group'), email2Group = $id('acc-new-email2-group');
         const emailChanged = () => {
-            const curEmail = $id('acc-email').textContent.trim();
-            const had = curEmail !== '' && curEmail !== 'none';
-            return emailIn.value.trim() !== (had ? curEmail : '');
+            // `data-has-email`, not the visible word: the placeholder used to be the literal string
+            // "none" and this compared against it, so translating that one word would have made
+            // every account look like it had an address called "brak".
+            const box = $id('acc-email');
+            const had = box.dataset.hasEmail === '1';
+            return emailIn.value.trim() !== (had ? box.textContent.trim() : '');
         };
         bindPwChecklist(passIn, $id('acc-pw-checklist'), true);
         const vMail = liveValidate(emailIn, () => emailIn.value.trim() === '' || EMAIL_RE.test(emailIn.value.trim()));

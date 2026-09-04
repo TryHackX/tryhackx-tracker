@@ -46,6 +46,8 @@ function settingsCatalogGroups(): array {
          'keywords' => 'api server to server clients keys bearer bans federation cluster peers export import sync partners'],
         ['id' => 'maintenance',  'title' => 'Backups',            'icon' => 'bi-archive',
          'keywords' => 'backup backups archive archives dump restore recovery disaster snapshot copy rotation retention schedule gpg encryption mariadb mysqldump kopia zapasowa'],
+        ['id' => 'languages',    'title' => 'Languages',          'icon' => 'bi-translate',
+         'keywords' => 'language languages translation translations locale localisation localization i18n polish english switcher default automatic accept-language install upload json coverage jezyk jezyki tlumaczenie'],
         ['id' => 'credentials',  'title' => 'Admin credentials',  'icon' => 'bi-key',
          'keywords' => 'admin username password change credentials login account panel'],
     ];
@@ -73,6 +75,9 @@ function settingsCatalogKeywords(): array {
         'transparency_enabled'     => 'transparency report public statistics takedowns page visibility',
         'transparency_per_page'    => 'transparency pagination rows page size',
         'donations_enabled'        => 'donate donations bitcoin btc eth monero xmr wallet support funding',
+        'home_layout'              => 'home page layout front page order sections arrange rearrange drag drop reorder hide headings titles tagline',
+        'default_language'         => 'language default site locale automatic browser accept-language',
+        'language_auto'            => 'language automatic browser accept-language detect detection',
         'donation_fields'          => 'donate wallet address crypto bitcoin monero paypal label value list',
         'footer_start_year'        => 'copyright year footer since',
         'footer_brand_name'        => 'footer brand owner name copyright',

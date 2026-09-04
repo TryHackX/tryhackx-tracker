@@ -26,6 +26,12 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Appeal System** — submit appeals to request blocking or unblocking of info hashes
 - **Transparency Page** — public statistics showing aggregated block counts per organization
 - **Terms of Service** — configurable ToS page
+- **Editable Terms and Info (1.30.0)** — both pages can be rewritten from the panel in Markdown or
+  BBCode with a live server-rendered preview; *Restore* hands back the built-in page written for how
+  the tracker is configured at that moment. See [Site pages](#site-pages-terms--info)
+- **Interface languages (1.31.0)** — English and Polish ship, more can be installed from a JSON file;
+  a switcher in the nav, a per-account preference, and a site default that can be *Automatic*
+  (`Accept-Language`). See [Languages](#languages)
 
 ### Admin Panel
 - **Dashboard** — sortable tables with multi-level sorting, search, filtering, pagination
@@ -36,6 +42,8 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Email Notifications** — professional dark-themed HTML emails for all status changes, with per-type unsubscribe
 - **Auto-Archiving** — automatically archive old reviewed reports and resolved appeals after configurable days
 - **Settings** — all configuration via web UI (site info, CAPTCHA provider + tuning, whitelist, API, donations, footer, etc.)
+- **Home page layout (1.31.0)** — drag the front page's seven sections into any order, hide them, and
+  rename their headings. See [Home page layout](#home-page-layout)
 
 ### Whitelist mode (1.2.0)
 - **Registration page** (`?action=whitelist`) — anyone can register magnet links / info hashes for free (CAPTCHA always required, per-IP hourly + daily caps, global daily cap, duplicate / banned checks, registrant IP stored for abuse detection); shows a generated magnet with the tracker's announce URLs and a "check status" form
@@ -1596,6 +1604,115 @@ this IP.
 > **Note on CSP:** the Content-Security-Policy in `.htaccess` intentionally allows `'unsafe-inline'`
 > / `'unsafe-eval'` because the pages use inline `onclick` handlers and Google reCAPTCHA. If you
 > refactor those out (or self-host reCAPTCHA), tighten the policy with nonces/hashes.
+
+---
+
+## Site pages (Terms & Info)
+
+**Settings → Site pages.** `?action=tos` and `?action=info` ship as written pages and can be
+replaced with your own text, in the same editor the whitelist descriptions use — Markdown or
+BBCode, with a preview rendered **by the server** through the very `richtextRender()` call the
+public page makes.
+
+Both shipped pages contain conditionals (`trackerMode()` decides whether the whitelist paragraphs
+appear, `usersEnabled()` whether the account terms do), so the default text is **generated from the
+configuration the tracker is running under** rather than stored as a frozen copy. Press *Restore
+built-in* in whitelist mode and you get the page with the whitelist clause and the list renumbered
+to close over it; press it in blacklist mode and you get the page without.
+
+A saved page stops following mode changes — the dialog says so, because that is a real consequence
+of editing. A page can be kept as a **draft** (stored but not live), an empty page can never be
+published, and *Restore* is a delete so the shipped template comes back by itself.
+
+Markdown is offered first for these two and not by taste: the renderer has real headings in
+Markdown and **no heading tag at all** in BBCode, where a heading can only be a larger bold line.
+
+Saving runs `richtextValidate()` — the same link rules and image limits as every other
+author-written text. Owner-only: there is no permission id, so an existing admin does not silently
+gain the ability to rewrite the terms.
+
+---
+
+## Home page layout
+
+**Settings → Home page layout.** The front page is built from seven sections — title and tagline,
+live statistics, announce URLs, About, Features, donations, contact. They can be dragged into any
+order, hidden, and their headings renamed; the line under the site name is editable too.
+
+Every section still renders where it always did, into a buffer; `includes/homelayout.php` only
+decides which order the buffers are emitted in. That is why the sections keep their own logic —
+tracker mode still rewrites About and Features, the statistics widget still needs its setting, its
+permission and its cache file.
+
+**Hiding a section is not switching its feature off**, and dragging one back does not switch it on.
+A section whose own setting is off says so on its row, and names the setting.
+
+Reordering works three ways — drag, and ↑ / ↓ on every row. Native HTML5 drag-and-drop fires no
+events on a touch screen and cannot be driven from a keyboard, so the buttons are not a convenience.
+
+The stored layout is repaired against the catalogue on every read: every known section appears
+exactly once, unknown keys are dropped, and a section added in a later version lands where the
+catalogue puts it. `home_layout` is written only by `api/admin/home_layout.php` and is deliberately
+absent from the settings allow-list, so an unrelated settings save cannot blank it.
+
+---
+
+## Languages
+
+**Settings → Languages.** English and Polish ship with the panel. Any `lang/<code>.php` is a
+language — install one from a JSON export, or copy an existing language and edit the copy.
+
+**Resolution order**, highest first:
+
+1. `?lang=xx` — an explicit choice, remembered in a cookie
+2. the signed-in account's own setting (so the language follows it to another browser)
+3. the cookie
+4. `default_language` — the site default
+5. `Accept-Language`, when the site default is *Automatic* (or *Follow the browser* is on)
+6. English
+
+**Three lists, and they are different questions:**
+
+| setting | what it decides |
+| --- | --- |
+| `enabled_languages` | which languages exist for visitors at all |
+| `switcher_languages` | which the header switcher offers |
+| `user_languages` | which an account may pin — and what automatic browser matching may pick |
+
+A language kept out of the last two is still reachable by an explicit `?lang=` link: hiding a
+control is not withdrawing a translation. Each list is stored as a **positive allow-list** and an
+empty list means *no restriction* — so the endpoint refuses to empty one, because the failure would
+look like "everything is offered" rather than like an error. The two shipped languages can never
+leave `enabled_languages`: they are the end of every fallback chain.
+
+**Installing a translation.** Export English from the table, translate the values, keep the keys,
+and upload the JSON. Uploads are JSON and never PHP on purpose — a `lang/*.php` is `require`d on
+every request, so accepting one as an upload would be a way to put code on the include path.
+The payload is parsed as data, every pair is checked to be a flat `string => string`, and the file
+is written from `var_export()`; what lands on disk is a literal array the app generated. A new
+translation starts **switched off** so it can be finished before anyone sees it.
+
+The two shipped languages are never replaced by an upload (a partial file would hollow out the
+fallback for every other translation) — copy one to a free code and edit that.
+
+`lang/` must be writable by the php-fpm user for installs to work; the panel says so if it is not.
+On Debian: `sudo chown www-data lang`. `deploy/deploy.py` does this on every tracker deploy.
+
+**Editing the shipped two.** They are generated from one source so a key cannot exist in one
+language and be missing from the other:
+
+```bash
+python tools/lang_src.py .
+```
+
+`tests/lang_test.php` checks the two files still agree — same keys, same `:name` placeholders,
+nothing blank.
+
+**What is translated.** The navigation and footer, the home page, Info, Terms, the whitelist page,
+the report form, search, sign-in, registration, the account page, password reset, email
+verification and change, the transparency report and the 404. **Stats, Unsubscribe, the admin
+sign-in page and the admin panel are still English.** A missing key falls back to English, so a
+partial translation reads as English rather than as blanks.
 
 ---
 

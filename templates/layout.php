@@ -1,13 +1,7 @@
 <?php
-$pageTitles = [
-    'home' => 'Home', 'info' => 'Info', 'tos' => 'Terms',
-    'report' => 'Report', 'status' => 'Status',
-    'transparency' => 'Transparency', 'unsubscribe' => 'Unsubscribe',
-    'whitelist' => 'Whitelist', 'stats' => 'Stats',
-    'login' => 'Sign in', 'register' => 'Register', 'account' => 'Account',
-    'reset' => 'Password reset', 'verify' => 'Email verification', 'emailchange' => 'Email change', 'search' => 'Search',
-    'adminlogin' => 'Admin sign in', 'notfound' => 'Not found',
-];
+// Titles come from the dictionary; the key is the action, so a page without one falls back to
+// Home exactly as before rather than printing a dotted key into the browser tab.
+$pageTitle = langHas('title.' . $action) ? __('title.' . $action) : __('title.home');
 $recaptchaNeeded = ($action === 'report' && isCaptchaEnabled($cfg, 'report'))
     || ($action === 'status' && (isCaptchaEnabled($cfg, 'status') || isCaptchaEnabled($cfg, 'block_check') || isCaptchaEnabled($cfg, 'appeal')))
     || ($action === 'whitelist' && captchaConfigured($cfg))
@@ -20,11 +14,11 @@ $timelineNeeded = ($action === 'stats' && ($cfg['tracker_stats_enabled'] ?? '0')
 $navUser = usersEnabled($cfg) ? currentUser($db) : null;
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?= sanitize(langCurrent()) ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= sanitize($pageTitles[$action] ?? 'Home') ?> &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
+    <title><?= sanitize($pageTitle) ?> &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/style.css<?= assetVer('assets/css/style.css') ?>">
@@ -67,9 +61,9 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
                 $tUrl = $cfg['footer_tracker_url'] ?? '';
                 $tAuthor = $cfg['footer_tracker_author'] ?? '';
                 $tAuthorUrl = $cfg['footer_tracker_author_url'] ?? '';
-                $trackerPart = 'Powered by ' . ($tUrl ? '<a href="' . sanitize($tUrl) . '" class="footer-link" target="_blank">' . $tName . '</a>' : $tName);
+                $trackerPart = __('footer.powered_by') . ' ' . ($tUrl ? '<a href="' . sanitize($tUrl) . '" class="footer-link" target="_blank">' . $tName . '</a>' : $tName);
                 if ($tAuthor) {
-                    $trackerPart .= ' by ' . ($tAuthorUrl ? '<a href="' . sanitize($tAuthorUrl) . '" class="footer-link" target="_blank">' . sanitize($tAuthor) . '</a>' : sanitize($tAuthor));
+                    $trackerPart .= ' ' . __('footer.by_author') . ' ' . ($tAuthorUrl ? '<a href="' . sanitize($tAuthorUrl) . '" class="footer-link" target="_blank">' . sanitize($tAuthor) . '</a>' : sanitize($tAuthor));
                 }
                 $footerLine1[] = $trackerPart;
             }
@@ -81,12 +75,12 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
                 $oName = sanitize($cfg['footer_os_name']);
                 $oUrl = $cfg['footer_os_url'] ?? '';
                 $osSinceYear = $cfg['footer_os_since_year'] ?? $startYear;
-                $footerLine2[] = ($oUrl ? '<a href="' . sanitize($oUrl) . '" class="footer-link" target="_blank">' . $oName . '</a>' : $oName) . ' since ' . (int)$osSinceYear;
+                $footerLine2[] = ($oUrl ? '<a href="' . sanitize($oUrl) . '" class="footer-link" target="_blank">' . $oName . '</a>' : $oName) . ' ' . __('footer.since') . ' ' . (int)$osSinceYear;
             }
             if (!empty($cfg['github_url'])) {
                 $footerLine2[] = '<a href="' . sanitize($cfg['github_url']) . '" class="footer-link" target="_blank"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg> GitHub</a>';
             }
-            $footerLine2[] = 'Content rights waived via CC0';
+            $footerLine2[] = _h('footer.cc0');
             ?>
             <p><?= implode(' &bull; ', $footerLine2) ?></p>
             <?php if ($recaptchaNeeded): ?>
@@ -97,9 +91,9 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
     <?php if ($recaptchaNeeded): ?>
     <div class="captcha-overlay" id="captcha-overlay">
         <div class="captcha-box">
-            <p>Please verify you are human</p>
+            <p><?= _h('captcha.verify_human') ?></p>
             <div id="captcha-widget" class="captcha-widget"></div>
-            <div class="captcha-actions"><button type="button" class="btn btn-secondary captcha-cancel" id="captcha-cancel">Cancel</button></div>
+            <div class="captcha-actions"><button type="button" class="btn btn-secondary captcha-cancel" id="captcha-cancel"><?= _h('common.cancel') ?></button></div>
         </div>
     </div>
     <?php endif; ?>

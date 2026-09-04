@@ -48,6 +48,7 @@ require_once __DIR__ . '/includes/backup.php';
 require_once __DIR__ . '/includes/opentracker.php';
 require_once __DIR__ . '/includes/sysctl.php';
 require_once __DIR__ . '/includes/cluster.php';
+require_once __DIR__ . '/includes/lang.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -67,6 +68,13 @@ if (PHP_SAPI !== 'cli') {
 
 $cfg = getSettings($db);
 ensureSchema($db, $cfg);
+
+// The API answers in the caller's language too -- an error message that comes back in English
+// while the page around it is in Polish is worse than one that was never translated at all.
+// Resolved from the same places the page uses (the account first, then the cookie), so the two
+// cannot disagree about which language this visitor is reading.
+$langUser = (!$isS2S && usersEnabled($cfg)) ? currentUser($db) : null;
+langInit($cfg, $langUser['language'] ?? null);
 
 // Background janitors run on normal API traffic but are skipped for the high-frequency pollers —
 // the stats poller and the admin tracker-service status poll are both hit repeatedly and have
@@ -176,6 +184,9 @@ $apiRoutes = [
     'admin/index_status'         => 'api/admin/index_status.php',
     'admin/index_polls'          => 'api/admin/index_polls.php',
     'admin/page_content'         => 'api/admin/page_content.php',
+    'admin/home_layout'          => 'api/admin/home_layout.php',
+    'admin/languages'            => 'api/admin/languages.php',
+
     'admin/index_poll_now'       => 'api/admin/index_poll_now.php',
     // ── API clients / bans (admin) ──
     'admin/fetch_api_clients'    => 'api/admin/fetch_api_clients.php',
@@ -196,6 +207,7 @@ $apiRoutes = [
     'user_reset_confirm'         => 'api/user_reset_confirm.php',
     'user_verify_send'           => 'api/user_verify_send.php',
     'user_email_prefs'           => 'api/user_email_prefs.php',
+    'user_language'              => 'api/user_language.php',
     'index_search'               => 'api/index_search.php',
     'index_files'                => 'api/index_files.php',
     'index_info'                 => 'api/index_info.php',

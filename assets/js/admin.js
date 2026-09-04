@@ -291,7 +291,7 @@ async function openModal(id) {
             <p><strong>Company:</strong> ${esc(r.company)}</p>
             <p><strong>Representative:</strong> ${esc(r.representative)}</p>
             <p><strong>Object:</strong> ${esc(r.objectTitle)}</p>
-            <p><strong>Link:</strong> <a href="${esc(r.link)}" target="_blank" class="text-info">${esc(r.link)}</a></p>
+            <p><strong>Link:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
             <p><strong>Hash:</strong> <code class="text-info">${r.infoHash}</code></p>
             ${r.magnet_link ? '<p><strong>Magnet:</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" onclick="copyMagnet(this)" class="btn btn-sm magnet-copy-btn" title="Copy magnet link"><i class="bi bi-clipboard"></i></button></div>' : ''}
             <p><strong>IP:</strong> ${r.ip} &nbsp; <strong>Date:</strong> ${r.timestamp}</p>
@@ -797,7 +797,7 @@ async function openReportFromAppeal(reportId, infoHash) {
             <p><strong>Company:</strong> ${esc(r.company)}</p>
             <p><strong>Representative:</strong> ${esc(r.representative)}</p>
             <p><strong>Object:</strong> ${esc(r.objectTitle)}</p>
-            <p><strong>Link:</strong> <a href="${esc(r.link)}" target="_blank" class="text-info">${esc(r.link)}</a></p>
+            <p><strong>Link:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
             <p><strong>Hash:</strong> <code class="text-info">${r.infoHash}</code></p>
             ${r.magnet_link ? '<p><strong>Magnet:</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" onclick="copyMagnet(this)" class="btn btn-sm magnet-copy-btn" title="Copy magnet link"><i class="bi bi-clipboard"></i></button></div>' : ''}
             <p><strong>IP:</strong> ${r.ip} &nbsp; <strong>Date:</strong> ${r.timestamp}</p>

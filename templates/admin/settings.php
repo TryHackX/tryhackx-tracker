@@ -1600,6 +1600,116 @@
                 </div>
             </div>
 
+            <!-- Interface languages — includes/lang.php -->
+            <div class="settings-section" id="section-languages" data-group="languages" data-title="Languages">
+                <h5>Languages</h5>
+                <p class="settings-hint mb-3">
+                    The panel ships with <strong>English</strong> and <strong>Polish</strong>. Any file dropped into
+                    <code>lang/</code> is a language &mdash; install one below from a JSON export, or copy an existing
+                    one and edit the copy. A key a translation is missing falls back to English, so a partial
+                    translation degrades into readable English rather than into blanks.
+                </p>
+                <p class="settings-hint mb-3">
+                    <strong>Three lists, and they are not the same question.</strong>
+                    <em>Offered</em> decides which languages exist for visitors at all;
+                    <em>in the switcher</em> decides which the header control shows;
+                    <em>for accounts</em> decides which a user may pin to their account &mdash; and that is also the set
+                    automatic browser matching may pick from. A language kept out of the last two is still reachable by
+                    an explicit <code>?lang=</code> link: hiding a control is not the same as withdrawing a translation.
+                </p>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6" data-setting="default_language">
+                        <label class="form-label" for="lang-default">Site language</label>
+                        <select class="form-select bg-dark text-light border-secondary" id="lang-default"></select>
+                        <div class="settings-hint">What a visitor gets before they choose anything. A signed-in
+                            account&rsquo;s own choice, and an explicit <code>?lang=</code>, both outrank this.</div>
+                    </div>
+                    <div class="col-md-6" data-setting="language_auto">
+                        <label class="form-label">Follow the browser</label>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="lang-auto">
+                            <label class="form-check-label" for="lang-auto">Use <code>Accept-Language</code> when nobody has chosen</label>
+                        </div>
+                        <div class="settings-hint">Only within &ldquo;for accounts&rdquo;, and only when there is no
+                            saved choice. Setting the site language to <em>Automatic</em> does the same thing more
+                            plainly.</div>
+                    </div>
+                </div>
+
+                <div class="alert alert-warning py-2 wl-small d-none" id="lang-writable">
+                    The <code>lang/</code> directory is not writable by the web user, so installing or copying a
+                    language will fail. On Debian: <code>sudo chown www-data lang</code>.
+                </div>
+
+                <div class="lang-table-wrap">
+                    <table class="table table-dark table-sm align-middle lang-table">
+                        <thead>
+                            <tr>
+                                <th>Language</th>
+                                <th>Completeness <span class="wl-small text-muted">vs <span id="lang-ref"></span></span></th>
+                                <th title="Exists for visitors at all">Offered</th>
+                                <th title="Shown by the header switcher">In the switcher</th>
+                                <th title="A user may pin it to their account; also what automatic matching may pick">For accounts</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="lang-body"></tbody>
+                    </table>
+                </div>
+
+                <div class="pc-acts mt-2">
+                    <button type="button" class="btn btn-sm btn-outline-info" id="lang-add">
+                        <i class="bi bi-plus-lg"></i> Install a language
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="lang-template">
+                        <i class="bi bi-download"></i> Download the English file to translate
+                    </button>
+                </div>
+            </div>
+
+            <!-- The home page's own layout — includes/homelayout.php -->
+            <div class="settings-section" id="section-home-layout" data-group="general" data-title="Home page layout">
+                <h5>Home page layout</h5>
+                <p class="settings-hint mb-3">
+                    The front page is built from seven sections. Drag them into the order you want, hide the ones you
+                    do not, and rename the headings above them. Every section keeps its own logic &mdash; the tracker
+                    mode still rewrites &ldquo;About&rdquo; and &ldquo;Features&rdquo;, the statistics widget still needs its own
+                    setting &mdash; so <strong>hiding a section here is not the same as switching its feature off</strong>,
+                    and dragging one back does not switch it on. The editor says which is which on each row.
+                </p>
+                <div class="pc-card" data-page="home" data-setting="home_layout">
+                    <div class="pc-head">
+                        <span class="pc-title">Front page</span>
+                        <?php if (function_exists('homeLayoutIsDefault') && homeLayoutIsDefault($cfg)): ?>
+                            <span class="wl-badge wl-b-muted">built-in layout</span>
+                        <?php else: ?>
+                            <span class="wl-badge wl-b-ok">rearranged</span>
+                        <?php endif; ?>
+                    </div>
+                    <div class="pc-meta">
+                        <?php if (function_exists('homeLayout')):
+                            $hl = homeLayout($cfg);
+                            $hlBits = [];
+                            if ($hl['hidden']) $hlBits[] = count($hl['hidden']) . ' section' . (count($hl['hidden']) === 1 ? '' : 's') . ' hidden';
+                            if ($hl['headings']) $hlBits[] = count($hl['headings']) . ' heading' . (count($hl['headings']) === 1 ? '' : 's') . ' renamed';
+                            if ($hl['tagline'] !== null) $hlBits[] = 'custom tagline';
+                            if ($hl['order'] !== homeSectionKeys()) array_unshift($hlBits, 'reordered');
+                            echo $hlBits ? sanitize(ucfirst(implode(', ', $hlBits))) . '.'
+                                         : 'Sections in the order they ship in, nothing hidden, headings unchanged.';
+                        endif; ?>
+                    </div>
+                    <div class="pc-acts">
+                        <button type="button" class="btn btn-sm btn-outline-info" id="hl-open">
+                            <i class="bi bi-grid-1x2"></i> Arrange sections
+                        </button>
+                        <a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener" href="<?= $baseUrl ?>">
+                            <i class="bi bi-box-arrow-up-right"></i> View
+                        </a>
+                    </div>
+                </div>
+            </div>
+
             <!-- Site pages the operator can rewrite — includes/pagecontent.php -->
             <div class="settings-section" id="section-pages" data-group="general" data-title="Site pages">
                 <h5>Site pages (Terms &amp; Info)</h5>
@@ -2519,6 +2629,113 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     <div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3" id="toast-container" style="z-index: 1080;"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+    <!-- Copy a language to a free code. The shipped two are never overwritten by an upload, so this
+         is how a customised English or Polish wording is made. -->
+    <div class="modal fade" id="langDupModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-files text-info"></i> Copy a language</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="wl-small text-muted">Every string from <strong id="ld-source">—</strong> is copied to a new
+                       code. The copy starts <strong>switched off</strong>, so it can be finished before anyone sees it.</p>
+                    <div class="mb-2">
+                        <label class="form-label wl-small" for="ld-code">New code</label>
+                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
+                               id="ld-code" maxlength="3" autocomplete="off" spellcheck="false" placeholder="de">
+                        <div class="settings-hint">Two or three letters, as in <code>de</code>, <code>fr</code>, <code>ast</code>.</div>
+                    </div>
+                    <div class="alert alert-danger py-2 wl-small d-none" id="ld-msg"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-sm btn-info" id="ld-submit">Copy</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Install from a JSON file. JSON and not PHP on purpose: a lang/*.php is `require`d on every
+         request, so accepting one as an upload would be a way to put code on the include path. -->
+    <div class="modal fade" id="langUploadModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-translate text-info"></i> Install a language</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="lang-step">
+                        <span class="lang-step-num">1</span>
+                        <div class="lang-step-body">
+                            <h6>Start from an existing file</h6>
+                            <p class="wl-small text-muted mb-0">Download English (or any installed language) from the
+                               table, translate the values, and keep the keys exactly as they are &mdash; a key that
+                               changed is a string that falls back to English.</p>
+                        </div>
+                    </div>
+                    <div class="lang-step">
+                        <span class="lang-step-num">2</span>
+                        <div class="lang-step-body">
+                            <h6>Which language is it</h6>
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary lang-code-input"
+                                   id="lu-code" maxlength="3" autocomplete="off" spellcheck="false" placeholder="de">
+                            <div class="wl-small" id="lu-code-name"></div>
+                            <div class="lang-suggest" id="lu-suggest"></div>
+                        </div>
+                    </div>
+                    <div class="lang-step">
+                        <span class="lang-step-num">3</span>
+                        <div class="lang-step-body">
+                            <h6>The translated file</h6>
+                            <input type="file" class="form-control form-control-sm bg-dark text-light border-secondary"
+                                   id="lu-file" accept=".json,application/json">
+                            <div class="wl-small text-muted" id="lu-file-info"></div>
+                        </div>
+                    </div>
+                    <div class="alert alert-danger py-2 wl-small d-none" id="lu-msg"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-sm btn-info" id="lu-submit">Install</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- The home page arranger. Drag to reorder, and buttons that do the same thing: native HTML5
+         drag-and-drop does not work on a touch screen at all and cannot be driven from a keyboard,
+         so a list that ONLY drags is a list some people cannot use. -->
+    <div class="modal fade" id="homeLayoutModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-grid-1x2 text-info"></i> Home page layout</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="pc-note wl-small" id="hl-note"></div>
+                    <div class="hl-tagline">
+                        <label class="form-label wl-small mb-1" for="hl-tagline">Line under the site name</label>
+                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
+                               id="hl-tagline" maxlength="80" spellcheck="false">
+                    </div>
+                    <div class="hl-list" id="hl-list"></div>
+                    <div class="alert alert-danger py-2 wl-small d-none mt-2" id="hl-error"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-outline-secondary me-auto" id="hl-reset">
+                        <i class="bi bi-arrow-counterclockwise"></i> Restore built-in layout
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-sm btn-info" id="hl-save">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- The page editor. A modal rather than an inline block: a Terms page is a page, and it needs
          the width and the live preview beside it that a settings row cannot give. -->
     <div class="modal fade" id="pageEditModal" tabindex="-1" aria-hidden="true">
@@ -2578,6 +2795,8 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     <script src="<?= $baseUrl ?>assets/js/admin-twofa.js<?= assetVer('assets/js/admin-twofa.js') ?>"></script>
     <!-- AFTER admin-common.js, which on this page is loaded below admin-settings.js: the editor
          needs window.AdminCommon and returned early without it, so the dialog never opened. -->
+    <script src="<?= $baseUrl ?>assets/js/admin-languages.js<?= assetVer('assets/js/admin-languages.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-homelayout.js<?= assetVer('assets/js/admin-homelayout.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-pagecontent.js<?= assetVer('assets/js/admin-pagecontent.js') ?>"></script>
     <script>
     const API_BASE = document.body.dataset.apiBase;

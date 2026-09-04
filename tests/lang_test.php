@@ -1,0 +1,251 @@
+<?php
+/**
+ * Tests for the interface language:
+ *   php tests/lang_test.php
+ *
+ * Two things are worth pinning down here and neither is "does t() return a string".
+ *
+ * The first is the FALLBACK: a translation is always partial at some point in its life, and the
+ * property that makes that survivable is that a missing key degrades to readable English rather
+ * than to a blank or to a dotted identifier on a button.
+ *
+ * The second is that the three visibility lists cannot be emptied. Each is stored as a positive
+ * allow-list, and an EMPTY list means "no restriction" — so a bug that empties one does not show as
+ * a site with no languages, it shows as a site that quietly offers all of them. Every guard below
+ * exists because that failure is invisible.
+ */
+if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+$root = dirname(__DIR__);
+require_once $root . '/includes/lang.php';
+
+$fails = 0; $n = 0;
+function check(string $name, bool $ok, string $info = ''): void {
+    global $fails, $n;
+    $n++;
+    echo ($ok ? 'PASS ' : 'FAIL ') . $name . ($ok || $info === '' ? '' : '  -> ' . $info) . "\n";
+    if (!$ok) $fails++;
+}
+/**
+ * Re-resolve as a fresh request would.
+ *
+ * langInit() runs once per process and the three list lookups are cached per request, so a test
+ * that changed the config without dropping those caches would be answered from the PREVIOUS
+ * config — which is how this file briefly "proved" that automatic matching ignored the account
+ * allow-list when in fact it was reading a stale copy of that list.
+ */
+function relang(array $cfg, ?string $user = null): void {
+    $GLOBALS['__lang']['current'] = null;
+    langInvalidate();
+    langInit($cfg, $user);
+}
+
+// ── what ships ──────────────────────────────────────────────────────────────
+$avail = langAvailable();
+check('both shipped languages are installed', isset($avail['en'], $avail['pl']), implode(',', array_keys($avail)));
+check('English is first, because it is what everything falls back to', array_key_first($avail) === 'en');
+check('the built-in list names exactly those two', LANG_BUILT_IN === ['en', 'pl']);
+check('the fallback is one of them', in_array(LANG_FALLBACK, LANG_BUILT_IN, true));
+foreach (LANG_BUILT_IN as $code) {
+    check("$code: the file exists", is_file($root . '/lang/' . $code . '.php'));
+    check("$code: it returns a non-empty flat map", count(langLoad($code)) > 50, (string)count(langLoad($code)));
+}
+
+// ── the two dictionaries hold the same keys ─────────────────────────────────
+// Generated from one source for exactly this reason: a key present in one language and missing from
+// the other is the normal way a translation rots.
+$en = langLoad('en');
+$pl = langLoad('pl');
+check('English and Polish have the same keys',
+      array_keys($en) === array_keys($pl),
+      implode(',', array_slice(array_merge(array_diff(array_keys($en), array_keys($pl)),
+                                           array_diff(array_keys($pl), array_keys($en))), 0, 6)));
+$empty = array_filter($en, fn($v) => trim((string)$v) === '') + array_filter($pl, fn($v) => trim((string)$v) === '');
+check('no string is blank in either language', $empty === [], implode(',', array_slice(array_keys($empty), 0, 5)));
+$badKey = array_filter(array_keys($en), fn($k) => !preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+)+$/', $k));
+check('every key is a flat dotted identifier', $badKey === [], implode(',', array_slice($badKey, 0, 5)));
+// A placeholder that exists in one language and not the other silently drops a value from a
+// sentence — the sentence still reads, which is what makes it easy to miss.
+$mismatch = [];
+foreach ($en as $k => $v) {
+    preg_match_all('/:[a-z_]+/', $v, $a);
+    preg_match_all('/:[a-z_]+/', $pl[$k] ?? '', $b);
+    sort($a[0]); sort($b[0]);
+    if ($a[0] !== $b[0]) $mismatch[] = $k;
+}
+check('placeholders match between the two languages', $mismatch === [], implode(',', array_slice($mismatch, 0, 5)));
+
+// ── lookup and fallback ─────────────────────────────────────────────────────
+relang(['default_language' => 'en']);
+check('a key resolves in English', __('nav.home') === 'Home', __('nav.home'));
+relang(['default_language' => 'pl']);
+check('… and in Polish', __('nav.home') === 'Strona główna', __('nav.home'));
+check('a key nobody translated comes back as the key, not as nothing',
+      __('no.such.key.at.all') === 'no.such.key.at.all');
+check('langHas() tells them apart', langHas('nav.home') && !langHas('no.such.key.at.all'));
+check('placeholders are substituted', __('notfound.body', ['site' => 'X']) === 'Ta strona nie istnieje na X.',
+      __('notfound.body', ['site' => 'X']));
+check('_h() escapes what __() does not',
+      _h('notfound.body', ['site' => '<b>']) === 'Ta strona nie istnieje na &lt;b&gt;.',
+      _h('notfound.body', ['site' => '<b>']));
+check('langFor() reads another language without changing this one',
+      langFor('en', 'nav.home') === 'Home' && __('nav.home') === 'Strona główna');
+check('langFor() with an unknown language falls back to English',
+      langFor('zz', 'nav.home') === 'Home');
+check('langAll() carries the English fallback under the active language',
+      count(langAll()) >= count($en));
+
+// The fallback that matters: a language file with two strings in it.
+$GLOBALS['__lang']['loaded']['xx'] = ['nav.home' => 'Startseite'];
+$GLOBALS['__lang']['current'] = 'xx';
+$GLOBALS['__lang']['strings'] = $GLOBALS['__lang']['loaded']['xx'];
+$GLOBALS['__lang']['fallback'] = $en;
+check('a translated key uses the translation', __('nav.home') === 'Startseite');
+check('an untranslated key falls back to English rather than to a blank',
+      __('nav.info') === 'Info' && __('report.h1') === 'Abuse Report Form', __('report.h1'));
+
+// ── resolution order ────────────────────────────────────────────────────────
+unset($_GET['lang'], $_COOKIE['lang'], $_SERVER['HTTP_ACCEPT_LANGUAGE']);
+relang([]);
+check('with nothing configured the site is English', langCurrent() === 'en');
+relang(['default_language' => 'pl']);
+check('the site default is used', langCurrent() === 'pl');
+relang(['default_language' => 'pl'], 'en');
+check('a signed-in user outranks the site default', langCurrent() === 'en');
+$_COOKIE['lang'] = 'pl';
+relang(['default_language' => 'en']);
+check('the cookie outranks the site default', langCurrent() === 'pl');
+relang(['default_language' => 'en'], 'en');
+check('… but the account outranks the cookie', langCurrent() === 'en');
+$_GET['lang'] = 'pl';
+relang(['default_language' => 'en'], 'en');
+check('an explicit ?lang= outranks everything', langCurrent() === 'pl');
+// The cookie from the previous case has to go first, or "ignored" cannot be told apart from
+// "fell back to what the cookie said".
+unset($_COOKIE['lang']);
+$_GET['lang'] = 'zz';
+relang(['default_language' => 'en'], null);
+check('?lang= for a language that is not installed is ignored', langCurrent() === 'en');
+unset($_GET['lang']);
+
+// ── Accept-Language ─────────────────────────────────────────────────────────
+$_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'pl-PL,pl;q=0.9,en;q=0.8';
+relang(['default_language' => 'en']);
+check('the browser is ignored while automatic matching is off', langCurrent() === 'en');
+relang(['default_language' => 'en', 'language_auto' => '1']);
+check('… and honoured when it is on — but only after the site default',
+      langCurrent() === 'en', langCurrent());
+relang(['default_language' => 'auto']);
+check('"auto" as the site default hands the choice to the browser', langCurrent() === 'pl');
+$_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'en;q=0.4,pl;q=0.9';
+relang(['default_language' => 'auto']);
+check('q weights are honoured, not header order', langCurrent() === 'pl');
+$_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'pl;q=0';
+relang(['default_language' => 'auto']);
+check('q=0 means "not this one"', langCurrent() === 'en');
+$_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'de,fr;q=0.9';
+relang(['default_language' => 'auto']);
+check('a browser asking for nothing we have gets English', langCurrent() === 'en');
+// Automatic matching stays inside what the admin offers to accounts — it is a choice made FOR a
+// visitor, so it must not reach a language deliberately kept out of that set.
+$_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'pl';
+relang(['default_language' => 'auto', 'user_languages' => 'en']);
+check('automatic matching cannot pick a language kept out of "for accounts"', langCurrent() === 'en');
+unset($_SERVER['HTTP_ACCEPT_LANGUAGE']);
+
+// ── the three lists ─────────────────────────────────────────────────────────
+langInvalidate();
+check('an empty setting means every installed language', array_keys(langEnabled([])) === array_keys($avail));
+langInvalidate();
+check('a list narrows what is offered', array_keys(langEnabled(['enabled_languages' => 'en'])) === ['en', 'pl'],
+      implode(',', array_keys(langEnabled(['enabled_languages' => 'en']))));
+langInvalidate();
+// The built-ins are re-added to `enabled` whatever the setting says: they are the end of every
+// fallback chain, and a site with neither has nothing to render.
+check('the shipped languages are always in the enabled list',
+      isset(langEnabled(['enabled_languages' => 'xx'])['en'], langEnabled(['enabled_languages' => 'xx'])['pl']));
+langInvalidate();
+check('a list of nothing but stale codes falls back to everything, never to nothing',
+      langForSwitcher(['switcher_languages' => 'zz,yy']) === langEnabled([]));
+langInvalidate();
+check('the switcher list can hide a language the site still offers',
+      array_keys(langForSwitcher(['switcher_languages' => 'en'])) === ['en']);
+langInvalidate();
+check('… and the account list is separate from it',
+      array_keys(langForUsers(['switcher_languages' => 'en'])) === ['en', 'pl']);
+langInvalidate();
+check('a language hidden from the switcher is still supported by ?lang=',
+      langSupported(['switcher_languages' => 'en'], 'pl'));
+langInvalidate();
+
+// ── coverage ────────────────────────────────────────────────────────────────
+$cov = langCoverage('pl');
+check('a complete translation measures 100 %', $cov['percent'] === 100, json_encode($cov));
+check('… with nothing missing', $cov['missing'] === 0);
+$cov = langCoverage('en');
+check('English measures itself at 100 %', $cov['percent'] === 100);
+check('coverage of something that is not installed is 0, not an error', langCoverage('zz')['percent'] === 0);
+
+// ── writing a language file ─────────────────────────────────────────────────
+check('a bad code is refused before anything is written', !langWriteFile('BAD!', ['a.b' => 'c'], 'x'));
+check('a non-string value is refused', !langWriteFile('zz', ['a.b' => ['nested']], 'x'));
+check('a built-in cannot be deleted', !langDeleteFile('en') && !langDeleteFile('pl'));
+check('… and the file is still there', is_file($root . '/lang/en.php'));
+if (is_writable($root . '/lang')) {
+    check('a language can be written', langWriteFile('zz', ['nav.home' => 'Home-zz'], 'test'));
+    langInvalidate();
+    $GLOBALS['__lang']['loaded'] = [];
+    check('… and read back', langLoad('zz') === ['nav.home' => 'Home-zz'], json_encode(langLoad('zz')));
+    check('… and shows as installed', langInstalled('zz'));
+    // The file is written by var_export() of vetted data, so nothing an uploader typed is executed.
+    $raw = (string)file_get_contents($root . '/lang/zz.php');
+    check('… as a literal array, with no code from the caller in it',
+          str_starts_with($raw, '<?php') && str_contains($raw, "return array (") && !str_contains($raw, '$'));
+    check('a non-built-in can be deleted', langDeleteFile('zz'));
+    langInvalidate();
+    check('… and is gone', !is_file($root . '/lang/zz.php'));
+} else {
+    echo "SKIP lang/ is not writable here — the write path is untested\n";
+}
+
+// ── registration ────────────────────────────────────────────────────────────
+$api = (string)file_get_contents($root . '/api.php');
+check('the admin endpoint is routed', str_contains($api, "'admin/languages'"));
+check('the user endpoint is routed', str_contains($api, "'user_language'"));
+check('installing a language is owner-only (no permission entry)',
+      !preg_match("/'admin\\/languages'\\s*=>\\s*'panel\\./", $api));
+check('the API resolves a language too', str_contains($api, 'langInit($cfg,'));
+$idx = (string)file_get_contents($root . '/index.php');
+check('the page resolves it before anything is rendered', str_contains($idx, 'langInit($cfg,'));
+$nav = (string)file_get_contents($root . '/templates/nav.php');
+check('the switcher is in the nav', str_contains($nav, 'lang-switch'));
+check('… and only when there is more than one language', str_contains($nav, 'count($langOpts) > 1'));
+// A switcher that sends you to the front page is one people stop pressing.
+check('… and it keeps you on the page you were reading', str_contains($nav, '$langQuery = $_GET;'));
+$layout = (string)file_get_contents($root . '/templates/layout.php');
+check('the html lang attribute follows the language', str_contains($layout, '<html lang="<?= sanitize(langCurrent()) ?>">'));
+$acc = (string)file_get_contents($root . '/templates/pages/account.php');
+check('an account can pin its own language', str_contains($acc, "id=\"acc-language\""));
+$css = (string)file_get_contents($root . '/assets/css/style.css');
+check('the switcher has styling', str_contains($css, '.lang-opt'));
+$tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
+check('the settings section exists', str_contains($tpl, 'id="section-languages"'));
+check('both modals exist', str_contains($tpl, 'id="langUploadModal"') && str_contains($tpl, 'id="langDupModal"'));
+check('the script is loaded after admin-common.js, which it needs',
+      strpos($tpl, 'admin-languages.js') > strpos($tpl, 'admin-common.js'));
+$cat = (string)file_get_contents($root . '/includes/settings_catalog.php');
+check('Languages is its own settings group', str_contains($cat, "'id' => 'languages'"));
+$audit = (string)file_get_contents($root . '/includes/audit.php');
+check('language changes are audited', str_contains($audit, "'admin/languages'             => 'language.manage'"));
+$schema = (string)file_get_contents($root . '/includes/schema.php');
+check('users.language exists in the schema', str_contains($schema, "`language` VARCHAR(3) DEFAULT NULL"));
+check('… and is added to older installs too', str_contains($schema, "schemaColumnExists(\$db, 'users', 'language')"));
+check('the schema version was bumped for it',
+      (bool)preg_match('/TRACKER_SCHEMA_VERSION = (\d+)/', $schema, $m) && (int)$m[1] >= 40, $m[1] ?? '?');
+// lang/ is written by its own endpoint; a settings save must never be able to touch these.
+$save = (string)file_get_contents($root . '/api/admin/save_settings.php');
+foreach (['enabled_languages', 'switcher_languages', 'user_languages'] as $k) {
+    check("$k is not in the settings allow-list", !str_contains($save, "'$k'"));
+}
+
+echo "\n$n checks, $fails failed\n";
+exit($fails ? 1 : 0);

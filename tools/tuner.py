@@ -131,6 +131,50 @@ def helper_cmd(cfg: dict) -> list:
     return raw.split()
 
 
+def address_box(raw: str, cap: int = 256) -> list:
+    """
+    The same parse includes/netlimit.php does on the two hand-typed boxes: split on whitespace,
+    commas or semicolons, de-duplicate, keep the order, cap the count.
+
+    Deliberately NOT re-validating each address here. The panel already refuses anything that is not
+    an address or CIDR before it stores the setting, and a second, subtly different validator is how
+    the probe would come to disagree with the page about what is trusted.
+    """
+    out = []
+    for item in re.split(r'[\s,;]+', (raw or '').strip()):
+        if not item or len(out) >= cap:
+            continue
+        if item not in out:
+            out.append(item)
+    return out
+
+
+def set_args(cfg: dict, pps, burst, port) -> list:
+    """
+    The full argument list for a `set`, exactly as includes/netlimit.php builds it.
+
+    THIS IS THE WHOLE POINT OF THIS FUNCTION: the helper REBUILDS the table from its arguments, so a
+    missing `--trusted=` does not mean "leave the trusted set alone", it means "the trusted set is
+    empty". Calling `set pps burst port` on its own wipes every exemption the operator configured --
+    and the janitor's `persist` then writes that loss to /etc/nftables.d, where it survives a reboot.
+
+    Every place in this file that runs a `set` goes through here.
+    """
+    args = ['set', str(pps), str(burst), str(port)]
+    trusted = address_box(cfg.get('net_limit_trusted', ''))
+    if trusted:
+        args.append('--trusted=' + ','.join(trusted))
+    blocked = address_box(cfg.get('net_limit_blocked', ''))
+    if blocked:
+        args.append('--blocked=' + ','.join(blocked))
+    # The address lists are far too large for argv and travel as a file. Passed whenever the file
+    # exists -- including when it is EMPTY, which is how the master switch clears the sets.
+    sets_file = os.path.join(ROOT, 'config', 'net_sets.txt')
+    if os.path.isfile(sets_file):
+        args.append('--sets=' + sets_file)
+    return args
+
+
 def run_helper(cfg: dict, args: list, timeout: int = 30) -> dict:
     """Returns {'ok', 'json', 'out', 'rc'}. Never raises for a non-zero exit."""
     if not IS_LINUX:
@@ -373,7 +417,7 @@ def apply_limit(cfg: dict, pps: int, burst: int, port: int, dry: bool, what: str
     if dry:
         return {'ok': True, 'json': None, 'out': 'dry-run', 'rc': 0}
     if what in (WHAT_INBOUND, WHAT_BOTH):
-        r = run_helper(cfg, ['set', str(pps), str(burst), str(port)], timeout=60)
+        r = run_helper(cfg, set_args(cfg, pps, burst, port), timeout=60)
         if not r['ok']:
             return r
     if what in (WHAT_OUTBOUND, WHAT_BOTH):
@@ -401,7 +445,8 @@ def restore(cfg: dict, dry: bool = False) -> dict:
     if rec.get('mode') == 'off':
         r = run_helper(cfg, ['off'], timeout=60)
     else:
-        r = run_helper(cfg, ['set', str(rec.get('pps')), str(rec.get('burst')), str(rec.get('port'))], timeout=60)
+        r = run_helper(cfg, set_args(cfg, rec.get('pps'), rec.get('burst'), rec.get('port')),
+                       timeout=60)
     # The reply budget is restored whether or not this run moved it: a run that was cancelled between
     # setting the two would otherwise leave one of them where it was put.
     if rec.get('egress_pps'):
@@ -864,6 +909,41 @@ def self_test() -> int:
     # ── the way back ──
     check('restore with nothing recorded does nothing and says so',
           restore({}, dry=True)['restored'] is False)
+
+    # ── the exemptions survive a probe ──
+    #
+    # The helper REBUILDS the table from its arguments, so a missing --trusted= does not mean "leave
+    # it alone", it means "empty". Before this was fixed, every probe step and the restore at the end
+    # of a run wiped the operator's trusted hosts, blocked hosts and address lists -- and the
+    # janitor's `persist` then wrote that loss to /etc/nftables.d.
+    cfgx = {'net_limit_trusted': '10.0.0.1, 10.0.0.2 10.0.0.1', 'net_limit_blocked': '203.0.113.7'}
+    a = set_args(cfgx, 30000, 100, 6969)
+    check('a set carries the trusted addresses', '--trusted=10.0.0.1,10.0.0.2' in a, a)
+    check('… de-duplicated, in the order they were typed', a.count('--trusted=10.0.0.1,10.0.0.2') == 1, a)
+    check('a set carries the blocked addresses', '--blocked=203.0.113.7' in a, a)
+    check('an empty box adds no argument at all',
+          not [x for x in set_args({}, 30000, 100, 6969) if x.startswith('--trusted=')],
+          set_args({}, 30000, 100, 6969))
+    check('the positional arguments still come first',
+          set_args(cfgx, 30000, 100, 6969)[:4] == ['set', '30000', '100', '6969'], a)
+
+    calls = []
+    real2 = run_helper
+    globals()['run_helper'] = lambda cfg, args, timeout=30: (calls.append(list(args)),
+                                                             {'ok': True, 'json': None, 'out': '', 'rc': 0})[1]
+    try:
+        calls.clear()
+        apply_limit(cfgx, 30000, 100, 6969, dry=False, what=WHAT_INBOUND)
+        check('a probe step does not wipe the trusted set',
+              any(x.startswith('--trusted=') for x in calls[0]), calls)
+        calls.clear()
+        state_write({'restore': {'mode': 'on', 'pps': 40000, 'burst': 100, 'port': 6969, 'egress_pps': 0}})
+        restore(cfgx)
+        check('and neither does the restore at the end of the run',
+              any(x.startswith('--trusted=') for x in calls[0]), calls)
+    finally:
+        globals()['run_helper'] = real2
+        state_write({})
 
     # Counted, not typed in. A hardcoded total drifts from the file the first time a check is added
     # or a loop changes length, and then the suite reports a number nobody has verified.

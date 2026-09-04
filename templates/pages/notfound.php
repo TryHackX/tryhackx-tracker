@@ -4,6 +4,6 @@
  * `admin_hidden_behavior` is set to "404" — the panel then looks like it simply isn't there.
  */
 ?>
-<h1>404 &mdash; Not found</h1>
-<p>This page does not exist on <?= sanitize($cfg['site_name'] ?? 'this tracker') ?>.</p>
-<p class="form-center"><a class="btn" href="<?= $baseUrl ?>">Back to the front page</a></p>
+<h1><?= _h('notfound.h1') ?></h1>
+<p><?= _h('notfound.body', ['site' => $cfg['site_name'] ?? 'this tracker']) ?></p>
+<p class="form-center"><a class="btn" href="<?= $baseUrl ?>"><?= _h('common.back_home') ?></a></p>

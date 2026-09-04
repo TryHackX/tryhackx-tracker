@@ -129,7 +129,10 @@ check('changing a public page is owner-only (no permission entry)',
       !preg_match("/'admin\\/page_content'\\s*=>\\s*'panel\\./", $api));
 $audit = (string)file_get_contents($root . '/includes/audit.php');
 check('edits are audited', str_contains($audit, "'admin/page_content'          => 'page.edit'"));
-check('… under the settings group', str_contains($audit, "'settings' => ['settings.save', 'page.edit']"));
+// Matched loosely on purpose: the group keeps gaining members (page.layout, language.manage),
+// and a test that pins the whole literal fails for every addition rather than for a regression.
+check('… under the settings group',
+      (bool)preg_match("/'settings' => \[[^\]]*'page\.edit'[^\]]*\]/", $audit));
 $idx = (string)file_get_contents($root . '/index.php');
 check('the router consults the override', str_contains($idx, 'pageContentActive($db, $action)'));
 check('… and only for the pages in the catalogue', str_contains($idx, 'in_array($action, PAGECONTENT_PAGES, true)'));

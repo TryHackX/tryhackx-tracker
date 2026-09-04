@@ -4,12 +4,12 @@
 $verifyToken = preg_replace('/[^a-f0-9]/', '', strtolower((string)($_GET['token'] ?? '')));
 $verifiedId = strlen($verifyToken) === 64 ? userVerifyConsume($db, $verifyToken) : null;
 ?>
-<h1>Email verification</h1>
+<h1><?= _h('verify.h1') ?></h1>
 
 <?php if ($verifiedId !== null): ?>
-<div class="alert alert-success show">Your email address is now <strong>verified</strong>. Thank you!</div>
-<p class="form-center"><a class="btn" href="<?= $baseUrl ?>?action=account">Go to your account</a></p>
+<div class="alert alert-success show"><?= __('verify.ok') ?></div>
+<p class="form-center"><a class="btn" href="<?= $baseUrl ?>?action=account"><?= _h('common.go_account') ?></a></p>
 <?php else: ?>
-<div class="alert alert-error show">This verification link is invalid, expired or was already used.</div>
-<p>You can request a fresh link from your <a href="<?= $baseUrl ?>?action=account">account page</a> (links are valid for 72 hours).</p>
+<div class="alert alert-error show"><?= _h('verify.bad') ?></div>
+<p><?= __('verify.bad_hint', ['url' => sanitize($baseUrl . '?action=account')]) ?></p>
 <?php endif; ?>

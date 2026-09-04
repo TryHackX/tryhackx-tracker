@@ -2107,3 +2107,81 @@ textarea.pc-text {
 /* A whole page, not a comment in a card: the preview gets the page's type scale. */
 .rt-page h1, .rt-page .rt-h { color: #dfe6ee; }
 .rt-page { font-size: 0.9rem; line-height: 1.6; }
+
+/* ── Home page arranger ─────────────────────────────────────────────────────── */
+.hl-tagline { margin-bottom: 0.8rem; }
+.hl-list { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.hl-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: start;
+    gap: 0.7rem;
+    padding: 0.6rem 0.7rem;
+    background: #10161d;
+    border: 1px solid #1c232b;
+    border-radius: 6px;
+    cursor: grab;
+}
+.hl-row.hl-dragging { opacity: 0.45; cursor: grabbing; }
+/* The drop target gets a line on the edge the row will land against, not a filled box: a filled
+   box reads as "this row is selected", which is the opposite of what is about to happen to it. */
+.hl-row.hl-over { border-color: #4a9eff; box-shadow: inset 0 2px 0 0 #4a9eff; }
+/* Hidden is dimmed, not removed — an operator has to be able to find it again to bring it back. */
+.hl-row.hl-off { opacity: 0.55; border-style: dashed; }
+
+.hl-grip { color: #55606d; font-size: 1.1rem; line-height: 1.4; user-select: none; padding-top: 0.1rem; }
+.hl-mid { min-width: 0; }
+.hl-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.hl-pos {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.35rem; height: 1.35rem;
+    background: #17202a; border: 1px solid #263140; border-radius: 4px;
+    color: #8a94a2; font-size: 0.72rem;
+}
+.hl-label { color: #dfe6ee; font-size: 0.9rem; }
+.hl-about { margin-top: 0.15rem; line-height: 1.4; }
+.hl-why { color: #ffb74d; margin-top: 0.2rem; line-height: 1.4; }
+.hl-heading-wrap { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
+.hl-heading-wrap .form-control { max-width: 22rem; cursor: text; }
+
+.hl-acts { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; }
+.hl-switch { min-width: 5.4rem; }
+
+@media (max-width: 575.98px) {
+    .hl-row { grid-template-columns: auto 1fr; }
+    .hl-acts { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+/* ── Languages ──────────────────────────────────────────────────────────────── */
+.lang-table-wrap { overflow-x: auto; }
+.lang-table { margin-bottom: 0; }
+.lang-table th { color: #8a94a2; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+.lang-table td { vertical-align: middle; }
+.lang-name { color: #dfe6ee; font-size: 0.9rem; }
+.lang-badges { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.2rem; }
+.lang-code { color: #8a94a2; font-size: 0.74rem; background: #0d1117; border: 1px solid #1c232b; border-radius: 3px; padding: 0 0.3rem; }
+.lang-lock { color: #55606d; }
+
+/* A bar rather than a bare percentage: "83 %" and "97 %" look alike in a column and a length does
+   not. Colour only where it means something -- below 60 % a translation is mostly English. */
+.lang-cov { height: 6px; background: #0d1117; border: 1px solid #1c232b; border-radius: 3px; overflow: hidden; min-width: 7rem; }
+.lang-cov i { display: block; height: 100%; background: #6cc38a; }
+.lang-cov i.mid { background: #ffb74d; }
+.lang-cov i.low { background: #f08a94; }
+.lang-acts { display: flex; gap: 0.3rem; justify-content: flex-end; }
+
+.lang-step { display: flex; gap: 0.75rem; padding: 0.7rem 0; border-top: 1px solid #1c232b; }
+.lang-step:first-child { border-top: 0; padding-top: 0; }
+.lang-step-num {
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.6rem; height: 1.6rem;
+    background: #17202a; border: 1px solid #263140; border-radius: 50%;
+    color: #9ecbff; font-size: 0.8rem;
+}
+.lang-step-body { min-width: 0; flex: 1; }
+.lang-step-body h6 { color: #dfe6ee; font-size: 0.86rem; margin-bottom: 0.35rem; }
+.lang-code-input { max-width: 8rem; }
+.lang-suggest { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.lang-chip { font-size: 0.76rem; padding: 0.1rem 0.45rem; }

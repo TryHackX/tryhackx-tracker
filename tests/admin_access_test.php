@@ -255,5 +255,35 @@ $db->prepare("DELETE FROM user_group_members WHERE user_id = ?")->execute([$modU
 $db->prepare("DELETE FROM users WHERE id = ?")->execute([$modUid]);
 unset($_SESSION['admin_via_user']);
 
+// ── the report link, which is the one field a stranger fully controls ────────
+//
+// It was the only report field that skipped sanitize(), and its only gate was
+// filter_var(FILTER_VALIDATE_URL) -- which accepts `javascript://x/%0aalert(1)` outright, and
+// accepts a double quote inside the URL. The panel rendered it as href="${esc(r.link)}", and esc()
+// is innerHTML serialisation: it escapes & < > and LEAVES QUOTES ALONE. A quote closed the
+// attribute, in the owner's session, from the public form.
+//
+// Both halves are checked because neither alone is sufficient: richtextSafeUrl kills the
+// `javascript:` class, and only escAttr() at the sink stops a quote inside an otherwise valid
+// https URL (both validators accept that one).
+require_once $root . '/includes/richtext.php';
+check('a javascript: URL is refused by the validator the report form now uses',
+      richtextSafeUrl('javascript://x/%0aalert(1)') === null);
+check('… and so is one with a control character in the scheme',
+      richtextSafeUrl("java\tscript:alert(1)") === null);
+check('an ordinary https link still passes',
+      richtextSafeUrl('https://example.org/torrent/1') === 'https://example.org/torrent/1');
+$sr = (string)file_get_contents($root . '/api/submit_report.php');
+check('the report form validates the link rather than merely parsing it',
+      str_contains($sr, 'richtextSafeUrl($link)'));
+check('… and no longer trusts FILTER_VALIDATE_URL for it',
+      !str_contains($sr, 'filter_var($link, FILTER_VALIDATE_URL)'));
+$aj = (string)file_get_contents($root . '/assets/js/admin.js');
+check('the panel puts the link in the attribute with escAttr(), not esc()',
+      !str_contains($aj, 'href="${esc(r.link)}"') && substr_count($aj, 'href="${escAttr(r.link)}"') === 2,
+      (string)substr_count($aj, 'href="${escAttr(r.link)}"'));
+$pj = (string)file_get_contents($root . '/assets/js/app.js');
+check('the public status page escapes the quote too', str_contains($pj, 'replace(/"/g,'));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

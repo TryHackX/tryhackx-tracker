@@ -7,20 +7,20 @@ $canMagnet = $canSearch && userCan($db, $cfg, 'index.magnet');
 $canWl = $canSearch && userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
 $meUser = currentUser($db);
 ?>
-<h1>Search</h1>
+<h1><?= _h('search.h1') ?></h1>
 
 <?php if (!$searchOn): ?>
-<p>The search index is currently <strong>disabled</strong> on this tracker.</p>
+<p><?= __('search.disabled') ?></p>
 <?php elseif (!$canSearch): ?>
 <?php if ($meUser === null): ?>
-<p>Searching the tracker index requires an account with search access.</p>
-<p><a class="btn" href="<?= $baseUrl ?>?action=login">Sign in</a>
-<?php if (usersRegistrationEnabled($cfg)): ?> <a class="btn btn-secondary" href="<?= $baseUrl ?>?action=register">Register</a><?php endif; ?></p>
+<p><?= _h('search.need_account') ?></p>
+<p><a class="btn" href="<?= $baseUrl ?>?action=login"><?= _h('common.sign_in') ?></a>
+<?php if (usersRegistrationEnabled($cfg)): ?> <a class="btn btn-secondary" href="<?= $baseUrl ?>?action=register"><?= _h('common.register') ?></a><?php endif; ?></p>
 <?php else: ?>
-<p>Your account does not have search access. Check <a href="<?= $baseUrl ?>?action=account">your groups</a> or contact the site admin.</p>
+<p><?= __('search.no_access', ['url' => sanitize($baseUrl . '?action=account')]) ?></p>
 <?php endif; ?>
 <?php else: ?>
-<p>Search everything this tracker has <em>seen</em> (resolved metadata only<?= $canWl ? ', registered torrents included' : '' ?>). This is a catalogue of hashes observed in the swarm &mdash; nothing is hosted here.</p>
+<p><?= __('search.intro', ['wl' => $canWl ? __('search.intro_wl') : '']) ?></p>
 <input type="hidden" id="search-csrf" value="<?= $csrfToken ?>">
 <form id="search-form" class="search-panel" novalidate
       data-can-files="<?= $canFiles ? '1' : '0' ?>" data-can-magnet="<?= $canMagnet ? '1' : '0' ?>"
@@ -31,29 +31,27 @@ $meUser = currentUser($db);
     <div class="search-toolbar">
         <div class="search-box">
             <span class="search-box-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
-            <input type="text" id="search-input" maxlength="200" placeholder="Name<?= $canFiles ? ' or file name' : '' ?>&hellip;" autocomplete="off">
-            <button type="button" class="search-clear" id="search-clear" title="Clear search" hidden><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            <input type="text" id="search-input" maxlength="200" placeholder="<?= _h($canFiles ? 'search.placeholder_files' : 'search.placeholder') ?>" autocomplete="off">
+            <button type="button" class="search-clear" id="search-clear" title="<?= _h('search.clear') ?>" hidden><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
-        <label class="search-check" title="Order by how well the name matches your query (rarer and longer words weigh more); column sorts break ties"><input type="checkbox" id="search-best" checked><span class="search-check-box" aria-hidden="true"></span> Best match first</label>
+        <label class="search-check" title="<?= _h('search.best_title') ?>"><input type="checkbox" id="search-best" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.best') ?></label>
         <?php if ($canFiles): ?>
-        <label class="search-check" title="Also match torrent file names"><input type="checkbox" id="search-files"><span class="search-check-box" aria-hidden="true"></span> Also search file names</label>
+        <label class="search-check" title="<?= _h('search.files_title') ?>"><input type="checkbox" id="search-files"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.files') ?></label>
         <?php endif; ?>
         <?php if (($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1'): ?>
-        <select id="search-content" title="Which descriptions to include, by review state. The default hides rejected ones — a description a moderator turned down should not be the first thing you read, but the torrent behind it is still a torrent.">
-            <option value="not_rejected">Hide rejected</option>
-            <option value="approved">Approved only</option>
-            <option value="approved_or_none">Approved &amp; unreviewed</option>
-            <option value="pending">Waiting for review</option>
-            <option value="none">Nothing written yet</option>
-            <option value="rejected">Rejected only</option>
+        <select id="search-content" title="<?= _h('search.content_title') ?>">
+            <option value="not_rejected"><?= _h('search.c_not_rejected') ?></option>
+            <option value="approved"><?= _h('search.c_approved') ?></option>
+            <option value="approved_or_none"><?= _h('search.c_approved_or_none') ?></option>
+            <option value="pending"><?= _h('search.c_pending') ?></option>
+            <option value="none"><?= _h('search.c_none') ?></option>
+            <option value="rejected"><?= _h('search.c_rejected') ?></option>
         </select>
         <?php endif; ?>
-        <select id="search-perpage" title="Results per page">
-            <option value="15">15 / page</option>
-            <option value="25" selected>25 / page</option>
-            <option value="50">50 / page</option>
-            <option value="100">100 / page</option>
-            <option value="200">200 / page</option>
+        <select id="search-perpage" title="<?= _h('search.perpage_title') ?>">
+            <?php foreach ([15, 25, 50, 100, 200] as $sPer): ?>
+            <option value="<?= $sPer ?>"<?= $sPer === 25 ? ' selected' : '' ?>><?= _h('search.perpage', ['n' => $sPer]) ?></option>
+            <?php endforeach; ?>
         </select>
         <span class="search-total text-muted" id="search-total"></span>
     </div>
@@ -65,13 +63,13 @@ $meUser = currentUser($db);
             <col class="search-c-name"><col class="search-c-size"><col class="search-c-sl"><col class="search-c-seen"><?= $canMagnet ? '<col class="search-c-actions">' : '' ?>
         </colgroup>
         <thead><tr>
-            <th class="search-sortable" data-sort="name">Name <span class="search-sort-icon" aria-hidden="true"></span></th>
-            <th class="search-sortable" data-sort="size">Size <span class="search-sort-icon" aria-hidden="true"></span></th>
-            <th class="search-sortable" data-sort="seeders" title="Seeders / leechers">S / L <span class="search-sort-icon" aria-hidden="true"></span></th>
+            <th class="search-sortable" data-sort="name"><?= _h('search.col_name') ?> <span class="search-sort-icon" aria-hidden="true"></span></th>
+            <th class="search-sortable" data-sort="size"><?= _h('search.col_size') ?> <span class="search-sort-icon" aria-hidden="true"></span></th>
+            <th class="search-sortable" data-sort="seeders" title="<?= _h('search.col_sl_title') ?>"><?= _h('search.col_sl') ?> <span class="search-sort-icon" aria-hidden="true"></span></th>
             <?php if (function_exists('repEnabled') && repEnabled($cfg) && repShowInResults($cfg)): ?>
-            <th title="How visitors rated it. The number of ratings is in the tooltip — a percentage on its own cannot tell one vote from four hundred.">Rating</th>
+            <th title="<?= _h('search.col_rating_title') ?>"><?= _h('search.col_rating') ?></th>
             <?php endif; ?>
-            <th class="search-sortable" data-sort="last">Last seen <span class="search-sort-icon" aria-hidden="true"></span></th><?= $canMagnet ? '<th></th>' : '' ?>
+            <th class="search-sortable" data-sort="last"><?= _h('search.col_last') ?> <span class="search-sort-icon" aria-hidden="true"></span></th><?= $canMagnet ? '<th></th>' : '' ?>
         </tr></thead>
         <tbody id="search-body"></tbody>
     </table>
@@ -84,8 +82,8 @@ $meUser = currentUser($db);
 <div class="files-overlay" id="info-overlay" hidden>
     <div class="files-box info-box" role="dialog" aria-modal="true" aria-labelledby="info-title">
         <div class="files-head">
-            <h3 id="info-title">Details</h3>
-            <button type="button" class="files-close" id="info-close" title="Close" aria-label="Close">&times;</button>
+            <h3 id="info-title"><?= _h('search.details') ?></h3>
+            <button type="button" class="files-close" id="info-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
         </div>
         <div class="files-body" id="info-body"></div>
     </div>
@@ -94,8 +92,8 @@ $meUser = currentUser($db);
 <div class="files-overlay" id="files-overlay" hidden>
     <div class="files-box" role="dialog" aria-modal="true" aria-labelledby="files-title">
         <div class="files-head">
-            <h3 id="files-title">Files</h3>
-            <button type="button" class="files-close" id="files-close" title="Close">&times;</button>
+            <h3 id="files-title"><?= _h('search.files_head') ?></h3>
+            <button type="button" class="files-close" id="files-close" title="<?= _h('common.close') ?>">&times;</button>
         </div>
         <div class="files-body" id="files-body"></div>
     </div>
