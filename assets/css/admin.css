@@ -2012,3 +2012,98 @@ input[type="number"] {
 /* The coverage tiles use the panel's own .wl-kv-item, so they need no rules of their own —
    only the sub-line under a value wants a little air. */
 .wl-status-grid .wl-kv-value > .wl-small { margin-top: 0.15rem; line-height: 1.35; }
+
+/* ── Bootstrap's alerts and semantic text, on a dark page ────────────────────
+ *
+ * Both of these are light-theme defaults, and both were measured rather than eyeballed:
+ *
+ *   .alert-info   background 16.2x brighter than the page  -> a pale slab in a dark room
+ *   .alert-warning            17.1x
+ *   .text-danger  #dc3545 on a tile: 4.02:1  -> under the 4.5:1 floor for body text
+ *   .text-success #198754 on a tile: 4.01:1  -> the same
+ *
+ * The panel already has the right answer in `.nl-note-*`: an 8 % wash of the hue over the page
+ * (1.11x brighter, so it reads as a tinted region rather than a slab) with soft text at 13:1. These
+ * rules give Bootstrap's classes that same treatment everywhere in the panel, so a note written with
+ * `alert-info` looks like one written with `nl-note-info` — there is no reason for the panel to have
+ * two visual languages for the same thing.
+ *
+ * The semantic text colours are lifted to the panel's own hues, which are what the password
+ * checklist and the traffic notes already use: danger 4.02 -> 7.59:1, success 4.01 -> 8.50:1.
+ * Buttons are deliberately untouched — `btn-outline-danger` carries its meaning in the border and is
+ * read against a border, not against the page. */
+.wl-page .alert,
+.modal .alert {
+    border: 1px solid;
+    border-radius: 6px;
+    line-height: 1.5;
+}
+.wl-page .alert-info,      .modal .alert-info      { background: rgba(74, 158, 255, 0.08); border-color: rgba(74, 158, 255, 0.35); color: #cfe3ff; }
+.wl-page .alert-warning,   .modal .alert-warning   { background: rgba(255, 183, 77, 0.08); border-color: rgba(255, 183, 77, 0.35); color: #ffe0b2; }
+.wl-page .alert-danger,    .modal .alert-danger    { background: rgba(255, 82, 82, 0.08);  border-color: rgba(255, 82, 82, 0.35);  color: #ffcdd2; }
+.wl-page .alert-success,   .modal .alert-success   { background: rgba(108, 195, 138, 0.08); border-color: rgba(108, 195, 138, 0.35); color: #c8e6c9; }
+.wl-page .alert-secondary, .modal .alert-secondary { background: rgba(138, 148, 162, 0.08); border-color: rgba(138, 148, 162, 0.30); color: #c3ccd8; }
+.wl-page .alert strong, .modal .alert strong { color: inherit; }
+.wl-page .alert code, .modal .alert code { color: #9ecbff; }
+.wl-page .alert a, .modal .alert a { color: #9ecbff; }
+
+/* Semantic values inside the panel's cards and tables. */
+.wl-page .text-danger,  .modal .text-danger  { color: #f08a94 !important; }
+.wl-page .text-success, .modal .text-success { color: #6cc38a !important; }
+.wl-page .text-warning, .modal .text-warning { color: #ffb74d !important; }
+.wl-page .text-info,    .modal .text-info    { color: #9ecbff !important; }
+/* A button carries its colour on the border and its own hover state; leaving these alone keeps the
+   destructive ones as loud as they should be. */
+.wl-page .btn.text-danger, .wl-page .btn.text-success,
+.wl-page .btn.text-warning, .wl-page .btn.text-info { color: inherit !important; }
+
+
+/* ── Site pages: the cards in Settings and the editor modal ─────────────────── */
+.pc-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.7rem 0.85rem;
+    background: #10161d;
+    border: 1px solid #1c232b;
+    border-radius: 6px;
+    height: 100%;
+}
+.pc-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.pc-title { color: #dfe6ee; font-size: 0.92rem; }
+.pc-meta { color: #8a94a2; font-size: 0.78rem; line-height: 1.4; }
+.pc-acts { display: flex; gap: 0.4rem; margin-top: auto; padding-top: 0.3rem; }
+
+.pc-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.pc-bar-left, .pc-bar-right { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.pc-bar .form-select { width: auto; }
+.pc-note { color: #8a94a2; line-height: 1.45; margin-bottom: 0.5rem; }
+
+/* Text and preview side by side, and stacked on a narrow screen — a preview under a 30-line
+   textarea is a preview nobody scrolls to. */
+.pc-split { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+@media (max-width: 991.98px) { .pc-split { grid-template-columns: 1fr; } }
+.pc-pane { display: flex; flex-direction: column; min-width: 0; }
+.pc-pane-head { color: #8a94a2; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+/* `textarea.pc-text`, not `.pc-text`: Bootstrap's own `textarea.form-control` sets a min-height and
+   carries one class plus one element, so a bare class here loses on specificity no matter where it
+   sits in the file — the box came out two rows tall. Same trap as `.settings-where` and `.d-hidden`. */
+textarea.pc-text {
+    min-height: 52vh;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    line-height: 1.55;
+    resize: vertical;
+}
+.pc-preview {
+    min-height: 52vh;
+    max-height: 52vh;
+    overflow: auto;
+    padding: 0.7rem 0.9rem;
+    background: #0d1117;
+    border: 1px solid #2a3a4c;
+    border-radius: 6px;
+}
+/* A whole page, not a comment in a card: the preview gets the page's type scale. */
+.rt-page h1, .rt-page .rt-h { color: #dfe6ee; }
+.rt-page { font-size: 0.9rem; line-height: 1.6; }

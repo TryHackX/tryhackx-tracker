@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 38;  // 38 = net_limit_blocked — hand-typed addresses that beat an allow list
+const TRACKER_SCHEMA_VERSION = 39;  // 39 = page_content — Terms and Info editable through the panel's own editor
+// 38 = net_limit_blocked — hand-typed addresses that beat an allow list
 // 37 = index_polls — what each scrape poll actually delivered, kept as a series
 // 36 = ip_lists.addr4 — an "entry" is a network, not an address, and the page has to say which
 // 35 = index_hashes.eff_seeders (virtual) + its index — the catalogue's own first page was a 2 890 ms scan
@@ -569,6 +570,22 @@ function trackerSchemaStatements(): array {
 
         // schema v34: address lists for the inbound UDP limit — allow, block, block-under-pressure.
         // See includes/iplist.php for what the three kinds mean and the order they are applied in.
+        // schema v39: an operator's replacement for a shipped page.
+        //
+        // Only ever an OVERRIDE. The templates stay in the package and remain the default, so
+        // restoring is a DELETE rather than a copy that has to be kept in step with them — and a
+        // page nobody edited costs a row that does not exist.
+        "CREATE TABLE IF NOT EXISTS `page_content` (
+            `page` VARCHAR(32) NOT NULL PRIMARY KEY,
+            `format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'markdown',
+            `body` MEDIUMTEXT NOT NULL,
+            -- Stored but off is a DRAFT. The router checks this as well as emptiness, so a half
+            -- written page cannot replace a live one merely by having been saved.
+            `enabled` TINYINT(1) NOT NULL DEFAULT 0,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_by` VARCHAR(64) DEFAULT NULL
+        ) $engine",
+
         "CREATE TABLE IF NOT EXISTS `ip_lists` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             `name` VARCHAR(64) NOT NULL,

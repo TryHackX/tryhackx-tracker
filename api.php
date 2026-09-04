@@ -175,6 +175,7 @@ $apiRoutes = [
     'admin/index_scrape_bulk'    => 'api/admin/index_scrape_bulk.php',
     'admin/index_status'         => 'api/admin/index_status.php',
     'admin/index_polls'          => 'api/admin/index_polls.php',
+    'admin/page_content'         => 'api/admin/page_content.php',
     'admin/index_poll_now'       => 'api/admin/index_poll_now.php',
     // ── API clients / bans (admin) ──
     'admin/fetch_api_clients'    => 'api/admin/fetch_api_clients.php',

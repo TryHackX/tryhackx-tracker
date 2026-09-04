@@ -29,7 +29,7 @@ const AUDIT_MAX_DETAIL        = 4000;
 function auditActionGroups(): array {
     return [
         'auth'     => ['login.ok', 'login.fail', 'login.2fa_fail', 'logout', 'password.change', 'twofa.change'],
-        'settings' => ['settings.save'],
+        'settings' => ['settings.save', 'page.edit'],
         'content'  => ['content.approve', 'content.reject', 'content.clear', 'content.edit_apply', 'content.edit_reject'],
         'hashes'   => ['whitelist.add', 'whitelist.delete', 'whitelist.ban', 'whitelist.unban',
                        'index.delete', 'index.promote', 'blacklist.add', 'blacklist.delete'],
@@ -261,6 +261,7 @@ function auditEndpointAction(string $endpoint): ?string {
         'admin/restart_tracker'       => 'tracker.restart',
         'admin/reload_tracker'        => 'tracker.reload',
         'admin/whitelist_regenerate'  => 'tracker.regenerate',
+        'admin/page_content'          => 'page.edit',
         'admin/net_apply'             => 'netlimit.apply',
         'admin/ip_list_action'        => 'iplist.change',
         'admin/sysctl_apply'          => 'sysctl.apply',

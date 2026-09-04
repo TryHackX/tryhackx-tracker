@@ -4,6 +4,51 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.30.0] — 2026-09-04
+
+### Added — Terms and Info are editable from the panel
+
+**Settings → Site pages.** The two written pages the tracker serves (`?action=tos`, `?action=info`)
+can now be replaced with your own text, using the editor the whitelist descriptions and the bulk
+mail already use — Markdown or BBCode, with a **live preview rendered by the server**, through the
+very `richtextRender()` call the public page makes. A preview produced by a second renderer in
+JavaScript is a preview of a different page; this one cannot diverge.
+
+The part that took the work is that both shipped pages contain conditionals: `trackerMode()`
+decides whether the whitelist paragraphs appear, `usersEnabled()` whether the account terms do. So
+the default text is **generated from the configuration the tracker is running under**, not stored
+as a frozen copy. Press *Restore built-in* while the tracker is in whitelist mode and you get the
+page with the whitelist clause and the list renumbered to close over it; press it in blacklist mode
+and you get the page without. The dialog says out loud that a saved page stops following mode
+changes, because that is a real consequence of editing and better said than discovered.
+
+Markdown is offered first for these two, and not by taste: the renderer has real headings in
+Markdown and **no heading tag at all** in BBCode, where a heading can only be a larger bold line. A
+Terms page is mostly headings and numbered lists. BBCode is still offered for the toolbar.
+
+Saving goes through `richtextValidate()` — the same link rules and image limits as every other
+author-written text. A page written by the owner is not a reason to have a second, weaker path into
+a public page. A stored page can be kept as a **draft**: visitors keep seeing the built-in one until
+*Use my version* is switched on, and an empty page can never be published. *Restore* is a delete, so
+the shipped template comes back by itself rather than by being copied over the top.
+
+Schema 39 (`page_content`). Owner-only — there is no permission id for it, so an existing admin
+does not silently gain the ability to rewrite the terms.
+
+### Changed — the panel's alerts and status colours stopped shouting
+
+The notes on the new cards used Bootstrap's stock alert colours, which are built for a white page.
+Measured on ours they were **14 to 17 times brighter than the background they sat on** — a pale
+orange slab in the middle of a dark panel. They now use the panel's own palette: an 8 % tint of the
+hue, a 35 % border, and light text, which puts the slab at **1.08–1.14×** the page and the text at
+**10.6–13.1:1** contrast.
+
+Two semantic colours were also below the readability floor rather than merely loud: `.text-danger`
+measured **4.02:1** and `.text-success` **4.01:1** against the card background, both under the 4.5:1
+minimum, and both are used for numbers that matter (failed polls, coverage). They are now **7.59:1**
+and **8.50:1**. The candidates were picked by computing the ratio for six options per hue, not by
+eye. Buttons that carry a semantic class keep their own colour.
+
 ## [1.29.1] — 2026-09-04
 
 Four things about the 1.29.0 cards, from looking at them on the real machine.

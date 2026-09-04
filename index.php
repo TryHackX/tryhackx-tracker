@@ -30,6 +30,7 @@ require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/federation.php';
+require_once __DIR__ . '/includes/pagecontent.php';
 require_once __DIR__ . '/includes/netlimit.php';
 require_once __DIR__ . '/includes/iplist.php';
 require_once __DIR__ . '/includes/backup.php';
@@ -159,4 +160,14 @@ if (!isset($routes[$action])) {
 }
 
 $pageTemplate = __DIR__ . '/' . $routes[$action];
+
+// An operator's replacement for a shipped page (Settings → Site pages). Only ever an override: the
+// template stays the default, so a page that was never edited costs one query that finds nothing and
+// "restore" is a delete rather than a copy that has to be kept in step.
+$customPage = null;
+if (function_exists('pageContentActive') && in_array($action, PAGECONTENT_PAGES, true)) {
+    $customPage = pageContentActive($db, $action);
+    if ($customPage) $pageTemplate = __DIR__ . '/templates/pages/_custom.php';
+}
+
 include __DIR__ . '/templates/layout.php';

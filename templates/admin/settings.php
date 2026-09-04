@@ -1600,6 +1600,61 @@
                 </div>
             </div>
 
+            <!-- Site pages the operator can rewrite — includes/pagecontent.php -->
+            <div class="settings-section" id="section-pages" data-group="general" data-title="Site pages">
+                <h5>Site pages (Terms &amp; Info)</h5>
+                <p class="settings-hint mb-2">
+                    <strong>Terms of Service</strong> and <strong>Tracker Information</strong> ship as written pages and can be
+                    replaced with your own, using the same editor the whitelist descriptions and the bulk mail use &mdash;
+                    Markdown or BBCode, with a live preview.
+                    The built-in pages <em>rewrite themselves</em> when the tracker mode or the account system changes;
+                    a saved page does not, and <strong>Restore</strong> brings back the built-in one written for how the tracker
+                    is configured at that moment.
+                </p>
+                <p class="settings-hint mb-3">
+                    <strong>Markdown is offered first</strong> for these two, and not by taste: the renderer has real headings in
+                    Markdown (<code>#</code>&hellip;<code>######</code>) and none at all in BBCode, where a heading can only be a
+                    larger bold line. A Terms page is mostly headings and numbered lists.
+                </p>
+                <div class="row g-3" id="pc-rows"><?php
+                foreach (pageContentCatalog() as $pcKey => $pcMeta):
+                    $pcRow = function_exists('pageContentGet') ? pageContentGet($db, $pcKey) : null;
+                ?>
+                    <div class="col-md-6">
+                        <div class="pc-card" data-page="<?= sanitize($pcKey) ?>">
+                            <div class="pc-head">
+                                <span class="pc-title"><?= sanitize($pcMeta['label']) ?></span>
+                                <?php if ($pcRow && $pcRow['enabled']): ?>
+                                    <span class="wl-badge wl-b-ok">your version, live</span>
+                                <?php elseif ($pcRow): ?>
+                                    <span class="wl-badge wl-b-warn">draft &mdash; built-in page is live</span>
+                                <?php else: ?>
+                                    <span class="wl-badge wl-b-muted">built-in</span>
+                                <?php endif; ?>
+                            </div>
+                            <div class="pc-meta">
+                                <?php if ($pcRow): ?>
+                                    <?= sanitize(ucfirst((string)$pcRow['format'])) ?> &middot;
+                                    last saved <?= sanitize((string)$pcRow['updated_at']) ?>
+                                    <?= $pcRow['updated_by'] ? ' by ' . sanitize((string)$pcRow['updated_by']) : '' ?>
+                                <?php else: ?>
+                                    Never edited &mdash; visitors see the page that ships with the panel.
+                                <?php endif; ?>
+                            </div>
+                            <div class="pc-acts">
+                                <button type="button" class="btn btn-sm btn-outline-info pc-edit" data-page="<?= sanitize($pcKey) ?>">
+                                    <i class="bi bi-pencil-square"></i> Edit
+                                </button>
+                                <a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener"
+                                   href="<?= $baseUrl ?>?action=<?= sanitize($pcMeta['route']) ?>">
+                                    <i class="bi bi-box-arrow-up-right"></i> View
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                <?php endforeach; ?></div>
+            </div>
+
             <!-- Observed-hash Index -->
             <div class="settings-section" id="section-index" data-group="index" data-title="Index (observed hashes)">
                 <h5>Index (observed hashes)</h5>
@@ -2464,12 +2519,66 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     <div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3" id="toast-container" style="z-index: 1080;"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+    <!-- The page editor. A modal rather than an inline block: a Terms page is a page, and it needs
+         the width and the live preview beside it that a settings row cannot give. -->
+    <div class="modal fade" id="pageEditModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-file-earmark-text text-info"></i> <span id="pc-title">Page</span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="pc-bar">
+                        <div class="pc-bar-left">
+                            <label class="form-label wl-small mb-0" for="pc-format">Format</label>
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary" id="pc-format">
+                                <option value="markdown">Markdown &mdash; has headings</option>
+                                <option value="bbcode">BBCode &mdash; no headings, large bold instead</option>
+                            </select>
+                            <div class="form-check form-switch mb-0 ms-2">
+                                <input class="form-check-input" type="checkbox" id="pc-enabled">
+                                <label class="form-check-label wl-small" for="pc-enabled">Use my version</label>
+                            </div>
+                        </div>
+                        <div class="pc-bar-right">
+                            <span class="wl-small text-muted" id="pc-count"></span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="pc-restore">
+                                <i class="bi bi-arrow-counterclockwise"></i> Restore built-in
+                            </button>
+                        </div>
+                    </div>
+                    <div class="pc-note wl-small" id="pc-note"></div>
+                    <div class="pc-split">
+                        <div class="pc-pane">
+                            <div class="pc-pane-head">Your text</div>
+                            <textarea class="form-control bg-dark text-light border-secondary pc-text" id="pc-body" spellcheck="false"></textarea>
+                        </div>
+                        <div class="pc-pane">
+                            <div class="pc-pane-head">How it will look</div>
+                            <div class="pc-preview rt rt-page" id="pc-preview"></div>
+                        </div>
+                    </div>
+                    <div class="alert alert-danger py-2 wl-small d-none mt-2" id="pc-error"></div>
+                </div>
+                <div class="modal-footer">
+                    <span class="wl-small text-muted me-auto" id="pc-saved"></span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-sm btn-info" id="pc-save">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="<?= $baseUrl ?>assets/js/admin-settings.js<?= assetVer('assets/js/admin-settings.js') ?>"></script>
     <!-- admin-common.js only defines window.AdminCommon (apiCall / el / showToast) and adds no globals
          of its own, so it can join this page without colliding with the inline script above. Without
          it admin-twofa.js returns immediately and the section sits on "Reading…" for ever. -->
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-twofa.js<?= assetVer('assets/js/admin-twofa.js') ?>"></script>
+    <!-- AFTER admin-common.js, which on this page is loaded below admin-settings.js: the editor
+         needs window.AdminCommon and returned early without it, so the dialog never opened. -->
+    <script src="<?= $baseUrl ?>assets/js/admin-pagecontent.js<?= assetVer('assets/js/admin-pagecontent.js') ?>"></script>
     <script>
     const API_BASE = document.body.dataset.apiBase;
     const CSRF = document.body.dataset.csrf || '';
