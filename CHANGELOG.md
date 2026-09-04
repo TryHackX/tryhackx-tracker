@@ -38,6 +38,16 @@ during a search, and nowhere else. A plain page load now goes through the same p
 settings — it did not before, so the breadcrumbs appeared when you clicked the button and not when
 you arrived on the view it selects.
 
+### Fixed — a poll that delivered 432 703 entries was charted as delivering nothing
+
+Visible only once real rows existed: `delivered 0` sitting beside `kept 189 434`, and 0 % coverage
+on the chart. `delivered` was `entries − skip_from`, and `skip_from` recorded the cursor that was
+**stored** rather than the one that was **applied** — a truncated download resets the cursor to zero
+and reads the short file from the start, while the stored value stays where a longer earlier pass
+left it. The poll is now recorded with the cursor it actually used, and the endpoint reads a cursor
+above the entries walked as the restart it can only be, so the two rows written before this are
+readable too: **31.2 % and 59 %**, not 0 %.
+
 ### Fixed — the worker CPU tile blanked itself every few seconds
 
 A share of a CPU needs two readings a few seconds apart, and between them the tile was replacing the

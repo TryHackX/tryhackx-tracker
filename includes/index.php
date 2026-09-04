@@ -476,7 +476,14 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
                            removed_wl, removed_ban, rows_total, index_rows, error)
                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                           ON DUPLICATE KEY UPDATE entries = VALUES(entries), kept = VALUES(kept)")
-               ->execute([$now, $out['entries'], $stateSkip, $out['kept'], $out['bytes'], $out['ms'],
+               // THE CURSOR THAT WAS ACTUALLY APPLIED, not the one that was stored.
+               //
+               // A truncated download resets $skip to 0 above and reads the short file from the
+               // start, while the stored cursor stays where a longer earlier pass left it. Recording
+               // the stored one made the first two live rows read "delivered 0" beside "kept
+               // 189 434" — a poll that plainly delivered something, reported as having delivered
+               // nothing, and a coverage of 0 % on the chart to go with it.
+               ->execute([$now, $out['entries'], $skip, $out['kept'], $out['bytes'], $out['ms'],
                           $out['truncated'] ? 1 : 0, $out['partial'] !== null ? mb_substr((string)$out['partial'], 0, 64) : null,
                           $out['removed_wl'], $out['removed_ban'], $rowsTotal, indexTotalCached($db),
                           $out['error'] !== null ? mb_substr((string)$out['error'], 0, 190) : null]);

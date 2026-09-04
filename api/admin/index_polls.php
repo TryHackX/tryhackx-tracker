@@ -42,7 +42,13 @@ $points = [];
 foreach ($rows as $r) {
     $entries = (int)$r['entries'];
     $skip = (int)$r['skip_from'];
-    $delivered = max(0, $entries - $skip);
+    // A cursor ABOVE the entries walked means the pass restarted from the beginning — a truncated
+    // download reads the short file from zero while the stored cursor stays where a longer earlier
+    // pass left it. You cannot walk past fewer entries than you skipped, so this is not ambiguous,
+    // and reading it as "delivered nothing" is how a poll that stored 189 434 rows was charted at
+    // 0 % coverage. Rows written before 1.29.1 recorded the stored cursor rather than the applied
+    // one; this is what makes them readable too.
+    $delivered = ($skip >= $entries) ? $entries : ($entries - $skip);
     $total = $r['rows_total'] !== null ? (int)$r['rows_total'] : null;
     $points[] = [
         'ts'        => (int)$r['ts'],
