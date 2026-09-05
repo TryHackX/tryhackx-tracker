@@ -2079,3 +2079,7 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 }
 .acc-language:focus { outline: none; border-color: var(--accent); }
 .acc-lang-note { margin: 0 0 0.45rem; }
+
+/* A custom home section: the page's own type scale, not a comment's. */
+.rt-home { line-height: 1.6; }
+.rt-home > :first-child { margin-top: 0; }

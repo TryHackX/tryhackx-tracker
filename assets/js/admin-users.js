@@ -45,6 +45,7 @@
         if (r.error) { showToast('Groups: ' + r.error, 'danger'); return; }
         state.groups = r.groups || [];
         state.permList = r.permission_list || {};
+        state.presets = r.presets || {};
         // group filter select
         const sel = $('us-filter-group');
         const cur = sel.value;
@@ -443,6 +444,42 @@
             tr.appendChild(act);
             tb.appendChild(tr);
         });
+        renderMatrix();
+    }
+
+    /** Groups across, permissions down — the same data as the key list, in a shape a person reads. */
+    function renderMatrix() {
+        const t = $('gr-matrix');
+        if (!t) return;
+        t.textContent = '';
+        const groups = state.groups || [];
+        const perms = Object.keys(state.permList || {});
+        if (!groups.length || !perms.length) return;
+        const thead = el('thead', {});
+        const hr = el('tr', {}, [el('th', { text: 'Permission' })]);
+        groups.forEach(g => {
+            const th = el('th', { className: 'gr-matrix-g', title: g.slug }, [g.name]);
+            if (g.color && /^#[0-9a-fA-F]{3,8}$/.test(g.color)) th.style.color = g.color;
+            hr.appendChild(th);
+        });
+        thead.appendChild(hr); t.appendChild(thead);
+        const tbody = el('tbody', {});
+        let section = '';
+        perms.forEach(key => {
+            const sec = key.startsWith('panel.') ? 'PANEL' : 'SITE';
+            if (sec !== section) {
+                section = sec;
+                tbody.appendChild(el('tr', { className: 'gr-matrix-sec' }, [el('td', { colspan: String(groups.length + 1), text: sec === 'PANEL' ? 'The admin panel' : 'The public site' })]));
+            }
+            const tr = el('tr', {}, [el('td', { title: state.permList[key] || '' }, [el('code', { text: key })])]);
+            groups.forEach(g => {
+                const on = !!(g.permissions && g.permissions[key]);
+                tr.appendChild(el('td', { className: 'gr-matrix-c' + (on ? ' on' : '') }, [
+                    on ? el('i', { className: 'bi bi-check-lg', title: g.name + ' — ' + key }) : el('span', { className: 'gr-matrix-off', text: '·' })]));
+            });
+            tbody.appendChild(tr);
+        });
+        t.appendChild(tbody);
     }
     function openGroupEditor(g) {
         editGroup = g;   // null = new
@@ -455,6 +492,24 @@
         $('ge-desc').value = g ? g.description : '';
         $('ge-default').checked = !!(g && g.is_default);
         $('ge-alert').textContent = '';
+        // Presets. One click ticks a set; the checkboxes below stay visible and editable, so a
+        // preset is a starting point the operator can see through, not a lock.
+        const pre = $('ge-presets');
+        if (pre) {
+            pre.textContent = '';
+            pre.appendChild(el('span', { className: 'wl-small text-muted me-1', text: 'Start from:' }));
+            Object.entries(state.presets || {}).forEach(([key, p]) => {
+                const b = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary ge-preset', title: p.about || '' }, [p.label || key]);
+                b.addEventListener('click', () => {
+                    const set = new Set(p.perms || []);
+                    $('ge-perms').querySelectorAll('input[data-perm]').forEach(cb => { cb.checked = set.has(cb.dataset.perm); });
+                });
+                pre.appendChild(b);
+            });
+            const none = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary ge-preset', title: 'Untick everything' }, ['None']);
+            none.addEventListener('click', () => $('ge-perms').querySelectorAll('input[data-perm]').forEach(cb => { cb.checked = false; }));
+            pre.appendChild(none);
+        }
         const box = $('ge-perms');
         box.textContent = '';
         Object.entries(state.permList).forEach(([key, desc]) => {

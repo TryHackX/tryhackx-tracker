@@ -20,6 +20,7 @@
  */
 
 const HOME_HEADING_MAX = 80;
+const HOME_CUSTOM_MAX = 6;
 
 /**
  * The sections, in the order the page has always had them.
@@ -103,24 +104,40 @@ function homeLayout(array $cfg): array {
     $raw = json_decode((string)($cfg['home_layout'] ?? ''), true);
     if (!is_array($raw)) $raw = [];
 
+    // Custom sections: the operator's own, keyed custom_N, with a label that doubles as the
+    // default heading. Their text lives in page_content as 'home:custom_N', per language.
+    $custom = [];
+    foreach (is_array($raw['custom'] ?? null) ? $raw['custom'] : [] as $c) {
+        if (!is_array($c) || !isset($c['key']) || !is_string($c['key'])) continue;
+        if (!preg_match('/^custom_[1-9][0-9]?$/', $c['key']) || isset($custom[$c['key']])) continue;
+        $label = trim((string)preg_replace('/\s+/u', ' ', (string)($c['label'] ?? '')));
+        if ($label === '') $label = 'Section';
+        $custom[$c['key']] = ['key' => $c['key'], 'label' => mb_substr($label, 0, HOME_HEADING_MAX)];
+        if (count($custom) >= HOME_CUSTOM_MAX) break;
+    }
+    $known = $cat + $custom;
+
     $order = [];
     foreach (is_array($raw['order'] ?? null) ? $raw['order'] : [] as $k) {
-        if (is_string($k) && isset($cat[$k]) && !in_array($k, $order, true)) $order[] = $k;
+        if (is_string($k) && isset($known[$k]) && !in_array($k, $order, true)) $order[] = $k;
     }
     foreach (array_keys($cat) as $i => $k) {
         if (in_array($k, $order, true)) continue;
         array_splice($order, min($i, count($order)), 0, [$k]);
     }
+    foreach (array_keys($custom) as $k) {
+        if (!in_array($k, $order, true)) $order[] = $k;   // a custom section the order forgot goes last
+    }
 
     $hidden = [];
     foreach (is_array($raw['hidden'] ?? null) ? $raw['hidden'] : [] as $k) {
         // A section marked `fixed` cannot be hidden, however the stored JSON came to say otherwise.
-        if (is_string($k) && isset($cat[$k]) && empty($cat[$k]['fixed'])) $hidden[] = $k;
+        if (is_string($k) && isset($known[$k]) && empty($cat[$k]['fixed'])) $hidden[] = $k;
     }
 
     $headings = [];
     foreach (is_array($raw['headings'] ?? null) ? $raw['headings'] : [] as $k => $v) {
-        if (!is_string($k) || !isset($cat[$k]) || !is_string($v)) continue;
+        if (!is_string($k) || !isset($known[$k]) || !is_string($v)) continue;
         $v = trim((string)preg_replace('/\s+/u', ' ', $v));
         if ($v === '') continue;                       // empty means "use the built-in text"
         $headings[$k] = mb_substr($v, 0, HOME_HEADING_MAX);
@@ -133,7 +150,20 @@ function homeLayout(array $cfg): array {
     }
 
     return ['order' => $order, 'hidden' => array_values(array_unique($hidden)),
-            'headings' => $headings, 'tagline' => $tagline];
+            'headings' => $headings, 'tagline' => $tagline, 'custom' => array_values($custom)];
+}
+
+/** Is this key one of the operator's own sections? */
+function homeSectionIsCustom(string $key): bool {
+    return (bool)preg_match('/^custom_[1-9][0-9]?$/', $key);
+}
+
+/** The label of any section — the catalogue's, or the custom section's own. */
+function homeSectionLabel(array $cfg, string $key): string {
+    $cat = homeSectionCatalog();
+    if (isset($cat[$key])) return $cat[$key]['label'];
+    foreach (homeLayout($cfg)['custom'] as $c) if ($c['key'] === $key) return $c['label'];
+    return $key;
 }
 
 /** The order the template should emit its buffers in. */
@@ -158,10 +188,11 @@ function homeTaglineDefault(): string {
     return $k === '' ? '' : (function_exists('__') ? __($k) : $k);
 }
 
-/** The heading above a section — the operator's wording, or the translated built-in one. */
+/** The heading above a section — the operator's wording, the translated built-in one, or a custom section's label. */
 function homeHeading(array $cfg, string $key): string {
     $l = homeLayout($cfg);
     if (isset($l['headings'][$key])) return $l['headings'][$key];
+    if (homeSectionIsCustom($key)) return homeSectionLabel($cfg, $key);
     return homeHeadingDefault($key);
 }
 
@@ -175,7 +206,7 @@ function homeTagline(array $cfg): string {
 function homeLayoutIsDefault(array $cfg): bool {
     $l = homeLayout($cfg);
     return $l['order'] === homeSectionKeys() && $l['hidden'] === []
-        && $l['headings'] === [] && $l['tagline'] === null;
+        && $l['headings'] === [] && $l['tagline'] === null && $l['custom'] === [];
 }
 
 /**
@@ -185,9 +216,24 @@ function homeLayoutIsDefault(array $cfg): bool {
  * it twice. Hiding is what removes a section; an order that simply omitted one would make "hidden"
  * and "dropped on the way here" the same thing, and only one of those is what the operator meant.
  */
-function homeLayoutValidate(array $order, array $hidden, array $headings, string $tagline): array {
+function homeLayoutValidate(array $order, array $hidden, array $headings, string $tagline, array $custom = []): array {
     $cat = homeSectionCatalog();
-    $keys = array_keys($cat);
+
+    // Custom sections first: they are part of what the order has to account for.
+    $cleanCustom = [];
+    foreach ($custom as $c) {
+        if (!is_array($c)) continue;
+        $k = (string)($c['key'] ?? '');
+        if (!preg_match('/^custom_[1-9][0-9]?$/', $k)) return ['error' => 'A custom section has a malformed key.'];
+        if (isset($cleanCustom[$k])) return ['error' => 'A custom section is listed twice.'];
+        $label = trim((string)preg_replace('/\s+/u', ' ', (string)($c['label'] ?? '')));
+        if ($label === '') return ['error' => 'Every custom section needs a label.'];
+        if (mb_strlen($label) > HOME_HEADING_MAX) return ['error' => 'A section label is longer than ' . HOME_HEADING_MAX . ' characters.'];
+        $cleanCustom[$k] = ['key' => $k, 'label' => $label];
+    }
+    if (count($cleanCustom) > HOME_CUSTOM_MAX) return ['error' => 'At most ' . HOME_CUSTOM_MAX . ' custom sections.'];
+    $known = $cat + $cleanCustom;
+    $keys = array_keys($known);
 
     $order = array_values(array_filter($order, 'is_string'));
     if (count($order) !== count($keys) || array_diff($order, $keys) || array_diff($keys, $order)
@@ -197,7 +243,7 @@ function homeLayoutValidate(array $order, array $hidden, array $headings, string
 
     $cleanHidden = [];
     foreach ($hidden as $k) {
-        if (!is_string($k) || !isset($cat[$k])) continue;
+        if (!is_string($k) || !isset($known[$k])) continue;
         if (!empty($cat[$k]['fixed'])) {
             return ['error' => 'The "' . $cat[$k]['label'] . '" section cannot be hidden — a page with no title is not a page.'];
         }
@@ -207,10 +253,12 @@ function homeLayoutValidate(array $order, array $hidden, array $headings, string
 
     $cleanHeadings = [];
     foreach ($headings as $k => $v) {
-        if (!is_string($k) || !isset($cat[$k]) || !is_string($v)) continue;
-        if ($cat[$k]['heading'] === null) continue;               // nothing to rename
+        if (!is_string($k) || !isset($known[$k]) || !is_string($v)) continue;
+        if (isset($cat[$k]) && $cat[$k]['heading'] === null) continue;   // nothing to rename
         $v = trim((string)preg_replace('/\s+/u', ' ', $v));
-        if ($v === '' || $v === homeHeadingDefault($k)) continue; // back to the built-in wording
+        // Back to the built-in wording — or, for a custom section, to its label.
+        $default = isset($cat[$k]) ? homeHeadingDefault($k) : $cleanCustom[$k]['label'];
+        if ($v === '' || $v === $default) continue;
         if (mb_strlen($v) > HOME_HEADING_MAX) {
             return ['error' => 'A heading is longer than ' . HOME_HEADING_MAX . ' characters.'];
         }
@@ -222,6 +270,7 @@ function homeLayoutValidate(array $order, array $hidden, array $headings, string
         return ['error' => 'The tagline is longer than ' . HOME_HEADING_MAX . ' characters.'];
     }
     $store = ['order' => $order, 'hidden' => $cleanHidden, 'headings' => $cleanHeadings];
+    if ($cleanCustom) $store['custom'] = array_values($cleanCustom);
     if ($tagline !== '' && $tagline !== homeTaglineDefault()) $store['tagline'] = $tagline;
 
     return ['ok' => true, 'json' => json_encode($store, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)];

@@ -4,6 +4,94 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.34.0] — 2026-09-05
+
+### OpenTracker — the fix is in production, and a review of what else is there
+
+**Both binaries swapped** (whitelist and blacklist mode, 12:48) for the builds with libowfat's
+zerocopy block compiled out — `tools/opentracker/libowfat-no-zerocopy.patch`, applied before
+`make -C libowfat`. The originals are kept in `/home/debian/backup-opentracker-20260905/`. The swarm
+rebuilt from empty as expected (1.56 M torrents and 3.8 M peers within four hours), and **every full
+scrape since has arrived intact**: the framing error that truncated 10 of 13 polls is gone. The
+truncated rows that still appear are the panel's own doing — the poll runs out of its
+`index_poll_budget` (default 45 s, cap 120 s) on a swarm this size, and those rows carry no
+`partial` marker. Raising the budget is the operator's call; the panel now reads the whole file
+within it.
+
+**What a source review found** — written up as an addendum to
+`tools/opentracker/UPSTREAM-REPORT.md`, none of it patched here. Traced by a second reader: the UDP
+connection-id secret comes from `srandom(time(NULL))` on the shipped Makefile (forgeable, high);
+an accesslist reload frees the superseded list at once when it is older than five minutes while
+announce threads may still be searching it (use-after-free on SIGHUP, high); a `/stats` task
+outlives its client and writes to whoever reuses the fd (medium); `g_torrent_count` and the stats
+counters are updated without the lock, a one-byte write past the request buffer in the tpbs path,
+`free_peerlist(NULL)` on allocation failure, and a dangling pointer in `iovec_increase` (low). Six
+more were raised by one reader and not confirmed before the session ended; three were refuted.
+
+### Changed — the language you pick lasts as long as the tab
+
+The switcher's cookie no longer carries an expiry, so it lives exactly as long as the browser
+session — close the tab, and the next visit is back to the account's *Interface language* (or the
+site default). While it lives it outranks the account setting, because a person who clicks **PL**
+means *now*, not *until I find the account page*. The order is: `?lang=` → session cookie → account
+language → site default → browser → English. `tests/lang_test.php` encodes the new order.
+
+### Added — the switcher where it was missing
+
+The admin header (before *Logout*) and the account page (inside *Your groups*) now carry the same
+switcher the public pages have; every admin template links the favicon, so the tab icon no longer
+depends on which page was cached first.
+
+### Changed — Swarm Timeline 3 m / All use the fine table when it still has the data
+
+`statsTimelineChooseTable()` used to pick the hourly table for anything beyond a week, which capped
+3 m and All at about 300 points while 1 m had thousands. It now takes the five-minute table whenever
+the range fits inside its retention and the point count stays under 4 500 — which on this install is
+both 3 m and All — and only falls back to the hourly rows past that.
+
+### Changed — Terms, Info and the home page grew with the project
+
+The built-in Terms and Info now describe the index, the member search, accounts, languages,
+ratings and the transparency features — each paragraph wrapped in a **conditional marker** so it
+appears only under the setting that makes it true: `[[if:whitelist]] … [[/if]]`,
+`[[ifnot:users]] … [[/ifnot]]`, and so on for `open`, `schedule`, `registration`, `signup`,
+`email_verify`, `index`, `search`, `stats`, `donations`, `contact`, `transparency`, `languages`,
+`ratings`, `descriptions`. The markers are part of the text the editor shows, so a page you save
+keeps following the tracker mode exactly as the built-in one does — that was the one thing an
+edited page used to lose. Unknown marker names are reported by the preview rather than swallowed.
+
+### Added — the home page is yours to write
+
+**Home page layout** can now add up to six **custom sections** (own heading, own text), and every
+built-in section has a **Text** button that opens the page editor for that section alone. The text
+is Markdown, BBCode or HTML, per language like Terms and Info, and it can use **placeholders**
+resolved at render time: `{{block:announce}}` (any built-in section's live body), `{{torrent_count}}`,
+`{{register_button}}`, `{{announce_http}}`, `{{site_name}}` and the rest listed as chips under the
+editor. A custom text replaces the section's built-in body; leave it empty and the built-in body
+returns. `includes/homeblocks.php` now builds every section into a string so the page, the editor
+preview and the placeholder engine all read the same thing.
+
+### Added — permission presets and the matrix
+
+The group editor offers **Start from:** Moderator, Content reviewer, Whitelist curator, Read-only
+auditor, Site member — one click fills the checkboxes, and every one of them stays visible and
+editable before saving. Under the groups table a **permission matrix** (groups across, permissions
+down) shows who holds what in one glance. No new permission id: Settings stays owner-only by design,
+so a "pages" permission would promise something no page could keep.
+
+### Fixed
+
+- Settings search no longer triggers the browser's email autosuggest (the field starts read-only and
+  unlocks on focus).
+- `apiCall()` regression guard: the second parameter joins with `&`, never `?` — the mistake that
+  gave *Unknown endpoint* on every Terms/Info open in 1.32.0 now fails a test.
+
+### Docs
+
+README (screenshot gallery of fifteen local-instance shots, home sections, placeholders, markers,
+the new language order, presets), HANDOFF, INSTALL (the third opentracker patch in the recipe),
+`tools/opentracker/README.md` (round five: production) and the upstream report addendum.
+
 ## [1.33.0] — 2026-09-05
 
 ### Found — the OpenTracker framing bug, with the syscall that causes it

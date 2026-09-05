@@ -101,6 +101,9 @@ Provides a public-facing website for tracker information, abuse report submissio
 
 ## Screenshots
 
+*All shots come from a local instance with bootstrap data ("Local Tracker", example.org addresses,
+the smoke-test accounts) — nothing from production appears in them.*
+
 <p align="center">
   <img src="assets/img/screenshots/admin-panel.png" alt="Admin dashboard — reports table with search, filters and workflow actions" width="900">
 </p>
@@ -108,12 +111,60 @@ Provides a public-facing website for tracker information, abuse report submissio
 
 <table>
   <tr>
-    <td width="50%" valign="top"><img src="assets/img/screenshots/home.png" alt="Public home page" width="100%"></td>
-    <td width="50%" valign="top"><img src="assets/img/screenshots/stats.png" alt="Live tracker statistics page" width="100%"></td>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/home.png" alt="Public home page (English)" width="100%"></td>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/home-pl.png" alt="Public home page (Polish)" width="100%"></td>
   </tr>
   <tr>
-    <td align="center"><em>Public home — announce URLs, features, donations, contact.</em></td>
-    <td align="center"><em>Live tracker statistics (cached, auto-refreshing).</em></td>
+    <td align="center"><em>Public home — announce URLs, features, contact; sections and their text are editable.</em></td>
+    <td align="center"><em>The same page in Polish — one switch, every string.</em></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/stats.png" alt="Live tracker statistics page" width="100%"></td>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/status.png" alt="Public status page" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Live tracker statistics (cached, auto-refreshing) with the swarm timeline.</em></td>
+    <td align="center"><em>Public status — is my hash whitelisted, is the tracker up.</em></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/whitelist.png" alt="Public whitelist registration" width="100%"></td>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/info.png" alt="Public info page" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Whitelist registration — paste a hash or a magnet.</em></td>
+    <td align="center"><em>Info — the built-in page follows the tracker mode; the operator can replace it per language.</em></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/admin-whitelist.png" alt="Admin whitelist page" width="100%"></td>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/admin-index.png" alt="Admin index page" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Whitelist management — hashes, bans, metadata, the swarm timeline.</em></td>
+    <td align="center"><em>The index — every hash the tracker has seen, with names and file lists.</em></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/admin-traffic.png" alt="Admin traffic page" width="100%"></td>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/admin-users.png" alt="Admin users page" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Traffic — packet rates, the network limiter, kernel counters.</em></td>
+    <td align="center"><em>Users, groups and permissions — with presets and the permission matrix.</em></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/admin-settings.png" alt="Admin settings page" width="100%"></td>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/admin-languages.png" alt="Languages panel in settings" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Settings — searchable, grouped, every value explained.</em></td>
+    <td align="center"><em>Languages — install a dictionary, pick the site default, switch one on or off.</em></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/admin-home-layout.png" alt="Home page layout editor" width="100%"></td>
+    <td width="50%" valign="top"><img src="assets/img/screenshots/admin-page-editor.png" alt="Terms/Info page editor" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Home page layout — drag sections, rename headings, add your own, edit any section's text.</em></td>
+    <td align="center"><em>Page editor — Terms/Info per language, Markdown/BBCode/HTML, conditional markers, live preview.</em></td>
   </tr>
 </table>
 
@@ -133,8 +184,9 @@ Provides a public-facing website for tracker information, abuse report submissio
 
 This is an admin panel for [opentracker](https://erdgeist.org/arts/software/opentracker/), and the
 package ships the two builds it is developed against — `tools/opentracker/bin/opentracker.white` and
-`opentracker.black` — together with the two patches applied to them, the exact commit and feature
-flags they were built from, and the recipe to rebuild them yourself.
+`opentracker.black` — together with the three patches applied to them (two to opentracker, one to
+libowfat), the exact commit and feature flags they were built from, and the recipe to rebuild them
+yourself.
 
 **Two binaries, because white or black is a compile-time choice in opentracker**, not a runtime one:
 `WANT_ACCESSLIST_WHITE` and `WANT_ACCESSLIST_BLACK` are mutually exclusive `#ifdef`s. Switching modes
@@ -146,6 +198,13 @@ one adds `access.udp_reject_interval`, which answers a rejected UDP announce wit
 come back in N seconds" reply instead of the 8-byte packet clients read as a broken tracker and
 retry for ever. On a whitelist tracker that inherited an open swarm, the second one removes more
 traffic than everything else in this panel put together.
+
+The third patch is to **libowfat**, the I/O library opentracker links: its `iob_send()` sends with
+`MSG_ZEROCOPY` and frees the buffers before the kernel has read them, so a chunked `/scrape` read by
+anyone slower than the tracker arrives with heap pointers where chunk headers belong. The panel's
+full-scrape polls failed ten times in thirteen until the block was compiled out
+(`tools/opentracker/libowfat-no-zerocopy.patch`, 1.33.0 found it, 1.34.0 put it in production).
+The write-up meant for upstream is `tools/opentracker/UPSTREAM-REPORT.md`.
 
 Built and tested on **Debian 13 (trixie)**, x86-64, gcc 14.2.0. Details, checksums, feature flags,
 the build recipe and the install steps: **[tools/opentracker/README.md](tools/opentracker/README.md)**.
@@ -545,6 +604,14 @@ default — with it off, everything behaves exactly like the classic single-admi
   (`users_default_group`) and on fresh installs starts with guest's classic permissions; the seeded
   system **admin** group passes *every* permission check — the panel admin is mirrored into the
   user list with it once (the two passwords do not stay in sync afterwards).
+- **Presets and the matrix (1.34.0)**: the group editor offers *Start from:* **Moderator**
+  (reports + whitelist), **Content reviewer** (descriptions and rewrites), **Whitelist curator**
+  (hashes, bans, metadata), **Read-only auditor** (every page and the log, nothing writable) and
+  **Site member** (the public features). A preset fills the checkboxes and every one of them stays
+  visible and editable — it is a starting point, not a lock — and the presets live next to the
+  permission registry in `includes/users.php`, so one cannot name an id the other does not have.
+  Under the groups table, a collapsible **permission matrix** shows groups across and permissions
+  down, panel ids and site ids in two bands, a tick where the group holds it.
 - **Timed access**: grant a group permanently or for **1 d / 1 w / 2 w / 1 m / 3 m / 6 m / 1 y**, or
   a custom **from–to** window. Duration grants *extend* an existing membership (repeat purchases
   stack). The janitor expires memberships, warns `users_notify_expiry_days` days before the end and
@@ -1635,6 +1702,18 @@ must never be quietly replaced by boilerplate because one translation is missing
 The default text is built from the same dictionary keys the templates render, so *Restore* while
 editing Polish gives back Polish — and there is one source for the wording rather than two.
 
+**Conditional markers (1.34.0).** The built-in text is not flattened when it reaches the editor: a
+clause that only applies in whitelist mode arrives as `[[if:whitelist]] … [[/if]]`, one that only
+applies without accounts as `[[ifnot:users]] … [[/ifnot]]`, and so on. The markers are resolved
+against the live configuration just before rendering — for the built-in page and for a saved one
+alike — so a page you have edited **keeps following the tracker mode** instead of freezing the
+clauses that were true the day you saved it. Names: `whitelist`, `open`, `schedule`,
+`registration`, `users`, `signup`, `email_verify`, `index`, `search`, `stats`, `donations`,
+`contact`, `transparency`, `languages`, `ratings`, `descriptions`; the editor lists them with their
+current state, the preview resolves them the same way the page does, and an unknown name is
+reported rather than silently dropped. Numbered clauses hidden by a marker do not leave an empty
+number behind — the whole item is wrapped.
+
 Markdown is offered first for these two and not by taste: the renderer has real headings in
 Markdown and **no heading tag at all** in BBCode, where a heading can only be a larger bold line.
 
@@ -1666,6 +1745,19 @@ exactly once, unknown keys are dropped, and a section added in a later version l
 catalogue puts it. `home_layout` is written only by `api/admin/home_layout.php` and is deliberately
 absent from the settings allow-list, so an unrelated settings save cannot blank it.
 
+**Your own sections, and your own text in the built-in ones (1.34.0).** *Add a section* creates a
+custom section (up to six; keys are assigned server-side, removing one deletes its text), and every
+row has a **Text** button that opens the page editor — Markdown, BBCode or HTML, one version per
+language, the same conditional markers as Terms and Info — for that section only. A saved text
+replaces the section's built-in body under the section's heading; an empty one brings the built-in
+body back. Inside the text, **placeholders** are filled at render time, after the markup has been
+rendered so they cannot be escaped away — `{{block:announce}}` and the other built-in bodies,
+`{{torrent_count}}` and the other live numbers, `{{announce_http}}`, `{{register_button}}`,
+`{{site_name}}` and the rest. The editor lists every placeholder as a chip above the text; the
+preview resolves them; an unknown one is reported. `includes/homeblocks.php` builds every built-in
+section into a string, and `templates/pages/home.php` only assembles — the page, the editor preview
+and the placeholder engine read one source.
+
 ---
 
 ## Languages
@@ -1675,12 +1767,16 @@ language — install one from a JSON export, or copy an existing language and ed
 
 **Resolution order**, highest first:
 
-1. `?lang=xx` — an explicit choice, remembered in a cookie
-2. the signed-in account's own setting (so the language follows it to another browser)
-3. the cookie
+1. `?lang=xx` — an explicit choice, remembered for the rest of the **browser session**
+2. that session cookie — it has no expiry, so closing the browser forgets it (1.34.0)
+3. the signed-in account's own setting (so the language follows it to another browser)
 4. `default_language` — the site default
 5. `Accept-Language`, when the site default is *Automatic* (or *Follow the browser* is on)
 6. English
+
+The session cookie outranks the account setting on purpose: someone who clicks **PL** in the
+header means *now*, and the account page is where they say *always*. The switcher sits in the
+public header, the admin header and the account page (1.34.0).
 
 **Three lists, and they are different questions:**
 
@@ -1804,7 +1900,7 @@ tracker/
 │   └── img/
 │       ├── favicon.ico
 │       ├── favicon.svg
-│       └── screenshots/       # README screenshots (home, admin, stats)
+│       └── screenshots/       # README screenshots (15, from a local bootstrap instance)
 │
 ├── config/                    # Generated + runtime state (mostly gitignored, web-denied)
 │   ├── app.php                # Bootstrap config (loads password hash)

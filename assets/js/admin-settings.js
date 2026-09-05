@@ -92,6 +92,14 @@
     }
     bindSizeFields();
 
+    // The search box is rendered readonly (see settings.php) so the browser's profile autofill
+    // leaves it alone; it becomes editable the moment anyone reaches for it.
+    document.querySelectorAll('[data-unlock-on-focus]').forEach(el => {
+        const unlock = () => el.removeAttribute('readonly');
+        el.addEventListener('focus', unlock, { once: true });
+        el.addEventListener('pointerdown', unlock, { once: true });
+    });
+
     // ── model ───────────────────────────────────────────────────────────────
     // Every section is a list of "items": one per settings cell (.row > div) plus one per block that
     // is not a plain cell (donation rows, the schedule table, the federation peer card). Indexing the

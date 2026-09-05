@@ -18,16 +18,19 @@ them; older glibc will not.
 | `bin/opentracker.white` | whitelist build — serves **only** hashes in the accesslist file |
 | `bin/opentracker.black` | blacklist build — serves everything **except** the hashes in the file |
 | `sighup-udp-workers.patch` | fixes `systemctl reload` killing the tracker |
+| `libowfat-no-zerocopy.patch` | libowfat: compiles out `MSG_ZEROCOPY` in `iob_send()` — the chunked `/scrape` corruption (round four) |
+| `UPSTREAM-REPORT.md` | the bug report for libowfat/opentracker, ready to send |
 | `udp-reject-interval.patch` | adds `access.udp_reject_interval` |
 | `egress-budget/ottrack.nft` | the reply-rate budget (see the Traffic page) |
 | `tracker-*.sh` | the root helpers the panel calls (see [INSTALL.md](../../INSTALL.md)) |
 
 ```
-sha256  399230797752f6d1e217a0b43d1d8ce3ea4451291664de6e79a2912fbd4259ac  opentracker.white
-sha256  4c6dc5f693ac9b083d751f5b563c4f83c722a278df70236f4e3a99f00dcf9baa  opentracker.black
+sha256  164a37c53b352253911c4ce5d9b82f554c23f2212f4f6897071e59cb0083f849  opentracker.white
+sha256  02c3d8e3eea919657b85515f8adcd168af9597003efca22f331c8011cf5c6d74  opentracker.black
 ```
 
-Both are 117 936 bytes, stripped, position-independent.
+Both are 113 840 bytes, stripped, position-independent — the 2026-09-05 builds with the libowfat
+zerocopy patch (round five below); the unpatched 117 936-byte builds of 2026-08-18 are retired.
 
 ### Why two binaries and not one switch
 
@@ -45,7 +48,8 @@ binary a symlink points at, and why the panel restarts the service to do it.
 upstream   git://erdgeist.org/opentracker
 commit     1c7fac4cc23801ac81a2abd7d3110683831c4811   ("Reduce chance of collisions")
 dated      2026-05-26
-libowfat   0.34 (built from source alongside; Debian's libowfat-dev also works)
+libowfat   0.34, built from source with libowfat-no-zerocopy.patch applied (Debian's libowfat-dev
+           is the unpatched library and reproduces the /scrape corruption — do not link it)
 ```
 
 The commit is baked into the binary as `GIT_VERSION`, so a build can always be traced back:
@@ -140,8 +144,11 @@ Nothing here needs the panel; this is the whole recipe.
 sudo apt install -y build-essential git zlib1g-dev
 mkdir -p ~/build && cd ~/build
 
-# libowfat, opentracker's own support library
+# libowfat, opentracker's own support library — WITH the zerocopy patch, or the /scrape framing
+# bug comes back (see "Round four" below: iob_send() frees MSG_ZEROCOPY buffers before the kernel
+# has read them). The patch is small and applies to 0.34 as shipped.
 git clone git://git.fefe.de/libowfat
+(cd libowfat && patch -p1 --forward < $P/libowfat-no-zerocopy.patch)
 make -C libowfat
 
 # opentracker at the tested commit
@@ -149,7 +156,7 @@ git clone git://erdgeist.org/opentracker
 cd opentracker
 git checkout 1c7fac4cc23801ac81a2abd7d3110683831c4811
 
-P=/path/to/tryhackx-tracker/tools/opentracker
+P=/path/to/tryhackx-tracker/tools/opentracker   # (set this before the libowfat step above)
 patch -p1 --forward < $P/sighup-udp-workers.patch
 patch -p1 --forward < $P/udp-reject-interval.patch
 ```
@@ -535,11 +542,31 @@ the receiver has to be behind the sender for the freed page to be reused before 
 taken — the path run B used. Handling the completion queue properly would be the "right" fix
 upstream; for a tracker whose scrape is read by one panel on loopback, copying 30 MB is nothing.
 Built as `/tmp/fix/out/opentracker.{white,black}` with the production feature set (`/tmp/fixbuild.sh`),
-verified with `strings` for the accesslist symbol and with `strace` for the absence of the flag. Not
-installed: the swap restarts the tracker and the swarm rebuilds from empty.
+verified with `strings` for the accesslist symbol and with `strace` for the absence of the flag.
+Installed the same afternoon — round five.
 
-Add to the recipe above, after `make -C libowfat`: apply the same `#undef` to
-`libowfat/io/iob_send.c` **before** building — or the bug comes back with the next rebuild. The corruption is at a
-chunk boundary, so a lab with `OT_SCRAPE_CHUNK_SIZE` at 1 KiB and a deliberately failing
-`malloc` (an LD_PRELOAD that fails the Nth allocation) should hit the abandonment path in seconds
-instead of minutes — and if that produces the same corrupt stream, the suspect above is the bug.
+The recipe above gains one step, and it is not optional: apply
+`libowfat-no-zerocopy.patch` to `libowfat/io/iob_send.c` **before** `make -C libowfat`, or the bug
+comes back with the next rebuild. The patch is the `#if defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY)`
+guard turned into `#if 0`, with a comment saying why.
+
+## Round five: production (2026-09-05)
+
+Both binaries swapped at 12:48:03 — `opentracker.white` and `opentracker.black`, built from the
+patched libowfat with the production feature set (`/home/debian/build-fixed/` on the VPS; the
+originals are in `/home/debian/backup-opentracker-20260905/`). The service restarted once and the
+swarm rebuilt from empty: 1.56 M torrents and 3.8 M peers four hours later.
+
+**Every full scrape since has arrived intact.** The 16:55 poll read 1 561 725 of 1 562 173 hashes
+with `truncated=0`; the polls before the swap had failed 10 times in 13. The truncated rows that
+still appear are a different thing entirely: the panel stops reading when its own
+`index_poll_budget` (45 s by default, 120 s cap) runs out, and on a swarm this size a poll takes
+56–96 s. Those rows have no `partial` marker and no framing error — raising the budget is a
+settings decision, not a tracker bug.
+
+**A review of the rest of the source** ran in parallel and is written up as an addendum to
+`UPSTREAM-REPORT.md`: seven findings traced by a second reader (the UDP connection-id secret from
+`srandom(time(NULL))`, the accesslist reload use-after-free, the `/stats` task that outlives its
+client, and four low ones), six raised but not confirmed, three refuted. Nothing from it is
+patched here; the zerocopy fix is the only change these binaries carry beyond the two patches
+above.

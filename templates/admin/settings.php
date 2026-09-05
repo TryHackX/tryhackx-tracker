@@ -8,6 +8,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
+    <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
+    <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
 </head>
 <body class="admin-body admin-hc" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
     <div class="admin-container admin-wide">
@@ -22,7 +24,9 @@
             <div class="settings-search-row">
                 <div class="settings-search-box">
                     <i class="bi bi-search settings-search-icon"></i>
-                    <input type="search" id="settings-search" class="form-control bg-dark text-light border-secondary" placeholder="Search settings &mdash; try captcha, sender, timeout, whitelist&hellip;" autocomplete="off" spellcheck="false" aria-label="Search settings" aria-describedby="settings-search-count">
+                    <?php // readonly until the first focus: the one thing Chrome's profile autofill reliably respects. It offered
+      // e-mail addresses here, autocomplete="off" notwithstanding. admin-settings.js drops the attribute on focus. ?>
+                    <input type="search" id="settings-search" name="settings-q" class="form-control bg-dark text-light border-secondary" placeholder="Search settings &mdash; try captcha, sender, timeout, whitelist&hellip;" autocomplete="off" autocapitalize="off" spellcheck="false" readonly data-unlock-on-focus="1" aria-label="Search settings" aria-describedby="settings-search-count">
                     <button type="button" class="settings-search-clear d-hidden" id="settings-search-clear" title="Clear search" aria-label="Clear search"><i class="bi bi-x-lg"></i></button>
                 </div>
                 <span class="settings-search-count" id="settings-search-count" role="status" aria-live="polite"></span>
@@ -1673,7 +1677,10 @@
                 <h5>Home page layout</h5>
                 <p class="settings-hint mb-3">
                     The front page is built from seven sections. Drag them into the order you want, hide the ones you
-                    do not, and rename the headings above them. Every section keeps its own logic &mdash; the tracker
+                    do not, rename the headings above them &mdash; and <strong>write your own text for any of them</strong>,
+                    or add sections of your own. A custom text can paste the live pieces in where it says
+                    <code>{{block:announce}}</code>, <code>{{torrent_count}}</code>, <code>{{register_button}}</code>&hellip;
+                    so your own words wrap around the parts that have to stay live. Every section keeps its own logic &mdash; the tracker
                     mode still rewrites &ldquo;About&rdquo; and &ldquo;Features&rdquo;, the statistics widget still needs its own
                     setting &mdash; so <strong>hiding a section here is not the same as switching its feature off</strong>,
                     and dragging one back does not switch it on. The editor says which is which on each row.
@@ -2771,6 +2778,9 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                     <button type="button" class="btn btn-sm btn-outline-secondary me-auto" id="hl-reset">
                         <i class="bi bi-arrow-counterclockwise"></i> Restore built-in layout
                     </button>
+                    <button type="button" class="btn btn-sm btn-outline-info" id="hl-add">
+                        <i class="bi bi-plus-lg"></i> Add a section
+                    </button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
                     <button type="button" class="btn btn-sm btn-info" id="hl-save">Save</button>
                 </div>
@@ -2810,6 +2820,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                         </div>
                     </div>
                     <div class="pc-note wl-small" id="pc-note"></div>
+                    <div class="pc-placeholders" id="pc-placeholders" hidden></div>
                     <div class="pc-split">
                         <div class="pc-pane">
                             <div class="pc-pane-head">Your text</div>

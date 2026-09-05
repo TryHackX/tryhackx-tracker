@@ -133,21 +133,48 @@ check('… the tagline changed', homeTagline($c) === 'A tracker');
 check('… and it no longer claims to be the built-in layout', !homeLayoutIsDefault($c));
 
 // ── the template renders from the layout, and nothing else does ─────────────
+// 1.34.0: the bodies moved to includes/homeblocks.php (a function, so the editor's preview can build
+// the same bodies to paste into a custom section); the template only assembles.
 $tpl = (string)file_get_contents($root . '/templates/pages/home.php');
+$blk = (string)file_get_contents($root . '/includes/homeblocks.php');
 check('the template emits its sections through the layout', str_contains($tpl, 'homeLayoutOrder($cfg)'));
 check('… skips the hidden ones', str_contains($tpl, 'homeSectionHidden($cfg, $homeKey)'));
+check('… takes the bodies from homeBlocks()', str_contains($tpl, 'homeBlocks($db, $cfg, $baseUrl)'));
+check("… and consults the operator's own text per section", str_contains($tpl, "pageContentActive(\$db, 'home:' . \$homeKey, \$cfg)"));
 foreach ($keys as $k) {
-    check("$k: the template captures a buffer for it", str_contains($tpl, "\$homeBlocks['$k'] = ob_get_clean();"));
+    check("$k: homeblocks captures a buffer for it", str_contains($blk, "\$homeBlocks['$k'] = ob_get_clean();"));
 }
-check('every buffer that is opened is closed',
-      substr_count($tpl, 'ob_start()') === substr_count($tpl, 'ob_get_clean()'),
-      substr_count($tpl, 'ob_start()') . ' vs ' . substr_count($tpl, 'ob_get_clean()'));
+check('every buffer that is opened is closed (plus the outer one that swallows whitespace)',
+      substr_count($blk, 'ob_start()') === substr_count($blk, 'ob_get_clean()') + 1,
+      substr_count($blk, 'ob_start()') . ' vs ' . substr_count($blk, 'ob_get_clean()'));
+check('no heading is hard-coded inside a body any more — the assembly draws them',
+      !preg_match('/<h2>.*homeHeading/', $blk));
 // The bug this catches: a heading left as literal markup silently ignores the operator's wording.
 foreach (['Announce URL', 'About the Tracker', 'Features', 'Support the Project', 'Contact'] as $h) {
     check("the \"$h\" heading is not hard-coded any more", !str_contains($tpl, '<h2>' . $h . '</h2>'));
 }
 check('the tagline is not hard-coded any more',
       !str_contains($tpl, '<p>Public BitTorrent tracker powered by OpenTracker</p>'));
+
+// ── custom sections (1.34.0) ────────────────────────────────────────────────
+$c = cfgOf(['order' => $keys, 'custom' => [['key' => 'custom_2', 'label' => 'How to connect']]]);
+check('a custom section is part of the order', in_array('custom_2', homeLayoutOrder($c), true));
+$ord = homeLayoutOrder($c);
+check('… lands last when the order forgot it', end($ord) === 'custom_2');
+check('… its label is its default heading', homeHeading($c, 'custom_2') === 'How to connect');
+check('… and it is recognised as custom', homeSectionIsCustom('custom_2') && !homeSectionIsCustom('about'));
+check('a custom section with a bad key is dropped', homeLayout(cfgOf(['custom' => [['key' => 'evil; drop', 'label' => 'x']]]))['custom'] === []);
+$r = homeLayoutValidate(array_merge($keys, ['custom_1']), [], [], '', [['key' => 'custom_1', 'label' => 'Mine']]);
+check('a layout with a custom section validates', isset($r['ok']), json_encode($r));
+check('… and stores it', (json_decode($r['json'], true)['custom'][0]['label'] ?? '') === 'Mine');
+check('… and is no longer the built-in layout', !homeLayoutIsDefault(['home_layout' => $r['json']]));
+check('an order that forgets a custom section is refused',
+      isset(homeLayoutValidate($keys, [], [], '', [['key' => 'custom_1', 'label' => 'Mine']])['error']));
+check('a custom section without a label is refused',
+      isset(homeLayoutValidate(array_merge($keys, ['custom_1']), [], [], '', [['key' => 'custom_1', 'label' => '  ']])['error']));
+check('more than the cap is refused',
+      isset(homeLayoutValidate(array_merge($keys, array_map(fn($i) => "custom_$i", range(1, 7))), [], [], '',
+            array_map(fn($i) => ['key' => "custom_$i", 'label' => "s$i"], range(1, 7)))['error']));
 
 // ── registration ────────────────────────────────────────────────────────────
 $api = (string)file_get_contents($root . '/api.php');

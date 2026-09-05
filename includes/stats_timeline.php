@@ -549,6 +549,24 @@ function statsTimelineChooseTable(array $cfg, int $rangeSec, ?PDO $db = null, ?i
         }
         if ($fits) return [ST_5M_TABLE, 300, '5m'];
     }
+    // A range LONGER than the five-minute retention (3m, all) used to go straight to the hourly
+    // table — even when the whole history was thirteen days old and sat entirely inside the
+    // five-minute window. Three months at hourly resolution on thirteen days of data is 302
+    // points; the same thirteen days at five minutes is 3 700. Same rule as above: decide on what
+    // exists. If the OLDEST sample is inside the five-minute retention, the hourly table holds
+    // nothing the five-minute one does not, and the finer one is used when it fits the cap. The
+    // moment history outgrows the retention, the hourly table takes over — the right moment.
+    if ($db !== null && $rangeSec > $keepDays * 86400) {
+        try {
+            $oldest = (int)$db->query("SELECT MIN(ts) FROM `" . ST_1H_TABLE . "`")->fetchColumn();
+            $cut = ($now ?? time()) - $keepDays * 86400;
+            if ($oldest > 0 && $oldest >= $cut) {
+                $st = $db->prepare("SELECT COUNT(*) FROM `" . ST_5M_TABLE . "` WHERE ts >= ?");
+                $st->execute([$cut]);
+                if ((int)$st->fetchColumn() <= ST_MAX_5M_POINTS) return [ST_5M_TABLE, 300, '5m'];
+            }
+        } catch (\Throwable $e) { /* the hourly table is always a correct answer */ }
+    }
     return [ST_1H_TABLE, 3600, '1h'];
 }
 

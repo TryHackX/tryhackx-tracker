@@ -84,6 +84,34 @@
         }
     }
 
+    /**
+     * The placeholders a home section may use — chips that insert `{{name}}` at the caret.
+     *
+     * Listed rather than documented: a name you can see and click is one you will not mistype, and
+     * an unknown placeholder is removed from the page rather than printed.
+     */
+    function renderPlaceholders(list) {
+        const box = $('pc-placeholders');
+        if (!box) return;
+        box.textContent = '';
+        box.hidden = !list.length;
+        if (!list.length) return;
+        box.appendChild(el('span', { className: 'wl-small text-muted me-1', text: 'Paste in:' }));
+        list.forEach(p => {
+            const b = el('button', { className: 'pc-ph', type: 'button', title: p.what || '' });
+            b.appendChild(el('code', { text: '{{' + p.name + '}}' }));
+            b.addEventListener('click', () => {
+                const ta = $('pc-body');
+                const at = ta.selectionStart || 0, to = ta.selectionEnd || at;
+                const tok = '{{' + p.name + '}}';
+                ta.value = ta.value.slice(0, at) + tok + ta.value.slice(to);
+                ta.focus(); ta.selectionStart = ta.selectionEnd = at + tok.length;
+                state.dirty = true; count(); schedulePreview();
+            });
+            box.appendChild(b);
+        });
+    }
+
     async function switchLang(code) {
         if (state.dirty && !await confirmAction('Switch language?',
                 'Your changes to this page have not been saved. Switching loses them.',
@@ -105,6 +133,7 @@
         state.max = r.max || 60000;
         state.note = r.note || '';
         renderLangs(r.languages, r.lang, r.serving);
+        renderPlaceholders(r.placeholders || []);
         $('pc-title').textContent = r.label + ' · ' + String(r.lang).toUpperCase()
             + ' — ' + (r.stored ? (r.enabled ? 'your version, live' : 'your draft') : 'built-in page');
         $('pc-format').value = r.format || 'markdown';
@@ -183,6 +212,9 @@
     $('pc-restore').addEventListener('click', restore);
     // Bootstrap wants a synchronous answer here and asking is asynchronous, so the close is
     // cancelled, the question asked, and the modal closed again once the answer is in.
+    // The home page arranger opens this editor on a section: one entry point, no second editor.
+    window.PageContentEditor = { open };
+
     modalEl.addEventListener('hide.bs.modal', (e) => {
         if (!state.dirty || state.closing) return;
         e.preventDefault();

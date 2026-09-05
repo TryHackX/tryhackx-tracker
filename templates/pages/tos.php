@@ -14,6 +14,9 @@
 <?php if (trackerMode($cfg) === 'whitelist'): ?>
     <li><?= __('tos.r_wl') ?></li>
 <?php endif; ?>
+<?php if (function_exists('indexEnabled') && indexEnabled($cfg)): ?>
+    <li><?= __('tos.r_index') ?></li>
+<?php endif; ?>
     <li><?= __('tos.r8') ?></li>
     <li><?= __('tos.r9') ?></li>
 </ol>
@@ -28,5 +31,12 @@
     <li><?= __('tos.acc5') ?></li>
     <li><?= __('tos.acc6') ?></li>
     <li><?= __('tos.acc7') ?></li>
+<?php if (function_exists('indexEnabled') && indexEnabled($cfg) && ($cfg['index_search_enabled'] ?? '1') === '1'): ?>
+    <li><?= __('tos.acc8') ?></li>
+<?php endif; ?>
 </ol>
+<?php endif; ?>
+<?php if (function_exists('langEnabled') && count(langEnabled($cfg)) > 1): ?>
+<h2><?= _h('tos.lang_head') ?></h2>
+<p><?= __('tos.lang1') ?></p>
 <?php endif; ?>

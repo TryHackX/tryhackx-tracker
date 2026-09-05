@@ -10,9 +10,9 @@
  * the middle of them would be the odd file out.
  *
  * RESOLUTION ORDER, highest first:
- *   1. `?lang=xx`          — an explicit choice, remembered in a cookie
- *   2. the signed-in user  — so the language follows the account to another browser
- *   3. the cookie          — the last explicit choice on this browser
+ *   1. `?lang=xx`          — an explicit choice, remembered in a SESSION cookie
+ *   2. the cookie          — that choice, for as long as the browser session lasts
+ *   3. the signed-in user  — the account's saved language: the default that comes back
  *   4. `default_language`  — what the operator set for the site
  *   5. Accept-Language     — only when `language_auto` is on, and only within the offerable set
  *   6. English
@@ -162,8 +162,10 @@ function langInit(array $cfg, ?string $userLanguage = null): void {
     if (isset($_GET['lang']) && is_string($_GET['lang']) && langSupported($cfg, strtolower($_GET['lang']))) {
         $lang = strtolower($_GET['lang']);
         if (!headers_sent()) {
+            // A SESSION cookie, on purpose: the switcher is a temporary choice for this visit. It
+            // dies with the browser, and the account's saved language (or the site default) is
+            // what comes back. No `expires` is what makes it a session cookie.
             setcookie(LANG_COOKIE, $lang, [
-                'expires'  => time() + 31536000,
                 'path'     => '/',
                 'secure'   => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
                 'httponly' => false,   // no secret in it, and the switcher reads it client-side
@@ -173,14 +175,15 @@ function langInit(array $cfg, ?string $userLanguage = null): void {
         $_COOKIE[LANG_COOKIE] = $lang;
     }
 
-    // A signed-in user's saved choice outranks the cookie: the language follows the account to a
-    // new browser rather than being whatever that browser last happened to use.
-    if (!$lang && $userLanguage && langSupported($cfg, $userLanguage)) $lang = $userLanguage;
-
+    // The cookie — an explicit click on the switcher, for this browser session — outranks the
+    // account's saved language while it exists: somebody who just chose Polish on this page meant
+    // this page in Polish, whatever their account says. The account setting is the DEFAULT that
+    // comes back when the browser closes and the session cookie is gone.
     if (!$lang && isset($_COOKIE[LANG_COOKIE]) && is_string($_COOKIE[LANG_COOKIE])
         && langSupported($cfg, strtolower($_COOKIE[LANG_COOKIE]))) {
         $lang = strtolower($_COOKIE[LANG_COOKIE]);
     }
+    if (!$lang && $userLanguage && langSupported($cfg, $userLanguage)) $lang = $userLanguage;
     if (!$lang) {
         $default = strtolower(trim((string)($cfg['default_language'] ?? LANG_FALLBACK)));
         if ($default !== '' && $default !== 'auto' && langSupported($cfg, $default)) $lang = $default;

@@ -103,6 +103,50 @@ function userPermissionList(): array {
     ];
 }
 
+/**
+ * Group presets — a starting point for the group editor, not a second registry.
+ *
+ * Each names permissions that exist in userPermissionList(); a preset naming an id that does not
+ * exist is dropped by the editor rather than granted, and users_test.php checks every id here is
+ * real. Presets are kept deliberately narrow: the operator adds to them, the preset never carries
+ * something they did not mean to hand out.
+ */
+function userGroupPresets(): array {
+    return [
+        'moderator' => [
+            'label' => 'Moderator',
+            'about' => 'Works the report queue and the whitelist. No users, no backups, no log.',
+            'perms' => ['panel.access', 'panel.reports.view', 'panel.reports.status', 'panel.reports.block',
+                        'panel.reports.email', 'panel.reports.archive', 'panel.appeals.resolve',
+                        'panel.whitelist.view', 'panel.whitelist.add', 'panel.whitelist.delete',
+                        'panel.whitelist.ban', 'panel.whitelist.meta', 'panel.whitelist.content'],
+        ],
+        'reviewer' => [
+            'label' => 'Content reviewer',
+            'about' => 'Approves or rejects descriptions and rewrites; sees the whitelist, changes nothing else.',
+            'perms' => ['panel.access', 'panel.whitelist.view', 'panel.whitelist.content'],
+        ],
+        'curator' => [
+            'label' => 'Whitelist curator',
+            'about' => 'Registers, bans and refreshes hashes. Never touches reports or users.',
+            'perms' => ['panel.access', 'panel.whitelist.view', 'panel.whitelist.add', 'panel.whitelist.delete',
+                        'panel.whitelist.ban', 'panel.whitelist.meta'],
+        ],
+        'auditor' => [
+            'label' => 'Read-only auditor',
+            'about' => 'Sees every page and the audit log, and can change nothing.',
+            'perms' => ['panel.access', 'panel.reports.view', 'panel.whitelist.view', 'panel.users.view',
+                        'panel.backups.view', 'panel.traffic.view', 'panel.audit.view'],
+        ],
+        'member' => [
+            'label' => 'Site member',
+            'about' => 'The public-site features, no panel at all.',
+            'perms' => ['index.view', 'index.files', 'index.magnet', 'whitelist.view', 'whitelist.add',
+                        'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose'],
+        ],
+    ];
+}
+
 /** Is this permission id one of the panel ones? */
 function userIsPanelPermission(string $perm): bool { return str_starts_with($perm, 'panel.'); }
 

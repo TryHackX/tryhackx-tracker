@@ -115,7 +115,10 @@ $_COOKIE['lang'] = 'pl';
 relang(['default_language' => 'en']);
 check('the cookie outranks the site default', langCurrent() === 'pl');
 relang(['default_language' => 'en'], 'en');
-check('… but the account outranks the cookie', langCurrent() === 'en');
+// Changed in 1.34.0, on purpose: the cookie is an explicit click on the switcher, scoped to the
+// browser session, and somebody who just chose a language meant it — whatever their account
+// says. The account setting is the default that comes back once the session cookie is gone.
+check('… and the cookie (an explicit choice for this session) outranks the account', langCurrent() === 'pl');
 $_GET['lang'] = 'pl';
 relang(['default_language' => 'en'], 'en');
 check('an explicit ?lang= outranks everything', langCurrent() === 'pl');

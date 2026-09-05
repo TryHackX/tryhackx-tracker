@@ -100,4 +100,12 @@ add('home', {
                        'współpracy lub gdy nie otrzymałeś odpowiedzi na zgłoszenie, możesz '
                        'skontaktować się z nami przez '),
     'contact_reveal': ('[click to reveal contact]', '[kliknij, aby pokazać kontakt]'),
+    'feat_index':     ('An index of observed torrents with names and file lists, so reports can be matched to content',
+                       'Indeks zaobserwowanych torrentów z nazwami i listami plików, aby zgłoszenia dało się dopasować do treści'),
+    'feat_search':    ('Members can search that index', 'Zalogowani mogą przeszukiwać ten indeks'),
+    'feat_accounts':  ('Optional accounts — the tracker works without one',
+                       'Opcjonalne konta — tracker działa bez nich'),
+    'feat_languages': ('Available in more than one language', 'Dostępny w więcej niż jednym języku'),
+    'feat_transparency': ('A public transparency report of every removal request',
+                          'Publiczny raport przejrzystości z każdego żądania usunięcia'),
 })

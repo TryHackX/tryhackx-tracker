@@ -102,7 +102,9 @@ check('… and it does not carry the port of the instance that is down',
 // at all and this went on passing. tests/announce_multiport_test.py asks the running server instead,
 // which is the check that actually holds; these two only fail earlier and more cheaply.
 foreach ([
-    'templates/pages/home.php'      => ['$extraUrls = ', 'foreach ($extraUrls'],
+    // 1.34.0 moved the home page's section bodies into includes/homeblocks.php (the announce box
+    // included); templates/pages/home.php only assembles the buffers now.
+    'includes/homeblocks.php'       => ['$extraUrls = ', 'foreach ($extraUrls'],
     'templates/pages/whitelist.php' => ['$wlExtra    = ', 'foreach ($wlExtra'],
     'templates/pages/search.php'    => ['$sExtra = ', 'data-announce-extra'],
     'api/whitelist_submit.php'      => ["'all' => announceUrls", "'all' => announceUrls"],

@@ -146,8 +146,8 @@ sudo chmod 2770 /home/tracker/accesslist
 ```bash
 cd /var/www/tracker.example.org/tools/opentracker/bin   # or wherever you unpacked the release
 sha256sum -c <<'SUMS'
-399230797752f6d1e217a0b43d1d8ce3ea4451291664de6e79a2912fbd4259ac  opentracker.white
-4c6dc5f693ac9b083d751f5b563c4f83c722a278df70236f4e3a99f00dcf9baa  opentracker.black
+164a37c53b352253911c4ce5d9b82f554c23f2212f4f6897071e59cb0083f849  opentracker.white
+02c3d8e3eea919657b85515f8adcd168af9597003efca22f331c8011cf5c6d74  opentracker.black
 SUMS
 sudo install -o tracker -g tracker -m 0755 opentracker.white /home/tracker/opentracker.white
 sudo install -o tracker -g tracker -m 0755 opentracker.black /home/tracker/opentracker.black
@@ -157,16 +157,18 @@ Debian 13 / x86-64, dynamically linked against `libz` and `libc` only.
 
 ### Or: build them yourself
 
-The full recipe — upstream commit, the two patches, the feature flags and what each one is for —
+The full recipe — upstream commit, the three patches, the feature flags and what each one is for —
 is in **[tools/opentracker/README.md](tools/opentracker/README.md)**. In short:
 
 ```bash
 cd /usr/local/src
-sudo git clone git://git.fefe.de/libowfat && sudo make -C libowfat
+P=/var/www/tracker.example.org/tools/opentracker
+sudo git clone git://git.fefe.de/libowfat
+(cd libowfat && sudo patch -p1 --forward < $P/libowfat-no-zerocopy.patch)   # else chunked /scrape corrupts
+sudo make -C libowfat
 sudo git clone git://erdgeist.org/opentracker && cd opentracker
 sudo git checkout 1c7fac4cc23801ac81a2abd7d3110683831c4811
 
-P=/var/www/tracker.example.org/tools/opentracker
 sudo patch -p1 --forward < $P/sighup-udp-workers.patch     # else `systemctl reload` KILLS the tracker
 sudo patch -p1 --forward < $P/udp-reject-interval.patch    # else rejected clients retry for ever
 
@@ -180,6 +182,11 @@ sudo install -o tracker -g tracker -m 0755 opentracker /home/tracker/opentracker
 
 ⚠ `make clean` between the two is **not** optional: the object files carry the accesslist flag, and
 without it the second build silently keeps the first one's mode.
+
+⚠ The libowfat patch is not optional either. Unpatched, `iob_send()` sends with `MSG_ZEROCOPY` and
+frees the buffers before the kernel has read them; the panel's full-scrape polls then arrive with
+heap pointers in the chunk headers and fail as "truncated". Details and the proof:
+`tools/opentracker/UPSTREAM-REPORT.md`.
 
 ⚠ Do not drop `-DWANT_RESTRICT_STATS`. Without it `/stats` — the whole torrent list, with counts —
 is served to anyone who asks, on a path they can guess. With it, `access.stats` limits it to named

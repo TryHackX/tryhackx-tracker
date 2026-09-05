@@ -41,22 +41,44 @@ foreach (pageContentCatalog() as $k => $m) {
 }
 
 // ── the defaults are generated from the configuration, not frozen ───────────
-$wlCfg   = array_merge($cfg, ['tracker_mode' => 'whitelist', 'users_enabled' => '1']);
-$openCfg = array_merge($cfg, ['tracker_mode' => 'blacklist', 'users_enabled' => '0']);
+$wlCfg   = array_merge($cfg, ['tracker_mode' => 'whitelist', 'users_enabled' => '1', 'index_enabled' => '0']);
+$openCfg = array_merge($cfg, ['tracker_mode' => 'blacklist', 'users_enabled' => '0', 'index_enabled' => '0']);
 
-$tosWl = pageContentDefault($wlCfg, 'tos', 'markdown', '', 'en');
-$tosOpen = pageContentDefault($openCfg, 'tos', 'markdown', '', 'en');
+// 1.34.0: the default text carries [[if:…]] MARKERS instead of deciding in PHP, so what a visitor
+// reads is the default RESOLVED against the configuration. That is the whole point — a page the
+// operator saved keeps following the settings the way the shipped one does — and it is what these
+// checks have to look at. The raw text is the same whatever the mode; see the marker checks below.
+$resolved = fn(array $c, string $page, string $fmt = 'markdown') => pageContentResolveMarkers(pageContentDefault($c, $page, $fmt, '', 'en'), $c);
+$rawTos = pageContentDefault($wlCfg, 'tos', 'markdown', '', 'en');
+check('the default carries conditional markers rather than deciding in PHP',
+      substr_count($rawTos, '[[if:') >= 4 && substr_count($rawTos, '[[/if]]') >= 4, (string)substr_count($rawTos, '[[if:'));
+check('the raw default is the same text whatever the mode — the markers do the deciding',
+      $rawTos === pageContentDefault($openCfg, 'tos', 'markdown', '', 'en'));
+check('resolving leaves no marker behind', !str_contains($resolved($openCfg, 'tos'), '[['));
+check('an unknown condition hides its block and is reported',
+      pageContentResolveMarkers('a [[if:bogus]]X[[/if]] b', $cfg, null, $unk) === 'a  b' && $unk === ['bogus']);
+check('[[ifnot:]] is the complement', pageContentResolveMarkers('[[ifnot:users]]NO[[/if]]', $openCfg, null) === 'NO'
+      && pageContentResolveMarkers('[[ifnot:users]]NO[[/if]]', $wlCfg, null) === '');
+check('one level of nesting resolves innermost first',
+      pageContentResolveMarkers('[[if:users]]U[[if:whitelist]]W[[/if]][[/if]]', $wlCfg, null) === 'UW');
+$tosWl = $resolved($wlCfg, 'tos');
+$tosOpen = $resolved($openCfg, 'tos');
 check('the whitelist clause is in the terms when the tracker is in whitelist mode',
       str_contains($tosWl, 'Whitelist registrations are free and anonymous'));
 check('… and is absent when it is not', !str_contains($tosOpen, 'Whitelist registrations are free'));
 check('the account terms appear only when accounts are on',
       str_contains($tosWl, 'User accounts') && !str_contains($tosOpen, 'User accounts'));
-check('the numbering closes over the clause that came and went',
-      str_contains($tosWl, '10. **Connecting to the tracker') && str_contains($tosOpen, '9. **Connecting to the tracker'),
-      substr($tosOpen, -80));
+// The literal numbers in the source go non-sequential when a marked item is hidden; the RENDERED
+// list is what closes over the gap, because Markdown and [list=1] both renumber from the first item.
+$liWl = substr_count(richtextRender($tosWl, 'markdown', $cfg, true), '<li');
+$liOpen = substr_count(richtextRender($tosOpen, 'markdown', $cfg, true), '<li');
+check('the rendered numbering closes over the clause that came and went (10 items vs 9)',
+      $liWl === 17 && $liOpen === 9, "$liWl / $liOpen");
+check('… and the rendered whitelist-mode list starts at 1 and carries no empty item',
+      !preg_match('/<li[^>]*>\s*<\/li>/', richtextRender($tosWl, 'markdown', $cfg, true)));
 
-$infoWl = pageContentDefault($wlCfg, 'info', 'markdown', '', 'en');
-$infoOpen = pageContentDefault($openCfg, 'info', 'markdown', '', 'en');
+$infoWl = $resolved($wlCfg, 'info');
+$infoOpen = $resolved($openCfg, 'info');
 check('the info page gains its whitelist section in whitelist mode',
       str_contains($infoWl, '## Whitelist mode') && !str_contains($infoOpen, '## Whitelist mode'));
 check('the FAQ answer changes with the mode',

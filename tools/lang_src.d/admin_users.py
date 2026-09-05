@@ -198,4 +198,5 @@ add('a.users', {
     'default_group':  ('Default group — granted automatically to every new account',
                        'Grupa domyślna — przyznawana automatycznie każdemu nowemu kontu'),
     'save_group':     ('Save group', 'Zapisz grupę'),
+    'matrix_title': ('Permission matrix — who holds what', 'Macierz uprawnień — kto co ma'),
 })

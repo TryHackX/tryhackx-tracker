@@ -100,4 +100,31 @@ add('info', {
                   'connections.',
                   'Nie. Tracker nie przechowuje plików .torrent. Śledzi wyłącznie aktywne '
                   'połączenia peerów.'),
+    'q_index':   ('The observed-hash index', 'Indeks zaobserwowanych hashy'),
+    'a_index':   ('Besides serving swarms, this tracker keeps an index of the info hashes it has seen, and '
+                  'fetches each torrent\'s name and file list from the swarm itself. It exists so that an abuse '
+                  'report naming a title can be matched to a hash, and so that a hash can be shown for what it '
+                  'is. Nothing is downloaded beyond the metadata; entries expire once a swarm has been quiet '
+                  'for a while.',
+                  'Poza obsługą rojów tracker prowadzi indeks zaobserwowanych info hashy i pobiera z roju nazwę '
+                  'oraz listę plików każdego torrenta. Istnieje po to, by zgłoszenie z tytułem dało się dopasować '
+                  'do hasha, i by hash można było pokazać takim, jaki jest. Poza metadanymi nic nie jest '
+                  'pobierane; wpisy wygasają, gdy rój przez jakiś czas milczy.'),
+    'a_index_search': ('Members can <a href=":url">search it</a>.', 'Zalogowani mogą go <a href=":url">przeszukiwać</a>.'),
+    'q_accounts': ('Accounts', 'Konta'),
+    'a_accounts': ('An account is optional — the tracker works without one. It unlocks member features according '
+                   'to the groups it holds, such as searching the index or registering torrents without a CAPTCHA. '
+                   'What is stored for an account is listed in the Terms.',
+                   'Konto jest opcjonalne — tracker działa bez niego. Odblokowuje funkcje dla zalogowanych zależnie '
+                   'od przypisanych grup, na przykład wyszukiwanie w indeksie albo rejestrację torrentów bez '
+                   'CAPTCHY. Co przechowujemy dla konta, opisuje Regulamin.'),
+    'a_data_index': ('The index additionally keeps, per observed hash, the torrent name and file list fetched from '
+                     'the swarm — metadata, not content.',
+                     'Indeks przechowuje dodatkowo, dla każdego zaobserwowanego hasha, nazwę torrenta i listę '
+                     'plików pobraną z roju — metadane, nie treść.'),
+    'faq_q6':    ('Can I read this site in another language?', 'Czy mogę czytać tę stronę w innym języku?'),
+    'faq_a6':    ('Yes — the switcher in the navigation changes the language for this browser session, and a '
+                  'signed-in account can save a preferred language on its account page.',
+                  'Tak — przełącznik w nawigacji zmienia język na czas sesji przeglądarki, a zalogowane konto może '
+                  'zapisać preferowany język na stronie konta.'),
 })

@@ -2261,3 +2261,37 @@ textarea.pc-text {
 .pc-dot-draft { background: #ffb74d; }
 .pc-dot-none  { background: #3a4552; }
 .pc-serving { color: #8a94a2; margin-bottom: 0.6rem; line-height: 1.45; }
+
+/* ── Language switcher in the panel header ───────────────────────────────────
+   Codes, not flags (a flag is a country); the same idea as the public nav, in the header's scale. */
+.admin-lang { display: inline-flex; gap: 0.2rem; align-items: center; margin-left: 0.25rem; }
+.admin-lang-opt {
+    display: inline-block; padding: 0.2rem 0.45rem;
+    border: 1px solid #2a3a4c; border-radius: 4px;
+    color: #8a94a2; font-size: 0.72rem; letter-spacing: 0.05em; text-decoration: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.admin-lang-opt:hover { color: #dfe6ee; border-color: #4a9eff; }
+.admin-lang-opt.active { color: #9ecbff; border-color: #4a9eff; background: rgba(74, 158, 255, 0.12); }
+
+/* ── Group presets and the permission matrix ────────────────────────────────── */
+.ge-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin-bottom: 0.5rem; }
+.ge-preset { --bs-btn-padding-y: 0.15rem; --bs-btn-padding-x: 0.5rem; font-size: 0.78rem; }
+.gr-matrix-wrap summary { cursor: pointer; list-style: none; }
+.gr-matrix-wrap summary::before { content: 'B8  '; }
+.gr-matrix-wrap[open] summary::before { content: 'BE  '; }
+.gr-matrix { --bs-table-bg: transparent; font-size: 0.8rem; }
+.gr-matrix th, .gr-matrix td { border-color: #1b232d; vertical-align: middle; }
+.gr-matrix-g { text-align: center; white-space: nowrap; font-weight: 500; }
+.gr-matrix-sec td { color: #8a94a2; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; background: #10161d; padding: 0.35rem 0.5rem; }
+.gr-matrix-c { text-align: center; color: #3a4552; }
+.gr-matrix-c.on { color: #6cc38a; }
+.gr-matrix code { color: #b9c3cf; background: transparent; padding: 0; font-size: 0.78rem; }
+
+/* ── Home sections: own text, placeholders ───────────────────────────────── */
+.pc-placeholders { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: -0.2rem 0 0.6rem; }
+.pc-ph { background: #10161d; border: 1px solid #232c37; border-radius: 4px; padding: 0.1rem 0.4rem; color: #9ecbff; cursor: pointer; }
+.pc-ph:hover { border-color: #4a9eff; }
+.pc-ph code { color: inherit; background: transparent; padding: 0; font-size: 0.74rem; }
+.hl-content { --bs-btn-padding-x: 0.5rem; }
+.hl-acts .pc-lang-dot { margin-left: 0.2rem; }

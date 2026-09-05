@@ -13,14 +13,16 @@
  */
 
 require_once __DIR__ . '/../../includes/pagecontent.php';
+require_once __DIR__ . '/../../includes/homeblocks.php';
 
 $input = $_SERVER['REQUEST_METHOD'] === 'POST' ? readJsonBody() : [];
 
 $page = (string)($_GET['page'] ?? '');
 if ($input) $page = (string)($input['page'] ?? $page);
-if (!in_array($page, PAGECONTENT_PAGES, true)) {
+if (!pageContentPageKnown($page, $cfg)) {
     jsonResponse(['error' => 'Unknown page.'], 400);
 }
+$isHome = str_starts_with($page, 'home:');
 
 // Any INSTALLED language may be edited, not merely an enabled one: a translation is written before
 // it is switched on, and an editor that refused would make that impossible.
@@ -61,8 +63,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         'success'  => true,
         'page'     => $page,
         'lang'     => $lang,
-        'label'    => $catalog[$page]['label'],
-        'route'    => $catalog[$page]['route'],
+        'label'    => pageContentLabel($page, $cfg),
+        'route'    => $isHome ? 'home' : $catalog[$page]['route'],
+        // What a home section may paste in. Terms and Info have none: they are prose.
+        'placeholders' => $isHome ? array_map(fn($k, $v) => ['name' => $k, 'what' => $v],
+                                              array_keys(homePlaceholderList()), homePlaceholderList()) : [],
         'stored'   => $stored !== null,
         'enabled'  => $stored['enabled'] ?? false,
         'format'   => $stored['format'] ?? $format,
@@ -79,12 +84,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         'serving'    => $active ? $active['lang'] : null,
         'max'      => PAGECONTENT_MAX,
         'formats'  => richtextFormats($cfg),
-        // Stated once, here, because it is the one consequence of editing that is not obvious: the
-        // shipped pages change themselves when the tracker mode does, and a saved one cannot.
-        'note'     => 'The built-in pages rewrite themselves when the tracker mode or the account '
-                    . 'system changes. A saved page does not — it is your text from then on. '
-                    . 'Restore brings back the built-in one for this language, written for how the '
-                    . 'tracker is configured right now.',
+        // Every condition a page may test, with its state right now — the editor lists them.
+        'markers'  => array_map(fn($k, $v) => ['name' => $k, 'on' => (bool)$v[0], 'what' => $v[1]],
+                                array_keys(pageContentConditions($cfg, $db)), pageContentConditions($cfg, $db)),
+        'note'     => 'Blocks wrapped in [[if:name]] … [[/if]] (or [[ifnot:name]]) appear only while '
+                    . 'that setting is on, so a page you save keeps following the tracker mode and the '
+                    . 'account system exactly as the built-in one does. Restore brings back the built-in '
+                    . 'text for this language, markers included.',
     ]);
 }
 
@@ -105,8 +111,26 @@ if ($op === 'preview') {
         jsonResponse(['error' => 'That is longer than ' . number_format(PAGECONTENT_MAX) . ' characters.'], 400);
     }
     $err = trim($body) === '' ? null : richtextValidate($body, $format, $cfg);
-    jsonResponse(['success' => true, 'html' => richtextRender($body, $format, $cfg, true),
-                  'warning' => $err, 'chars' => strlen($body)]);
+    // Resolved the way the public page resolves them, so the preview is the page. A marker nobody
+    // knows is worth saying out loud: it is far more likely a typo than a request to show nothing.
+    $unknown = [];
+    $resolved = pageContentResolveMarkers($body, $cfg, $db, $unknown);
+    if ($unknown && $err === null) {
+        $err = 'Unknown marker' . (count($unknown) === 1 ? '' : 's') . ': ' . implode(', ', $unknown)
+             . ' — the block is hidden. Known: ' . implode(', ', array_keys(pageContentConditions($cfg, $db))) . '.';
+    }
+    $html = richtextRender($resolved, $format, $cfg, true);
+    if ($isHome) {
+        // The same bodies the page builds, pasted the same way — the preview IS the page.
+        $unknownPh = [];
+        $html = homeApplyPlaceholders($html, homePlaceholders($db, $cfg, $baseUrl), $unknownPh);
+        if ($unknownPh && $err === null) {
+            $err = 'Unknown placeholder' . (count($unknownPh) === 1 ? '' : 's') . ': ' . implode(', ', $unknownPh)
+                 . ' — removed. Known: ' . implode(', ', array_keys(homePlaceholderList())) . '.';
+        }
+        $html = '<div class="rt-home">' . $html . '</div>';
+    }
+    jsonResponse(['success' => true, 'html' => $html, 'warning' => $err, 'chars' => strlen($body)]);
 }
 
 if ($op === 'reset') {
@@ -114,10 +138,10 @@ if ($op === 'reset') {
     // spent an afternoon writing.
     if (!pageContentReset($db, $page, $lang)) jsonResponse(['error' => 'Could not restore the page.'], 500);
     auditNote(['target_id' => $page . '/' . $lang,
-               'summary' => 'restored the built-in ' . $catalog[$page]['label'] . ' (' . strtoupper($lang) . ')']);
+               'summary' => 'restored the built-in ' . pageContentLabel($page, $cfg) . ' (' . strtoupper($lang) . ')']);
     jsonResponse(['success' => true, 'stored' => false, 'enabled' => false, 'lang' => $lang,
                   'body' => pageContentDefault($cfg, $page, $format, $baseUrl, $lang),
-                  'message' => $catalog[$page]['label'] . ' (' . strtoupper($lang) . ') is the built-in page again.']);
+                  'message' => pageContentLabel($page, $cfg) . ' (' . strtoupper($lang) . ') is the built-in page again.']);
 }
 
 $who = (string)($_SESSION['admin_user'] ?? $_SESSION['username'] ?? 'owner');
@@ -125,8 +149,8 @@ $r = pageContentSave($db, $cfg, $page, $lang, $format, $body, !empty($input['ena
 if (isset($r['error'])) jsonResponse(['error' => $r['error']], 400);
 auditNote(['target_id' => $page . '/' . $lang,
            'summary' => (!empty($input['enabled']) ? 'published' : 'saved a draft of')
-                      . ' ' . $catalog[$page]['label'] . ' (' . strtoupper($lang) . ')']);
+                      . ' ' . pageContentLabel($page, $cfg) . ' (' . strtoupper($lang) . ')']);
 jsonResponse(['success' => true, 'stored' => true, 'enabled' => !empty($input['enabled']), 'lang' => $lang,
               'message' => !empty($input['enabled'])
-                  ? $catalog[$page]['label'] . ' (' . strtoupper($lang) . ') is now your version — it is live.'
-                  : 'Saved as a draft. The built-in page is still the one visitors see.']);
+                  ? pageContentLabel($page, $cfg) . ' (' . strtoupper($lang) . ') is now your version — it is live.'
+                  : 'Saved as a draft. The built-in ' . ($isHome ? 'section' : 'page') . ' is still the one visitors see.']);

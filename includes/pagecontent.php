@@ -32,8 +32,31 @@
 require_once __DIR__ . '/whitelist.php';
 require_once __DIR__ . '/users.php';
 require_once __DIR__ . '/lang.php';
+require_once __DIR__ . '/homelayout.php';
 
 const PAGECONTENT_PAGES = ['tos', 'info'];
+
+/**
+ * Is this a page the editor may hold text for?
+ *
+ * The two written pages, and every section of the home page as 'home:<key>' — built-in sections
+ * (an override for the shipped body) and the operator's own custom_N ones. A key that is not in the
+ * current layout is refused, so a section removed from the layout cannot keep collecting text.
+ */
+function pageContentPageKnown(string $page, array $cfg = []): bool {
+    if (in_array($page, PAGECONTENT_PAGES, true)) return true;
+    if (!str_starts_with($page, 'home:')) return false;
+    $key = substr($page, 5);
+    return preg_match('/^[a-z_0-9]{1,24}$/', $key) === 1 && in_array($key, homeLayoutOrder($cfg), true);
+}
+
+/** The human label of any page the editor may hold. */
+function pageContentLabel(string $page, array $cfg = []): string {
+    $cat = pageContentCatalog();
+    if (isset($cat[$page])) return $cat[$page]['label'];
+    if (str_starts_with($page, 'home:')) return 'Home page — ' . homeSectionLabel($cfg, substr($page, 5));
+    return $page;
+}
 const PAGECONTENT_MAX = 60000;
 
 /**
@@ -69,7 +92,7 @@ function pageContentCatalog(): array {
 
 /** One stored override for one language, or null when that language has none. */
 function pageContentGet(PDO $db, string $page, string $lang): ?array {
-    if (!in_array($page, PAGECONTENT_PAGES, true)) return null;
+    if (!in_array($page, PAGECONTENT_PAGES, true) && !str_starts_with($page, 'home:')) return null;
     if (!preg_match('/^[a-z]{2,3}$/', $lang)) return null;
     try {
         $st = $db->prepare("SELECT page, lang, format, body, enabled, updated_at, updated_by
@@ -90,7 +113,7 @@ function pageContentAll(PDO $db): array {
     try {
         $st = $db->query("SELECT page, lang, format, enabled, updated_at, updated_by FROM page_content");
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            if (!in_array($r['page'], PAGECONTENT_PAGES, true)) continue;
+            if (!in_array($r['page'], PAGECONTENT_PAGES, true) && !str_starts_with((string)$r['page'], 'home:')) continue;
             $r['enabled'] = (int)$r['enabled'] === 1;
             $out[$r['page']][$r['lang']] = $r;
         }
@@ -102,7 +125,7 @@ function pageContentAll(PDO $db): array {
 
 /** Store (or replace) a page. Returns ['error' => …] or ['ok' => true]. */
 function pageContentSave(PDO $db, array $cfg, string $page, string $lang, string $format, string $body, bool $enabled, string $who): array {
-    if (!in_array($page, PAGECONTENT_PAGES, true)) return ['error' => 'Unknown page.'];
+    if (!pageContentPageKnown($page, $cfg)) return ['error' => 'Unknown page.'];
     // Any INSTALLED language, not merely an enabled one: a translation is written before it is
     // switched on, and refusing to store the page for it would make that impossible.
     if (!langInstalled($lang)) return ['error' => 'That language is not installed.'];
@@ -141,7 +164,7 @@ function pageContentSave(PDO $db, array $cfg, string $page, string $lang, string
  * English page the operator spent an afternoon on.
  */
 function pageContentReset(PDO $db, string $page, ?string $lang = null): bool {
-    if (!in_array($page, PAGECONTENT_PAGES, true)) return false;
+    if (!in_array($page, PAGECONTENT_PAGES, true) && !str_starts_with($page, 'home:')) return false;
     if ($lang !== null && !preg_match('/^[a-z]{2,3}$/', $lang)) return false;
     try {
         if ($lang === null) {
@@ -183,6 +206,76 @@ function pageContentActive(PDO $db, string $page, array $cfg = [], ?string $lang
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Conditional markers: [[if:name]] … [[/if]] and [[ifnot:name]] … [[/if]]
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every condition a page may test, with what it is RIGHT NOW and a line for the editor.
+ *
+ * Curated, not derived from the settings table: a marker is part of a page's wording, and the
+ * names have to stay stable across versions and readable to somebody writing Terms, not to the
+ * code. Adding one is adding a line here; the editor lists them from this.
+ */
+function pageContentConditions(array $cfg, ?PDO $db = null): array {
+    $wl = trackerMode($cfg) === 'whitelist';
+    $sched = function_exists('scheduleEnabled') && scheduleEnabled($cfg);
+    $users = usersEnabled($cfg);
+    $index = function_exists('indexEnabled') && indexEnabled($cfg);
+    $langs = function_exists('langEnabled') ? count(langEnabled($cfg)) : 1;
+    return [
+        'whitelist'    => [$wl,    'the tracker serves registered torrents only'],
+        'open'         => [!$wl,   'the tracker is open — every torrent is served'],
+        'schedule'     => [$sched, 'whitelist hours are scheduled'],
+        'registration' => [($wl || $sched) && ($cfg['whitelist_public_enabled'] ?? '1') === '1',
+                                   'the public can register torrents on the whitelist'],
+        'users'        => [$users, 'user accounts are switched on'],
+        'signup'       => [$users && usersRegistrationEnabled($cfg), 'visitors can create an account'],
+        'email_verify' => [$users && userEmailVerifyRequired($cfg), 'an account needs a verified email'],
+        'index'        => [$index, 'the observed-hash index is on'],
+        'search'       => [$index && $users && ($cfg['index_search_enabled'] ?? '1') === '1',
+                                   'members can search the index'],
+        'stats'        => [($cfg['tracker_stats_enabled'] ?? '0') === '1', 'the statistics page is on'],
+        'donations'    => [($cfg['donations_enabled'] ?? '0') === '1', 'donations are shown'],
+        'contact'      => [($cfg['contact_visible'] ?? '1') === '1', 'the contact section is shown'],
+        'transparency' => [($cfg['transparency_enabled'] ?? '1') === '1', 'the transparency report is public'],
+        'languages'    => [$langs > 1, 'more than one interface language is offered'],
+        'ratings'      => [($cfg['rating_enabled'] ?? '0') === '1', 'torrent ratings are on'],
+        'descriptions' => [($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1',
+                                   'registrants may attach a description or a source link'],
+    ];
+}
+
+/**
+ * Resolve the markers against the current settings. Innermost blocks first, so one level of
+ * nesting works; anything left over ([[/if]] without an opener) is removed rather than shown.
+ *
+ * An unknown condition is FALSE. A block that names a condition nobody has heard of is more likely
+ * a typo than a request to show something to everyone — and the editor's preview says which.
+ */
+function pageContentResolveMarkers(string $text, array $cfg, ?PDO $db = null, ?array &$unknown = null): string {
+    if (strpos($text, '[[') === false) return $text;
+    $conds = pageContentConditions($cfg, $db);
+    $unknown = [];
+    $re = '/\[\[(if|ifnot):([a-z_]+)\]\]((?:(?!\[\[(?:if|ifnot):)[\s\S])*?)\[\[\/if\]\]/';
+    for ($pass = 0; $pass < 24; $pass++) {
+        $n = 0;
+        $text = preg_replace_callback($re, function ($m) use ($conds, &$unknown) {
+            $name = $m[2];
+            if (!isset($conds[$name])) { $unknown[] = $name; $on = false; }
+            else $on = (bool)$conds[$name][0];
+            if ($m[1] === 'ifnot') $on = !$on;
+            // Trim the newline that follows the opener and precedes the closer, so a hidden block
+            // does not leave a blank line and a shown one does not gain two.
+            return $on ? preg_replace('/^\r?\n|\r?\n$/', '', $m[3]) : '';
+        }, $text, -1, $n) ?? $text;
+        if (!$n) break;
+    }
+    $unknown = array_values(array_unique($unknown));
+    // Stray closers or openers with no partner: removed, never printed.
+    return preg_replace('/\[\[(?:if|ifnot):[a-z_]+\]\]|\[\[\/if\]\]/', '', $text) ?? $text;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The defaults — the SAME words the templates render, in the requested language
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -221,10 +314,19 @@ function pageContentFromHtml(string $html, bool $md): string {
  */
 function pageContentDefault(array $cfg, string $page, string $format, string $baseUrl = '', ?string $lang = null): string {
     $md    = $format !== 'bbcode';
-    $wl    = trackerMode($cfg) === 'whitelist';
-    $users = usersEnabled($cfg);
-    $verify = userEmailVerifyRequired($cfg);
+    if (str_starts_with($page, 'home:')) {
+        $key = substr($page, 5);
+        if (homeSectionIsCustom($key)) return '';
+        // The built-in body, pasted by name. Restore gives this back, and it renders exactly what
+        // the page renders without an override — so "start from the built-in" is one line.
+        return '{{block:' . $key . '}}' . "\n";
+    }
     $lang  = $lang && langInstalled($lang) ? $lang : langCurrent();
+    // The conditionals are written INTO the text as [[if:…]] markers rather than decided here, so
+    // the page an operator restores and edits keeps following the settings the way the shipped one
+    // does — pageContentResolveMarkers() decides at render time, for both.
+    $IF = fn(string $c): string => '[[if:' . $c . ']]';
+    $FI = '[[/if]]';
 
     /** One dictionary string, already converted to the requested markup. */
     $t = fn(string $key, array $params = []): string => pageContentFromHtml(langFor($lang, $key, $params), $md);
@@ -236,12 +338,25 @@ function pageContentDefault(array $cfg, string $page, string $format, string $ba
     $h1 = fn(string $x): string => $md ? '# ' . $x : '[size=24][b]' . $x . '[/b][/size]';
     $h2 = fn(string $x): string => $md ? '## ' . $x : '[size=19][b]' . $x . '[/b][/size]';
     $b  = fn(string $x): string => $md ? '**' . $x . '**' : '[b]' . $x . '[/b]';
+    // An item may be [condition, text]: the marker then wraps the WHOLE numbered line, so a clause
+    // that is switched off leaves no empty "8." behind. The literal numbers go non-sequential when
+    // one is hidden, and that is fine — Markdown and [list=1] both renumber from the first item.
     $ol = function (array $items) use ($md): string {
-        if ($md) {
-            $n = 0;
-            return implode("\n", array_map(function ($i) use (&$n) { $n++; return $n . '. ' . $i; }, $items));
+        $lines = [];
+        $n = 0;
+        foreach ($items as $i) {
+            $cond = is_array($i) ? $i[0] : null;
+            $text = is_array($i) ? $i[1] : $i;
+            $n++;
+            $line = $md ? ($n . '. ' . $text) : ('[*] ' . $text);
+            $lines[] = $cond ? '[[if:' . $cond . ']]' . $line . "
+[[/if]]" : $line;
         }
-        return "[list=1]\n" . implode("\n", array_map(fn($i) => '[*] ' . $i, $items)) . "\n[/list]";
+        $body = implode("
+", $lines);
+        return $md ? $body : "[list=1]
+" . $body . "
+[/list]";
     };
 
     $L = [];
@@ -250,23 +365,35 @@ function pageContentDefault(array $cfg, string $page, string $format, string $ba
         $L[] = '';
         $L[] = $t('tos.intro');
         $L[] = '';
+        // A numbered list cannot hold a marker between its items without breaking the numbering
+        // in Markdown, so the whitelist clause is emitted as its own marked item: the renderer sees
+        // either a continuous list or one with that item gone, never a gap.
         $terms = [];
         foreach (['tos.r1', 'tos.r2', 'tos.r3', 'tos.r4', 'tos.r5', 'tos.r6', 'tos.r7'] as $k) $terms[] = $t($k);
-        if ($wl) $terms[] = $t('tos.r_wl');
+        $terms[] = ['whitelist', $t('tos.r_wl')];
+        $terms[] = ['index', $t('tos.r_index')];
         $terms[] = $t('tos.r8');
         $terms[] = $t('tos.r9');
         $L[] = $ol($terms);
 
-        if ($users) {
-            $L[] = '';
-            $L[] = $h2($t('tos.acc_head'));
-            $L[] = '';
-            $L[] = $ol([
-                $t('tos.acc1'),
-                $t('tos.acc2', ['email' => langFor($lang, $verify ? 'tos.acc2_req' : 'tos.acc2_opt')]),
-                $t('tos.acc3'), $t('tos.acc4'), $t('tos.acc5'), $t('tos.acc6'), $t('tos.acc7'),
-            ]);
-        }
+        $L[] = '';
+        $L[] = $IF('users');
+        $L[] = $h2($t('tos.acc_head'));
+        $L[] = '';
+        $L[] = $ol([
+            $t('tos.acc1'),
+            $t('tos.acc2', ['email' => $IF('email_verify') . langFor($lang, 'tos.acc2_req') . $FI
+                                     . '[[ifnot:email_verify]]' . langFor($lang, 'tos.acc2_opt') . $FI]),
+            $t('tos.acc3'), $t('tos.acc4'), $t('tos.acc5'), $t('tos.acc6'), $t('tos.acc7'),
+            ['search', $t('tos.acc8')],
+        ]);
+        $L[] = $FI;
+        $L[] = '';
+        $L[] = $IF('languages');
+        $L[] = $h2($t('tos.lang_head'));
+        $L[] = '';
+        $L[] = $t('tos.lang1');
+        $L[] = $FI;
         return implode("\n", $L) . "\n";
     }
 
@@ -278,21 +405,35 @@ function pageContentDefault(array $cfg, string $page, string $format, string $ba
         $L[] = '';
         $L[] = $t($a);
     }
-    if ($wl) {
-        $L[] = '';
-        $L[] = $h2($t('info.q_wl'));
-        $L[] = '';
-        $L[] = $t('info.a_wl', ['url' => $baseUrl . '?action=whitelist']);
-    }
+    $L[] = '';
+    $L[] = $IF('whitelist');
+    $L[] = $h2($t('info.q_wl'));
+    $L[] = '';
+    $L[] = $t('info.a_wl', ['url' => $baseUrl . '?action=whitelist']);
+    $L[] = $FI;
+    $L[] = '';
+    $L[] = $IF('index');
+    $L[] = $h2($t('info.q_index'));
+    $L[] = '';
+    $L[] = $t('info.a_index');
+    $L[] = $IF('search') . ' ' . $t('info.a_index_search', ['url' => $baseUrl . '?action=search']) . $FI;
+    $L[] = $FI;
+    $L[] = '';
+    $L[] = $IF('users');
+    $L[] = $h2($t('info.q_accounts'));
+    $L[] = '';
+    $L[] = $t('info.a_accounts');
+    $L[] = $FI;
     $L[] = '';
     $L[] = $h2($t('info.q_data'));
     $L[] = '';
     $L[] = $t('info.a_data');
+    $L[] = $IF('index') . ' ' . $t('info.a_data_index') . $FI;
     $L[] = '';
     $L[] = $h2($t('info.faq_head'));
     $L[] = '';
     $faq = [
-        ['info.faq_q1', $wl ? 'info.faq_a1_wl' : 'info.faq_a1_open'],
+        ['info.faq_q1', null],
         ['info.faq_q2', 'info.faq_a2'],
         ['info.faq_q3', 'info.faq_a3'],
         ['info.faq_q4', 'info.faq_a4'],
@@ -301,8 +442,16 @@ function pageContentDefault(array $cfg, string $page, string $format, string $ba
     foreach ($faq as [$q, $a]) {
         $L[] = $b($t($q));
         $L[] = '';
-        $L[] = $t($a);
+        // The first answer depends on the mode; both versions are in the text, one marked each way.
+        $L[] = $a === null
+            ? $IF('whitelist') . $t('info.faq_a1_wl') . $FI . '[[ifnot:whitelist]]' . $t('info.faq_a1_open') . $FI
+            : $t($a);
         $L[] = '';
     }
+    $L[] = $IF('languages');
+    $L[] = $b($t('info.faq_q6'));
+    $L[] = '';
+    $L[] = $t('info.faq_a6');
+    $L[] = $FI;
     return rtrim(implode("\n", $L)) . "\n";
 }

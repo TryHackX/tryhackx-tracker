@@ -42,5 +42,20 @@ $navExtra = $navExtra ?? null;   // an optional block rendered first, inside the
        class="btn btn-sm btn-outline-info<?= $current === 'settings' ? ' active' : '' ?>"
        <?= $current === 'settings' ? 'aria-current="page"' : '' ?>><i class="bi bi-gear"></i> <?= _h('a.head.settings') ?></a>
     <?php endif; ?>
+    <?php
+    // The language switcher, the same ?lang= links the public nav uses, kept on the page you are on.
+    // Only when there is a choice: one language is a fact, not a control.
+    $hdrLangs = function_exists('langForSwitcher') ? langForSwitcher($cfg) : [];
+    if (count($hdrLangs) > 1):
+        $hdrNow = langCurrent();
+        $hdrQuery = $_GET; unset($hdrQuery['lang']);
+    ?>
+    <span class="admin-lang" role="group" aria-label="<?= _h('common.language') ?>">
+        <?php foreach ($hdrLangs as $hc => $hn): $hdrQuery['lang'] = $hc; ?>
+        <a href="<?= $baseUrl ?>?<?= sanitize(http_build_query($hdrQuery)) ?>" class="admin-lang-opt<?= $hc === $hdrNow ? ' active' : '' ?>"
+           hreflang="<?= sanitize($hc) ?>" title="<?= sanitize($hn) ?>" <?= $hc === $hdrNow ? 'aria-current="true"' : '' ?>><?= sanitize(strtoupper($hc)) ?></a>
+        <?php endforeach; ?>
+    </span>
+    <?php endif; ?>
     <button class="btn btn-sm btn-outline-danger" id="btn-logout"><i class="bi bi-box-arrow-right"></i> <?= _h('a.head.logout') ?></button>
 </div>

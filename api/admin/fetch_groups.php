@@ -15,4 +15,4 @@ foreach ($db->query("SELECT * FROM user_groups ORDER BY priority DESC, name") as
         'members' => $counts[(int)$g['id']] ?? 0, 'created_at' => $g['created_at'],
     ];
 }
-jsonResponse(['groups' => $rows, 'permission_list' => userPermissionList(), 'enabled' => usersEnabled($cfg)]);
+jsonResponse(['groups' => $rows, 'permission_list' => userPermissionList(), 'presets' => userGroupPresets(), 'enabled' => usersEnabled($cfg)]);

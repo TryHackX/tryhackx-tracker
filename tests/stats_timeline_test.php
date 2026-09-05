@@ -170,8 +170,16 @@ check('without a row count to consult, a month falls back to hourly as before',
 $withData = statsTimelineChooseTable($modeCfg, 30 * 86400, $db, $nowS);
 check('with a row count, the same month keeps five-minute detail while the data is sparse',
       $withData[2] === '5m', $withData[2]);
-check('and a range beyond the retention window is hourly whatever the count says',
+// 1.34.0: a range beyond the retention window is hourly ONLY once the hourly table holds something
+// the five-minute one does not. While the whole history is younger than the retention, the finer
+// table is used — three months on thirteen days of data used to be 302 hourly points where the same
+// thirteen days at five minutes are 3 700.
+check('a range beyond the retention window stays five-minute while all history is inside it',
+      statsTimelineChooseTable(['stats_timeline_keep_days' => '7'] + $modeCfg, 30 * 86400, $db, $nowS)[2] === '5m');
+$db->exec("INSERT IGNORE INTO `" . ST_1H_TABLE . "` (ts) VALUES (" . ($nowS - 20 * 86400) . ")");
+check('… and becomes hourly the moment history outgrows the retention',
       statsTimelineChooseTable(['stats_timeline_keep_days' => '7'] + $modeCfg, 30 * 86400, $db, $nowS)[2] === '1h');
+$db->exec("DELETE FROM `" . ST_1H_TABLE . "` WHERE ts = " . ($nowS - 20 * 86400));
 // interval 30 s → 24 h = 2880 raw points (≤ 3000) still raw; raw_days 1 with 7 d range → 5m
 check('choose: 24h @30s → raw', statsTimelineChooseTable(['stats_timeline_interval' => '30'] + $modeCfg, 86400)[2] === 'raw');
 check('choose: 7d @ raw_days=1 → 5m', statsTimelineChooseTable(['stats_timeline_raw_days' => '1'] + $modeCfg, 7 * 86400)[2] === '5m');

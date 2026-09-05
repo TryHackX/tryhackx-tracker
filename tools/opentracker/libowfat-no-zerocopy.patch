@@ -1,0 +1,18 @@
+--- a/io/iob_send.c
++++ b/io/iob_send.c
+@@ -273,7 +273,14 @@
+ 	else
+ 	  sent=writev(s,v,headers);
+       } else {
+-#if defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY)
++/* ZEROCOPY COMPILED OUT.
++ * MSG_ZEROCOPY is a promise that the pages will not change until the kernel reports, on the
++ * socket's error queue, that it is done with them. This function frees the buffers the moment
++ * sendmsg() returns and never reads that queue, so on a slow receiver the kernel hands over memory
++ * glibc has already reused: a heap pointer where the data was. Reproduced 3/3 on opentracker's
++ * chunked /scrape, gone 3/3 with the option refused. Until the completion queue is handled, the
++ * ordinary copying sendmsg() is the correct call. */
++#if 0
+ 	  if (!nozerocopy && sum>=8*1024) {
+ 	    /* MSG_ZEROCOPY has page table management overhead,
+ 	     * it only pays off after 8k or so */

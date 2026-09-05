@@ -15,6 +15,7 @@
  */
 
 require_once __DIR__ . '/../../includes/homelayout.php';
+require_once __DIR__ . '/../../includes/pagecontent.php';
 
 $catalog = homeSectionCatalog();
 
@@ -64,23 +65,34 @@ function homeSectionAvailable(array $cfg, PDO $db, string $key): array {
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     $layout = homeLayout($cfg);
+    // What text exists for each section, per language: the row shows a dot for it.
+    $content = pageContentAll($db);
     $sections = [];
     foreach ($layout['order'] as $key) {
-        $meta = $catalog[$key];
-        [$live, $why] = homeSectionAvailable($cfg, $db, $key);
+        $isCustom = homeSectionIsCustom($key);
+        $meta = $isCustom
+            ? ['label' => homeSectionLabel($cfg, $key), 'about' => 'Your own section — its text is whatever you write.',
+               'fixed' => false, 'heading' => 'custom']
+            : $catalog[$key];
+        [$live, $why] = $isCustom ? [true, ''] : homeSectionAvailable($cfg, $db, $key);
+        $rows = $content['home:' . $key] ?? [];
         $sections[] = [
             'key'      => $key,
             'label'    => $meta['label'],
             'about'    => $meta['about'],
             'fixed'    => !empty($meta['fixed']),
+            'is_custom' => $isCustom,
             'hidden'   => in_array($key, $layout['hidden'], true),
-            // The RENDERED built-in wording, not its key: the editor shows it as the
-            // placeholder, and `home.about_head` in a text box would be gibberish.
-            'heading'  => $meta['heading'] === null ? null : homeHeadingDefault($key),
-            'value'    => $layout['headings'][$key] ?? ($meta['heading'] === null ? '' : homeHeadingDefault($key)),
+            // The RENDERED built-in wording, not its key; a custom section's heading defaults to its label.
+            'heading'  => $isCustom ? $meta['label'] : ($meta['heading'] === null ? null : homeHeadingDefault($key)),
+            'value'    => $layout['headings'][$key] ?? ($isCustom ? $meta['label'] : ($meta['heading'] === null ? '' : homeHeadingDefault($key))),
             'custom'   => isset($layout['headings'][$key]),
             'live'     => $live,
             'why'      => $why,
+            // 'live' when any language has a published version, 'draft' when something is stored,
+            // 'none' otherwise — the same three states the Site pages card shows.
+            'content'  => $rows ? (count(array_filter($rows, fn($r) => $r['enabled'])) ? 'live' : 'draft') : 'none',
+            'content_langs' => array_keys($rows),
         ];
     }
     jsonResponse([
@@ -90,6 +102,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         'tagline_default' => homeTaglineDefault(),
         'is_default' => homeLayoutIsDefault($cfg),
         'max'        => HOME_HEADING_MAX,
+        'custom_max' => HOME_CUSTOM_MAX,
+        'custom'     => $layout['custom'],
         'note'       => 'Hiding a section here removes it from the page. It does not switch the '
                       . 'feature off, and dragging one back does not switch it on — a section whose '
                       . 'own setting is off says so on its row.',
@@ -102,7 +116,9 @@ $op = strtolower(trim((string)($input['op'] ?? 'save')));
 
 if ($op === 'reset') {
     setSetting($db, 'home_layout', '');
-    auditNote(['summary' => 'restored the built-in home page layout']);
+    // A full reset: every section's own text goes too — the dialog says so before asking.
+    try { $db->prepare("DELETE FROM page_content WHERE page LIKE 'home:%'")->execute(); } catch (\Throwable $e) {}
+    auditNote(['summary' => 'restored the built-in home page layout and removed every custom section text']);
     jsonResponse(['success' => true, 'message' => 'The home page is back to its built-in layout.']);
 }
 if ($op !== 'save') jsonResponse(['error' => 'Unknown operation. Use save or reset.'], 400);
@@ -111,9 +127,38 @@ $order    = is_array($input['order'] ?? null) ? $input['order'] : [];
 $hidden   = is_array($input['hidden'] ?? null) ? $input['hidden'] : [];
 $headings = is_array($input['headings'] ?? null) ? $input['headings'] : [];
 $tagline  = (string)($input['tagline'] ?? '');
+$custom   = is_array($input['custom'] ?? null) ? $input['custom'] : [];
 
-$r = homeLayoutValidate($order, $hidden, $headings, $tagline);
+// New custom sections arrive without a key ("key": "" or "new"); they get the next free custom_N
+// here, so two dialogs cannot hand out the same one.
+$taken = array_map(fn($c) => (int)substr($c['key'], 7), homeLayout($cfg)['custom']);
+foreach ($custom as $i => $c) {
+    if (!is_array($c)) continue;
+    if (!empty($c['key']) && preg_match('/^custom_[1-9][0-9]?$/', (string)$c['key'])) continue;
+    $n = 1;
+    while (in_array($n, $taken, true)) $n++;
+    $taken[] = $n;
+    $newKey = 'custom_' . $n;
+    // The order and hidden lists still name the placeholder key the client used.
+    $old = (string)($c['key'] ?? '');
+    $order  = array_map(fn($k) => $k === $old ? $newKey : $k, $order);
+    $hidden = array_map(fn($k) => $k === $old ? $newKey : $k, $hidden);
+    if (isset($headings[$old])) { $headings[$newKey] = $headings[$old]; unset($headings[$old]); }
+    $custom[$i]['key'] = $newKey;
+}
+
+$r = homeLayoutValidate($order, $hidden, $headings, $tagline, $custom);
 if (isset($r['error'])) jsonResponse(['error' => $r['error']], 400);
+
+// A custom section removed from the layout takes its text with it — a row nobody can reach is not
+// a draft, it is a leak.
+$keep = array_map(fn($c) => 'home:' . $c['key'], json_decode($r['json'], true)['custom'] ?? []);
+try {
+    $st = $db->query("SELECT DISTINCT page FROM page_content WHERE page LIKE 'home:custom_%'");
+    foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $pg) {
+        if (!in_array($pg, $keep, true)) $db->prepare("DELETE FROM page_content WHERE page = ?")->execute([$pg]);
+    }
+} catch (\Throwable $e) {}
 
 setSetting($db, 'home_layout', $r['json']);
 
@@ -125,6 +170,7 @@ $stored = json_decode($r['json'], true);
 if (!empty($stored['hidden'])) $parts[] = 'hidden: ' . implode(', ', $stored['hidden']);
 if (!empty($stored['headings'])) $parts[] = 'renamed: ' . implode(', ', array_keys($stored['headings']));
 if (isset($stored['tagline'])) $parts[] = 'new tagline';
+if (!empty($stored['custom'])) $parts[] = count($stored['custom']) . ' custom section' . (count($stored['custom']) === 1 ? '' : 's');
 auditNote(['summary' => 'changed the home page layout' . ($parts ? ' (' . implode('; ', $parts) . ')' : '')]);
 
 jsonResponse(['success' => true, 'message' => 'Home page saved.',

@@ -12,7 +12,7 @@
     'use strict';
 
     if (typeof window.AdminCommon === 'undefined') return;
-    const { apiCall, el, showToast, confirmAction } = window.AdminCommon;
+    const { apiCall, el, showToast, confirmAction, promptModal } = window.AdminCommon;
     const $ = (id) => document.getElementById(id);
     const modalEl = $('homeLayoutModal');
     const openBtn = $('hl-open');
@@ -23,6 +23,19 @@
     // disagreeing about where a section went.
     let rows = [];
     let taglineDefault = '';
+    let customMax = 6;
+    let newSeq = 0;           // client-side keys for sections not yet saved: new_1, new_2, …
+
+    /** Add a section of the operator's own. It gets its real custom_N key from the server on save. */
+    async function addSection() {
+        if (rows.filter(x => x.is_custom).length >= customMax) { showToast('At most ' + customMax + ' custom sections.', 'info'); return; }
+        const label = await promptModal({ title: 'New section', label: 'Heading', placeholder: 'e.g. How to connect', okLabel: 'Add', maxlength: 80 });
+        if (label === null || !label.trim()) return;
+        rows.push({ key: 'new_' + (++newSeq), label: label.trim(), about: 'Your own section — its text is whatever you write.',
+                    fixed: false, is_custom: true, hidden: false, heading: 'custom', value: label.trim(), custom: false,
+                    live: true, why: '', content: 'none' });
+        dirty = true; render();
+    }
     let dirty = false;
     let closing = false;      // set only while a confirmed close is in flight
     let dragKey = null;
@@ -78,6 +91,11 @@
             if (r.fixed) {
                 head.appendChild(el('span', { className: 'wl-badge wl-b-muted', text: 'always shown' }));
             }
+            // The text state: a dot like the Site pages card's — live, draft, or none.
+            if (r.content && r.content !== 'none') {
+                head.appendChild(el('span', { className: 'pc-lang-dot pc-dot-' + r.content, title: r.content === 'live' ? 'your text is live' : 'a draft is saved' }));
+            }
+            if (r.is_custom) head.appendChild(el('span', { className: 'wl-badge wl-b-ok', text: 'your section' }));
             mid.appendChild(head);
             mid.appendChild(el('div', { className: 'hl-about wl-small text-muted', text: r.about }));
             // The distinction the whole dialog turns on: a section can be *hidden here* or *off
@@ -104,6 +122,31 @@
             row.appendChild(mid);
 
             const acts = el('div', { className: 'hl-acts' });
+            // Every section — built-in or custom — can carry the operator's own text. The editor
+            // is the Site pages one, opened on the 'home:<key>' page, language rail and all.
+            if (r.key !== 'header') {
+                const ed = el('button', { className: 'btn btn-sm btn-outline-info hl-content' });
+                ed.type = 'button'; ed.title = r.content === 'none' ? 'Write your own text for this section' : 'Edit your text for this section';
+                ed.appendChild(el('i', { className: 'bi bi-pencil-square' }));
+                ed.appendChild(document.createTextNode(' Text'));
+                ed.addEventListener('click', () => {
+                    if (!window.PageContentEditor) { showToast('The page editor did not load.', 'danger'); return; }
+                    // A custom section must be saved into the layout before it has a page to write to.
+                    if (r.is_custom && !/^custom_[1-9][0-9]?$/.test(r.key)) { showToast('Save the layout first, then write the text.', 'info'); return; }
+                    window.PageContentEditor.open('home:' + r.key, null);
+                });
+                acts.appendChild(ed);
+            }
+            if (r.is_custom) {
+                const rm = el('button', { className: 'btn btn-sm btn-outline-danger hl-remove' });
+                rm.type = 'button'; rm.title = 'Remove this section (its text goes with it on save)';
+                rm.appendChild(el('i', { className: 'bi bi-trash' }));
+                rm.addEventListener('click', async () => {
+                    if (!await confirmAction('Remove "' + r.label + '"?', 'The section leaves the layout, and its text in every language is deleted when you save.', { okLabel: 'Remove', danger: true })) return;
+                    rows = rows.filter(x => x.key !== r.key); dirty = true; render();
+                });
+                acts.appendChild(rm);
+            }
             const up = el('button', { className: 'btn btn-sm btn-outline-secondary hl-up' });
             up.type = 'button'; up.title = 'Move up'; up.setAttribute('aria-label', 'Move ' + r.label + ' up');
             up.disabled = i === 0;
@@ -160,6 +203,7 @@
         const r = await apiCall('admin/home_layout');
         if (r.error) { showToast(r.error, 'danger'); return; }
         rows = (r.sections || []).map(s => Object.assign({}, s));
+        customMax = r.custom_max || 6;
         taglineDefault = r.tagline_default || '';
         $('hl-tagline').value = r.tagline || '';
         $('hl-tagline').placeholder = taglineDefault;
@@ -183,6 +227,8 @@
                 hidden: rows.filter(r => r.hidden).map(r => r.key),
                 headings,
                 tagline: $('hl-tagline').value,
+                // The label doubles as the default heading; what was typed in the heading box wins.
+                custom: rows.filter(r => r.is_custom).map(r => ({ key: r.key, label: (r.value || r.label || '').trim() || r.label })),
             });
             if (res.error) { setError(res.error); return; }
             dirty = false;
@@ -197,8 +243,9 @@
 
     async function reset() {
         const ok = await confirmAction('Restore the built-in layout?',
-            'The sections go back to the order they ship in, nothing is hidden, and every heading '
-            + 'and the tagline return to their original wording. This cannot be undone.',
+            'The sections go back to the order they ship in, nothing is hidden, every heading and the '
+            + 'tagline return to their original wording, and EVERY text you wrote for a section — in '
+            + 'every language — is deleted. This cannot be undone.',
             { okLabel: 'Restore', danger: true });
         if (!ok) return;
         const res = await apiCall('admin/home_layout', 'POST', { op: 'reset' });
@@ -210,6 +257,8 @@
     openBtn.addEventListener('click', open);
     $('hl-save').addEventListener('click', save);
     $('hl-reset').addEventListener('click', reset);
+    const addBtn = $('hl-add');
+    if (addBtn) addBtn.addEventListener('click', addSection);
     $('hl-tagline').addEventListener('input', () => { dirty = true; });
     // Bootstrap wants a synchronous answer here and asking is asynchronous, so the close is
     // cancelled, the question asked, and the modal closed again once the answer is in.

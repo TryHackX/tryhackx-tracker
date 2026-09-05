@@ -7,6 +7,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
+    <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
+    <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
 </head>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
     <div class="admin-container admin-wide wl-page">
@@ -194,6 +196,12 @@
                     <tbody id="gr-body"></tbody>
                 </table>
             </div>
+            <?php // Groups across, permissions down. Fifteen ids over five groups is a table a person reads
+                  // in one glance; the comma-separated key list in the table above is not. ?>
+            <details class="gr-matrix-wrap mt-2">
+                <summary class="wl-small text-muted"><?= _h('a.users.matrix_title') ?></summary>
+                <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="gr-matrix"></table></div>
+            </details>
         </div>
     </div>
 
@@ -410,6 +418,9 @@
                         <label class="form-check-label wl-small" for="ge-default"><?= _h('a.users.default_group') ?></label>
                     </div>
                     <label class="form-label wl-label"><?= _h('a.users.permissions') ?></label>
+                    <?php // Presets: a starting point, never a lock. Each fills the checkboxes below and the
+                          // operator still sees — and can change — every one of them before saving. ?>
+                    <div class="ge-presets" id="ge-presets"></div>
                     <div id="ge-perms" class="ge-perms"></div>
                     <div id="ge-alert"></div>
                     <div class="d-flex justify-content-end gap-2 mt-3">

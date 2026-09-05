@@ -96,4 +96,22 @@ add('tos', {
                 'Aby usunąć konto i jego dane, napisz na adres serwisu z adresu przypisanego do '
                 'konta (albo skorzystaj z formularza zgłoszeń). Przeczytane powiadomienia są '
                 'automatycznie usuwane po 90 dniach.'),
+    'r_index':   ('The tracker keeps an <strong>index</strong> of info hashes it has observed, with the torrent '
+                  'name and file list fetched from the swarm, so that reports can be matched to content. No files '
+                  'are downloaded or stored; entries expire when a swarm goes quiet.',
+                  'Tracker prowadzi <strong>indeks</strong> zaobserwowanych info hashy wraz z nazwą torrenta i '
+                  'listą plików pobraną z roju, aby zgłoszenia dało się dopasować do treści. Żadne pliki nie są '
+                  'pobierane ani przechowywane; wpisy wygasają, gdy rój cichnie.'),
+    'acc8':      ('Searching the index is a member feature. Search terms are not stored beyond the request; the '
+                  'results reflect what the tracker has observed, not what we host — we host nothing.',
+                  'Wyszukiwarka indeksu jest funkcją dla zalogowanych. Frazy nie są przechowywane dłużej niż '
+                  'żądanie; wyniki odzwierciedlają to, co tracker zaobserwował, nie to, co hostujemy — nie '
+                  'hostujemy niczego.'),
+    'lang_head': ('Languages and cookies', 'Języki i ciasteczka'),
+    'lang1':     ('Choosing a language with the switcher sets a cookie named <code>lang</code> for the browser '
+                  'session only; it holds a two-letter code and nothing else. A signed-in account may save a '
+                  'language preference, which is kept with the account.',
+                  'Wybór języka przełącznikiem ustawia ciasteczko <code>lang</code> tylko na czas sesji '
+                  'przeglądarki; zawiera dwuliterowy kod i nic więcej. Zalogowane konto może zapisać '
+                  'preferowany język, przechowywany razem z kontem.'),
 })

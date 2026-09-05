@@ -10,7 +10,10 @@
  * `rt-page` gives it the page's own type scale rather than the compact one a description gets inside
  * a card — this is a whole page, not a comment.
  */
-$__pcBody = (string)($customPage['body'] ?? '');
+// The [[if:…]] markers are decided HERE, on the raw text, against the settings as they are for
+// this request — the renderer never sees them. This is what lets a saved page keep following the
+// tracker mode the way the shipped one does.
+$__pcBody = pageContentResolveMarkers((string)($customPage['body'] ?? ''), $cfg, $db);
 $__pcFormat = (string)($customPage['format'] ?? 'markdown');
 ?>
 <div class="rt rt-page">
