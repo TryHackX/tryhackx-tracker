@@ -652,21 +652,35 @@ class Worker:
                 # doesn't cover the new column yet) the stamped UPDATE fails — fall back WITHOUT the
                 # stamp instead of throwing the fetched metadata away as 'failed'.
                 src = ", meta_source='dht'" if (q["table"] == self.cfg.index_table and getattr(self, "_meta_source_ok", True)) else ""
-                sql = "UPDATE %s SET name=%%s, total_size=%%s, files_count=%%s, piece_length=%%s, meta_status='done', meta_fetched_at=NOW(), meta_error=NULL, meta_claim=NULL%s WHERE %s=%%s AND meta_claim=%%s"
+                # ONE TRANSACTION, and the claim is released LAST.
+                #
+                # These used to be three autocommitted statements, and the first of them set
+                # meta_claim=NULL. If the DELETE or the INSERT then threw, the except-branch below
+                # tried to mark the row failed WHERE meta_claim = token -- which matched nothing,
+                # because the claim was already gone. The row stayed 'done' with its file list
+                # deleted. Now the status, the files and the claim move together or not at all.
+                sql = "UPDATE %s SET name=%%s, total_size=%%s, files_count=%%s, piece_length=%%s, meta_status='done', meta_fetched_at=NOW(), meta_error=NULL%s WHERE %s=%%s AND meta_claim=%%s"
+                fk = row["info_hash"] if q["files_fk"] == "info_hash" else kv
+                conn = self.db._connect()
+                conn.begin()
                 try:
-                    self.db.query(sql % (q["table"], src, kc), (name, total, count, piece, kv, token))
-                except Exception as e:
-                    if not src:
-                        raise
-                    log.warning("meta_source column unavailable (%s) — storing without it from now on", e)
-                    self._meta_source_ok = False
-                    self.db.query(sql % (q["table"], "", kc), (name, total, count, piece, kv, token))
-                self.db.query("DELETE FROM %s WHERE %s=%%s" % (q["files"], q["files_fk"]), (row["info_hash"] if q["files_fk"] == "info_hash" else kv,))
-                if files and keep_files:
-                    conn = self.db._connect()
                     with conn.cursor() as cur:
-                        fk = row["info_hash"] if q["files_fk"] == "info_hash" else kv
-                        cur.executemany("INSERT INTO %s (%s, path, size) VALUES (%%s, %%s, %%s)" % (q["files"], q["files_fk"]), [(fk, p, s) for p, s in files])
+                        try:
+                            cur.execute(sql % (q["table"], src, kc), (name, total, count, piece, kv, token))
+                        except Exception as e:
+                            if not src:
+                                raise
+                            log.warning("meta_source column unavailable (%s) — storing without it from now on", e)
+                            self._meta_source_ok = False
+                            cur.execute(sql % (q["table"], "", kc), (name, total, count, piece, kv, token))
+                        cur.execute("DELETE FROM %s WHERE %s=%%s" % (q["files"], q["files_fk"]), (fk,))
+                        if files and keep_files:
+                            cur.executemany("INSERT INTO %s (%s, path, size) VALUES (%%s, %%s, %%s)" % (q["files"], q["files_fk"]), [(fk, p, s) for p, s in files])
+                        cur.execute("UPDATE %s SET meta_claim=NULL WHERE %s=%%s AND meta_claim=%%s" % (q["table"], kc), (kv, token))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
                 log.info("done %s:%s %s name=%r size=%d files=%d in %ds", q["table"], kv, row["info_hash"], name, total, count, time.time() - item["started"])
                 return
             except Exception as e:

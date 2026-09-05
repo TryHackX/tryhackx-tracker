@@ -2725,9 +2725,16 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                         <span class="lang-step-num">3</span>
                         <div class="lang-step-body">
                             <h6>The translated file</h6>
-                            <input type="file" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                   id="lu-file" accept=".json,application/json">
-                            <div class="wl-small text-muted" id="lu-file-info"></div>
+                            <?php // The same drop zone the address-list import uses (.ipl-drop): the real
+                                  // <input type=file> stays in the DOM, invisible, covering a label-shaped box
+                                  // that also takes a dropped file. Not a second component. ?>
+                            <div class="ipl-drop" id="lu-drop" tabindex="0" role="button" aria-label="Choose or drop the JSON file">
+                                <i class="bi bi-file-earmark-arrow-up ipl-drop-icon"></i>
+                                <span class="ipl-drop-main"><u>Choose a file</u> or drop it here</span>
+                                <span class="ipl-drop-sub">A JSON file of "key": "text" pairs &mdash; export one above to start from.</span>
+                                <input type="file" id="lu-file" class="ipl-drop-input" accept=".json,application/json">
+                            </div>
+                            <div class="wl-small text-muted mt-1" id="lu-file-info"></div>
                         </div>
                     </div>
                     <div class="alert alert-danger py-2 wl-small d-none" id="lu-msg"></div>

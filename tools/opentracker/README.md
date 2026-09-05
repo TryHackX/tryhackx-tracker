@@ -503,7 +503,43 @@ torrents, 420 KB) does not finish under instrumentation in one run. So the clean
 evidence that the send path is sound — it is evidence that the reproducer needs to get cheaper
 before valgrind can be pointed at it.
 
-**Next:** make the reproducer smaller rather than making valgrind faster. The corruption is at a
+**That was the wrong next step, and round four found out why.**
+
+## Round four: the cause (2026-09-05)
+
+**`MSG_ZEROCOPY`, and nobody waiting for the completion.** libowfat 0.34's `io/iob_send.c` sends
+with `sendmsg(MSG_MORE | MSG_ZEROCOPY)` once a batch is ≥ 8 KiB, then frees the buffers as soon as
+the call returns (`cleanup()` per completed entry, `iob_reset()` at the end of the batch).
+`MSG_ZEROCOPY` means the kernel reads the pages *later* — at transmit, or on loopback when the
+receiver `recv()`s — and reports completion on the error queue. libowfat never reads that queue. So:
+`sendmsg` returns → `free(header)` → glibc writes a tcache pointer over the first 16 bytes → the
+receiver reads → the kernel hands over the page as it is now. A heap pointer where `%zx\r\n` was.
+
+This is why three rounds of in-process probes were all *correct and all useless*: the bytes really
+were right at queue time and at send time. It is why valgrind saw nothing: no instruction in the
+process ever read freed memory. And it is why the small-`SO_RCVBUF` reader was needed to reproduce:
+the receiver has to be behind the sender for the freed page to be reused before it is read.
+
+**The A/B** (`/tmp/zclab.sh`; same binary, 6000 torrents, scaled chunk sizes, slow reader):
+
+| | 1 | 2 | 3 |
+|---|---|---|---|
+| as built | BAD FRAMING @64705, bytes `\x00e\xe3[\xadU` → `0x55ad…` | BAD FRAMING @16187, `\xc9\x7f` → `0x7fc9…` | BAD FRAMING @48535 |
+| `SO_ZEROCOPY` refused (LD_PRELOAD, one option, `ENOPROTOOPT`) | CLEAN | CLEAN | CLEAN |
+
+`strace` on run A: 3 × `setsockopt(SO_ZEROCOPY)`, and **63 of 63** `sendmsg` calls flagged
+`MSG_ZEROCOPY`. The corruption followed the flag.
+
+**The fix** is to compile the zerocopy block out of `iob_send.c` (`#undef MSG_ZEROCOPY`,
+`#undef SO_ZEROCOPY` before the `#ifdef MSG_MORE` section) so the copying `sendmsg(MSG_MORE)` path is
+taken — the path run B used. Handling the completion queue properly would be the "right" fix
+upstream; for a tracker whose scrape is read by one panel on loopback, copying 30 MB is nothing.
+Built as `/tmp/fix/out/opentracker.{white,black}` with the production feature set (`/tmp/fixbuild.sh`),
+verified with `strings` for the accesslist symbol and with `strace` for the absence of the flag. Not
+installed: the swap restarts the tracker and the swarm rebuilds from empty.
+
+Add to the recipe above, after `make -C libowfat`: apply the same `#undef` to
+`libowfat/io/iob_send.c` **before** building — or the bug comes back with the next rebuild. The corruption is at a
 chunk boundary, so a lab with `OT_SCRAPE_CHUNK_SIZE` at 1 KiB and a deliberately failing
 `malloc` (an LD_PRELOAD that fails the Nth allocation) should hit the abandonment path in seconds
 instead of minutes — and if that produces the same corrupt stream, the suspect above is the bug.

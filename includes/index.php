@@ -627,10 +627,31 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
         }
     }
     // orphaned files (index_files has no FK cascade)
-    if (($res['expired'] > 0 || $res['capped'] > 0) || $force) {
-        $res['orphan_files'] = (int)$db->exec("DELETE f FROM index_files f LEFT JOIN index_hashes h ON h.info_hash = f.info_hash WHERE h.info_hash IS NULL");
+    //
+    // Only when THIS prune deleted something: a prune that removed no rows created no orphans, and
+    // `|| $force` used to run an unbounded join-delete over 6.1 M index_files rows every 60 s for
+    // as long as the table sat over its cap. In batches, because a multi-table DELETE takes no
+    // LIMIT: pick up to 2 000 orphaned hashes, delete their rows, repeat while the batch was full.
+    if ($res['expired'] > 0 || $res['capped'] > 0) {
+        do {
+            $orphans = $db->query("SELECT f.info_hash FROM index_files f LEFT JOIN index_hashes h ON h.info_hash = f.info_hash
+                                    WHERE h.info_hash IS NULL LIMIT 2000")->fetchAll(PDO::FETCH_COLUMN);
+            if (!$orphans) break;
+            $ph = implode(',', array_fill(0, count($orphans), '?'));
+            $del = $db->prepare("DELETE FROM index_files WHERE info_hash IN ($ph)");
+            $del->execute($orphans);
+            $res['orphan_files'] += (int)$del->rowCount();
+        } while (count($orphans) === 2000);
     }
-    indexStateUpdate(function (array &$s) use ($now, $res) { $s['last_prune_at'] = $now; $s['last_prune'] = $res; return true; });
+    // #11 (b): a FORCED prune that could not trim anything must not be forced again a minute
+    // later — everything over the cap is protected and will stay so until the next poll changes
+    // something. Stand down for the ordinary interval.
+    $idle = ($force && $res['capped'] === 0 && $res['expired'] === 0) ? $now + IDX_PRUNE_EVERY : 0;
+    indexStateUpdate(function (array &$s) use ($now, $res, $idle) {
+        $s['last_prune_at'] = $now; $s['last_prune'] = $res;
+        if ($idle) $s['force_idle_until'] = $idle;
+        return true;
+    });
     if ($res['expired'] > 0 || $res['capped'] > 0) { indexTotalCacheDrop(); indexStatusCacheDrop(); }
     return $res;
     } finally {
@@ -656,7 +677,10 @@ function indexTick(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
         $out['meta_queued'] = indexMetaAutoQueue($cfg) ? indexQueueMetaAuto($db) : indexQueueMetaBudget($db, $cfg, $now);
         // a big OPEN-hours poll can overshoot the cap by tens of thousands — don't wait for the hourly
         // prune, trim right away when we're more than 5 % over
-        $force = indexRowsCount($db) > (int)(indexMaxRows($cfg) * 1.05);
+        // … unless the last forced prune found nothing it could trim, in which case forcing again
+        // every minute only repeats the scan (see indexPrune()).
+        $force = indexRowsCount($db) > (int)(indexMaxRows($cfg) * 1.05)
+              && $now >= (int)(indexStateRead()['force_idle_until'] ?? 0);
         $out['prune'] = indexPrune($db, $cfg, $now, $force);
         indexStateUpdate(function (array &$s) use ($now) { $s['last_tick_at'] = $now; return true; });
     } catch (\Throwable $e) {
@@ -950,12 +974,24 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         $w = $where; $p = $params;
         if ($extra) { $w[] = $extra['sql']; $p = array_merge($p, $extra['params']); }
         $whereClause = $w ? 'WHERE ' . implode(' AND ', $w) : '';
-        $total = $whereClause === '' ? indexTotalCached($db)
-                                     : (function () use ($db, $whereClause, $p): int {
-                                           $st = $db->prepare("SELECT COUNT(*) FROM index_hashes $whereClause");
-                                           $st->execute($p);
-                                           return (int)$st->fetchColumn();
-                                       })();
+        // A filtered count. The life and meta filters are a fixed vocabulary (three and five
+        // values), so their counts are cached per combination for 20 s — the page re-polls every
+        // 5 s while anything is pending and each of those counts is measured at over a second.
+        // Free-text search is not cached: its counts are already short-circuited further down and
+        // its key space is unbounded.
+        $liveCount = function () use ($db, $whereClause, $p): int {
+            $st = $db->prepare("SELECT COUNT(*) FROM index_hashes $whereClause");
+            $st->execute($p);
+            return (int)$st->fetchColumn();
+        };
+        if ($whereClause === '') {
+            $total = indexTotalCached($db);
+        } elseif (stripos($whereClause, 'LIKE') === false && stripos($whereClause, 'MATCH') === false) {
+            $ck = 'listcount_' . md5($whereClause . '|' . json_encode($p));
+            $total = (int)(indexStatusCached($db, $ck, fn() => ['n' => $liveCount()], 20)['n'] ?? 0);
+        } else {
+            $total = $liveCount();
+        }
         $stmt = $db->prepare("SELECT $columns FROM index_hashes $whereClause ORDER BY $orderClause LIMIT ? OFFSET ?");
         $i = 1;
         foreach ($p as $v) $stmt->bindValue($i++, $v, PDO::PARAM_STR);

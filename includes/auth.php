@@ -284,14 +284,15 @@ function recordLoginFailure(string $ip, array $cfg): void {
 }
 
 function clearLoginFailures(string $ip): void {
-    $file = loginAttemptsFile();
-    if (!is_file($file)) return;
-    $raw  = @file_get_contents($file);
-    $data = $raw ? (json_decode($raw, true) ?: []) : [];
-    if (isset($data[$ip])) {
+    if (!is_file(loginAttemptsFile())) return;
+    // Under the SAME lock the failures are recorded with. An unlocked read-then-rewrite of the
+    // whole map could land between another request's read and write and erase the failure that
+    // request had just recorded — a lost failure is a lockout that never trips.
+    loginAttemptsUpdate(function (array &$data) use ($ip) {
+        if (!isset($data[$ip])) return false;
         unset($data[$ip]);
-        @file_put_contents($file, json_encode($data), LOCK_EX);
-    }
+        return true;
+    });
 }
 
 /* ── re-confirming the password, and what happens when it keeps being wrong ──

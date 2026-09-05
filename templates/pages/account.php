@@ -74,25 +74,27 @@ $accCooldownDays = userEmailChangeCooldownDays($cfg);
     <div class="account-card">
         <h2><?= _h('account.groups') ?></h2>
         <div id="acc-groups"><span class="text-muted"><?= _h('common.loading') ?></span></div>
-    </div>
-    <div class="account-card">
-        <h2><?= _h('account.lang_head') ?></h2>
 <?php
+// The interface language lives here, under the groups, as a sub-section — not as a third card. A
+// card for one <select> read as a feature and sat mostly empty. Same sub-section style the Profile
+// card uses for the mail preferences, so the two cards look like each other.
+//
 // Only when there is a choice. One language is not a preference, it is a fact about the site, and a
 // select with a single option is a control that teaches people it does nothing.
 $accLangs = function_exists('langForUsers') ? langForUsers($cfg) : [];
 if (count($accLangs) > 1):
     $accLangNow = (string)($meUser['language'] ?? '');
 ?>
-        <p class="text-muted acc-verify-note"><?= _h('account.lang_note') ?></p>
-        <select id="acc-language" class="acc-language">
-            <option value=""<?= $accLangNow === '' ? ' selected' : '' ?>><?= _h('account.lang_site') ?></option>
-            <?php foreach ($accLangs as $accCode => $accName): ?>
-            <option value="<?= sanitize($accCode) ?>"<?= $accLangNow === $accCode ? ' selected' : '' ?>><?= sanitize($accName) ?></option>
-            <?php endforeach; ?>
-        </select>
-<?php else: ?>
-        <p class="text-muted acc-verify-note"><?= sanitize(reset($accLangs) ?: 'English') ?></p>
+        <div class="acc-mail-prefs acc-lang-block">
+            <h3 class="acc-sub"><?= _h('account.lang_head') ?></h3>
+            <p class="text-muted acc-verify-note acc-lang-note"><?= _h('account.lang_note') ?></p>
+            <select id="acc-language" class="acc-language">
+                <option value=""<?= $accLangNow === '' ? ' selected' : '' ?>><?= _h('account.lang_site') ?></option>
+                <?php foreach ($accLangs as $accCode => $accName): ?>
+                <option value="<?= sanitize($accCode) ?>"<?= $accLangNow === $accCode ? ' selected' : '' ?>><?= sanitize($accName) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
 <?php endif; ?>
     </div>
 </div>

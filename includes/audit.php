@@ -328,7 +328,9 @@ function auditFinish(array $data, int $code): void {
     try {
         if (!empty($GLOBALS['__audit_off'])) return;
         $endpoint = (string)($GLOBALS['__audit_endpoint'] ?? '');
-        if ($endpoint === '' || !str_starts_with($endpoint, 'admin/')) return;
+        // admin/* AND v1/*: the three v1 endpoints create accounts and move group memberships,
+        // which is exactly what an audit log is for. They used to leave no record at all.
+        if ($endpoint === '' || !(str_starts_with($endpoint, 'admin/') || str_starts_with($endpoint, 'v1/'))) return;
         if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') return;
         if (auditIsNoise($endpoint)) return;
         $db = $GLOBALS['db'] ?? null;
@@ -339,7 +341,7 @@ function auditFinish(array $data, int $code): void {
         $ok = $code < 400 && empty($data['error']);
         // A failed sign-in is the one thing worth recording under a different name: it is the line
         // somebody looks for after the fact, and calling it "login.ok that failed" hides it.
-        $action = auditEndpointAction($endpoint) ?? str_replace('admin/', 'panel.', $endpoint);
+        $action = auditEndpointAction($endpoint) ?? str_replace(['admin/', 'v1/'], ['panel.', 'api.'], $endpoint);
         if ($action === 'login.ok' && !$ok) $action = 'login.fail';
 
         $note = (array)($GLOBALS['__audit_note'] ?? []);

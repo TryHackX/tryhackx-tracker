@@ -367,6 +367,11 @@ function scheduleSyncBansToBlacklist(PDO $db, array $cfg): array {
         return ['ok' => false, 'added' => 0, 'error' => 'DB: ' . $e->getMessage()];
     }
     if (!$banned) return $out;
+    // Under withBlacklistLock(), the lock every other writer of this file takes. This function used
+    // to flock() the file's OWN inode — which is precisely the inode removeHashFromBlacklist()
+    // throws away when it replaces the file by rename(). The two excluded nothing, and an unblock
+    // racing this append silently discarded the bans it had just written.
+    return withBlacklistLock($path, function () use ($db, $path, $banned, $out) {
     $present = [];
     if (is_file($path)) {
         if (!is_readable($path)) return ['ok' => false, 'added' => 0, 'error' => "Blacklist file is not readable: $path"];
@@ -390,6 +395,7 @@ function scheduleSyncBansToBlacklist(PDO $db, array $cfg): array {
     $out['added'] = count($missing);
     if (function_exists('recordBlacklistChange')) recordBlacklistChange('add');
     return $out;
+    });
 }
 
 /** Persist the outcome of a switch attempt in the whitelist state file (never throws). */

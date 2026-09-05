@@ -465,6 +465,25 @@ function rateLimitAllow(string $action, string $ip, int $max, int $windowSec = 3
     $now  = time();
     $key  = $action . '|' . $ip;
 
+    // ONE LOCK AROUND THE READ AND THE WRITE, on a separate path.
+    //
+    // LOCK_EX on file_put_contents() covered only the write: two requests could both read the same
+    // map, each add its own hit, and the second write erased the first — and because every writer
+    // rewrites the WHOLE file, the lost hit could belong to any action and any IP. A burst of
+    // parallel submissions is exactly the case a rate limit exists for. The lock file is a
+    // different path from the data file so a future rename()-based replace cannot pull the inode
+    // out from under a waiter (the shape loginAttemptsUpdate() uses).
+    $lockH = @fopen($file . '.lock', 'c');
+    if ($lockH) @flock($lockH, LOCK_EX);
+    try {
+        return rateLimitAllowLocked($file, $key, $action, $now, $max, $windowSec);
+    } finally {
+        if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+    }
+}
+
+/** The body of rateLimitAllow(), run with the lock held. */
+function rateLimitAllowLocked(string $file, string $key, string $action, int $now, int $max, int $windowSec): bool {
     $data = [];
     if (is_file($file)) {
         $raw  = @file_get_contents($file);
@@ -483,13 +502,20 @@ function rateLimitAllow(string $action, string $ip, int $max, int $windowSec = 3
 
     $hits = $data[$key] ?? [];
     if (count($hits) >= $max) {
-        @file_put_contents($file, json_encode($data), LOCK_EX);
+        rateLimitWrite($file, $data);
         return false;
     }
     $hits[] = $now;
     $data[$key] = $hits;
-    @file_put_contents($file, json_encode($data), LOCK_EX);
+    rateLimitWrite($file, $data);
     return true;
+}
+
+/** tmp + rename, so a reader never sees a half-written map. Called with the lock held. */
+function rateLimitWrite(string $file, array $data): void {
+    $tmp = $file . '.tmp.' . getmypid();
+    if (@file_put_contents($tmp, json_encode($data)) !== false) @rename($tmp, $file);
+    else @unlink($tmp);
 }
 
 function jsonResponse(array $data, int $code = 200): void {

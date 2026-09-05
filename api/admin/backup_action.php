@@ -98,13 +98,17 @@ switch ($op) {
                                            : 'Restored: ' . $fileItems . '. Every file that was overwritten has a .bak-<stamp> copy next to it.']);
 
     case 'restore-db':
-        $db      = trim((string)($input['db'] ?? ''));
+        // $dbName, NOT $db: this file runs at include scope, where $db IS the router's PDO handle.
+        // Assigning the database name to it meant auditFinish()'s `$db instanceof PDO` guard
+        // failed — and the panel's most destructive operation was the one never written to the
+        // audit log.
+        $dbName  = trim((string)($input['db'] ?? ''));
         $confirm = trim((string)($input['confirm'] ?? ''));
-        if (!preg_match('/^[A-Za-z0-9_]{1,64}$/', $db)) jsonResponse(['error' => 'Invalid database name.'], 400);
-        if ($db !== $confirm) {
-            jsonResponse(['error' => 'The name you typed does not match "' . $db . '". Nothing was touched.'], 400);
+        if (!preg_match('/^[A-Za-z0-9_]{1,64}$/', $dbName)) jsonResponse(['error' => 'Invalid database name.'], 400);
+        if ($dbName !== $confirm) {
+            jsonResponse(['error' => 'The name you typed does not match "' . $dbName . '". Nothing was touched.'], 400);
         }
-        $r = backupRestoreDb($cfg, $id, $db, $confirm, $dryRun);
+        $r = backupRestoreDb($cfg, $id, $dbName, $confirm, $dryRun);
         if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? 'The database restore failed.', 'output' => $r['output']], 500);
         if ($dryRun) {
             jsonResponse(['success' => true, 'dry_run' => true, 'db' => $db,

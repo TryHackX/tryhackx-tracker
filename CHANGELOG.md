@@ -4,7 +4,91 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [1.32.0] — 2026-09-05
+## [1.33.0] — 2026-09-05
+
+### Found — the OpenTracker framing bug, with the syscall that causes it
+
+Three rounds of instrumentation had established that every buffer was freed after it was sent, that
+every chunk header declared exactly what followed it, that the byte count on the wire matched the
+byte count handed to the kernel — and that the stream was corrupt anyway, with a heap pointer sitting
+where a chunk-size header belonged. Valgrind and helgrind saw nothing on the send path.
+
+They saw nothing because **no instruction in the process ever touched freed memory. The kernel
+did.** libowfat 0.34's `iob_send()` sends with `sendmsg(MSG_MORE | MSG_ZEROCOPY)` once a batch is
+8 KiB or larger, and then frees the buffers the moment the call returns. `MSG_ZEROCOPY` is a promise
+that the pages will not change until the kernel reports, on the socket's error queue, that it is done
+with them — and libowfat never reads that queue. So the sequence is: `sendmsg` returns → `free()` →
+glibc writes a tcache pointer into the first sixteen bytes of the freed block → the receiver reads the
+socket → the kernel hands it the page **as it is now**. A pointer where `%zx\r\n` used to be. On
+loopback, with a slow reader (the panel decoding tens of megabytes of gzip), the window is wide open;
+that is why 10 of 13 production polls in the last six hours arrived truncated.
+
+**Proved, not argued.** The same binary, the same 6000-torrent reproducer, twice:
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| as built | BAD FRAMING @ 64 705 — bytes `\xad\x55…` (0x55ad…, a heap pointer) | BAD FRAMING @ 16 187 — `\xc9\x7f` (0x7fc9…) | BAD FRAMING @ 48 535 |
+| `SO_ZEROCOPY` refused via `LD_PRELOAD` | CLEAN 420 311 B | CLEAN 420 112 B | CLEAN 420 311 B |
+
+`strace` on the first: **3 × `setsockopt(SO_ZEROCOPY)`, and all 63 `sendmsg` calls carried
+`MSG_ZEROCOPY`.** The shim did one thing — return `ENOPROTOOPT` for that one option — and the
+corruption followed the flag.
+
+**The fix is built and NOT installed.** libowfat's `iob_send.c` with the zerocopy block compiled
+out (`#undef MSG_ZEROCOPY` / `#undef SO_ZEROCOPY` — the plain copying `sendmsg` path is what run B
+used), both modes with the production feature set, at `/tmp/fix/out/opentracker.{white,black}` on the
+VPS; the shipped binaries are copied to `/home/debian/backup-opentracker-<date>/`. Swapping them
+restarts the tracker and the swarm rebuilds from empty, so that is the operator's call, not a deploy
+step. **Nothing in production changed and nothing is slower**: valgrind and helgrind only ever ran on
+copies in `/tmp`.
+
+Also confirmed along the way, upstream-worthy but unrelated: a use-after-free at **shutdown** —
+`clean_worker` (ot_clean.c:56/106/122) walking peer lists that `trackerlogic_deinit`
+(trackerlogic.c:588) frees from `signal_handler`. A crash-on-exit, not the framing bug.
+
+### Fixed — the last fifteen audit findings
+
+Every finding that survived adversarial review is now closed. The ones with a judgment in them:
+
+- **`rateLimitAllow()`** read-modify-wrote a shared JSON file with the lock covering only the write,
+  so parallel requests erased each other's hits — including hits for other actions and other IPs,
+  because every writer rewrote the whole file. One lock around read and write, on a separate path.
+- **`v1/users/revoke`** could strip the admin group from the site owner and remove panel-carrying
+  groups — the two guards both of its siblings enforce were missing.
+- **`backup_action.php`** shadowed the global PDO `$db` with the database *name* in the restore-db
+  branch, so the panel's most destructive operation was the one never written to the audit log.
+- **v1 server-to-server calls were never audited** — the guard admitted only `admin/*`, and the actor
+  branch that would name the API client read a global nothing ever set.
+- **`clearLoginFailures()`** rewrote the map from an unlocked read while failures were recorded under
+  a lock; a failure landing in the gap was a lockout that never tripped.
+- **`scheduleSyncBansToBlacklist()`** locked the blacklist file's own inode — the inode
+  `removeHashFromBlacklist()` throws away with `rename()`. The two excluded nothing.
+- **`[quote=]` / `[spoiler=]`** backtracked quadratically; past ~15 600 characters PCRE gave up,
+  returned NULL, and the next pattern turned that into an empty description. Anchored, and each call
+  now falls back to its input if the engine ever gives up again.
+- **`admin/logout`** mutated session state on GET, the one method the router exempts from CSRF.
+- **The worker's `finish()`** cleared the claim before writing the file list, so a failed store left
+  the row `done` with its files deleted. One transaction; the claim is released last.
+- **Three full-table `COUNT(*)`** on endpoints the index page re-polls every 5 s are cached (15–20 s
+  — they are labels), and the bulk scrape counts what is left **once** per run instead of on each of
+  up to 500 calls.
+- **A table stuck over its cap** forced the full prune — including an unbounded orphan sweep over
+  6.1 M `index_files` rows — every 60 s. The sweep runs only when a prune deleted something, in
+  batches; a forced prune that trimmed nothing stands down for the normal interval.
+- **The whitelist probe** made up to 200 sequential scrapes with nothing to stop it when the tracker
+  went quiet. A 20 s budget and a five-in-a-row abort; rows not reached are first in line next tick.
+- The overlap cache key now includes the content of the hand-typed blocked addresses.
+
+### Changed — the account page, and installing a language
+
+The interface language is a sub-section under *Your groups* rather than a third card that held one
+`<select>`, and the select is styled like the rest of the site instead of being the browser's own
+white control. Installing a language: the file step is the same drop zone the address-list import
+uses; the language list has 76 entries; and a typed code the table does not know is still
+**recognised** — the browser's own ISO table (`Intl.DisplayNames`) names it, and on the server PHP's
+`intl` does the same, so a switcher never shows a bare code for a language somebody could name.
+
+
 
 ### Fixed — the Terms/Info editor could not reach its own endpoint
 

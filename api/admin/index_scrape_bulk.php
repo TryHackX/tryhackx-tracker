@@ -45,8 +45,13 @@ catch (\Throwable $e) { $res['error'] = 'Scrape failed: ' . $e->getMessage(); }
 $lastHash = $res['last_id'] !== null ? (string)$res['last_id'] : ($rows ? (string)end($rows)['info_hash'] : $after);
 $truncated = ($res['error'] === null) && (!empty($res['truncated']) || $more);
 
-$remaining = 0;
-if ($scope !== 'page') {
+// COUNTED ONCE, on the first call of a run. The browser drives this endpoint in a loop of up to
+// 500 calls, and each used to re-count the entire remainder of the table for an "(N left)" label.
+// The first answer carries the count; the client subtracts what each later call processed. A
+// later call answers null, which the client reads as "keep your own arithmetic".
+$remaining = null;
+if ($scope !== 'page' && $after === '') {
+    $remaining = 0;
     $w = "info_hash > ?";
     $params = [$lastHash];
     if ($scope === 'stale') $w .= " AND (scraped_at IS NULL OR scraped_at < DATE_SUB(NOW(), INTERVAL " . (int)WL_SCRAPE_STALE_AFTER . " SECOND))";
@@ -54,7 +59,7 @@ if ($scope !== 'page') {
     $st = $db->prepare("SELECT COUNT(*) FROM index_hashes WHERE $w");
     $st->execute($params);
     $remaining = (int)$st->fetchColumn();
-} else {
+} elseif ($scope === 'page') {
     $remaining = max(0, count($rows) - (int)$res['processed']);
 }
 

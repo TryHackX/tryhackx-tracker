@@ -16,8 +16,17 @@ $res = indexListSelect($db, $cfg, [
 $counts = ['total' => 0, 'protected' => 0, 'pending_meta' => 0];
 try {
     $counts['total'] = indexTotalCached($db);
-    $counts['protected'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE protected_until IS NOT NULL AND protected_until >= NOW()")->fetchColumn();
-    $counts['pending_meta'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status IN ('pending','fetching')")->fetchColumn();
+    // Two full-table aggregates over 1.9 M rows, on an endpoint the page re-polls every 5 s while
+    // anything is pending. They are labels. Fifteen seconds of staleness on a label costs nobody
+    // anything; two uncached COUNT(*) per poll cost the database its cache for everyone else.
+    $c = indexStatusCached($db, 'listcounts', function () use ($db): array {
+        return [
+            'protected'    => (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE protected_until IS NOT NULL AND protected_until >= NOW()")->fetchColumn(),
+            'pending_meta' => (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status IN ('pending','fetching')")->fetchColumn(),
+        ];
+    }, 15);
+    $counts['protected'] = (int)($c['protected'] ?? 0);
+    $counts['pending_meta'] = (int)($c['pending_meta'] ?? 0);
 } catch (\Throwable $e) {}
 
 jsonResponse(['rows' => $res['rows'], 'total' => $res['total'], 'page' => $res['page'], 'pages' => $res['pages'], 'counts' => $counts, 'enabled' => indexEnabled($cfg)]);

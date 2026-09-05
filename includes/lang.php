@@ -28,7 +28,12 @@
  * positive allow-list, and never allowed to end up empty.
  */
 
-/** Native names for the codes we know. Anything else shows as its uppercased code. */
+/**
+ * Native names for the codes the DROPDOWN offers. Curated on purpose: this feeds a list a person
+ * scrolls, and two hundred entries is not a list, it is a search problem. A code that is not here
+ * is still fine — langName() asks PHP's intl extension, and the install dialog asks the browser's
+ * own ISO table, so a typed code is recognised either way.
+ */
 const LANG_NAMES = [
     'en' => 'English', 'pl' => 'Polski', 'de' => 'Deutsch', 'fr' => 'Français',
     'es' => 'Español', 'it' => 'Italiano', 'nl' => 'Nederlands', 'pt' => 'Português',
@@ -37,7 +42,36 @@ const LANG_NAMES = [
     'sv' => 'Svenska', 'da' => 'Dansk', 'fi' => 'Suomi', 'no' => 'Norsk', 'hu' => 'Magyar',
     'ro' => 'Română', 'bg' => 'Български', 'el' => 'Ελληνικά', 'he' => 'עברית',
     'hi' => 'हिन्दी', 'id' => 'Bahasa Indonesia', 'vi' => 'Tiếng Việt', 'th' => 'ไทย',
+    'hr' => 'Hrvatski', 'sr' => 'Српски', 'sl' => 'Slovenščina', 'bs' => 'Bosanski',
+    'lt' => 'Lietuvių', 'lv' => 'Latviešu', 'et' => 'Eesti', 'be' => 'Беларуская',
+    'ca' => 'Català', 'eu' => 'Euskara', 'gl' => 'Galego', 'ga' => 'Gaeilge', 'cy' => 'Cymraeg',
+    'is' => 'Íslenska', 'mk' => 'Македонски', 'sq' => 'Shqip', 'mt' => 'Malti', 'lb' => 'Lëtzebuergesch',
+    'fa' => 'فارسی', 'ur' => 'اردو', 'bn' => 'বাংলা', 'ta' => 'தமிழ்', 'te' => 'తెలుగు',
+    'ml' => 'മലയാളം', 'mr' => 'मराठी', 'pa' => 'ਪੰਜਾਬੀ', 'gu' => 'ગુજરાતી', 'ne' => 'नेपाली',
+    'si' => 'සිංහල', 'my' => 'မြန်မာ', 'km' => 'ខ្មែរ', 'lo' => 'ລາວ', 'ms' => 'Bahasa Melayu',
+    'tl' => 'Filipino', 'ka' => 'ქართული', 'hy' => 'Հայերեն', 'az' => 'Azərbaycan',
+    'kk' => 'Қазақ', 'uz' => 'Oʻzbek', 'mn' => 'Монгол', 'sw' => 'Kiswahili', 'am' => 'አማርኛ',
+    'af' => 'Afrikaans', 'zu' => 'isiZulu', 'eo' => 'Esperanto', 'la' => 'Latina',
 ];
+
+/**
+ * The display name of ANY language code — the table first, then PHP's intl extension, which
+ * carries the whole ISO list. Native form (`de` → "Deutsch"), because a switcher is read by the
+ * person who speaks the language, not by the operator. Falls back to the uppercased code, which
+ * is honest: it says "no name known" rather than pretending.
+ */
+function langName(string $code): string {
+    $code = strtolower($code);
+    if (isset(LANG_NAMES[$code])) return LANG_NAMES[$code];
+    if (class_exists('Locale') && preg_match('/^[a-z]{2,3}$/', $code)) {
+        try {
+            $n = (string)\Locale::getDisplayLanguage($code, $code);
+            // intl answers with the code itself when it has no name; that is not a name.
+            if ($n !== '' && strtolower($n) !== $code) return $n;
+        } catch (\Throwable $e) { /* fall through */ }
+    }
+    return strtoupper($code);
+}
 
 /**
  * The languages that ship with the panel. They are always offered and can never be switched off or
@@ -62,7 +96,7 @@ function langAvailable(): array {
     $out = [];
     foreach (glob(LANG_DIR . '/*.php') ?: [] as $file) {
         $code = strtolower(basename($file, '.php'));
-        if (preg_match('/^[a-z]{2,3}$/', $code)) $out[$code] = LANG_NAMES[$code] ?? strtoupper($code);
+        if (preg_match('/^[a-z]{2,3}$/', $code)) $out[$code] = langName($code);
     }
     // Even with the directory missing or unreadable the fallback has to exist, or every lookup
     // below turns into "the key itself" and the site renders as a list of dotted identifiers.

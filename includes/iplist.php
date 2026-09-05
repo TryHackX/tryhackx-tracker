@@ -499,7 +499,12 @@ function ipListOverlapsCached(PDO $db, array $manual, array $against, string $ta
     } catch (\Throwable $e) {
         $stamp = '';
     }
-    $key = md5($tag . '|' . implode(',', $manual) . '|' . $stamp . '|' . count($against));
+    // The CONTENT of the other side, not just its size. `$against` carries the hand-typed blocked
+    // addresses as well as the lists; the lists are covered by $stamp, the typed ones were not, so
+    // swapping one blocked address for another kept the key and returned the stale "no conflict".
+    // Hashing a quarter-million short strings once per five minutes is nothing next to the overlap
+    // computation the cache exists to avoid.
+    $key = md5($tag . '|' . implode(',', $manual) . '|' . $stamp . '|' . count($against) . ':' . md5(implode(',', $against)));
     $file = __DIR__ . '/../config/iplist_overlap_' . $key . '.json';
     $now = time();
     if (is_file($file) && ($now - (int)@filemtime($file)) < 300) {

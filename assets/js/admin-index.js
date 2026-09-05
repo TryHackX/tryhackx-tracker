@@ -463,6 +463,9 @@
             outer:
             for (const chunk of chunks) {
                 let after = '';
+                // The server counts what is left ONCE, on the first call of a run (a full count over
+                // the table is not free); after that it answers null and this keeps the arithmetic.
+                let left = null;
                 do {
                     const body = chunk !== null ? { scope, hashes: chunk, after } : { scope, after };
                     if (dateBody) Object.assign(body, dateBody);
@@ -470,7 +473,9 @@
                     if (!r.success || r.error) { showToast(r.error || 'Scrape failed', 'error'); broke = true; break outer; }
                     total += r.scraped || 0;
                     after = r.after || '';
-                    label.textContent = 'Stop \u00b7 scraped ' + total + (r.remaining ? ' (' + r.remaining + ' left)' : '');
+                    if (r.remaining !== null && r.remaining !== undefined) left = r.remaining;
+                    else if (left !== null) left = Math.max(0, left - (r.processed || 0));
+                    label.textContent = 'Stop \u00b7 scraped ' + total + (left ? ' (' + left + ' left)' : '');
                     if (r.warning) { showToast(r.warning, 'warning'); broke = true; break outer; }
                     if (scrapeStop) { stopped = true; break outer; }
                     if (!r.truncated) break;

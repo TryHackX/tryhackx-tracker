@@ -102,13 +102,23 @@ function wlProbeTick(PDO $db, array $cfg): array {
     $pass = [];
     $fail = [];
 
+    // A BUDGET, because this loop is up to 200 sequential HTTP requests inside the janitor's
+    // minute. Each scrape has its own 2 s timeout; nothing stopped the loop when the tracker went
+    // quiet, so a dead tracker turned one tick into 200 × 2 s. Twenty seconds of wall clock, and
+    // five unanswered scrapes in a row means the tracker is not answering — stop asking. Rows not
+    // reached stay 'probing' and, ordered by probe_started_at, are first in line next tick.
+    $deadline = microtime(true) + 20.0;
+    $quiet = 0;
+
     foreach ($rows as $r) {
+        if (microtime(true) >= $deadline || $quiet >= 5) { $out['deferred'] = ($out['deferred'] ?? 0) + 1; continue; }
         $age = $now - strtotime((string)$r['probe_started_at']);
         $haveMeta = ($r['meta_status'] === 'done');
 
         if ($haveMeta) {
             // The metadata is in. Now: is anybody actually there, and announcing to us?
             $sl = scrapeOpenTracker($db, $cfg, $r, true);
+            $quiet = is_array($sl) ? 0 : $quiet + 1;
             $peers = is_array($sl) ? ((int)$sl['seeders'] + (int)$sl['leechers']) : -1;
             if ($peers > 0) { $pass[] = (int)$r['id']; continue; }
             if ($age >= $timeout) {

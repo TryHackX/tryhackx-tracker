@@ -2063,4 +2063,19 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .rt-tools button[hidden] { display: none; }
 
 /* === Account: interface language === */
-.acc-language { width: 100%; max-width: 22rem; margin-top: 0.4rem; }
+/* The language <select> was the browser's own white control on a dark card. Same skin as the
+   search toolbar's selects, which is the one select on the public site that already looks right. */
+.acc-language {
+    width: 100%; max-width: 22rem; margin-top: 0.2rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    color-scheme: dark;   /* the dropdown list itself, which CSS cannot otherwise reach */
+}
+.acc-language:focus { outline: none; border-color: var(--accent); }
+.acc-lang-note { margin: 0 0 0.45rem; }

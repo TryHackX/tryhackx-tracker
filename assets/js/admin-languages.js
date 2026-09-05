@@ -189,7 +189,8 @@
     function openUpload() {
         $('lu-code').value = '';
         $('lu-file').value = '';
-        $('lu-file-info').textContent = 'A JSON file of "key": "text" pairs — export one above to start from.';
+        $('lu-file-info').textContent = '';
+        markFile(null);
         $('lu-code-name').textContent = '';
         $('lu-pick-label').textContent = 'Choose a language…';
         pending = null;
@@ -230,6 +231,24 @@
         }
     }
 
+    /**
+     * The native name of a language code, from the browser's own ISO table — or null.
+     *
+     * Intl.DisplayNames answers with the CODE ITSELF for something it does not know, which is not
+     * a name; that case is null here so the caller can say "no name for it" honestly. Asked in the
+     * language's own locale first (so `de` gives "Deutsch", not "German"), English as the fallback.
+     */
+    function intlName(code) {
+        if (typeof Intl === 'undefined' || typeof Intl.DisplayNames !== 'function') return null;
+        for (const loc of [code, 'en']) {
+            try {
+                const n = new Intl.DisplayNames([loc], { type: 'language', fallback: 'none' }).of(code);
+                if (n && n.toLowerCase() !== code.toLowerCase()) return n;
+            } catch (_) { /* an invalid tag throws RangeError; try the next locale */ }
+        }
+        return null;
+    }
+
     /** Resolve the typed code to a name as it is typed — and say NOW what will be refused later. */
     function onCode() {
         const code = ($('lu-code').value || '').trim().toLowerCase();
@@ -252,9 +271,19 @@
             out.textContent = '→ ' + k.name;
             out.className = 'wl-small text-success';
         } else if (/^[a-z]{2,3}$/.test(code)) {
-            out.textContent = 'Accepted — it will show in the switcher as ' + code.toUpperCase()
-                            + ' until someone adds a name for it.';
-            out.className = 'wl-small text-muted';
+            // The panel's own table is short on purpose (it feeds the dropdown). The browser ships
+            // the whole ISO list, so a typed code the panel has no name for is still RECOGNISED:
+            // Intl.DisplayNames gives its native name for anything the browser knows.
+            const native = intlName(code);
+            if (native) {
+                out.textContent = '→ ' + native;
+                out.className = 'wl-small text-success';
+                $('lu-pick-label').textContent = native + ' (' + code.toUpperCase() + ')';
+            } else {
+                out.textContent = 'Accepted, but neither the panel nor this browser knows a name for '
+                                + code.toUpperCase() + ' — it will show as its code.';
+                out.className = 'wl-small text-muted';
+            }
         } else {
             out.textContent = 'A language code is two or three letters, like "de" or "ast".';
             out.className = 'wl-small text-warning';
@@ -262,12 +291,26 @@
     }
 
     /** Parse the picked file in the browser, so problems surface before anything is sent. */
-    function onFile() {
+    /** Show which file the zone holds — the box itself says so, like the address-list import. */
+    function markFile(file) {
+        const z = $('lu-drop');
+        if (!z) return;
+        z.classList.toggle('has-file', !!file);
+        const main = z.querySelector('.ipl-drop-main');
+        if (main) {
+            main.textContent = '';
+            if (file) main.appendChild(document.createTextNode(file.name));
+            else { main.appendChild(el('u', { text: 'Choose a file' })); main.appendChild(document.createTextNode(' or drop it here')); }
+        }
+    }
+
+    function onFile(dropped) {
         const input = $('lu-file');
         const info = $('lu-file-info');
-        const file = input.files && input.files[0];
+        const file = dropped || (input.files && input.files[0]);
         pending = null;
-        if (!file) { info.textContent = 'A JSON file of "key": "text" pairs.'; return; }
+        markFile(file || null);
+        if (!file) { info.textContent = ''; return; }
         const reader = new FileReader();
         reader.onload = () => {
             try {
@@ -332,7 +375,23 @@
     });
     $('lang-add').addEventListener('click', openUpload);
     $('lu-code').addEventListener('input', onCode);
-    $('lu-file').addEventListener('change', onFile);
+    $('lu-file').addEventListener('change', () => onFile(null));
+    const luDrop = $('lu-drop');
+    if (luDrop) {
+        // dragover must be cancelled or the browser navigates to the file, losing the dialog.
+        ['dragenter', 'dragover'].forEach(ev => luDrop.addEventListener(ev, (e) => {
+            e.preventDefault(); luDrop.classList.add('dragging');
+        }));
+        ['dragleave', 'drop'].forEach(ev => luDrop.addEventListener(ev, () => luDrop.classList.remove('dragging')));
+        luDrop.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+            if (f) onFile(f);
+        });
+        luDrop.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('lu-file').click(); }
+        });
+    }
     $('lu-submit').addEventListener('click', submitUpload);
     $('ld-submit').addEventListener('click', submitDuplicate);
     $('ld-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitDuplicate(); });

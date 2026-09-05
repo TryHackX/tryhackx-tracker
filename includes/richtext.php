@@ -462,15 +462,21 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
 
         // ── quotes, with or without an author ──
         // Longest form first: [quote=x] would otherwise be eaten by the bare [quote] pattern.
-        $s = preg_replace_callback('/\[quote=(?:&quot;|&#039;)?(.{1,64}?)(?:&quot;|&#039;)?\](.*?)\[\/quote\]/is',
-            fn($m) => '<blockquote class="rt-quote"><cite class="rt-cite">' . trim($m[1]) . '</cite>' . $m[2] . '</blockquote>', $s);
-        $s = preg_replace('/\[quote\](.*?)\[\/quote\]/is', '<blockquote class="rt-quote">$1</blockquote>', $s);
+        // The title group is `[^\]\n]{1,64}`, NOT `.{1,64}?`: a lazy dot-run could put the closing
+        // `]` at any of 64 positions and the engine retried the whole `(.*?)` scan for each of them,
+        // for every [quote= in the text — quadratic, and past ~15 600 characters PCRE gave up and
+        // returned NULL, which the next pattern turned into "" and the whole description vanished.
+        // Anchoring the title to "no ] inside" leaves one position per opener. The `?? $s` is the
+        // belt to that brace: if the engine ever gives up again, the text stays as it was.
+        $s = preg_replace_callback('/\[quote=(?:&quot;|&#039;)?([^\]\n]{1,64}?)(?:&quot;|&#039;)?\](.*?)\[\/quote\]/is',
+            fn($m) => '<blockquote class="rt-quote"><cite class="rt-cite">' . trim($m[1]) . '</cite>' . $m[2] . '</blockquote>', $s) ?? $s;
+        $s = preg_replace('/\[quote\](.*?)\[\/quote\]/is', '<blockquote class="rt-quote">$1</blockquote>', $s) ?? $s;
 
         // ── spoilers ──
-        $s = preg_replace_callback('/\[spoiler=(?:&quot;|&#039;)?(.{1,80}?)(?:&quot;|&#039;)?\](.*?)\[\/spoiler\]/is',
-            fn($m) => '<details class="rt-spoiler"><summary>' . trim($m[1]) . '</summary><div class="rt-spoiler-body">' . $m[2] . '</div></details>', $s);
+        $s = preg_replace_callback('/\[spoiler=(?:&quot;|&#039;)?([^\]\n]{1,80}?)(?:&quot;|&#039;)?\](.*?)\[\/spoiler\]/is',
+            fn($m) => '<details class="rt-spoiler"><summary>' . trim($m[1]) . '</summary><div class="rt-spoiler-body">' . $m[2] . '</div></details>', $s) ?? $s;
         $s = preg_replace('/\[spoiler\](.*?)\[\/spoiler\]/is',
-            '<details class="rt-spoiler"><summary>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s);
+            '<details class="rt-spoiler"><summary>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s) ?? $s;
 
         // ── media and links ──
         $s = preg_replace_callback('/\[img(?:=[^\]]*)?\](.*?)\[\/img\]/is', function ($m) {

@@ -307,6 +307,10 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
     } catch (\Throwable $e) {}
     unset($client['secret_hash']);
     apiRateLimit($db, $cfg, $client, strlen((string)$rawBody));
+    // Name the actor for the audit log. auditActor() has read this global since the log was
+    // written; nothing ever assigned it, so the 'api' branch was dead and a v1 call that did
+    // get logged would have been attributed to nobody.
+    $GLOBALS['apiClient'] = ['id' => (int)$client['id'], 'name' => (string)($client['label'] ?? ('key ' . ($client['key_id'] ?? '')))];
     return $client;
 }
 
