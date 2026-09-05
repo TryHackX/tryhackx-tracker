@@ -31,9 +31,33 @@
 // worst kind. Naming the dependency makes a missing include an error instead.
 require_once __DIR__ . '/whitelist.php';
 require_once __DIR__ . '/users.php';
+require_once __DIR__ . '/lang.php';
 
 const PAGECONTENT_PAGES = ['tos', 'info'];
 const PAGECONTENT_MAX = 60000;
+
+/**
+ * Which stored version a visitor gets, in order.
+ *
+ * A page is stored PER LANGUAGE, and a translation is normally incomplete for a while. The
+ * fallback therefore never drops back to the built-in text once anything has been written: an
+ * operator who wrote real terms in one language must not have a visitor in another quietly served
+ * the generic boilerplate instead. Their words, in the nearest language available, or nothing.
+ *
+ *   1. the visitor's language
+ *   2. the site's default language
+ *   3. English
+ *   4. any other stored version at all
+ *   5. only then the built-in template (which is itself translated)
+ */
+function pageContentLangChain(array $cfg, ?string $lang = null): array {
+    $chain = [];
+    foreach ([$lang ?: langCurrent(), (string)($cfg['default_language'] ?? ''), LANG_FALLBACK] as $c) {
+        $c = strtolower(trim((string)$c));
+        if ($c !== '' && $c !== 'auto' && !in_array($c, $chain, true)) $chain[] = $c;
+    }
+    return $chain;
+}
 
 /** The pages this can edit, with the labels the panel shows and the route each one serves. */
 function pageContentCatalog(): array {
@@ -43,12 +67,14 @@ function pageContentCatalog(): array {
     ];
 }
 
-/** One stored override, or null when the page is still the shipped template. */
-function pageContentGet(PDO $db, string $page): ?array {
+/** One stored override for one language, or null when that language has none. */
+function pageContentGet(PDO $db, string $page, string $lang): ?array {
     if (!in_array($page, PAGECONTENT_PAGES, true)) return null;
+    if (!preg_match('/^[a-z]{2,3}$/', $lang)) return null;
     try {
-        $st = $db->prepare("SELECT page, format, body, enabled, updated_at, updated_by FROM page_content WHERE page = ?");
-        $st->execute([$page]);
+        $st = $db->prepare("SELECT page, lang, format, body, enabled, updated_at, updated_by
+                            FROM page_content WHERE page = ? AND lang = ?");
+        $st->execute([$page, $lang]);
         $r = $st->fetch(PDO::FETCH_ASSOC);
     } catch (\Throwable $e) {
         return null;
@@ -58,19 +84,28 @@ function pageContentGet(PDO $db, string $page): ?array {
     return $r;
 }
 
-/** Every override, keyed by page, for the settings screen. */
+/** Every stored version of every page, as [page][lang] => row — for the settings screen. */
 function pageContentAll(PDO $db): array {
     $out = [];
-    foreach (PAGECONTENT_PAGES as $p) {
-        $r = pageContentGet($db, $p);
-        if ($r) $out[$p] = $r;
+    try {
+        $st = $db->query("SELECT page, lang, format, enabled, updated_at, updated_by FROM page_content");
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            if (!in_array($r['page'], PAGECONTENT_PAGES, true)) continue;
+            $r['enabled'] = (int)$r['enabled'] === 1;
+            $out[$r['page']][$r['lang']] = $r;
+        }
+    } catch (\Throwable $e) {
+        return [];
     }
     return $out;
 }
 
 /** Store (or replace) a page. Returns ['error' => …] or ['ok' => true]. */
-function pageContentSave(PDO $db, array $cfg, string $page, string $format, string $body, bool $enabled, string $who): array {
+function pageContentSave(PDO $db, array $cfg, string $page, string $lang, string $format, string $body, bool $enabled, string $who): array {
     if (!in_array($page, PAGECONTENT_PAGES, true)) return ['error' => 'Unknown page.'];
+    // Any INSTALLED language, not merely an enabled one: a translation is written before it is
+    // switched on, and refusing to store the page for it would make that impossible.
+    if (!langInstalled($lang)) return ['error' => 'That language is not installed.'];
     if (!in_array($format, ['bbcode', 'markdown'], true)) return ['error' => 'Unknown format.'];
     if (strlen($body) > PAGECONTENT_MAX) {
         return ['error' => 'That is longer than ' . number_format(PAGECONTENT_MAX) . ' characters.'];
@@ -87,23 +122,33 @@ function pageContentSave(PDO $db, array $cfg, string $page, string $format, stri
         if ($err !== null) return ['error' => $err];
     }
     try {
-        $db->prepare("INSERT INTO page_content (page, format, body, enabled, updated_at, updated_by)
-                      VALUES (?, ?, ?, ?, NOW(), ?)
+        $db->prepare("INSERT INTO page_content (page, lang, format, body, enabled, updated_at, updated_by)
+                      VALUES (?, ?, ?, ?, ?, NOW(), ?)
                       ON DUPLICATE KEY UPDATE format = VALUES(format), body = VALUES(body),
                                               enabled = VALUES(enabled), updated_at = NOW(),
                                               updated_by = VALUES(updated_by)")
-           ->execute([$page, $format, $body, $enabled ? 1 : 0, mb_substr($who, 0, 64)]);
+           ->execute([$page, $lang, $format, $body, $enabled ? 1 : 0, mb_substr($who, 0, 64)]);
     } catch (\Throwable $e) {
         return ['error' => 'Could not store the page.'];
     }
     return ['ok' => true];
 }
 
-/** Throw the override away; the shipped template comes back on the next request. */
-function pageContentReset(PDO $db, string $page): bool {
+/**
+ * Throw one language's version away. With $lang null, every language of that page goes.
+ *
+ * Per language by default, because "restore" while editing Polish should not silently delete an
+ * English page the operator spent an afternoon on.
+ */
+function pageContentReset(PDO $db, string $page, ?string $lang = null): bool {
     if (!in_array($page, PAGECONTENT_PAGES, true)) return false;
+    if ($lang !== null && !preg_match('/^[a-z]{2,3}$/', $lang)) return false;
     try {
-        $db->prepare("DELETE FROM page_content WHERE page = ?")->execute([$page]);
+        if ($lang === null) {
+            $db->prepare("DELETE FROM page_content WHERE page = ?")->execute([$page]);
+        } else {
+            $db->prepare("DELETE FROM page_content WHERE page = ? AND lang = ?")->execute([$page, $lang]);
+        }
         return true;
     } catch (\Throwable $e) {
         return false;
@@ -111,44 +156,86 @@ function pageContentReset(PDO $db, string $page): bool {
 }
 
 /**
- * Should the router use an override for this page?
+ * Should the router use an override for this page, and which one?
  *
- * Enabled AND non-empty. A stored-but-disabled page is a draft, and a draft must not be able to
- * blank a public page by being empty.
+ * Enabled AND non-empty, in the order pageContentLangChain() gives — plus, as a last resort, any
+ * other stored version. A stored-but-disabled page is a draft and never reaches a visitor, and a
+ * draft must not be able to blank a public page by being empty.
  */
-function pageContentActive(PDO $db, string $page): ?array {
-    $r = pageContentGet($db, $page);
-    if (!$r || !$r['enabled'] || trim((string)$r['body']) === '') return null;
+function pageContentActive(PDO $db, string $page, array $cfg = [], ?string $lang = null): ?array {
+    foreach (pageContentLangChain($cfg, $lang) as $code) {
+        $r = pageContentGet($db, $page, $code);
+        if ($r && $r['enabled'] && trim((string)$r['body']) !== '') return $r;
+    }
+    // Anything the operator wrote beats the built-in boilerplate — see pageContentLangChain().
+    try {
+        $st = $db->prepare("SELECT page, lang, format, body, enabled, updated_at, updated_by
+                            FROM page_content WHERE page = ? AND enabled = 1 AND TRIM(body) <> ''
+                            ORDER BY lang = 'en' DESC, lang ASC LIMIT 1");
+        $st->execute([$page]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        return null;
+    }
+    if (!$r) return null;
+    $r['enabled'] = true;
     return $r;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The defaults, generated from the configuration the tracker is running under
+// The defaults — the SAME words the templates render, in the requested language
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * The shipped page, written out in the requested format.
+ * Turn the little HTML the dictionary carries into Markdown or BBCode.
  *
- * Kept deliberately close to the template's own words. Anything that differs is a difference the
- * operator would have to reconcile by hand the first time they press Restore, and the point of the
- * button is that they do not have to.
+ * The strings in lang/*.php are written for a template, so they contain <strong>, <em>, <a href>
+ * and <code>. This is what lets the default page be generated from those exact strings instead of
+ * from a second English copy kept beside them — which is what this file used to do, and which was
+ * a guarantee of drift the moment there was more than one language.
+ *
+ * Deliberately not a general HTML parser: it handles the four tags the dictionary actually uses and
+ * strips anything else, because a general parser here would be a second renderer to keep correct.
  */
-function pageContentDefault(array $cfg, string $page, string $format, string $baseUrl = ''): string {
-    $md = $format !== 'bbcode';
-    $wl = trackerMode($cfg) === 'whitelist';
+function pageContentFromHtml(string $html, bool $md): string {
+    $out = $html;
+    $out = preg_replace_callback('#<a\s+href="([^"]*)"[^>]*>(.*?)</a>#is',
+        fn($m) => $md ? '[' . $m[2] . '](' . $m[1] . ')' : '[url=' . $m[1] . ']' . $m[2] . '[/url]',
+        $out);
+    $out = preg_replace('#<strong>(.*?)</strong>#is', $md ? '**$1**' : '[b]$1[/b]', $out);
+    $out = preg_replace('#<b>(.*?)</b>#is',           $md ? '**$1**' : '[b]$1[/b]', $out);
+    $out = preg_replace('#<em>(.*?)</em>#is',         $md ? '*$1*'   : '[i]$1[/i]', $out);
+    $out = preg_replace('#<i>(.*?)</i>#is',           $md ? '*$1*'   : '[i]$1[/i]', $out);
+    $out = preg_replace('#<code>(.*?)</code>#is',     $md ? '`$1`'   : '[code]$1[/code]', $out);
+    $out = strip_tags($out);
+    // The dictionary is HTML, so &amp; and friends are entities there and text here.
+    return html_entity_decode($out, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+}
+
+/**
+ * The shipped page, in the requested language and format.
+ *
+ * Built from the dictionary keys the templates use, so "Restore" hands back exactly what the
+ * visitor would otherwise be reading — same wording, same language, and the same conditionals
+ * (`trackerMode()` and `usersEnabled()` still decide which clauses exist).
+ */
+function pageContentDefault(array $cfg, string $page, string $format, string $baseUrl = '', ?string $lang = null): string {
+    $md    = $format !== 'bbcode';
+    $wl    = trackerMode($cfg) === 'whitelist';
     $users = usersEnabled($cfg);
     $verify = userEmailVerifyRequired($cfg);
+    $lang  = $lang && langInstalled($lang) ? $lang : langCurrent();
+
+    /** One dictionary string, already converted to the requested markup. */
+    $t = fn(string $key, array $params = []): string => pageContentFromHtml(langFor($lang, $key, $params), $md);
 
     // Headings: Markdown has them, BBCode does not — see the file header. `[size]` is the closest
-    // BBCode gets, and saying so in the UI is better than pretending the two are equivalent.
-    // Concatenated, never interpolated: inside a double-quoted string PHP reads `$t[` as the start
-    // of an array index, so "[b]$t[/b]" is a parse error rather than the BBCode it looks like.
-    $h1 = fn(string $t): string => $md ? '# ' . $t : '[size=24][b]' . $t . '[/b][/size]';
-    $h2 = fn(string $t): string => $md ? '## ' . $t : '[size=19][b]' . $t . '[/b][/size]';
-    $b  = fn(string $t): string => $md ? '**' . $t . '**' : '[b]' . $t . '[/b]';
-    $link = function (string $url, string $text) use ($md): string {
-        return $md ? '[' . $text . '](' . $url . ')' : '[url=' . $url . ']' . $text . '[/url]';
-    };
+    // BBCode gets. Concatenated, never interpolated: inside a double-quoted string PHP reads `$t[`
+    // as the start of an array index, so "[b]$t[/b]" is a parse error rather than the BBCode it
+    // looks like.
+    $h1 = fn(string $x): string => $md ? '# ' . $x : '[size=24][b]' . $x . '[/b][/size]';
+    $h2 = fn(string $x): string => $md ? '## ' . $x : '[size=19][b]' . $x . '[/b][/size]';
+    $b  = fn(string $x): string => $md ? '**' . $x . '**' : '[b]' . $x . '[/b]';
     $ol = function (array $items) use ($md): string {
         if ($md) {
             $n = 0;
@@ -159,118 +246,62 @@ function pageContentDefault(array $cfg, string $page, string $format, string $ba
 
     $L = [];
     if ($page === 'tos') {
-        $L[] = $h1('Terms of Service');
+        $L[] = $h1($t('tos.h1'));
         $L[] = '';
-        $L[] = 'By using this tracker, you agree to the following terms:';
+        $L[] = $t('tos.intro');
         $L[] = '';
-        $terms = [
-            'The service is free for personal use. Commercial organizations require written permission.',
-            'User tracking, DoS/DDoS attacks, and any attempts to disrupt the service are prohibited.',
-            'We do not guarantee service uptime. Availability may be limited without prior notice.',
-            'The user bears full responsibility for the legality of shared content in their jurisdiction.',
-            'Commercial use policy violations are subject to a fee of EUR 5,000.',
-            'We reserve the right to publish information about policy violations.',
-            'We respect user privacy. We do not store personal data beyond what is necessary for tracker operation.',
-        ];
-        if ($wl) {
-            $terms[] = 'Whitelist registrations are free and anonymous; the registrant\'s IP address is stored to '
-                     . 'detect abuse. Registered info hashes may be removed or banned at any time, and abusive '
-                     . 'registrants may be banned.';
-        }
-        $terms[] = 'Terms may change. Continued use of the service constitutes acceptance of changes.';
-        $terms[] = $b('Connecting to the tracker constitutes acceptance of these terms.');
+        $terms = [];
+        foreach (['tos.r1', 'tos.r2', 'tos.r3', 'tos.r4', 'tos.r5', 'tos.r6', 'tos.r7'] as $k) $terms[] = $t($k);
+        if ($wl) $terms[] = $t('tos.r_wl');
+        $terms[] = $t('tos.r8');
+        $terms[] = $t('tos.r9');
         $L[] = $ol($terms);
 
         if ($users) {
             $L[] = '';
-            $L[] = $h2('User accounts');
+            $L[] = $h2($t('tos.acc_head'));
             $L[] = '';
             $L[] = $ol([
-                'Creating an account is free and optional — the tracker itself works without one. An account only '
-                . 'unlocks member features (such as the catalogue search) according to the groups granted to it.',
-                'For an account we store: the username, the password (as a salted hash — never in plain text), the '
-                . 'email address' . ($verify ? ' (required and confirmed by a verification link)' : ' (optional)')
-                . ', the IP addresses used at registration and sign-in (abuse prevention), group memberships with '
-                . 'their expiry dates, and in-app notifications.',
-                'Emails are used solely for account operation: verification links, password resets, email-change '
-                . 'confirmations and expiry/security notices. Account notices can be disabled on the account page; '
-                . 'we never share addresses with third parties.',
-                'Changing the account email requires confirmation from the current address and then from the new '
-                . 'one; a cool-down period applies between changes. This protects accounts from hijacking.',
-                'Session cookies (and the optional "stay signed in" token) are strictly functional. The sign-in '
-                . 'duration is chosen at login; tokens are stored only as hashes and are invalidated by a password '
-                . 'change or sign-out.',
-                'Accounts used for abuse (spam, attacks on the service, deliberately registering infringing content '
-                . 'after warnings) may be suspended or deleted, together with their whitelist registrations.',
-                'To have your account and its data removed, contact the site email from your account address (or use '
-                . 'the report form). Read notifications are pruned automatically after 90 days.',
+                $t('tos.acc1'),
+                $t('tos.acc2', ['email' => langFor($lang, $verify ? 'tos.acc2_req' : 'tos.acc2_opt')]),
+                $t('tos.acc3'), $t('tos.acc4'), $t('tos.acc5'), $t('tos.acc6'), $t('tos.acc7'),
             ]);
         }
         return implode("\n", $L) . "\n";
     }
 
     // ── info ────────────────────────────────────────────────────────────────
-    $L[] = $h1('Tracker Information');
-    $L[] = '';
-    $L[] = $h2('What is a BitTorrent tracker?');
-    $L[] = '';
-    $L[] = 'A BitTorrent tracker is a server that helps BitTorrent clients communicate. It coordinates file '
-         . 'transfers between users (peers) by tracking who is sharing a given torrent. The tracker does not store '
-         . 'any files — only information about active swarm participants.';
-    $L[] = '';
-    $L[] = $h2('What is OpenTracker?');
-    $L[] = '';
-    $L[] = 'OpenTracker is a high-performance BitTorrent tracker software created by erdgeist. It is open-source, '
-         . 'extremely fast, and minimalist. It can handle millions of connections with minimal resource usage.';
-    $L[] = '';
-    $L[] = $h2('How does the tracker work?');
-    $L[] = '';
-    $L[] = 'A BitTorrent client sends an "announce" request to the tracker with the torrent\'s info_hash. The tracker '
-         . 'responds with a list of peers currently sharing or downloading the same torrent. The tracker only knows: '
-         . 'the info_hash, the peer\'s IP address, and port.';
+    $L[] = $h1($t('info.h1'));
+    foreach ([['info.q_what', 'info.a_what'], ['info.q_ot', 'info.a_ot'], ['info.q_how', 'info.a_how']] as [$q, $a]) {
+        $L[] = '';
+        $L[] = $h2($t($q));
+        $L[] = '';
+        $L[] = $t($a);
+    }
     if ($wl) {
         $L[] = '';
-        $L[] = $h2('Whitelist mode');
+        $L[] = $h2($t('info.q_wl'));
         $L[] = '';
-        $L[] = 'This tracker runs OpenTracker in ' . $b('whitelist mode') . ': announces are only answered for info '
-             . 'hashes that were ' . $b('registered') . ' beforehand. Torrents posted on our community forum are '
-             . 'registered automatically; anyone else can register a magnet link or info hash for free on the '
-             . $link($baseUrl . '?action=whitelist', 'Whitelist page')
-             . ' (CAPTCHA + rate limits apply, the registrant\'s IP is stored to fight abuse). Registered hashes may '
-             . 'be removed or banned after an abuse report. Unregistered hashes receive an empty / "not authorized" '
-             . 'answer.';
+        $L[] = $t('info.a_wl', ['url' => $baseUrl . '?action=whitelist']);
     }
     $L[] = '';
-    $L[] = $h2('What data does the tracker store?');
+    $L[] = $h2($t('info.q_data'));
     $L[] = '';
-    $L[] = 'The tracker only stores active swarms — a list of info_hashes and their associated peers (IP + port). '
-         . 'This data is temporary and removed when a peer\'s session expires. No files, torrent names, or content '
-         . 'are stored.';
+    $L[] = $t('info.a_data');
     $L[] = '';
-    $L[] = $h2('Frequently Asked Questions');
+    $L[] = $h2($t('info.faq_head'));
     $L[] = '';
     $faq = [
-        ['Can you remove an info_hash?', $wl
-            ? 'Yes — in whitelist mode a hash can be removed from (or banned on) the whitelist, after which the '
-              . 'tracker stops answering announces for it. Use the report form.'
-            : 'The tracker automatically removes swarms when all peers\' sessions expire. We do not control which '
-              . 'torrents are tracked.'],
-        ['Can you see what content is behind a hash?',
-            'No. An info_hash is merely a SHA1 digest of the torrent\'s metadata. The tracker has no information '
-            . 'about file contents.'],
-        ['Do you keep IP address logs?',
-            'No. We do not keep persistent connection logs. Random IP addresses are inserted into peer lists to '
-            . 'protect privacy.'],
-        ['What should copyright holders do?',
-            'Since the tracker does not store any files or content, copyright holders should contact the indexing '
-            . 'site (e.g., the torrent site), not the tracker. You may, however, submit a report using our form.'],
-        ['Do you have .torrent files?',
-            'No. The tracker does not store .torrent files. It only tracks active peer connections.'],
+        ['info.faq_q1', $wl ? 'info.faq_a1_wl' : 'info.faq_a1_open'],
+        ['info.faq_q2', 'info.faq_a2'],
+        ['info.faq_q3', 'info.faq_a3'],
+        ['info.faq_q4', 'info.faq_a4'],
+        ['info.faq_q5', 'info.faq_a5'],
     ];
     foreach ($faq as [$q, $a]) {
-        $L[] = $b($q);
+        $L[] = $b($t($q));
         $L[] = '';
-        $L[] = $a;
+        $L[] = $t($a);
         $L[] = '';
     }
     return rtrim(implode("\n", $L)) . "\n";

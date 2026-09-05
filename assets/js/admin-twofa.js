@@ -17,7 +17,7 @@
 
     const panel = document.getElementById('tf-panel');
     if (!panel || typeof window.AdminCommon === 'undefined') return;
-    const { apiCall, el, showToast } = window.AdminCommon;
+    const { apiCall, el, showToast, confirmAction } = window.AdminCommon;
 
     let state = null;
     let setup = null;          // the pending secret + codes, while a setup is in progress
@@ -173,7 +173,9 @@
             wrap.appendChild(row('Current code *', ci));
             const btn = el('button', { className: 'btn btn-sm ' + cls, type: 'button' }, [okLabel]);
             btn.addEventListener('click', async () => {
-                if (opName === 'disable' && !window.confirm('Turn two-factor authentication off?\n\nThe secret and every recovery code are deleted. Signing in will need the password alone again.')) return;
+                if (opName === 'disable' && !await confirmAction('Turn two-factor authentication off?',
+                    'The secret and every recovery code are deleted. Signing in will need the password alone again.',
+                    { okLabel: 'Turn it off', danger: true })) return;
                 btn.disabled = true;
                 try {
                     const r = await call(opName, { password: pw.value, code: ci.value });

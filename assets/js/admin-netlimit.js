@@ -137,7 +137,10 @@
         renderMarks();
         renderAdvice();
         renderEgressTune(j);
-        setPps(state.pps);   // repaint the inbound zones now that a fresh measurement is in
+        // Repaint the zones, but NOT the input the operator may be in the middle of. Typing
+        // "4" toward 45000 clamps state.pps to PPS_MIN; the poll then wrote 1000 over the "4"
+        // with the caret at the end, and the next keystrokes appended to the wrong number.
+        setPps(state.pps, ppsFieldBusy());
     }
 
     // A fetch that never settles runs neither the try nor the catch above, so nothing would ever
@@ -736,6 +739,18 @@
         return pps.in_passed || 0;
     }
 
+    /**
+     * Is the operator holding the pps field right now?
+     *
+     * `fromInput` on setPps() already means "do not write the box", so this reuses that flag rather
+     * than adding a second concept. Focus is the honest test: a blurred field is not being edited,
+     * and a focused one is — whatever its value happens to be at this instant.
+     */
+    function ppsFieldBusy() {
+        const el = $('net-pps-input');
+        return !!el && document.activeElement === el;
+    }
+
     function setPps(v, fromInput) {
         state.pps = Math.max(PPS_MIN, Math.min(PPS_MAX, parseInt(v, 10) || PPS_MIN));
         if (!fromInput) $('net-pps-input').value = state.pps;
@@ -808,13 +823,21 @@
         }, [[], [], [], [], []], host);
     }
 
+    // Which chart request is the current one. Switching range twice quickly used to leave the
+    // slower FIRST answer painted over the second, so the chart showed a range the buttons did not.
+    let chartSeq = 0;
+
     async function loadChart(force) {
         if (state.collapsed) return;
         if (!force && document.hidden) return;
         if (!state.chart) state.chart = buildChart();
         if (!state.chart) return;
+        const seq = ++chartSeq;
+        const asked = state.range;
         let j;
-        try { j = await apiCall('admin/net_samples&range=' + encodeURIComponent(state.range)); } catch { return; }
+        try { j = await apiCall('admin/net_samples&range=' + encodeURIComponent(asked)); } catch { return; }
+        // A late answer for a range nobody is looking at any more is thrown away, not drawn.
+        if (seq !== chartSeq) return;
         if (!j || !j.ok) return;
         const s = j.series || {};
         const data = [s.t || []].concat(SERIES.map(def => (s[def.key] || []).map(v => (v == null ? null : Number(v)))));

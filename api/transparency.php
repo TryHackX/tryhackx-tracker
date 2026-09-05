@@ -112,6 +112,9 @@ jsonResponse([
     'success' => true,
     'data' => $pagedData,
     'page' => $page,
+    // The page SIZE, so the client can number rows from a real offset. Without it the last page —
+    // which is short — was numbered from its own row count and started again from a lower number.
+    'per_page' => $perPage,
     'pages' => $totalPages,
     'total' => $totalGroups,
     'aggregates' => $aggregates,

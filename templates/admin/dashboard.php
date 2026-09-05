@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?= sanitize(langCurrent()) ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reports &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
+    <title><?= _h('a.reports.title') ?> &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
@@ -16,16 +16,16 @@
     <div class="admin-container admin-wide">
         <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
         <div class="admin-header">
-            <h2><i class="bi bi-flag"></i> Reports <span class="idx-subtitle">abuse reports, appeals &amp; tracker status</span></h2>
+            <h2><i class="bi bi-flag"></i> <?= _h('a.reports.title') ?> <span class="idx-subtitle"><?= __('a.reports.subtitle') ?></span></h2>
             <?php $current = 'admin'; $navExtra = $svcName !== '' ? __DIR__ . '/_tracker_service.php' : null; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
         <!-- Source Tabs -->
         <div class="source-tabs">
-            <button class="source-tab active" data-source="reports"><i class="bi bi-inbox"></i> Active Reports <span id="reports-badge" class="appeals-count-badge d-hidden"></span></button>
-            <button class="source-tab" data-source="archives"><i class="bi bi-archive"></i> Archives <span id="archives-badge" class="appeals-count-badge d-hidden"></span></button>
-            <button class="source-tab" data-source="appeals"><i class="bi bi-megaphone"></i> Appeals <span id="appeals-badge" class="appeals-count-badge d-hidden"></span></button>
-            <button class="source-tab" data-source="appeal_archives"><i class="bi bi-archive"></i> Appeal Archives</button>
+            <button class="source-tab active" data-source="reports"><i class="bi bi-inbox"></i> <?= _h('a.reports.tab_active') ?> <span id="reports-badge" class="appeals-count-badge d-hidden"></span></button>
+            <button class="source-tab" data-source="archives"><i class="bi bi-archive"></i> <?= _h('a.reports.tab_archives') ?> <span id="archives-badge" class="appeals-count-badge d-hidden"></span></button>
+            <button class="source-tab" data-source="appeals"><i class="bi bi-megaphone"></i> <?= _h('a.reports.tab_appeals') ?> <span id="appeals-badge" class="appeals-count-badge d-hidden"></span></button>
+            <button class="source-tab" data-source="appeal_archives"><i class="bi bi-archive"></i> <?= _h('a.reports.tab_appeal_archives') ?></button>
             <!-- The page links that used to sit here are gone. They predate the shared header bar, which
                  now lists every page from the same adminNavItems() list; keeping both meant Reports was
                  the only page showing its navigation twice, once in each row. Every other page's tab bar
@@ -38,19 +38,19 @@
                 <div class="toolbar-search">
                     <span class="toolbar-search-icon"><i class="bi bi-search"></i></span>
                     <div class="search-input-wrap">
-                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="search-input" placeholder="Search name, company, entity, email, hash, link...">
-                        <button type="button" class="search-clear-btn" id="search-clear" title="Clear search"><i class="bi bi-x-lg"></i></button>
+                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="search-input" placeholder="<?= _h('a.reports.search_ph') ?>">
+                        <button type="button" class="search-clear-btn" id="search-clear" title="<?= _h('search.clear') ?>"><i class="bi bi-x-lg"></i></button>
                     </div>
                     <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="filter-status">
-                        <option value="all">All statuses</option>
-                        <option value="pending">Awaiting Review</option>
-                        <option value="reviewed">Reviewed</option>
-                        <option value="blocked">Blocked</option>
+                        <option value="all"><?= _h('a.reports.f_all') ?></option>
+                        <option value="pending"><?= _h('status.b_pending') ?></option>
+                        <option value="reviewed"><?= _h('status.b_checked') ?></option>
+                        <option value="blocked"><?= _h('status.b_blocked') ?></option>
                     </select>
                 </div>
                 <div class="toolbar-right">
                     <span id="total-count" class="text-muted"></span>
-                    <button class="btn btn-sm btn-outline-warning" id="btn-archive-all"><i class="bi bi-archive"></i> Archive reviewed</button>
+                    <button class="btn btn-sm btn-outline-warning" id="btn-archive-all"><i class="bi bi-archive"></i> <?= _h('a.reports.archive_reviewed') ?></button>
                 </div>
             </div>
         </div>
@@ -61,17 +61,17 @@
                     <col class="dash-c-id"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">
                 </colgroup>
                 <thead><tr>
-                    <th class="sortable" data-sort="id">ID <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="name">Name <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="email">Email <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="company">Company <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="representative">Entity <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="object">Object <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="hash">Info Hash <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="ip">IP <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable col-badge" data-sort="blocked">Status <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="date">Date <i class="bi bi-arrow-down sort-icon active"></i></th>
-                    <th class="th-actions">Actions</th>
+                    <th class="sortable" data-sort="id"><?= _h('a.reports.c_id') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="name"><?= _h('a.reports.c_name') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="email"><?= _h('a.reports.c_email') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="company"><?= _h('a.reports.c_company') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="representative"><?= _h('a.reports.c_entity') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="object"><?= _h('a.reports.c_object') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="hash"><?= _h('status.f_hash') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="ip"><?= _h('a.reports.c_ip') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable col-badge" data-sort="blocked"><?= _h('status.f_status') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="date"><?= _h('a.reports.c_date') ?> <i class="bi bi-arrow-down sort-icon active"></i></th>
+                    <th class="th-actions"><?= _h('a.reports.c_actions') ?></th>
                 </tr></thead>
                 <tbody id="reports-body"></tbody>
             </table>
@@ -84,27 +84,27 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
-                    <h5 class="modal-title"><i class="bi bi-file-earmark-text"></i> Report Details</h5>
+                    <h5 class="modal-title"><i class="bi bi-file-earmark-text"></i> <?= _h('a.reports.m_title') ?></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div id="modal-report-info" class="mb-3"></div>
                     <div class="d-flex flex-wrap gap-2 mb-3 justify-content-center" id="modal-actions">
-                        <button class="btn btn-outline-danger btn-sm" id="modal-block"><i class="bi bi-slash-circle"></i> Block hash</button>
-                        <button class="btn btn-outline-info btn-sm" id="modal-unblock" style="display:none"><i class="bi bi-unlock"></i> Unblock hash</button>
-                        <button class="btn btn-outline-warning btn-sm" id="modal-archive"><i class="bi bi-archive"></i> Archive (no action)</button>
-                        <button class="btn btn-outline-success btn-sm" id="modal-restore" style="display:none"><i class="bi bi-arrow-counterclockwise"></i> Restore to active</button>
-                        <button class="btn btn-outline-danger btn-sm" id="modal-delete-perm"><i class="bi bi-trash"></i> Delete permanently</button>
+                        <button class="btn btn-outline-danger btn-sm" id="modal-block"><i class="bi bi-slash-circle"></i> <?= _h('a.reports.m_block') ?></button>
+                        <button class="btn btn-outline-info btn-sm" id="modal-unblock" style="display:none"><i class="bi bi-unlock"></i> <?= _h('a.reports.m_unblock') ?></button>
+                        <button class="btn btn-outline-warning btn-sm" id="modal-archive"><i class="bi bi-archive"></i> <?= _h('a.reports.m_archive') ?></button>
+                        <button class="btn btn-outline-success btn-sm" id="modal-restore" style="display:none"><i class="bi bi-arrow-counterclockwise"></i> <?= _h('a.reports.m_restore') ?></button>
+                        <button class="btn btn-outline-danger btn-sm" id="modal-delete-perm"><i class="bi bi-trash"></i> <?= _h('a.reports.m_delete_perm') ?></button>
                     </div>
                     <div id="modal-blacklist-warning" class="mb-2" style="display:none"></div>
                     <hr class="border-secondary">
                     <div class="text-center" id="modal-email-section">
-                        <h6><i class="bi bi-envelope"></i> Send custom message to reporter</h6>
-                        <p class="email-hint">Your message will be sent in a professional email template along with the full report details.</p>
+                        <h6><i class="bi bi-envelope"></i> <?= _h('a.reports.m_email_head') ?></h6>
+                        <p class="email-hint"><?= _h('a.reports.m_email_hint') ?></p>
                     </div>
-                    <textarea class="form-control bg-dark text-light border-secondary" id="modal-email-msg" rows="3" placeholder="e.g. We have reviewed your report and would like to request additional documentation..."></textarea>
+                    <textarea class="form-control bg-dark text-light border-secondary" id="modal-email-msg" rows="3" placeholder="<?= _h('a.reports.m_email_ph') ?>"></textarea>
                     <div class="text-center mt-2">
-                        <button class="btn btn-primary btn-sm" id="modal-send-email"><i class="bi bi-send"></i> Send Message</button>
+                        <button class="btn btn-primary btn-sm" id="modal-send-email"><i class="bi bi-send"></i> <?= _h('a.reports.m_send') ?></button>
                     </div>
                     <div id="modal-alert" class="mt-2"></div>
                 </div>
@@ -117,21 +117,21 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
-                    <h5 class="modal-title"><i class="bi bi-megaphone"></i> Appeal Details</h5>
+                    <h5 class="modal-title"><i class="bi bi-megaphone"></i> <?= _h('a.reports.ap_title') ?></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div id="appeal-modal-info" class="mb-3"></div>
                     <div id="appeal-modal-actions" class="d-flex flex-wrap gap-2 mb-3 justify-content-center">
-                        <button class="btn btn-outline-success btn-sm" id="appeal-accept"><i class="bi bi-check-circle"></i> Accept Appeal</button>
-                        <button class="btn btn-outline-danger btn-sm" id="appeal-reject"><i class="bi bi-x-circle"></i> Reject Appeal</button>
-                        <button class="btn btn-outline-warning btn-sm" id="appeal-restore" style="display:none"><i class="bi bi-arrow-counterclockwise"></i> Restore to Active</button>
+                        <button class="btn btn-outline-success btn-sm" id="appeal-accept"><i class="bi bi-check-circle"></i> <?= _h('a.reports.ap_accept') ?></button>
+                        <button class="btn btn-outline-danger btn-sm" id="appeal-reject"><i class="bi bi-x-circle"></i> <?= _h('a.reports.ap_reject') ?></button>
+                        <button class="btn btn-outline-warning btn-sm" id="appeal-restore" style="display:none"><i class="bi bi-arrow-counterclockwise"></i> <?= _h('a.reports.ap_restore') ?></button>
                     </div>
                     <hr class="border-secondary" id="appeal-response-hr">
                     <div class="text-center" id="appeal-response-header">
-                        <h6><i class="bi bi-reply"></i> Admin Response (sent to appellant)</h6>
+                        <h6><i class="bi bi-reply"></i> <?= _h('a.reports.ap_resp_head') ?></h6>
                     </div>
-                    <textarea class="form-control bg-dark text-light border-secondary" id="appeal-response-msg" rows="3" placeholder="Optional response message to the appellant..."></textarea>
+                    <textarea class="form-control bg-dark text-light border-secondary" id="appeal-response-msg" rows="3" placeholder="<?= _h('a.reports.ap_resp_ph') ?>"></textarea>
                     <div id="appeal-modal-alert" class="mt-2"></div>
                 </div>
             </div>
@@ -145,8 +145,8 @@
                 <div class="modal-body text-center py-4">
                     <p id="confirmModal-msg" class="text-light mb-3 confirm-msg"></p>
                     <div class="d-flex justify-content-center gap-2">
-                        <button class="btn btn-sm btn-outline-danger" id="confirmModal-cancel"><i class="bi bi-x-lg"></i> Cancel</button>
-                        <button class="btn btn-sm btn-success" id="confirmModal-ok"><i class="bi bi-check-lg"></i> Confirm</button>
+                        <button class="btn btn-sm btn-outline-danger" id="confirmModal-cancel"><i class="bi bi-x-lg"></i> <?= _h('common.cancel') ?></button>
+                        <button class="btn btn-sm btn-success" id="confirmModal-ok"><i class="bi bi-check-lg"></i> <?= _h('a.reports.confirm') ?></button>
                     </div>
                 </div>
             </div>
@@ -158,23 +158,23 @@
         <div class="modal-dialog">
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
-                    <h5 class="modal-title"><i class="bi bi-trash text-danger"></i> Permanent Deletion</h5>
+                    <h5 class="modal-title"><i class="bi bi-trash text-danger"></i> <?= _h('a.reports.del_title') ?></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-warning mb-3" style="font-size:0.9rem;"><strong>Warning:</strong> This will permanently delete the report and all its dependencies (sent emails, appeals) from the database. It will not be archived and will not appear in the transparency report.</p>
+                    <p class="text-warning mb-3" style="font-size:0.9rem;"><?= __('a.reports.del_warn') ?></p>
                     <form id="delete-perm-form">
                         <div class="mb-3">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;">Admin Password *</label>
+                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.reports.admin_pass') ?></label>
                             <input type="password" class="form-control bg-dark text-light border-secondary" id="del-password" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;">Reason for deletion (Sent to reporter) <small style="color: #a0a0b0;">(Optional)</small></label>
-                            <textarea class="form-control bg-dark text-light border-secondary" id="del-reason" rows="3" placeholder="e.g. This was a duplicate test report."></textarea>
+                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= __('a.reports.del_reason') ?></label>
+                            <textarea class="form-control bg-dark text-light border-secondary" id="del-reason" rows="3" placeholder="<?= _h('a.reports.del_reason_ph') ?>"></textarea>
                         </div>
                         <div class="d-flex justify-content-center gap-2 mt-3">
-                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-danger btn-sm"><i class="bi bi-trash"></i> Confirm Deletion</button>
+                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                            <button type="submit" class="btn btn-danger btn-sm"><i class="bi bi-trash"></i> <?= _h('a.reports.del_confirm') ?></button>
                         </div>
                     </form>
                     <div id="del-modal-alert" class="mt-2"></div>
@@ -186,9 +186,9 @@
     <?php if (isCaptchaEnabled($cfg, 'login')): ?>
     <div class="captcha-overlay" id="captcha-overlay">
         <div class="captcha-box">
-            <p>Please verify you are human</p>
+            <p><?= _h('captcha.verify_human') ?></p>
             <div id="captcha-widget" class="captcha-widget"></div>
-            <div class="captcha-actions"><button type="button" class="btn btn-secondary captcha-cancel" id="captcha-cancel">Cancel</button></div>
+            <div class="captcha-actions"><button type="button" class="btn btn-secondary captcha-cancel" id="captcha-cancel"><?= _h('common.cancel') ?></button></div>
         </div>
     </div>
     <?php endif; ?>
@@ -203,20 +203,20 @@
         <div class="modal-dialog">
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
-                    <h5 class="modal-title"><i class="bi bi-arrow-clockwise text-warning"></i> Restart Tracker Service</h5>
+                    <h5 class="modal-title"><i class="bi bi-arrow-clockwise text-warning"></i> <?= _h('a.reports.restart_title') ?></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-light mb-2" style="font-size:0.9rem;">This runs <code>systemctl restart <?= sanitize($svcName) ?></code> on the server. The tracker will be briefly unavailable while it reloads (picking up the latest blacklist). Enter your admin password to confirm.</p>
+                    <p class="text-light mb-2" style="font-size:0.9rem;"><?= __('a.reports.restart_body', ['svc' => sanitize($svcName)]) ?></p>
                     <div id="restart-warn-list" class="mb-2"></div>
                     <form id="restart-tracker-form">
                         <div class="mb-3">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;">Admin Password *</label>
+                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.reports.admin_pass') ?></label>
                             <input type="password" class="form-control bg-dark text-light border-secondary" id="restart-password" required>
                         </div>
                         <div class="d-flex justify-content-center gap-2 mt-3">
-                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-warning btn-sm text-dark"><i class="bi bi-arrow-clockwise"></i> Restart now</button>
+                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                            <button type="submit" class="btn btn-warning btn-sm text-dark"><i class="bi bi-arrow-clockwise"></i> <?= _h('a.reports.restart_now') ?></button>
                         </div>
                     </form>
                     <div id="restart-modal-alert" class="mt-2"></div>
@@ -230,20 +230,20 @@
         <div class="modal-dialog">
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
-                    <h5 class="modal-title"><i class="bi bi-arrow-clockwise text-info"></i> Reload Tracker Blacklist</h5>
+                    <h5 class="modal-title"><i class="bi bi-arrow-clockwise text-info"></i> <?= _h('a.reports.reload_title') ?></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-light mb-2" style="font-size:0.9rem;">This runs <code>systemctl reload <?= sanitize($svcName) ?></code> on the server, sending it a <strong>SIGHUP</strong> so it re-reads its white/blacklist <strong>without downtime</strong> (no dropped connections). Enter your admin password to confirm.</p>
+                    <p class="text-light mb-2" style="font-size:0.9rem;"><?= __('a.reports.reload_body', ['svc' => sanitize($svcName)]) ?></p>
                     <div id="reload-warn-list" class="mb-2"></div>
                     <form id="reload-tracker-form">
                         <div class="mb-3">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;">Admin Password *</label>
+                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.reports.admin_pass') ?></label>
                             <input type="password" class="form-control bg-dark text-light border-secondary" id="reload-password" required>
                         </div>
                         <div class="d-flex justify-content-center gap-2 mt-3">
-                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-info btn-sm text-dark"><i class="bi bi-arrow-clockwise"></i> Reload now</button>
+                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                            <button type="submit" class="btn btn-info btn-sm text-dark"><i class="bi bi-arrow-clockwise"></i> <?= _h('a.reports.reload_now') ?></button>
                         </div>
                     </form>
                     <div id="reload-modal-alert" class="mt-2"></div>

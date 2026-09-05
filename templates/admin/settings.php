@@ -1648,10 +1648,10 @@
                             <tr>
                                 <th>Language</th>
                                 <th>Completeness <span class="wl-small text-muted">vs <span id="lang-ref"></span></span></th>
-                                <th title="Exists for visitors at all">Offered</th>
-                                <th title="Shown by the header switcher">In the switcher</th>
-                                <th title="A user may pin it to their account; also what automatic matching may pick">For accounts</th>
-                                <th></th>
+                                <th class="lang-col-sw" title="Exists for visitors at all">Offered</th>
+                                <th class="lang-col-sw" title="Shown by the header switcher">In the switcher</th>
+                                <th class="lang-col-sw" title="A user may pin it to their account; also what automatic matching may pick">For accounts</th>
+                                <th class="lang-col-acts"></th>
                             </tr>
                         </thead>
                         <tbody id="lang-body"></tbody>
@@ -1721,35 +1721,58 @@
                     a saved page does not, and <strong>Restore</strong> brings back the built-in one written for how the tracker
                     is configured at that moment.
                 </p>
+                <p class="settings-hint mb-2">
+                    <strong>One version per language.</strong> A visitor gets the version for their language; where none is
+                    published, they get the one for the site's default language, then English, then any other version that
+                    exists &mdash; and only if <em>nothing</em> is written do they get the built-in page.
+                    That order is deliberate: terms you actually wrote must never be quietly replaced by boilerplate because
+                    one translation is missing.
+                </p>
                 <p class="settings-hint mb-3">
                     <strong>Markdown is offered first</strong> for these two, and not by taste: the renderer has real headings in
                     Markdown (<code>#</code>&hellip;<code>######</code>) and none at all in BBCode, where a heading can only be a
                     larger bold line. A Terms page is mostly headings and numbered lists.
                 </p>
                 <div class="row g-3" id="pc-rows"><?php
+                $pcAll   = function_exists('pageContentAll') ? pageContentAll($db) : [];
+                $pcLangs = function_exists('langAvailable') ? langAvailable() : ['en' => 'English'];
                 foreach (pageContentCatalog() as $pcKey => $pcMeta):
-                    $pcRow = function_exists('pageContentGet') ? pageContentGet($db, $pcKey) : null;
+                    $pcRows = $pcAll[$pcKey] ?? [];
+                    $pcLive = count(array_filter($pcRows, fn($r) => $r['enabled']));
                 ?>
                     <div class="col-md-6">
                         <div class="pc-card" data-page="<?= sanitize($pcKey) ?>">
                             <div class="pc-head">
                                 <span class="pc-title"><?= sanitize($pcMeta['label']) ?></span>
-                                <?php if ($pcRow && $pcRow['enabled']): ?>
+                                <?php if ($pcLive): ?>
                                     <span class="wl-badge wl-b-ok">your version, live</span>
-                                <?php elseif ($pcRow): ?>
+                                <?php elseif ($pcRows): ?>
                                     <span class="wl-badge wl-b-warn">draft &mdash; built-in page is live</span>
                                 <?php else: ?>
                                     <span class="wl-badge wl-b-muted">built-in</span>
                                 <?php endif; ?>
                             </div>
                             <div class="pc-meta">
-                                <?php if ($pcRow): ?>
-                                    <?= sanitize(ucfirst((string)$pcRow['format'])) ?> &middot;
-                                    last saved <?= sanitize((string)$pcRow['updated_at']) ?>
-                                    <?= $pcRow['updated_by'] ? ' by ' . sanitize((string)$pcRow['updated_by']) : '' ?>
+                                <?php if ($pcRows): ?>
+                                    <?= count($pcRows) ?> of <?= count($pcLangs) ?> language<?= count($pcLangs) === 1 ? '' : 's' ?> written.
                                 <?php else: ?>
                                     Never edited &mdash; visitors see the page that ships with the panel.
                                 <?php endif; ?>
+                            </div>
+                            <?php // One chip per installed language: click it to edit that language directly, and
+                                  // the dot says whether it is live, a draft, or not written yet. ?>
+                            <div class="pc-langrow">
+                                <?php foreach ($pcLangs as $pcCode => $pcName):
+                                    $pcOne = $pcRows[$pcCode] ?? null;
+                                    $pcSt  = $pcOne ? ($pcOne['enabled'] ? 'live' : 'draft') : 'none';
+                                ?>
+                                <button type="button" class="pc-lang pc-edit" data-page="<?= sanitize($pcKey) ?>"
+                                        data-lang="<?= sanitize($pcCode) ?>"
+                                        title="<?= sanitize($pcName) ?> &mdash; <?= $pcSt === 'live' ? 'your version is live' : ($pcSt === 'draft' ? 'saved as a draft' : 'no version written yet') ?>">
+                                    <span class="pc-lang-code"><?= sanitize(strtoupper($pcCode)) ?></span>
+                                    <span class="pc-lang-dot pc-dot-<?= $pcSt ?>"></span>
+                                </button>
+                                <?php endforeach; ?>
                             </div>
                             <div class="pc-acts">
                                 <button type="button" class="btn btn-sm btn-outline-info pc-edit" data-page="<?= sanitize($pcKey) ?>">
@@ -2680,10 +2703,22 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                         <span class="lang-step-num">2</span>
                         <div class="lang-step-body">
                             <h6>Which language is it</h6>
-                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary lang-code-input"
-                                   id="lu-code" maxlength="3" autocomplete="off" spellcheck="false" placeholder="de">
-                            <div class="wl-small" id="lu-code-name"></div>
-                            <div class="lang-suggest" id="lu-suggest"></div>
+                            <?php // The panel's own dropdown skin (.wl-dd-menu), the one the whitelist and index
+                                  // toolbars use. A scrollable list beats a wall of chips: it is ordered, it is
+                                  // keyboard-navigable, and it does not grow the dialog as languages are added. ?>
+                            <div class="lang-pick">
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                                            id="lu-pick" data-bs-toggle="dropdown" data-bs-auto-close="true" aria-expanded="false">
+                                        <span id="lu-pick-label">Choose a language&hellip;</span>
+                                    </button>
+                                    <ul class="dropdown-menu wl-dd-menu lang-dd-scroll" id="lu-menu" aria-labelledby="lu-pick"></ul>
+                                </div>
+                                <span class="wl-small text-muted">or a code:</span>
+                                <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary lang-code-input"
+                                       id="lu-code" maxlength="3" autocomplete="off" spellcheck="false" placeholder="de">
+                            </div>
+                            <div class="wl-small mt-1" id="lu-code-name"></div>
                         </div>
                     </div>
                     <div class="lang-step">
@@ -2746,6 +2781,8 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
+                    <div class="pc-langs" id="pc-langs"></div>
+                    <div class="pc-serving wl-small" id="pc-serving"></div>
                     <div class="pc-bar">
                         <div class="pc-bar-left">
                             <label class="form-label wl-small mb-0" for="pc-format">Format</label>
@@ -3323,11 +3360,11 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 el.innerHTML = '<span class="text-success">&#10003; The directory works and the panel can make a backup here.</span>'
                     + (sug.length ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             } else {
-                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || ['Test failed']).map(esc).join('<br>') + '</span>'
+                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || [<?= json_encode(__('settings.js_test_failed')) ?>]).map(esc).join('<br>') + '</span>'
                     + (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             }
         } catch {
-            el.innerHTML = '<span class="text-danger">Network error</span>';
+            el.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -3342,26 +3379,26 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const el = document.getElementById('netlimit-result');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
-        el.innerHTML = '<span class="text-info">Checking the firewall helper&hellip;</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_testing')) ?>;
+        el.innerHTML = '<span class="text-info">' + <?= json_encode(__('settings.js_checking_fw_helper')) ?> + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/net_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const json = await res.json();
             const sug = (json.suggestions || []).map(esc);
             const meta = '<br><small style="color:#a0a0b0;">'
-                + (json.command ? 'Command: <code>' + esc(json.command) + '</code><br>' : '')
-                + (json.output ? 'Output: <code>' + esc(json.output) + '</code><br>' : '')
-                + 'OS: ' + esc(json.os || '') + ' | PHP user: ' + esc(json.php_user || '')
-                + (json.cpus ? ' | CPU cores: ' + esc(String(json.cpus)) : '') + '</small>';
+                + (json.command ? <?= json_encode(__('settings.js_meta_command')) ?> + '<code>' + esc(json.command) + '</code><br>' : '')
+                + (json.output ? <?= json_encode(__('settings.js_meta_output')) ?> + '<code>' + esc(json.output) + '</code><br>' : '')
+                + <?= json_encode(__('settings.js_meta_os')) ?> + esc(json.os || '') + ' | ' + <?= json_encode(__('settings.js_meta_php_user')) ?> + esc(json.php_user || '')
+                + (json.cpus ? ' | ' + <?= json_encode(__('settings.js_meta_cpu_cores')) ?> + esc(String(json.cpus)) : '') + '</small>';
             if (json.ok) {
-                el.innerHTML = '<span class="text-success">&#10003; The panel can load and remove the inbound limit.</span>'
+                el.innerHTML = '<span class="text-success">&#10003; ' + <?= json_encode(__('settings.js_netlimit_ok')) ?> + '</span>'
                     + (sug.length ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             } else {
-                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || ['Test failed']).map(esc).join('<br>') + '</span>'
+                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || [<?= json_encode(__('settings.js_test_failed')) ?>]).map(esc).join('<br>') + '</span>'
                     + (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             }
         } catch {
-            el.innerHTML = '<span class="text-danger">Network error</span>';
+            el.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -3375,26 +3412,26 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const box = document.getElementById('ot-test-result');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
-        box.innerHTML = '<span class="text-info">Asking the helper&hellip;</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_testing')) ?>;
+        box.innerHTML = '<span class="text-info">' + <?= json_encode(__('settings.js_asking_helper')) ?> + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/ot_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
             const meta = '<br><small style="color:#a0a0b0;">'
-                + (j.unit ? 'Unit: <code>' + esc(j.unit) + '</code> | ' : '')
-                + (j.cpus ? 'cores: ' + esc(String(j.cpus)) + ' | ' : '')
-                + 'drop-in dir: <code>' + esc(j.dropin_dir || '?') + '</code>'
-                + (j.dropin_writable === false ? ' <span class="text-warning">(read-only for this process)</span>' : '')
+                + (j.unit ? <?= json_encode(__('settings.js_meta_unit')) ?> + '<code>' + esc(j.unit) + '</code> | ' : '')
+                + (j.cpus ? <?= json_encode(__('settings.js_meta_cores')) ?> + esc(String(j.cpus)) + ' | ' : '')
+                + <?= json_encode(__('settings.js_meta_dropin_dir')) ?> + '<code>' + esc(j.dropin_dir || '?') + '</code>'
+                + (j.dropin_writable === false ? ' ' + <?= json_encode(__('settings.js_dropin_readonly')) ?> : '')
                 + '</small>';
             if (j.ok) {
-                box.innerHTML = '<span class="text-success">&#10003; The panel can read the unit and write its own drop-in.</span>'
+                box.innerHTML = '<span class="text-success">&#10003; ' + <?= json_encode(__('settings.js_ot_test_ok')) ?> + '</span>'
                     + (j.hint ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + esc(j.hint) + '</small>' : '') + meta;
             } else {
-                box.innerHTML = '<span class="text-danger">&#10007; ' + esc(j.error || 'Test failed') + '</span>'
+                box.innerHTML = '<span class="text-danger">&#10007; ' + esc(j.error || <?= json_encode(__('settings.js_test_failed')) ?>) + '</span>'
                     + (j.hint ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + esc(j.hint) + '</small>' : '') + meta;
             }
         } catch {
-            box.innerHTML = '<span class="text-danger">Network error</span>';
+            box.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -3409,12 +3446,12 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const box = document.getElementById('cluster-test-result');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
-        box.innerHTML = '<span class="text-info">Asking the helper&hellip;</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_testing')) ?>;
+        box.innerHTML = '<span class="text-info">' + <?= json_encode(__('settings.js_asking_helper')) ?> + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/ot_cluster_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
-            box.innerHTML = renderTestResult(j, 'The panel can manage extra instances from here.');
+            box.innerHTML = renderTestResult(j, <?= json_encode(__('settings.js_cluster_test_ok')) ?>);
             let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {
@@ -3430,7 +3467,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             }
             if (html) box.innerHTML = html;
         } catch {
-            box.innerHTML = '<span class="text-danger">Network error</span>';
+            box.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -3446,12 +3483,12 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const box = document.getElementById('sysctl-test-result');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing...';
-        box.innerHTML = '<span class="text-info">Asking the helper&hellip;</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_testing')) ?>;
+        box.innerHTML = '<span class="text-info">' + <?= json_encode(__('settings.js_asking_helper')) ?> + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/sysctl_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
-            box.innerHTML = renderTestResult(j, 'The panel can reach the kernel-buffer helper.');
+            box.innerHTML = renderTestResult(j, <?= json_encode(__('settings.js_sysctl_test_ok')) ?>);
             let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {
@@ -3467,7 +3504,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             }
             if (html) box.innerHTML = html;
         } catch {
-            box.innerHTML = '<span class="text-danger">Network error</span>';
+            box.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -3487,9 +3524,9 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
 
     function dfRowHtml() {
         return `<div class="row g-2 mb-2 donation-field-row">
-            <div class="col-md-3"><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Label" data-df="label"></div>
-            <div class="col"><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Address, hash, or URL" data-df="value"></div>
-            <div class="col-auto"><button type="button" class="btn btn-sm btn-outline-danger donation-field-remove" title="Remove"><i class="bi bi-x-lg"></i></button></div>
+            <div class="col-md-3"><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="<?= _h('settings.donation_field_label_ph') ?>" data-df="label"></div>
+            <div class="col"><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="<?= _h('settings.donation_field_value_ph') ?>" data-df="value"></div>
+            <div class="col-auto"><button type="button" class="btn btn-sm btn-outline-danger donation-field-remove" title="<?= _h('settings.donation_field_remove_title') ?>"><i class="bi bi-x-lg"></i></button></div>
         </div>`;
     }
 
@@ -3523,11 +3560,11 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const note = row.querySelector('[data-sched-note]');
         from.disabled = to.disabled = (kind !== 'window');
         if (kind === 'window' && from.value && to.value) {
-            note.textContent = to.value <= from.value ? 'ends next day at ' + to.value : 'same day';
+            note.textContent = to.value <= from.value ? <?= json_encode(__('settings.sched_ends_next_day_at')) ?> + to.value : <?= json_encode(__('settings.sched_same_day')) ?>;
         } else if (kind === 'window') {
-            note.textContent = 'set both times';
+            note.textContent = <?= json_encode(__('settings.sched_set_both_times')) ?>;
         } else {
-            note.textContent = kind === 'all' ? 'whitelist 00:00–24:00' : 'open (blacklist) mode';
+            note.textContent = kind === 'all' ? <?= json_encode(__('settings.sched_all_day')) ?> : <?= json_encode(__('settings.sched_open_mode')) ?>;
         }
     }
     function collectSchedule() {
@@ -3571,10 +3608,10 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 // switching the tracker mode writes a row, it does not move the symlinks. That is a
                 // warning, not an error, and it must not be dressed up as a success and forgotten.
                 if (json.warning) showToast('error', json.warning);
-                else showToast('success', 'Settings saved successfully.');
+                else showToast('success', <?= json_encode(__('settings.js_saved_ok')) ?>);
                 return true;
             } else {
-                const errMsg = json.error || 'Error saving settings';
+                const errMsg = json.error || <?= json_encode(__('settings.js_save_error')) ?>;
                 const confirmAlert = document.getElementById('settings-confirm-alert');
                 const confirmModalEl = document.getElementById('settingsConfirmModal');
                 if (confirmAlert && confirmModalEl.classList.contains('show')) {
@@ -3593,14 +3630,14 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             const confirmAlert = document.getElementById('settings-confirm-alert');
             const confirmModalEl = document.getElementById('settingsConfirmModal');
             if (confirmAlert && confirmModalEl.classList.contains('show')) {
-                confirmAlert.innerHTML = '<div class="alert alert-danger py-1 px-2 modal-alert-sm">Network error.</div>';
+                confirmAlert.innerHTML = '<div class="alert alert-danger py-1 px-2 modal-alert-sm">' + <?= json_encode(__('settings.js_network_error')) ?> + '</div>';
                 setTimeout(() => {
                     const alertDiv = confirmAlert.querySelector('.modal-alert-sm');
                     if (alertDiv) alertDiv.classList.add('alert-fade');
                 }, 4500);
                 setTimeout(() => confirmAlert.innerHTML = '', 5000);
             } else {
-                showToast('error', 'Network error.');
+                showToast('error', <?= json_encode(__('settings.js_network_error')) ?>);
             }
             return false;
         }
@@ -3669,7 +3706,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const btn = e.target.querySelector('button[type="submit"]');
         const origHtml = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_saving')) ?>;
 
         const success = await saveSettingsSubmit(settingsPayloadToSubmit);
         btn.disabled = false;
@@ -3701,34 +3738,34 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const confirm = form.confirm_password.value;
 
         if (!current) {
-            showToast('error', 'Current password is required.');
+            showToast('error', <?= json_encode(__('settings.js_current_password_required')) ?>);
             return;
         }
 
         if (newPass && newPass !== confirm) {
-            showToast('error', 'New passwords do not match.');
+            showToast('error', <?= json_encode(__('settings.js_passwords_mismatch')) ?>);
             return;
         }
 
         if (newPass) {
             if (newPass.length < 10) {
-                showToast('error', 'New password must be at least 10 characters long.');
+                showToast('error', <?= json_encode(__('settings.js_password_too_short')) ?>);
                 return;
             }
             if (!/[a-z]/.test(newPass)) {
-                showToast('error', 'New password must contain at least one lowercase letter.');
+                showToast('error', <?= json_encode(__('settings.js_password_need_lower')) ?>);
                 return;
             }
             if (!/[A-Z]/.test(newPass)) {
-                showToast('error', 'New password must contain at least one uppercase letter.');
+                showToast('error', <?= json_encode(__('settings.js_password_need_upper')) ?>);
                 return;
             }
             if (!/[0-9]/.test(newPass)) {
-                showToast('error', 'New password must contain at least one digit.');
+                showToast('error', <?= json_encode(__('settings.js_password_need_digit')) ?>);
                 return;
             }
             if (!/[^a-zA-Z0-9]/.test(newPass)) {
-                showToast('error', 'New password must contain at least one special character.');
+                showToast('error', <?= json_encode(__('settings.js_password_need_special')) ?>);
                 return;
             }
         }
@@ -3740,7 +3777,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const wantEmail = emailNow !== null && emailNow !== ADMIN_EMAIL_CURRENT;
         const wantCreds = username !== ADMIN_USERNAME_CURRENT || !!newPass;
         if (!wantCreds && !wantEmail) {
-            showToast('error', 'Nothing to change.');
+            showToast('error', <?= json_encode(__('settings.js_nothing_to_change')) ?>);
             return;
         }
 
@@ -3755,7 +3792,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
 
         const saveBtn = form.querySelector('button[type="submit"]');
         const btnHtml = saveBtn ? saveBtn.innerHTML : '';
-        if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving…'; }
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_saving_ellipsis')) ?>; }
         try {
             let ok = true;
             if (wantCreds) {
@@ -3763,24 +3800,24 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 if (newPass) payload.new_password = newPass;
                 const json = await post('admin/change_password', payload);
                 if (json.success) {
-                    showToast('success', json.message || 'Saved successfully.');
+                    showToast('success', json.message || <?= json_encode(__('settings.js_saved_short')) ?>);
                     ADMIN_USERNAME_CURRENT = username;
                 } else {
                     ok = false;
-                    showToast('error', json.error || 'Error');
+                    showToast('error', json.error || <?= json_encode(__('settings.js_error')) ?>);
                 }
             }
             if (ok && wantEmail) {
                 const json = await post('admin/account_email', { current_password: current, email: emailNow });
                 if (json.success) {
-                    showToast('success', json.message || 'Email change started.');
+                    showToast('success', json.message || <?= json_encode(__('settings.js_email_change_started')) ?>);
                     // the address only really moves once the mailboxes confirm it, so keep showing
                     // the stored one until then
                     if (json.stage === 'done_direct') ADMIN_EMAIL_CURRENT = emailNow;
                     else emailField.value = ADMIN_EMAIL_CURRENT;
                 } else {
                     ok = false;
-                    showToast('error', json.error || 'Error');
+                    showToast('error', json.error || <?= json_encode(__('settings.js_error')) ?>);
                     emailField.value = ADMIN_EMAIL_CURRENT;
                 }
             }
@@ -3790,7 +3827,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 form.confirm_password.value = '';
             }
         } catch {
-            showToast('error', 'Network error.');
+            showToast('error', <?= json_encode(__('settings.js_network_error')) ?>);
         } finally {
             if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = btnHtml; }
         }
@@ -3808,14 +3845,14 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             });
             const json = await res.json();
             if (json.success) {
-                showToast('success', json.message || 'Cancelled.');
+                showToast('success', json.message || <?= json_encode(__('settings.js_cancelled')) ?>);
                 document.getElementById('admin-email-pending')?.remove();
             } else {
-                showToast('error', json.error || 'Error');
+                showToast('error', json.error || <?= json_encode(__('settings.js_error')) ?>);
                 btn.disabled = false;
             }
         } catch {
-            showToast('error', 'Network error.');
+            showToast('error', <?= json_encode(__('settings.js_network_error')) ?>);
             btn.disabled = false;
         }
     });

@@ -44,9 +44,11 @@ a:visited { color: var(--link-visited); }
 a:hover { opacity: 0.8; text-decoration: underline; }
 
 /* === Navigation === */
+/* One child now (`.nav-links`, which carries the switcher too), so `space-between` has nothing
+   to space and `center` is what it should always have been. */
 .main-nav {
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
     padding: 0.75rem 0;
     margin-bottom: 2rem;
@@ -56,18 +58,21 @@ a:hover { opacity: 0.8; text-decoration: underline; }
 }
 
 .nav-links { display: flex; gap: 0.25rem; align-items: center; flex-wrap: wrap; justify-content: center; }
-.nav-links a { padding: 0.25rem 0.5rem; border-radius: var(--radius); color: var(--link); }
+.nav-links a { padding: 0.25rem 0.5rem; border-radius: var(--radius); color: var(--link); white-space: nowrap; }
+/* Row spacing that survives a wrap: without it two wrapped lines sit on top of each other. */
+.nav-links { row-gap: 0.15rem; }
 .nav-links a:visited { color: var(--link); }
 .nav-links a.active { background: var(--bg-code); color: var(--accent); }
 .nav-links a.active:visited { color: var(--accent); }
 .nav-links .sep { color: var(--text-muted); font-size: 0.8rem; }
 
 /* === Language switcher ===
-   `.main-nav` is already `justify-content: space-between`, and the mobile block near the bottom of
-   this file has carried a `.lang-switch` rule since before there was a switcher to style -- the
-   layout was waiting for this. Codes rather than flags: a flag is a country and a language is not,
-   and "EN" is unambiguous where a Union Jack next to American English is not. */
-.lang-switch { display: flex; gap: 0.2rem; align-items: center; }
+   Codes rather than flags: a flag is a country and a language is not, and "EN" is unambiguous
+   where a Union Jack next to American English is not.
+
+   `inline-flex`, because this lives INSIDE `.nav-links` and has to behave like one more item in
+   that row -- as a block-level flex child it would claim its own line the moment the row wrapped. */
+.lang-switch { display: inline-flex; gap: 0.2rem; align-items: center; }
 .lang-opt {
     padding: 0.2rem 0.45rem;
     border: 1px solid var(--border);
@@ -499,7 +504,6 @@ footer p { margin: 0.25rem 0; }
     .nav-links { gap: 0.15rem; }
     .nav-links a { padding: 0.25rem 0.4rem; font-size: 0.9rem; }
     .nav-links .sep { display: none; }
-    .lang-switch { margin-top: 0.5rem; }
 }
 
 /* === Contact CTA === */

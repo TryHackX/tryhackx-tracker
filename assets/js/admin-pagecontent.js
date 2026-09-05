@@ -18,7 +18,7 @@
     const modalEl = $('pageEditModal');
     if (!modalEl) return;
 
-    const state = { page: null, defaults: {}, max: 60000, dirty: false, note: '' };
+    const state = { page: null, lang: null, defaults: {}, max: 60000, dirty: false, closing: false, note: '' };
     let previewTimer = null;
 
     function setError(msg) {
@@ -38,7 +38,8 @@
         clearTimeout(previewTimer);
         previewTimer = setTimeout(async () => {
             const r = await apiCall('admin/page_content', 'POST', {
-                op: 'preview', page: state.page, format: $('pc-format').value, body: $('pc-body').value,
+                op: 'preview', page: state.page, lang: state.lang,
+                format: $('pc-format').value, body: $('pc-body').value,
             });
             if (r.error) { setError(r.error); return; }
             setError(r.warning || '');
@@ -47,23 +48,72 @@
         }, 350);
     }
 
-    async function open(page) {
+    /**
+     * The language rail.
+     *
+     * A tab per installed language with a dot saying what that language already has: live, a draft,
+     * or nothing. Switching tabs re-fetches, because each language is a separate page — and it asks
+     * first when there are unsaved changes, since a tab click that silently threw away an
+     * afternoon's writing would be the worst control on this screen.
+     */
+    function renderLangs(list, current, serving) {
+        const rail = $('pc-langs');
+        rail.textContent = '';
+        (list || []).forEach((l) => {
+            const b = el('button', { className: 'pc-lang' + (l.code === current ? ' active' : '') });
+            b.type = 'button';
+            b.appendChild(el('span', { className: 'pc-lang-code', text: l.code.toUpperCase() }));
+            b.appendChild(el('span', { className: 'pc-lang-name', text: l.name }));
+            const dot = l.enabled ? 'live' : (l.stored ? 'draft' : 'none');
+            b.appendChild(el('span', { className: 'pc-lang-dot pc-dot-' + dot }));
+            b.title = l.name + ' — ' + (l.enabled ? 'your version is live'
+                     : l.stored ? 'saved as a draft' : 'no version written yet');
+            if (l.code !== current) b.addEventListener('click', () => switchLang(l.code));
+            rail.appendChild(b);
+        });
+        // Which version a visitor reading THIS language actually gets. Worth saying out loud: the
+        // fallback chain means it is often a version written for a different language.
+        const note = $('pc-serving');
+        if (!serving) {
+            note.textContent = 'Visitors reading this language get the built-in page.';
+        } else if (serving === current) {
+            note.textContent = 'Visitors reading this language get this version.';
+        } else {
+            note.textContent = 'Visitors reading this language currently get the '
+                             + serving.toUpperCase() + ' version — nothing is published here yet.';
+        }
+    }
+
+    async function switchLang(code) {
+        if (state.dirty && !await confirmAction('Switch language?',
+                'Your changes to this page have not been saved. Switching loses them.',
+                { okLabel: 'Discard and switch', danger: true })) return;
+        state.dirty = false;
+        open(state.page, code);
+    }
+
+    async function open(page, lang) {
         setError('');
         state.page = page;
         state.dirty = false;
-        const r = await apiCall('admin/page_content?page=' + encodeURIComponent(page));
+        state.closing = false;   // a fresh visit must ask again
+        const r = await apiCall('admin/page_content&page=' + encodeURIComponent(page)
+                                + (lang ? '&lang=' + encodeURIComponent(lang) : ''));
         if (r.error) { showToast(r.error, 'danger'); return; }
+        state.lang = r.lang;
         state.defaults = r.default || {};
         state.max = r.max || 60000;
         state.note = r.note || '';
-        $('pc-title').textContent = r.label + ' — ' + (r.stored ? 'your version' : 'built-in page');
+        renderLangs(r.languages, r.lang, r.serving);
+        $('pc-title').textContent = r.label + ' · ' + String(r.lang).toUpperCase()
+            + ' — ' + (r.stored ? (r.enabled ? 'your version, live' : 'your draft') : 'built-in page');
         $('pc-format').value = r.format || 'markdown';
         $('pc-enabled').checked = !!r.enabled;
         $('pc-body').value = r.body || '';
         $('pc-note').textContent = state.note;
         $('pc-saved').textContent = r.stored && r.updated_at
             ? 'Last saved ' + r.updated_at + (r.updated_by ? ' by ' + r.updated_by : '')
-            : 'Never edited.';
+            : 'Never edited in this language.';
         // A format the operator switched off in Settings must not be offered here.
         const allowed = r.formats || ['bbcode', 'markdown'];
         [...$('pc-format').options].forEach(o => { o.disabled = !allowed.includes(o.value); });
@@ -79,7 +129,7 @@
         btn.disabled = true;
         try {
             const r = await apiCall('admin/page_content', 'POST', {
-                op: 'save', page: state.page, format: $('pc-format').value,
+                op: 'save', page: state.page, lang: state.lang, format: $('pc-format').value,
                 body: $('pc-body').value, enabled: $('pc-enabled').checked,
             });
             if (r.error) { setError(r.error); return; }
@@ -95,12 +145,13 @@
 
     async function restore() {
         const ok = await confirmAction('Restore the built-in page?',
-            'Your text for this page is deleted and visitors see the page that ships with the panel — '
-            + 'written for how the tracker is configured right now. This cannot be undone.',
+            'Your ' + String(state.lang).toUpperCase() + ' text for this page is deleted and the built-in '
+            + 'one comes back — written for how the tracker is configured right now. Other languages are '
+            + 'left alone. This cannot be undone.',
             { okLabel: 'Restore', danger: true });
         if (!ok) return;
         const r = await apiCall('admin/page_content', 'POST', {
-            op: 'reset', page: state.page, format: $('pc-format').value,
+            op: 'reset', page: state.page, lang: state.lang, format: $('pc-format').value,
         });
         if (r.error) { setError(r.error); return; }
         showToast(r.message || 'Restored.', 'success');
@@ -110,7 +161,7 @@
     // ── wiring ──────────────────────────────────────────────────────────────
     document.addEventListener('click', (e) => {
         const b = e.target.closest('.pc-edit');
-        if (b) { e.preventDefault(); open(b.dataset.page); }
+        if (b) { e.preventDefault(); open(b.dataset.page, b.dataset.lang || null); }
     });
     $('pc-body').addEventListener('input', () => { state.dirty = true; count(); schedulePreview(); });
     $('pc-format').addEventListener('change', () => {
@@ -130,8 +181,18 @@
     });
     $('pc-save').addEventListener('click', save);
     $('pc-restore').addEventListener('click', restore);
+    // Bootstrap wants a synchronous answer here and asking is asynchronous, so the close is
+    // cancelled, the question asked, and the modal closed again once the answer is in.
     modalEl.addEventListener('hide.bs.modal', (e) => {
-        if (!state.dirty) return;
-        if (!window.confirm('Close without saving? Your changes to this page are lost.')) e.preventDefault();
+        if (!state.dirty || state.closing) return;
+        e.preventDefault();
+        confirmAction('Close without saving?',
+            'Your changes to this page have not been saved. Closing now loses them.',
+            { okLabel: 'Discard changes', danger: true }).then((ok) => {
+                if (!ok) return;
+                state.closing = true;
+                state.dirty = false;
+                bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+            });
     });
 })();

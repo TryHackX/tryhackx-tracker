@@ -22,8 +22,33 @@
     async function loadStatus() {
         try {
             const s = await apiCall('admin/index_status');
+            // apiCall() NEVER THROWS on a non-2xx: it puts the status in `error` and returns.
+            // So a transient 500 used to reach renderStatus() as an object with no counts in it,
+            // and a live 1.9 M-row index was drawn as empty — which is exactly the sort of thing an
+            // operator acts on. A failed poll leaves the last good numbers where they are and says
+            // so, because "we could not ask" is a different fact from "there is nothing there".
+            if (!s || s.error) { markStale(s && s.error); return; }
+            stale = false;
             renderStatus(s);
-        } catch (e) { /* leave the spinner */ }
+        } catch (e) { markStale('could not reach the panel'); }
+    }
+
+    /**
+     * Say that the numbers on screen are the last ones we managed to fetch.
+     *
+     * Deliberately does NOT clear the card. The previous values are still the best information
+     * available; blanking them would replace "slightly old" with "apparently nothing".
+     */
+    let stale = false;
+    function markStale(why) {
+        if (stale) return;
+        stale = true;
+        const box = document.getElementById('idx-status-card');
+        if (!box) return;
+        const n = el('div', { className: 'alert alert-warning py-2 wl-small mt-2 idx-stale',
+            text: 'Could not refresh the index status' + (why ? ' (' + why + ')' : '')
+                + ' — the numbers below are the last ones that arrived.' });
+        if (!box.querySelector('.idx-stale')) box.appendChild(n);
     }
     function badge(text, cls) { return el('span', { className: 'wl-badge ' + (cls || ''), text }); }
     function kv(label, value) {

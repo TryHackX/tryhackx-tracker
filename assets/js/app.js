@@ -781,7 +781,11 @@ async function loadTransparency(page) {
             '<div class="trans-stat-warning"><strong>' + (a.total_pending || 0) + pct(a.total_pending || 0) + '</strong><br><small>Awaiting Review</small></div>' +
             '</div>';
 
-        const offset = (json.page - 1) * json.data.length;
+        // json.data.length is the size of THIS page, and the last page is short — using it
+        // made the final page start its numbering again from a smaller offset. The page SIZE
+        // is what the server paged by, and it is the same for every page.
+        const pageSize = Number(json.per_page) || Number(json.limit) || json.data.length;
+        const offset = (json.page - 1) * pageSize;
         document.getElementById('trans-body').innerHTML = json.data.map((r, i) => `
             <tr>
                 <td>${offset + i + 1}</td>

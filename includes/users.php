@@ -248,7 +248,13 @@ function userSessionLogout(PDO $db): void {
  * keep the panel open forever; after the idle window the panel asks for its login again.
  */
 function userMaybeOpenPanelSession(PDO $db, array $user): void {
-    if (!userIsAdminGroup($db, (int)$user['id'])) return;
+    // BOTH conditions, which is what panelCan() downstream already assumes.
+    //
+    // This used to require admin-group membership, and it is the ONLY writer of
+    // $_SESSION['admin_via_user'] — so a user granted panel.access plus a handful of panel.*
+    // permissions never got a panel session, and the entire moderator permission map was
+    // unreachable by the audience it was written for. The feature existed and nobody could use it.
+    if (!userIsAdminGroup($db, (int)$user['id']) && !userHasPanelAccess($db, (int)$user['id'])) return;
     $_SESSION['loggedin'] = true;
     $_SESSION['login_time'] = time();
     $_SESSION['last_activity'] = time();
@@ -305,6 +311,9 @@ function userTryRememberLogin(PDO $db): ?array {
     unset($_SESSION['user_expires_at']);   // the remember token's own expiry is the deadline now
     // rotation keeps the ORIGINAL absolute expiry, so a "1 day" sign-in really ends after 1 day
     if (!headers_sent()) userRememberIssue($db, (int)$u['id'], (int)$tok['exp']);
+    // AFTER the session id has been regenerated, or the panel flags land on the old session and are
+    // thrown away. A remember-me return is a sign-in; it must open the panel like one.
+    userMaybeOpenPanelSession($db, $u);
     return $u;
 }
 

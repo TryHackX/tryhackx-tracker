@@ -41,21 +41,21 @@ if ($email && $token) {
 
 <?php if (!$valid): ?>
 <div class="unsub-msg">
-    <h1>Notification Preferences</h1>
-    <div class="alert show alert-error">Invalid or expired unsubscribe link.</div>
+    <h1><?= _h('unsub.h1') ?></h1>
+    <div class="alert show alert-error"><?= _h('unsub.bad_link') ?></div>
 </div>
 <?php else: ?>
 <div class="unsub-page">
-    <h1>Notification Preferences</h1>
-    <p class="unsub-desc">Manage which email notifications you receive for <strong><?= sanitize($email) ?></strong></p>
+    <h1><?= _h('unsub.h1') ?></h1>
+    <p class="unsub-desc"><?= __('unsub.desc', ['email' => sanitize($email)]) ?></p>
 
     <div id="unsub-alert" class="alert"></div>
 
     <div class="unsub-prefs">
         <div class="unsub-pref-item unsub-pref-master">
             <div class="unsub-pref-info">
-                <span class="unsub-pref-label">All Notifications</span>
-                <span class="unsub-pref-hint">Master switch — turns all notifications on or off</span>
+                <span class="unsub-pref-label"><?= _h('unsub.all') ?></span>
+                <span class="unsub-pref-hint"><?= _h('unsub.all_hint') ?></span>
             </div>
             <label class="toggle">
                 <input type="checkbox" id="pref-all" <?= (array_filter($prefs) === $prefs && count(array_filter($prefs)) === count($prefs)) ? 'checked' : '' ?>>
@@ -67,8 +67,8 @@ if ($email && $token) {
 
         <div class="unsub-pref-item">
             <div class="unsub-pref-info">
-                <span class="unsub-pref-label">Submission Confirmations</span>
-                <span class="unsub-pref-hint">Confirmation email after submitting a new report</span>
+                <span class="unsub-pref-label"><?= _h('unsub.submission') ?></span>
+                <span class="unsub-pref-hint"><?= _h('unsub.submission_hint') ?></span>
             </div>
             <label class="toggle">
                 <input type="checkbox" data-pref="submission" <?= $prefs['submission'] ? 'checked' : '' ?>>
@@ -78,8 +78,8 @@ if ($email && $token) {
 
         <div class="unsub-pref-item">
             <div class="unsub-pref-info">
-                <span class="unsub-pref-label">Under Review</span>
-                <span class="unsub-pref-hint">Notification when an admin starts reviewing your report</span>
+                <span class="unsub-pref-label"><?= _h('unsub.review') ?></span>
+                <span class="unsub-pref-hint"><?= _h('unsub.review_hint') ?></span>
             </div>
             <label class="toggle">
                 <input type="checkbox" data-pref="review" <?= $prefs['review'] ? 'checked' : '' ?>>
@@ -89,8 +89,8 @@ if ($email && $token) {
 
         <div class="unsub-pref-item">
             <div class="unsub-pref-info">
-                <span class="unsub-pref-label">Status Updates</span>
-                <span class="unsub-pref-hint">Notifications when your report status changes (reviewed, blocked, archived)</span>
+                <span class="unsub-pref-label"><?= _h('unsub.status') ?></span>
+                <span class="unsub-pref-hint"><?= _h('unsub.status_hint') ?></span>
             </div>
             <label class="toggle">
                 <input type="checkbox" data-pref="status" <?= $prefs['status'] ? 'checked' : '' ?>>
@@ -100,8 +100,8 @@ if ($email && $token) {
 
         <div class="unsub-pref-item">
             <div class="unsub-pref-info">
-                <span class="unsub-pref-label">Admin Messages</span>
-                <span class="unsub-pref-hint">Custom messages sent by the admin regarding your report</span>
+                <span class="unsub-pref-label"><?= _h('unsub.custom') ?></span>
+                <span class="unsub-pref-hint"><?= _h('unsub.custom_hint') ?></span>
             </div>
             <label class="toggle">
                 <input type="checkbox" data-pref="custom" <?= $prefs['custom'] ? 'checked' : '' ?>>
@@ -111,8 +111,8 @@ if ($email && $token) {
 
         <div class="unsub-pref-item">
             <div class="unsub-pref-info">
-                <span class="unsub-pref-label">Appeal Notifications</span>
-                <span class="unsub-pref-hint">Confirmation and decision emails for appeals you submit</span>
+                <span class="unsub-pref-label"><?= _h('unsub.appeal') ?></span>
+                <span class="unsub-pref-hint"><?= _h('unsub.appeal_hint') ?></span>
             </div>
             <label class="toggle">
                 <input type="checkbox" data-pref="appeal" <?= $prefs['appeal'] ? 'checked' : '' ?>>
@@ -122,7 +122,7 @@ if ($email && $token) {
     </div>
 
     <div class="form-center mt-1">
-        <button type="button" class="btn" id="unsub-save">Save Preferences</button>
+        <button type="button" class="btn" id="unsub-save"><?= _h('unsub.save') ?></button>
     </div>
 </div>
 
@@ -146,7 +146,7 @@ if ($email && $token) {
 
     saveBtn.addEventListener('click', async () => {
         saveBtn.disabled = true;
-        saveBtn.textContent = 'Saving...';
+        saveBtn.textContent = <?= json_encode(__('unsub.saving')) ?>;
 
         const preferences = {};
         typeToggles.forEach(cb => {
@@ -166,18 +166,18 @@ if ($email && $token) {
             const json = await res.json();
             if (json.success) {
                 alert.className = 'alert alert-success show';
-                alert.textContent = 'Preferences saved successfully.';
+                alert.textContent = <?= json_encode(__('unsub.saved')) ?>;
             } else {
                 alert.className = 'alert alert-error show';
-                alert.textContent = json.error || 'Failed to save preferences.';
+                alert.textContent = json.error || <?= json_encode(__('unsub.save_failed')) ?>;
             }
         } catch {
             alert.className = 'alert alert-error show';
-            alert.textContent = 'Network error. Please try again.';
+            alert.textContent = <?= json_encode(__('unsub.net_error')) ?>;
         }
 
         saveBtn.disabled = false;
-        saveBtn.textContent = 'Save Preferences';
+        saveBtn.textContent = <?= json_encode(__('unsub.save')) ?>;
         setTimeout(() => { alert.className = 'alert'; }, 5000);
     });
 })();

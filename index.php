@@ -175,7 +175,7 @@ $pageTemplate = __DIR__ . '/' . $routes[$action];
 // "restore" is a delete rather than a copy that has to be kept in step.
 $customPage = null;
 if (function_exists('pageContentActive') && in_array($action, PAGECONTENT_PAGES, true)) {
-    $customPage = pageContentActive($db, $action);
+    $customPage = pageContentActive($db, $action, $cfg);
     if ($customPage) $pageTemplate = __DIR__ . '/templates/pages/_custom.php';
 }
 

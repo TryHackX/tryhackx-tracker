@@ -118,9 +118,15 @@ try {
     // Address lists: re-download the URL ones whose cache has expired, and push the result to the
     // firewall if anything actually changed. A country zone that stops being downloadable changes
     // nothing — the last good copy stays loaded and the failure is shown on the Traffic page.
+    // WRITTEN WHETHER THE SWITCH IS ON OR OFF, and that is the whole point: with the switch off
+    // ipListWriteSetsFile() writes an EMPTY file, which is how the helper is told to clear the sets.
+    // While this call sat inside the guard below, turning the lists off in Settings changed nothing
+    // at the firewall -- the last full file stayed on disk and every later apply passed --sets= with
+    // it. The panel said "off" and the machine went on dropping.
+    $sets = ipListWriteSetsFile($db, $cfg);
     if (($cfg['net_lists_enabled'] ?? '0') === '1') {
         $il = ipListTick($db);
-        $sets = ipListWriteSetsFile($db, $cfg);
+        $sets = ipListWriteSetsFile($db, $cfg);   // again, now that a tick may have refreshed a list
         // Only re-apply when the file's content moved. The helper would notice anyway (it compares a
         // fingerprint), but calling it every minute for nothing means a fork and an nft syntax check
         // every minute for nothing.
@@ -136,6 +142,19 @@ try {
         } elseif ($il['refreshed'] || $il['failed'] || in_array('-v', $argv ?? [], true)) {
             echo sprintf('[iplists] refreshed=%d failed=%d entries=%d reloaded=no',
                 (int)$il['refreshed'], (int)$il['failed'], (int)$sets['lines']), "
+";
+        }
+    } else {
+        // The switch is OFF. The empty file above says so; this is what makes the firewall agree.
+        // Same stamp rule as the on-path, so this fires once after the switch is flipped and then
+        // costs nothing every minute afterwards.
+        $stamp = $sets['written'] ? md5_file($sets['path']) : '';
+        $prev = (string)($cfg['net_lists_stamp'] ?? '');
+        if ($stamp !== '' && $stamp !== $prev && netlimitEnabled($cfg)) {
+            $r = netlimitApply($cfg, netlimitPps($cfg), netlimitBurst($cfg), netlimitPort($cfg), false, 'lists-off');
+            if (!empty($r['ok'])) setSettings($db, ['net_lists_stamp' => $stamp]);
+            echo sprintf('[iplists] switched off — sets cleared=%s%s', !empty($r['ok']) ? 'yes' : 'no',
+                empty($r['ok']) ? ' error=' . ($r['error'] ?? '?') : ''), "
 ";
         }
     }

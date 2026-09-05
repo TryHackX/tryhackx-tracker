@@ -24,6 +24,7 @@
     let rows = [];
     let taglineDefault = '';
     let dirty = false;
+    let closing = false;      // set only while a confirmed close is in flight
     let dragKey = null;
 
     function setError(msg) {
@@ -164,6 +165,7 @@
         $('hl-tagline').placeholder = taglineDefault;
         $('hl-note').textContent = r.note || '';
         dirty = false;
+        closing = false;         // a fresh visit must ask again
         render();
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }
@@ -209,8 +211,18 @@
     $('hl-save').addEventListener('click', save);
     $('hl-reset').addEventListener('click', reset);
     $('hl-tagline').addEventListener('input', () => { dirty = true; });
+    // Bootstrap wants a synchronous answer here and asking is asynchronous, so the close is
+    // cancelled, the question asked, and the modal closed again once the answer is in.
     modalEl.addEventListener('hide.bs.modal', (e) => {
-        if (!dirty) return;
-        if (!window.confirm('Close without saving? Your changes to the layout are lost.')) e.preventDefault();
+        if (!dirty || closing) return;
+        e.preventDefault();
+        confirmAction('Close without saving?',
+            'Your changes to the layout have not been saved. Closing now loses them.',
+            { okLabel: 'Discard changes', danger: true }).then((ok) => {
+                if (!ok) return;
+                closing = true;
+                dirty = false;
+                bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+            });
     });
 })();

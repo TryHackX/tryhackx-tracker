@@ -34,9 +34,13 @@
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=login" class="<?= $accountActive ? 'active' : '' ?>"><?= _h('nav.account') ?></a>
         <?php endif; ?>
-    </div>
 <?php
-// THE LANGUAGE SWITCHER.
+// THE LANGUAGE SWITCHER -- the last item in the link row, not a second column.
+//
+// It used to be a sibling of `.nav-links` with `space-between` between them. That works only while
+// the links fit on one line; with longer labels (Polish) the link row takes the full width, wraps,
+// and the switcher lands alone on a third line at the left edge. As the last item in the row it
+// wraps with everything else and stays centred, whatever the labels say.
 //
 // Rendered only when there is a choice to make: one language is not a switcher, it is a label that
 // does nothing. The links keep the visitor on the page they are reading (`?lang=` is added to the
@@ -48,15 +52,17 @@ if (count($langOpts) > 1):
     $langQuery = $_GET;
     unset($langQuery['lang']);
 ?>
-    <div class="lang-switch" role="group" aria-label="<?= _h('common.language') ?>">
-        <?php foreach ($langOpts as $langCode => $langName):
-            $langQuery['lang'] = $langCode;
-            $langHref = $baseUrl . '?' . http_build_query($langQuery);
-        ?>
-        <a href="<?= sanitize($langHref) ?>" class="lang-opt<?= $langCode === $langNow ? ' active' : '' ?>"
-           hreflang="<?= sanitize($langCode) ?>" title="<?= sanitize($langName) ?>"
-           <?= $langCode === $langNow ? 'aria-current="true"' : '' ?>><?= sanitize(strtoupper($langCode)) ?></a>
-        <?php endforeach; ?>
-    </div>
+        <span class="sep">|</span>
+        <span class="lang-switch" role="group" aria-label="<?= _h('common.language') ?>">
+            <?php foreach ($langOpts as $langCode => $langName):
+                $langQuery['lang'] = $langCode;
+                $langHref = $baseUrl . '?' . http_build_query($langQuery);
+            ?>
+            <a href="<?= sanitize($langHref) ?>" class="lang-opt<?= $langCode === $langNow ? ' active' : '' ?>"
+               hreflang="<?= sanitize($langCode) ?>" title="<?= sanitize($langName) ?>"
+               <?= $langCode === $langNow ? 'aria-current="true"' : '' ?>><?= sanitize(strtoupper($langCode)) ?></a>
+            <?php endforeach; ?>
+        </span>
 <?php endif; ?>
+    </div>
 </nav>

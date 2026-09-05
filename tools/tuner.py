@@ -440,6 +440,16 @@ def restore(cfg: dict, dry: bool = False) -> dict:
     if not rec:
         return {'ok': True, 'restored': False, 'why': 'nothing was recorded'}
     if dry:
+        # CLEAR THE MARKER even on a dry run.
+        #
+        # This used to return with the marker still armed and `running` already false, which is
+        # exactly the combination tunerReap() fires on -- so a minute later the janitor ran
+        # `tuner.py --restore` for real, and a dry run had written to the firewall. A dry run that
+        # changes the machine is the one thing a dry run must never do.
+        st.pop('restore', None)
+        st['restored_at'] = int(time.time())
+        st['restore_result'] = {'ok': True, 'out': 'dry-run: nothing was changed, marker cleared'}
+        state_write(st)
         return {'ok': True, 'restored': False, 'why': 'dry-run'}
 
     if rec.get('mode') == 'off':

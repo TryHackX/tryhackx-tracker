@@ -13,7 +13,7 @@
 
     const card = document.getElementById('cluster-card');
     if (!card || typeof window.AdminCommon === 'undefined') return;
-    const { apiCall, el, showToast } = window.AdminCommon;
+    const { apiCall, el, showToast, confirmAction, promptPassword } = window.AdminCommon;
 
     const $ = (id) => document.getElementById(id);
     const POLL_MS = 20000;
@@ -152,12 +152,14 @@
     /* ── operations ──────────────────────────────────────────────────────── */
 
     async function op(kind, name) {
+        const title = kind === 'remove' ? 'Remove instance "' + name + '"?' : 'Restart instance "' + name + '"?';
         const what = kind === 'remove'
-            ? 'Remove instance "' + name + '"?\n\nIts unit is stopped and disabled and its files are deleted. '
-              + 'The swarm on that port goes with it; clients retry against whatever else you publish.'
-            : 'Restart instance "' + name + '"?\n\nAnnounces in flight on its port are lost and peers retry.';
-        if (!window.confirm(what)) return;
-        const pw = window.prompt('Admin password to confirm:');
+            ? 'Its unit is stopped and disabled and its files are deleted. The swarm on that port goes '
+              + 'with it; clients retry against whatever else you publish.'
+            : 'Announces in flight on its port are lost and peers retry.';
+        if (!await confirmAction(title, what, { okLabel: kind === 'remove' ? 'Remove' : 'Restart', danger: true })) return;
+        // promptPassword(), not window.prompt(): that one shows the password in clear on screen.
+        const pw = await promptPassword(title, 'This changes a running service, so it is confirmed with the admin password.');
         if (!pw) return;
         try {
             const r = await apiCall('admin/ot_cluster_apply', 'POST', { op: kind, name: name, password: pw });

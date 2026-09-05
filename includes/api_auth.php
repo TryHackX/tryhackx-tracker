@@ -85,11 +85,51 @@ function apiRequestSnapshot(string $rawBody, string $endpoint): array {
     }
     $bodyLen = strlen($rawBody);
     $body = $bodyLen > API_SNAPSHOT_MAX_BODY ? substr($rawBody, 0, API_SNAPSHOT_MAX_BODY) : $rawBody;
+    $body = apiRedactBody($body);
     return [
         'ts' => date('c'), 'ip' => getClientIp(), 'remote_addr' => $_SERVER['REMOTE_ADDR'] ?? null,
         'method' => $_SERVER['REQUEST_METHOD'] ?? '', 'endpoint' => $endpoint, 'uri' => mb_substr((string)($_SERVER['REQUEST_URI'] ?? ''), 0, 512),
         'headers' => $headers, 'body' => $body, 'body_len' => $bodyLen, 'body_truncated' => $bodyLen > API_SNAPSHOT_MAX_BODY,
     ];
+}
+
+/**
+ * Redact secrets out of a request body before it is stored.
+ *
+ * The headers above were already redacted; the body was not — and the body is where the secrets
+ * actually are. A failed authentication on v1/users/provision left the buyer's CLEARTEXT ACCOUNT
+ * PASSWORD in api_bans.request_snapshot, and admin/fetch_api_bans handed it back in a JSON
+ * response. An authentication failure is exactly when a wrong key, or a right key sent to the wrong
+ * host, arrives with a real payload behind it.
+ *
+ * Redacted BY THE NAME OF THE FIELD, on the same rule the audit log already uses
+ * (auditIsSecretKey) — matching on value shape would need this code to recognise every secret
+ * format the API will ever carry, and it will not.
+ *
+ * A body that is not a JSON object is not inspectable field by field, so it is dropped entirely
+ * rather than guessed at: the length and the fact that it was unparseable are kept, which is all a
+ * ban investigation actually needs from it.
+ */
+function apiRedactBody(string $body): string {
+    if (trim($body) === '') return $body;
+    $decoded = json_decode($body, true);
+    if (!is_array($decoded)) {
+        return '[not JSON — ' . strlen($body) . ' bytes, dropped rather than stored]';
+    }
+    $walk = function ($node) use (&$walk) {
+        if (!is_array($node)) return $node;
+        $out = [];
+        foreach ($node as $k => $v) {
+            if (is_string($k) && function_exists('auditIsSecretKey') && auditIsSecretKey($k)) {
+                $out[$k] = '***';
+                continue;
+            }
+            $out[$k] = is_array($v) ? $walk($v) : $v;
+        }
+        return $out;
+    };
+    $clean = json_encode($walk($decoded), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return $clean === false ? '[unencodable — dropped]' : $clean;
 }
 
 /** Insert a ban row (unless exempt / already banned). Never throws — the caller always answers 403. */

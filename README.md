@@ -32,6 +32,8 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Interface languages (1.31.0)** — English and Polish ship, more can be installed from a JSON file;
   a switcher in the nav, a per-account preference, and a site default that can be *Automatic*
   (`Accept-Language`). See [Languages](#languages)
+- **Terms and Info per language (1.32.0)** — one version of each page per language, with a fallback
+  order that never drops back to the built-in boilerplate once anything has been written
 
 ### Admin Panel
 - **Dashboard** — sortable tables with multi-level sorting, search, filtering, pagination
@@ -1624,6 +1626,15 @@ A saved page stops following mode changes — the dialog says so, because that i
 of editing. A page can be kept as a **draft** (stored but not live), an empty page can never be
 published, and *Restore* is a delete so the shipped template comes back by itself.
 
+**One version per language (1.32.0).** The editor has a language rail with a dot per language —
+live, draft, or nothing written — and *Restore* only touches the language you are editing. A visitor
+gets, in order: their language → the site's default language → English → any other version that
+exists → and only if *nothing* is written at all, the built-in page. Terms somebody actually wrote
+must never be quietly replaced by boilerplate because one translation is missing.
+
+The default text is built from the same dictionary keys the templates render, so *Restore* while
+editing Polish gives back Polish — and there is one source for the wording rather than two.
+
 Markdown is offered first for these two and not by taste: the renderer has real headings in
 Markdown and **no heading tag at all** in BBCode, where a heading can only be a larger bold line.
 
@@ -1708,11 +1719,14 @@ python tools/lang_src.py .
 `tests/lang_test.php` checks the two files still agree — same keys, same `:name` placeholders,
 nothing blank.
 
-**What is translated.** The navigation and footer, the home page, Info, Terms, the whitelist page,
-the report form, search, sign-in, registration, the account page, password reset, email
-verification and change, the transparency report and the 404. **Stats, Unsubscribe, the admin
-sign-in page and the admin panel are still English.** A missing key falls back to English, so a
-partial translation reads as English rather than as blanks.
+**Editing the shipped two.** The source is split into one module per area under
+`tools/lang_src.d/` — adding an area is adding a file, and nothing lists them, so two people can
+work on different areas without touching the same file. `python tools/lang_src.py .` rebuilds both
+languages; `tests/lang_test.php` fails if they stop agreeing.
+
+**What is translated (1.32.0).** The whole public site and the admin panel templates. A missing key
+falls back to English, so a partial translation reads as English rather than as blanks — which is
+also what happens to any language installed from a JSON file that is not yet complete.
 
 ---
 

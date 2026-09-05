@@ -89,6 +89,29 @@
         if (document.querySelector('.modal.show')) document.body.classList.add('modal-open');
     }
 
+    /**
+     * Lift a small dialog above the modal it was opened from.
+     *
+     * Bootstrap gives every .modal the same z-index and appends each backdrop to the end of <body>,
+     * so a confirm opened over an open modal gets a backdrop that sits ABOVE its own dialog: the
+     * buttons are visible but greyed out and unclickable. Done in JS because "the backdrop that
+     * belongs to this dialog" is the last one in the DOM — a fact no CSS selector can state.
+     *
+     * Returns a function that puts everything back.
+     */
+    function stackAbove(dialogEl) {
+        const under = [...document.querySelectorAll('.modal.show')].filter(m => m !== dialogEl);
+        if (!under.length) return () => {};
+        const backdrops = document.querySelectorAll('.modal-backdrop');
+        const top = backdrops[backdrops.length - 1] || null;
+        dialogEl.style.zIndex = '1075';
+        if (top) top.style.zIndex = '1070';
+        return () => {
+            dialogEl.style.zIndex = '';
+            if (top) top.style.zIndex = '';
+        };
+    }
+
     let confirmModalEl = null;
     /** confirmAction(title, message, {okLabel, danger}) → Promise<boolean>. Also accepts (message). */
     function confirmAction(title, message, opts = {}) {
@@ -137,11 +160,13 @@
             };
             const onOk = () => { resolved = true; cleanup(); modal.hide(); resolve(true); };
             const onCancel = () => { resolved = true; cleanup(); modal.hide(); resolve(false); };
-            const onHidden = () => { restoreModalOpen(); if (!resolved) { cleanup(); resolve(false); } };
+            let unstack = () => {};
+            const onHidden = () => { unstack(); restoreModalOpen(); if (!resolved) { cleanup(); resolve(false); } };
             okBtn.addEventListener('click', onOk);
             cancelBtn.addEventListener('click', onCancel);
             confirmModalEl.addEventListener('hidden.bs.modal', onHidden);
             modal.show();
+            unstack = stackAbove(confirmModalEl);
         });
     }
 

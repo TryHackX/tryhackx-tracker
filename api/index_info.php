@@ -16,7 +16,7 @@
 if (!indexEnabled($cfg) || ($cfg['index_search_enabled'] ?? '1') !== '1') {
     jsonResponse(['error' => 'Search is not available.'], 404);
 }
-if (!userCan($db, $cfg, 'index.search')) {
+if (!userCan($db, $cfg, 'index.view')) {
     jsonResponse(['error' => 'Search access is required.'], 403);
 }
 

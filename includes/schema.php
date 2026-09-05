@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 40;  // 40 = users.language — the interface language follows the account
+const TRACKER_SCHEMA_VERSION = 41;  // 41 = page_content.lang — Terms and Info are written per language
+// 40 = users.language — the interface language follows the account
 // 39 = page_content — Terms and Info editable through the panel's own editor
 // 38 = net_limit_blocked — hand-typed addresses that beat an allow list
 // 37 = index_polls — what each scrape poll actually delivered, kept as a series
@@ -578,14 +579,18 @@ function trackerSchemaStatements(): array {
         // restoring is a DELETE rather than a copy that has to be kept in step with them — and a
         // page nobody edited costs a row that does not exist.
         "CREATE TABLE IF NOT EXISTS `page_content` (
-            `page` VARCHAR(32) NOT NULL PRIMARY KEY,
+            `page` VARCHAR(32) NOT NULL,
+            -- v41: one version per language. A single text served to everybody was fine while the
+            -- site had one language; with two it means a Polish visitor reads English terms.
+            `lang` VARCHAR(3) NOT NULL DEFAULT 'en',
             `format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'markdown',
             `body` MEDIUMTEXT NOT NULL,
             -- Stored but off is a DRAFT. The router checks this as well as emptiness, so a half
             -- written page cannot replace a live one merely by having been saved.
             `enabled` TINYINT(1) NOT NULL DEFAULT 0,
             `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            `updated_by` VARCHAR(64) DEFAULT NULL
+            `updated_by` VARCHAR(64) DEFAULT NULL,
+            PRIMARY KEY (`page`, `lang`)
         ) $engine",
 
         "CREATE TABLE IF NOT EXISTS `ip_lists` (
@@ -700,6 +705,19 @@ function trackerSchemaGuardedStatements(PDO $db): array {
             schemaDeferHeavy('index_hashes: ' . implode(', ', $parts));
         }
     }
+    // v41: page_content gains a language and a composite key. The table holds at most a handful of
+    // rows, so this is instant — but the ORDER matters: the column has to exist before the old
+    // single-column primary key can be replaced, and MariaDB will not drop a PRIMARY KEY and add
+    // one in separate statements without a moment where the table has none. One ALTER does both.
+    // No table-exists guard needed: schemaColumnExists() reads information_schema and answers
+    // false for a table that is not there — and the CREATE list above has already run.
+    if (!schemaColumnExists($db, 'page_content', 'lang')) {
+        // Existing rows were written when there was one language; they belong to whatever the site
+        // default was then, and 'en' is what that column defaults to for a fresh install.
+        $out[] = "ALTER TABLE `page_content` ADD COLUMN `lang` VARCHAR(3) NOT NULL DEFAULT 'en',
+                  DROP PRIMARY KEY, ADD PRIMARY KEY (`page`, `lang`)";
+    }
+
     // v9: two-step email change scratch columns (users is tiny — instant ALTER)
     $uparts = [];
     if (!schemaColumnExists($db, 'users', 'pending_email')) $uparts[] = "ADD COLUMN `pending_email` VARCHAR(190) DEFAULT NULL";

@@ -4,6 +4,109 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.32.0] — 2026-09-05
+
+### Fixed — the Terms/Info editor could not reach its own endpoint
+
+`apiCall()` prepends `api.php?endpoint=`, so a second parameter has to join with `&`. Both new
+editors used `?`, which made the whole string the endpoint name — `admin/page_content?page=tos` is
+not in the route map, so every open answered 404 and the dialog showed nothing. The same mistake
+was in the language export. Both fixed, and `pagecontent_test.php` now fails if either comes back:
+this is a trap the project has hit before and a comment alone had not been enough.
+
+### Added — Terms and Info are written per language
+
+`page_content` is keyed by (page, language) instead of by page alone. The editor grows a language
+rail with a dot per language — live, draft, or nothing written — and *Restore* is per language, so
+restoring Polish cannot take an English page with it.
+
+**What a visitor gets, in order:** their language → the site's default language → English → any
+other version that exists → and only if *nothing* is written, the built-in page. That order is
+deliberate. Terms somebody actually wrote must never be quietly replaced by the shipped boilerplate
+because one translation is missing.
+
+The default text is no longer a second English copy living in the generator: it is built from the
+same dictionary keys the templates render, converting the little HTML those strings carry into
+Markdown or BBCode. So *Restore* while editing Polish gives back Polish, and there is one source
+for the wording rather than two that drift.
+
+Schema 41.
+
+### Changed — no browser dialogs left in the panel
+
+`window.confirm()` and `window.prompt()` are unstyled, some browsers suppress them after the first
+one on a page, and `window.prompt` shows a typed password in clear. Six of them were still in the
+panel; they now use the panel's own dialog.
+
+Stacking one dialog over another needed a fix of its own: Bootstrap gives every modal the same
+z-index and appends each new backdrop to the end of `<body>`, so a confirm opened over an open
+modal got a backdrop **above its own dialog** — buttons visible, greyed out, unclickable. Measured
+after the fix: dialog at 1075, its backdrop at 1070, the one underneath at 1050, and the OK button
+is the topmost element at its own centre.
+
+The close question is asked asynchronously while Bootstrap wants a synchronous answer, so the close
+is cancelled, the question asked, and the modal closed again once the answer is in.
+
+### Fixed — the navigation fell apart in Polish
+
+`.main-nav` was `space-between` with the links and the switcher as two columns. That works only
+while the links fit on one line; with longer labels the link row took the full width, wrapped, and
+the switcher landed alone on a third line at the left edge. The switcher is now the last item
+*inside* the link row, after the same separator everything else uses, so it wraps with them and
+stays centred however long the labels get.
+
+### Changed — the Languages panel, and a real dropdown to install one
+
+The table sits in its own panel, the three switch columns are separated so they read as three
+different questions rather than one repeated control, the padlock on a built-in looks like a
+deliberately fixed control instead of a rendering failure, and the action buttons are inside the
+row. "Which language is it" is now the panel's own dropdown (`.wl-dd-menu`) instead of a wall of
+chips — ordered, scrollable, keyboard-navigable, with a free-text box beside it for a code the
+panel has no name for.
+
+### Added — the admin panel speaks Polish
+
+The remaining public pages (statistics, unsubscribe, admin sign-in) and the admin panel templates
+are translated. The dictionary source is split into one module per area under `tools/lang_src.d/`,
+so adding an area is adding a file — a single source file could only ever have one writer.
+
+### Fixed — seven audit findings, each confirmed by five or six independent refuters
+
+- **`includes/api_auth.php`** — a failed bearer auth stored the request BODY verbatim, so a
+  provisioning call that failed to authenticate left the buyer's **cleartext account password** in
+  `api_bans`, and the panel read it back in a JSON response. The headers were already redacted; the
+  body was not. Redacted now by field NAME, on the same rule the audit log uses. A body that is not
+  a JSON object is dropped rather than guessed at.
+- **`api/index_info.php`** — gated on `index.search`, a permission id that does not exist in the
+  registry, so it denied every account. It is `index.view`, which is what the search itself uses.
+- **`includes/users.php`** — a moderator could never obtain a panel session at all: the only writer
+  of `admin_via_user` required admin-group membership, so the entire moderator permission map was
+  unreachable by the audience it was written for. A remember-me return now opens it too.
+- **`tools/tuner.py`** — a **dry run** left the restore marker armed with `running` already false,
+  which is exactly what the janitor fires on: a minute later it ran a real firewall write for it. A
+  dry run that changes the machine is the one thing a dry run must not do.
+- **`tools/janitor.php`** — turning the address lists off never wrote the empty file that clears
+  them, because the write sat inside the "switch is on" guard. The panel said off; the firewall went
+  on dropping. The write is unconditional now and the clear is pushed.
+- **`assets/js/admin-netlimit.js`** — the 5-second poll wrote over the pps field while it was being
+  typed into. Typing "4" toward 45000 clamped to the minimum, the poll stamped "1000" over it with
+  the caret at the end, and the rest of the digits appended to the wrong number. Also: a slow answer
+  for an old chart range could overwrite a newer one.
+- **`assets/js/admin-sysctl.js`** — the 15-second poll rebuilt every input in the grid, so a value
+  being typed was replaced and the caret went with it. A repaint is a refresh, not an instruction.
+
+Also: `admin-index.js` rendered HTTP error bodies as real data (a transient 500 drew a live 1.9 M-row
+index as empty) — a failed poll now keeps the last good numbers and says they are stale; the
+transparency page numbered rows from the size of the page it was on, so the short last page started
+again from a lower number; and the coverage chart dropped its uPlot instance without destroying it.
+
+### Changed — MariaDB's buffer pool is 1.5 GiB
+
+It was 1 GiB with a 2 GiB ceiling already configured, so this was live and needed no restart.
+Measured before: 0.73 % of page reads coming from disk, 1217 free pages — the pool was full. The
+two index tables are 5.4 GB together, so this moves coverage from about 19 % to 28 %; worth having,
+not a cure. Persisted, so a restart does not hand the memory back.
+
 ## [1.31.0] — 2026-09-04
 
 Two features that both come down to the same thing: the front page and the words on it stop being

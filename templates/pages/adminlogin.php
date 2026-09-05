@@ -12,22 +12,22 @@
 // that never located this page. Harmless on a default install, where the check is not applied.
 $_SESSION['admin_login_form_at'] = time();
 ?>
-<h1>Admin sign in</h1>
-<p class="text-muted">Staff area of <?= sanitize($cfg['site_name'] ?? 'this tracker') ?>.</p>
+<h1><?= _h('adminlogin.h1') ?></h1>
+<p class="text-muted"><?= __('adminlogin.staff_area', ['site' => sanitize($cfg['site_name'] ?? __('adminlogin.this_tracker'))]) ?></p>
 
 <div class="user-card">
     <div id="admin-login-alert" class="alert"></div>
     <form id="admin-login-form" class="user-form" novalidate>
         <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
         <div class="form-group">
-            <label for="al-username">Username</label>
+            <label for="al-username"><?= _h('register.username') ?></label>
             <input type="text" id="al-username" name="username" maxlength="190" autocomplete="username" required autofocus>
         </div>
         <div class="form-group">
-            <label for="al-password">Password</label>
+            <label for="al-password"><?= _h('login.password') ?></label>
             <input type="password" id="al-password" name="password" maxlength="200" autocomplete="current-password" required>
         </div>
-        <div class="form-center"><button type="submit" class="btn" id="al-submit">Sign in</button></div>
+        <div class="form-center"><button type="submit" class="btn" id="al-submit"><?= _h('common.sign_in') ?></button></div>
     </form>
 
     <!-- The second factor. Hidden until the password has been accepted, and it replaces the first form
@@ -36,13 +36,13 @@ $_SESSION['admin_login_form_at'] = time();
     <form id="admin-2fa-form" class="user-form" novalidate style="display:none;">
         <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
         <div class="form-group">
-            <label for="al-code">Authentication code</label>
+            <label for="al-code"><?= _h('adminlogin.code_label') ?></label>
             <input type="text" id="al-code" name="code" maxlength="32" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
-            <small class="settings-hint" id="al-code-hint">Six digits from your authenticator app. If you cannot reach it, enter one of your recovery codes instead.</small>
+            <small class="settings-hint" id="al-code-hint"><?= _h('adminlogin.code_hint') ?></small>
         </div>
-        <div class="form-center"><button type="submit" class="btn" id="al-code-submit">Continue</button></div>
+        <div class="form-center"><button type="submit" class="btn" id="al-code-submit"><?= _h('adminlogin.continue') ?></button></div>
     </form>
-    <p class="user-links"><a href="<?= $baseUrl ?>">Back to the tracker</a></p>
+    <p class="user-links"><a href="<?= $baseUrl ?>"><?= _h('adminlogin.back_tracker') ?></a></p>
 </div>
 
 <script>
@@ -52,6 +52,19 @@ $_SESSION['admin_login_form_at'] = time();
     // feature is off and the modal appears for nothing, do not ask when it is on and every login
     // writes a phantom failure into the audit log.
     const CAPTCHA_ON = <?= isCaptchaRequired($cfg, 'login') ? 'true' : 'false' ?>;
+    // Every message this script can put on screen, translated server-side. They belong in the same
+    // dictionary as the rest of the page, not hard-coded in English halfway down a script block.
+    const T = {
+        captchaUnavailable: <?= json_encode(__('adminlogin.captcha_unavailable')) ?>,
+        captchaCancelled:   <?= json_encode(__('adminlogin.captcha_cancelled')) ?>,
+        enterCode:          <?= json_encode(__('adminlogin.enter_code')) ?>,
+        codeHintLow:        <?= json_encode(__('adminlogin.code_hint_low')) ?>,
+        expired:            <?= json_encode(__('adminlogin.expired')) ?>,
+        badCredentials:     <?= json_encode(__('adminlogin.bad_credentials')) ?>,
+        loginFailed:        <?= json_encode(__('adminlogin.login_failed')) ?>,
+        networkError:       <?= json_encode(__('adminlogin.network_error')) ?>,
+        codeWrong:          <?= json_encode(__('adminlogin.code_wrong')) ?>,
+    };
     const form = document.getElementById('admin-login-form');
     const alertEl = document.getElementById('admin-login-alert');
     const api = '<?= $baseUrl ?>api.php?endpoint=';
@@ -91,8 +104,8 @@ $_SESSION['admin_login_form_at'] = time();
                 const first = await window.showCaptchaModal({ action: 'admin_login' });
                 if (!first) {
                     fail(window.captchaWasUnavailable && window.captchaWasUnavailable()
-                        ? 'CAPTCHA could not load — reload the page or try again later.'
-                        : 'CAPTCHA cancelled');
+                        ? T.captchaUnavailable
+                        : T.captchaCancelled);
                     return;
                 }
                 data['captcha_token'] = first;
@@ -103,7 +116,7 @@ $_SESSION['admin_login_form_at'] = time();
             // server is entitled to say so. This loop is now the exception rather than the rule.
             for (let attempt = 0; attempt < 2 && json.captcha_required; attempt++) {
                 const token = await window.showCaptchaModal({ action: 'admin_login' });
-                if (!token) { fail(window.captchaWasUnavailable && window.captchaWasUnavailable() ? 'CAPTCHA could not load — reload the page or try again later.' : 'CAPTCHA cancelled'); return; }
+                if (!token) { fail(window.captchaWasUnavailable && window.captchaWasUnavailable() ? T.captchaUnavailable : T.captchaCancelled); return; }
                 data['captcha_token'] = token;
                 data['g-recaptcha-response'] = token;
                 json = await post();
@@ -117,22 +130,21 @@ $_SESSION['admin_login_form_at'] = time();
                 form.style.display = 'none';
                 twofaForm.style.display = '';
                 alertEl.className = 'alert alert-info show';
-                alertEl.textContent = json.message || 'Enter the six-digit code from your authenticator app.';
+                alertEl.textContent = json.message || T.enterCode;
                 if (typeof json.recovery_left === 'number' && json.recovery_left <= 2) {
                     document.getElementById('al-code-hint').textContent =
-                        'Six digits from your authenticator app, or a recovery code — you have only '
-                        + json.recovery_left + ' of those left.';
+                        T.codeHintLow.replace(':n', json.recovery_left);
                 }
                 setTimeout(() => codeInput.focus(), 50);
             } else if ((json.error || '').indexOf('CSRF') !== -1) {
                 // the session behind this page expired (PHP session GC) — reload for a fresh token
-                fail('This login page had expired — reloading, please try again.');
+                fail(T.expired);
                 setTimeout(() => window.location.reload(), 1200);
             } else {
-                fail(json.error === 'Invalid credentials' ? 'Invalid username or password' : (json.error || 'Login failed'));
+                fail(json.error === 'Invalid credentials' ? T.badCredentials : (json.error || T.loginFailed));
             }
         } catch {
-            fail('Network error');
+            fail(T.networkError);
         } finally {
             btn.disabled = false;
         }
@@ -159,11 +171,11 @@ $_SESSION['admin_login_form_at'] = time();
                     window.location.reload();
                 }
             } else {
-                fail(json.error || 'That code is not right.');
+                fail(json.error || T.codeWrong);
                 codeInput.select();
             }
         } catch {
-            fail('Network error');
+            fail(T.networkError);
         } finally {
             btn.disabled = false;
         }

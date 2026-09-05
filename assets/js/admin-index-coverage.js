@@ -125,6 +125,10 @@
                 points.length ? el('div', { className: 'idx-cov-empty-hint',
                     text: 'Try a wider range if there should be more.' }) : '',
             ]));
+            // destroy() before dropping the reference: uPlot registers window listeners and a
+            // resize observer, and simply forgetting the instance leaks both. Switching range back
+            // and forth over a quiet window did that every time.
+            if (chart && typeof chart.destroy === 'function') { try { chart.destroy(); } catch (_) {} }
             chart = null;
             return;
         }

@@ -87,7 +87,20 @@
         state.lastError = j.last_error || null;
         state.lastRevert = j.last_revert_at ? { at: j.last_revert_at, why: j.last_revert_reason } : null;
         seedWanted();
+        // DO NOT REPAINT OVER SOMEBODY'S HANDS.
+        //
+        // render() rebuilds every row from scratch, so a 15-second poll landing mid-edit replaced
+        // the input being typed into and moved the caret with it. The new numbers are already in
+        // `state`; they will be drawn the moment the form is clean again (Reset, or a successful
+        // apply, both call render()). Stale-by-one-tick beats un-editable.
+        if (formDirty() || gridHasFocus()) return;
         render();
+    }
+
+    /** Is the operator inside one of the grid's controls right now? */
+    function gridHasFocus() {
+        const g = $('sy-grid');
+        return !!(g && document.activeElement && g.contains(document.activeElement));
     }
 
     function fatal(msg) {
@@ -597,7 +610,10 @@
             showToast('Nothing to put back: the panel has never changed any of these, and you have not edited anything — what you see IS this machine’s own configuration.', 'info');
             return;
         }
-        if (!window.confirm('Put the captured values back?\n\nThis restores what the machine had before the panel first touched these settings, and removes the panel’s file. It is NOT the distribution’s defaults — it is what your machine had. It never asks for a password, on purpose.')) return;
+        if (!await confirmAction('Put the captured values back?',
+            'This restores what the machine had before the panel first touched these settings, and removes '
+            + 'the panel’s file. It is NOT the distribution’s defaults — it is what your machine had.',
+            { okLabel: 'Restore', danger: true })) return;
         try {
             const r = await apiCall('admin/sysctl_apply', 'POST', { op: 'revert' });
             showToast(r.success ? (r.message || 'Queued.') : (r.error || 'Failed.'), r.success ? 'success' : 'error');

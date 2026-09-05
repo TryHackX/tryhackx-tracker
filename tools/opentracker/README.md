@@ -428,3 +428,82 @@ leaving it to be inferred from what came out of the socket.
 
 **Nothing has been swapped on production.** The backup taken before any of this is at
 `/home/debian/opentracker-backup-20260903-185859` with `SHA256SUMS` and `ACTIVE-BINARY.txt`.
+
+## Round three: valgrind and helgrind (2026-09-05)
+
+Both tools installed on the VPS (`valgrind 3.24.0`), run against a scaled lab in `/tmp/vg`
+(`OT_BATCH_LIMIT` 256 KiB, `OT_SCRAPE_CHUNK_SIZE` 16 KiB, 1200 torrents), built with
+`OPTS_production="-g -O1" STRIP=true`.
+
+**`STRIP=true` is not optional.** The Makefile runs `strip` on the binary after linking
+(`STRIP?=strip`, line 19), so the first run produced `???` for every frame and told us nothing.
+`CFLAGS` must also be *appended* to, never replaced — replacing it drops libowfat's own `-I.` and
+the build dies on the generated `entities.h`.
+
+### Confirmed: a use-after-free — but at SHUTDOWN, not on the scrape path
+
+    Invalid read of size 8
+       at clean_single_peer_list (ot_clean.c:56)
+       by clean_single_torrent   (ot_clean.c:106)
+       by clean_worker           (ot_clean.c:122)          <- the cleanup THREAD
+     Address is 0 bytes inside a block of size 56 free'd
+       at free_peerlist          (trackerlogic.c:43)
+       by trackerlogic_deinit    (trackerlogic.c:588)
+       by signal_handler         (opentracker.c:67)        <- the MAIN thread
+
+Four of these, two blocks (56 B `malloc`, 80 B `realloc`). Real, and worth fixing upstream: SIGINT
+frees the torrent and peer structures while the cleanup thread is still walking them. It is a
+crash-on-shutdown, not the framing bug.
+
+### Helgrind: 20 possible races, none on the send path
+
+Mostly `g_now_seconds` — written by `time_caching_worker` (opentracker.c:650), read unlocked by
+`handle_accept`, `udp_generate_rijndael_round_key`, `stats_init`. An unsynchronised clock cache;
+formally a race, benign on x86-64 for an aligned 8-byte word. One substantive: `clean_worker`
+against `add_peer_to_torrent_and_return_peers` (trackerlogic.c:126-127).
+
+### TWO HYPOTHESES ELIMINATED
+
+**The cleanup thread cannot compact a vector under the fullscrape.** Both take the same lock —
+`ot_fullscrape.c:170/240/367` and `ot_clean.c:116` each call `mutex_bucket_lock(bucket)` and hold
+it for the whole bucket.
+
+**The sender is not walking a reallocated iovec array.** `mutex_workqueue_popresult`
+(ot_mutex.c:236-247) sets `ptask->iovec = NULL` and `iovec_entries = 0` on the PARTIAL path, under
+`tasklist_mutex` — so ownership passes outright and a later `iovec_append` starts a fresh array.
+This was the best hypothesis going in and it is wrong.
+
+### NEW SUSPECT: three exits that abandon a task without terminating it
+
+`fullscrape_iterate_database` (ot_fullscrape.c, the loop at ~168-200) leaves three ways:
+
+```c
+if (mutex_workqueue_pushchunked(taskid, &iovector)) {
+    free(iovector.iov_base);
+    return mutex_bucket_unlock(bucket, 0);      /* push failed */
+}
+r = iovector.iov_base = malloc(OT_SCRAPE_CHUNK_SIZE);
+if (!r)
+    return mutex_bucket_unlock(bucket, 0);      /* malloc failed */
+...
+if (!g_opentracker_running)
+    return;                                     /* bare return — buffer leaked too */
+```
+
+None of them ever sends the terminating `mutex_workqueue_pushchunked(taskid, NULL)` that sets
+`TASK_DONE`. Chunks already pushed have been written to the socket; the connection is then left
+waiting for a terminator that never arrives. That is the "truncated" failure mode exactly, and it is
+reachable under memory pressure — which is when a 16 MiB batch allocation is most likely to fail.
+
+### What did NOT happen
+
+**The framing bug did not reproduce under either tool.** The scrape came back clean (84 119 bytes,
+1200 torrents). Both tools are 30-100x slower and the scale that triggers it natively (6000
+torrents, 420 KB) does not finish under instrumentation in one run. So the clean result is NOT
+evidence that the send path is sound — it is evidence that the reproducer needs to get cheaper
+before valgrind can be pointed at it.
+
+**Next:** make the reproducer smaller rather than making valgrind faster. The corruption is at a
+chunk boundary, so a lab with `OT_SCRAPE_CHUNK_SIZE` at 1 KiB and a deliberately failing
+`malloc` (an LD_PRELOAD that fails the Nth allocation) should hit the abandonment path in seconds
+instead of minutes — and if that produces the same corrupt stream, the suspect above is the bug.

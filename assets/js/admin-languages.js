@@ -100,12 +100,12 @@
             else if (l.coverage < 95) fill.className = 'mid';
             bar.appendChild(fill);
             cov.appendChild(bar);
-            cov.appendChild(el('div', { className: 'wl-small text-muted',
+            cov.appendChild(el('div', { className: 'wl-small text-muted lang-cov-text',
                 text: l.coverage + ' % · ' + fmt(l.strings) + ' strings'
                     + (l.missing ? ' · ' + fmt(l.missing) + ' missing' : '') }));
             tr.appendChild(cov);
 
-            const on = el('td');
+            const on = el('td', { className: 'lang-col-sw' });
             on.appendChild(l.builtIn
                 ? el('span', { className: 'lang-lock', title: 'Ships with the panel — every other language falls back to it' }, [
                       el('i', { className: 'bi bi-lock-fill' })])
@@ -113,36 +113,38 @@
             tr.appendChild(on);
 
             // The two visibility columns are meaningless for a language nobody can reach.
-            const sw = el('td');
+            const sw = el('td', { className: 'lang-col-sw' });
             sw.appendChild(l.enabled ? toggle(l, 'switcher', l.switcher, false)
                                      : el('span', { className: 'text-muted', text: '—' }));
             tr.appendChild(sw);
 
-            const us = el('td');
+            const us = el('td', { className: 'lang-col-sw' });
             us.appendChild(l.enabled ? toggle(l, 'users', l.users, false)
                                      : el('span', { className: 'text-muted', text: '—' }));
             tr.appendChild(us);
 
-            const acts = el('td', { className: 'lang-acts' });
+            const acts = el('td', { className: 'lang-col-acts' });
+            const actsBox = el('div', { className: 'lang-acts' });
             const dup = el('button', { className: 'btn btn-sm btn-outline-secondary' });
             dup.type = 'button'; dup.title = 'Copy to a new code';
             dup.appendChild(el('i', { className: 'bi bi-files' }));
             dup.addEventListener('click', () => askDuplicate(l.code));
-            acts.appendChild(dup);
+            actsBox.appendChild(dup);
 
             const exp = el('button', { className: 'btn btn-sm btn-outline-secondary' });
             exp.type = 'button'; exp.title = 'Download as JSON';
             exp.appendChild(el('i', { className: 'bi bi-download' }));
             exp.addEventListener('click', () => exportLang(l.code));
-            acts.appendChild(exp);
+            actsBox.appendChild(exp);
 
             if (!l.builtIn) {
                 const del = el('button', { className: 'btn btn-sm btn-outline-danger' });
                 del.type = 'button'; del.title = 'Remove';
                 del.appendChild(el('i', { className: 'bi bi-trash' }));
                 del.addEventListener('click', () => askDelete(l));
-                acts.appendChild(del);
+                actsBox.appendChild(del);
             }
+            acts.appendChild(actsBox);
             tr.appendChild(acts);
             body.appendChild(tr);
         });
@@ -150,7 +152,7 @@
 
     /** Download a language as JSON — the starting point for translating it. */
     async function exportLang(code) {
-        const d = await apiCall('admin/languages?export=' + encodeURIComponent(code));
+        const d = await apiCall('admin/languages&export=' + encodeURIComponent(code));
         if (d.error) { showToast(d.error, 'danger'); return; }
         const blob = new Blob([JSON.stringify({ code: d.code, strings: d.strings }, null, 2)],
                               { type: 'application/json' });
@@ -189,34 +191,54 @@
         $('lu-file').value = '';
         $('lu-file-info').textContent = 'A JSON file of "key": "text" pairs — export one above to start from.';
         $('lu-code-name').textContent = '';
+        $('lu-pick-label').textContent = 'Choose a language…';
         pending = null;
         setMsg('lu-msg', '');
-        renderSuggestions();
+        renderMenu();
         bootstrap.Modal.getOrCreateInstance($('langUploadModal')).show();
     }
 
-    /** Codes the panel has a display name for and that are not installed yet. */
-    function renderSuggestions() {
-        const holder = $('lu-suggest');
-        holder.textContent = '';
+    /**
+     * The language dropdown — every code the panel has a name for, installed ones marked.
+     *
+     * Installed languages are LISTED, not hidden: choosing one is how a translation is replaced with
+     * a newer file, and a control that silently omits that option looks broken to somebody who came
+     * to do exactly that. They are labelled instead.
+     */
+    function renderMenu() {
+        const menu = $('lu-menu');
+        menu.textContent = '';
         const free = known.filter(l => !l.installed);
-        if (!free.length) return;
-        holder.appendChild(el('span', { className: 'wl-small text-muted me-2', text: 'Not installed yet:' }));
-        free.forEach(l => {
-            const b = el('button', { className: 'btn btn-sm btn-outline-secondary lang-chip' });
-            b.type = 'button';
-            b.appendChild(el('strong', { text: l.code }));
-            b.appendChild(document.createTextNode(' ' + l.name));
-            b.addEventListener('click', () => { $('lu-code').value = l.code; onCode(); });
-            holder.appendChild(b);
-        });
+        const taken = known.filter(l => l.installed);
+        const add = (list, header) => {
+            if (!list.length) return;
+            menu.appendChild(el('li', {}, [el('h6', { className: 'dropdown-header', text: header })]));
+            list.forEach(l => {
+                const a = el('button', { className: 'dropdown-item', type: 'button' }, [
+                    el('span', { className: 'lang-dd-code', text: l.code }),
+                    l.name,
+                ]);
+                a.addEventListener('click', () => { $('lu-code').value = l.code; onCode(); });
+                menu.appendChild(el('li', {}, [a]));
+            });
+        };
+        add(free, 'Not installed yet');
+        add(taken, 'Already installed — uploading replaces it');
+        if (!menu.childNodes.length) {
+            menu.appendChild(el('li', {}, [el('div', { className: 'dropdown-item-text wl-dd-note',
+                text: 'Every code the panel knows a name for is installed. Type any two- or three-letter code.' })]));
+        }
     }
 
     /** Resolve the typed code to a name as it is typed — and say NOW what will be refused later. */
     function onCode() {
         const code = ($('lu-code').value || '').trim().toLowerCase();
         const out = $('lu-code-name');
-        out.className = 'wl-small';
+        out.className = 'wl-small mt-1';
+        const picked = known.find(l => l.code === code);
+        $('lu-pick-label').textContent = code
+            ? (picked ? picked.name + ' (' + code.toUpperCase() + ')' : code.toUpperCase())
+            : 'Choose a language…';
         if (!code) { out.textContent = ''; return; }
         const k = known.find(l => l.code === code);
         if (langs.some(l => l.code === code && l.builtIn)) {
