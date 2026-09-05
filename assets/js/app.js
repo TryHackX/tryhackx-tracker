@@ -489,9 +489,17 @@ async function handleStatusCheck(e) {
             document.getElementById('res-representative').textContent = json.representative || '—';
             const linkEl = document.getElementById('res-link');
             if (json.link) {
-                // escHtml() does not escape quotes, and this value is a URL a stranger submitted.
-                const safeHref = escHtml(json.link).replace(/"/g, '&quot;');
-                linkEl.innerHTML = '<a href="' + safeHref + '" rel="noopener noreferrer" target="_blank" class="status-link">' + escHtml(json.link) + '</a>';
+                // A URL a STRANGER submitted, on a public page. Escaping alone is not enough: it
+                // closes the attribute breakout but leaves `javascript:` intact, because a scheme
+                // is not markup. So the scheme is checked first and anything that is not http(s)
+                // is shown as text rather than made clickable — a reporter does not get to choose
+                // what a visitor's browser executes.
+                const ok = /^https?:\/\//i.test(String(json.link).trim());
+                if (ok) {
+                    linkEl.innerHTML = '<a href="' + escAttr(json.link) + '" rel="noopener noreferrer" target="_blank" class="status-link">' + escHtml(json.link) + '</a>';
+                } else {
+                    linkEl.textContent = json.link;
+                }
             } else {
                 linkEl.textContent = '—';
             }
