@@ -21,7 +21,7 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
     <title><?= sanitize($pageTitle) ?> &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
-    <?= langJsBridge($baseUrl) ?>
+    <?= langJsBridge($baseUrl, LANG_JS_PUBLIC) ?>
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/style.css<?= assetVer('assets/css/style.css') ?>">
     <!-- shared with the admin whitelist / index pages so the three "everything about one hash"
          panels look like each other (assets/css/detail-panel.css) -->

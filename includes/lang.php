@@ -308,15 +308,26 @@ function langAll(): array {
  * string lives under `js.` BY DEFINITION; a template string the script also needs is duplicated
  * under `js.` rather than widening the bundle.
  */
-function langJsBundle(): array {
+function langJsBundle(array $prefixes = ['js.']): array {
     $out = [];
-    foreach (langAll() as $k => $v) if (str_starts_with($k, 'js.')) $out[$k] = (string)$v;
+    foreach (langAll() as $k => $v) {
+        foreach ($prefixes as $p) { if (str_starts_with($k, $p)) { $out[$k] = (string)$v; break; } }
+    }
     return ['lang' => langCurrent(), 'strings' => $out];
 }
 
-/** The `<script>` pair that puts the bundle and the t() helper on a page — before any other script. */
-function langJsBridge(string $baseUrl): string {
-    $json = json_encode(langJsBundle(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+/** The prefixes the PUBLIC scripts use (app.js, captcha.js, stats-timeline.js) — see langJsBridge(). */
+const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.'];
+
+/**
+ * The `<script>` pair that puts the bundle and the t() helper on a page — before any other script.
+ *
+ * $prefixes narrows the bundle: the panel's scripts need every `js.*` string (about 1 900 of them),
+ * a public page needs the four areas its own scripts read, and shipping the panel's dictionary to
+ * every visitor would have cost more than the page. Default is everything, for the panel.
+ */
+function langJsBridge(string $baseUrl, ?array $prefixes = null): string {
+    $json = json_encode(langJsBundle($prefixes ?? ['js.']), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     $ver = function_exists('assetVer') ? assetVer('assets/js/i18n.js') : '';
     return '<script id="i18n-data" type="application/json">' . $json . '</script>' . "
 "

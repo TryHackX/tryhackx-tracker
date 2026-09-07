@@ -28,11 +28,11 @@ Every string a script shows — toasts, confirmations, table headers built in JS
 button captions, the public search page, the CAPTCHA overlay, the home beacon — now comes from the
 dictionary. `langJsBridge()` writes a JSON bundle of the `js.*` keys for the active language into
 the page head and `assets/js/i18n.js` defines `t(key, {n: 5})`, the client-side twin of `__()`.
-Only the `js.` prefix is sent, so the bundle stays a few hundred strings. The settings page, which
+Only the `js.` prefix is sent, and a public page only the four areas its scripts read. The settings page, which
 was translated in part, is translated in full (about 900 strings), and its sub-menu group names
 come from the catalogue through `settingsGroupTitle()` so the search index and the tests keep the
-English source. Dictionary: 1 130 → about 3 000 strings, EN and PL, one source under
-`tools/lang_src.d/`.
+English source. Dictionary: 1 130 → 3 936 strings, EN and PL, one source under `tools/lang_src.d/`. A public
+page carries only the four `js.` areas its own scripts read; the panel gets the whole set.
 
 ### Changed — one wait for every list
 

@@ -1838,8 +1838,8 @@ languages; `tests/lang_test.php` fails if they stop agreeing.
 3 900-line settings page, and every browser script. Scripts get their strings through a small
 bridge — `langJsBridge()` in `includes/lang.php` writes a JSON bundle of every `js.*` key for the
 active language into the page head, and `assets/js/i18n.js` defines `t('js.area.key', {n: 5})`,
-which reads it and replaces `:n` placeholders the way `__()` does. Only the `js.` prefix is sent
-(a few hundred strings, not the whole dictionary), so a script string lives under `js.` by
+which reads it and replaces `:n` placeholders the way `__()` does. Only the `js.` prefix is sent, and a public page only the four areas its own scripts read
+(`LANG_JS_PUBLIC`), so a visitor never downloads the panel's dictionary; a script string lives under `js.` by
 definition; the source module is `tools/lang_src.d/js.py`. The settings sub-menu group names come
 from the catalogue in `includes/settings_catalog.php` and are translated at the output point
 (`settingsGroupTitle()`), so the keyword index and the tests keep the English source.
