@@ -49,10 +49,32 @@ set -u
 # configured path so an install that keeps the toolkit somewhere else still works. sudo scrubs the
 # environment, so BACKUP_SCRIPT is only useful to the test suite.
 BACKUP_SCRIPT="${BACKUP_SCRIPT:-}"
+# The path is TRUSTED ONLY IF ROOT COULD HAVE WRITTEN IT. This helper runs as root under a
+# NOPASSWD sudoers line, so an argument the web user chooses is an argument an attacker who owns
+# the web user chooses; "any absolute path" made `--script /tmp/x.sh run` a root shell. A file
+# that root owns, in a directory root owns, neither writable by group or others, is the same
+# thing the fixed candidate list below points at — just somewhere else.
+script_is_trusted() {
+    local f="$1" d
+    [ -f "$f" ] || return 1
+    d="$(dirname -- "$f")"
+    [ "$(stat -c '%u' -- "$f" 2>/dev/null)" = "0" ] || return 1
+    [ "$(stat -c '%u' -- "$d" 2>/dev/null)" = "0" ] || return 1
+    case "$(stat -c '%A' -- "$f" 2>/dev/null)" in ?????w*|????????w*) return 1 ;; esac
+    case "$(stat -c '%A' -- "$d" 2>/dev/null)" in ?????w*|????????w*) return 1 ;; esac
+    return 0
+}
 if [ "${1-}" = "--script" ]; then
     shift
     case "${1-}" in
-        /*) BACKUP_SCRIPT="$1" ;;
+        /*) if [ ! -e "$1" ]; then
+                # A configured path that is not there behaves as before: the candidate list, then
+                # builtin mode. Only a file that EXISTS and is not root's is refused — that is the
+                # attack, not a stale setting.
+                :
+            elif script_is_trusted "$1"; then BACKUP_SCRIPT="$1"
+            else printf '{"ok":false,"error":"--script refused: %s must be a root-owned file in a root-owned directory, neither writable by group or others"}\n' "$(printf '%s' "$1" | sed 's/["\\]/\\&/g')"; exit 1
+            fi ;;
         *)  printf '{"ok":false,"error":"--script needs an absolute path"}\n'; exit 1 ;;
     esac
     shift

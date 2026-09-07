@@ -21,6 +21,8 @@ room. Consequences: `seen_count` counts six-hour windows rather than polls, and 
 catalogue can lag by up to six hours for a swarm nobody joined or left. `tests/index_test.php`
 encodes the rule (a poll inside the window updates seeders and leaves the stamp; one outside
 advances it).
+First production poll after the deploy: 1 506 386 entries in one pass, 75 s, not truncated —
+the alternating truncated/resumed pattern is gone and every poll covers the whole file.
 
 ### Added — the browser scripts speak the site's language
 
@@ -45,6 +47,15 @@ load `admin-common.js` carry the numbers with a comment saying where they come f
 
 ### Fixed
 
+- **Security — the backup helper ran any `--script` path as root.** `tracker-backup.sh` accepted
+  every absolute path after the flag and executed it under its NOPASSWD sudoers line, so the web
+  user (or anything that had become the web user) had a password-free root shell one argument
+  away — the one property every other root helper was built to deny. Found by the review pass
+  behind the suggestions list. The helper now trusts a path only when the file and its directory
+  are owned by root and writable by neither group nor others; a file that exists and fails that
+  test is refused with an explicit JSON error, a path that does not exist falls through to the
+  candidate list and builtin mode as before. Reinstall the helper:
+  `sudo install -m 0755 tools/opentracker/tracker-backup.sh /usr/local/sbin/`.
 - **The settings search box offered a saved e-mail and password.** Not autofill: Chrome's password
   manager pairs the nearest text box before a password field as the username, and the credentials
   form on the same page has three. The form now names its own username field
