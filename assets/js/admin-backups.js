@@ -77,24 +77,24 @@
 
         // 1. can this machine make a backup at all, and of what
         if (j.error && !chk.mode) {
-            grid.appendChild(kv('Backups', [badge('unavailable', 'wl-b-bad'), ' ',
+            grid.appendChild(kv(t('js.backups.label_backups'), [badge(t('js.backups.unavailable'), 'wl-b-bad'), ' ',
                 el('span', { className: 'wl-small text-muted', text: j.error })]));
         } else if (chk.mode === 'script') {
-            grid.appendChild(kv('Covers', [badge('database + files', 'wl-b-ok'), ' ',
-                el('span', { className: 'text-muted', text: 'via Backup-serwera.sh' }),
-                el('div', { className: 'wl-small text-muted', text: 'Database, configuration, lists, units and firewall rules — whatever the profile asks for.' })]));
+            grid.appendChild(kv(t('js.backups.label_covers'), [badge(t('js.backups.covers_db_files'), 'wl-b-ok'), ' ',
+                el('span', { className: 'text-muted', text: t('js.backups.via_script') }),
+                el('div', { className: 'wl-small text-muted', text: t('js.backups.covers_script_desc') })]));
         } else if (chk.mariadb_dump) {
             // Not a degraded state: backing up the whole server is a different job, done by a
             // different tool. Say what this covers, and do not nag about what it deliberately is not.
-            grid.appendChild(kv('Covers', [badge('database only', 'wl-b-ok'), ' ',
-                el('span', { className: 'text-muted', text: 'the tracker database' }),
-                el('div', { className: 'wl-small text-muted', text: 'Whole-server backups — mail, the forum, certificates — are a separate job. If Backup-serwera.sh is installed here, this page will use it and offer its items too.' })]));
+            grid.appendChild(kv(t('js.backups.label_covers'), [badge(t('js.backups.db_only'), 'wl-b-ok'), ' ',
+                el('span', { className: 'text-muted', text: t('js.backups.covers_tracker_db') }),
+                el('div', { className: 'wl-small text-muted', text: t('js.backups.covers_db_only_desc') })]));
         } else {
-            grid.appendChild(kv('Mode', [badge('nothing available', 'wl-b-bad'),
-                el('div', { className: 'wl-small text-muted', text: (chk.error || 'No dump client and no toolkit on this machine.') })]));
+            grid.appendChild(kv(t('js.backups.label_mode'), [badge(t('js.backups.nothing_available'), 'wl-b-bad'),
+                el('div', { className: 'wl-small text-muted', text: (chk.error || t('js.backups.no_tools')) })]));
         }
 
-        grid.appendChild(kv('Profile', [
+        grid.appendChild(kv(t('js.backups.label_profile'), [
             el('span', { text: cfg.profile_label || cfg.profile || '—' }),
             el('div', { className: 'wl-small text-muted', text: cfg.items || '' }),
         ]));
@@ -102,49 +102,49 @@
         // 2. the schedule
         const sc = j.schedule || {};
         const schedParts = cfg.enabled
-            ? [sc.valid ? badge('on', 'wl-b-ok') : badge('off', 'wl-b-muted'), ' ',
+            ? [sc.valid ? badge(t('js.backups.on'), 'wl-b-ok') : badge(t('js.backups.off'), 'wl-b-muted'), ' ',
                el('span', { className: 'text-muted', text: sc.describe || '' })]
-            : [badge('off', 'wl-b-muted'), ' ',
-               el('span', { className: 'wl-small text-muted', text: 'Backups are switched off in Settings — nothing runs on a timer.' })];
+            : [badge(t('js.backups.off'), 'wl-b-muted'), ' ',
+               el('span', { className: 'wl-small text-muted', text: t('js.backups.sched_off_desc') })];
         if (cfg.enabled && sc.next) {
-            schedParts.push(el('div', { className: 'wl-small text-muted', text: 'next: ' + when(sc.next) }));
+            schedParts.push(el('div', { className: 'wl-small text-muted', text: t('js.backups.next_run', { when: when(sc.next) }) }));
         }
-        grid.appendChild(kv('Schedule', schedParts));
+        grid.appendChild(kv(t('js.backups.label_schedule'), schedParts));
 
         // 3. the last run
         if (st.state && st.state !== 'idle') {
             const okRun = st.state === 'done';
-            const parts = [badge(okRun ? 'ok' : (st.state === 'running' ? 'running' : 'FAILED'),
+            const parts = [badge(okRun ? t('js.backups.status_ok') : (st.state === 'running' ? t('js.backups.status_running') : t('js.backups.status_failed')),
                                  okRun ? 'wl-b-ok' : (st.state === 'running' ? 'wl-b-pending' : 'wl-b-bad')), ' ',
-                el('span', { className: 'text-muted', text: st.finished_at ? fmtAgo(Math.floor(j.server_time - st.finished_at)) + ' ago' : (st.started_at ? 'started ' + fmtAgo(Math.floor(j.server_time - st.started_at)) + ' ago' : '') })];
-            if (st.bytes) parts.push(el('div', { className: 'wl-small text-muted', text: bytes(st.bytes) + (st.encrypted ? ' · encrypted' : '') }));
+                el('span', { className: 'text-muted', text: st.finished_at ? t('js.backups.ago', { t: fmtAgo(Math.floor(j.server_time - st.finished_at)) }) : (st.started_at ? t('js.backups.started_ago', { t: fmtAgo(Math.floor(j.server_time - st.started_at)) }) : '') })];
+            if (st.bytes) parts.push(el('div', { className: 'wl-small text-muted', text: bytes(st.bytes) + (st.encrypted ? t('js.backups.encrypted_suffix') : '') }));
             if (st.error) parts.push(el('div', { className: 'wl-small text-danger', text: st.error }));
-            if (st.pruned) parts.push(el('div', { className: 'wl-small text-muted', text: 'rotation removed: ' + st.pruned }));
-            grid.appendChild(kv('Last run', parts));
+            if (st.pruned) parts.push(el('div', { className: 'wl-small text-muted', text: t('js.backups.rotation_removed', { n: st.pruned }) }));
+            grid.appendChild(kv(t('js.backups.label_last_run'), parts));
         } else {
-            grid.appendChild(kv('Last run', [el('span', { className: 'text-muted', text: 'never — press "Back up now"' })]));
+            grid.appendChild(kv(t('js.backups.label_last_run'), [el('span', { className: 'text-muted', text: t('js.backups.never_run') })]));
         }
 
         // 4. where the archives are and how much room is left
-        grid.appendChild(kv('Directory', [
+        grid.appendChild(kv(t('js.backups.label_directory'), [
             el('code', { className: 'wl-path', text: cfg.dir || '—' }),
             el('div', { className: 'wl-small text-muted', text:
-                (j.archives || []).length + ' archive(s) · ' + bytes(j.total_bytes || 0) + ' used' +
-                (j.free_bytes ? ' · ' + bytes(j.free_bytes) + ' free' : '') }),
+                t('js.backups.usage', { n: (j.archives || []).length, used: bytes(j.total_bytes || 0) }) +
+                (j.free_bytes ? t('js.backups.free', { free: bytes(j.free_bytes) }) : '') }),
         ]));
-        grid.appendChild(kv('Retention', [
-            el('span', { text: (cfg.keep ? 'keep ' + cfg.keep : 'no count limit')
-                + ' · ' + (cfg.keep_days ? cfg.keep_days + ' days' : 'no age limit')
-                + ' · ' + (cfg.max_gb ? 'max ' + cfg.max_gb + ' GB' : 'no size limit') }),
-            el('div', { className: 'wl-small text-muted', text: 'The oldest go first, and the last archive standing is never deleted.' }),
+        grid.appendChild(kv(t('js.backups.label_retention'), [
+            el('span', { text: (cfg.keep ? t('js.backups.keep_n', { n: cfg.keep }) : t('js.backups.no_count_limit'))
+                + ' · ' + (cfg.keep_days ? t('js.backups.n_days', { n: cfg.keep_days }) : t('js.backups.no_age_limit'))
+                + ' · ' + (cfg.max_gb ? t('js.backups.max_gb', { n: cfg.max_gb }) : t('js.backups.no_size_limit')) }),
+            el('div', { className: 'wl-small text-muted', text: t('js.backups.retention_desc') }),
         ]));
-        grid.appendChild(kv('Encryption', cfg.gpg
+        grid.appendChild(kv(t('js.backups.label_encryption'), cfg.gpg
             ? [badge('gpg', 'wl-b-ok'), ' ', el('span', { className: 'text-muted', text: cfg.gpg })]
-            : [badge('none', 'wl-b-warn'), ' ', el('span', { className: 'wl-small text-muted', text: 'Archives are written in the clear. Set a GPG recipient in Settings if they ever leave this server.' })]));
+            : [badge(t('js.backups.none'), 'wl-b-warn'), ' ', el('span', { className: 'wl-small text-muted', text: t('js.backups.encryption_none_desc') })]));
 
         $('bk-dir-label').textContent = cfg.dir || '';
-        $('bk-total').textContent = (j.archives || []).length + ' archive(s) · ' + bytes(j.total_bytes || 0);
-        $('bk-status-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+        $('bk-total').textContent = t('js.backups.total', { n: (j.archives || []).length, size: bytes(j.total_bytes || 0) });
+        $('bk-status-updated').textContent = t('js.backups.updated_at', { time: new Date().toLocaleTimeString() });
         renderNotes(j);
     }
 
@@ -157,11 +157,11 @@
         if (j.error && chk.mode) box.appendChild(el('div', { className: 'nl-note nl-note-warn' }, [el('i', { className: 'bi bi-exclamation-triangle' }), ' ' + j.error]));
         if (j.last_error) box.appendChild(el('div', { className: 'nl-note nl-note-bad' }, [
             el('i', { className: 'bi bi-x-octagon' }),
-            el('span', { text: ' Last failure: ' + j.last_error + (j.last_error_at ? ' (' + fmtAgo(Math.floor(j.server_time - j.last_error_at)) + ' ago)' : '') }),
+            el('span', { text: ' ' + t('js.backups.last_failure', { error: j.last_error }) + (j.last_error_at ? ' (' + t('js.backups.ago', { t: fmtAgo(Math.floor(j.server_time - j.last_error_at)) }) + ')' : '') }),
         ]));
         if (!(j.archives || []).length && (chk.mode)) box.appendChild(el('div', { className: 'nl-note nl-note-warn' }, [
             el('i', { className: 'bi bi-hdd-stack' }),
-            el('span', { text: ' There is no backup of this tracker yet. Press "Back up now" — the first one tells you how long it takes and how big it is.' }),
+            el('span', { text: ' ' + t('js.backups.no_backup_yet') }),
         ]));
     }
 
@@ -169,10 +169,10 @@
         const box = $('bk-progress');
         box.classList.toggle('d-hidden', !running);
         if (!running) return;
-        $('bk-progress-step').textContent = st.step || 'Working…';
+        $('bk-progress-step').textContent = st.step || t('js.backups.working');
         const bits = [];
         if (st.id) bits.push(st.id);
-        if (st.started_at) bits.push('started ' + when(st.started_at));
+        if (st.started_at) bits.push(t('js.backups.started_at', { when: when(st.started_at) }));
         if (st.bytes) bits.push(bytes(st.bytes));
         $('bk-progress-meta').textContent = bits.join(' · ');
         $('bk-progress-log').textContent = st.log_tail || '';
@@ -181,15 +181,17 @@
 
     // ── sorting ──────────────────────────────────────────────────────────────
     // The list is a handful of files the helper already handed over, so this sorts in place: no
-    // request, no debounce, nothing to wait for. Same header behaviour as every other table in the
-    // panel (desc → asc → off, multiple keys with priority badges) via the shared sort stack.
+    // request. It still waits the shared sort debounce before repainting, because a header click is
+    // one of two or three (desc → asc → off) and a table that reshuffles under every click reads as
+    // jumpy; the arrows move at once, the rows follow when the decision is made. Same header
+    // behaviour as every other table in the panel via the shared sort stack.
     let bkSort = null;
     let lastList = [];
     let lastServerTime = 0;   // re-sorting repaints the rows, and the "x ago" column is server-relative
     let lastCheck = null;     // the empty-table wording depends on it, so keep it for a repaint
     const SORT_KEYS = {
         when:      a => a.ts || 0,
-        profile:   a => (a.profile || (a.mode === 'builtin' ? 'database only' : '')).toLowerCase(),
+        profile:   a => (a.profile || (a.mode === 'builtin' ? t('js.backups.db_only') : '')).toLowerCase(),
         size:      a => a.size || 0,
         // three states, ordered worst-first so one click surfaces what needs attention
         integrity: a => (a.verified === false ? 0 : a.verified === true ? 2 : 1),
@@ -219,46 +221,46 @@
         const list = sortList(lastList);
         if (!list.length) {
             tb.appendChild(el('tr', {}, [el('td', { colspan: '6', className: 'text-center text-muted py-4',
-                text: (j.check && j.check.mode) ? 'No archives yet.' : 'Backups are not available on this machine — see the status above.' })]));
+                text: (j.check && j.check.mode) ? t('js.backups.no_archives') : t('js.backups.not_available_here') })]));
             return;
         }
         list.forEach(a => {
             const acts = el('div', { className: 'wl-actions' });
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-info wl-act', type: 'button', title: 'Check the archive is intact',
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-info wl-act', type: 'button', title: t('js.backups.verify_title'),
                 onclick: () => ask('verify', { id: a.id }) }, [el('i', { className: 'bi bi-patch-check' })]));
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-secondary wl-act', type: 'button', title: 'Download (single-use link)',
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-secondary wl-act', type: 'button', title: t('js.backups.download_title'),
                 onclick: () => ask('token', { id: a.id }) }, [el('i', { className: 'bi bi-download' })]));
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-warning wl-act', type: 'button', title: 'Restore from this archive',
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-warning wl-act', type: 'button', title: t('js.backups.restore_title'),
                 onclick: () => openRestore(a) }, [el('i', { className: 'bi bi-arrow-counterclockwise' })]));
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-danger wl-act', type: 'button', title: 'Delete this archive',
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-danger wl-act', type: 'button', title: t('js.backups.delete_title'),
                 onclick: () => ask('delete', { id: a.id }) }, [el('i', { className: 'bi bi-trash' })]));
 
-            const integrity = a.verified === true ? [badge('verified', 'wl-b-ok')]
-                : a.verified === false ? [badge('FAILED', 'wl-b-bad')]
-                : [badge('not checked', 'wl-b-muted')];
-            if (a.encrypted) integrity.push(' ', el('i', { className: 'bi bi-lock-fill text-info', title: 'Encrypted with GPG' }));
+            const integrity = a.verified === true ? [badge(t('js.backups.verified'), 'wl-b-ok')]
+                : a.verified === false ? [badge(t('js.backups.status_failed'), 'wl-b-bad')]
+                : [badge(t('js.backups.not_checked'), 'wl-b-muted')];
+            if (a.encrypted) integrity.push(' ', el('i', { className: 'bi bi-lock-fill text-info', title: t('js.backups.encrypted_gpg') }));
 
             tb.appendChild(el('tr', {}, [
                 el('td', {}, [el('span', { text: when(a.ts) }),
-                              el('div', { className: 'wl-small text-muted', text: a.ts ? fmtAgo(Math.floor(j.server_time - a.ts)) + ' ago' : '' })]),
-                el('td', {}, [el('span', { text: a.profile || (a.mode === 'builtin' ? 'database only' : '—') }),
+                              el('div', { className: 'wl-small text-muted', text: a.ts ? t('js.backups.ago', { t: fmtAgo(Math.floor(j.server_time - a.ts)) }) : '' })]),
+                el('td', {}, [el('span', { text: a.profile || (a.mode === 'builtin' ? t('js.backups.db_only') : '—') }),
                     // The built-in dump names every file tracker-db-*, whatever profile made it, so
                     // the filename contradicts the choice. The items are the truth and are shown here.
                     a.items ? el('div', { className: 'wl-small text-muted', title: a.items,
-                                          text: includesFullDb(a) ? 'full database + files' : String(a.items).split(',').length + ' items' }) : '',
-                              a.mode === 'builtin' ? el('div', { className: 'wl-small text-warning', text: 'built-in dump' }) : null]),
+                                          text: includesFullDb(a) ? t('js.backups.full_db_files') : t('js.backups.n_items', { n: String(a.items).split(',').length }) }) : '',
+                              a.mode === 'builtin' ? el('div', { className: 'wl-small text-warning', text: t('js.backups.builtin_dump') }) : null]),
                 el('td', {}, [
                     el('span', { text: bytes(a.size || 0) }),
                     // An archive that holds the whole database looks alarmingly small next to it, so
                     // the ratio is shown rather than left for the reader to doubt.
                     (a.size && state.status && state.status.db_bytes && includesFullDb(a))
                         ? el('div', { className: 'wl-small text-muted',
-                                      title: 'The database is ' + bytes(state.status.db_bytes)
-                                           + ' on disk; this archive is gzipped',
-                                      text: '≈' + Math.round(state.status.db_bytes / a.size) + '× compressed' })
+                                      title: t('js.backups.db_size_title', { size: bytes(state.status.db_bytes) })
+                                           + '',
+                                      text: t('js.backups.compressed', { n: Math.round(state.status.db_bytes / a.size) }) })
                         : '',
                 ]),
-                el('td', {}, [el('span', { className: 'wl-small text-muted', text: a.items || (a.mode === 'builtin' ? 'tracker database' : '—') })]),
+                el('td', {}, [el('span', { className: 'wl-small text-muted', text: a.items || (a.mode === 'builtin' ? t('js.backups.tracker_db') : '—') })]),
                 el('td', {}, integrity),
                 el('td', { className: 'th-actions' }, [acts]),
             ]));
@@ -274,38 +276,35 @@
 
     const COPY = {
         run: {
-            title: 'Make a backup now', ok: 'Back up now', cls: 'btn-outline-success',
+            title: t('js.backups.run_title'), ok: t('js.backups.run_ok'), cls: 'btn-outline-success',
             text: () => {
                 const c = (state.status && state.status.configured) || {};
-                return 'Writes into ' + (c.dir || 'the backup directory') +
-                       (c.nice !== undefined ? ', niced to ' + c.nice + ' so it does not fight the tracker for disk' : '') +
-                       '. It continues on the server even if you close this page. Choosing a profile here '
-                       + 'affects this run only — the schedule keeps whatever Settings says.';
+                return t('js.backups.run_text', { dir: c.dir || t('js.backups.backup_dir') }) +
+                       (c.nice !== undefined ? t('js.backups.run_nice', { n: c.nice }) : '') +
+                       t('js.backups.run_text_tail');
             },
         },
-        cancel: { title: 'Cancel the running backup', ok: 'Stop it', cls: 'btn-outline-warning',
-                  text: () => 'Stops the backup that is in progress. A half-written archive is removed rather than left looking valid.' },
-        verify: { title: 'Check the archive', ok: 'Check it', cls: 'btn-outline-info',
-                  text: () => 'Recomputes the checksum and reads the archive back. On a big archive this is a minute of disk I/O on a live box, which is why it asks first.' },
-        prune:  { title: 'Apply the retention rules now', ok: 'Rotate', cls: 'btn-outline-secondary',
+        cancel: { title: t('js.backups.cancel_title'), ok: t('js.backups.cancel_ok'), cls: 'btn-outline-warning',
+                  text: () => t('js.backups.cancel_text') },
+        verify: { title: t('js.backups.verify_modal_title'), ok: t('js.backups.verify_ok'), cls: 'btn-outline-info',
+                  text: () => t('js.backups.verify_text') },
+        prune:  { title: t('js.backups.prune_title'), ok: t('js.backups.prune_ok'), cls: 'btn-outline-secondary',
                   text: () => {
                       const c = (state.status && state.status.configured) || {};
-                      const limits = [c.keep ? 'keep ' + c.keep : null, c.keep_days ? c.keep_days + ' days' : null,
-                                      c.max_gb ? 'max ' + c.max_gb + ' GB' : null].filter(Boolean).join(', ');
-                      return 'Deletes archives that are outside the limits in Settings' + (limits ? ' (' + limits + ')' : '') +
-                             ', oldest first. The newest archive is never deleted.';
+                      const limits = [c.keep ? t('js.backups.keep_n', { n: c.keep }) : null, c.keep_days ? t('js.backups.n_days', { n: c.keep_days }) : null,
+                                      c.max_gb ? t('js.backups.max_gb', { n: c.max_gb }) : null].filter(Boolean).join(', ');
+                      return t('js.backups.prune_text') + (limits ? ' (' + limits + ')' : '') +
+                             t('js.backups.prune_text_tail');
                   } },
-        delete: { title: 'Delete this archive', ok: 'Delete', cls: 'btn-outline-danger',
-                  text: () => 'Removes the archive and its metadata from the server for good. If it is the only copy you have, it is gone.' },
-        token:  { title: 'Download this archive', ok: 'Get the link', cls: 'btn-outline-secondary',
-                  text: () => 'The archive contains every database password on this machine. The link works once and expires in five minutes — do not paste it anywhere.' },
-        restore: { title: 'Restore files from this archive', ok: 'Restore', cls: 'btn-outline-warning',
-                   text: () => 'Overwrites the selected files on this server. Each one that is replaced keeps a .bak-<stamp> copy next to it, so this step is itself reversible.' },
+        delete: { title: t('js.backups.delete_title'), ok: t('js.backups.delete_ok'), cls: 'btn-outline-danger',
+                  text: () => t('js.backups.delete_text') },
+        token:  { title: t('js.backups.token_title'), ok: t('js.backups.token_ok'), cls: 'btn-outline-secondary',
+                  text: () => t('js.backups.token_text') },
+        restore: { title: t('js.backups.restore_files_title'), ok: t('js.backups.restore_ok'), cls: 'btn-outline-warning',
+                   text: () => t('js.backups.restore_text') },
         'restore-db': {
-            title: 'Restore the DATABASE', ok: 'Overwrite the database', cls: 'btn-outline-danger', needsName: true,
-            text: () => 'This overwrites the live "' + state.dbName + '" database with the copy inside the archive. ' +
-                        'Everything written since that backup is lost. The server dumps the database as it is right now first, ' +
-                        'next to the archives, so there is a way back.',
+            title: t('js.backups.restore_db_title'), ok: t('js.backups.restore_db_ok'), cls: 'btn-outline-danger', needsName: true,
+            text: () => t('js.backups.restore_db_text', { db: state.dbName }),
         },
     };
 
@@ -318,9 +317,9 @@
         const extra = $('bk-modal-extra');
         extra.textContent = '';
         if (state.pending.id) extra.appendChild(el('div', { className: 'wl-small text-muted mb-2' }, [
-            el('span', { text: 'Archive: ' }), el('code', { text: state.pending.id })]));
+            el('span', { text: t('js.backups.archive_label') }), el('code', { text: state.pending.id })]));
         if (state.pending.items) extra.appendChild(el('div', { className: 'wl-small text-muted mb-2' }, [
-            el('span', { text: 'Items: ' }), el('code', { text: state.pending.items })]));
+            el('span', { text: t('js.backups.items_label') }), el('code', { text: state.pending.items })]));
         // The profile picker appears for a manual run only. Every other operation acts on an archive
         // that already exists, where "what to back up" is a question about the past.
         const profRow = $('bk-confirm-profile-row');
@@ -331,7 +330,7 @@
             const list = (state.status && state.status.profiles) || [];
             profSel.textContent = '';
             list.forEach(pr => profSel.appendChild(el('option', {
-                value: pr.id, text: pr.label + (pr.id === cfgNow.profile ? ' — configured' : '') })));
+                value: pr.id, text: pr.label + (pr.id === cfgNow.profile ? t('js.backups.configured_suffix') : '') })));
             profSel.value = cfgNow.profile || (list[0] && list[0].id) || '';
             const hint = $('bk-confirm-profile-hint');
             const describe = () => {
@@ -363,7 +362,7 @@
         const btn = $('bk-confirm-ok');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Working…';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.backups.working');
         alert.textContent = '';
 
         const body = { op: p.op, password: $('bk-confirm-password').value };
@@ -384,13 +383,13 @@
                 bootstrap.Modal.getOrCreateInstance($('bkConfirmModal')).hide();
                 if (p.op === 'token' && r.url) {
                     // Navigating starts the download; the token is burned by the first request.
-                    showToast('Download starting — the link is now spent.', 'success');
+                    showToast(t('js.backups.download_starting'), 'success');
                     window.location.href = r.url;
                 } else if (p.op === 'verify') {
                     // a verification result is the answer, not a side effect — say which way it went
-                    showToast(r.message || 'Checked', 'success');
+                    showToast(r.message || t('js.backups.checked'), 'success');
                 } else {
-                    showToast(r.message || 'Done', 'success');
+                    showToast(r.message || t('js.backups.done'), 'success');
                 }
                 // a restore (dry run or not) reports inside the restore modal, which stays open
                 if (p.op === 'restore') {
@@ -403,7 +402,7 @@
                 state.pending = null;
                 load();
             } else {
-                alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || 'Failed' }));
+                alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t('js.backups.failed') }));
                 if (r.output) alert.appendChild(el('pre', { className: 'bk-log', text: r.output }));
             }
             if (p.op === 'restore' && !r.success) {
@@ -412,7 +411,7 @@
                 outEl.classList.remove('d-hidden');
             }
         } catch {
-            alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: 'Network error' }));
+            alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: t('js.backups.network_error') }));
         }
         btn.disabled = false;
         btn.innerHTML = orig;
@@ -433,8 +432,8 @@
         const dbItems = items.filter(i => /-db(-lekka)?$/.test(i));
         if (!fileItems.length) {
             box.appendChild(el('div', { className: 'wl-small text-muted', text:
-                a.mode === 'builtin' ? 'This archive is a plain database dump — there are no files in it to restore.'
-                                     : 'This archive contains no file items.' }));
+                a.mode === 'builtin' ? t('js.backups.builtin_no_files')
+                                     : t('js.backups.no_file_items') }));
         } else {
             fileItems.forEach(i => {
                 const id = 'bk-it-' + i;
@@ -456,7 +455,7 @@
         const items = selectedItems();
         const alert = $('bk-restore-alert');
         alert.textContent = '';
-        if (!items) { alert.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small', text: 'Tick at least one item first.' })); return; }
+        if (!items) { alert.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small', text: t('js.backups.tick_one') })); return; }
         // The dry run changes nothing, but it still runs a privileged command — so it asks for the
         // password like everything else on this page.
         ask('restore', { id: state.restoreId, items: items, dry_run: true });
@@ -469,7 +468,7 @@
         bkSort = makeSortStack({
             table: $('bk-table'),
             defaultSort: [{ col: 'when', dir: 'desc' }],
-            onChange: () => renderRows({ archives: lastList, server_time: lastServerTime, check: lastCheck }),
+            onChange: window.AdminCommon.debounce(() => renderRows({ archives: lastList, server_time: lastServerTime, check: lastCheck }), window.AdminCommon.DEBOUNCE.sort),
         });
         bkSort.bindHeaders();
         $('btn-bk-run').addEventListener('click', () => ask('run', {}));
@@ -486,7 +485,7 @@
             const items = selectedItems();
             const alert = $('bk-restore-alert');
             alert.textContent = '';
-            if (!items) { alert.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small', text: 'Tick at least one item first.' })); return; }
+            if (!items) { alert.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small', text: t('js.backups.tick_one') })); return; }
             ask('restore', { id: state.restoreId, items: items });
         });
         $('btn-bk-restore-db').addEventListener('click', () => ask('restore-db', { id: state.restoreId }));

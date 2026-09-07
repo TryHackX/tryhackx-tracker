@@ -31,7 +31,7 @@
             state = await call('status');
         } catch (e) {
             panel.textContent = '';
-            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: 'Could not read the status.' }));
+            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.twofa.status_failed') }));
             return;
         }
         setup = null;
@@ -59,11 +59,11 @@
         box.appendChild(el('div', { text: heading }));
         box.appendChild(el('pre', { className: 'nl-preview mt-1', text: codes.join('\n') }));
         const btn = el('button', { className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button' },
-            [el('i', { className: 'bi bi-clipboard' }), ' Copy them']);
+            [el('i', { className: 'bi bi-clipboard' }), ' ' + t('js.twofa.copy_them')]);
         btn.addEventListener('click', () => {
             navigator.clipboard.writeText(codes.join('\n')).then(
-                () => showToast('Copied. Put them somewhere that is not this machine.', 'success'),
-                () => showToast('Could not copy — select the text instead.', 'error'));
+                () => showToast(t('js.twofa.copied'), 'success'),
+                () => showToast(t('js.twofa.copy_failed'), 'error'));
         });
         box.appendChild(btn);
         return box;
@@ -72,14 +72,11 @@
     function render() {
         panel.textContent = '';
         if (!state || !state.success) {
-            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: 'Could not read the status.' }));
+            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.twofa.status_failed') }));
             return;
         }
         if (state.writable === false) {
-            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text:
-                'config/ is not writable by the web server, so a secret could not be stored. Fix that before '
-                + 'turning this on — a setup that cannot be saved would leave your app generating codes for a '
-                + 'secret this server has forgotten.' }));
+            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.twofa.not_writable') }));
         }
 
         /* ── a setup in progress ─────────────────────────────────────────── */
@@ -96,28 +93,26 @@
                 key.appendChild(box);
             }
             key.appendChild(el('div', { className: 'wl-small text-muted' + (setup.qr ? ' mt-1' : ''), text: setup.qr_note }));
-            key.appendChild(el('div', { className: 'wl-small text-muted mt-2', text: 'Setup key (type this into your authenticator app):' }));
+            key.appendChild(el('div', { className: 'wl-small text-muted mt-2', text: t('js.twofa.setup_key') }));
             key.appendChild(el('pre', { className: 'nl-preview mt-1', text: setup.secret_grouped }));
-            key.appendChild(el('div', { className: 'wl-small text-muted', text: 'Account: the admin username. Algorithm SHA1, 6 digits, 30 seconds — the defaults every app uses.' }));
-            key.appendChild(el('div', { className: 'wl-small text-muted mt-1', text: 'Full otpauth URI, if your app accepts one:' }));
+            key.appendChild(el('div', { className: 'wl-small text-muted', text: t('js.twofa.account_note') }));
+            key.appendChild(el('div', { className: 'wl-small text-muted mt-1', text: t('js.twofa.uri_note') }));
             key.appendChild(el('pre', { className: 'nl-preview mt-1', text: setup.uri }));
             panel.appendChild(key);
-            panel.appendChild(recoveryBlock(setup.recovery,
-                'Save these ten recovery codes NOW — they are shown once and never again. Each one works a '
-                + 'single time, and they are the only way back if you lose the app.'));
+            panel.appendChild(recoveryBlock(setup.recovery, t('js.twofa.save_codes_now')));
 
             const ci = codeInput('tf-confirm-code');
-            panel.appendChild(row('Code from the app *', ci));
+            panel.appendChild(row(t('js.twofa.code_from_app'), ci));
             const go = el('button', { className: 'btn btn-sm btn-outline-success', type: 'button' },
-                [el('i', { className: 'bi bi-check-lg' }), ' Turn it on']);
-            const cancel = el('button', { className: 'btn btn-sm btn-outline-secondary ms-2', type: 'button' }, ['Cancel']);
+                [el('i', { className: 'bi bi-check-lg' }), ' ' + t('js.twofa.turn_on')]);
+            const cancel = el('button', { className: 'btn btn-sm btn-outline-secondary ms-2', type: 'button' }, [t('js.twofa.cancel')]);
             go.addEventListener('click', async () => {
                 go.disabled = true;
                 try {
                     const r = await call('confirm', { code: ci.value });
                     if (r.success) { showToast(r.message, 'success'); await load(); }
-                    else { showToast(r.error || 'Failed.', 'error'); }
-                } catch { showToast('Network error', 'error'); }
+                    else { showToast(r.error || t('js.twofa.failed'), 'error'); }
+                } catch { showToast(t('js.twofa.network_error'), 'error'); }
                 go.disabled = false;
             });
             cancel.addEventListener('click', async () => { await call('cancel'); await load(); });
@@ -130,20 +125,20 @@
         /* ── off ─────────────────────────────────────────────────────────── */
         if (!state.enabled) {
             panel.appendChild(el('div', {}, [
-                el('span', { className: 'wl-badge wl-b-muted', text: 'off' }),
-                el('span', { className: 'wl-small text-muted', text: '  The panel asks for a password only.' }),
+                el('span', { className: 'wl-badge wl-b-muted', text: t('js.twofa.badge_off') }),
+                el('span', { className: 'wl-small text-muted', text: '  ' + t('js.twofa.password_only') }),
             ]));
             const pw = pwInput('tf-begin-pw');
-            panel.appendChild(row('Admin password *', pw));
+            panel.appendChild(row(t('js.twofa.admin_password'), pw));
             const btn = el('button', { className: 'btn btn-sm btn-outline-success mt-1', type: 'button' },
-                [el('i', { className: 'bi bi-shield-lock' }), ' Set it up']);
+                [el('i', { className: 'bi bi-shield-lock' }), ' ' + t('js.twofa.set_it_up')]);
             btn.addEventListener('click', async () => {
                 btn.disabled = true;
                 try {
                     const r = await call('begin', { password: pw.value });
                     if (r.success) { setup = r; render(); }
-                    else showToast(r.error || 'Failed.', 'error');
-                } catch { showToast('Network error', 'error'); }
+                    else showToast(r.error || t('js.twofa.failed'), 'error');
+                } catch { showToast(t('js.twofa.network_error'), 'error'); }
                 btn.disabled = false;
             });
             panel.appendChild(btn);
@@ -152,15 +147,13 @@
 
         /* ── on ──────────────────────────────────────────────────────────── */
         const head = el('div', { className: 'mb-2' });
-        head.appendChild(el('span', { className: 'wl-badge wl-b-ok', text: 'on' }));
+        head.appendChild(el('span', { className: 'wl-badge wl-b-ok', text: t('js.twofa.badge_on') }));
         head.appendChild(el('span', { className: 'wl-small text-muted',
-            text: '  Since ' + (state.confirmed_at ? new Date(state.confirmed_at * 1000).toLocaleString() : '?')
-                + ' · ' + state.recovery_left + ' recovery code(s) left' }));
+            text: '  ' + t('js.twofa.since_codes_left', { date: (state.confirmed_at ? new Date(state.confirmed_at * 1000).toLocaleString() : '?'),
+                n: state.recovery_left }) }));
         panel.appendChild(head);
         if (state.recovery_left <= 2) {
-            panel.appendChild(el('div', { className: 'nl-note nl-note-warn', text:
-                'Only ' + state.recovery_left + ' recovery code(s) left. Generate a new set now, while you can '
-                + 'still sign in — they are what stands between a lost phone and a lost panel.' }));
+            panel.appendChild(el('div', { className: 'nl-note nl-note-warn', text: t('js.twofa.few_codes_left', { n: state.recovery_left }) }));
         }
 
         const mk = (title, opName, okLabel, cls, hint) => {
@@ -168,43 +161,41 @@
             wrap.appendChild(el('div', { className: 'wl-kv-k', text: title }));
             if (hint) wrap.appendChild(el('div', { className: 'wl-small text-muted', text: hint }));
             const pw = pwInput('tf-' + opName + '-pw');
-            const ci = codeInput('tf-' + opName + '-code', '123456 or a recovery code');
-            wrap.appendChild(row('Admin password *', pw));
-            wrap.appendChild(row('Current code *', ci));
+            const ci = codeInput('tf-' + opName + '-code', t('js.twofa.code_placeholder'));
+            wrap.appendChild(row(t('js.twofa.admin_password'), pw));
+            wrap.appendChild(row(t('js.twofa.current_code'), ci));
             const btn = el('button', { className: 'btn btn-sm ' + cls, type: 'button' }, [okLabel]);
             btn.addEventListener('click', async () => {
-                if (opName === 'disable' && !await confirmAction('Turn two-factor authentication off?',
-                    'The secret and every recovery code are deleted. Signing in will need the password alone again.',
-                    { okLabel: 'Turn it off', danger: true })) return;
+                if (opName === 'disable' && !await confirmAction(t('js.twofa.disable_title'),
+                    t('js.twofa.disable_body'),
+                    { okLabel: t('js.twofa.disable_ok'), danger: true })) return;
                 btn.disabled = true;
                 try {
                     const r = await call(opName, { password: pw.value, code: ci.value });
                     if (r.success) {
-                        showToast(r.message || 'Done.', 'success');
+                        showToast(r.message || t('js.twofa.done'), 'success');
                         if (r.recovery) {
                             // New codes replace every old one, so they get the same once-only treatment.
                             panel.textContent = '';
-                            panel.appendChild(recoveryBlock(r.recovery,
-                                'Ten new recovery codes. Every previous one stopped working just now — save these, '
-                                + 'they are shown once.'));
-                            const done = el('button', { className: 'btn btn-sm btn-outline-secondary mt-2', type: 'button' }, ['I have saved them']);
+                            panel.appendChild(recoveryBlock(r.recovery, t('js.twofa.new_codes')));
+                            const done = el('button', { className: 'btn btn-sm btn-outline-secondary mt-2', type: 'button' }, [t('js.twofa.saved_them')]);
                             done.addEventListener('click', load);
                             panel.appendChild(done);
                             return;
                         }
                         await load();
-                    } else showToast(r.error || 'Failed.', 'error');
-                } catch { showToast('Network error', 'error'); }
+                    } else showToast(r.error || t('js.twofa.failed'), 'error');
+                } catch { showToast(t('js.twofa.network_error'), 'error'); }
                 btn.disabled = false;
             });
             wrap.appendChild(btn);
             return wrap;
         };
 
-        panel.appendChild(mk('New recovery codes', 'regen', 'Generate ten new codes', 'btn-outline-warning',
-            'Replaces every existing code. Use this after you have signed in with one, or if you are not sure where the old list is.'));
-        panel.appendChild(mk('Turn it off', 'disable', 'Turn off', 'btn-outline-danger',
-            'Needs the password AND a current code — the whole point is that somebody who only has the password cannot switch it off.'));
+        panel.appendChild(mk(t('js.twofa.regen_title'), 'regen', t('js.twofa.regen_ok'), 'btn-outline-warning',
+            t('js.twofa.regen_hint')));
+        panel.appendChild(mk(t('js.twofa.disable_section'), 'disable', t('js.twofa.disable_btn'), 'btn-outline-danger',
+            t('js.twofa.disable_hint')));
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', load); else load();

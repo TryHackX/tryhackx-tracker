@@ -301,6 +301,29 @@ function langAll(): array {
 }
 
 /**
+ * The strings the browser scripts need — every key under `js.` — with the fallback filled in.
+ *
+ * Only that prefix: the whole dictionary is 1100+ strings and the scripts use a few dozen, so
+ * sending everything would put the size of the templates' text on every page for nothing. A script
+ * string lives under `js.` BY DEFINITION; a template string the script also needs is duplicated
+ * under `js.` rather than widening the bundle.
+ */
+function langJsBundle(): array {
+    $out = [];
+    foreach (langAll() as $k => $v) if (str_starts_with($k, 'js.')) $out[$k] = (string)$v;
+    return ['lang' => langCurrent(), 'strings' => $out];
+}
+
+/** The `<script>` pair that puts the bundle and the t() helper on a page — before any other script. */
+function langJsBridge(string $baseUrl): string {
+    $json = json_encode(langJsBundle(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $ver = function_exists('assetVer') ? assetVer('assets/js/i18n.js') : '';
+    return '<script id="i18n-data" type="application/json">' . $json . '</script>' . "
+"
+         . '    <script src="' . htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8') . 'assets/js/i18n.js' . $ver . '"></script>';
+}
+
+/**
  * How complete a translation is, measured against English.
  *
  * Against English and not against the largest file: "coverage" has to mean "how much of what the

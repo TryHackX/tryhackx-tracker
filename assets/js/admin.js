@@ -17,7 +17,7 @@ let sortStack = [{ col: 'date', dir: 'desc' }];
 // The dashboard fired a request on the click itself. The header row is rebuilt whenever the source
 // changes, so this timer has to live out here — one created inside the forEach would give every
 // column its own, and debounce nothing at all.
-const SORT_DEBOUNCE_MS = 900;
+const SORT_DEBOUNCE_MS = 1200;   // the same number as AdminCommon.DEBOUNCE.sort — this file does not load admin-common.js
 let sortTimer = null;
 function reloadAfterSort() {
     clearTimeout(sortTimer);
@@ -110,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
             searchTerm = e.target.value.trim();
             currentPage = 1;
             (source === 'appeals' || source === 'appeal_archives') ? loadAppeals() : loadReports();
-        }, 300);
+        }, 400);   // AdminCommon.DEBOUNCE.search
     });
 
     searchClear.addEventListener('click', () => {
@@ -193,22 +193,22 @@ async function loadReports() {
     const totalEl = document.getElementById('total-count');
 
     if (!json.reports || json.reports.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 table-empty-state">No reports found.</td></tr>';
-        totalEl.textContent = 'Total: 0';
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 table-empty-state">' + esc(t('js.reports.no_reports_found')) + '</td></tr>';
+        totalEl.textContent = t('js.reports.total', {n: 0});
         document.getElementById('pagination').innerHTML = '';
         return;
     }
 
-    totalEl.textContent = 'Total: ' + json.total;
+    totalEl.textContent = t('js.reports.total', {n: json.total});
 
     tbody.innerHTML = json.reports.map(r => {
         let statusBadge;
         if (r.blocked) {
-            statusBadge = '<span class="badge-table badge-blocked">Blocked</span>';
+            statusBadge = '<span class="badge-table badge-blocked">' + esc(t('js.reports.status_blocked')) + '</span>';
         } else if (r.checked) {
-            statusBadge = '<span class="badge-table badge-reviewed">Reviewed</span>';
+            statusBadge = '<span class="badge-table badge-reviewed">' + esc(t('js.reports.status_reviewed')) + '</span>';
         } else {
-            statusBadge = '<span class="badge-table badge-pending">Pending</span>';
+            statusBadge = '<span class="badge-table badge-pending">' + esc(t('js.reports.status_pending')) + '</span>';
         }
         return `
         <tr>
@@ -218,7 +218,7 @@ async function loadReports() {
             <td class="editable-cell" title="${escAttr(r.company)}" ondblclick="inlineEdit(this, ${r.id}, 'company')">${esc(r.company)}</td>
             <td class="editable-cell" title="${escAttr(r.representative)}" ondblclick="inlineEdit(this, ${r.id}, 'representative')">${esc(r.representative)}</td>
             <td title="${escAttr(r.objectTitle)}">${esc(r.objectTitle)}</td>
-            <td class="hash-cell hash-copy" title="Click to copy: ${r.infoHash}" onclick="copyHash(this, '${r.infoHash}')">${r.infoHash}</td>
+            <td class="hash-cell hash-copy" title="${escAttr(t('js.reports.click_to_copy', {hash: r.infoHash}))}" onclick="copyHash(this, '${r.infoHash}')">${r.infoHash}</td>
             <td title="${escAttr(r.ip)}"><small>${esc(r.ip)}</small></td>
             <td class="col-badge">${statusBadge}</td>
             <td class="dash-date"><small>${r.timestamp}</small></td>
@@ -238,9 +238,9 @@ function renderPagination(total, page, pages) {
     }
     if (pages <= 1) { el.innerHTML = ''; return; }
     el.innerHTML = `
-        <button ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})"><i class="bi bi-chevron-left"></i> Prev</button>
-        <span>Page ${page} of ${pages}</span>
-        <button ${page >= pages ? 'disabled' : ''} onclick="goPage(${page + 1})">Next <i class="bi bi-chevron-right"></i></button>
+        <button ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})"><i class="bi bi-chevron-left"></i> ${esc(t('js.reports.prev'))}</button>
+        <span>${esc(t('js.reports.page_of', {page: page, pages: pages}))}</span>
+        <button ${page >= pages ? 'disabled' : ''} onclick="goPage(${page + 1})">${esc(t('js.reports.next'))} <i class="bi bi-chevron-right"></i></button>
     `;
 }
 
@@ -280,21 +280,21 @@ async function openModal(id) {
     const isArchive = source === 'archives';
 
     const messageHtml = r.add_message
-        ? `<div class="report-message-block"><p class="msg-block-header">Message</p><div class="report-message-content">${renderMessage(r.add_message)}</div></div>`
+        ? `<div class="report-message-block"><p class="msg-block-header">${esc(t('js.reports.message'))}</p><div class="report-message-content">${renderMessage(r.add_message)}</div></div>`
         : '';
 
     document.getElementById('modal-report-info').innerHTML = `
         <div class="report-info-grid">
-            <p><strong>ID:</strong> ${r.id}</p>
-            <p><strong>Name:</strong> ${esc(r.name)}</p>
-            <p><strong>Email:</strong> ${esc(r.email)}</p>
-            <p><strong>Company:</strong> ${esc(r.company)}</p>
-            <p><strong>Representative:</strong> ${esc(r.representative)}</p>
-            <p><strong>Object:</strong> ${esc(r.objectTitle)}</p>
-            <p><strong>Link:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
-            <p><strong>Hash:</strong> <code class="text-info">${r.infoHash}</code></p>
-            ${r.magnet_link ? '<p><strong>Magnet:</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" onclick="copyMagnet(this)" class="btn btn-sm magnet-copy-btn" title="Copy magnet link"><i class="bi bi-clipboard"></i></button></div>' : ''}
-            <p><strong>IP:</strong> ${r.ip} &nbsp; <strong>Date:</strong> ${r.timestamp}</p>
+            <p><strong>${esc(t('js.reports.col_id'))}:</strong> ${r.id}</p>
+            <p><strong>${esc(t('js.reports.col_name'))}:</strong> ${esc(r.name)}</p>
+            <p><strong>${esc(t('js.reports.col_email'))}:</strong> ${esc(r.email)}</p>
+            <p><strong>${esc(t('js.reports.col_company'))}:</strong> ${esc(r.company)}</p>
+            <p><strong>${esc(t('js.reports.lbl_representative'))}:</strong> ${esc(r.representative)}</p>
+            <p><strong>${esc(t('js.reports.col_object'))}:</strong> ${esc(r.objectTitle)}</p>
+            <p><strong>${esc(t('js.reports.lbl_link'))}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
+            <p><strong>${esc(t('js.reports.lbl_hash'))}:</strong> <code class="text-info">${r.infoHash}</code></p>
+            ${r.magnet_link ? '<p><strong>' + esc(t('js.reports.lbl_magnet')) + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" onclick="copyMagnet(this)" class="btn btn-sm magnet-copy-btn" title="' + escAttr(t('js.reports.copy_magnet_link')) + '"><i class="bi bi-clipboard"></i></button></div>' : ''}
+            <p><strong>${esc(t('js.reports.col_ip'))}:</strong> ${r.ip} &nbsp; <strong>${esc(t('js.reports.col_date'))}:</strong> ${r.timestamp}</p>
         </div>
         ${messageHtml}
     `;
@@ -336,7 +336,7 @@ async function openModal(id) {
             if (res.success) {
                 if (res.marked_reviewed) loadReports();
                 if (!res.already_sent && !res.skipped) {
-                    showToast('success', 'Review notification sent to reporter');
+                    showToast('success', t('js.reports.review_notification_sent'));
                 }
             }
         });
@@ -347,15 +347,15 @@ async function handleBlock() {
     if (!currentReport) return;
     const isArchive = source === 'archives';
     const msg = isArchive
-        ? 'Block this hash in the archive? The reporter will be notified.'
-        : 'Block this hash and archive the report? The reporter will be notified.';
+        ? t('js.reports.confirm_block_archive')
+        : t('js.reports.confirm_block_and_archive');
     if (!await confirmAction(msg)) return;
     const endpoint = isArchive ? 'admin/block_archived' : 'admin/block_hash';
     const json = await apiCall(endpoint, 'POST', { id: currentReport.id });
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('actionModal')).hide();
-        let toastMsg = json.message || 'Hash blocked';
-        if (json.auto_closed > 0) toastMsg += ' (' + json.auto_closed + ' appeal' + (json.auto_closed > 1 ? 's' : '') + ' auto-closed)';
+        let toastMsg = json.message || t('js.reports.hash_blocked');
+        if (json.auto_closed > 0) toastMsg += json.auto_closed > 1 ? t('js.reports.auto_closed_many', {n: json.auto_closed}) : t('js.reports.auto_closed_one');
         showToast('success', toastMsg);
         if (json.blacklist_warning) {
             showToast('error', json.blacklist_warning);
@@ -363,17 +363,17 @@ async function handleBlock() {
         loadReports();
         refreshTrackerWarnings();
     } else {
-        showModalAlert('error', json.error || 'Error');
+        showModalAlert('error', json.error || t('js.reports.error'));
     }
 }
 
 async function handleUnblock() {
     if (!currentReport) return;
-    if (!await confirmAction('Are you sure you want to unblock this hash?')) return;
+    if (!await confirmAction(t('js.reports.confirm_unblock'))) return;
     const json = await apiCall('admin/unblock_hash', 'POST', { id: currentReport.id });
     if (json.success) {
-        let unblockMsg = json.message || 'Hash unblocked';
-        if (json.auto_closed > 0) unblockMsg += ' (' + json.auto_closed + ' appeal' + (json.auto_closed > 1 ? 's' : '') + ' auto-closed)';
+        let unblockMsg = json.message || t('js.reports.hash_unblocked');
+        if (json.auto_closed > 0) unblockMsg += json.auto_closed > 1 ? t('js.reports.auto_closed_many', {n: json.auto_closed}) : t('js.reports.auto_closed_one');
         showToast('success', unblockMsg);
         currentReport.blocked = 0;
         document.getElementById('modal-block').style.display = '';
@@ -384,34 +384,34 @@ async function handleUnblock() {
         loadReports();
         refreshTrackerWarnings();
     } else {
-        showModalAlert('error', json.error || 'Error');
+        showModalAlert('error', json.error || t('js.reports.error'));
     }
 }
 
 async function handleArchive() {
     if (!currentReport) return;
-    if (!await confirmAction('Archive this report without blocking? The reporter will be notified that the case is closed.')) return;
+    if (!await confirmAction(t('js.reports.confirm_archive'))) return;
     const json = await apiCall('admin/delete_report', 'POST', { id: currentReport.id });
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('actionModal')).hide();
-        showToast('success', 'Report archived');
+        showToast('success', t('js.reports.report_archived'));
         loadReports();
     } else {
-        showModalAlert('error', json.error || 'Error');
+        showModalAlert('error', json.error || t('js.reports.error'));
     }
 }
 
 async function handleRestore() {
     if (!currentReport) return;
-    if (!await confirmAction('Restore this report to active reports?')) return;
+    if (!await confirmAction(t('js.reports.confirm_restore'))) return;
     const json = await apiCall('admin/restore_report', 'POST', { id: currentReport.id });
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('actionModal')).hide();
-        showToast('success', 'Report restored to active');
+        showToast('success', t('js.reports.report_restored'));
         loadReports();
         refreshTrackerWarnings();
     } else {
-        showModalAlert('error', json.error || 'Error');
+        showModalAlert('error', json.error || t('js.reports.error'));
     }
 }
 
@@ -419,7 +419,7 @@ async function handleSendEmail() {
     if (!currentReport) return;
     const msg = document.getElementById('modal-email-msg').value.trim();
     if (!msg) {
-        showModalAlert('error', 'Please enter a message');
+        showModalAlert('error', t('js.reports.enter_message'));
         return;
     }
     const json = await apiCall('admin/send_email', 'POST', {
@@ -427,18 +427,18 @@ async function handleSendEmail() {
         message: msg,
     });
     if (json.success) {
-        showToast('success', 'Email sent');
+        showToast('success', t('js.reports.email_sent'));
         document.getElementById('modal-email-msg').value = '';
     } else {
-        showModalAlert('error', json.error || 'Failed to send email');
+        showModalAlert('error', json.error || t('js.reports.email_failed'));
     }
 }
 
 async function handleArchiveAll() {
-    if (!await confirmAction('Archive all reviewed reports?')) return;
+    if (!await confirmAction(t('js.reports.confirm_archive_all'))) return;
     const json = await apiCall('admin/delete_all', 'POST');
     if (json.success) {
-        showToast('success', 'Archived ' + (json.archived || 0) + ' reports');
+        showToast('success', t('js.reports.archived_count', {n: json.archived || 0}));
         loadReports();
     }
 }
@@ -524,31 +524,31 @@ function updateTableHeaders(src) {
 
     if (isAppeal) {
         thead.innerHTML = `
-            <th class="sortable" data-sort="id">ID <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="name">Name <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="email">Email <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th>Description</th>
-            <th class="sortable col-badge" data-sort="type">Type <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="report">Report <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="hash">Info Hash <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="ip">IP <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable col-badge" data-sort="status">Status <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="date">Date <i class="bi bi-arrow-down sort-icon active"></i></th>
-            <th class="th-actions">Actions</th>
+            <th class="sortable" data-sort="id">${esc(t('js.reports.col_id'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="name">${esc(t('js.reports.col_name'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="email">${esc(t('js.reports.col_email'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th>${esc(t('js.reports.col_description'))}</th>
+            <th class="sortable col-badge" data-sort="type">${esc(t('js.reports.col_type'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="report">${esc(t('js.reports.col_report'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="hash">${esc(t('js.reports.col_info_hash'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="ip">${esc(t('js.reports.col_ip'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable col-badge" data-sort="status">${esc(t('js.reports.col_status'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="date">${esc(t('js.reports.col_date'))} <i class="bi bi-arrow-down sort-icon active"></i></th>
+            <th class="th-actions">${esc(t('js.reports.col_actions'))}</th>
         `;
     } else {
         thead.innerHTML = `
-            <th class="sortable" data-sort="id">ID <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="name">Name <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="email">Email <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="company">Company <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="representative">Entity <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="object">Object <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="hash">Info Hash <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="ip">IP <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable col-badge" data-sort="blocked">Status <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="date">Date <i class="bi bi-arrow-down sort-icon active"></i></th>
-            <th class="th-actions">Actions</th>
+            <th class="sortable" data-sort="id">${esc(t('js.reports.col_id'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="name">${esc(t('js.reports.col_name'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="email">${esc(t('js.reports.col_email'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="company">${esc(t('js.reports.col_company'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="representative">${esc(t('js.reports.col_entity'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="object">${esc(t('js.reports.col_object'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="hash">${esc(t('js.reports.col_hash'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="ip">${esc(t('js.reports.col_ip'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable col-badge" data-sort="blocked">${esc(t('js.reports.col_status'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="date">${esc(t('js.reports.col_date'))} <i class="bi bi-arrow-down sort-icon active"></i></th>
+            <th class="th-actions">${esc(t('js.reports.col_actions'))}</th>
         `;
     }
 
@@ -579,21 +579,21 @@ function updateFilterOptions(src) {
     filter.value = 'all';
 
     const reportOptions = [
-        { value: 'all', text: 'All statuses' },
-        { value: 'pending', text: 'Awaiting Review' },
-        { value: 'reviewed', text: 'Reviewed' },
-        { value: 'blocked', text: 'Blocked' },
+        { value: 'all', text: t('js.reports.filter_all_statuses') },
+        { value: 'pending', text: t('js.reports.filter_awaiting_review') },
+        { value: 'reviewed', text: t('js.reports.status_reviewed') },
+        { value: 'blocked', text: t('js.reports.status_blocked') },
     ];
     const appealOptions = [
-        { value: 'all', text: 'All statuses' },
-        { value: 'pending', text: 'Pending' },
-        { value: 'accepted', text: 'Accepted' },
-        { value: 'rejected', text: 'Rejected' },
+        { value: 'all', text: t('js.reports.filter_all_statuses') },
+        { value: 'pending', text: t('js.reports.status_pending') },
+        { value: 'accepted', text: t('js.reports.status_accepted') },
+        { value: 'rejected', text: t('js.reports.status_rejected') },
     ];
     const appealArchiveOptions = [
-        { value: 'all', text: 'All statuses' },
-        { value: 'accepted', text: 'Accepted' },
-        { value: 'rejected', text: 'Rejected' },
+        { value: 'all', text: t('js.reports.filter_all_statuses') },
+        { value: 'accepted', text: t('js.reports.status_accepted') },
+        { value: 'rejected', text: t('js.reports.status_rejected') },
     ];
 
     let options;
@@ -605,7 +605,7 @@ function updateFilterOptions(src) {
         options = reportOptions;
     }
 
-    filter.innerHTML = options.map(o => `<option value="${o.value}">${o.text}</option>`).join('');
+    filter.innerHTML = options.map(o => `<option value="${o.value}">${esc(o.text)}</option>`).join('');
 }
 
 function updateBadge(id, count) {
@@ -635,7 +635,7 @@ function escAttr(str) {
 function copyHash(td, hash) {
     navigator.clipboard.writeText(hash).then(() => {
         const orig = td.textContent;
-        td.textContent = 'Copied!';
+        td.textContent = t('js.reports.copied');
         td.style.color = '#4caf50';
         setTimeout(() => { td.textContent = orig; td.style.color = ''; }, 1200);
     });
@@ -683,10 +683,10 @@ function inlineEdit(td, id, field) {
         });
         if (json.success) {
             td.textContent = json.value;
-            showToast('success', field.charAt(0).toUpperCase() + field.slice(1) + ' updated');
+            showToast('success', t('js.reports.field_updated', {field: field.charAt(0).toUpperCase() + field.slice(1)}));
         } else {
             td.textContent = original;
-            showToast('error', json.error || 'Update failed');
+            showToast('error', json.error || t('js.reports.update_failed'));
         }
     }
 
@@ -725,21 +725,21 @@ async function loadAppeals() {
     updateBadge('appeals-badge', json.pending_count);
 
     if (!json.appeals || json.appeals.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 table-empty-state">No appeals found.</td></tr>';
-        totalEl.textContent = 'Total: 0';
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 table-empty-state">' + t('js.reports.no_appeals') + '</td></tr>';
+        totalEl.textContent = t('js.reports.total', {n: 0});
         document.getElementById('pagination').innerHTML = '';
         return;
     }
 
-    totalEl.textContent = 'Total: ' + json.total;
+    totalEl.textContent = t('js.reports.total', {n: json.total});
 
     tbody.innerHTML = json.appeals.map(a => {
         const statusMap = { pending: 'badge-pending', accepted: 'badge-reviewed', rejected: 'badge-blocked', reviewed: 'badge-reviewed' };
-        const labelMap = { pending: 'Pending', accepted: 'Accepted', rejected: 'Rejected', reviewed: 'Reviewed' };
+        const labelMap = { pending: t('js.reports.status_pending'), accepted: t('js.reports.status_accepted'), rejected: t('js.reports.status_rejected'), reviewed: t('js.reports.status_reviewed') };
         const badge = `<span class="badge-table ${statusMap[a.status] || 'badge-pending'}">${labelMap[a.status] || a.status}</span>`;
         const typeBadge = a.appeal_type === 'block'
-            ? '<span class="badge-table badge-type-block">Block</span>'
-            : '<span class="badge-table badge-type-unblock">Unblock</span>';
+            ? '<span class="badge-table badge-type-block">' + t('js.reports.type_block') + '</span>'
+            : '<span class="badge-table badge-type-unblock">' + t('js.reports.type_unblock') + '</span>';
         const shortMsg = a.message ? (a.message.length > 50 ? esc(a.message.substring(0, 50)) + '...' : esc(a.message)) : '';
         return `
         <tr>
@@ -749,7 +749,7 @@ async function loadAppeals() {
             <td class="col-desc" title="${escAttr(a.message)}"><small>${shortMsg}</small></td>
             <td class="col-badge">${typeBadge}</td>
             <td>${a.report_id ? '<a href="#" class="text-info" onclick="openReportFromAppeal(' + a.report_id + ', \'' + esc(a.infoHash) + '\');return false;">#' + a.report_id + '</a>' : '—'}</td>
-            <td class="hash-cell hash-copy" title="Click to copy: ${a.infoHash}" onclick="copyHash(this, '${a.infoHash}')">${a.infoHash}</td>
+            <td class="hash-cell hash-copy" title="${t('js.reports.click_to_copy', {hash: a.infoHash})}" onclick="copyHash(this, '${a.infoHash}')">${a.infoHash}</td>
             <td title="${escAttr(a.ip)}"><small>${esc(a.ip)}</small></td>
             <td class="col-badge">${badge}</td>
             <td class="dash-date"><small>${a.timestamp}</small></td>
@@ -774,7 +774,7 @@ async function openReportFromAppeal(reportId, infoHash) {
         reportSource = 'archives';
     }
     if (!json.report) {
-        showToast('error', 'Report #' + reportId + ' not found');
+        showToast('error', t('js.reports.report_not_found', {id: reportId}));
         return;
     }
 
@@ -786,21 +786,21 @@ async function openReportFromAppeal(reportId, infoHash) {
     const isArchive = reportSource === 'archives';
 
     const messageHtml = r.add_message
-        ? `<div class="report-message-block"><p class="msg-block-header">Message</p><div class="report-message-content">${renderMessage(r.add_message)}</div></div>`
+        ? `<div class="report-message-block"><p class="msg-block-header">${t('js.reports.lbl_message')}</p><div class="report-message-content">${renderMessage(r.add_message)}</div></div>`
         : '';
 
     document.getElementById('modal-report-info').innerHTML = `
         <div class="report-info-grid">
-            <p><strong>ID:</strong> ${r.id}${isArchive ? ' <span class="badge bg-secondary badge-archived-sm">Archived</span>' : ''}</p>
-            <p><strong>Name:</strong> ${esc(r.name)}</p>
-            <p><strong>Email:</strong> ${esc(r.email)}</p>
-            <p><strong>Company:</strong> ${esc(r.company)}</p>
-            <p><strong>Representative:</strong> ${esc(r.representative)}</p>
-            <p><strong>Object:</strong> ${esc(r.objectTitle)}</p>
-            <p><strong>Link:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
-            <p><strong>Hash:</strong> <code class="text-info">${r.infoHash}</code></p>
-            ${r.magnet_link ? '<p><strong>Magnet:</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" onclick="copyMagnet(this)" class="btn btn-sm magnet-copy-btn" title="Copy magnet link"><i class="bi bi-clipboard"></i></button></div>' : ''}
-            <p><strong>IP:</strong> ${r.ip} &nbsp; <strong>Date:</strong> ${r.timestamp}</p>
+            <p><strong>${t('js.reports.lbl_id')}:</strong> ${r.id}${isArchive ? ' <span class="badge bg-secondary badge-archived-sm">' + t('js.reports.archived') + '</span>' : ''}</p>
+            <p><strong>${t('js.reports.lbl_name')}:</strong> ${esc(r.name)}</p>
+            <p><strong>${t('js.reports.lbl_email')}:</strong> ${esc(r.email)}</p>
+            <p><strong>${t('js.reports.lbl_company')}:</strong> ${esc(r.company)}</p>
+            <p><strong>${t('js.reports.lbl_representative')}:</strong> ${esc(r.representative)}</p>
+            <p><strong>${t('js.reports.lbl_object')}:</strong> ${esc(r.objectTitle)}</p>
+            <p><strong>${t('js.reports.lbl_link')}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
+            <p><strong>${t('js.reports.lbl_hash')}:</strong> <code class="text-info">${r.infoHash}</code></p>
+            ${r.magnet_link ? '<p><strong>' + t('js.reports.lbl_magnet') + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" onclick="copyMagnet(this)" class="btn btn-sm magnet-copy-btn" title="' + escAttr(t('js.reports.copy_magnet')) + '"><i class="bi bi-clipboard"></i></button></div>' : ''}
+            <p><strong>${t('js.reports.lbl_ip')}:</strong> ${r.ip} &nbsp; <strong>${t('js.reports.lbl_date')}:</strong> ${r.timestamp}</p>
         </div>
         ${messageHtml}
     `;
@@ -835,24 +835,25 @@ async function openAppealModal(id) {
 
     const appealType = a.appeal_type || 'unblock';
     const typeBadge = appealType === 'block'
-        ? '<span class="badge-table badge-type-block badge-type-lg">Block Request</span>'
-        : '<span class="badge-table badge-type-unblock badge-type-lg">Unblock Request</span>';
+        ? '<span class="badge-table badge-type-block badge-type-lg">' + t('js.reports.block_request') + '</span>'
+        : '<span class="badge-table badge-type-unblock badge-type-lg">' + t('js.reports.unblock_request') + '</span>';
+    const statusLabels = { pending: t('js.reports.status_pending'), accepted: t('js.reports.status_accepted'), rejected: t('js.reports.status_rejected'), reviewed: t('js.reports.status_reviewed') };
 
     document.getElementById('appeal-modal-info').innerHTML = `
         <div class="report-info-grid">
-            <p><strong>Appeal ID:</strong> ${a.id} ${typeBadge}</p>
-            <p><strong>Name:</strong> ${esc(a.name)}</p>
-            <p><strong>Email:</strong> ${esc(a.email)}</p>
-            <p><strong>Report #:</strong> ${a.report_id ? '<a href="#" class="text-info" onclick="openReportFromAppeal(' + a.report_id + ', \'' + esc(a.infoHash) + '\');return false;">#' + a.report_id + '</a>' : '—'}</p>
-            <p><strong>Hash:</strong> <code class="text-info">${a.infoHash}</code></p>
-            <p><strong>IP:</strong> ${a.ip} &nbsp; <strong>Date:</strong> ${a.timestamp}</p>
-            <p><strong>Status:</strong> ${a.status}</p>
+            <p><strong>${t('js.reports.lbl_appeal_id')}:</strong> ${a.id} ${typeBadge}</p>
+            <p><strong>${t('js.reports.lbl_name')}:</strong> ${esc(a.name)}</p>
+            <p><strong>${t('js.reports.lbl_email')}:</strong> ${esc(a.email)}</p>
+            <p><strong>${t('js.reports.lbl_report_no')}:</strong> ${a.report_id ? '<a href="#" class="text-info" onclick="openReportFromAppeal(' + a.report_id + ', \'' + esc(a.infoHash) + '\');return false;">#' + a.report_id + '</a>' : '—'}</p>
+            <p><strong>${t('js.reports.lbl_hash')}:</strong> <code class="text-info">${a.infoHash}</code></p>
+            <p><strong>${t('js.reports.lbl_ip')}:</strong> ${a.ip} &nbsp; <strong>${t('js.reports.lbl_date')}:</strong> ${a.timestamp}</p>
+            <p><strong>${t('js.reports.lbl_status')}:</strong> ${statusLabels[a.status] || a.status}</p>
         </div>
         <div class="report-message-block">
-            <p class="msg-block-header">Appeal Message</p>
+            <p class="msg-block-header">${t('js.reports.appeal_message')}</p>
             <div class="report-message-content">${renderMessage(a.message)}</div>
         </div>
-        ${a.admin_response ? '<div class="report-message-block admin-response"><p class="msg-block-header admin-response">Admin Response</p><div class="report-message-content">' + renderMessage(a.admin_response) + '</div></div>' : ''}
+        ${a.admin_response ? '<div class="report-message-block admin-response"><p class="msg-block-header admin-response">' + t('js.reports.admin_response') + '</p><div class="report-message-content">' + renderMessage(a.admin_response) + '</div></div>' : ''}
     `;
 
     const isPending = a.status === 'pending';
@@ -896,8 +897,8 @@ async function openAppealModal(id) {
 
 async function handleResolveAppeal(status) {
     if (!currentAppeal) return;
-    const label = status === 'accepted' ? 'accept' : 'reject';
-    if (!await confirmAction(`Are you sure you want to ${label} this appeal?`)) return;
+    const confirmMsg = status === 'accepted' ? t('js.reports.confirm_accept_appeal') : t('js.reports.confirm_reject_appeal');
+    if (!await confirmAction(confirmMsg)) return;
 
     const appealType = currentAppeal.appeal_type || 'unblock';
     const body = {
@@ -919,33 +920,33 @@ async function handleResolveAppeal(status) {
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('appealModal')).hide();
         let extra = '';
-        if (json.unblocked) extra += ' — hash unblocked';
-        if (json.blocked) extra += ' — hash blocked';
-        if (json.auto_closed > 0) extra += ' (' + json.auto_closed + ' related appeal' + (json.auto_closed > 1 ? 's' : '') + ' auto-closed)';
+        if (json.unblocked) extra += t('js.reports.extra_hash_unblocked');
+        if (json.blocked) extra += t('js.reports.extra_hash_blocked');
+        if (json.auto_closed > 0) extra += t('js.reports.extra_auto_closed', {n: json.auto_closed});
         showToast('success', json.message + extra);
         loadAppeals();
         loadAppealsBadge();
         refreshTrackerWarnings();
     } else {
         const el = document.getElementById('appeal-modal-alert');
-        el.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || 'Error')}</div>`;
+        el.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t('js.reports.error'))}</div>`;
         setTimeout(() => el.innerHTML = '', 5000);
     }
 }
 
 async function handleRestoreAppeal() {
     if (!currentAppeal) return;
-    if (!await confirmAction('Restore this appeal to active reviews? The appellant will be notified.')) return;
+    if (!await confirmAction(t('js.reports.confirm_restore_appeal'))) return;
 
     const json = await apiCall('admin/restore_appeal', 'POST', { id: currentAppeal.id });
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('appealModal')).hide();
-        showToast('success', json.message || 'Appeal restored');
+        showToast('success', json.message || t('js.reports.appeal_restored'));
         loadAppeals();
         loadAppealsBadge();
     } else {
         const el = document.getElementById('appeal-modal-alert');
-        el.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || 'Error')}</div>`;
+        el.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t('js.reports.error'))}</div>`;
         setTimeout(() => el.innerHTML = '', 5000);
     }
 }
@@ -981,7 +982,7 @@ async function handleDeletePermSubmit(e) {
     const btn = e.target.querySelector('button[type="submit"]');
     const origHtml = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Deleting...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.reports.deleting');
 
     const payload = {
         id: currentReport.id,
@@ -998,8 +999,8 @@ async function handleDeletePermSubmit(e) {
             if (!token) {
                 // a widget/loader failure needs different advice than "you cancelled it"
                 const msg = captchaUnavailable()
-                    ? 'CAPTCHA could not load — reload the page or check the site key.'
-                    : 'CAPTCHA verification required.';
+                    ? t('js.reports.captcha_could_not_load')
+                    : t('js.reports.captcha_required');
                 alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(msg)}</div>`;
                 setTimeout(() => {
                     const alertDiv = alertEl.querySelector('.modal-alert-sm');
@@ -1017,11 +1018,11 @@ async function handleDeletePermSubmit(e) {
             const deletePermModalEl = document.getElementById('deletePermModal');
             const deletePermModal = bootstrap.Modal.getInstance(deletePermModalEl);
             if (deletePermModal) deletePermModal.hide();
-            showToast('success', json.message || 'Report deleted permanently');
+            showToast('success', json.message || t('js.reports.report_deleted_permanently'));
             loadReports();
             refreshTrackerWarnings();
         } else {
-            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || 'Error')}</div>`;
+            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t('js.reports.error'))}</div>`;
             setTimeout(() => {
                 const alertDiv = alertEl.querySelector('.modal-alert-sm');
                 if (alertDiv) alertDiv.classList.add('alert-fade');
@@ -1029,7 +1030,7 @@ async function handleDeletePermSubmit(e) {
             setTimeout(() => alertEl.innerHTML = '', 5000);
         }
     } catch (err) {
-        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">Network error or unexpected response.</div>`;
+        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(t('js.reports.network_error_unexpected'))}</div>`;
         setTimeout(() => {
             const alertDiv = alertEl.querySelector('.modal-alert-sm');
             if (alertDiv) alertDiv.classList.add('alert-fade');
@@ -1118,16 +1119,16 @@ function applyTrackerWarnings(json) {
     else if (level === 'danger') restartBtn.classList.add('tracker-glow-danger');
     restartBtn.disabled = json.exec_available === false;
     restartBtn.title = restartBtn.disabled
-        ? 'Restart unavailable: PHP exec() is disabled on the server'
-        : ('Restart the tracker service' + (json.service ? ' (' + json.service + ')' : ''));
+        ? t('js.reports.restart_unavailable')
+        : (t('js.reports.restart_tracker_title') + (json.service ? ' (' + json.service + ')' : ''));
 
     // The Reload button shares the same exec-availability gate.
     const reloadBtn = document.getElementById('btn-reload-tracker');
     if (reloadBtn) {
         reloadBtn.disabled = json.exec_available === false;
         reloadBtn.title = reloadBtn.disabled
-            ? 'Reload unavailable: PHP exec() is disabled on the server'
-            : ('Reload the tracker blacklist (SIGHUP, no downtime)' + (json.service ? ' — ' + json.service : ''));
+            ? t('js.reports.reload_unavailable')
+            : (t('js.reports.reload_tracker_title') + (json.service ? ' — ' + json.service : ''));
     }
 
     // Only rebuild the chip + popover when something actually changed, so a background refresh
@@ -1149,7 +1150,7 @@ function applyTrackerWarnings(json) {
 
     trackerWarnPopover = new bootstrap.Popover(badge, {
         html: true,
-        title: 'Restart recommendations',
+        title: t('js.reports.restart_recommendations'),
         content: trackerWarnListHtml(items),
         trigger: 'hover focus',
         placement: 'bottom',
@@ -1191,7 +1192,7 @@ async function handleRestartTracker(e) {
     const btn = e.target.querySelector('button[type="submit"]');
     const orig = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Restarting...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.reports.restarting');
 
     try {
         const json = await apiCall('admin/restart_tracker', 'POST', { password: pw });
@@ -1199,10 +1200,10 @@ async function handleRestartTracker(e) {
             const modalEl = document.getElementById('restartTrackerModal');
             const modal = bootstrap.Modal.getInstance(modalEl);
             if (modal) modal.hide();
-            showToast('success', json.message || 'Tracker restarted');
+            showToast('success', json.message || t('js.reports.tracker_restarted'));
             refreshTrackerWarnings();
         } else {
-            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || 'Restart failed')}</div>`;
+            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t('js.reports.restart_failed'))}</div>`;
             setTimeout(() => {
                 const alertDiv = alertEl.querySelector('.modal-alert-sm');
                 if (alertDiv) alertDiv.classList.add('alert-fade');
@@ -1210,7 +1211,7 @@ async function handleRestartTracker(e) {
             setTimeout(() => alertEl.innerHTML = '', 7000);
         }
     } catch {
-        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">Network error.</div>`;
+        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(t('js.reports.network_error'))}</div>`;
         setTimeout(() => alertEl.innerHTML = '', 5000);
     } finally {
         btn.disabled = false;
@@ -1227,7 +1228,7 @@ async function handleReloadTracker(e) {
     const btn = e.target.querySelector('button[type="submit"]');
     const orig = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Reloading...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.reports.reloading');
 
     try {
         const json = await apiCall('admin/reload_tracker', 'POST', { password: pw });
@@ -1235,10 +1236,10 @@ async function handleReloadTracker(e) {
             const modalEl = document.getElementById('reloadTrackerModal');
             const modal = bootstrap.Modal.getInstance(modalEl);
             if (modal) modal.hide();
-            showToast('success', json.message || 'Tracker blacklist reloaded');
+            showToast('success', json.message || t('js.reports.tracker_blacklist_reloaded'));
             refreshTrackerWarnings();
         } else {
-            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || 'Reload failed')}</div>`;
+            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t('js.reports.reload_failed'))}</div>`;
             setTimeout(() => {
                 const alertDiv = alertEl.querySelector('.modal-alert-sm');
                 if (alertDiv) alertDiv.classList.add('alert-fade');
@@ -1246,7 +1247,7 @@ async function handleReloadTracker(e) {
             setTimeout(() => alertEl.innerHTML = '', 7000);
         }
     } catch {
-        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">Network error.</div>`;
+        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(t('js.reports.network_error'))}</div>`;
         setTimeout(() => alertEl.innerHTML = '', 5000);
     } finally {
         btn.disabled = false;

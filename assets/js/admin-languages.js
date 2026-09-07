@@ -43,7 +43,7 @@
         cb.disabled = !!disabled;
         cb.id = 'lang-' + scope + '-' + l.code;
         if (title) cb.title = title;
-        cb.setAttribute('aria-label', scope + ' — ' + l.name);
+        cb.setAttribute('aria-label', ({ enabled: t('js.languages.scope_enabled'), switcher: t('js.languages.scope_switcher'), users: t('js.languages.scope_users') })[scope] + ' — ' + l.name);
         cb.addEventListener('change', () => flip(l.code, scope, cb.checked, cb));
         wrap.appendChild(cb);
         return wrap;
@@ -66,14 +66,14 @@
         // The site default select only offers languages that are actually enabled, plus "automatic".
         const sel = $('lang-default');
         sel.textContent = '';
-        sel.appendChild(el('option', { value: 'auto', text: 'Automatic — whatever the browser asks for' }));
+        sel.appendChild(el('option', { value: 'auto', text: t('js.languages.auto_default') }));
         langs.filter(l => l.enabled).forEach(l => {
             sel.appendChild(el('option', { value: l.code, text: l.name + ' (' + l.code.toUpperCase() + ')' }));
         });
         sel.value = d.default || 'en';
 
         $('lang-auto').checked = !!d.auto;
-        $('lang-ref').textContent = fmt(d.reference) + ' strings';
+        $('lang-ref').textContent = t('js.languages.ref_strings', { n: fmt(d.reference) });
         // A lang/ directory the web user cannot write to means every install and copy will fail.
         // Better said here, once, than discovered as "could not write the language file".
         $('lang-writable').classList.toggle('d-none', !!d.writable);
@@ -85,8 +85,8 @@
             name.appendChild(el('div', { className: 'lang-name', text: l.name }));
             const badges = el('div', { className: 'lang-badges' });
             badges.appendChild(el('code', { className: 'lang-code', text: l.code }));
-            if (l.builtIn) badges.appendChild(el('span', { className: 'wl-badge wl-b-muted', text: 'ships with the panel' }));
-            if (l.code === d.default) badges.appendChild(el('span', { className: 'wl-badge wl-b-ok', text: 'site default' }));
+            if (l.builtIn) badges.appendChild(el('span', { className: 'wl-badge wl-b-muted', text: t('js.languages.ships_badge') }));
+            if (l.code === d.default) badges.appendChild(el('span', { className: 'wl-badge wl-b-ok', text: t('js.languages.site_default_badge') }));
             name.appendChild(badges);
             tr.appendChild(name);
 
@@ -101,13 +101,13 @@
             bar.appendChild(fill);
             cov.appendChild(bar);
             cov.appendChild(el('div', { className: 'wl-small text-muted lang-cov-text',
-                text: l.coverage + ' % · ' + fmt(l.strings) + ' strings'
-                    + (l.missing ? ' · ' + fmt(l.missing) + ' missing' : '') }));
+                text: t('js.languages.cov_text', { pct: l.coverage, n: fmt(l.strings) })
+                    + (l.missing ? t('js.languages.cov_missing', { n: fmt(l.missing) }) : '') }));
             tr.appendChild(cov);
 
             const on = el('td', { className: 'lang-col-sw' });
             on.appendChild(l.builtIn
-                ? el('span', { className: 'lang-lock', title: 'Ships with the panel — every other language falls back to it' }, [
+                ? el('span', { className: 'lang-lock', title: t('js.languages.lock_title') }, [
                       el('i', { className: 'bi bi-lock-fill' })])
                 : toggle(l, 'enabled', l.enabled, false));
             tr.appendChild(on);
@@ -126,20 +126,20 @@
             const acts = el('td', { className: 'lang-col-acts' });
             const actsBox = el('div', { className: 'lang-acts' });
             const dup = el('button', { className: 'btn btn-sm btn-outline-secondary' });
-            dup.type = 'button'; dup.title = 'Copy to a new code';
+            dup.type = 'button'; dup.title = t('js.languages.copy_title');
             dup.appendChild(el('i', { className: 'bi bi-files' }));
             dup.addEventListener('click', () => askDuplicate(l.code));
             actsBox.appendChild(dup);
 
             const exp = el('button', { className: 'btn btn-sm btn-outline-secondary' });
-            exp.type = 'button'; exp.title = 'Download as JSON';
+            exp.type = 'button'; exp.title = t('js.languages.download_title');
             exp.appendChild(el('i', { className: 'bi bi-download' }));
             exp.addEventListener('click', () => exportLang(l.code));
             actsBox.appendChild(exp);
 
             if (!l.builtIn) {
                 const del = el('button', { className: 'btn btn-sm btn-outline-danger' });
-                del.type = 'button'; del.title = 'Remove';
+                del.type = 'button'; del.title = t('js.languages.remove');
                 del.appendChild(el('i', { className: 'bi bi-trash' }));
                 del.addEventListener('click', () => askDelete(l));
                 actsBox.appendChild(del);
@@ -177,11 +177,11 @@
 
     async function submitDuplicate() {
         const code = ($('ld-code').value || '').trim().toLowerCase();
-        if (!/^[a-z]{2,3}$/.test(code)) { setMsg('ld-msg', 'A language code is two or three letters.'); return; }
+        if (!/^[a-z]{2,3}$/.test(code)) { setMsg('ld-msg', t('js.languages.code_len')); return; }
         const d = await apiCall('admin/languages', 'POST', { op: 'duplicate', source: dupSource, code });
         if (d.error) { setMsg('ld-msg', d.error); return; }
         bootstrap.Modal.getOrCreateInstance($('langDupModal')).hide();
-        showToast(d.message || 'Copied.', 'success');
+        showToast(d.message || t('js.languages.copied'), 'success');
         load();
     }
 
@@ -192,7 +192,7 @@
         $('lu-file-info').textContent = '';
         markFile(null);
         $('lu-code-name').textContent = '';
-        $('lu-pick-label').textContent = 'Choose a language…';
+        $('lu-pick-label').textContent = t('js.languages.choose_language');
         pending = null;
         setMsg('lu-msg', '');
         renderMenu();
@@ -223,11 +223,11 @@
                 menu.appendChild(el('li', {}, [a]));
             });
         };
-        add(free, 'Not installed yet');
-        add(taken, 'Already installed — uploading replaces it');
+        add(free, t('js.languages.menu_free'));
+        add(taken, t('js.languages.menu_taken'));
         if (!menu.childNodes.length) {
             menu.appendChild(el('li', {}, [el('div', { className: 'dropdown-item-text wl-dd-note',
-                text: 'Every code the panel knows a name for is installed. Type any two- or three-letter code.' })]));
+                text: t('js.languages.menu_all_installed') })]));
         }
     }
 
@@ -257,15 +257,14 @@
         const picked = known.find(l => l.code === code);
         $('lu-pick-label').textContent = code
             ? (picked ? picked.name + ' (' + code.toUpperCase() + ')' : code.toUpperCase())
-            : 'Choose a language…';
+            : t('js.languages.choose_language');
         if (!code) { out.textContent = ''; return; }
         const k = known.find(l => l.code === code);
         if (langs.some(l => l.code === code && l.builtIn)) {
-            out.textContent = 'This one ships with the panel and is never replaced by an upload — '
-                            + 'copy it to a free code and edit that.';
+            out.textContent = t('js.languages.builtin_no_upload');
             out.className = 'wl-small text-warning';
         } else if (k && k.installed) {
-            out.textContent = k.name + ' is already installed — uploading replaces it.';
+            out.textContent = t('js.languages.already_installed', { name: k.name });
             out.className = 'wl-small text-warning';
         } else if (k) {
             out.textContent = '→ ' + k.name;
@@ -280,12 +279,11 @@
                 out.className = 'wl-small text-success';
                 $('lu-pick-label').textContent = native + ' (' + code.toUpperCase() + ')';
             } else {
-                out.textContent = 'Accepted, but neither the panel nor this browser knows a name for '
-                                + code.toUpperCase() + ' — it will show as its code.';
+                out.textContent = t('js.languages.accepted_no_name', { code: code.toUpperCase() });
                 out.className = 'wl-small text-muted';
             }
         } else {
-            out.textContent = 'A language code is two or three letters, like "de" or "ast".';
+            out.textContent = t('js.languages.code_len_example');
             out.className = 'wl-small text-warning';
         }
     }
@@ -300,7 +298,7 @@
         if (main) {
             main.textContent = '';
             if (file) main.appendChild(document.createTextNode(file.name));
-            else { main.appendChild(el('u', { text: 'Choose a file' })); main.appendChild(document.createTextNode(' or drop it here')); }
+            else { main.appendChild(el('u', { text: t('js.languages.choose_file') })); main.appendChild(document.createTextNode(t('js.languages.or_drop'))); }
         }
     }
 
@@ -320,13 +318,13 @@
                 const keys = Object.keys(strings || {});
                 if (!keys.length) throw new Error('empty');
                 pending = strings;
-                info.textContent = fmt(keys.length) + ' strings read from ' + file.name + '.';
+                info.textContent = t('js.languages.strings_read', { n: fmt(keys.length), file: file.name });
                 if (parsed && parsed.code && !$('lu-code').value) {
                     $('lu-code').value = String(parsed.code).toLowerCase();
                     onCode();
                 }
             } catch (e) {
-                info.textContent = 'That file is not JSON this can read.';
+                info.textContent = t('js.languages.not_json');
             }
         };
         reader.readAsText(file);
@@ -334,24 +332,23 @@
 
     async function submitUpload() {
         const code = ($('lu-code').value || '').trim().toLowerCase();
-        if (!/^[a-z]{2,3}$/.test(code)) { setMsg('lu-msg', 'A language code is two or three letters.'); return; }
-        if (!pending) { setMsg('lu-msg', 'Pick a JSON file first.'); return; }
+        if (!/^[a-z]{2,3}$/.test(code)) { setMsg('lu-msg', t('js.languages.code_len')); return; }
+        if (!pending) { setMsg('lu-msg', t('js.languages.pick_file_first')); return; }
         const d = await apiCall('admin/languages', 'POST', { op: 'upload', code, strings: pending });
         if (d.error) { setMsg('lu-msg', d.error); return; }
         bootstrap.Modal.getOrCreateInstance($('langUploadModal')).hide();
-        showToast(d.message || 'Installed.', 'success');
+        showToast(d.message || t('js.languages.installed'), 'success');
         load();
     }
 
     async function askDelete(l) {
-        const ok = await confirmAction('Remove ' + l.name + '?',
-            'The lang/' + l.code + '.php file is deleted. Anyone whose account had chosen it falls '
-            + 'back to the site default. This cannot be undone — export it first if you want a copy.',
-            { okLabel: 'Remove', danger: true });
+        const ok = await confirmAction(t('js.languages.remove_title', { name: l.name }),
+            t('js.languages.remove_body', { code: l.code }),
+            { okLabel: t('js.languages.remove'), danger: true });
         if (!ok) return;
         const d = await apiCall('admin/languages', 'POST', { op: 'delete', code: l.code });
         if (d.error) { showToast(d.error, 'danger'); return; }
-        showToast(d.message || 'Removed.', 'success');
+        showToast(d.message || t('js.languages.removed'), 'success');
         load();
     }
 
@@ -365,13 +362,13 @@
     $('lang-default').addEventListener('change', async (e) => {
         const d = await apiCall('admin/languages', 'POST', { op: 'default', code: e.target.value });
         if (d.error) { showToast(d.error, 'danger'); load(); return; }
-        showToast(d.message || 'Saved.', 'success');
+        showToast(d.message || t('js.languages.saved'), 'success');
         load();
     });
     $('lang-auto').addEventListener('change', async (e) => {
         const d = await apiCall('admin/languages', 'POST', { op: 'auto', enabled: e.target.checked });
         if (d.error) { showToast(d.error, 'danger'); return; }
-        showToast(d.message || 'Saved.', 'success');
+        showToast(d.message || t('js.languages.saved'), 'success');
     });
     $('lang-add').addEventListener('click', openUpload);
     $('lu-code').addEventListener('input', onCode);

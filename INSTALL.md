@@ -146,8 +146,8 @@ sudo chmod 2770 /home/tracker/accesslist
 ```bash
 cd /var/www/tracker.example.org/tools/opentracker/bin   # or wherever you unpacked the release
 sha256sum -c <<'SUMS'
-164a37c53b352253911c4ce5d9b82f554c23f2212f4f6897071e59cb0083f849  opentracker.white
-02c3d8e3eea919657b85515f8adcd168af9597003efca22f331c8011cf5c6d74  opentracker.black
+d1a319cd999812a98c4fa2d6fedfee7a8a259b1d0ca0816d58bf2dc5f264fe8d  opentracker.white
+ef5e162e7cba1c3fd73b72c04f267c2699e5975d433c154699bc89cdc49da3cf  opentracker.black
 SUMS
 sudo install -o tracker -g tracker -m 0755 opentracker.white /home/tracker/opentracker.white
 sudo install -o tracker -g tracker -m 0755 opentracker.black /home/tracker/opentracker.black
@@ -157,7 +157,7 @@ Debian 13 / x86-64, dynamically linked against `libz` and `libc` only.
 
 ### Or: build them yourself
 
-The full recipe — upstream commit, the three patches, the feature flags and what each one is for —
+The full recipe — upstream commit, the four patch files, the feature flags and what each one is for —
 is in **[tools/opentracker/README.md](tools/opentracker/README.md)**. In short:
 
 ```bash
@@ -171,6 +171,7 @@ sudo git checkout 1c7fac4cc23801ac81a2abd7d3110683831c4811
 
 sudo patch -p1 --forward < $P/sighup-udp-workers.patch     # else `systemctl reload` KILLS the tracker
 sudo patch -p1 --forward < $P/udp-reject-interval.patch    # else rejected clients retry for ever
+sudo patch -p1 --forward < $P/opentracker-review-fixes.patch  # seven review fixes (connid secret, accesslist reload, ...)
 
 F="-DWANT_FULLSCRAPE -DWANT_COMPRESSION_GZIP -DWANT_RESTRICT_STATS -DWANT_MODEST_FULLSCRAPES"
 O=/usr/local/src/libowfat

@@ -43,36 +43,36 @@
         if (!state.enabled) return;
 
         $('tn-updated').textContent = state.updated_at
-            ? 'updated ' + fmtAgo(Math.max(0, state.server_time - state.updated_at)) + ' ago' : '';
+            ? t('js.tuner.updated_ago', {ago: fmtAgo(Math.max(0, state.server_time - state.updated_at))}) : '';
         $('tn-cancel').classList.toggle('d-hidden', !state.running);
         $('tn-start').disabled = state.running || !state.available;
         $('tn-dry').disabled = state.running || !state.available;
 
         const g = $('tn-grid');
         g.textContent = '';
-        g.appendChild(kv('Moving', [el('span', { text: {
-            inbound: 'the receive limit', outbound: 'the reply budget', both: 'both together',
-        }[state.what] || 'the receive limit' })]));
-        g.appendChild(kv('State', [
+        g.appendChild(kv(t('js.tuner.moving'), [el('span', { text: {
+            inbound: t('js.tuner.what_inbound'), outbound: t('js.tuner.what_outbound'), both: t('js.tuner.what_both'),
+        }[state.what] || t('js.tuner.what_inbound') })]));
+        g.appendChild(kv(t('js.tuner.state'), [
             el('span', { className: 'wl-badge ' + (state.running ? 'wl-b-warn' : 'wl-b-muted'),
-                         text: state.running ? (state.phase || 'running') : (state.phase || 'idle') }),
-            state.dry_run ? el('span', { className: 'wl-badge wl-b-muted', text: 'test run' }) : '',
+                         text: state.running ? (state.phase || t('js.tuner.phase_running')) : (state.phase || t('js.tuner.phase_idle')) }),
+            state.dry_run ? el('span', { className: 'wl-badge wl-b-muted', text: t('js.tuner.test_run') }) : '',
         ]));
         if (state.baseline && state.baseline.arriving_pps) {
-            g.appendChild(kv('Arriving when it started', num(Math.round(state.baseline.arriving_pps)) + ' pps'));
+            g.appendChild(kv(t('js.tuner.arriving_at_start'), t('js.tuner.pps', {n: num(Math.round(state.baseline.arriving_pps))})));
         }
         if (state.plan && state.plan.length) {
-            g.appendChild(kv('Plan', state.plan.map(p => num(p)).join(' → ') + ' pps'));
+            g.appendChild(kv(t('js.tuner.plan'), t('js.tuner.pps', {n: state.plan.map(p => num(p)).join(' → ')})));
         }
         if (state.running && state.eta_s) {
             const left = Math.max(0, state.started_at + state.eta_s - state.server_time);
-            g.appendChild(kv('About', fmtAgo(left) + ' left'));
+            g.appendChild(kv(t('js.tuner.about'), t('js.tuner.time_left', {t: fmtAgo(left)})));
         }
         // The one fact that makes this safe to press, said on the card rather than only in the docs.
-        g.appendChild(kv('The way back', state.has_restore
-            ? [el('span', { className: 'wl-badge wl-b-ok', text: 'recorded' }),
-               el('div', { className: 'wl-small text-muted', text: 'the settings go back even if the run is killed' })]
-            : [el('span', { className: 'wl-badge wl-b-muted', text: 'nothing to restore' })]));
+        g.appendChild(kv(t('js.tuner.way_back'), state.has_restore
+            ? [el('span', { className: 'wl-badge wl-b-ok', text: t('js.tuner.restore_recorded') }),
+               el('div', { className: 'wl-small text-muted', text: t('js.tuner.restore_note') })]
+            : [el('span', { className: 'wl-badge wl-b-muted', text: t('js.tuner.nothing_to_restore') })]));
 
         renderProgress();
         renderReport();
@@ -80,21 +80,19 @@
         const note = $('tn-note');
         if (state.stale) {
             note.className = 'nl-note nl-note-warn';
-            note.textContent = 'A run stopped without finishing. The janitor puts the settings back within a minute.';
+            note.textContent = t('js.tuner.note_stale');
         } else if (state.requested) {
             note.className = 'nl-note nl-note-info';
-            note.textContent = 'Requested — the janitor starts it on its next tick, within a minute.';
+            note.textContent = t('js.tuner.note_requested');
         } else if (state.error) {
             note.className = 'nl-note nl-note-bad';
-            note.textContent = 'The last run failed: ' + state.error;
+            note.textContent = t('js.tuner.note_failed', {error: state.error});
         } else if (!state.available) {
             note.className = 'nl-note nl-note-warn';
-            note.textContent = 'tools/tuner.py is not on this server, so there is nothing to start.';
+            note.textContent = t('js.tuner.note_unavailable');
         } else {
             note.className = 'nl-note nl-note-info';
-            note.textContent = 'Each step holds a limit for a few minutes and watches what happens — to the tracker '
-                + 'and to everything else on this machine. It stops early if anything else starts dropping packets, '
-                + 'and it always puts the settings back. Nothing is applied for you.';
+            note.textContent = t('js.tuner.note_idle');
         }
     }
 
@@ -106,14 +104,14 @@
         box.textContent = '';
         steps.forEach(s => {
             const row = el('div', { className: 'tn-step' + (s.ok ? '' : ' tn-step-bad') });
-            row.appendChild(el('span', { className: 'tn-step-pps', text: num(s.limit_pps) + ' pps' }));
+            row.appendChild(el('span', { className: 'tn-step-pps', text: t('js.tuner.pps', {n: num(s.limit_pps)}) }));
             row.appendChild(el('span', { className: 'tn-step-fig',
-                text: s.served_pps === null ? 'served —' : 'served ' + num(Math.round(s.served_pps)) }));
+                text: t('js.tuner.step_served', {n: s.served_pps === null ? '—' : num(Math.round(s.served_pps))}) }));
             row.appendChild(el('span', { className: 'tn-step-fig',
-                text: s.dropped_pps === null ? 'dropped —' : 'dropped ' + num(Math.round(s.dropped_pps)) }));
+                text: t('js.tuner.step_dropped', {n: s.dropped_pps === null ? '—' : num(Math.round(s.dropped_pps))}) }));
             row.appendChild(el('span', { className: 'tn-step-fig',
-                text: s.load_per_core === null ? 'load —' : 'load ' + s.load_per_core.toFixed(2) + '/core' }));
-            row.appendChild(el('span', { className: 'tn-step-verdict', text: s.ok ? 'no harm' : s.harm }));
+                text: s.load_per_core === null ? t('js.tuner.step_load_none') : t('js.tuner.step_load', {n: s.load_per_core.toFixed(2)}) }));
+            row.appendChild(el('span', { className: 'tn-step-verdict', text: s.ok ? t('js.tuner.no_harm') : s.harm }));
             box.appendChild(row);
         });
     }
@@ -124,7 +122,7 @@
         box.classList.toggle('d-hidden', !rep || state.running);
         if (!rep || state.running) return;
         box.textContent = '';
-        box.appendChild(el('div', { className: 'tn-report-head', text: 'What the last run found' }));
+        box.appendChild(el('div', { className: 'tn-report-head', text: t('js.tuner.report_head') }));
         // A run whose limits changed nothing is not a quiet result, it is a broken one — and it is
         // the shape that already produced a confident recommendation nobody should have followed.
         // It gets a warning of its own rather than a sentence buried in the summary.
@@ -139,61 +137,59 @@
         // guess wearing a measurement's clothes.
         // The label names what the button will move. An outbound run's values go to the reply budget,
         // and calling that "the limit" was how the same number could be applied to the wrong one.
-        const target = state.what === 'outbound' ? ' to the reply budget' : '';
-        [['suggested_safe', 'Apply the safe value' + target],
-         ['suggested_minimum', 'Apply the minimum that refuses nothing' + target]]
+        const outbound = state.what === 'outbound';
+        [['suggested_safe', outbound ? t('js.tuner.apply_safe_outbound') : t('js.tuner.apply_safe')],
+         ['suggested_minimum', outbound ? t('js.tuner.apply_minimum_outbound') : t('js.tuner.apply_minimum')]]
             .forEach(([key, label]) => {
                 const v = rep[key];
                 if (!v) return;
                 const b = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success' },
-                    label + ' (' + num(v) + ' pps)');
+                    label + ' (' + t('js.tuner.pps', {n: num(v)}) + ')');
                 b.addEventListener('click', () => applyLimit(v));
                 acts.appendChild(b);
             });
         if (!acts.children.length) {
             acts.appendChild(el('span', { className: 'wl-small text-muted',
                 text: rep.inconclusive
-                    ? 'No value is offered from a run that could not tell its own steps apart.'
-                    : 'The run did not get far enough to suggest a value.' }));
+                    ? t('js.tuner.no_value_inconclusive')
+                    : t('js.tuner.no_value_short') }));
         }
         box.appendChild(acts);
     }
 
     async function applyLimit(pps) {
-        if (!await confirmAction('Apply ' + Number(pps).toLocaleString() + ' pps',
-            'This is the inbound firewall limit, set to a value this run actually held and watched.',
-            { after: 'It replaces whatever is in force now, and persists across reboots like any other limit.',
-              okLabel: 'Apply' })) return;
-        const pw = await promptPassword('Apply the limit', 'Confirm with the admin password.');
+        if (!await confirmAction(t('js.tuner.apply_title', {n: Number(pps).toLocaleString()}),
+            t('js.tuner.apply_body'),
+            { after: t('js.tuner.apply_after'),
+              okLabel: t('js.tuner.apply_ok') })) return;
+        const pw = await promptPassword(t('js.tuner.apply_limit'), t('js.tuner.confirm_password'));
         if (!pw) return;
         const r = await apiCall('admin/tuner', 'POST', { op: 'apply', pps, password: pw });
-        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.tuner.failed'), r && r.success ? 'success' : 'error');
         load();
     }
 
     async function start(dry) {
         const what = dry
-            ? 'Walks the whole plan and changes nothing. Useful for checking the plumbing before a real run.'
-            : 'Moves the inbound firewall limit through several values, holding each for a few minutes on a LIVE '
-              + 'machine. It stops early if anything else starts losing packets.';
-        if (!await confirmAction(dry ? 'Test the probe' : 'Run the stability probe', what, {
-            after: dry ? '' : 'The current settings are written down before the first change, so they go back even if '
-                          + 'this is interrupted or the machine reboots.',
-            okLabel: dry ? 'Test' : 'Run it', danger: !dry })) return;
-        const pw = await promptPassword('Stability probe', 'Confirm with the admin password.');
+            ? t('js.tuner.start_dry_body')
+            : t('js.tuner.start_real_body');
+        if (!await confirmAction(dry ? t('js.tuner.start_dry_title') : t('js.tuner.start_real_title'), what, {
+            after: dry ? '' : t('js.tuner.start_real_after'),
+            okLabel: dry ? t('js.tuner.start_dry_ok') : t('js.tuner.start_real_ok'), danger: !dry })) return;
+        const pw = await promptPassword(t('js.tuner.probe_title'), t('js.tuner.confirm_password'));
         if (!pw) return;
         const r = await apiCall('admin/tuner', 'POST',
             { op: 'start', dry_run: !!dry, steps: 6, dwell: dry ? 30 : 180,
               what: $('tn-what').value, password: pw });
-        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.tuner.failed'), r && r.success ? 'success' : 'error');
         load();
     }
 
     async function cancel() {
-        const pw = await promptPassword('Stop the run', 'Confirm with the admin password.');
+        const pw = await promptPassword(t('js.tuner.stop_title'), t('js.tuner.confirm_password'));
         if (!pw) return;
         const r = await apiCall('admin/tuner', 'POST', { op: 'cancel', password: pw });
-        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.tuner.failed'), r && r.success ? 'success' : 'error');
         load();
     }
 

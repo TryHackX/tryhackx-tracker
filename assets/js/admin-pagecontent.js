@@ -29,11 +29,29 @@
 
     function count() {
         const n = $('pc-body').value.length;
-        $('pc-count').textContent = n.toLocaleString() + ' / ' + state.max.toLocaleString() + ' characters';
+        $('pc-count').textContent = t('js.pagecontent.count', { n: n.toLocaleString(), max: state.max.toLocaleString() });
         $('pc-count').className = 'wl-small ' + (n > state.max ? 'text-danger' : 'text-muted');
     }
 
     /** Ask the server to render exactly what the page will render. Debounced: it is a POST. */
+    /**
+     * The preview is an iframe with the PUBLIC stylesheet (data-css) and nothing of the panel's,
+     * because the panel's CSS knows nothing about the stats widget or the announce box. The frame's
+     * document is rebuilt through srcdoc on every change; the markup itself is what the public page
+     * would show, so what the operator sees is what a visitor gets.
+     */
+    function setPreview(html) {
+        const fr = $('pc-preview');
+        if (!fr || fr.tagName !== 'IFRAME') { if (fr) fr.innerHTML = html; return; }
+        const css = fr.dataset.css || '', base = fr.dataset.base || '/';
+        fr.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><base href="' + base.replace(/"/g, '&quot;') + '">'
+            + '<link rel="stylesheet" href="' + css.replace(/"/g, '&quot;') + '">'
+            + '<style>html,body{background:#000011;margin:0}body{padding:0.9rem 1.1rem 0.9rem 1.4rem}.container{max-width:none;padding:0}'
+            + 'ol,ul{padding-left:1.6em;margin-left:0}'
+            + 'main{margin:0}.rt-page h1{margin-top:0}</style></head>'
+            + '<body class="page-preview"><div class="container"><main><div class="rt rt-page rt-home">' + html + '</div></main></div></body></html>';
+    }
+
     function schedulePreview() {
         clearTimeout(previewTimer);
         previewTimer = setTimeout(async () => {
@@ -44,7 +62,7 @@
             if (r.error) { setError(r.error); return; }
             setError(r.warning || '');
             // Server-rendered by includes/richtext.php, the same call the public page makes.
-            $('pc-preview').innerHTML = r.html || '';
+            setPreview(r.html || '');
         }, 350);
     }
 
@@ -66,8 +84,8 @@
             b.appendChild(el('span', { className: 'pc-lang-name', text: l.name }));
             const dot = l.enabled ? 'live' : (l.stored ? 'draft' : 'none');
             b.appendChild(el('span', { className: 'pc-lang-dot pc-dot-' + dot }));
-            b.title = l.name + ' — ' + (l.enabled ? 'your version is live'
-                     : l.stored ? 'saved as a draft' : 'no version written yet');
+            b.title = l.name + ' — ' + (l.enabled ? t('js.pagecontent.lang_live')
+                     : l.stored ? t('js.pagecontent.lang_draft') : t('js.pagecontent.lang_none'));
             if (l.code !== current) b.addEventListener('click', () => switchLang(l.code));
             rail.appendChild(b);
         });
@@ -75,12 +93,11 @@
         // fallback chain means it is often a version written for a different language.
         const note = $('pc-serving');
         if (!serving) {
-            note.textContent = 'Visitors reading this language get the built-in page.';
+            note.textContent = t('js.pagecontent.serving_builtin');
         } else if (serving === current) {
-            note.textContent = 'Visitors reading this language get this version.';
+            note.textContent = t('js.pagecontent.serving_this');
         } else {
-            note.textContent = 'Visitors reading this language currently get the '
-                             + serving.toUpperCase() + ' version — nothing is published here yet.';
+            note.textContent = t('js.pagecontent.serving_other', { lang: serving.toUpperCase() });
         }
     }
 
@@ -96,7 +113,7 @@
         box.textContent = '';
         box.hidden = !list.length;
         if (!list.length) return;
-        box.appendChild(el('span', { className: 'wl-small text-muted me-1', text: 'Paste in:' }));
+        box.appendChild(el('span', { className: 'wl-small text-muted me-1', text: t('js.pagecontent.paste_in') }));
         list.forEach(p => {
             const b = el('button', { className: 'pc-ph', type: 'button', title: p.what || '' });
             b.appendChild(el('code', { text: '{{' + p.name + '}}' }));
@@ -113,9 +130,9 @@
     }
 
     async function switchLang(code) {
-        if (state.dirty && !await confirmAction('Switch language?',
-                'Your changes to this page have not been saved. Switching loses them.',
-                { okLabel: 'Discard and switch', danger: true })) return;
+        if (state.dirty && !await confirmAction(t('js.pagecontent.switch_title'),
+                t('js.pagecontent.switch_body'),
+                { okLabel: t('js.pagecontent.switch_ok'), danger: true })) return;
         state.dirty = false;
         open(state.page, code);
     }
@@ -135,19 +152,19 @@
         renderLangs(r.languages, r.lang, r.serving);
         renderPlaceholders(r.placeholders || []);
         $('pc-title').textContent = r.label + ' · ' + String(r.lang).toUpperCase()
-            + ' — ' + (r.stored ? (r.enabled ? 'your version, live' : 'your draft') : 'built-in page');
+            + ' — ' + (r.stored ? (r.enabled ? t('js.pagecontent.title_live') : t('js.pagecontent.title_draft')) : t('js.pagecontent.title_builtin'));
         $('pc-format').value = r.format || 'markdown';
         $('pc-enabled').checked = !!r.enabled;
         $('pc-body').value = r.body || '';
         $('pc-note').textContent = state.note;
         $('pc-saved').textContent = r.stored && r.updated_at
-            ? 'Last saved ' + r.updated_at + (r.updated_by ? ' by ' + r.updated_by : '')
-            : 'Never edited in this language.';
+            ? (r.updated_by ? t('js.pagecontent.last_saved_by', { at: r.updated_at, by: r.updated_by }) : t('js.pagecontent.last_saved', { at: r.updated_at }))
+            : t('js.pagecontent.never_edited');
         // A format the operator switched off in Settings must not be offered here.
         const allowed = r.formats || ['bbcode', 'markdown'];
         [...$('pc-format').options].forEach(o => { o.disabled = !allowed.includes(o.value); });
         count();
-        $('pc-preview').innerHTML = '';
+        setPreview('');
         schedulePreview();
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }
@@ -163,7 +180,7 @@
             });
             if (r.error) { setError(r.error); return; }
             state.dirty = false;
-            showToast(r.message || 'Saved.', 'success');
+            showToast(r.message || t('js.pagecontent.saved'), 'success');
             // The card in Settings carries the badge and the timestamp; re-reading the page is the
             // only way to keep it honest without duplicating the rendering here.
             setTimeout(() => window.location.reload(), 600);
@@ -173,17 +190,15 @@
     }
 
     async function restore() {
-        const ok = await confirmAction('Restore the built-in page?',
-            'Your ' + String(state.lang).toUpperCase() + ' text for this page is deleted and the built-in '
-            + 'one comes back — written for how the tracker is configured right now. Other languages are '
-            + 'left alone. This cannot be undone.',
-            { okLabel: 'Restore', danger: true });
+        const ok = await confirmAction(t('js.pagecontent.restore_title'),
+            t('js.pagecontent.restore_body', { lang: String(state.lang).toUpperCase() }),
+            { okLabel: t('js.pagecontent.restore_ok'), danger: true });
         if (!ok) return;
         const r = await apiCall('admin/page_content', 'POST', {
             op: 'reset', page: state.page, lang: state.lang, format: $('pc-format').value,
         });
         if (r.error) { setError(r.error); return; }
-        showToast(r.message || 'Restored.', 'success');
+        showToast(r.message || t('js.pagecontent.restored'), 'success');
         setTimeout(() => window.location.reload(), 600);
     }
 
@@ -218,9 +233,9 @@
     modalEl.addEventListener('hide.bs.modal', (e) => {
         if (!state.dirty || state.closing) return;
         e.preventDefault();
-        confirmAction('Close without saving?',
-            'Your changes to this page have not been saved. Closing now loses them.',
-            { okLabel: 'Discard changes', danger: true }).then((ok) => {
+        confirmAction(t('js.pagecontent.close_title'),
+            t('js.pagecontent.close_body'),
+            { okLabel: t('js.pagecontent.close_ok'), danger: true }).then((ok) => {
                 if (!ok) return;
                 state.closing = true;
                 state.dirty = false;

@@ -1,0 +1,287 @@
+Review fixes for opentracker 1c7fac4 (2026-09-06), seven findings from a source review, each
+traced by a second reader and adversarially reviewed as a patch, then built and put through a lab
+(announce, scrape, /stats, sixty SIGHUP reloads under load and valgrind). Apply from inside the
+opentracker source directory with `patch -p1 --forward < opentracker-review-fixes.patch`, after
+sighup-udp-workers.patch and udp-reject-interval.patch. None of these touches the per-packet or
+per-announce path beyond one atomic add; none grows memory. The write-up for upstream is
+UPSTREAM-REPORT.md.
+
+  1. ot_udp.c: the UDP connection-id secret comes from getrandom(2), not srandom(time(NULL))
+  2. ot_accesslist.c: a reload keeps the superseded list alive for the grace period whatever its age (use-after-free on SIGHUP)
+  3. ot_http.c: a /stats task is cancelled when its client disconnects, like the fullscrape tasks (result delivered to a reused fd)
+  4. ot_mutex.c: g_torrent_count is updated atomically instead of after the bucket lock is dropped
+  5. ot_http.c: the tpbs stats path no longer writes one byte past a full request buffer
+  6. opentracker.c: UDP worker threads start after trackerlogic_init and the first accesslist load, not during option parsing
+  7. ot_accesslist.c: a whitelist whose last line has no newline no longer reads one byte past the mmap
+
+
+# ── connid-secret ─────────────────────────────────────────────────────────────
+--- opentracker/ot_udp.c
++++ opentracker/ot_udp.c
+@@ -9,6 +9,10 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#ifndef WANT_ARC4RANDOM
++#include <errno.h>
++#include <sys/random.h>
++#endif
+ 
+ /* Libowfat */
+ #include "io.h"
+@@ -28,22 +32,48 @@
+ static volatile uint32_t g_key_of_the_hour[2] = {0};
+ static volatile ot_time  g_hour_of_the_key;
+ 
++#ifndef WANT_ARC4RANDOM
++/* Take the connection id secrets from the kernel instead of random().
++   Without WANT_ARC4RANDOM/WANT_DEV_RANDOM random() is seeded with
++   srandom(time(NULL)), so every AES key and key of the hour would be a
++   function of the start second and connids could be forged for any ip. */
++static void udp_fill_random(void *buf, size_t len) {
++  uint8_t *p = buf;
++  while (len) {
++    ssize_t n = getrandom(p, len, 0);
++    if (n < 0) {
++      if (errno == EINTR)
++        continue;
++      /* No getrandom in this kernel: keep the old behaviour */
++      while (len--)
++        *p++ = (uint8_t)random();
++      return;
++    }
++    p += n;
++    len -= n;
++  }
++}
++
++static uint32_t udp_random_u32(void) {
++  uint32_t r;
++  udp_fill_random(&r, sizeof(r));
++  return r;
++}
++#endif
++
+ static void     udp_generate_rijndael_round_key(void) {
+   uint32_t key[16];
+ #ifdef WANT_ARC4RANDOM
+   arc4random_buf(&key[0], sizeof(key));
+ #else
+-  key[0] = random();
+-  key[1] = random();
+-  key[2] = random();
+-  key[3] = random();
++  udp_fill_random(&key[0], sizeof(key));
+ #endif
+   rijndaelKeySetupEnc128(g_rijndael_round_key, (uint8_t *)key);
+ 
+ #ifdef WANT_ARC4RANDOM
+   g_key_of_the_hour[0] = arc4random();
+ #else
+-  g_key_of_the_hour[0] = random();
++  g_key_of_the_hour[0] = udp_random_u32();
+ #endif
+   g_hour_of_the_key = g_now_minutes;
+ }
+@@ -59,7 +89,7 @@
+ #ifdef WANT_ARC4RANDOM
+     uint32_t new_key_of_the_hour = arc4random();
+ #else
+-    uint32_t new_key_of_the_hour = random();
++    uint32_t new_key_of_the_hour = udp_random_u32();
+ #endif
+     /* If in the meantime another thread has performed
+        key rotation, do not overwrite their results */
+
+# ── accesslist-uaf ─────────────────────────────────────────────────────────────
+--- opentracker/ot_accesslist.c
++++ opentracker/ot_accesslist.c
+@@ -90,10 +90,14 @@
+ }
+ 
+ /* This must be called with g_accesslist_mutex held.
+-   This will never delete head, because that might still be in use. */
++   This will never delete head, because that might still be in use.
++   A node's base is the minute it was created, i.e. the minute it superseded its ->next.
++   So free a node only once its predecessor in the chain is more than five minutes old:
++   this keeps the list that was head until a moment ago alive whatever its own age and
++   prevents free()ing (munmap of a 32 MB whitelist) under a reader still in bsearch. */
+ static void accesslist_clean(ot_accesslist *accesslist) {
+   while (accesslist && accesslist->next) {
+-    if (accesslist->next->base + 5 < g_now_minutes)
++    if (accesslist->base + 5 < g_now_minutes)
+       accesslist->next = accesslist_free(accesslist->next);
+     accesslist = accesslist->next;
+   }
+
+# ── stats-task-fd ─────────────────────────────────────────────────────────────
+--- opentracker/ot_http.c
++++ opentracker/ot_http.c
+@@ -330,11 +330,17 @@
+ 
+   /* default format for now */
+   if ((mode & TASK_CLASS_MASK) == TASK_STATS) {
+-    tai6464 t;
++    struct http_data *cookie = io_getcookie(sock);
++    tai6464           t;
++    /* Pass this task to the worker thread. Flag the socket as waiting, as the
++       fullscrape paths do, so handle_dead cancels the task if the client goes
++       away and the result is not delivered to whoever reuses this fd number */
++    cookie->flag |= STRUCT_HTTP_FLAG_WAITINGFORTASK;
+     /* Complex stats also include expensive memory debugging tools */
+     taia_uint(&t, 0);
+     io_timeout(sock, t);
+     stats_deliver(sock, mode);
++    io_dontwantread(sock);
+     return ws->reply_size = -2;
+   }
+ 
+
+# ── torrent-count-race ─────────────────────────────────────────────────────────────
+--- opentracker/ot_mutex.c
++++ opentracker/ot_mutex.c
+@@ -41,14 +41,18 @@
+ 
+ void mutex_bucket_unlock(int bucket, int delta_torrentcount) {
+   pthread_mutex_unlock(bucket_mutex + bucket);
+-  g_torrent_count += delta_torrentcount;
++  /* Updated outside the bucket lock by every worker, the main thread and the
++     clean thread: a plain += loses concurrent updates and the drift is permanent.
++     Relaxed atomic add; skipped when delta is 0 (almost every unlock). */
++  if (delta_torrentcount)
++    __atomic_add_fetch(&g_torrent_count, delta_torrentcount, __ATOMIC_RELAXED);
+ }
+ 
+ void mutex_bucket_unlock_by_hash(ot_hash const hash, int delta_torrentcount) {
+   mutex_bucket_unlock(uint32_read_big((char *)hash) >> OT_BUCKET_COUNT_SHIFT, delta_torrentcount);
+ }
+ 
+-size_t mutex_get_torrent_count(void) { return g_torrent_count; }
++size_t mutex_get_torrent_count(void) { return __atomic_load_n(&g_torrent_count, __ATOMIC_RELAXED); }
+ 
+ /* TaskQueue Magic */
+ 
+
+# ── tpbs-one-byte ─────────────────────────────────────────────────────────────
+--- opentracker/ot_http.c
++++ opentracker/ot_http.c
+@@ -306,7 +306,10 @@
+     struct http_data *cookie = io_getcookie(sock);
+     tai6464           t;
+ #ifdef WANT_COMPRESSION_GZIP
+-    ws->request[ws->request_size] = 0;
++    /* request_size may equal the 8192-byte allocation of inbuf / cookie->request, so index
++       request_size is one past the end; the last byte is the header-terminating newline and
++       is disposable, terminate there (as the fullscrape path below does) */
++    ws->request[ws->request_size - 1] = 0;
+ #ifndef WANT_COMPRESSION_GZIP_ALWAYS
+     if (strstr(read_ptr - 1, "gzip")) {
+ #endif
+
+# ── workers-before-init ─────────────────────────────────────────────────────────────
+--- opentracker/opentracker.c
++++ opentracker/opentracker.c
+@@ -49,6 +49,16 @@
+ static unsigned int g_udp_workers;
+ uint32_t            g_udp_reject_interval;
+ 
++/* UDP sockets bound for the worker pool, each with the worker count that was configured
++   when it was bound. Workers are only spawned from main() once trackerlogic_init() and
++   load_state() have finished, so no packet is served while the bucket mutexes are still
++   being initialised or the accesslist is still empty. */
++static struct ot_udp_pool_socket {
++  int64        sock;
++  unsigned int workers;
++} *g_udp_sockets;
++static size_t g_udp_socket_count;
++
+ static void         panic(const char *routine) __attribute__((noreturn));
+ static void         panic(const char *routine) {
+   fprintf(stderr, "%s: %s\n", routine, strerror(errno));
+@@ -366,7 +376,14 @@
+ 
+   if ((proto == FLAG_UDP) && g_udp_workers) {
+     io_block(sock);
+-    udp_init(sock, g_udp_workers);
++    /* Do not start the workers yet: option parsing is still running and the
++       tracker core is not initialised. main() spawns them after trackerlogic_init(). */
++    g_udp_sockets = realloc(g_udp_sockets, (g_udp_socket_count + 1) * sizeof(*g_udp_sockets));
++    if (!g_udp_sockets)
++      panic("udp socket list");
++    g_udp_sockets[g_udp_socket_count].sock    = sock;
++    g_udp_sockets[g_udp_socket_count].workers = g_udp_workers;
++    g_udp_socket_count++;
+   } else
+     io_wantread(sock);
+ 
+@@ -809,9 +826,18 @@
+   if (statefile)
+     load_state(statefile);
+ 
++  /* Now that mutexes, buckets, accesslist and state are in place, spawn the UDP workers.
++     Done before install_signal_handlers() so they inherit the blocked SIGINT/SIGHUP mask
++     like every other helper thread. */
++  {
++    size_t i;
++    for (i = 0; i < g_udp_socket_count; ++i)
++      udp_init(g_udp_sockets[i].sock, g_udp_sockets[i].workers);
++  }
++
+   install_signal_handlers();
+ 
+-  if (!g_udp_workers)
++  if (!g_udp_socket_count)
+     udp_init(-1, 0);
+ 
+   server_mainloop(0);
+--- opentracker/ot_accesslist.c
++++ opentracker/ot_accesslist.c
+@@ -218,15 +218,15 @@
+   (void)args;
+ 
+   while (1) {
++    /* Wait for signals; the initial load was done synchronously in accesslist_init() */
++    while (sigwait(&signal_mask, &sig) != 0 && sig != SIGHUP)
++      ;
++
+     if (!g_opentracker_running)
+       return NULL;
+ 
+-    /* Initial attempt to read accesslist */
++    /* Reload accesslist on SIGHUP */
+     accesslist_readfile();
+-
+-    /* Wait for signals */
+-    while (sigwait(&signal_mask, &sig) != 0 && sig != SIGHUP)
+-      ;
+   }
+   return NULL;
+ }
+@@ -344,6 +344,10 @@
+ static pthread_t thread_id;
+ void accesslist_init(void) {
+   pthread_mutex_init(&g_accesslist_mutex, NULL);
++  /* Load the list before any request can be judged: otherwise every announce arriving
++     before the worker thread finished parsing would be rejected against an empty list
++     (WHITE mode), and with access.udp_reject_interval set, told to stay away. */
++  accesslist_readfile();
+   pthread_create(&thread_id, NULL, accesslist_worker, NULL);
+ #ifdef WANT_DYNAMIC_ACCESSLIST
+   if (g_accesslist_pipe_add)
+
+# ── accesslist-mmap-end ─────────────────────────────────────────────────────────────
+--- opentracker/ot_accesslist.c
++++ opentracker/ot_accesslist.c
+@@ -141,8 +141,10 @@
+     if (i == sizeof(ot_hash)) {
+       read_offs += 40;
+ 
+-      /* Append accesslist to accesslist vector */
+-      if (read_offs == map_end || scan_fromhex((unsigned char)*read_offs) < 0)
++      /* Append accesslist to accesslist vector. Compare against the real end of
++         the mapping, not map_end (= map + maplen - 40): a hash on the last line
++         without a trailing newline would otherwise be checked one byte past the mmap. */
++      if (read_offs == map + maplen || scan_fromhex((unsigned char)*read_offs) < 0)
+         ++info_hash;
+     }
+ 

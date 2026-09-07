@@ -67,15 +67,15 @@
         try {
             j = await apiCall('admin/sysctl_status');
         } catch (e) {
-            if (my > painted) { painted = my; fatal((e && e.message) || 'network error'); }
+            if (my > painted) { painted = my; fatal((e && e.message) || t('js.sysctl.network_error')); }
             return;
         } finally {
             if (busy === my) busy = 0;
         }
         if (my <= painted) return;
         painted = my;
-        if (!j || j.enabled === false) { fatal('The helper is not configured or the feature is off.'); return; }
-        if (!j.ok) { fatal(j.error || 'The helper did not answer.'); return; }
+        if (!j || j.enabled === false) { fatal(t('js.sysctl.helper_off')); return; }
+        if (!j.ok) { fatal(j.error || t('js.sysctl.helper_no_answer')); return; }
         state.status = j.status;
         state.keys = j.keys;
         state.suggest = j.suggest || {};
@@ -106,11 +106,11 @@
     function fatal(msg) {
         const g = $('sy-grid');
         g.textContent = '';
-        g.appendChild(el('div', { className: 'nl-note nl-note-bad', text: msg || 'unavailable' }));
+        g.appendChild(el('div', { className: 'nl-note nl-note-bad', text: msg || t('js.sysctl.unavailable') }));
         g.appendChild(el('div', {}, [el('button', {
             className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button',
             onclick: () => { painted = 0; busy = 0; load(true); },
-        }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' Try again'])]));
+        }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ' + t('js.sysctl.try_again')])]));
         $('sy-notes').textContent = '';
     }
 
@@ -145,9 +145,9 @@
 
         const now = el('div', { className: 'sy-now' });
         now.appendChild(el('div', { className: 'sy-now-v', text: humanBytes(cur) }));
-        now.appendChild(el('div', { className: 'sy-now-raw', text: num(cur) + ' bytes' }));
+        now.appendChild(el('div', { className: 'sy-now-raw', text: t('js.sysctl.n_bytes', {n: num(cur)}) }));
         if (base[k] !== undefined && String(base[k]) !== String(cur)) {
-            now.appendChild(el('div', { className: 'sy-now-base', text: 'was ' + humanBytes(base[k]) + ' before the panel' }));
+            now.appendChild(el('div', { className: 'sy-now-base', text: t('js.sysctl.was_before', {v: humanBytes(base[k])}) }));
         }
         row.appendChild(now);
 
@@ -172,10 +172,10 @@
             const bytes = Math.round((parseFloat(inp.value) || 0) * mul);
             state.wanted[k] = String(bytes);
             state.unit[k] = sel.value;
-            const parts = [humanBytes(bytes) + ' — ' + num(bytes) + ' bytes'];
+            const parts = [t('js.sysctl.bytes_echo', {h: humanBytes(bytes), n: num(bytes)})];
             const mt = memTotalBytes();
-            if (mt > 0) parts.push(((bytes / mt) * 100).toFixed(2) + '% of this machine’s memory');
-            if (bytes !== cur && cur > 0) parts.push((bytes > cur ? '×' + (bytes / cur).toFixed(1) + ' of what is in force' : 'lower than what is in force'));
+            if (mt > 0) parts.push(t('js.sysctl.pct_of_memory', {p: ((bytes / mt) * 100).toFixed(2)}));
+            if (bytes !== cur && cur > 0) parts.push((bytes > cur ? t('js.sysctl.times_in_force', {x: (bytes / cur).toFixed(1)}) : t('js.sysctl.lower_than_force')));
             echo.textContent = parts.join(' · ');
             echo.classList.toggle('sy-echo-warn', mt > 0 && bytes > mt / 8);
         };
@@ -193,7 +193,7 @@
         ctl.appendChild(echo);
         if (state.suggest && state.suggest[k]) {
             const s = state.suggest[k];
-            ctl.appendChild(el('div', { className: 'sy-sugg', text: 'suggested ' + humanBytes(s.value) + ' — ' + s.why }));
+            ctl.appendChild(el('div', { className: 'sy-sugg', text: t('js.sysctl.suggested', {v: humanBytes(s.value), why: s.why}) }));
         }
         row.appendChild(ctl);
         recompute();
@@ -211,8 +211,8 @@
             el('div', { className: 'sy-key-what', text: meta.what }),
         ]));
         const now = el('div', { className: 'sy-now' });
-        now.appendChild(el('div', { className: 'sy-now-v', text: num(cur) + ' packets' }));
-        now.appendChild(el('div', { className: 'sy-now-raw', text: 'per CPU — ' + num(cur * cpus) + ' across ' + cpus + ' cores' }));
+        now.appendChild(el('div', { className: 'sy-now-v', text: t('js.sysctl.n_packets', {n: num(cur)}) }));
+        now.appendChild(el('div', { className: 'sy-now-raw', text: t('js.sysctl.per_cpu_across', {n: num(cur * cpus), c: cpus}) }));
         row.appendChild(now);
 
         const ctl = el('div', { className: 'sy-ctl' });
@@ -225,13 +225,13 @@
         const recompute = () => {
             const v = Math.max(0, parseInt(inp.value, 10) || 0);
             state.wanted[k] = String(v);
-            echo.textContent = num(v) + ' per CPU · ' + num(v * cpus) + ' packets queued across ' + cpus + ' cores';
+            echo.textContent = t('js.sysctl.packets_echo', {v: num(v), n: num(v * cpus), c: cpus});
             echo.classList.toggle('sy-echo-warn', v > cur * 4 && cur > 0);
         };
         inp.addEventListener('input', recompute);
         const wrap = el('div', { className: 'sy-input-wrap' });
         wrap.appendChild(inp);
-        wrap.appendChild(el('span', { className: 'sy-unit-static', text: 'packets / CPU' }));
+        wrap.appendChild(el('span', { className: 'sy-unit-static', text: t('js.sysctl.packets_per_cpu') }));
         ctl.appendChild(wrap);
         ctl.appendChild(echo);
         row.appendChild(ctl);
@@ -258,10 +258,10 @@
         const now = el('div', { className: 'sy-now' });
         if (curParts.length === 3) {
             now.appendChild(el('div', { className: 'sy-now-v', text: curParts.map(p => humanBytes(p * ps)).join(' / ') }));
-            now.appendChild(el('div', { className: 'sy-now-raw', text: curParts.map(num).join(' / ') + ' pages of ' + num(ps) + ' B' }));
+            now.appendChild(el('div', { className: 'sy-now-raw', text: t('js.sysctl.pages_of', {n: curParts.map(num).join(' / '), ps: num(ps)}) }));
         }
         const used = Number((state.status || {}).udp_pages_used || 0);
-        now.appendChild(el('div', { className: 'sy-now-base', text: 'all UDP sockets are using ' + num(used) + ' pages right now (' + humanBytes(used * ps) + ')' }));
+        now.appendChild(el('div', { className: 'sy-now-base', text: t('js.sysctl.udp_using', {n: num(used), h: humanBytes(used * ps)}) }));
         row.appendChild(now);
 
         const ctl = el('div', { className: 'sy-ctl' });
@@ -281,24 +281,25 @@
             cell.appendChild(inp);
             grid.appendChild(cell);
         });
-        const unitLabel = el('span', { className: 'sy-unit-static', text: 'MiB each' });
+        const unitLabel = el('span', { className: 'sy-unit-static', text: t('js.sysctl.mib_each') });
         const echo = el('div', { className: 'sy-echo' });
         const recompute = () => {
             const pages = inputs.map(i => Math.round(((parseFloat(i.value) || 0) * MIB) / ps));
             state.wanted[k] = pages.join(' ');
             const mt = memTotalBytes();
             const share = (p) => mt > 0 ? ((p * ps / mt) * 100).toFixed(1) + '%' : '?';
-            echo.textContent = pages.map(num).join(' / ') + ' pages · '
-                + pages.map(p => humanBytes(p * ps)).join(' / ') + ' · '
-                + pages.map(share).join(' / ') + ' of memory';
+            echo.textContent = t('js.sysctl.pages_echo', {
+                p: pages.map(num).join(' / '),
+                h: pages.map(p => humanBytes(p * ps)).join(' / '),
+                s: pages.map(share).join(' / ') });
             const bad = !(pages[0] < pages[1] && pages[1] < pages[2])
                 || (mt > 0 && pages[2] * ps > mt / 4)
                 || (mt > 0 && pages[0] * ps > mt / 100);
             echo.classList.toggle('sy-echo-warn', bad);
             if (!(pages[0] < pages[1] && pages[1] < pages[2])) {
-                echo.textContent += ' — must increase: min < pressure < max';
+                echo.textContent += t('js.sysctl.must_increase');
             } else if (mt > 0 && pages[0] * ps > mt / 100) {
-                echo.textContent += ' — min above 1% of memory is memory promised away, not a limit';
+                echo.textContent += t('js.sysctl.min_too_high');
             }
         };
         inputs.forEach(i => i.addEventListener('input', recompute));
@@ -315,7 +316,7 @@
         g.textContent = '';
         const st = state.status || {};
         $('sy-updated').textContent = st.mem_total_kb
-            ? (humanBytes(st.mem_total_kb * 1024) + ' RAM · ' + st.cpus + ' cores · page ' + num(st.page_size) + ' B')
+            ? t('js.sysctl.machine_line', {ram: humanBytes(st.mem_total_kb * 1024), cpus: st.cpus, page: num(st.page_size)})
             : '';
 
         // The verdict first: it decides which of the rows below is even worth reading.
@@ -330,8 +331,8 @@
             if (state.verdict.stale) {
                 const act = el('div', { className: 'sy-verdict-acts' });
                 const btn = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning',
-                    title: 'Restart the tracker so its socket is created with the buffer you have set' },
-                    [el('i', { className: 'bi bi-arrow-clockwise' }), ' Restart the tracker now']);
+                    title: t('js.sysctl.restart_title') },
+                    [el('i', { className: 'bi bi-arrow-clockwise' }), ' ' + t('js.sysctl.restart_now')]);
                 btn.addEventListener('click', restartForBuffer);
                 act.appendChild(btn);
                 note.appendChild(act);
@@ -357,12 +358,12 @@
             restore.disabled = !canMachine && !dirty;
             // Say which of the two it would do, so the button is never a surprise.
             restore.title = canMachine
-                ? 'Put back the values this machine had before the panel first touched them, and delete the panel’s file'
+                ? t('js.sysctl.restore_title_machine')
                 : (dirty
-                    ? 'Discard the edits in this form and show what the kernel is actually running'
-                    : 'Nothing to put back: the panel has never changed any of these and you have not edited anything');
+                    ? t('js.sysctl.restore_title_dirty')
+                    : t('js.sysctl.restore_title_none'));
             const label = restore.querySelector('.sy-restore-label');
-            if (label) label.textContent = (!canMachine && dirty) ? ' Discard my edits' : ' Restore defaults';
+            if (label) label.textContent = ' ' + ((!canMachine && dirty) ? t('js.sysctl.discard_edits') : t('js.sysctl.restore_defaults'));
         }
 
         renderArmed();
@@ -370,11 +371,11 @@
         const notes = $('sy-notes');
         notes.textContent = '';
         if (state.lastError) {
-            notes.appendChild(el('div', { className: 'nl-note nl-note-bad', text: 'Last helper error: ' + state.lastError }));
+            notes.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.sysctl.last_helper_error', {e: state.lastError}) }));
         }
         if (state.lastRevert) {
             notes.appendChild(el('div', { className: 'nl-note nl-note-warn',
-                text: 'A change was put back automatically (' + (state.lastRevert.why || 'not confirmed') + ').' }));
+                text: t('js.sysctl.auto_reverted', {why: state.lastRevert.why || t('js.sysctl.not_confirmed')}) }));
         }
         (state.advice || []).forEach(a => {
             const box2 = el('div', {
@@ -387,10 +388,10 @@
                 const row = el('div', { className: 'sy-verdict-acts' });
                 row.appendChild(el('code', { className: 'sy-cmd', text: a.command }));
                 const cp = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary' },
-                    [el('i', { className: 'bi bi-clipboard' }), ' Copy']);
+                    [el('i', { className: 'bi bi-clipboard' }), ' ' + t('js.sysctl.copy')]);
                 cp.addEventListener('click', () => {
                     copyToClipboard(a.command);
-                    showToast('Command copied. Run it as root on the server.', 'success');
+                    showToast(t('js.sysctl.command_copied'), 'success');
                 });
                 row.appendChild(cp);
                 box2.appendChild(row);
@@ -407,15 +408,14 @@
      * peers retry on their own, which is why this is a warning and not a refusal.
      */
     async function restartForBuffer() {
-        if (!await confirmAction('Restart the tracker',
-            'The tracker service is restarted. Its receive buffer is fixed when the socket is created, '
-            + 'so this is what makes the size you have set take effect.',
-            { after: 'The swarm briefly has no tracker; peers announcing during the restart retry on their own.',
-              okLabel: 'Restart', danger: true })) return;
-        const pw = await promptPassword('Restart the tracker', 'Confirm with the admin password.');
+        if (!await confirmAction(t('js.sysctl.restart_confirm_title'),
+            t('js.sysctl.restart_confirm_body'),
+            { after: t('js.sysctl.restart_confirm_after'),
+              okLabel: t('js.sysctl.restart_ok'), danger: true })) return;
+        const pw = await promptPassword(t('js.sysctl.restart_confirm_title'), t('js.sysctl.restart_pw_text'));
         if (!pw) return;
         const r = await apiCall('admin/restart_tracker', 'POST', { password: pw });
-        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.sysctl.failed'), r && r.success ? 'success' : 'error');
         setTimeout(load, 3000);
     }
 
@@ -424,7 +424,7 @@
         const req = state.request;
         if (req && !state.armed) {
             wrap.classList.remove('d-hidden');
-            $('sy-armed-text').textContent = 'Queued (' + req.op + '). The janitor performs it within a minute — nothing has changed yet.';
+            $('sy-armed-text').textContent = t('js.sysctl.queued_op', {op: req.op});
             $('sy-countdown').textContent = '';
             $('sy-armed-keys').textContent = '';
             $('btn-sy-confirm').disabled = true;
@@ -436,15 +436,15 @@
         $('btn-sy-confirm').disabled = !state.armed.all_landed;
         $('btn-sy-revert').disabled = false;
         $('sy-armed-text').textContent = state.armed.all_landed
-            ? 'This change is in force and will undo itself unless you keep it.'
-            : 'This change did NOT fully take effect. Keeping it is refused — put it back and look at the per-key result.';
+            ? t('js.sysctl.armed_landed')
+            : t('js.sysctl.armed_not_landed');
         const keys = $('sy-armed-keys');
         keys.textContent = '';
         Object.keys(state.armed.keys || {}).forEach(k => {
             const r = state.armed.keys[k];
             keys.appendChild(el('div', {
                 className: 'sy-armed-key ' + (r.landed ? '' : 'sy-armed-key-bad'),
-                text: (r.landed ? '✓ ' : '✗ ') + k + ': ' + r.got + (r.landed ? '' : ' (asked for ' + r.wanted + ')'),
+                text: (r.landed ? '✓ ' : '✗ ') + k + ': ' + r.got + (r.landed ? '' : ' ' + t('js.sysctl.asked_for', {v: r.wanted})),
             }));
         });
         paintCountdown();
@@ -459,10 +459,9 @@
         // "I should power-cycle now" lives in that gap, and the optimistic number is the one that
         // gets somebody to wait too long.
         c.textContent = left > 0
-            ? ('undoes itself in ' + Math.floor(left / 60) + 'm ' + (left % 60) + 's — worst case '
-               + Math.ceil(worst / 60) + ' min, since '
-               + (state.armed.watchdog === 'systemd' ? 'systemd holds the timer' : 'the only watchdog left is the janitor, which runs once a minute'))
-            : 'the window has passed — the undo is running';
+            ? t('js.sysctl.undo_in', { m: Math.floor(left / 60), s: (left % 60), w: Math.ceil(worst / 60),
+               who: (state.armed.watchdog === 'systemd' ? t('js.sysctl.watchdog_systemd') : t('js.sysctl.watchdog_janitor')) })
+            : t('js.sysctl.window_passed');
     }
 
     /* ── operations ──────────────────────────────────────────────────────── */
@@ -491,12 +490,9 @@
         if (op === 'arm') {
             const pairs = changedPairs();
             const names = Object.keys(pairs);
-            if (!names.length) { showToast('Nothing is different from what is already in force.', 'info'); return; }
-            $('sy-modal-title').textContent = 'Apply for ' + Math.round((state.confirmSeconds || 120) / 60) + ' minute(s)';
-            $('sy-modal-text').textContent =
-                'These ' + names.length + ' setting(s) take effect within a minute and then put themselves back '
-                + 'automatically unless you press Keep. Nothing is written to /etc until you do, so a reboot '
-                + 'undoes this too. If the machine becomes unreachable, it repairs itself without you.';
+            if (!names.length) { showToast(t('js.sysctl.nothing_different'), 'info'); return; }
+            $('sy-modal-title').textContent = t('js.sysctl.apply_for_minutes', {n: Math.round((state.confirmSeconds || 120) / 60)});
+            $('sy-modal-text').textContent = t('js.sysctl.arm_text', {n: names.length});
             const undo = $('sy-modal-undo');
             undo.textContent = '';
             names.forEach(k => {
@@ -510,25 +506,22 @@
                     const cb = el('input', { type: 'checkbox', className: 'form-check-input', id: id });
                     cb.dataset.ackKey = k;
                     const lb = el('label', { className: 'form-check-label wl-small', htmlFor: id,
-                        text: 'I mean ' + meta.sysctl + ' — this changes the buffer given to EVERY socket created afterwards, not just the tracker’s.' });
+                        text: t('js.sysctl.ack_text', {key: meta.sysctl}) });
                     line.appendChild(cb); line.appendChild(lb);
                     acks.appendChild(line);
                 }
             });
         } else if (op === 'confirm') {
-            $('sy-modal-title').textContent = 'Keep these settings permanently';
-            $('sy-modal-text').textContent =
-                'This writes /etc/sysctl.d/99-tracker-panel.conf, cancels the scheduled undo, and makes the '
-                + 'change survive a reboot — which is the escape hatch everything else here depends on. '
-                + 'That is why it asks for the password and Put-it-back does not.';
+            $('sy-modal-title').textContent = t('js.sysctl.keep_title');
+            $('sy-modal-text').textContent = t('js.sysctl.keep_text');
             $('sy-modal-undo').textContent = '';
             $('sy-modal-undo').appendChild(el('div', { className: 'wl-small text-muted',
-                text: 'Undo afterwards: the same Put it back button, or sudo /usr/local/sbin/tracker-sysctl.sh revert.' }));
+                text: t('js.sysctl.keep_undo') }));
         }
         const ok = $('sy-confirm-ok');
         ok.textContent = '';
         ok.appendChild(el('i', { className: 'bi bi-check-lg' }));
-        ok.appendChild(document.createTextNode(op === 'arm' ? ' Apply for now' : ' Keep it'));
+        ok.appendChild(document.createTextNode(' ' + (op === 'arm' ? t('js.sysctl.apply_now') : t('js.sysctl.keep_it'))));
         bootstrap.Modal.getOrCreateInstance($('syConfirmModal')).show();
         setTimeout(() => $('sy-confirm-password').focus(), 300);
     }
@@ -541,7 +534,7 @@
         const btn = $('sy-confirm-ok');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Working…';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.sysctl.working');
         alert.textContent = '';
         const body = { op: op, password: $('sy-confirm-password').value };
         if (op === 'arm') {
@@ -553,16 +546,16 @@
             const r = await apiCall('admin/sysctl_apply', 'POST', body);
             if (r.success) {
                 bootstrap.Modal.getInstance($('syConfirmModal')).hide();
-                showToast(r.message || 'Queued.', 'success');
+                showToast(r.message || t('js.sysctl.queued'), 'success');
                 painted = 0;
                 load(true);
             } else {
                 alert.textContent = '';
-                alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: r.error || 'Failed.' }));
+                alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: r.error || t('js.sysctl.failed') }));
             }
         } catch (err) {
             alert.textContent = '';
-            alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: 'Network error.' }));
+            alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.sysctl.network_error') }));
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -598,7 +591,7 @@
         const vals = (state.status && state.status.values) || {};
         Object.keys(state.wanted).forEach(k => { state.wanted[k] = String(vals[k] === undefined ? '' : vals[k]); });
         render();
-        showToast('Put back to what the kernel is running. Nothing was changed on the machine — those were only edits in this form.', 'success');
+        showToast(t('js.sysctl.reset_done'), 'success');
     }
 
     async function revert() {
@@ -607,42 +600,41 @@
         // restored on the machine. When both exist the machine takes priority and the form follows.
         if (!restorable()) {
             if (formDirty()) { resetForm(); return; }
-            showToast('Nothing to put back: the panel has never changed any of these, and you have not edited anything — what you see IS this machine’s own configuration.', 'info');
+            showToast(t('js.sysctl.nothing_to_revert'), 'info');
             return;
         }
-        if (!await confirmAction('Put the captured values back?',
-            'This restores what the machine had before the panel first touched these settings, and removes '
-            + 'the panel’s file. It is NOT the distribution’s defaults — it is what your machine had.',
-            { okLabel: 'Restore', danger: true })) return;
+        if (!await confirmAction(t('js.sysctl.revert_title'),
+            t('js.sysctl.revert_body'),
+            { okLabel: t('js.sysctl.revert_ok'), danger: true })) return;
         try {
             const r = await apiCall('admin/sysctl_apply', 'POST', { op: 'revert' });
-            showToast(r.success ? (r.message || 'Queued.') : (r.error || 'Failed.'), r.success ? 'success' : 'error');
+            showToast(r.success ? (r.message || t('js.sysctl.queued')) : (r.error || t('js.sysctl.failed')), r.success ? 'success' : 'error');
             painted = 0;
             load(true);
-        } catch { showToast('Network error', 'error'); }
+        } catch { showToast(t('js.sysctl.network_error'), 'error'); }
     }
 
     async function preview() {
         const pairs = changedPairs();
-        if (!Object.keys(pairs).length) { showToast('Nothing is different from what is already in force.', 'info'); return; }
+        if (!Object.keys(pairs).length) { showToast(t('js.sysctl.nothing_different'), 'info'); return; }
         try {
             const r = await apiCall('admin/sysctl_apply', 'POST', { op: 'preview', values: pairs });
-            $('sy-preview-title').textContent = r.file || 'File preview';
-            $('sy-preview-body').textContent = r.content || r.error || '(nothing)';
+            $('sy-preview-title').textContent = r.file || t('js.sysctl.file_preview');
+            $('sy-preview-body').textContent = r.content || r.error || t('js.sysctl.nothing_paren');
             bootstrap.Modal.getOrCreateInstance($('syPreviewModal')).show();
-        } catch { showToast('Network error', 'error'); }
+        } catch { showToast(t('js.sysctl.network_error'), 'error'); }
     }
 
     function useSuggested() {
         const s = state.suggest || {};
         const names = Object.keys(s);
         if (!names.length) {
-            showToast('Nothing here is supported by a measurement on this machine right now — so nothing is suggested.', 'info');
+            showToast(t('js.sysctl.no_suggestions'), 'info');
             return;
         }
         names.forEach(k => { state.wanted[k] = String(s[k].value); });
         render();
-        showToast('Filled in ' + names.length + ' value(s) the counters actually support.', 'success');
+        showToast(t('js.sysctl.filled_in', {n: names.length}), 'success');
     }
 
     function init() {

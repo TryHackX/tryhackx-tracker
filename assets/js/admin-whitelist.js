@@ -32,9 +32,9 @@
         return badge(src || '?', map[src] || '');
     }
     function metaBadge(status) {
-        const map = { none: ['—', 'wl-b-muted'], pending: ['pending', 'wl-b-pending'], fetching: ['fetching', 'wl-b-pending'], done: ['done', 'wl-b-ok'], failed: ['failed', 'wl-b-bad'] };
-        const [t, c] = map[status] || [status || '—', 'wl-b-muted'];
-        return badge(t, c);
+        const map = { none: ['—', 'wl-b-muted'], pending: [t('js.wl.meta_pending'), 'wl-b-pending'], fetching: [t('js.wl.meta_fetching'), 'wl-b-pending'], done: [t('js.wl.meta_done'), 'wl-b-ok'], failed: [t('js.wl.meta_failed'), 'wl-b-bad'] };
+        const [txt, c] = map[status] || [status || '—', 'wl-b-muted'];
+        return badge(txt, c);
     }
     function isHttpUrl(u) { return typeof u === 'string' && /^https?:\/\//i.test(u); }
     function iconBtn(icon, title, cls, onclick) {
@@ -50,7 +50,7 @@
     // cover a whole DECISION, not a single click — the direction cycles desc → asc → off, so picking
     // a column and then its direction is two or three clicks, and at 450 ms the first one had already
     // fired a request (and, with several sort keys, a wrong one).
-    const SORT_DEBOUNCE_MS = 900;
+    const SORT_DEBOUNCE_MS = window.AdminCommon.DEBOUNCE.sort;   // one number for every list — admin-common.js
     function magnetFor(hash, name) {
         let m = 'magnet:?xt=urn:btih:' + hash;
         if (name) m += '&dn=' + encodeURIComponent(name);
@@ -62,21 +62,21 @@
     async function loadStatus() {
         try {
             const s = await apiCall('admin/whitelist_status');
-            if (s.error) { showToast('Status: ' + s.error, 'danger'); return; }
+            if (s.error) { showToast(t('js.wl.status_error', {error: s.error}), 'danger'); return; }
             state.status = s;
             renderStatus(s);
-        } catch { showToast('Could not load whitelist status', 'danger'); }
+        } catch { showToast(t('js.wl.status_load_failed'), 'danger'); }
     }
 
     /** Ask the server what is really running, and say so out loud. */
     async function modeTest(btn) {
         const prev = btn.textContent;
         btn.disabled = true;
-        btn.textContent = 'Asking…';
+        btn.textContent = t('js.wl.asking');
         const r = await apiCall('admin/tracker_mode', 'POST', { op: 'status' });
         btn.textContent = prev;
         btn.disabled = false;
-        showToast((r && (r.message || r.error)) || 'No answer', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.wl.no_answer'), r && r.success ? 'success' : 'error');
         loadStatus();
     }
 
@@ -89,18 +89,17 @@
      * one, and it is the exact failure this whole path exists to prevent.
      */
     async function modeSwitch(mode) {
-        const to = mode === 'whitelist' ? 'WHITELIST' : 'BLACKLIST';
-        if (!await confirmAction('Switch the tracker to ' + to,
-            'The tracker service is restarted. Peers announcing during the restart retry on their own, '
-            + 'but the swarm briefly has no tracker.',
+        const to = mode === 'whitelist' ? t('js.wl.mode_whitelist') : t('js.wl.mode_blacklist');
+        if (!await confirmAction(t('js.wl.switch_title', {to}),
+            t('js.wl.switch_body'),
             { after: mode === 'whitelist'
-                ? 'In whitelist mode only registered hashes are served. The list is regenerated first.'
-                : 'In blacklist mode everything except banned hashes is served.',
-              okLabel: 'Switch', danger: true })) return;
-        const pw = await promptPassword('Switch the tracker', 'Confirm with the admin password.');
+                ? t('js.wl.switch_after_whitelist')
+                : t('js.wl.switch_after_blacklist'),
+              okLabel: t('js.wl.switch_ok'), danger: true })) return;
+        const pw = await promptPassword(t('js.wl.switch_pw_title'), t('js.wl.switch_pw_body'));
         if (!pw) return;
         const r = await apiCall('admin/tracker_mode', 'POST', { op: 'switch', mode, password: pw });
-        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.wl.failed'), r && r.success ? 'success' : 'error');
         loadStatus();
     }
 
@@ -120,103 +119,102 @@
         // config the symlinks point at. Only the schedule ever moved those. So this tile shows both,
         // and says plainly when they disagree instead of repeating the setting back to the operator.
         const ag = (s.schedule && s.schedule.agreement) || null;
-        const modeParts = [badge(s.mode === 'whitelist' ? 'WHITELIST' : 'BLACKLIST',
+        const modeParts = [badge(s.mode === 'whitelist' ? t('js.wl.mode_whitelist') : t('js.wl.mode_blacklist'),
                                  s.mode === 'whitelist' ? 'wl-b-ok' : 'wl-b-warn')];
         if (ag && ag.known && ag.match === false) {
-            modeParts.push(' ', badge('TRACKER IS RUNNING ' + String(ag.actual || '').toUpperCase(), 'wl-b-bad'));
-            modeParts.push(el('div', { className: 'wl-small text-danger', text:
-                'The panel and the tracker disagree. Everything the panel generates and every public '
-                + 'page follows the setting; the swarm follows the running build.' }));
+            modeParts.push(' ', badge(t('js.wl.tracker_running', {mode: String(ag.actual || '').toUpperCase()}), 'wl-b-bad'));
+            modeParts.push(el('div', { className: 'wl-small text-danger', text: t('js.wl.mode_disagree') }));
         } else if (ag && ag.known) {
-            modeParts.push(' ', el('span', { className: 'wl-small text-muted', text: 'confirmed on the server' }));
+            modeParts.push(' ', el('span', { className: 'wl-small text-muted', text: t('js.wl.mode_confirmed') }));
         } else if (ag) {
             // Unknown is not a mismatch, and must not be drawn as one.
             modeParts.push(el('div', { className: 'wl-small text-muted', text:
-                'Could not read what the tracker is running' + (ag.error ? ': ' + ag.error : '.') }));
+                t('js.wl.mode_unknown') + (ag.error ? ': ' + ag.error : '.') }));
         }
         const modeActs = el('div', { className: 'wl-mode-acts' });
         const testBtn = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary',
-            title: 'Ask the helper which build and config the service is actually using' },
-            [el('i', { className: 'bi bi-search' }), ' Test']);
+            title: t('js.wl.test_title') },
+            [el('i', { className: 'bi bi-search' }), ' ' + t('js.wl.test_btn')]);
         testBtn.addEventListener('click', () => modeTest(testBtn));
         modeActs.appendChild(testBtn);
         const other = s.mode === 'whitelist' ? 'blacklist' : 'whitelist';
+        const modeAcc = (m) => m === 'whitelist' ? t('js.wl.mode_whitelist_acc') : t('js.wl.mode_blacklist_acc');
         const needsSwitch = ag && ag.known && ag.match === false;
         const swBtn = el('button', { type: 'button',
             className: 'btn btn-sm ' + (needsSwitch ? 'btn-outline-warning' : 'btn-outline-secondary'),
             title: needsSwitch
-                ? 'Switch the tracker to ' + s.mode + ', which is what the panel already says'
-                : 'Switch the tracker (and the panel) to ' + other + ' mode' },
+                ? t('js.wl.switch_now_title', {mode: modeAcc(s.mode)})
+                : t('js.wl.switch_other_title', {mode: modeAcc(other)}) },
             [el('i', { className: 'bi bi-arrow-left-right' }),
-             needsSwitch ? ' Switch the tracker now' : ' Switch to ' + other]);
+             needsSwitch ? ' ' + t('js.wl.switch_now_btn') : ' ' + t('js.wl.switch_other_btn', {mode: modeAcc(other)})]);
         swBtn.addEventListener('click', () => modeSwitch(needsSwitch ? s.mode : other));
         modeActs.appendChild(swBtn);
         modeParts.push(modeActs);
-        grid.appendChild(kv('Tracker mode', modeParts));
+        grid.appendChild(kv(t('js.wl.kv_tracker_mode'), modeParts));
         // scheduled mode (whitelist hours): off / desired + next change / last switch outcome
         const sc = s.schedule;
         if (sc && sc.enabled) {
             const parts = [];
             if (!sc.valid) {
-                parts.push(badge('INVALID JSON', 'wl-b-bad'));
+                parts.push(badge(t('js.wl.sched_invalid'), 'wl-b-bad'));
             } else {
                 const inSync = sc.desired === s.mode;
-                parts.push(badge('wants ' + (sc.desired === 'whitelist' ? 'WHITELIST' : 'BLACKLIST'), inSync ? 'wl-b-ok' : 'wl-b-warn'));
-                if (!inSync) parts.push(' ', badge('out of sync', 'wl-b-warn'));
-                parts.push(' ', el('span', { className: 'text-muted', text: sc.next_change ? 'next change ' + fmtDate(new Date(sc.next_change * 1000).toISOString()) + ' (' + (sc.next_change_local || '') + ' ' + sc.tz + ')' : 'no change scheduled' }));
+                parts.push(badge(t('js.wl.sched_wants', {mode: sc.desired === 'whitelist' ? t('js.wl.mode_whitelist') : t('js.wl.mode_blacklist')}), inSync ? 'wl-b-ok' : 'wl-b-warn'));
+                if (!inSync) parts.push(' ', badge(t('js.wl.sched_out_of_sync'), 'wl-b-warn'));
+                parts.push(' ', el('span', { className: 'text-muted', text: sc.next_change ? t('js.wl.sched_next', {when: fmtDate(new Date(sc.next_change * 1000).toISOString()) + ' (' + (sc.next_change_local || '') + ' ' + sc.tz + ')'}) : t('js.wl.sched_none') }));
             }
             parts.push(el('div', { className: 'wl-small text-muted', text: sc.describe || '' }));
             if (sc.last_result) {
                 const okRes = sc.last_result === 'ok';
                 parts.push(el('div', { className: 'wl-small' }, [
-                    el('span', { className: 'text-muted', text: 'last switch: ' }),
-                    badge(okRes ? 'ok' : 'FAILED', okRes ? 'wl-b-ok' : 'wl-b-bad'), ' ',
-                    el('span', { className: 'text-muted', text: (sc.last_from && sc.last_to ? sc.last_from + ' → ' + sc.last_to + ' ' : '') + (sc.last_switch_at ? fmtAgo(Math.floor(s.server_time - sc.last_switch_at)) + ' ago' : (sc.last_attempt_at ? 'attempted ' + fmtAgo(Math.floor(s.server_time - sc.last_attempt_at)) + ' ago' : '')) }),
+                    el('span', { className: 'text-muted', text: t('js.wl.sched_last') + ' ' }),
+                    badge(okRes ? t('js.wl.ok') : t('js.wl.failed_upper'), okRes ? 'wl-b-ok' : 'wl-b-bad'), ' ',
+                    el('span', { className: 'text-muted', text: (sc.last_from && sc.last_to ? sc.last_from + ' → ' + sc.last_to + ' ' : '') + (sc.last_switch_at ? t('js.wl.ago', {ago: fmtAgo(Math.floor(s.server_time - sc.last_switch_at))}) : (sc.last_attempt_at ? t('js.wl.attempted_ago', {ago: fmtAgo(Math.floor(s.server_time - sc.last_attempt_at))}) : '')) }),
                 ]));
                 if (!okRes && sc.last_error) parts.push(el('div', { className: 'wl-small text-danger', text: sc.last_error }));
                 if (sc.last_notes) parts.push(el('div', { className: 'wl-small text-muted', text: sc.last_notes }));
             }
-            if (!sc.cmd_set) parts.push(el('div', { className: 'wl-small text-muted', text: 'no switch command — only the web setting flips' }));
-            grid.appendChild(kv('Schedule', parts));
+            if (!sc.cmd_set) parts.push(el('div', { className: 'wl-small text-muted', text: t('js.wl.sched_no_cmd') }));
+            grid.appendChild(kv(t('js.wl.kv_schedule'), parts));
         } else {
-            grid.appendChild(kv('Schedule', [badge('off', 'wl-b-muted'), ' ', el('span', { className: 'text-muted wl-small', text: 'fixed mode (Settings → Scheduled mode)' })]));
+            grid.appendChild(kv(t('js.wl.kv_schedule'), [badge(t('js.wl.off'), 'wl-b-muted'), ' ', el('span', { className: 'text-muted wl-small', text: t('js.wl.sched_fixed') })]));
         }
-        grid.appendChild(kv('Whitelist file', [
-            el('code', { className: 'wl-path', text: s.path || '(not configured)' }), ' ',
-            perm.ok ? badge('ok', 'wl-b-ok') : badge('problem', 'wl-b-bad'),
+        grid.appendChild(kv(t('js.wl.kv_wl_file'), [
+            el('code', { className: 'wl-path', text: s.path || t('js.wl.not_configured') }), ' ',
+            perm.ok ? badge(t('js.wl.ok'), 'wl-b-ok') : badge(t('js.wl.problem'), 'wl-b-bad'),
         ]));
-        grid.appendChild(kv('DB rows', [
-            el('span', { text: `${s.counts.active} active` }), ' · ',
-            el('span', { text: `${s.counts.banned_rows} banned rows` }), ' · ',
-            el('span', { text: `${s.counts.banned_hashes} banned hashes` }),
+        grid.appendChild(kv(t('js.wl.kv_db_rows'), [
+            el('span', { text: t('js.wl.n_active', {n: s.counts.active}) }), ' · ',
+            el('span', { text: t('js.wl.n_banned_rows', {n: s.counts.banned_rows}) }), ' · ',
+            el('span', { text: t('js.wl.n_banned_hashes', {n: s.counts.banned_hashes}) }),
         ]));
-        grid.appendChild(kv('Metadata queue', [
-            el('span', { text: `${s.counts.pending_meta} pending` }), ' · ',
-            el('span', { text: `${s.counts.fetching_meta} fetching` }),
+        grid.appendChild(kv(t('js.wl.kv_meta_queue'), [
+            el('span', { text: t('js.wl.n_pending', {n: s.counts.pending_meta}) }), ' · ',
+            el('span', { text: t('js.wl.n_fetching', {n: s.counts.fetching_meta}) }),
         ]));
         const f = s.file || {};
-        grid.appendChild(kv('File', f.exists
-            ? [el('span', { text: `≈${f.lines_estimate} lines · ${fmtBytes(f.size)}` }), ' · ', el('span', { className: 'text-muted', text: 'modified ' + (f.mtime ? fmtDate(new Date(f.mtime * 1000).toISOString()) : '—') })]
-            : [badge('missing', 'wl-b-bad')]));
-        grid.appendChild(kv('Last regeneration', st.generated_at ? [el('span', { text: fmtDate(new Date(st.generated_at * 1000).toISOString()) + ` (${st.count} hashes, +${st.appended_since_regen} appended since)` })] : ['never']));
+        grid.appendChild(kv(t('js.wl.kv_file'), f.exists
+            ? [el('span', { text: t('js.wl.file_lines', {n: f.lines_estimate, size: fmtBytes(f.size)}) }), ' · ', el('span', { className: 'text-muted', text: t('js.wl.modified', {when: f.mtime ? fmtDate(new Date(f.mtime * 1000).toISOString()) : '—'}) })]
+            : [badge(t('js.wl.missing'), 'wl-b-bad')]));
+        grid.appendChild(kv(t('js.wl.kv_last_regen'), st.generated_at ? [el('span', { text: fmtDate(new Date(st.generated_at * 1000).toISOString()) + ' ' + t('js.wl.regen_detail', {count: st.count, appended: st.appended_since_regen}) })] : [t('js.wl.never')]));
         const pend = st.pending_reload
-            ? [badge(st.urgent ? 'urgent' : 'pending', st.urgent ? 'wl-b-warn' : 'wl-b-pending'), ' ', el('span', { className: 'text-muted', text: st.dirty_since ? 'for ' + fmtAgo(Math.floor(s.server_time - st.dirty_since)) + (s.next_reload_in ? `, next in ~${s.next_reload_in} s` : '') : '' })]
-            : [badge('in sync', 'wl-b-ok')];
-        if (st.regen_needed) pend.push(' ', badge('regen needed', 'wl-b-warn'));
-        grid.appendChild(kv('Tracker reload', pend));
+            ? [badge(st.urgent ? t('js.wl.urgent') : t('js.wl.pending'), st.urgent ? 'wl-b-warn' : 'wl-b-pending'), ' ', el('span', { className: 'text-muted', text: st.dirty_since ? t('js.wl.pending_for', {ago: fmtAgo(Math.floor(s.server_time - st.dirty_since))}) + (s.next_reload_in ? t('js.wl.next_in', {s: s.next_reload_in}) : '') : '' })]
+            : [badge(t('js.wl.in_sync'), 'wl-b-ok')];
+        if (st.regen_needed) pend.push(' ', badge(t('js.wl.regen_needed'), 'wl-b-warn'));
+        grid.appendChild(kv(t('js.wl.kv_tracker_reload'), pend));
         const lr = st.last_reload_attempt_at
-            ? [badge(st.last_reload_ok ? 'ok' : 'FAILED', st.last_reload_ok ? 'wl-b-ok' : 'wl-b-bad'), ' ', el('span', { className: 'text-muted', text: fmtAgo(Math.floor(s.server_time - st.last_reload_attempt_at)) + ' ago' + (st.fail_count ? ` · ${st.fail_count} consecutive failures` : '') })]
-            : ['never'];
+            ? [badge(st.last_reload_ok ? t('js.wl.ok') : t('js.wl.failed_upper'), st.last_reload_ok ? 'wl-b-ok' : 'wl-b-bad'), ' ', el('span', { className: 'text-muted', text: t('js.wl.ago', {ago: fmtAgo(Math.floor(s.server_time - st.last_reload_attempt_at))}) + (st.fail_count ? t('js.wl.consecutive_failures', {n: st.fail_count}) : '') })]
+            : [t('js.wl.never')];
         if (!st.last_reload_ok && st.last_reload_output) lr.push(el('div', { className: 'wl-small text-danger', text: st.last_reload_output }));
-        grid.appendChild(kv('Last reload', lr));
+        grid.appendChild(kv(t('js.wl.kv_last_reload'), lr));
         const hb = s.worker_heartbeat_age;
-        grid.appendChild(kv('Metadata worker', hb === null || hb === undefined
-            ? [badge('not running', 'wl-b-muted'), ' ', el('span', { className: 'text-muted wl-small', text: 'no heartbeat file' })]
-            : [badge(hb < 120 ? 'alive' : 'stale', hb < 120 ? 'wl-b-ok' : 'wl-b-warn'), ' ', el('span', { className: 'text-muted', text: 'heartbeat ' + fmtAgo(hb) + ' ago' })]));
-        grid.appendChild(kv('Service', [
-            el('code', { text: (s.service && s.service.name) || '(none)' }), ' ',
-            s.service && s.service.auto_reload ? badge('auto-reload', 'wl-b-ok') : badge('auto-reload off', 'wl-b-warn'),
-            s.service && !s.service.exec ? [' ', badge('exec() disabled', 'wl-b-bad')] : null,
+        grid.appendChild(kv(t('js.wl.kv_meta_worker'), hb === null || hb === undefined
+            ? [badge(t('js.wl.not_running'), 'wl-b-muted'), ' ', el('span', { className: 'text-muted wl-small', text: t('js.wl.no_heartbeat') })]
+            : [badge(hb < 120 ? t('js.wl.alive') : t('js.wl.stale'), hb < 120 ? 'wl-b-ok' : 'wl-b-warn'), ' ', el('span', { className: 'text-muted', text: t('js.wl.heartbeat_ago', {ago: fmtAgo(hb)}) })]));
+        grid.appendChild(kv(t('js.wl.kv_service'), [
+            el('code', { text: (s.service && s.service.name) || t('js.wl.none') }), ' ',
+            s.service && s.service.auto_reload ? badge(t('js.wl.auto_reload'), 'wl-b-ok') : badge(t('js.wl.auto_reload_off'), 'wl-b-warn'),
+            s.service && !s.service.exec ? [' ', badge(t('js.wl.exec_disabled'), 'wl-b-bad')] : null,
         ].flat()));
 
         const warn = $('wl-status-warnings');
@@ -232,34 +230,34 @@
         } else {
             warn.classList.add('d-hidden');
         }
-        $('wl-status-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+        $('wl-status-updated').textContent = t('js.wl.updated_at', {time: new Date().toLocaleTimeString()});
         $('tab-badge-whitelist').textContent = s.counts.active ? String(s.counts.active) : '';
         $('tab-badge-banned').textContent = s.counts.banned_hashes ? String(s.counts.banned_hashes) : '';
     }
 
     async function regenerate() {
-        if (!await confirmAction('Regenerate whitelist file', 'Rewrite the whitelist file from the database (atomic) and ask the tracker to reload it?', { okLabel: 'Regenerate', danger: false })) return;
+        if (!await confirmAction(t('js.wl.regen_title'), t('js.wl.regen_body'), { okLabel: t('js.wl.regen_ok'), danger: false })) return;
         const btn = $('btn-wl-regen');
         btn.disabled = true;
         try {
             const r = await apiCall('admin/whitelist_regenerate', 'POST', { reload: true });
             if (r.success) {
-                showToast(`File written: ${r.count} hashes, ${fmtBytes(r.bytes)} in ${r.ms} ms` + (r.reload ? (r.reload.ok ? ' · tracker reloaded' : ' · reload NOT done: ' + (r.reload.output || 'see status')) : ''), r.reload && r.reload.ok === false ? 'warning' : 'success');
+                showToast(t('js.wl.regen_written', {count: r.count, size: fmtBytes(r.bytes), ms: r.ms}) + (r.reload ? (r.reload.ok ? t('js.wl.regen_reloaded') : t('js.wl.regen_not_reloaded', {out: r.reload.output || t('js.wl.see_status')})) : ''), r.reload && r.reload.ok === false ? 'warning' : 'success');
             } else {
-                showToast('Regeneration failed: ' + (r.error || 'unknown') + (r.suggestions && r.suggestions.length ? ' — ' + r.suggestions.join(' ') : ''), 'danger');
+                showToast(t('js.wl.regen_failed', {error: r.error || t('js.wl.unknown')}) + (r.suggestions && r.suggestions.length ? ' — ' + r.suggestions.join(' ') : ''), 'danger');
             }
-        } catch { showToast('Network error', 'danger'); }
+        } catch { showToast(t('js.wl.network_error'), 'danger'); }
         btn.disabled = false;
         loadStatus();
     }
 
     async function importBlacklist() {
-        if (!await confirmAction('Import blacklist', 'Import every hash from the legacy blacklist file into the banned hashes list?', { okLabel: 'Import', danger: false })) return;
+        if (!await confirmAction(t('js.wl.import_title'), t('js.wl.import_body'), { okLabel: t('js.wl.import_ok'), danger: false })) return;
         try {
             const r = await apiCall('admin/whitelist_import_blacklist', 'POST', {});
-            if (r.success) showToast(`Imported ${r.imported} new bans (${r.skipped} already banned, ${r.invalid} invalid lines)`, 'success');
-            else showToast('Import failed: ' + (r.error || 'unknown'), 'danger');
-        } catch { showToast('Network error', 'danger'); }
+            if (r.success) showToast(t('js.wl.import_done', {n: r.imported, skipped: r.skipped, invalid: r.invalid}), 'success');
+            else showToast(t('js.wl.import_failed', {error: r.error || t('js.wl.unknown')}), 'danger');
+        } catch { showToast(t('js.wl.network_error'), 'danger'); }
         loadStatus();
         if (state.view === 'banned') loadBanned();
     }
@@ -268,7 +266,7 @@
         const modalEl = $('wlReloadModal');
         const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         $('btn-wl-reload').addEventListener('click', () => {
-            if (!bodyDs.service) { showToast('No tracker service name configured in Settings.', 'warning'); return; }
+            if (!bodyDs.service) { showToast(t('js.wl.reload_no_service'), 'warning'); return; }
             $('wl-reload-alert').textContent = '';
             $('wl-reload-password').value = '';
             modal.show();
@@ -285,12 +283,12 @@
                 const r = await apiCall('admin/reload_tracker', 'POST', { password: pw });
                 if (r.success) {
                     modal.hide();
-                    showToast(r.message || 'Tracker reloaded', 'success');
+                    showToast(r.message || t('js.wl.reloaded'), 'success');
                     loadStatus();
                 } else {
-                    alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || 'Reload failed' }));
+                    alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t('js.wl.reload_failed') }));
                 }
-            } catch { alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: 'Network error' })); }
+            } catch { alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: t('js.wl.network_error') })); }
             btn.disabled = false;
         });
     }
@@ -332,12 +330,12 @@
         const box = $('rv-list');
         if (!box) return;
         box.textContent = '';
-        box.appendChild(el('div', { className: 'wl-status-loading', text: 'Loading…' }));
+        box.appendChild(el('div', { className: 'wl-status-loading', text: t('js.common.loading') }));
         const r = await apiCall('admin/wl_content', 'POST',
             { op: 'list', page: rvState.page, status: rvState.status, search: rvState.search });
         box.textContent = '';
         if (!r || !r.success) {
-            box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || 'Could not load the queue.' }));
+            box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || t('js.wl.review_load_failed') }));
             return;
         }
         // Both counters mean "waiting", never "matching the current filter": a badge that followed
@@ -348,16 +346,19 @@
         $('rv-sub-count').textContent = r.waiting ? String(r.waiting) : '';
         $('rv-edits-count').textContent = r.edits_pending ? String(r.edits_pending) : '';
         $('rv-total').textContent = r.total
-            ? (r.total + (rvState.status === 'pending' ? ' waiting' : ' shown'))
+            ? (rvState.status === 'pending' ? t('js.wl.n_waiting', {n: r.total}) : t('js.wl.n_shown', {n: r.total}))
             : '';
         if (!r.review_on) {
-            box.appendChild(el('div', { className: 'nl-note nl-note-info', text:
-                'Review is switched off, so new links and descriptions are published immediately. Anything here was submitted while it was on.' }));
+            box.appendChild(el('div', { className: 'nl-note nl-note-info', text: t('js.wl.review_off') }));
         }
         if (!(r.rows || []).length) {
-            box.appendChild(el('div', { className: 'nl-note', text: rvState.search
-                ? 'Nothing matches that search.'
-                : (rvState.status === 'pending' ? 'Nothing is waiting.' : 'Nothing here yet.') }));
+            // An empty queue is a state, not a note: the shared empty-state block, with a hint that says
+            // what would fill it.
+            box.appendChild(AdminCommon.emptyState(
+                rvState.search ? t('js.common.no_results')
+                    : (rvState.status === 'pending' ? t('js.common.nothing_waiting') : t('js.common.nothing_here')),
+                rvState.search ? 'bi-search' : 'bi-inbox',
+                rvState.search ? '' : t('js.wl.review_empty_hint')));
             renderPagination($('rv-pagination'), { total: 0, page: 1, pages: 1, onPage: () => {} });
             return;
         }
@@ -367,9 +368,9 @@
 
     /** The state of one submission, as an icon and a word rather than a colour alone. */
     const RV_STATE = {
-        pending:  { icon: 'bi-hourglass-split', cls: 'rv-st-wait', text: 'waiting' },
-        approved: { icon: 'bi-check-circle',    cls: 'rv-st-ok',   text: 'published' },
-        rejected: { icon: 'bi-x-circle',        cls: 'rv-st-no',   text: 'rejected' },
+        pending:  { icon: 'bi-hourglass-split', cls: 'rv-st-wait', text: t('js.wl.rv_waiting') },
+        approved: { icon: 'bi-check-circle',    cls: 'rv-st-ok',   text: t('js.wl.rv_published') },
+        rejected: { icon: 'bi-x-circle',        cls: 'rv-st-no',   text: t('js.wl.rv_rejected') },
     };
 
     function reviewCard(row) {
@@ -378,23 +379,24 @@
 
         const head = el('div', { className: 'rv-head' });
         const title = el('div', { className: 'rv-title' }, [
-            el('span', { className: 'rv-state', title: 'This submission is ' + state.text },
+            el('span', { className: 'rv-state', title: t('js.wl.rv_state_title', {state: state.text}) },
                [el('i', { className: 'bi ' + state.icon }), ' ' + state.text]),
-            el('strong', { className: 'rv-name', text: row.name || '(no name yet)' }),
+            el('strong', { className: 'rv-name', text: row.name || t('js.wl.no_name_yet') }),
         ]);
         const meta = el('div', { className: 'rv-meta' }, [
             el('code', { className: 'rv-hash', text: row.info_hash }),
             el('span', { className: 'wl-small text-muted', text: fmtDate(String(row.created_at).replace(' ', 'T')) }),
-            el('span', { className: 'wl-badge wl-b-muted', text: 'via ' + (row.source || 'web') }),
+            el('span', { className: 'wl-badge wl-b-muted', text: t('js.wl.via_source', {source: row.source || 'web'}) }),
         ]);
         // Ratings decide the order of this queue, so the number that did the deciding is on the card.
         // A moderator who cannot see why something is at the top is being asked to trust a sort.
         if (row.votes_count) {
             meta.appendChild(el('span', {
                 className: 'wl-badge ' + (row.score_x100 >= 5000 ? 'wl-b-ok' : 'wl-b-warn'),
-                title: 'Sorted worst-first: the ones people have complained about come before the ones nobody has an opinion on',
-                text: Math.round(row.score_x100 / 100) + '% from ' + row.votes_count
-                      + (row.votes_count === 1 ? ' rating' : ' ratings'),
+                title: t('js.wl.rv_sort_title'),
+                text: row.votes_count === 1
+                      ? t('js.wl.rating_one', {pct: Math.round(row.score_x100 / 100), n: row.votes_count})
+                      : t('js.wl.rating_many', {pct: Math.round(row.score_x100 / 100), n: row.votes_count}),
             }));
         }
         head.appendChild(title);
@@ -403,20 +405,20 @@
 
         if (row.source_url) {
             const line = el('div', { className: 'rv-src' });
-            line.appendChild(el('span', { className: 'rv-label', text: 'Source link' }));
+            line.appendChild(el('span', { className: 'rv-label', text: t('js.wl.source_link') }));
             // Not a live link, on purpose. A moderator deciding whether a link is acceptable should
             // not have to visit it to find out, and one accidental click is how that happens.
             line.appendChild(el('code', { className: 'rv-url', text: row.source_url }));
             line.appendChild(el('span', {
                 className: 'wl-badge ' + (row.source_trusted ? 'wl-b-ok' : 'wl-b-warn'),
-                text: row.source_trusted ? 'trusted domain' : 'off-site',
+                text: row.source_trusted ? t('js.wl.trusted_domain') : t('js.wl.off_site'),
             }));
             card.appendChild(line);
         }
 
         if (row.description_html) {
             const sec = el('div', { className: 'rv-sec' });
-            sec.appendChild(el('div', { className: 'rv-label', text: 'Description (' + (row.description_format || 'bbcode') + ')' }));
+            sec.appendChild(el('div', { className: 'rv-label', text: t('js.wl.description_fmt', {fmt: row.description_format || 'bbcode'}) }));
             const d = el('div', { className: 'rv-desc rt-body' });
             // The server built this string from escaped input with a fixed tag whitelist
             // (includes/richtext.php). It is the only place in this file that assigns innerHTML.
@@ -427,24 +429,24 @@
 
         if (row.content_status === 'rejected' && row.content_rejected_note) {
             card.appendChild(el('div', { className: 'rv-note' },
-                [el('strong', { text: 'Rejected: ' }), row.content_rejected_note]));
+                [el('strong', { text: t('js.wl.rejected_label') + ' ' }), row.content_rejected_note]));
         }
 
         const acts = el('div', { className: 'rv-acts' });
         if (row.content_status !== 'approved') {
             const ok = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success wl-act' },
-                [el('i', { className: 'bi bi-check-lg' }), ' Publish']);
+                [el('i', { className: 'bi bi-check-lg' }), ' ' + t('js.wl.publish')]);
             ok.addEventListener('click', () => reviewAct(row.id, 'approve'));
             acts.appendChild(ok);
         }
         if (row.content_status !== 'rejected') {
             const no = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning wl-act' },
-                [el('i', { className: 'bi bi-x-lg' }), ' Reject']);
+                [el('i', { className: 'bi bi-x-lg' }), ' ' + t('js.wl.reject')]);
             no.addEventListener('click', () => reviewReject(row.id));
             acts.appendChild(no);
         }
-        const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: 'Delete the link and description outright. The torrent stays registered.' },
-            [el('i', { className: 'bi bi-trash' }), ' Delete text']);
+        const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: t('js.wl.delete_text_title') },
+            [el('i', { className: 'bi bi-trash' }), ' ' + t('js.wl.delete_text')]);
         del.addEventListener('click', () => reviewClear(row.id, row.info_hash));
         acts.appendChild(del);
         card.appendChild(acts);
@@ -460,23 +462,23 @@
         const box = $('rv-edits-list');
         if (!box) return;
         box.textContent = '';
-        box.appendChild(el('div', { className: 'wl-status-loading', text: 'Loading…' }));
+        box.appendChild(el('div', { className: 'wl-status-loading', text: t('js.common.loading') }));
         const r = await apiCall('admin/wl_content', 'POST', { op: 'edits' });
         box.textContent = '';
         if (!r || !r.success) {
-            box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || 'Could not load the proposals.' }));
+            box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || t('js.wl.edits_load_failed') }));
             return;
         }
-        $('rv-edits-total').textContent = r.total ? (r.total + ' waiting') : '';
+        $('rv-edits-total').textContent = r.total ? t('js.wl.n_waiting', {n: r.total}) : '';
         $('rv-edits-count').textContent = r.total ? String(r.total) : '';
         if (!(r.rows || []).length) {
             // An empty queue is the normal state here, not a problem, and a bare grey note in a box
             // reads like something failed to load. Say what the empty state MEANS instead.
             box.appendChild(el('div', { className: 'rv-empty' }, [
                 el('i', { className: 'bi bi-inbox rv-empty-icon' }),
-                el('div', { className: 'rv-empty-title', text: 'No rewrites waiting' }),
+                el('div', { className: 'rv-empty-title', text: t('js.wl.no_rewrites') }),
                 el('div', { className: 'rv-empty-hint',
-                            text: 'Proposals appear here when a signed-in member suggests different wording for a description that is already published.' }),
+                            text: t('js.wl.no_rewrites_hint') }),
             ]));
             return;
         }
@@ -487,14 +489,14 @@
         const card = el('div', { className: 'rv-card rv-st-wait' });
         card.appendChild(el('div', { className: 'rv-head' }, [
             el('div', { className: 'rv-title' }, [
-                el('span', { className: 'rv-state', title: 'A rewrite waiting for a decision' },
-                   [el('i', { className: 'bi bi-pencil-square' }), ' rewrite']),
-                el('strong', { className: 'rv-name', text: row.name || '(no name yet)' }),
+                el('span', { className: 'rv-state', title: t('js.wl.rewrite_title') },
+                   [el('i', { className: 'bi bi-pencil-square' }), ' ' + t('js.wl.rewrite')]),
+                el('strong', { className: 'rv-name', text: row.name || t('js.wl.no_name_yet') }),
             ]),
             el('div', { className: 'rv-meta' }, [
                 el('code', { className: 'rv-hash', text: row.info_hash }),
                 el('span', { className: 'wl-small text-muted', text: fmtDate(String(row.created_at).replace(' ', 'T')) }),
-                el('span', { className: 'wl-small text-muted', text: row.ip ? 'from ' + row.ip : '' }),
+                el('span', { className: 'wl-small text-muted', text: row.ip ? t('js.wl.from_ip', {ip: row.ip}) : '' }),
             ]),
         ]));
 
@@ -509,36 +511,36 @@
                     el('code', { className: 'rv-url', text: url }),
                     trusted === null ? '' : el('span', {
                         className: 'wl-badge ' + (trusted ? 'wl-b-ok' : 'wl-b-warn'),
-                        text: trusted ? 'trusted domain' : 'off-site' }),
+                        text: trusted ? t('js.wl.trusted_domain') : t('js.wl.off_site') }),
                 ]));
             }
             const d = el('div', { className: 'rv-desc rt-body' });
             // Server-rendered, same renderer as the public page (includes/richtext.php).
-            d.innerHTML = html || '<p class="text-muted">(nothing)</p>';
+            d.innerHTML = html || '<p class="text-muted">' + t('js.wl.nothing_paren') + '</p>';
             col.appendChild(d);
             return col;
         };
-        cmp.appendChild(side('Published now', row.cur_html, row.cur_source_url, null));
-        cmp.appendChild(side('Proposed', row.new_html, row.source_url, !!row.new_trusted));
+        cmp.appendChild(side(t('js.wl.published_now'), row.cur_html, row.cur_source_url, null));
+        cmp.appendChild(side(t('js.wl.proposed'), row.new_html, row.source_url, !!row.new_trusted));
         card.appendChild(cmp);
 
         const acts = el('div', { className: 'rv-acts' });
         const ok = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success wl-act',
-            title: 'Replace the published text. The old version is kept as a rejected proposal, so this can be undone.' },
-            [el('i', { className: 'bi bi-check-lg' }), ' Apply']);
+            title: t('js.wl.apply_title') },
+            [el('i', { className: 'bi bi-check-lg' }), ' ' + t('js.wl.apply')]);
         ok.addEventListener('click', async () => {
-            if (!await confirmAction('Apply this rewrite',
-                'The published description is replaced by the proposed one.',
-                { code: row.info_hash, after: 'The version it replaces is kept, so you can put it back by accepting it later.', okLabel: 'Apply' })) return;
+            if (!await confirmAction(t('js.wl.apply_rewrite_title'),
+                t('js.wl.apply_rewrite_body'),
+                { code: row.info_hash, after: t('js.wl.apply_rewrite_after'), okLabel: t('js.wl.apply') })) return;
             const r = await apiCall('admin/wl_content', 'POST', { op: 'edit_apply', id: row.id });
-            showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+            showToast((r && (r.message || r.error)) || t('js.wl.failed'), r && r.success ? 'success' : 'error');
             if (r && r.success) loadEdits();
         });
         const no = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning wl-act' },
-            [el('i', { className: 'bi bi-x-lg' }), ' Reject']);
+            [el('i', { className: 'bi bi-x-lg' }), ' ' + t('js.wl.reject')]);
         no.addEventListener('click', async () => {
             const r = await apiCall('admin/wl_content', 'POST', { op: 'edit_reject', id: row.id });
-            showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+            showToast((r && (r.message || r.error)) || t('js.wl.failed'), r && r.success ? 'success' : 'error');
             if (r && r.success) loadEdits();
         });
         acts.appendChild(ok); acts.appendChild(no);
@@ -548,26 +550,26 @@
 
     async function reviewAct(id, op, extra) {
         const r = await apiCall('admin/wl_content', 'POST', Object.assign({ op, id }, extra || {}));
-        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.wl.failed'), r && r.success ? 'success' : 'error');
         if (r && r.success) loadReview();
     }
 
     async function reviewReject(id) {
         const note = await promptModal({
-            title: 'Reject this text',
-            label: 'Why (optional, kept for the record)',
-            placeholder: 'e.g. unrelated advertising',
+            title: t('js.wl.reject_text_title'),
+            label: t('js.wl.reject_why_label'),
+            placeholder: t('js.wl.reject_why_placeholder'),
             maxlength: 255,
-            okLabel: 'Reject',
+            okLabel: t('js.wl.reject'),
         });
         if (note === null) return;
         reviewAct(id, 'reject', { note });
     }
 
     async function reviewClear(id, hash) {
-        if (!await confirmAction('Delete this text', 'Delete the source link and description for this row?',
-            { code: hash, after: 'The torrent stays registered. This cannot be undone.', okLabel: 'Delete', danger: true })) return;
-        const pw = await promptPassword('Delete this text', 'Confirm with the admin password.');
+        if (!await confirmAction(t('js.wl.delete_text_title_2'), t('js.wl.delete_text_body'),
+            { code: hash, after: t('js.wl.delete_text_after'), okLabel: t('js.wl.delete'), danger: true })) return;
+        const pw = await promptPassword(t('js.wl.delete_text_title_2'), t('js.wl.confirm_admin_password'));
         if (!pw) return;
         reviewAct(id, 'clear', { password: pw });
     }
@@ -598,7 +600,7 @@
         busyDot($('wl-total'), true);
         if (!silent) $('wl-table').classList.add('tbl-loading');
         let r;
-        try { r = await apiCall('admin/fetch_whitelist&' + wlQuery()); } catch { r = { error: 'Network error' }; }
+        try { r = await apiCall('admin/fetch_whitelist&' + wlQuery()); } catch { r = { error: t('js.wl.network_error') }; }
         if (my !== wlLoadSeq) return;
         busyDot($('wl-total'), false);
         $('wl-table').classList.remove('tbl-loading');
@@ -611,9 +613,9 @@
         state.wl.pages = r.pages || 1;
         state.wl.ipCounts = r.ip_counts || {};
         state.wl.selected = new Set([...state.wl.selected].filter(id => state.wl.rows.has(id)));
-        $('wl-total').textContent = `${r.total} entries`;
+        $('wl-total').textContent = t('js.wl.entries_total', {n: r.total});
         if (!r.rows.length) {
-            body.appendChild(el('tr', null, el('td', { colspan: 12, className: 'text-center text-muted py-4', text: state.wl.search || state.wl.ip ? 'No entries match your search.' : 'The whitelist is empty. Use "Add hashes" or let the forum sync fill it.' })));
+            body.appendChild(el('tr', null, el('td', { colspan: 12, className: 'text-center text-muted py-4', text: state.wl.search || state.wl.ip ? t('js.wl.no_entries_match') : t('js.wl.whitelist_empty') })));
         }
         let lastIp = null;
         r.rows.forEach(row => {
@@ -627,7 +629,7 @@
             cb.checked = state.wl.selected.has(row.id);
             tr.appendChild(el('td', null, cb));
             tr.appendChild(el('td', { className: 'wl-id', text: String(row.id) }));
-            const hashCell = el('td', { className: 'wl-hash-cell', title: row.info_hash + ' — click to copy' }, [el('code', { text: row.info_hash })]);
+            const hashCell = el('td', { className: 'wl-hash-cell', title: t('js.wl.hash_click_copy', {hash: row.info_hash}) }, [el('code', { text: row.info_hash })]);
             hashCell.addEventListener('click', (e) => copyToClipboard(row.info_hash, e.currentTarget));
             tr.appendChild(hashCell);
             const nameTd = el('td', { className: 'wl-name', title: row.name || '' });
@@ -638,33 +640,33 @@
             const srcTd = el('td', { className: 'wl-source' }, sourceBadge(row.source));
             if (row.source_ref && isHttpUrl(row.source_ref.url)) {
                 srcTd.appendChild(document.createTextNode(' '));
-                srcTd.appendChild(el('a', { href: row.source_ref.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open source post', className: 'wl-ref-link' }, el('i', { className: 'bi bi-box-arrow-up-right' })));
+                srcTd.appendChild(el('a', { href: row.source_ref.url, target: '_blank', rel: 'noopener noreferrer', title: t('js.wl.open_source_post'), className: 'wl-ref-link' }, el('i', { className: 'bi bi-box-arrow-up-right' })));
             }
             tr.appendChild(srcTd);
             const ipTd = el('td', { className: 'wl-ip', title: row.ip || '' });
             if (row.ip) {
-                const a = el('a', { href: '#', title: 'Filter by ' + row.ip, text: row.ip });
+                const a = el('a', { href: '#', title: t('js.wl.filter_by_ip', {ip: row.ip}), text: row.ip });
                 a.addEventListener('click', (e) => { e.preventDefault(); setIpFilter(row.ip); });
                 ipTd.appendChild(a);
                 if (state.wl.group && row.ip !== lastIp && state.wl.ipCounts[row.ip] > 1) {
                     ipTd.appendChild(document.createTextNode(' '));
-                    ipTd.appendChild(el('span', { className: 'wl-ip-count', title: 'entries from this IP', text: '×' + state.wl.ipCounts[row.ip] }));
+                    ipTd.appendChild(el('span', { className: 'wl-ip-count', title: t('js.wl.entries_from_ip'), text: '×' + state.wl.ipCounts[row.ip] }));
                 }
             } else ipTd.textContent = '—';
             tr.appendChild(ipTd);
             const metaTd = el('td', { className: 'wl-meta' }, metaBadge(row.meta_status));
             if (row.meta_status === 'failed' && row.meta_error) metaTd.title = row.meta_error;
             tr.appendChild(metaTd);
-            tr.appendChild(el('td', { className: 'wl-sl', text: row.scraped_at ? `${row.scrape_seeders ?? 0} / ${row.scrape_leechers ?? 0}` : '—', title: row.scraped_at ? 'scraped ' + fmtDate(row.scraped_at) : 'not scraped yet' }));
+            tr.appendChild(el('td', { className: 'wl-sl', text: row.scraped_at ? `${row.scrape_seeders ?? 0} / ${row.scrape_leechers ?? 0}` : '—', title: row.scraped_at ? t('js.wl.scraped_at', {date: fmtDate(row.scraped_at)}) : t('js.wl.not_scraped_yet') }));
             tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(row.created_at) }));
             const act = el('td', { className: 'wl-actions' });
-            act.appendChild(iconBtn('bi-eye', 'Details', 'btn-outline-info', () => openDetails(row.id)));
-            const magOpen = el('a', { className: 'btn btn-sm btn-outline-secondary wl-act', title: 'Open magnet link in your torrent client', href: magnetFor(row.info_hash, row.name) }, el('i', { className: 'bi bi-magnet' }));
+            act.appendChild(iconBtn('bi-eye', t('js.wl.details'), 'btn-outline-info', () => openDetails(row.id)));
+            const magOpen = el('a', { className: 'btn btn-sm btn-outline-secondary wl-act', title: t('js.wl.open_magnet_title'), href: magnetFor(row.info_hash, row.name) }, el('i', { className: 'bi bi-magnet' }));
             act.appendChild(magOpen);
-            act.appendChild(iconBtn('bi-clipboard', 'Copy magnet link', 'btn-outline-secondary', (e) => copyToClipboard(magnetFor(row.info_hash, row.name), e.currentTarget)));
-            if (row.banned) act.appendChild(iconBtn('bi-unlock', 'Unban', 'btn-outline-success', () => unbanHash(row.info_hash)));
-            else act.appendChild(iconBtn('bi-lock', 'Ban', 'btn-outline-warning', () => banRows([row.id])));
-            act.appendChild(iconBtn('bi-trash', 'Delete', 'btn-outline-danger', () => deleteRows([row.id])));
+            act.appendChild(iconBtn('bi-clipboard', t('js.wl.copy_magnet'), 'btn-outline-secondary', (e) => copyToClipboard(magnetFor(row.info_hash, row.name), e.currentTarget)));
+            if (row.banned) act.appendChild(iconBtn('bi-unlock', t('js.wl.unban'), 'btn-outline-success', () => unbanHash(row.info_hash)));
+            else act.appendChild(iconBtn('bi-lock', t('js.wl.ban'), 'btn-outline-warning', () => banRows([row.id])));
+            act.appendChild(iconBtn('bi-trash', t('js.wl.delete'), 'btn-outline-danger', () => deleteRows([row.id])));
             tr.appendChild(act);
             tr.addEventListener('click', (e) => { if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a') || e.target.closest('.wl-hash-cell')) return; openDetails(row.id); });
             body.appendChild(tr);
@@ -695,8 +697,8 @@
         const c = $('wl-chips');
         c.textContent = '';
         if (state.wl.ip) {
-            const chip = el('span', { className: 'wl-chip' }, ['IP: ', el('code', { text: state.wl.ip }), ' ']);
-            const x = el('button', { type: 'button', className: 'wl-chip-x', title: 'Clear IP filter' }, el('i', { className: 'bi bi-x' }));
+            const chip = el('span', { className: 'wl-chip' }, [t('js.wl.ip_prefix'), el('code', { text: state.wl.ip }), ' ']);
+            const x = el('button', { type: 'button', className: 'wl-chip-x', title: t('js.wl.clear_ip_filter') }, el('i', { className: 'bi bi-x' }));
             x.addEventListener('click', () => { state.wl.ip = ''; state.wl.page = 1; loadWhitelist(); });
             chip.appendChild(x);
             c.appendChild(chip);
@@ -707,29 +709,29 @@
     function updateBulkBar() {
         const n = state.wl.selected.size;
         $('wl-bulk').classList.toggle('d-hidden', n === 0);
-        $('wl-bulk-count').textContent = `${n} selected`;
+        $('wl-bulk-count').textContent = t('js.wl.selected_count', {n});
     }
 
     async function deleteRows(ids) {
         if (!ids.length) return;
-        if (!await confirmAction('Delete from whitelist', `Remove ${ids.length} ${ids.length === 1 ? 'entry' : 'entries'} from the whitelist? The tracker stops serving them after the next reload.`, { okLabel: 'Delete' })) return;
+        if (!await confirmAction(t('js.wl.delete_from_wl_title'), t(ids.length === 1 ? 'js.wl.delete_confirm_one' : 'js.wl.delete_confirm_many', {n: ids.length}), { okLabel: t('js.wl.delete') })) return;
         try {
             const r = await apiCall('admin/whitelist_delete', 'POST', { ids });
-            if (r.success) { showToast(`Removed ${r.removed} entries`, 'success'); ids.forEach(id => state.wl.selected.delete(id)); }
-            else showToast(r.error || 'Delete failed', 'danger');
-        } catch { showToast('Network error', 'danger'); }
+            if (r.success) { showToast(t('js.wl.removed_entries', {n: r.removed}), 'success'); ids.forEach(id => state.wl.selected.delete(id)); }
+            else showToast(r.error || t('js.wl.delete_failed'), 'danger');
+        } catch { showToast(t('js.wl.network_error'), 'danger'); }
         loadWhitelist(); loadStatus();
     }
 
     async function banRows(ids) {
         if (!ids.length) return;
-        const noun = ids.length === 1 ? 'hash' : 'hashes';
+        const banLabel = t(ids.length === 1 ? 'js.wl.ban_n_one' : 'js.wl.ban_n_many', {n: ids.length});
         const reason = await promptModal({
-            title: `Ban ${ids.length} ${noun}`,
-            label: 'Reason (optional)',
-            placeholder: 'e.g. DMCA notice #1234',
-            hint: 'Banned hashes are removed from the served whitelist and cannot be re-registered until unbanned.',
-            okLabel: `Ban ${ids.length} ${noun}`,
+            title: banLabel,
+            label: t('js.wl.reason_optional'),
+            placeholder: t('js.wl.ban_reason_placeholder'),
+            hint: t('js.wl.ban_hint'),
+            okLabel: banLabel,
             danger: true,
             multiline: true,
             maxlength: 255,
@@ -737,20 +739,20 @@
         if (reason === null) return;
         try {
             const r = await apiCall('admin/whitelist_ban', 'POST', { ids, reason: reason.trim() });
-            if (r.success) { showToast(`Banned ${r.banned} new hashes (${r.affected} removed from the served list)`, 'success'); ids.forEach(id => state.wl.selected.delete(id)); }
-            else showToast(r.error || 'Ban failed', 'danger');
-        } catch { showToast('Network error', 'danger'); }
+            if (r.success) { showToast(t('js.wl.banned_result', {n: r.banned, affected: r.affected}), 'success'); ids.forEach(id => state.wl.selected.delete(id)); }
+            else showToast(r.error || t('js.wl.ban_failed'), 'danger');
+        } catch { showToast(t('js.wl.network_error'), 'danger'); }
         loadWhitelist(); loadStatus();
     }
 
     async function unbanHash(hash) {
-        if (!await confirmAction('Unban hash', 'Lift the ban on this hash?',
-            { code: hash, after: 'If a whitelist row exists it becomes active again.',
-              okLabel: 'Unban', danger: false })) return;
+        if (!await confirmAction(t('js.wl.unban_hash_title'), t('js.wl.unban_hash_body'),
+            { code: hash, after: t('js.wl.unban_hash_after'),
+              okLabel: t('js.wl.unban'), danger: false })) return;
         try {
             const r = await apiCall('admin/whitelist_unban', 'POST', { hash });
-            if (r.success) showToast('Ban lifted', 'success'); else showToast(r.error || 'Unban failed', 'danger');
-        } catch { showToast('Network error', 'danger'); }
+            if (r.success) showToast(t('js.wl.ban_lifted'), 'success'); else showToast(r.error || t('js.wl.unban_failed'), 'danger');
+        } catch { showToast(t('js.wl.network_error'), 'danger'); }
         if (state.view === 'banned') loadBanned(); else loadWhitelist();
         loadStatus();
     }
@@ -761,15 +763,15 @@
             let queued = 0, hb;
             for (let i = 0; i < ids.length; i += 500) {
                 const r = await apiCall('admin/whitelist_fetch_meta', 'POST', { ids: ids.slice(i, i + 500), refresh: !!refresh });
-                if (!r.success) { showToast(r.error || 'Request failed', 'danger'); return; }
+                if (!r.success) { showToast(r.error || t('js.wl.request_failed'), 'danger'); return; }
                 queued += Number(r.queued) || 0;
                 hb = r.worker_heartbeat_age;
             }
-            let msg = `Queued ${queued} of ${ids.length}`;
-            if (hb === null || hb === undefined) msg += ' — warning: the metadata worker seems to be down (no heartbeat)';
-            else if (hb > 120) msg += ` — warning: worker heartbeat is ${fmtAgo(hb)} old`;
+            let msg = t('js.wl.queued_of', {n: queued, total: ids.length});
+            if (hb === null || hb === undefined) msg += t('js.wl.worker_down_warn');
+            else if (hb > 120) msg += t('js.wl.worker_heartbeat_old', {age: fmtAgo(hb)});
             showToast(msg, hb === null || hb === undefined || hb > 120 ? 'warning' : 'success');
-        } catch { showToast('Network error', 'danger'); }
+        } catch { showToast(t('js.wl.network_error'), 'danger'); }
     }
 
     // ── "This page" / "Near pages" helpers (near radius comes from the admin_near_pages setting) ──
@@ -803,37 +805,37 @@
     /** Queue metadata for the given rows, skipping everything that already has (or is fetching) it. */
     async function metaRowsWl(rows, what) {
         const ids = rows.filter(r => r.meta_status === 'none' || r.meta_status === 'failed').map(r => r.id);
-        if (!ids.length) { showToast('Nothing to queue — no missing/failed rows in ' + what, 'info'); return; }
+        if (!ids.length) { showToast(t('js.wl.nothing_to_queue_in', {what}), 'info'); return; }
         try {
             let queued = 0, hb;
             for (let i = 0; i < ids.length; i += 500) {
                 const r = await apiCall('admin/whitelist_fetch_meta', 'POST', { ids: ids.slice(i, i + 500), refresh: false });
-                if (!r.success) { showToast(r.error || 'Request failed', 'danger'); return; }
+                if (!r.success) { showToast(r.error || t('js.wl.request_failed'), 'danger'); return; }
                 queued += Number(r.queued) || 0;
                 hb = r.worker_heartbeat_age;
             }
-            let msg = `Queued ${queued} of ${ids.length} missing/failed (${what})`;
-            if (hb === null || hb === undefined) msg += ' — warning: the metadata worker seems to be down (no heartbeat)';
-            else if (hb > 120) msg += ` — warning: worker heartbeat is ${fmtAgo(hb)} old`;
+            let msg = t('js.wl.queued_of_missing', {n: queued, total: ids.length, what});
+            if (hb === null || hb === undefined) msg += t('js.wl.worker_down_warn');
+            else if (hb > 120) msg += t('js.wl.worker_heartbeat_old', {age: fmtAgo(hb)});
             showToast(msg, hb === null || hb === undefined || hb > 120 ? 'warning' : 'success');
-        } catch { showToast('Network error', 'danger'); return; }
+        } catch { showToast(t('js.wl.network_error'), 'danger'); return; }
         loadStatus(); loadWhitelist();
     }
     async function metaNearPagesWl() {
         if (collectingNear) return;
         collectingNear = true;
-        try { await metaRowsWl(await collectNearRowsWl(), 'near pages ±' + nearRadius()); }
-        catch (e) { showToast('Near pages failed: ' + (e.message || 'error'), 'danger'); }
+        try { await metaRowsWl(await collectNearRowsWl(), t('js.wl.near_pages_what', {n: nearRadius()})); }
+        catch (e) { showToast(t('js.wl.near_pages_failed', {msg: e.message || t('js.wl.error_word')}), 'danger'); }
         finally { collectingNear = false; }
     }
 
     // ───────────────────────── bulk tools (toolbar dropdowns) ─────────────────────────
-    const META_SCOPE_LABEL = { missing: 'missing (never fetched)', failed: 'failed', missing_failed: 'missing + failed', all: 'active' };
+    const META_SCOPE_LABEL = { missing: t('js.wl.scope_missing'), failed: t('js.wl.scope_failed'), missing_failed: t('js.wl.scope_missing_failed'), all: t('js.wl.scope_all') };
 
     /** Bulk "Fetch metadata": one UPDATE server-side; the worker drains the queue one hash after another. */
     async function queueMetaScope(scope) {
         if (!META_SCOPE_LABEL[scope]) return;
-        if (scope === 'all' && !await confirmAction('Re-fetch all metadata', 'Queue EVERY active hash for a metadata re-fetch (already fetched ones included)? The worker processes the queue one hash after another — a big list can take hours.', { okLabel: 'Queue all', danger: false })) return;
+        if (scope === 'all' && !await confirmAction(t('js.wl.refetch_all_title'), t('js.wl.refetch_all_body'), { okLabel: t('js.wl.queue_all'), danger: false })) return;
         const btn = $('btn-wl-meta-bulk');
         btn.disabled = true;
         try {
@@ -841,23 +843,23 @@
             if (r.success) {
                 const n = Number(r.queued) || 0;
                 let msg = n === 0
-                    ? `Nothing to queue — no ${META_SCOPE_LABEL[scope]} hashes without a pending fetch`
-                    : `Queued ${n} ${META_SCOPE_LABEL[scope]} ${n === 1 ? 'hash' : 'hashes'} — the worker fetches them one by one in the background`;
+                    ? t('js.wl.nothing_to_queue_scope', {scope: META_SCOPE_LABEL[scope]})
+                    : t(n === 1 ? 'js.wl.queued_scope_one' : 'js.wl.queued_scope_many', {n, scope: META_SCOPE_LABEL[scope]});
                 let type = n === 0 ? 'info' : 'success';
-                if (n > 0 && (r.worker_heartbeat_age === null || r.worker_heartbeat_age === undefined)) { msg += ' — warning: the metadata worker seems to be down (no heartbeat)'; type = 'warning'; }
-                else if (n > 0 && r.worker_heartbeat_age > 120) { msg += ` — warning: worker heartbeat is ${fmtAgo(r.worker_heartbeat_age)} old`; type = 'warning'; }
+                if (n > 0 && (r.worker_heartbeat_age === null || r.worker_heartbeat_age === undefined)) { msg += t('js.wl.worker_down_warn'); type = 'warning'; }
+                else if (n > 0 && r.worker_heartbeat_age > 120) { msg += t('js.wl.worker_heartbeat_old', {age: fmtAgo(r.worker_heartbeat_age)}); type = 'warning'; }
                 showToast(msg, type);
-            } else showToast(r.error || 'Request failed', 'danger');
-        } catch { showToast('Network error', 'danger'); }
+            } else showToast(r.error || t('js.wl.request_failed'), 'danger');
+        } catch { showToast(t('js.wl.network_error'), 'danger'); }
         btn.disabled = false;
         loadStatus(); loadWhitelist();
     }
 
     /** Ask for a custom from/to (Y-m-d, `to` empty = now). Returns {from,to} or null when cancelled/invalid. */
     async function promptDateRange() {
-        const from = await promptModal({ title: 'Custom date range', label: 'From (YYYY-MM-DD or YYYY-MM-DD HH:MM)', placeholder: '2026-08-20' });
+        const from = await promptModal({ title: t('js.wl.custom_date_range'), label: t('js.wl.date_from_label'), placeholder: '2026-08-20' });
         if (from === null || !from.trim()) return null;
-        const to = await promptModal({ title: 'Custom date range', label: 'To (empty = now; a date covers the whole day)', placeholder: '2026-08-23' });
+        const to = await promptModal({ title: t('js.wl.custom_date_range'), label: t('js.wl.date_to_label'), placeholder: '2026-08-23' });
         if (to === null) return null;
         return { from: from.trim(), to: (to || '').trim() };
     }
@@ -876,23 +878,23 @@
             const r = await apiCall('admin/whitelist_meta_queue', 'POST', body);
             if (r.success) {
                 const n = Number(r.queued) || 0;
-                let msg = n === 0 ? 'Nothing to queue in that window (missing + failed only)' : `Queued ${n} ${n === 1 ? 'hash' : 'hashes'} added ${r.from} → ${r.to}`;
+                let msg = n === 0 ? t('js.wl.nothing_to_queue_window') : t(n === 1 ? 'js.wl.queued_added_one' : 'js.wl.queued_added_many', {n, from: r.from, to: r.to});
                 let type = n === 0 ? 'info' : 'success';
-                if (n > 0 && (r.worker_heartbeat_age === null || r.worker_heartbeat_age === undefined)) { msg += ' — warning: the metadata worker seems to be down'; type = 'warning'; }
+                if (n > 0 && (r.worker_heartbeat_age === null || r.worker_heartbeat_age === undefined)) { msg += t('js.wl.worker_down_warn_short'); type = 'warning'; }
                 showToast(msg, type);
-            } else showToast(r.error || 'Request failed', 'danger');
-        } catch { showToast('Network error', 'danger'); }
+            } else showToast(r.error || t('js.wl.request_failed'), 'danger');
+        } catch { showToast(t('js.wl.network_error'), 'danger'); }
         btn.disabled = false;
     }
 
     /** Stop the metadata backlog: every queued (pending) row goes back to `none`; active fetches finish. */
     async function cancelMetaQueue() {
-        if (!await confirmAction('Cancel queued metadata', 'Reset every QUEUED (pending) hash back to "no metadata"? Rows being fetched right now still finish. You can re-queue any time.', { okLabel: 'Cancel queue', danger: true })) return;
+        if (!await confirmAction(t('js.wl.cancel_queue_title'), t('js.wl.cancel_queue_body'), { okLabel: t('js.wl.cancel_queue'), danger: true })) return;
         try {
             const r = await apiCall('admin/whitelist_meta_queue', 'POST', { scope: 'cancel' });
-            if (r.success) showToast(`Cancelled ${r.cancelled} queued ${r.cancelled === 1 ? 'fetch' : 'fetches'}` + (r.restored ? ` (${r.restored} restored to done)` : ''));
-            else showToast(r.error || 'Request failed', 'danger');
-        } catch { showToast('Network error', 'danger'); }
+            if (r.success) showToast(t(r.cancelled === 1 ? 'js.wl.cancelled_one' : 'js.wl.cancelled_many', {n: r.cancelled}) + (r.restored ? t('js.wl.restored_done', {n: r.restored}) : ''));
+            else showToast(r.error || t('js.wl.request_failed'), 'danger');
+        } catch { showToast(t('js.wl.network_error'), 'danger'); }
         loadWhitelist();
     }
 
@@ -904,10 +906,10 @@
      */
     async function scrapeBulk(scope, dateBody, idList) {
         const btn = $('btn-wl-scrape-bulk'), caret = $('btn-wl-scrape-caret'), label = $('wl-scrape-label');
-        if (scrapeRunning) { scrapeStop = true; label.textContent = 'Stopping…'; return; }   // second click = stop
-        if (collectingNear && !idList) { showToast('Near-pages collection is running — wait a moment', 'info'); return; }
+        if (scrapeRunning) { scrapeStop = true; label.textContent = t('js.wl.stopping'); return; }   // second click = stop
+        if (collectingNear && !idList) { showToast(t('js.wl.near_pages_running'), 'info'); return; }
         const ids = scope === 'page' ? (idList || [...state.wl.rows.keys()]) : null;
-        if (scope === 'page' && !ids.length) { showToast('No rows on this page to scrape', 'info'); return; }
+        if (scope === 'page' && !ids.length) { showToast(t('js.wl.no_rows_to_scrape'), 'info'); return; }
         // the 'page' scope takes at most 500 ids per request — near pages can exceed that, so chunk
         const chunks = ids ? Array.from({ length: Math.ceil(ids.length / 500) }, (_, i) => ids.slice(i * 500, i * 500 + 500)) : [null];
         scrapeRunning = true; scrapeStop = false;
@@ -915,10 +917,10 @@
         const origTitle = btn.title;
         caret.disabled = true;                       // the main button stays clickable — it is the Stop button now
         btn.classList.add('wl-busy');
-        btn.title = 'Click to stop after the current batch';
+        btn.title = t('js.wl.click_to_stop_batch');
         const progress = (t) => { label.textContent = t; };
         let scraped = 0, requests = 0, failed = 0, rounds = 0, warning = null, aborted = false, stopped = false;
-        progress('Stop · scraping…');
+        progress(t('js.wl.stop_scraping'));
         try {
             outer:
             for (const chunk of chunks) {
@@ -929,24 +931,24 @@
                     if (chunk) body.ids = chunk;
                     if (dateBody) Object.assign(body, dateBody);
                     const r = await apiCall('admin/whitelist_scrape_bulk', 'POST', body);
-                    if (!r.success) { showToast(r.error || 'Scrape failed', 'danger'); aborted = true; break outer; }
+                    if (!r.success) { showToast(r.error || t('js.wl.scrape_failed'), 'danger'); aborted = true; break outer; }
                     scraped += Number(r.scraped) || 0;
                     requests += Number(r.requests) || 0;
                     failed += Number(r.failed) || 0;
                     if (r.after_id) afterId = r.after_id;
                     if (r.warning) warning = r.warning;
-                    progress(`Stop · scraped ${scraped}…` + (r.remaining ? ` (${r.remaining} left)` : ''));
+                    progress(t('js.wl.stop_scraped', {n: scraped}) + (r.remaining ? t('js.wl.remaining_left', {n: r.remaining}) : ''));
                     if (scrapeStop) { stopped = true; break outer; }
                     if (!r.truncated || rounds >= 200) break;
                 }
                 if (rounds >= 200) break;
             }
-        } catch { showToast('Network error', 'danger'); aborted = true; }
-        if (stopped) showToast(`Stopped — scraped ${scraped} before stopping`, 'info');
+        } catch { showToast(t('js.wl.network_error'), 'danger'); aborted = true; }
+        if (stopped) showToast(t('js.wl.stopped_scraped', {n: scraped}), 'info');
         if (!aborted && !stopped) {
-            const what = scope === 'page' ? 'this page' : scope === 'stale' ? 'stale rows' : scope === 'date' ? 'the selected window' : 'all active hashes';
-            if (scraped === 0 && warning) showToast(`Scrape (${what}): ${warning}`, 'warning');
-            else showToast(`Scraped ${scraped} ${scraped === 1 ? 'hash' : 'hashes'} (${what}) in ${requests} tracker request${requests === 1 ? '' : 's'}` + (failed ? ` — ${failed} request${failed === 1 ? '' : 's'} got no answer` : '') + (warning ? ` — ${warning}` : ''), failed || warning ? 'warning' : 'success');
+            const what = scope === 'page' ? t('js.wl.what_this_page') : scope === 'stale' ? t('js.wl.what_stale_rows') : scope === 'date' ? t('js.wl.what_selected_window') : t('js.wl.what_all_active');
+            if (scraped === 0 && warning) showToast(t('js.wl.scrape_warning', {what, warning}), 'warning');
+            else showToast(t(scraped === 1 ? 'js.wl.scraped_one' : 'js.wl.scraped_many', {n: scraped, what}) + t(requests === 1 ? 'js.wl.in_requests_one' : 'js.wl.in_requests_many', {n: requests}) + (failed ? ' — ' + t(failed === 1 ? 'js.wl.no_answer_one' : 'js.wl.no_answer_many', {n: failed}) : '') + (warning ? ` — ${warning}` : ''), failed || warning ? 'warning' : 'success');
         }
         label.textContent = origLabel;
         btn.classList.remove('wl-busy');
@@ -967,13 +969,13 @@
             stopDetailPoll();
             detailPollStart = Date.now();
             body.textContent = '';
-            body.appendChild(el('div', { className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' Loading…']));
+            body.appendChild(el('div', { className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' ' + t('js.common.loading')]));
             $('wd-title-id').textContent = '#' + id;
             modal.show();
             modalEl.addEventListener('hidden.bs.modal', stopDetailPoll, { once: true });
         }
         let r;
-        try { r = await apiCall('admin/whitelist_item&id=' + encodeURIComponent(id)); } catch { r = { error: 'Network error' }; }
+        try { r = await apiCall('admin/whitelist_item&id=' + encodeURIComponent(id)); } catch { r = { error: t('js.wl.network_error') }; }
         if (r.error) { body.textContent = ''; body.appendChild(el('div', { className: 'alert alert-danger', text: r.error })); return; }
         renderDetails(r);
         const ms = r.item.meta_status;
@@ -1004,18 +1006,18 @@
             wrap.appendChild(el('div', {
                 className: 'wl-badge ' + (c.content_status === 'pending' ? 'wl-b-pending' : 'wl-b-warn'),
                 text: c.content_status === 'pending'
-                    ? 'waiting for review — not public yet'
-                    : 'rejected' + (c.rejected_note ? ' — ' + c.rejected_note : '') + ' — not public',
+                    ? t('js.wl.waiting_review_not_public')
+                    : t('js.wl.rejected_not_public', {note: c.rejected_note ? ' — ' + c.rejected_note : ''}),
             }));
         }
 
         if (hasLink) {
             const row = el('div', { className: 'rt-src-row' });
-            row.appendChild(el('span', { className: 'wl-kv-label', text: 'Source' }));
+            row.appendChild(el('span', { className: 'wl-kv-label', text: t('js.wl.source') }));
             const a = el('a', {
                 className: 'rt-src-url', href: c.source_url, text: c.source_url,
                 rel: 'nofollow noopener noreferrer ugc', target: '_blank',
-                title: c.source_trusted ? 'A domain you have marked as trusted' : 'Off-site — you will be asked to confirm',
+                title: c.source_trusted ? t('js.wl.src_trusted_title') : t('js.wl.src_offsite_title'),
             });
             // Not our link. The confirmation is the panel's too: an administrator clicking through a
             // queue is exactly the person who should not open one by accident.
@@ -1026,7 +1028,7 @@
 
         if (hasText) {
             const det = el('details', { className: 'rt-collapse' });
-            det.appendChild(el('summary', { text: 'Description' }));
+            det.appendChild(el('summary', { text: t('js.wl.description') }));
             const body = el('div', { className: 'rt-body' });
             // Built on the server by includes/richtext.php from fully escaped input with a fixed tag
             // whitelist. Everything else in this file goes through el()/textContent.
@@ -1067,12 +1069,12 @@
         const idx = r.index || null;
         const sc0 = r.scrape;
         const strip = statStrip([
-            [sc0 ? sc0.seeders : (it.scrape_seeders != null ? it.scrape_seeders : null), 'seeders', 'info-stat-seed'],
-            [sc0 ? sc0.leechers : (it.scrape_leechers != null ? it.scrape_leechers : null), 'leechers', 'info-stat-leech'],
-            [sc0 ? sc0.completed : (it.scrape_completed != null ? it.scrape_completed : null), 'completed'],
-            [it.total_size ? fmtBytes(it.total_size) : null, 'size'],
-            [it.files_count != null ? it.files_count : null, it.files_count === 1 ? 'file' : 'files'],
-            [idx && idx.peak_seeders != null ? idx.peak_seeders : null, 'peak seeders'],
+            [sc0 ? sc0.seeders : (it.scrape_seeders != null ? it.scrape_seeders : null), t('js.wl.stat_seeders'), 'info-stat-seed'],
+            [sc0 ? sc0.leechers : (it.scrape_leechers != null ? it.scrape_leechers : null), t('js.wl.stat_leechers'), 'info-stat-leech'],
+            [sc0 ? sc0.completed : (it.scrape_completed != null ? it.scrape_completed : null), t('js.wl.stat_completed')],
+            [it.total_size ? fmtBytes(it.total_size) : null, t('js.wl.stat_size')],
+            [it.files_count != null ? it.files_count : null, it.files_count === 1 ? t('js.wl.stat_file') : t('js.wl.stat_files')],
+            [idx && idx.peak_seeders != null ? idx.peak_seeders : null, t('js.wl.stat_peak_seeders')],
         ]);
         if (strip) body.appendChild(strip);
 
@@ -1087,54 +1089,54 @@
         // whole point of opening this panel was to look at one torrent. The row listing already has an
         // open button; the detail view, where somebody has deliberately stopped to read, did not.
         const magnetBox = (text) => {
-            const box = copyBox(text, 'Copy magnet link');
+            const box = copyBox(text, t('js.wl.copy_magnet'));
             box.appendChild(el('a', {
                 className: 'btn btn-sm wl-copybox-btn', href: text,
-                title: 'Open in your torrent client', 'aria-label': 'Open magnet link in your torrent client',
+                title: t('js.wl.open_in_client'), 'aria-label': t('js.wl.open_magnet_in_client'),
             }, el('i', { className: 'bi bi-magnet' })));
             return box;
         };
-        row('Info hash', [copyBox(it.info_hash, 'Copy hash')]);
-        row('Magnet link', [magnetBox(magnet)]);
-        row('Name', [el('span', { text: it.name || '—' })]);
-        row('Size', [el('span', { text: it.total_size ? `${fmtBytes(it.total_size)} · ${it.files_count || 0} files` + (it.piece_length ? ` · piece ${fmtBytes(it.piece_length)}` : '') : '—' })]);
+        row(t('js.wl.lbl_info_hash'), [copyBox(it.info_hash, t('js.wl.copy_hash'))]);
+        row(t('js.wl.lbl_magnet'), [magnetBox(magnet)]);
+        row(t('js.wl.lbl_name'), [el('span', { text: it.name || '—' })]);
+        row(t('js.wl.lbl_size'), [el('span', { text: it.total_size ? t('js.wl.size_line', { size: fmtBytes(it.total_size), n: it.files_count || 0 }) + (it.piece_length ? ' · ' + t('js.wl.piece_size', { size: fmtBytes(it.piece_length) }) : '') : '—' })]);
         const metaNodes = [metaBadge(it.meta_status)];
         if (it.meta_status === 'failed' && it.meta_error) metaNodes.push(' ', el('span', { className: 'text-danger wl-small', text: it.meta_error }));
-        if (it.meta_fetched_at) metaNodes.push(' ', el('span', { className: 'text-muted wl-small', text: 'fetched ' + fmtDate(it.meta_fetched_at) }));
+        if (it.meta_fetched_at) metaNodes.push(' ', el('span', { className: 'text-muted wl-small', text: t('js.wl.fetched_at', { date: fmtDate(it.meta_fetched_at) }) }));
         if (it.meta_status === 'pending' || it.meta_status === 'fetching') metaNodes.push(' ', el('span', { className: 'spinner-border spinner-border-sm text-info' }));
-        metaNodes.push(' ', el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', onclick: async () => { await fetchMeta([it.id], it.meta_status === 'done' || it.meta_status === 'failed'); openDetails(it.id); } }, [el('i', { className: 'bi bi-cloud-download' }), ' ' + (it.meta_status === 'done' ? 'Refresh metadata' : 'Fetch metadata')]));
-        row('Metadata', metaNodes);
+        metaNodes.push(' ', el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', onclick: async () => { await fetchMeta([it.id], it.meta_status === 'done' || it.meta_status === 'failed'); openDetails(it.id); } }, [el('i', { className: 'bi bi-cloud-download' }), ' ' + (it.meta_status === 'done' ? t('js.wl.refresh_metadata') : t('js.wl.fetch_metadata'))]));
+        row(t('js.wl.lbl_metadata'), metaNodes);
         const sc = r.scrape;
         const scrapeNodes = sc
-            ? [el('span', { text: `${sc.seeders} seeders · ${sc.leechers} leechers · ${sc.completed} completed` }), ' ', el('span', { className: 'text-muted wl-small', text: (sc.cached ? 'cached ' : '') + fmtDate(sc.scraped_at) })]
-            : [el('span', { className: 'text-muted', text: 'no scrape data' })];
-        scrapeNodes.push(' ', el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', onclick: async (e) => { e.currentTarget.disabled = true; const s = await apiCall('admin/whitelist_scrape', 'POST', { id: it.id }); if (!s.success) showToast(s.error || 'Scrape failed', 'warning'); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-arrow-repeat' }), ' Scrape now']));
-        row('Swarm', scrapeNodes);
+            ? [el('span', { text: t('js.wl.swarm_line', { s: sc.seeders, l: sc.leechers, c: sc.completed }) }), ' ', el('span', { className: 'text-muted wl-small', text: (sc.cached ? t('js.wl.cached') + ' ' : '') + fmtDate(sc.scraped_at) })]
+            : [el('span', { className: 'text-muted', text: t('js.wl.no_scrape_data') })];
+        scrapeNodes.push(' ', el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', onclick: async (e) => { e.currentTarget.disabled = true; const s = await apiCall('admin/whitelist_scrape', 'POST', { id: it.id }); if (!s.success) showToast(s.error || t('js.wl.scrape_failed'), 'warning'); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-arrow-repeat' }), ' ' + t('js.wl.scrape_now')]));
+        row(t('js.wl.lbl_swarm'), scrapeNodes);
         const srcNodes = [sourceBadge(it.source)];
-        if (it.ip) { const a = el('a', { href: '#', text: it.ip, title: 'Filter by IP' }); a.addEventListener('click', (e) => { e.preventDefault(); bootstrap.Modal.getOrCreateInstance($('wlDetailsModal')).hide(); switchView('whitelist'); setIpFilter(it.ip); }); srcNodes.push(' ', a); if (it.ip_bucket && it.ip_bucket !== it.ip) srcNodes.push(' ', el('span', { className: 'text-muted wl-small', text: '(' + it.ip_bucket + ')' })); }
-        if (r.api_client) srcNodes.push(' · ', el('span', { text: 'API client: ' + r.api_client.label }));
+        if (it.ip) { const a = el('a', { href: '#', text: it.ip, title: t('js.wl.filter_by_ip_2') }); a.addEventListener('click', (e) => { e.preventDefault(); bootstrap.Modal.getOrCreateInstance($('wlDetailsModal')).hide(); switchView('whitelist'); setIpFilter(it.ip); }); srcNodes.push(' ', a); if (it.ip_bucket && it.ip_bucket !== it.ip) srcNodes.push(' ', el('span', { className: 'text-muted wl-small', text: '(' + it.ip_bucket + ')' })); }
+        if (r.api_client) srcNodes.push(' · ', el('span', { text: t('js.wl.api_client', { name: r.api_client.label }) }));
         if (it.source_ref) {
             const ref = it.source_ref;
             const parts = [];
-            if (ref.discussion_id) parts.push('discussion #' + ref.discussion_id);
-            if (ref.post_id) parts.push('post #' + ref.post_id);
+            if (ref.discussion_id) parts.push(t('js.wl.discussion_ref', { id: ref.discussion_id }));
+            if (ref.post_id) parts.push(t('js.wl.post_ref', { id: ref.post_id }));
             if (parts.length) srcNodes.push(' · ', el('span', { className: 'text-muted wl-small', text: parts.join(', ') }));
-            if (isHttpUrl(ref.url)) srcNodes.push(' ', el('a', { href: ref.url, target: '_blank', rel: 'noopener noreferrer', className: 'wl-ref-link' }, [el('i', { className: 'bi bi-box-arrow-up-right' }), ' open']));
+            if (isHttpUrl(ref.url)) srcNodes.push(' ', el('a', { href: ref.url, target: '_blank', rel: 'noopener noreferrer', className: 'wl-ref-link' }, [el('i', { className: 'bi bi-box-arrow-up-right' }), ' ' + t('js.wl.open')]));
         }
-        row('Source', srcNodes);
+        row(t('js.wl.lbl_source'), srcNodes);
         if (it.banned || r.banned_reason) {
             const b = r.banned_reason || {};
-            row('Ban', [badge('BANNED', 'wl-b-bad'), ' ', el('span', { text: (b.reason || '') + (b.source ? ` (${b.source}${b.source_id ? ' #' + b.source_id : ''})` : '') }), b.created_at ? el('span', { className: 'text-muted wl-small', text: ' · ' + fmtDate(b.created_at) }) : null]);
+            row(t('js.wl.lbl_ban'), [badge(t('js.wl.badge_banned'), 'wl-b-bad'), ' ', el('span', { text: (b.reason || '') + (b.source ? ` (${b.source}${b.source_id ? ' #' + b.source_id : ''})` : '') }), b.created_at ? el('span', { className: 'text-muted wl-small', text: ' · ' + fmtDate(b.created_at) }) : null]);
         }
         // Ratings: the LIST already showed these and the detail panel did not, which is a strange
         // place to lose information — you click a row to see MORE.
         if (it.votes_count) {
             const pct = Math.round((it.score_x100 || 0) / 100);
-            row('Rating', [
+            row(t('js.wl.lbl_rating'), [
                 badge(pct + '%', pct >= 50 ? 'wl-b-ok' : 'wl-b-warn'), ' ',
                 el('span', { className: 'text-muted wl-small',
-                    text: 'from ' + it.votes_count + (it.votes_count === 1 ? ' rating' : ' ratings')
-                        + (it.votes_up || it.votes_down ? ' (' + (it.votes_up || 0) + ' up, ' + (it.votes_down || 0) + ' down)' : '') }),
+                    text: t(it.votes_count === 1 ? 'js.wl.from_rating' : 'js.wl.from_ratings', { n: it.votes_count })
+                        + (it.votes_up || it.votes_down ? ' ' + t('js.wl.up_down', { up: it.votes_up || 0, down: it.votes_down || 0 }) : '') }),
             ]);
         }
         // "Prove it" state, when the tracker is set to make submissions prove themselves.
@@ -1143,23 +1145,23 @@
             const cls = { passed: 'wl-b-ok', failed: 'wl-b-bad', probing: 'wl-b-pending' }[it.probe_status] || 'wl-b-muted';
             const probeNodes = [badge(it.probe_status, cls)];
             if (it.probe_error) probeNodes.push(' ', el('span', { className: 'text-danger wl-small', text: it.probe_error }));
-            if (it.probe_started_at) probeNodes.push(' ', el('span', { className: 'text-muted wl-small', text: 'started ' + fmtDate(it.probe_started_at) }));
-            row('Proof', probeNodes);
+            if (it.probe_started_at) probeNodes.push(' ', el('span', { className: 'text-muted wl-small', text: t('js.wl.started_at', { date: fmtDate(it.probe_started_at) }) }));
+            row(t('js.wl.lbl_proof'), probeNodes);
         }
         if (it.dead_since) {
-            row('Dead since', [el('span', { className: 'text-warning', text: fmtDate(it.dead_since) }), ' ',
-                el('span', { className: 'text-muted wl-small', text: 'no peers seen for long enough that the cleanup rule noticed' })]);
+            row(t('js.wl.lbl_dead_since'), [el('span', { className: 'text-warning', text: fmtDate(it.dead_since) }), ' ',
+                el('span', { className: 'text-muted wl-small', text: t('js.wl.dead_since_hint') })]);
         }
         // What the CATALOGUE knows. Absent for a registered hash nobody has announced yet, which is
         // itself worth seeing — it means the tracker has never been asked for this torrent.
         if (idx) {
             const seenNodes = [el('span', { text: fmtDate(idx.first_seen) + ' → ' + fmtDate(idx.last_seen) })];
-            if (idx.seen_count != null) seenNodes.push(' ', el('span', { className: 'text-muted wl-small', text: '· seen ' + idx.seen_count + '×' }));
-            row('Seen by the tracker', seenNodes);
+            if (idx.seen_count != null) seenNodes.push(' ', el('span', { className: 'text-muted wl-small', text: '· ' + t('js.wl.seen_times', { n: idx.seen_count }) }));
+            row(t('js.wl.lbl_seen_by_tracker'), seenNodes);
         } else {
-            row('Seen by the tracker', [el('span', { className: 'text-muted', text: 'never announced — no catalogue row' })]);
+            row(t('js.wl.lbl_seen_by_tracker'), [el('span', { className: 'text-muted', text: t('js.wl.never_announced') })]);
         }
-        row('Created / updated', [el('span', { text: fmtDate(it.created_at) + ' / ' + fmtDate(it.updated_at) })]);
+        row(t('js.wl.lbl_created_updated'), [el('span', { text: fmtDate(it.created_at) + ' / ' + fmtDate(it.updated_at) })]);
         body.appendChild(kvBox);
 
         // The submitter own words, between the numbers above and the files below.
@@ -1168,17 +1170,17 @@
 
         // files tree
         const filesBox = el('div', { className: 'wl-files' });
-        filesBox.appendChild(el('div', { className: 'wl-label mb-1', text: r.files && r.files.length ? `Files (${r.files.length}${r.files_truncated ? '+, truncated' : ''})` : 'Files' }));
+        filesBox.appendChild(el('div', { className: 'wl-label mb-1', text: r.files && r.files.length ? t('js.wl.files_n', { n: r.files.length, more: r.files_truncated ? t('js.wl.files_truncated') : '' }) : t('js.wl.files') }));
         if (r.files && r.files.length) filesBox.appendChild(buildFileTree(r.files));
-        else filesBox.appendChild(el('div', { className: 'text-muted wl-small', text: it.meta_status === 'done' ? 'Single-file torrent or no file list stored.' : 'No file list yet — fetch metadata.' }));
+        else filesBox.appendChild(el('div', { className: 'text-muted wl-small', text: it.meta_status === 'done' ? t('js.wl.single_file_or_no_list') : t('js.wl.no_file_list_yet') }));
         body.appendChild(filesBox);
 
         // actions
         const actions = el('div', { className: 'd-flex justify-content-end gap-2 mt-3 flex-wrap' });
-        if (it.banned) actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-success', onclick: async () => { await unbanHash(it.info_hash); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-unlock' }), ' Unban']));
-        else actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning', onclick: async () => { await banRows([it.id]); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-lock' }), ' Ban']));
-        actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', onclick: async () => { const before = state.wl.rows.size; await deleteRows([it.id]); if (!state.wl.rows.has(it.id) || before === 0) bootstrap.Modal.getOrCreateInstance($('wlDetailsModal')).hide(); } }, [el('i', { className: 'bi bi-trash' }), ' Delete']));
-        actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-secondary', 'data-bs-dismiss': 'modal', text: 'Close' }));
+        if (it.banned) actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-success', onclick: async () => { await unbanHash(it.info_hash); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-unlock' }), ' ' + t('js.wl.unban')]));
+        else actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning', onclick: async () => { await banRows([it.id]); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-lock' }), ' ' + t('js.wl.ban')]));
+        actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', onclick: async () => { const before = state.wl.rows.size; await deleteRows([it.id]); if (!state.wl.rows.has(it.id) || before === 0) bootstrap.Modal.getOrCreateInstance($('wlDetailsModal')).hide(); } }, [el('i', { className: 'bi bi-trash' }), ' ' + t('js.wl.delete')]));
+        actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-secondary', 'data-bs-dismiss': 'modal', text: t('js.wl.close') }));
         body.appendChild(actions);
     }
 
@@ -1199,15 +1201,15 @@
                 const r = await apiCall('admin/whitelist_add', 'POST', { input });
                 if (r.success) {
                     const s = r.summary;
-                    showToast(`Added ${s.added} · existing ${s.exists} · banned ${s.banned} · invalid ${s.invalid}` + (r.file && r.file.ok === false ? ' — file write FAILED: ' + (r.file.error || '') : ''), r.file && r.file.ok === false ? 'danger' : 'success');
+                    showToast(t('js.wl.add_summary', { added: s.added, exists: s.exists, banned: s.banned, invalid: s.invalid }) + (r.file && r.file.ok === false ? ' — ' + t('js.wl.add_file_failed', { error: r.file.error || '' }) : ''), r.file && r.file.ok === false ? 'danger' : 'success');
                     renderAddResults(out, r.results);
                     $('wl-add-input').value = '';
                     loadWhitelist(); loadStatus();
                 } else {
-                    showToast(r.error || 'Add failed', 'danger');
+                    showToast(r.error || t('js.wl.add_failed'), 'danger');
                     if (r.results) renderAddResults(out, r.results);
                 }
-            } catch { showToast('Network error', 'danger'); }
+            } catch { showToast(t('js.wl.network_error'), 'danger'); }
             btn.disabled = false;
         });
     }
@@ -1224,18 +1226,18 @@
     async function loadBanned() {
         const body = $('bn-body');
         body.textContent = '';
-        body.appendChild(el('tr', null, el('td', { colspan: 6, className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' Loading…'])));
+        body.appendChild(el('tr', null, el('td', { colspan: 6, className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' ' + t('js.common.loading')])));
         const p = new URLSearchParams({ page: String(state.bn.page), sort: bnSort.serialize() });
         if (state.bn.search) p.set('search', state.bn.search);
         let r;
-        try { r = await apiCall('admin/fetch_banned&' + p.toString()); } catch { r = { error: 'Network error' }; }
+        try { r = await apiCall('admin/fetch_banned&' + p.toString()); } catch { r = { error: t('js.wl.network_error') }; }
         body.textContent = '';
         if (r.error) { body.appendChild(el('tr', null, el('td', { colspan: 6, className: 'text-center text-danger py-4', text: r.error }))); return; }
-        $('bn-total').textContent = `${r.total} banned`;
-        if (!r.rows.length) body.appendChild(el('tr', null, el('td', { colspan: 6, className: 'text-center text-muted py-4', text: 'No banned hashes.' })));
+        $('bn-total').textContent = t('js.wl.banned_total', { n: r.total });
+        if (!r.rows.length) body.appendChild(el('tr', null, el('td', { colspan: 6, className: 'text-center text-muted py-4', text: t('js.wl.no_banned_hashes') })));
         r.rows.forEach(row => {
             const tr = el('tr');
-            const hc = el('td', { className: 'wl-hash-cell', title: row.info_hash + ' — click to copy' }, el('code', { text: row.info_hash }));
+            const hc = el('td', { className: 'wl-hash-cell', title: t('js.wl.hash_click_to_copy', { hash: row.info_hash }) }, el('code', { text: row.info_hash }));
             hc.addEventListener('click', (e) => copyToClipboard(row.info_hash, e.currentTarget));
             tr.appendChild(hc);
             tr.appendChild(el('td', { className: 'wl-name', text: row.name || '—', title: row.name || '' }));
@@ -1243,8 +1245,8 @@
             tr.appendChild(el('td', { className: 'wl-source' }, badge(row.source + (row.source_id ? ' #' + row.source_id : ''), 'wl-b-muted')));
             tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(row.created_at) }));
             const act = el('td', { className: 'wl-actions' });
-            if (row.whitelist_id) act.appendChild(iconBtn('bi-eye', 'Whitelist entry details', 'btn-outline-info', () => openDetails(row.whitelist_id)));
-            act.appendChild(iconBtn('bi-unlock', 'Unban', 'btn-outline-success', () => unbanHash(row.info_hash)));
+            if (row.whitelist_id) act.appendChild(iconBtn('bi-eye', t('js.wl.whitelist_entry_details'), 'btn-outline-info', () => openDetails(row.whitelist_id)));
+            act.appendChild(iconBtn('bi-unlock', t('js.wl.unban'), 'btn-outline-success', () => unbanHash(row.info_hash)));
             tr.appendChild(act);
             body.appendChild(tr);
         });
@@ -1261,9 +1263,9 @@
             btn.disabled = true;
             try {
                 const r = await apiCall('admin/banned_add', 'POST', { input, reason: $('bn-add-reason').value });
-                if (r.success) { showToast(`Banned ${r.banned} new hashes (${r.affected} removed from the served list, ${r.invalid} invalid lines)`, 'success'); modal.hide(); loadBanned(); loadStatus(); }
-                else { $('bn-add-alert').textContent = ''; $('bn-add-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || 'Ban failed' })); }
-            } catch { showToast('Network error', 'danger'); }
+                if (r.success) { showToast(t('js.wl.ban_add_summary', { banned: r.banned, affected: r.affected, invalid: r.invalid }), 'success'); modal.hide(); loadBanned(); loadStatus(); }
+                else { $('bn-add-alert').textContent = ''; $('bn-add-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t('js.wl.ban_failed') })); }
+            } catch { showToast(t('js.wl.network_error'), 'danger'); }
             btn.disabled = false;
         });
     }
@@ -1273,39 +1275,39 @@
         const body = $('cl-body');
         body.textContent = '';
         let r;
-        try { r = await apiCall('admin/fetch_api_clients'); } catch { r = { error: 'Network error' }; }
+        try { r = await apiCall('admin/fetch_api_clients'); } catch { r = { error: t('js.wl.network_error') }; }
         if (r.error) { body.appendChild(el('tr', null, el('td', { colspan: 10, className: 'text-center text-danger py-4', text: r.error }))); return; }
         state.cl.rows = new Map(r.clients.map(c => [c.id, c]));
-        $('cl-total').textContent = `${r.clients.length} client${r.clients.length === 1 ? '' : 's'}` + (r.api_enabled ? '' : ' · API DISABLED in Settings');
-        if (!r.clients.length) body.appendChild(el('tr', null, el('td', { colspan: 10, className: 'text-center text-muted py-4', text: 'No API clients yet. Create one and paste its bearer token into the forum extension settings.' })));
+        $('cl-total').textContent = t(r.clients.length === 1 ? 'js.wl.clients_one' : 'js.wl.clients_many', { n: r.clients.length }) + (r.api_enabled ? '' : ' · ' + t('js.wl.api_disabled_in_settings'));
+        if (!r.clients.length) body.appendChild(el('tr', null, el('td', { colspan: 10, className: 'text-center text-muted py-4', text: t('js.wl.no_api_clients') })));
         r.clients.forEach(c => {
             const tr = el('tr');
             tr.appendChild(el('td', { className: 'wl-cl-label', text: c.label, title: c.label }));
             tr.appendChild(el('td', {}, badge(c.scope || 'whitelist', c.scope === 'all' ? 'wl-b-warn' : '')));
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { text: c.key_id })));
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { className: 'text-muted', text: '····' + (c.secret_hint || '') })));
-            const sw = el('input', { type: 'checkbox', className: 'form-check-input', role: 'switch', title: c.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable' });
+            const sw = el('input', { type: 'checkbox', className: 'form-check-input', role: 'switch', title: c.enabled ? t('js.wl.enabled_click_disable') : t('js.wl.disabled_click_enable') });
             sw.checked = !!c.enabled;
             sw.addEventListener('change', async () => {
                 const rr = await apiCall('admin/api_client_update', 'POST', { id: c.id, enabled: sw.checked ? 1 : 0 });
-                if (rr.success) showToast(sw.checked ? 'Client enabled' : 'Client disabled', 'success'); else { showToast(rr.error || 'Update failed', 'danger'); sw.checked = !sw.checked; }
+                if (rr.success) showToast(sw.checked ? t('js.wl.client_enabled') : t('js.wl.client_disabled'), 'success'); else { showToast(rr.error || t('js.wl.update_failed'), 'danger'); sw.checked = !sw.checked; }
             });
             tr.appendChild(el('td', { className: 'wl-enabled' }, el('div', { className: 'form-check form-switch m-0 d-inline-block' }, sw)));
             tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(c.created_at) }));
-            tr.appendChild(el('td', { className: 'wl-date', text: c.last_used_at ? fmtDate(c.last_used_at) : 'never' }));
+            tr.appendChild(el('td', { className: 'wl-date', text: c.last_used_at ? fmtDate(c.last_used_at) : t('js.wl.never') }));
             tr.appendChild(el('td', { className: 'wl-ip', text: c.last_used_ip || '—', title: c.last_used_ip || '' }));
             tr.appendChild(el('td', { className: 'wl-num', text: String(c.requests_count) }));
             const act = el('td', { className: 'wl-actions' });
-            act.appendChild(iconBtn('bi-pencil', 'Rename', 'btn-outline-secondary', async () => {
-                const label = await promptModal({ title: 'Rename API client', label: 'Label', value: c.label, okLabel: 'Rename', maxlength: 100 });
+            act.appendChild(iconBtn('bi-pencil', t('js.wl.rename'), 'btn-outline-secondary', async () => {
+                const label = await promptModal({ title: t('js.wl.rename_api_client'), label: t('js.wl.label'), value: c.label, okLabel: t('js.wl.rename'), maxlength: 100 });
                 if (label === null || !label.trim()) return;
                 const rr = await apiCall('admin/api_client_update', 'POST', { id: c.id, label: label.trim() });
-                if (rr.success) { showToast('Renamed', 'success'); loadClients(); } else showToast(rr.error || 'Rename failed', 'danger');
+                if (rr.success) { showToast(t('js.wl.renamed'), 'success'); loadClients(); } else showToast(rr.error || t('js.wl.rename_failed'), 'danger');
             }));
-            act.appendChild(iconBtn('bi-trash', 'Delete client', 'btn-outline-danger', async () => {
-                if (!await confirmAction('Delete API client', `Delete client "${c.label}"? Any system still using this key will get 403 and its IP will be banned on the next attempt.`, { okLabel: 'Delete' })) return;
+            act.appendChild(iconBtn('bi-trash', t('js.wl.delete_client'), 'btn-outline-danger', async () => {
+                if (!await confirmAction(t('js.wl.delete_api_client'), t('js.wl.delete_client_confirm', { name: c.label }), { okLabel: t('js.wl.delete') })) return;
                 const rr = await apiCall('admin/api_client_delete', 'POST', { id: c.id });
-                if (rr.success) { showToast('Client deleted', 'success'); loadClients(); } else showToast(rr.error || 'Delete failed', 'danger');
+                if (rr.success) { showToast(t('js.wl.client_deleted'), 'success'); loadClients(); } else showToast(rr.error || t('js.wl.delete_failed'), 'danger');
             }));
             tr.appendChild(act);
             body.appendChild(tr);
@@ -1315,12 +1317,12 @@
     function initClientCreate() {
         const tokenModal = bootstrap.Modal.getOrCreateInstance($('tokenModal'));
         $('btn-cl-create').addEventListener('click', async () => {
-            const label = await promptModal({ title: 'Create API client', label: 'Client label', placeholder: 'e.g. Flarum forum', hint: 'The bearer token is shown once, right after creation.', okLabel: 'Create', maxlength: 100 });
+            const label = await promptModal({ title: t('js.wl.create_api_client'), label: t('js.wl.client_label'), placeholder: t('js.wl.client_label_placeholder'), hint: t('js.wl.token_shown_once'), okLabel: t('js.wl.create'), maxlength: 100 });
             if (label === null || !label.trim()) return;
-            const scope = await promptModal({ title: 'Client scope', label: 'Scope', value: 'whitelist', hint: 'Which v1 endpoints this key may call: whitelist (forum sync), users (sales/shop API), federation (peer metadata exchange) or all.', okLabel: 'Create', maxlength: 16 });
+            const scope = await promptModal({ title: t('js.wl.client_scope'), label: t('js.wl.scope'), value: 'whitelist', hint: t('js.wl.scope_hint'), okLabel: t('js.wl.create'), maxlength: 16 });
             if (scope === null) return;
             const scopeVal = scope.trim().toLowerCase() || 'whitelist';
-            if (!['whitelist', 'users', 'federation', 'all'].includes(scopeVal)) { showToast('Scope must be whitelist, users, federation or all', 'warning'); return; }
+            if (!['whitelist', 'users', 'federation', 'all'].includes(scopeVal)) { showToast(t('js.wl.scope_invalid'), 'warning'); return; }
             try {
                 const r = await apiCall('admin/api_client_create', 'POST', { label: label.trim(), scope: scopeVal });
                 if (r.success) {
@@ -1329,8 +1331,8 @@
                     $('token-value').textContent = r.bearer;
                     tokenModal.show();
                     loadClients();
-                } else showToast(r.error || 'Create failed', 'danger');
-            } catch { showToast('Network error', 'danger'); }
+                } else showToast(r.error || t('js.wl.create_failed'), 'danger');
+            } catch { showToast(t('js.wl.network_error'), 'danger'); }
         });
         $('token-copy').addEventListener('click', (e) => copyToClipboard($('token-value').textContent, e.currentTarget));
     }
@@ -1339,16 +1341,16 @@
     async function loadApiBans() {
         const body = $('ab-body');
         body.textContent = '';
-        body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' Loading…'])));
+        body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' ' + t('js.common.loading')])));
         const p = new URLSearchParams({ page: String(state.ab.page), sort: abSort.serialize(), status: state.ab.status });
         if (state.ab.search) p.set('search', state.ab.search);
         let r;
-        try { r = await apiCall('admin/fetch_api_bans&' + p.toString()); } catch { r = { error: 'Network error' }; }
+        try { r = await apiCall('admin/fetch_api_bans&' + p.toString()); } catch { r = { error: t('js.wl.network_error') }; }
         body.textContent = '';
         if (r.error) { body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-danger py-4', text: r.error }))); return; }
         state.ab.rows = new Map(r.rows.map(x => [x.id, x]));
-        $('ab-total').textContent = `${r.total} ban${r.total === 1 ? '' : 's'}`;
-        if (!r.rows.length) body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-muted py-4', text: state.ab.status === 'active' ? 'No active API bans.' : 'No API bans recorded.' })));
+        $('ab-total').textContent = t(r.total === 1 ? 'js.wl.bans_one' : 'js.wl.bans_many', { n: r.total });
+        if (!r.rows.length) body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-muted py-4', text: state.ab.status === 'active' ? t('js.wl.no_active_api_bans') : t('js.wl.no_api_bans') })));
         r.rows.forEach(b => {
             const tr = el('tr', { className: b.active ? '' : 'wl-row-muted' });
             tr.appendChild(el('td', { className: 'wl-ip wl-mono', title: b.ip }, el('code', { text: b.ip })));
@@ -1358,10 +1360,10 @@
             tr.appendChild(el('td', { className: 'wl-small wl-endpoint', text: b.endpoint || '—', title: b.endpoint || '' }));
             tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(b.created_at) }));
             tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(b.expires_at) }));
-            tr.appendChild(el('td', { className: 'wl-date', text: b.lifted_at ? fmtDate(b.lifted_at) + (b.lifted_by ? ' (' + b.lifted_by + ')' : '') : (b.active ? '' : 'expired') }));
+            tr.appendChild(el('td', { className: 'wl-date', text: b.lifted_at ? fmtDate(b.lifted_at) + (b.lifted_by ? ' (' + b.lifted_by + ')' : '') : (b.active ? '' : t('js.wl.expired')) }));
             const act = el('td', { className: 'wl-actions' });
-            act.appendChild(iconBtn('bi-eye', b.has_snapshot ? `View request (${fmtBytes(b.snapshot_len)})` : 'View', 'btn-outline-info', () => openSnapshot(b.id)));
-            if (b.active) act.appendChild(iconBtn('bi-unlock', 'Lift ban', 'btn-outline-success', () => liftBan(b.id)));
+            act.appendChild(iconBtn('bi-eye', b.has_snapshot ? t('js.wl.view_request', { size: fmtBytes(b.snapshot_len) }) : t('js.wl.view'), 'btn-outline-info', () => openSnapshot(b.id)));
+            if (b.active) act.appendChild(iconBtn('bi-unlock', t('js.wl.lift_ban'), 'btn-outline-success', () => liftBan(b.id)));
             tr.appendChild(act);
             body.appendChild(tr);
         });
@@ -1369,9 +1371,9 @@
     }
 
     async function liftBan(id) {
-        if (!await confirmAction('Lift API ban', 'Lift this ban now? The IP can call the API again immediately.', { okLabel: 'Lift', danger: false })) return;
+        if (!await confirmAction(t('js.wl.lift_api_ban'), t('js.wl.lift_ban_confirm'), { okLabel: t('js.wl.lift'), danger: false })) return;
         const r = await apiCall('admin/api_ban_lift', 'POST', { id });
-        if (r.success) { showToast('Ban lifted', 'success'); loadApiBans(); } else showToast(r.error || 'Failed', 'danger');
+        if (r.success) { showToast(t('js.wl.ban_lifted'), 'success'); loadApiBans(); } else showToast(r.error || t('js.wl.failed'), 'danger');
     }
 
     let currentSnapshotJson = '';
@@ -1379,7 +1381,7 @@
         const modal = bootstrap.Modal.getOrCreateInstance($('snapshotModal'));
         $('snapshot-title-id').textContent = '#' + id;
         $('snapshot-meta').textContent = '';
-        $('snapshot-pre').textContent = 'Loading…';
+        $('snapshot-pre').textContent = t('js.common.loading');
         $('snapshot-lift').classList.add('d-hidden');
         modal.show();
         const r = await apiCall('admin/fetch_api_bans&id=' + encodeURIComponent(id));
@@ -1387,15 +1389,15 @@
         const b = r.ban;
         const meta = $('snapshot-meta');
         const add = (k, v) => meta.appendChild(el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: k }), el('div', { className: 'wl-kv-value', text: v == null || v === '' ? '—' : String(v) })]));
-        add('IP', b.ip + (b.ip_bucket !== b.ip ? ' (' + b.ip_bucket + ')' : ''));
-        add('Reason', b.reason + (b.detail ? ' — ' + b.detail : ''));
-        add('Key ID', b.key_id);
-        add('Endpoint', b.endpoint);
-        add('Created', fmtDate(b.created_at));
-        add('Expires', fmtDate(b.expires_at) + (b.active ? ' (active)' : ''));
-        add('Lifted', b.lifted_at ? fmtDate(b.lifted_at) + (b.lifted_by ? ' by ' + b.lifted_by : '') : '');
+        add(t('js.wl.snap_ip'), b.ip + (b.ip_bucket !== b.ip ? ' (' + b.ip_bucket + ')' : ''));
+        add(t('js.wl.snap_reason'), b.reason + (b.detail ? ' — ' + b.detail : ''));
+        add(t('js.wl.snap_key_id'), b.key_id);
+        add(t('js.wl.snap_endpoint'), b.endpoint);
+        add(t('js.wl.snap_created'), fmtDate(b.created_at));
+        add(t('js.wl.snap_expires'), fmtDate(b.expires_at) + (b.active ? ' (' + t('js.wl.active') + ')' : ''));
+        add(t('js.wl.snap_lifted'), b.lifted_at ? fmtDate(b.lifted_at) + (b.lifted_by ? ' ' + t('js.wl.lifted_by', { name: b.lifted_by }) : '') : '');
         currentSnapshotJson = b.request_snapshot == null ? '' : (typeof b.request_snapshot === 'string' ? b.request_snapshot : JSON.stringify(b.request_snapshot, null, 2));
-        $('snapshot-pre').textContent = currentSnapshotJson || '(no snapshot stored — manual ban, or the snapshot rate limit was hit)';
+        $('snapshot-pre').textContent = currentSnapshotJson || t('js.wl.no_snapshot');
         if (b.active) {
             const lift = $('snapshot-lift');
             lift.classList.remove('d-hidden');
@@ -1411,8 +1413,8 @@
             const alert = $('ab-add-alert');
             alert.textContent = '';
             const r = await apiCall('admin/api_ban_add', 'POST', { ip: $('ab-add-ip').value.trim(), days: parseInt($('ab-add-days').value, 10) || 0, reason: $('ab-add-reason').value });
-            if (r.success) { showToast(`Banned ${$('ab-add-ip').value.trim()} for ${r.days} days`, 'success'); modal.hide(); loadApiBans(); }
-            else alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || 'Failed' }));
+            if (r.success) { showToast(t('js.wl.ip_banned_for_days', { ip: $('ab-add-ip').value.trim(), n: r.days }), 'success'); modal.hide(); loadApiBans(); }
+            else alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t('js.wl.failed') }));
         });
         $('snapshot-copy').addEventListener('click', (e) => copyToClipboard(currentSnapshotJson || '', e.currentTarget));
     }
@@ -1443,7 +1445,7 @@
         // review toolbar + sub-tabs
         const rvSearch = $('rv-search');
         if (rvSearch) {
-            const doRv = debounce(() => { rvState.search = rvSearch.value.trim(); rvState.page = 1; loadReview(); }, 350);
+            const doRv = debounce(() => { rvState.search = rvSearch.value.trim(); rvState.page = 1; loadReview(); }, window.AdminCommon.DEBOUNCE.search);
             rvSearch.addEventListener('input', doRv);
             bindSearchClear(rvSearch, $('rv-search-clear'), () => { rvState.search = ''; rvState.page = 1; loadReview(); });
             $('rv-status').addEventListener('change', (e) => { rvState.status = e.target.value; rvState.page = 1; loadReview(); });
@@ -1455,7 +1457,7 @@
 
         // whitelist toolbar
         const searchInput = $('wl-search');
-        const doSearch = debounce(() => { state.wl.search = searchInput.value.trim(); state.wl.page = 1; loadWhitelist(); }, 350);
+        const doSearch = debounce(() => { state.wl.search = searchInput.value.trim(); state.wl.page = 1; loadWhitelist(); }, window.AdminCommon.DEBOUNCE.search);
         searchInput.addEventListener('input', doSearch);
         bindSearchClear(searchInput, $('wl-search-clear'), () => { state.wl.search = ''; state.wl.page = 1; loadWhitelist(); });
         $('wl-search-files').addEventListener('change', (e) => { state.wl.searchFiles = e.target.checked; if (state.wl.search) loadWhitelist(); });
@@ -1498,8 +1500,8 @@
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-restore]').forEach(b => b.addEventListener('click', async () => {
             closeMenu('btn-wl-meta-bulk');
             const r = await apiCall('admin/whitelist_meta_queue', 'POST', { scope: 'restore' });
-            if (r.success) { showToast(r.restored ? `Restored ${r.restored} rows to done` : 'Nothing to restore — every resolved row is already done', r.restored ? 'success' : 'info'); loadWhitelist(); loadStatus(); }
-            else showToast(r.error || 'Rebuild failed', 'danger');
+            if (r.success) { showToast(r.restored ? t('js.wl.restored_rows', { n: r.restored }) : t('js.wl.nothing_to_restore'), r.restored ? 'success' : 'info'); loadWhitelist(); loadStatus(); }
+            else showToast(r.error || t('js.wl.rebuild_failed'), 'danger');
         }));
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-page]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); metaRowsWl([...state.wl.rows.values()], 'this page'); }));
         document.querySelectorAll('#wl-meta-bulk-group [data-meta-near]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); metaNearPagesWl(); }));
@@ -1511,12 +1513,12 @@
             collectingNear = true;                               // blocks other scrape starts during collection
             const label = $('wl-scrape-label');
             const orig = label.textContent;
-            label.textContent = 'Collecting…';
+            label.textContent = t('js.wl.collecting');
             let rows;
             try { rows = await collectNearRowsWl(); }
-            catch (e) { showToast('Near pages failed: ' + (e.message || 'error'), 'danger'); return; }
+            catch (e) { showToast(t('js.wl.near_pages_failed_2', { error: e.message || t('js.wl.error') }), 'danger'); return; }
             finally { collectingNear = false; label.textContent = orig; }
-            if (!rows.length) { showToast('No rows in the near pages', 'info'); return; }
+            if (!rows.length) { showToast(t('js.wl.no_rows_near_pages'), 'info'); return; }
             scrapeBulk('page', null, rows.map(r => r.id));
         }));
         document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-date]').forEach(b => b.addEventListener('click', async () => {
@@ -1528,11 +1530,11 @@
 
         // banned toolbar
         const bnSearch = $('bn-search');
-        bnSearch.addEventListener('input', debounce(() => { state.bn.search = bnSearch.value.trim(); state.bn.page = 1; loadBanned(); }, 350));
+        bnSearch.addEventListener('input', debounce(() => { state.bn.search = bnSearch.value.trim(); state.bn.page = 1; loadBanned(); }, window.AdminCommon.DEBOUNCE.search));
         $('bn-search-clear').addEventListener('click', () => { bnSearch.value = ''; state.bn.search = ''; state.bn.page = 1; loadBanned(); });
         // api bans toolbar
         const abSearch = $('ab-search');
-        abSearch.addEventListener('input', debounce(() => { state.ab.search = abSearch.value.trim(); state.ab.page = 1; loadApiBans(); }, 350));
+        abSearch.addEventListener('input', debounce(() => { state.ab.search = abSearch.value.trim(); state.ab.page = 1; loadApiBans(); }, window.AdminCommon.DEBOUNCE.search));
         $('ab-search-clear').addEventListener('click', () => { abSearch.value = ''; state.ab.search = ''; state.ab.page = 1; loadApiBans(); });
         $('ab-status').addEventListener('change', (e) => { state.ab.status = e.target.value; state.ab.page = 1; loadApiBans(); });
 

@@ -64,21 +64,21 @@
         // An average over one poll is not an average, and colouring it red says something the
         // number cannot support. Below three polls the figures are shown plainly.
         const thin = (s.polls || 0) < 3;
-        box.appendChild(tile('Average coverage', pct(s.avg_coverage), thin ? '' : covCls,
-            thin ? 'over ' + fmt(s.polls) + ' poll' + (s.polls === 1 ? '' : 's') + ' — too few to average'
-                 : 'over ' + fmt(s.polls) + ' polls'));
-        box.appendChild(tile('Worst poll', pct(s.min_coverage),
+        box.appendChild(tile(t('js.coverage.avg_coverage'), pct(s.avg_coverage), thin ? '' : covCls,
+            thin ? t('js.coverage.over_polls_thin', {n: fmt(s.polls)})
+                 : t('js.coverage.over_polls', {n: fmt(s.polls)})));
+        box.appendChild(tile(t('js.coverage.worst_poll'), pct(s.min_coverage),
             (!thin && s.min_coverage !== null && s.min_coverage < 70) ? 'text-warning' : ''));
-        box.appendChild(tile('Polls in this window', fmt(s.polls)));
-        box.appendChild(tile('Arrived truncated', fmt(s.truncated),
+        box.appendChild(tile(t('js.coverage.polls_in_window'), fmt(s.polls)));
+        box.appendChild(tile(t('js.coverage.arrived_truncated'), fmt(s.truncated),
             s.truncated ? 'text-warning' : 'text-muted',
-            s.truncated ? 'the scrape did not fit in one poll' : null));
-        box.appendChild(tile('Failed', fmt(s.failed), s.failed ? 'text-danger' : 'text-muted'));
+            s.truncated ? t('js.coverage.truncated_note') : null));
+        box.appendChild(tile(t('js.coverage.failed'), fmt(s.failed), s.failed ? 'text-danger' : 'text-muted'));
         if (l) {
-            box.appendChild(tile('Last poll delivered', fmt(l.delivered)
-                + (l.rows_total ? ' of ' + fmt(l.rows_total) : ''),
+            box.appendChild(tile(t('js.coverage.last_poll_delivered'), fmt(l.delivered)
+                + (l.rows_total ? ' ' + t('js.coverage.of_total', {n: fmt(l.rows_total)}) : ''),
                 l.delivered === 0 ? 'text-muted' : '',
-                l.delivered === 0 ? 'nothing new — it resumed past what an earlier poll had' : null));
+                l.delivered === 0 ? t('js.coverage.nothing_new_note') : null));
         }
 
         // A note only when there is something to say. "Everything is fine" does not need a sentence.
@@ -86,19 +86,15 @@
         note.textContent = '';
         if (d.unavailable) {
             note.appendChild(el('p', { className: 'wl-small text-muted mb-0',
-                text: d.message || 'No history yet.' }));
+                text: d.message || t('js.coverage.no_history') }));
             return;
         }
         if (s.polls && s.truncated === s.polls) {
             note.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small mb-0',
-                text: 'Every poll in this window arrived truncated. The scrape is larger than one poll '
-                    + 'can carry — the index is being built a slice at a time, and coverage per poll is '
-                    + 'not the same thing as coverage over a day.' }));
+                text: t('js.coverage.all_truncated_alert') }));
         } else if (s.avg_coverage !== null && s.avg_coverage !== undefined && s.avg_coverage < 70 && s.polls > 2) {
             note.appendChild(el('div', { className: 'alert alert-info py-2 wl-small mb-0',
-                text: 'Polls are delivering about ' + pct(s.avg_coverage) + ' of what the tracker reports. '
-                    + 'That is normal while a resume cursor is walking a large scrape; it is worth looking at '
-                    + 'if it stays here with no truncated polls.' }));
+                text: t('js.coverage.low_coverage_alert', {pct: pct(s.avg_coverage)}) }));
         }
     }
 
@@ -115,15 +111,15 @@
             const one = points[0] || null;
             box.appendChild(el('div', { className: 'idx-cov-empty' }, [
                 el('div', { text: points.length
-                    ? 'One poll so far in this window — a line needs two. The next one draws it.'
-                    : 'No polls recorded in this window yet. The first one lands on the next scrape poll.' }),
+                    ? t('js.coverage.one_poll_so_far')
+                    : t('js.coverage.no_polls_yet') }),
                 one ? el('div', { className: 'idx-cov-empty-one',
-                    text: new Date(one.ts * 1000).toLocaleString() + ' · '
-                        + fmt(one.delivered) + ' delivered · ' + fmt(one.kept) + ' kept'
-                        + (one.coverage !== null ? ' · ' + pct(one.coverage) + ' coverage' : '')
-                        + (one.truncated ? ' · arrived truncated' : '') }) : '',
+                    text: t('js.coverage.one_poll_line', {when: new Date(one.ts * 1000).toLocaleString(),
+                            delivered: fmt(one.delivered), kept: fmt(one.kept)})
+                        + (one.coverage !== null ? ' · ' + t('js.coverage.one_poll_coverage', {pct: pct(one.coverage)}) : '')
+                        + (one.truncated ? ' · ' + t('js.coverage.one_poll_truncated') : '') }) : '',
                 points.length ? el('div', { className: 'idx-cov-empty-hint',
-                    text: 'Try a wider range if there should be more.' }) : '',
+                    text: t('js.coverage.wider_range_hint') }) : '',
             ]));
             // destroy() before dropping the reference: uPlot registers window listeners and a
             // resize observer, and simply forgetting the instance leaks both. Switching range back
@@ -159,10 +155,10 @@
                   values: (u, vals) => vals.map(v => v + '%') },
             ],
             series: [
-                { label: 'Time' },
-                { label: 'Delivered', stroke: '#4d9fd6', width: 1.5, fill: 'rgba(77,159,214,0.10)' },
-                { label: 'Kept', stroke: '#6cc38a', width: 1.5 },
-                { label: 'Coverage', scale: 'pct', stroke: '#e0b96c', width: 1.5, dash: [4, 3] },
+                { label: t('js.coverage.series_time') },
+                { label: t('js.coverage.series_delivered'), stroke: '#4d9fd6', width: 1.5, fill: 'rgba(77,159,214,0.10)' },
+                { label: t('js.coverage.series_kept'), stroke: '#6cc38a', width: 1.5 },
+                { label: t('js.coverage.series_coverage'), scale: 'pct', stroke: '#e0b96c', width: 1.5, dash: [4, 3] },
             ],
         };
 
@@ -187,12 +183,12 @@
         if (r.error) {
             $('idx-cov-note').textContent = '';
             $('idx-cov-note').appendChild(el('p', { className: 'wl-small text-danger mb-0',
-                text: 'Could not read the poll history: ' + r.error }));
+                text: t('js.coverage.load_failed', {error: r.error}) }));
             return;
         }
         last = r;
         const u = $('idx-cov-updated');
-        if (u) u.textContent = (r.points || []).length + ' polls · ' + range;
+        if (u) u.textContent = t('js.coverage.updated_line', {n: (r.points || []).length, range: range});
         renderSummary(r);
         draw(r.points || [], r.from || 0);
     }

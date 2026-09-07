@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
+    <?= langJsBridge($baseUrl) ?>
     <?php
     // Both charts are drawn by the same vendored uPlot; either one on is enough to need it.
     $tlOn  = statsTimelineEnabled($cfg);

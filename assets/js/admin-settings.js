@@ -214,7 +214,7 @@
         const jump = document.createElement('button');
         jump.type = 'button';
         jump.className = 'btn btn-sm btn-outline-secondary settings-where-jump';
-        jump.textContent = 'Show me where';
+        jump.textContent = t('js.settings.show_me_where');
         jump.addEventListener('click', () => {
             // Clear the search, switch to the section's own group, and scroll it into view with the
             // same highlight the #hash links use. This is the "…and now where was it?" button.
@@ -363,7 +363,7 @@
             ranked.forEach(({ sec, score }) => {
                 if (!sec.inForm) return;
                 if (!dividerPlaced && score <= GROUP_BONUS && ranked.some(r => r.score > GROUP_BONUS)) {
-                    divider.textContent = 'Other sections in matching groups';
+                    divider.textContent = t('js.settings.other_sections');
                     show(divider, true);
                     mark.parentNode.insertBefore(divider, mark);
                     dividerPlaced = true;
@@ -375,9 +375,9 @@
 
         const groups = new Set(ranked.map(r => r.sec.group));
         countEl.textContent = ranked.length
-            ? (fields ? fields + (fields === 1 ? ' setting' : ' settings') + ' · ' : '') +
-              ranked.length + (ranked.length === 1 ? ' section' : ' sections') +
-              ' in ' + groups.size + (groups.size === 1 ? ' group' : ' groups')
+            ? (fields ? t(fields === 1 ? 'js.settings.n_setting' : 'js.settings.n_settings', {n: fields}) + ' · ' : '') +
+              t(ranked.length === 1 ? 'js.settings.n_section' : 'js.settings.n_sections', {n: ranked.length}) +
+              ' ' + t(groups.size === 1 ? 'js.settings.in_n_group' : 'js.settings.in_n_groups', {n: groups.size})
             : '';
         emptyQ.textContent = input.value.trim();
         show(emptyEl, ranked.length === 0);
@@ -518,7 +518,7 @@
         seen:      ['idx_index_meta_seen', 'meta_priority DESC, seen_count DESC'],
         completed: ['idx_index_meta_completed', 'meta_priority DESC, last_completed DESC'],
         random:    ['PRIMARY', 'info_hash >= (random point), ORDER BY info_hash'],
-        whitelist: ['—', 'the whitelist queue, in admin-priority order'],
+        whitelist: ['—', t('js.settings.plan_whitelist')],
     };
 
     const val = f => Math.max(0, Math.min(100, parseInt(f.value, 10) || 0));
@@ -537,14 +537,14 @@
             const live = fields.filter(f => val(f) > 0)
                 .sort((a, b) => val(b) - val(a))
                 .map(f => val(f) + '% ' + f.dataset.share);
-            liveEl.innerHTML = '<span class="settings-hint">Rotating over 100 claims: <strong>' +
-                (live.length ? live.join(' · ') : 'nothing — set a share below') + '</strong>. ' +
-                'A slot whose queue is empty falls through to the other queue.</span>';
+            liveEl.innerHTML = '<span class="settings-hint">' + t('js.settings.rotating_over') + ' <strong>' +
+                (live.length ? live.join(' · ') : t('js.settings.no_share_set')) + '</strong>. ' +
+                t('js.settings.slot_falls_through') + '</span>';
             return;
         }
         const p = PLAN[mode.value] || ['—', '—'];
-        liveEl.innerHTML = '<span class="settings-hint">Runs on <code>' + p[0] + '</code> as ' +
-            '<code>' + p[1] + '</code>. The whitelist queue still drains first.</span>';
+        liveEl.innerHTML = '<span class="settings-hint">' + t('js.settings.runs_on') + ' <code>' + p[0] + '</code> ' + t('js.settings.runs_as') + ' ' +
+            '<code>' + p[1] + '</code>. ' + t('js.settings.whitelist_still_first') + '</span>';
     }
 
     function paint() {
@@ -552,7 +552,7 @@
         let total = 0;
         fields.forEach(f => { total += val(f); });
         if (sumEl) {
-            sumEl.textContent = total === 100 ? 'adds up to 100%' : 'adds up to ' + total + '% — will be corrected on save';
+            sumEl.textContent = total === 100 ? t('js.settings.adds_up_ok') : t('js.settings.adds_up_bad', {n: total});
             sumEl.classList.toggle('text-warning', total !== 100);
         }
         notes.forEach(n => {
@@ -563,18 +563,17 @@
             if (p === 0) {
                 // Zero means two different things, and saying which one matters: for the whitelist
                 // it is not "never" but "absolute priority", which is the default and the safe case.
-                n.textContent = f.dataset.share === 'whitelist' ? 'whitelist drains first (default)' : 'off';
+                n.textContent = f.dataset.share === 'whitelist' ? t('js.settings.whitelist_drains_default') : t('js.settings.share_off');
                 n.classList.remove('text-warning');
                 return;
             }
             const perWave = (p * c) / 100;
             if (perWave >= 1) {
-                n.textContent = '≈ ' + (perWave >= 10 ? Math.round(perWave) : perWave.toFixed(1)) +
-                    ' of every ' + c + ' fetches';
+                n.textContent = t('js.settings.per_wave', {n: (perWave >= 10 ? Math.round(perWave) : perWave.toFixed(1)), c: c});
                 n.classList.remove('text-warning');
             } else {
                 // Not forbidden — but this is the case worth naming out loud.
-                n.textContent = 'one every ' + Math.round(1 / perWave) + ' waves — thin at ' + c + ' parallel fetches';
+                n.textContent = t('js.settings.thin_share', {n: Math.round(1 / perWave), c: c});
                 n.classList.add('text-warning');
                 f.classList.add('is-thin');
             }

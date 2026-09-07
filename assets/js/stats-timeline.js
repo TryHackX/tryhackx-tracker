@@ -18,23 +18,23 @@
     'use strict';
     if (typeof window === 'undefined') return;
 
-    const RANGES = [['24h', '24h'], ['7d', '7d'], ['14d', '2w'], ['30d', '1m'], ['90d', '3m'], ['all', 'All']];
+    const RANGES = [['24h', t('js.timeline.range_24h')], ['7d', t('js.timeline.range_7d')], ['14d', t('js.timeline.range_2w')], ['30d', t('js.timeline.range_1m')], ['90d', t('js.timeline.range_3m')], ['all', t('js.timeline.range_all')]];
     const GAUGES = [
-        { key: 'seeds',           label: 'Seeds',                color: '#4a9eff', scale: 'peers',    on: true  },
-        { key: 'leechers',        label: 'Leechers',             color: '#ff5252', scale: 'peers',    on: true  },
-        { key: 'peers',           label: 'Peers',                color: '#ffb74d', scale: 'peers',    on: true  },
-        { key: 'torrents',        label: 'Torrents',             color: '#b388ff', scale: 'torrents', on: true  },
-        { key: 'whitelist_count', label: 'Whitelisted torrents', color: '#9e9e9e', scale: 'torrents', on: false },
-        { key: 'index_rows',      label: 'Indexed hashes',       color: '#26a69a', scale: 'torrents', on: false },
+        { key: 'seeds',           label: t('js.timeline.seeds'), color: '#4a9eff', scale: 'peers',    on: true  },
+        { key: 'leechers',        label: t('js.timeline.leechers'), color: '#ff5252', scale: 'peers',    on: true  },
+        { key: 'peers',           label: t('js.timeline.peers'), color: '#ffb74d', scale: 'peers',    on: true  },
+        { key: 'torrents',        label: t('js.timeline.torrents'), color: '#b388ff', scale: 'torrents', on: true  },
+        { key: 'whitelist_count', label: t('js.timeline.whitelisted_torrents'), color: '#9e9e9e', scale: 'torrents', on: false },
+        { key: 'index_rows',      label: t('js.timeline.indexed_hashes'), color: '#26a69a', scale: 'torrents', on: false },
         // Off by default like the one above it. The gap between the two lines is the metadata
         // backlog; drawn together they answer "is the worker keeping up" without any arithmetic.
-        { key: 'index_fetched',   label: 'Fetched hashes',       color: '#7e57c2', scale: 'torrents', on: false },
+        { key: 'index_fetched',   label: t('js.timeline.fetched_hashes'), color: '#7e57c2', scale: 'torrents', on: false },
     ];
     const RATES = [
-        { key: 'udp_rps',     label: 'UDP announces/s',  color: '#26c6da', on: true  },
-        { key: 'tcp_rps',     label: 'HTTP announces/s', color: '#66bb6a', on: true  },
-        { key: 'connect_rps', label: 'UDP connects/s',   color: '#8d6e63', on: false },
-        { key: 'scrape_rps',  label: 'Scrapes/s',        color: '#ec407a', on: false },
+        { key: 'udp_rps',     label: t('js.timeline.udp_announces'), color: '#26c6da', on: true  },
+        { key: 'tcp_rps',     label: t('js.timeline.http_announces'), color: '#66bb6a', on: true  },
+        { key: 'connect_rps', label: t('js.timeline.udp_connects'), color: '#8d6e63', on: false },
+        { key: 'scrape_rps',  label: t('js.timeline.scrapes'), color: '#ec407a', on: false },
     ];
     const OPEN_FILL = 'rgba(255, 152, 0, 0.075)';
     const STORE_KEY = 'tracker_timeline_range';
@@ -58,11 +58,11 @@
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
     /** Round label for a custom span: hours below a day, days below two months, then months / years. */
     const fmtSpan = (sec) => {
-        if (sec < 86400) return (Math.round(sec / 360) / 10) + ' h';
+        if (sec < 86400) return t('js.timeline.unit_h', {n: Math.round(sec / 360) / 10});
         const d = sec / 86400;
-        if (d < 61) return (Math.round(d * 10) / 10) + ' d';
-        if (d < 365) return Math.round(d / 30.44) + ' mo';
-        return (Math.round((d / 365.25) * 10) / 10) + ' y';
+        if (d < 61) return t('js.timeline.unit_d', {n: Math.round(d * 10) / 10});
+        if (d < 365) return t('js.timeline.unit_mo', {n: Math.round(d / 30.44)});
+        return t('js.timeline.unit_y', {n: Math.round((d / 365.25) * 10) / 10});
     };
 
     /**
@@ -145,7 +145,7 @@
             axes.push(Object.assign(axisBase(), { scale: 'peers', size: 56, values: (u, vals) => vals.map(yFmt) }));
             axes.push(Object.assign(axisBase(), { scale: 'torrents', side: 1, size: 56, stroke: '#b388ff', grid: { show: false }, values: (u, vals) => vals.map(yFmt) }));
         }
-        const series = [{ label: 'Time', value: (u, v) => v == null ? '—' : fmtTime(v) }];
+        const series = [{ label: t('js.timeline.time'), value: (u, v) => v == null ? '—' : fmtTime(v) }];
 
         /**
          * Draw a marker ONLY where the line cannot show the value on its own.
@@ -232,13 +232,13 @@
         const ranges = el('div', 'tl-ranges');
         rangeDefs.forEach(([key, label]) => { const b = el('button', 'tl-range-btn' + (key === range ? ' active' : ''), label); b.type = 'button'; b.dataset.range = key; ranges.appendChild(b); });
         if (customOn) {
-            const b = el('button', 'tl-range-btn' + (range === 'custom' ? ' active' : ''), 'Custom');
-            b.type = 'button'; b.dataset.range = 'custom'; b.title = 'Pick any span with the slider';
+            const b = el('button', 'tl-range-btn' + (range === 'custom' ? ' active' : ''), t('js.timeline.custom'));
+            b.type = 'button'; b.dataset.range = 'custom'; b.title = t('js.timeline.custom_title');
             ranges.appendChild(b);
         }
         const meta = el('div', 'tl-meta');
-        const status = el('span', 'tl-status', 'Loading…');
-        const hint = el('span', 'tl-hint', 'Click a legend entry to toggle a series · drag on a chart to zoom (the visible span reloads at a finer resolution) · drag / resize the window on the mini-chart to pan · double-click to reset · shaded = OPEN hours');
+        const status = el('span', 'tl-status', t('js.common.loading'));
+        const hint = el('span', 'tl-hint', t('js.timeline.hint'));
         meta.appendChild(status);
         head.appendChild(ranges); head.appendChild(meta);
         container.appendChild(head);
@@ -247,17 +247,17 @@
         const slider = el('input', 'tl-custom-slider');
         slider.type = 'range'; slider.min = '0'; slider.max = String(CUSTOM_STOPS.length - 1); slider.step = '1';
         slider.value = String(Math.max(0, CUSTOM_STOPS.indexOf(customSpan)));
-        slider.setAttribute('aria-label', 'Custom range span');
+        slider.setAttribute('aria-label', t('js.timeline.custom_aria'));
         const customLabel = el('span', 'tl-custom-label', fmtSpan(customSpan));
-        customRow.appendChild(el('span', 'tl-custom-cap', 'Last'));
+        customRow.appendChild(el('span', 'tl-custom-cap', t('js.timeline.last')));
         customRow.appendChild(slider);
         customRow.appendChild(customLabel);
         if (customOn) container.appendChild(customRow);
         const mainHost = el('div', 'tl-chart tl-chart-main');
-        const rateTitle = el('div', 'tl-subtitle', 'Requests per second (derived from the tracker counters)');
+        const rateTitle = el('div', 'tl-subtitle', t('js.timeline.rate_title'));
         const rateHost = el('div', 'tl-chart tl-chart-rate');
         const rangerHost = el('div', 'tl-chart tl-ranger');
-        const empty = el('div', 'tl-empty d-hidden', 'No samples yet — the janitor timer records one sample per interval; come back in a few minutes.');
+        const empty = el('div', 'tl-empty d-hidden', t('js.timeline.no_samples'));
         container.appendChild(mainHost); container.appendChild(rateTitle); container.appendChild(rateHost); container.appendChild(rangerHost); container.appendChild(empty); container.appendChild(hint);
 
         const payloadRef = { current: null };
@@ -367,8 +367,8 @@
         // a drag-zoom narrows the x scale below the data extents; background refreshes must not undo it
         const isZoomed = (u) => { const d = u.data && u.data[0]; return !!d && d.length > 1 && (u.scales.x.min > d[0] || u.scales.x.max < d[d.length - 1]); };
         const put = (u, d, keepZoom) => { if (keepZoom && isZoomed(u)) { u.setData(d, false); u.redraw(); } else u.setData(d); };
-        const stepTxt = (s) => s >= 3600 ? (s / 3600) + ' h' : (s >= 60 ? (s / 60) + ' min' : s + ' s');
-        const statusFor = (p, zoomed) => p.points.toLocaleString() + ' points · ' + stepTxt(p.step) + ' resolution (' + p.table + (zoomed ? ' · zoom' : '') + ') · updated ' + fmtTime(p.generated_at);
+        const stepTxt = (s) => s >= 3600 ? t('js.timeline.unit_h', {n: s / 3600}) : (s >= 60 ? t('js.timeline.unit_min', {n: s / 60}) : t('js.timeline.unit_s', {n: s}));
+        const statusFor = (p, zoomed) => t('js.timeline.status', {points: p.points.toLocaleString(), step: stepTxt(p.step), table: p.table, zoom: zoomed ? t('js.timeline.status_zoom') : '', time: fmtTime(p.generated_at)});
         // zoom-window refetch state: while active, main+rate show a fine-grained slice fetched with
         // &from/&to (the server picks raw → 5m → 1h for the span); the ranger keeps the full range
         let basePayload = null;
@@ -377,9 +377,9 @@
         let winTimer = null;
         const setCharts = (p) => {
             payloadRef.current = p;
-            const t = p.t || [];
-            main.setData([t].concat(GAUGES.map(d => p[d.key] || t.map(() => null))), false);
-            rate.setData([t].concat(RATES.map(d => p[d.key] || t.map(() => null))), false);
+            const ts = p.t || [];
+            main.setData([ts].concat(GAUGES.map(d => p[d.key] || ts.map(() => null))), false);
+            rate.setData([ts].concat(RATES.map(d => p[d.key] || ts.map(() => null))), false);
             main.redraw(); rate.redraw();
             alignLegend(main); alignLegend(rate);
         };
@@ -455,11 +455,11 @@
         }
         const apply = (p, keepZoom) => {
             basePayload = p;
-            const t = p.t || [];
+            const ts = p.t || [];
             if (keepZoom && winState.active) {
                 // background refresh while zoomed into a refetched window: refresh the ranger/base
                 // only, then bring the fine slice up to date too — never clobber it with coarse data
-                ranger.setData([t, p.seeds || t.map(() => null)]);
+                ranger.setData([ts, p.seeds || ts.map(() => null)]);
                 updateBrush();
                 requestWindow(true);
                 return;
@@ -467,18 +467,18 @@
             winState.active = false; winState.seq++;
             winState.floor = 0; winState.floorSpan = 0;   // a new base payload invalidates the floor
             payloadRef.current = p;
-            put(main, [t].concat(GAUGES.map(d => p[d.key] || t.map(() => null))), keepZoom);
-            put(rate, [t].concat(RATES.map(d => p[d.key] || t.map(() => null))), keepZoom);
-            ranger.setData([t, p.seeds || t.map(() => null)]);
+            put(main, [ts].concat(GAUGES.map(d => p[d.key] || ts.map(() => null))), keepZoom);
+            put(rate, [ts].concat(RATES.map(d => p[d.key] || ts.map(() => null))), keepZoom);
+            ranger.setData([ts, p.seeds || ts.map(() => null)]);
             // the ranger's auto x scale may be committed after this tick — try now AND on the next task
             // (setTimeout, not rAF: rAF never fires in hidden/background tabs)
             updateBrush();
             setTimeout(updateBrush, 0);
-            const none = !t.length;
+            const none = !ts.length;
             empty.classList.toggle('d-hidden', !none);
             mainHost.classList.toggle('d-hidden', none); rateHost.classList.toggle('d-hidden', none); rateTitle.classList.toggle('d-hidden', none);
             rangerHost.classList.toggle('d-hidden', none);
-            status.textContent = none ? 'No data for this range yet' : statusFor(p, false);
+            status.textContent = none ? t('js.timeline.no_data_range') : statusFor(p, false);
             alignLegend(main); alignLegend(rate);
             setTimeout(() => { alignLegend(main); alignLegend(rate); }, 0);
         };
@@ -487,18 +487,18 @@
         const load = (force) => {
             if (pending && !force) return;
             const my = ++seq; pending = true;
-            status.textContent = 'Loading…';
+            status.textContent = t('js.common.loading');
             let url = api + 'stats_timeline&' + rangeQuery();
             if (force) url += '&_=' + Date.now();
             fetch(url, { credentials: 'same-origin', cache: 'no-store' })
                 .then(r => r.json().then(j => ({ ok: r.ok, j })))
                 .then(({ ok, j }) => {
                     if (my !== seq) return;
-                    if (!ok || !j || !j.success) { status.textContent = (j && j.error) ? j.error : 'Timeline unavailable'; return; }
+                    if (!ok || !j || !j.success) { status.textContent = (j && j.error) ? j.error : t('js.timeline.unavailable'); return; }
                     lastOk = Date.now();
                     apply(j, !force);
                 })
-                .catch(() => { if (my === seq) status.textContent = 'Timeline unavailable (network)'; })
+                .catch(() => { if (my === seq) status.textContent = t('js.timeline.unavailable_network'); })
                 .finally(() => { if (my === seq) pending = false; });
         };
         ranges.addEventListener('click', (ev) => {
@@ -540,7 +540,7 @@
             const setState = (collapsed) => {
                 target.classList.toggle('d-hidden', collapsed);
                 btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-                if (label) label.textContent = collapsed ? 'Expand' : 'Collapse';
+                if (label) label.textContent = collapsed ? t('js.timeline.expand') : t('js.timeline.collapse');
                 if (icon) icon.className = collapsed ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
                 if (!collapsed && target.__timeline) target.__timeline.reload();
             };

@@ -29,20 +29,20 @@
         const grid = $('us-status-grid');
         grid.textContent = '';
         $('us-disabled-note').style.display = enabled ? 'none' : '';
-        grid.appendChild(kv('Accounts', [badge(enabled ? 'ENABLED' : 'DISABLED', enabled ? 'wl-b-ok' : 'wl-b-warn')]));
-        grid.appendChild(kv('Users', [
-            el('span', { text: `${counts.total} total` }), ' · ',
-            el('span', { text: `${counts.active} active` }), ' · ',
-            el('span', { className: counts.banned ? 'text-warning' : '', text: `${counts.banned} banned` }),
+        grid.appendChild(kv(t('js.users.accounts'), [badge(enabled ? t('js.users.enabled') : t('js.users.disabled'), enabled ? 'wl-b-ok' : 'wl-b-warn')]));
+        grid.appendChild(kv(t('js.users.users'), [
+            el('span', { text: t('js.users.n_total', { n: counts.total }) }), ' · ',
+            el('span', { text: t('js.users.n_active', { n: counts.active }) }), ' · ',
+            el('span', { className: counts.banned ? 'text-warning' : '', text: t('js.users.n_banned', { n: counts.banned }) }),
         ]));
-        grid.appendChild(kv('Groups', [el('span', { text: String(state.groups.length) }), ' ',
-            el('span', { className: 'text-muted wl-small', text: 'guest = anonymous only · signed-in users get the union of their own groups' })]));
+        grid.appendChild(kv(t('js.users.groups'), [el('span', { text: String(state.groups.length) }), ' ',
+            el('span', { className: 'text-muted wl-small', text: t('js.users.guest_note') })]));
     }
 
     // ── groups data (shared) ────────────────────────────────────────────────
     async function loadGroups() {
         const r = await apiCall('admin/fetch_groups');
-        if (r.error) { showToast('Groups: ' + r.error, 'danger'); return; }
+        if (r.error) { showToast(t('js.users.groups_error', { error: r.error }), 'danger'); return; }
         state.groups = r.groups || [];
         state.permList = r.permission_list || {};
         state.presets = r.presets || {};
@@ -50,7 +50,7 @@
         const sel = $('us-filter-group');
         const cur = sel.value;
         sel.textContent = '';
-        sel.appendChild(el('option', { value: '', text: 'All groups' }));
+        sel.appendChild(el('option', { value: '', text: t('js.users.all_groups') }));
         state.groups.forEach(g => sel.appendChild(el('option', { value: String(g.id), text: g.name })));
         sel.value = cur;
         if (state.view === 'groups') renderGroups();
@@ -70,14 +70,14 @@
         if (my !== usLoadSeq) return;
         busyDot($('us-total'), false);
         $('us-table').classList.remove('tbl-loading');
-        if (r.error) { showToast('Users: ' + r.error, 'danger'); return; }
+        if (r.error) { showToast(t('js.users.users_error', { error: r.error }), 'danger'); return; }
         state.us.rows = r.rows || [];
         renderStatus(r.counts || { total: 0, active: 0, banned: 0 }, !!r.enabled);
-        $('us-total').textContent = (r.total || 0).toLocaleString() + ' users';
+        $('us-total').textContent = t('js.users.count_users', { n: (r.total || 0).toLocaleString() });
         const tb = $('us-body');
         tb.textContent = '';
         if (!state.us.rows.length) {
-            tb.appendChild(el('tr', {}, el('td', { colSpan: 9, className: 'text-center text-muted py-4', text: 'No users match.' })));
+            tb.appendChild(el('tr', {}, el('td', { colSpan: 9, className: 'text-center text-muted py-4', text: t('js.users.no_users_match') })));
         }
         state.us.rows.forEach(u => {
             const tr = el('tr', {});
@@ -91,16 +91,16 @@
             tr.appendChild(el('td', { className: 'us-c-pick' },
                 el('label', { className: 'search-check' }, [pick, el('span', { className: 'search-check-box' })])));
             tr.appendChild(el('td', { className: 'wl-id', text: String(u.id) }));
-            tr.appendChild(el('td', {}, [el('strong', { text: u.username }), u.root_admin ? el('i', { className: 'bi bi-shield-lock-fill text-warning ms-1', title: 'Site owner (panel admin) — protected account' }) : null]));
-            tr.appendChild(el('td', { className: 'wl-small', title: u.email ? (u.email_verified ? 'verified address' : 'not verified') : '' },
-                [u.email || '—', u.email && u.email_verified ? el('i', { className: 'bi bi-patch-check-fill text-success ms-1', title: 'verified' }) : null]));
+            tr.appendChild(el('td', {}, [el('strong', { text: u.username }), u.root_admin ? el('i', { className: 'bi bi-shield-lock-fill text-warning ms-1', title: t('js.users.owner_protected') }) : null]));
+            tr.appendChild(el('td', { className: 'wl-small', title: u.email ? (u.email_verified ? t('js.users.email_verified') : t('js.users.email_not_verified')) : '' },
+                [u.email || '—', u.email && u.email_verified ? el('i', { className: 'bi bi-patch-check-fill text-success ms-1', title: t('js.users.verified') }) : null]));
             tr.appendChild(el('td', {}, badge(u.status, u.status === 'active' ? 'wl-b-ok' : 'wl-b-bad')));
             const gTd = el('td', {});
             (u.groups || []).forEach(g => {
                 const b = el('span', {
                     className: 'us-group-badge' + (g.active ? '' : ' us-inactive'),
-                    title: (g.active ? '' : (new Date(String(g.granted_at).replace(' ', 'T')) > new Date() ? 'starts ' + g.granted_at : 'expired') + ' · ')
-                        + (g.expires_at ? 'until ' + g.expires_at : 'permanent'),
+                    title: (g.active ? '' : (new Date(String(g.granted_at).replace(' ', 'T')) > new Date() ? t('js.users.starts_at', { date: g.granted_at }) : t('js.users.expired')) + ' · ')
+                        + (g.expires_at ? t('js.users.until', { date: g.expires_at }) : t('js.users.permanent')),
                     text: g.name + (g.expires_at ? ' ⏱' : ''),
                 });
                 if (g.color && /^#[0-9a-fA-F]{3,8}$/.test(g.color)) b.style.borderColor = g.color;
@@ -108,18 +108,18 @@
             });
             if (!(u.groups || []).length) gTd.appendChild(el('span', { className: 'text-muted', text: '—' }));
             tr.appendChild(gTd);
-            tr.appendChild(el('td', { className: 'wl-small text-muted', text: fmtDate(u.created_at), title: 'IP: ' + (u.created_ip || '—') }));
-            tr.appendChild(el('td', { className: 'wl-small text-muted', text: u.last_login_at ? fmtDate(u.last_login_at) : 'never', title: 'IP: ' + (u.last_login_ip || '—') }));
+            tr.appendChild(el('td', { className: 'wl-small text-muted', text: fmtDate(u.created_at), title: t('js.users.ip', { ip: u.created_ip || '—' }) }));
+            tr.appendChild(el('td', { className: 'wl-small text-muted', text: u.last_login_at ? fmtDate(u.last_login_at) : t('js.users.never'), title: t('js.users.ip', { ip: u.last_login_ip || '—' }) }));
             const act = el('td', { className: 'th-actions' });
             const mkBtn = (icon, title, cls, fn) => {
                 const b = el('button', { type: 'button', className: 'btn btn-sm ' + cls + ' wl-act', title }, el('i', { className: 'bi ' + icon }));
                 b.addEventListener('click', fn);
                 return b;
             };
-            act.appendChild(mkBtn('bi-award', 'Grant group', 'btn-outline-success', () => openGrant(u)));
-            act.appendChild(mkBtn('bi-pencil', 'Edit', 'btn-outline-info', () => openEdit(u)));
-            act.appendChild(mkBtn('bi-bell', 'Send notification', 'btn-outline-info', () => openNotify(u)));
-            const delBtn = mkBtn('bi-trash', u.root_admin ? 'Site owner — cannot be deleted' : 'Delete', 'btn-outline-danger', () => deleteUser(u));
+            act.appendChild(mkBtn('bi-award', t('js.users.grant_group'), 'btn-outline-success', () => openGrant(u)));
+            act.appendChild(mkBtn('bi-pencil', t('js.users.edit'), 'btn-outline-info', () => openEdit(u)));
+            act.appendChild(mkBtn('bi-bell', t('js.users.send_notification'), 'btn-outline-info', () => openNotify(u)));
+            const delBtn = mkBtn('bi-trash', u.root_admin ? t('js.users.owner_no_delete') : t('js.users.delete'), 'btn-outline-danger', () => deleteUser(u));
             if (u.root_admin) delBtn.disabled = true;
             act.appendChild(delBtn);
             tr.appendChild(act);
@@ -130,10 +130,10 @@
     }
 
     async function deleteUser(u) {
-        if (!(await confirmAction('Delete user', 'Permanently delete "' + u.username + '" with all group memberships and notifications?', { danger: true, okLabel: 'Delete' }))) return;
+        if (!(await confirmAction(t('js.users.delete_user_title'), t('js.users.delete_user_body', { name: u.username }), { danger: true, okLabel: t('js.users.delete') }))) return;
         const r = await apiCall('admin/user_delete', 'POST', { id: u.id });
-        if (r.success) { showToast('Deleted ' + u.username); loadUsers(); }
-        else showToast(r.error || 'Delete failed', 'danger');
+        if (r.success) { showToast(t('js.users.deleted_user', { name: u.username })); loadUsers(); }
+        else showToast(r.error || t('js.users.delete_failed'), 'danger');
     }
 
     // ── user edit modal ─────────────────────────────────────────────────────
@@ -177,7 +177,7 @@
         $('ue-status').value = u.status;
         // the site owner cannot be banned — grey the option out
         const bannedOpt = $('ue-status').querySelector('option[value="banned"]');
-        if (bannedOpt) { bannedOpt.disabled = !!u.root_admin; bannedOpt.title = u.root_admin ? 'Site owner — cannot be banned' : ''; }
+        if (bannedOpt) { bannedOpt.disabled = !!u.root_admin; bannedOpt.title = u.root_admin ? t('js.users.owner_no_ban') : ''; }
         $('ue-email').value = u.email || '';
         $('ue-email2').value = '';
         $('ue-password').value = '';
@@ -193,12 +193,12 @@
         if ($('ue-password').value !== '') body.password = $('ue-password').value;
         const r = await apiCall('admin/user_update', 'POST', body);
         if (r.success) {
-            showToast('Saved');
+            showToast(t('js.users.saved'));
             bootstrap.Modal.getOrCreateInstance($('usEditModal')).hide();
             loadUsers();
         } else {
             $('ue-alert').textContent = '';
-            $('ue-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mt-2', text: r.error || 'Save failed' }));
+            $('ue-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mt-2', text: r.error || t('js.users.save_failed') }));
         }
     }
 
@@ -214,11 +214,11 @@
     // for that than a visitor does, and the password rules in particular are not guessable from a
     // sentence — you find out which of the five you missed only after pressing the button.
     const UA_PW_REQS = [
-        ['At least 8 characters', (p) => p.length >= 8 && p.length <= 200],
-        ['A lowercase letter', (p) => /[a-z]/.test(p)],
-        ['An uppercase letter', (p) => /[A-Z]/.test(p)],
-        ['A special character', (p) => /[^a-zA-Z0-9]/.test(p)],
-        ['A digit', (p) => /[0-9]/.test(p)],
+        [t('js.users.pw_length'), (p) => p.length >= 8 && p.length <= 200],
+        [t('js.users.pw_lower'), (p) => /[a-z]/.test(p)],
+        [t('js.users.pw_upper'), (p) => /[A-Z]/.test(p)],
+        [t('js.users.pw_special'), (p) => /[^a-zA-Z0-9]/.test(p)],
+        [t('js.users.pw_digit'), (p) => /[0-9]/.test(p)],
     ];
     // Mirrors userValidUsername() and userValidEmail() in includes/users.php.
     const uaUserOk = (v) => /^[A-Za-z0-9_.-]{3,32}$/.test(v);
@@ -248,7 +248,7 @@
         const userOk = user === '' ? null : uaUserOk(user);
         $('ua-username').classList.toggle('is-invalid', userOk === false);
         $('ua-username-msg').textContent = userOk === false
-            ? '3–32 characters, and only letters, digits, dot, dash or underscore.' : '';
+            ? t('js.users.username_rule') : '';
 
         // An address is required unless verification is "no email", because the panel would
         // otherwise promise a verified address or a sent link for something that does not exist.
@@ -257,8 +257,8 @@
         else if (needMail) mailOk = false;
         $('ua-email').classList.toggle('is-invalid', mailOk === false);
         $('ua-email-msg').textContent = mailOk === false
-            ? (mail === '' ? 'Required unless verification is set to "no email at all".'
-                           : 'That does not look like an email address.') : '';
+            ? (mail === '' ? t('js.users.email_required')
+                           : t('js.users.email_invalid')) : '';
 
         let pwOk = true;
         UA_PW_REQS.forEach(([, test], i) => {
@@ -276,11 +276,11 @@
     function uaHint() {
         const v = $('ua-verify').value;
         const req = $('ua-email-req');
-        req.textContent = v === 'none' ? '(optional)' : '(required)';
+        req.textContent = v === 'none' ? t('js.users.optional') : t('js.users.required');
         $('ua-verify-hint').textContent = {
-            auto: 'Nothing is emailed. The address is trusted as typed and the account can sign in immediately — for an account you are handing over in person.',
-            send: 'The account is created unverified and a verification link goes out. Until it is clicked the account acts as a guest.',
-            none: 'Created unverified and nothing is sent. Use this for an account with no address, or when you will send the link yourself.',
+            auto: t('js.users.verify_auto'),
+            send: t('js.users.verify_send'),
+            none: t('js.users.verify_none'),
         }[v] || '';
     }
     function uaGenerate() {
@@ -324,11 +324,11 @@
             if (r.success) {
                 // The message distinguishes "created and verified" from "created but the mail did not
                 // go out", because those need different things from the admin next.
-                showToast(r.message || 'Account created');
+                showToast(r.message || t('js.users.account_created'));
                 bootstrap.Modal.getOrCreateInstance($('userAddModal')).hide();
                 loadUsers();
             } else {
-                err.textContent = r.error || 'Could not create the account';
+                err.textContent = r.error || t('js.users.create_failed');
                 err.classList.remove('d-none');
             }
         } finally {
@@ -356,20 +356,20 @@
         }
         list.textContent = '';
         if ((u.groups || []).length) {
-            list.appendChild(el('div', { className: 'wl-label form-label', text: 'Current memberships' }));
+            list.appendChild(el('div', { className: 'wl-label form-label', text: t('js.users.current_memberships') }));
             u.groups.forEach(g => {
                 const row = el('div', { className: 'd-flex align-items-center gap-2 wl-small mb-1' }, [
                     el('span', { className: 'us-group-badge' + (g.active ? '' : ' us-inactive'), text: g.name }),
-                    el('span', { className: 'text-muted', text: g.expires_at ? 'until ' + g.expires_at : 'permanent' }),
+                    el('span', { className: 'text-muted', text: g.expires_at ? t('js.users.until', { date: g.expires_at }) : t('js.users.permanent') }),
                 ]);
-                const rm = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: 'Revoke' }, el('i', { className: 'bi bi-x-lg' }));
+                const rm = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: t('js.users.revoke') }, el('i', { className: 'bi bi-x-lg' }));
                 const gid = (state.groups.find(x => x.slug === g.slug) || {}).id;
-                if (u.root_admin && g.slug === 'admin') { rm.disabled = true; rm.title = 'Site owner — the admin group cannot be revoked'; }
+                if (u.root_admin && g.slug === 'admin') { rm.disabled = true; rm.title = t('js.users.owner_no_revoke'); }
                 rm.addEventListener('click', async () => {
-                    if (!(await confirmAction('Revoke group', 'Remove "' + g.name + '" from ' + u.username + '?', { danger: true, okLabel: 'Revoke' }))) return;
+                    if (!(await confirmAction(t('js.users.revoke_group_title'), t('js.users.revoke_group_body', { group: g.name, name: u.username }), { danger: true, okLabel: t('js.users.revoke') }))) return;
                     const r = await apiCall('admin/user_revoke', 'POST', { id: u.id, group_id: gid });
-                    if (r.success) { showToast('Revoked'); bootstrap.Modal.getOrCreateInstance($('usGrantModal')).hide(); loadUsers(); }
-                    else showToast(r.error || 'Revoke failed', 'danger');
+                    if (r.success) { showToast(t('js.users.revoked')); bootstrap.Modal.getOrCreateInstance($('usGrantModal')).hide(); loadUsers(); }
+                    else showToast(r.error || t('js.users.revoke_failed'), 'danger');
                 });
                 row.appendChild(rm);
                 list.appendChild(row);
@@ -383,12 +383,12 @@
         if (duration === 'custom') { body.from = $('ug-from').value.trim(); body.to = $('ug-to').value.trim(); }
         const r = await apiCall('admin/user_grant', 'POST', body);
         if (r.success) {
-            showToast('Granted ' + r.group + (r.expires_at ? ' until ' + r.expires_at : ' permanently'));
+            showToast(r.expires_at ? t('js.users.granted_until', { group: r.group, date: r.expires_at }) : t('js.users.granted_permanent', { group: r.group }));
             bootstrap.Modal.getOrCreateInstance($('usGrantModal')).hide();
             loadUsers();
         } else {
             $('ug-alert').textContent = '';
-            $('ug-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mt-2', text: r.error || 'Grant failed' }));
+            $('ug-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mt-2', text: r.error || t('js.users.grant_failed') }));
         }
     }
 
@@ -404,11 +404,11 @@
     async function sendNotify() {
         const r = await apiCall('admin/user_notify', 'POST', { id: notifyUser.id, title: $('un-title').value.trim(), body: $('un-body').value.trim(), email: $('un-email').checked ? 1 : 0 });
         if (r.success) {
-            showToast('Sent' + (r.mailed ? ' (+email)' : ''));
+            showToast(r.mailed ? t('js.users.sent_email') : t('js.users.sent'));
             bootstrap.Modal.getOrCreateInstance($('usNotifyModal')).hide();
         } else {
             $('un-alert').textContent = '';
-            $('un-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mt-2', text: r.error || 'Send failed' }));
+            $('un-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mt-2', text: r.error || t('js.users.send_failed') }));
         }
     }
 
@@ -420,24 +420,24 @@
             const tr = el('tr', {});
             const nameEl = el('strong', { text: g.name });
             if (g.color && /^#[0-9a-fA-F]{3,8}$/.test(g.color)) nameEl.style.color = g.color;
-            tr.appendChild(el('td', {}, [nameEl, g.is_system ? el('span', { className: 'text-muted wl-small', text: ' (system)' }) : null]));
+            tr.appendChild(el('td', {}, [nameEl, g.is_system ? el('span', { className: 'text-muted wl-small', text: t('js.users.system_suffix') }) : null]));
             tr.appendChild(el('td', { className: 'font-mono wl-small', text: g.slug }));
             tr.appendChild(el('td', { text: String(g.priority) }));
-            tr.appendChild(el('td', {}, g.is_default ? badge('default', 'wl-b-ok') : el('span', { className: 'text-muted', text: '—' })));
+            tr.appendChild(el('td', {}, g.is_default ? badge(t('js.users.default_badge'), 'wl-b-ok') : el('span', { className: 'text-muted', text: '—' })));
             tr.appendChild(el('td', { text: String(g.members) }));
             const permKeys = Object.keys(g.permissions || {});
-            tr.appendChild(el('td', { className: 'wl-small text-muted', text: permKeys.length ? permKeys.join(', ') : '(none)' }));
+            tr.appendChild(el('td', { className: 'wl-small text-muted', text: permKeys.length ? permKeys.join(', ') : t('js.users.none') }));
             const act = el('td', { className: 'th-actions' });
-            const edit = el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', title: 'Edit' }, el('i', { className: 'bi bi-pencil' }));
+            const edit = el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', title: t('js.users.edit') }, el('i', { className: 'bi bi-pencil' }));
             edit.addEventListener('click', () => openGroupEditor(g));
             act.appendChild(edit);
             if (!g.is_system) {
-                const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: 'Delete' }, el('i', { className: 'bi bi-trash' }));
+                const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: t('js.users.delete') }, el('i', { className: 'bi bi-trash' }));
                 del.addEventListener('click', async () => {
-                    if (!(await confirmAction('Delete group', 'Delete "' + g.name + '"? ' + g.members + ' membership(s) are removed with it.', { danger: true, okLabel: 'Delete' }))) return;
+                    if (!(await confirmAction(t('js.users.delete_group_title'), t('js.users.delete_group_body', { name: g.name, n: g.members }), { danger: true, okLabel: t('js.users.delete') }))) return;
                     const r = await apiCall('admin/group_delete', 'POST', { id: g.id });
-                    if (r.success) { showToast('Deleted'); loadGroups(); }
-                    else showToast(r.error || 'Delete failed', 'danger');
+                    if (r.success) { showToast(t('js.users.deleted')); loadGroups(); }
+                    else showToast(r.error || t('js.users.delete_failed'), 'danger');
                 });
                 act.appendChild(del);
             }
@@ -449,41 +449,41 @@
 
     /** Groups across, permissions down — the same data as the key list, in a shape a person reads. */
     function renderMatrix() {
-        const t = $('gr-matrix');
-        if (!t) return;
-        t.textContent = '';
+        const tbl = $('gr-matrix');
+        if (!tbl) return;
+        tbl.textContent = '';
         const groups = state.groups || [];
         const perms = Object.keys(state.permList || {});
         if (!groups.length || !perms.length) return;
         const thead = el('thead', {});
-        const hr = el('tr', {}, [el('th', { text: 'Permission' })]);
+        const hr = el('tr', {}, [el('th', { text: t('js.users.matrix_permission') })]);
         groups.forEach(g => {
             const th = el('th', { className: 'gr-matrix-g', title: g.slug }, [g.name]);
             if (g.color && /^#[0-9a-fA-F]{3,8}$/.test(g.color)) th.style.color = g.color;
             hr.appendChild(th);
         });
-        thead.appendChild(hr); t.appendChild(thead);
+        thead.appendChild(hr); tbl.appendChild(thead);
         const tbody = el('tbody', {});
         let section = '';
         perms.forEach(key => {
             const sec = key.startsWith('panel.') ? 'PANEL' : 'SITE';
             if (sec !== section) {
                 section = sec;
-                tbody.appendChild(el('tr', { className: 'gr-matrix-sec' }, [el('td', { colspan: String(groups.length + 1), text: sec === 'PANEL' ? 'The admin panel' : 'The public site' })]));
+                tbody.appendChild(el('tr', { className: 'gr-matrix-sec' }, [el('td', { colspan: String(groups.length + 1), text: sec === 'PANEL' ? t('js.users.matrix_panel') : t('js.users.matrix_site') })]));
             }
             const tr = el('tr', {}, [el('td', { title: state.permList[key] || '' }, [el('code', { text: key })])]);
             groups.forEach(g => {
                 const on = !!(g.permissions && g.permissions[key]);
                 tr.appendChild(el('td', { className: 'gr-matrix-c' + (on ? ' on' : '') }, [
-                    on ? el('i', { className: 'bi bi-check-lg', title: g.name + ' — ' + key }) : el('span', { className: 'gr-matrix-off', text: '·' })]));
+                    on ? el('i', { className: 'bi bi-check-lg', title: t('js.users.matrix_has', { group: g.name, key: key }) }) : el('span', { className: 'gr-matrix-off', text: '·' })]));
             });
             tbody.appendChild(tr);
         });
-        t.appendChild(tbody);
+        tbl.appendChild(tbody);
     }
     function openGroupEditor(g) {
         editGroup = g;   // null = new
-        $('ge-title').textContent = g ? 'Edit group — ' + g.name : 'New group';
+        $('ge-title').textContent = g ? t('js.users.group_edit_title', { name: g.name }) : t('js.users.group_new');
         $('ge-name').value = g ? g.name : '';
         $('ge-slug').value = g ? g.slug : '';
         $('ge-slug').disabled = !!(g && g.is_system);
@@ -497,7 +497,7 @@
         const pre = $('ge-presets');
         if (pre) {
             pre.textContent = '';
-            pre.appendChild(el('span', { className: 'wl-small text-muted me-1', text: 'Start from:' }));
+            pre.appendChild(el('span', { className: 'wl-small text-muted me-1', text: t('js.users.presets_start_from') }));
             Object.entries(state.presets || {}).forEach(([key, p]) => {
                 const b = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary ge-preset', title: p.about || '' }, [p.label || key]);
                 b.addEventListener('click', () => {
@@ -506,7 +506,7 @@
                 });
                 pre.appendChild(b);
             });
-            const none = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary ge-preset', title: 'Untick everything' }, ['None']);
+            const none = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary ge-preset', title: t('js.users.presets_untick') }, [t('js.users.presets_none')]);
             none.addEventListener('click', () => $('ge-perms').querySelectorAll('input[data-perm]').forEach(cb => { cb.checked = false; }));
             pre.appendChild(none);
         }
@@ -535,12 +535,12 @@
         if (editGroup) body.id = editGroup.id;
         const r = await apiCall('admin/group_save', 'POST', body);
         if (r.success) {
-            showToast('Group saved');
+            showToast(t('js.users.group_saved'));
             bootstrap.Modal.getOrCreateInstance($('grEditModal')).hide();
             loadGroups();
         } else {
             $('ge-alert').textContent = '';
-            $('ge-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mt-2', text: r.error || 'Save failed' }));
+            $('ge-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mt-2', text: r.error || t('js.users.save_failed') }));
         }
     }
 
@@ -583,11 +583,11 @@
         if (!box) return;
         $('bm-group-wrap').style.display = $('bm-mode').value === 'group' ? '' : 'none';
         box.textContent = '';
-        box.appendChild(el('span', { className: 'text-muted', text: 'Counting...' }));
+        box.appendChild(el('span', { className: 'text-muted', text: t('js.users.write_counting') }));
         const r = await apiCall('admin/bulk_send', 'POST', { op: 'preview', audience: writeAudience() });
         if (!r || !r.success) {
             box.textContent = '';
-            box.appendChild(el('span', { className: 'text-danger', text: (r && r.error) || 'Could not count.' }));
+            box.appendChild(el('span', { className: 'text-danger', text: (r && r.error) || t('js.users.write_count_failed') }));
             return;
         }
         $('bm-off-note').style.display = r.enabled ? 'none' : '';
@@ -599,23 +599,23 @@
         if (lbl) {
             const mode = $('bm-mode').value;
             const who = mode === 'group'
-                ? ($('bm-group').options[$('bm-group').selectedIndex] || {}).text || 'the group'
-                : (mode === 'selected' ? 'the users you ticked' : 'everyone');
+                ? ($('bm-group').options[$('bm-group').selectedIndex] || {}).text || t('js.users.write_who_group')
+                : (mode === 'selected' ? t('js.users.write_who_selected') : t('js.users.write_who_all'));
             const n = $('bm-email').checked ? r.recipients : r.audience;
             lbl.textContent = n > 0
-                ? 'Send to ' + who + ' (' + n + ')'
-                : 'Nobody to send to';
+                ? t('js.users.write_send_to', { who: who, n: n })
+                : t('js.users.write_nobody');
         }
         box.textContent = '';
         box.appendChild(el('strong', { text: String(r.recipients) }));
         const why = [];
-        if (r.no_email) why.push(r.no_email + ' with no address');
-        if (r.opted_out) why.push(r.opted_out + ' opted out of announcements');
-        if (r.unsubscribed) why.push(r.unsubscribed + ' unsubscribed');
-        box.appendChild(document.createTextNode(' of ' + r.audience + ' would receive the email'
+        if (r.no_email) why.push(t('js.users.write_why_no_email', { n: r.no_email }));
+        if (r.opted_out) why.push(t('js.users.write_why_opted_out', { n: r.opted_out }));
+        if (r.unsubscribed) why.push(t('js.users.write_why_unsubscribed', { n: r.unsubscribed }));
+        box.appendChild(document.createTextNode(t('js.users.write_of_audience', { n: r.audience })
             + (why.length ? ' - ' + why.join(', ') : '') + '. '));
         box.appendChild(el('span', { className: 'text-muted wl-small',
-            text: 'In-app notifications reach all ' + r.audience + ': there is nothing to opt out of, they only exist inside the site.' }));
+            text: t('js.users.write_inapp_note', { n: r.audience }) }));
     }
 
     async function loadBatches() {
@@ -624,9 +624,9 @@
         const r = await apiCall('admin/bulk_send', 'POST', { op: 'batches' });
         tb.textContent = '';
         if (!r || !r.success) return;
-        $('bm-depth').textContent = r.depth ? (r.depth + ' still waiting - ' + r.per_minute + '/min') : '';
+        $('bm-depth').textContent = r.depth ? t('js.users.write_depth', { n: r.depth, rate: r.per_minute }) : '';
         if (!(r.batches || []).length) {
-            tb.appendChild(el('tr', {}, el('td', { colSpan: 7, className: 'text-center text-muted py-4', text: 'Nothing sent yet.' })));
+            tb.appendChild(el('tr', {}, el('td', { colSpan: 7, className: 'text-center text-muted py-4', text: t('js.users.write_nothing_sent') })));
             return;
         }
         r.batches.forEach(b => {
@@ -639,7 +639,7 @@
             tr.appendChild(el('td', { text: String(b.pending) }));
             const act = el('td', { className: 'td-actions' });
             if (Number(b.pending) > 0) {
-                const stop = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning wl-act', title: 'Stop what has not gone out yet' },
+                const stop = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning wl-act', title: t('js.users.batch_stop_title') },
                     el('i', { className: 'bi bi-stop-circle' }));
                 stop.addEventListener('click', () => cancelBatch(b.batch_id, Number(b.pending)));
                 act.appendChild(stop);
@@ -652,11 +652,11 @@
     const askPassword = (title, message) => A.promptPassword(title, message);
 
     async function cancelBatch(id, pending) {
-        const pw = await askPassword('Stop this send',
-            'Stop the ' + pending + ' message(s) that have not gone out yet? Anything already delivered cannot be recalled.');
+        const pw = await askPassword(t('js.users.batch_stop_head'),
+            t('js.users.batch_stop_body', { n: pending }));
         if (!pw) return;
         const r = await apiCall('admin/bulk_send', 'POST', { op: 'cancel', batch_id: id, password: pw });
-        showToast((r && (r.message || r.error)) || 'Done', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.users.done'), r && r.success ? 'success' : 'error');
         loadBatches();
     }
 
@@ -762,10 +762,10 @@
         const hint = $('bm-fmt-hint');
         if (hint) {
             hint.textContent = fmt === 'plain'
-                ? 'Plain text: line breaks are kept and nothing else is interpreted.'
+                ? t('js.users.fmt_hint_plain')
                 : (fmt === 'markdown'
-                    ? 'Markdown: **bold**, *italic*, ~~strike~~, ==mark==, # heading, - list, 1. list, > quote, `code`, tables, [text](url), ![](image). Ctrl+B / Ctrl+I / Ctrl+K.'
-                    : 'BBCode: [b] [i] [u] [s] [color=#hex] [size=18] [center] [hr] [quote] [list] [list=1] [table] [highlight] [url] [img]. Ctrl+B / Ctrl+I / Ctrl+K.');
+                    ? t('js.users.fmt_hint_markdown')
+                    : t('js.users.fmt_hint_bbcode'));
         }
         bmRenderPreview();
     }
@@ -774,7 +774,7 @@
     function bmFillFormats(formats) {
         const sel = $('bm-format');
         if (!sel || !Array.isArray(formats) || sel.dataset.filled === '1') return;
-        const label = { plain: 'Plain text', markdown: 'Markdown', bbcode: 'BBCode' };
+        const label = { plain: t('js.users.fmt_plain'), markdown: 'Markdown', bbcode: 'BBCode' };
         sel.textContent = '';
         formats.forEach(f => sel.appendChild(el('option', { value: f, text: label[f] || f })));
         sel.dataset.filled = '1';
@@ -784,32 +784,32 @@
     async function sendTest() {
         const r = await apiCall('admin/bulk_send', 'POST',
             { op: 'test', subject: $('bm-subject').value, body: $('bm-body').value, format: bmFormat() });
-        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.users.failed'), r && r.success ? 'success' : 'error');
     }
 
     async function sendWrite() {
         const subject = $('bm-subject').value.trim();
         const body = $('bm-body').value.trim();
-        if (!subject || !body) { showToast('A subject and a message are both required.', 'error'); return; }
+        if (!subject || !body) { showToast(t('js.users.write_need_subject_body'), 'error'); return; }
         const wantMail = $('bm-email').checked;
         const wantNotify = $('bm-notify').checked;
-        if (!wantMail && !wantNotify) { showToast('Choose a notification, an email, or both.', 'error'); return; }
+        if (!wantMail && !wantNotify) { showToast(t('js.users.write_need_channel'), 'error'); return; }
         const pre = await apiCall('admin/bulk_send', 'POST', { op: 'preview', audience: writeAudience() });
-        if (!pre || !pre.success) { showToast((pre && pre.error) || 'Could not count the audience.', 'error'); return; }
+        if (!pre || !pre.success) { showToast((pre && pre.error) || t('js.users.write_audience_failed'), 'error'); return; }
         const what = [];
-        if (wantNotify) what.push(pre.audience + ' notification(s)');
-        if (wantMail) what.push(pre.recipients + ' email(s)');
+        if (wantNotify) what.push(t('js.users.write_count_notify', { n: pre.audience }));
+        if (wantMail) what.push(t('js.users.write_count_email', { n: pre.recipients }));
         // The number again, at the moment of committing. This is the last point at which somebody can
         // notice that "everyone" is larger than they had pictured.
-        if (!await confirmAction('Send to members',
-            'This sends ' + what.join(' and ') + '. Emails cannot be recalled once they leave.',
-            { okLabel: 'Send', danger: true })) return;
-        const pw = await askPassword('Send to members', 'Confirm with the admin password.');
+        if (!await confirmAction(t('js.users.write_send_head'),
+            t('js.users.write_send_body', { what: what.join(t('js.users.write_and')) }),
+            { okLabel: t('js.users.write_send_ok'), danger: true })) return;
+        const pw = await askPassword(t('js.users.write_send_head'), t('js.users.write_send_password'));
         if (!pw) return;
         const r = await apiCall('admin/bulk_send', 'POST', {
             op: 'queue', password: pw, audience: writeAudience(),
             subject, body, format: bmFormat(), notify: wantNotify, email: wantMail });
-        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.users.failed'), r && r.success ? 'success' : 'error');
         if (r && r.success) { $('bm-subject').value = ''; $('bm-body').value = ''; bmRenderPreview(); loadBatches(); }
     }
 
@@ -828,14 +828,14 @@
     // cover a whole DECISION, not a single click — the direction cycles desc → asc → off, so picking
     // a column and then its direction is two or three clicks, and at 450 ms the first one had already
     // fired a request (and, with several sort keys, a wrong one).
-    const SORT_DEBOUNCE_MS = 900;
+    const SORT_DEBOUNCE_MS = window.AdminCommon.DEBOUNCE.sort;   // one number for every list — admin-common.js
 
     document.addEventListener('DOMContentLoaded', () => {
         const loadUsersDebounced = debounce(() => loadUsers(), SORT_DEBOUNCE_MS);
         usSort = makeSortStack({ table: $('us-table'), defaultSort: [{ col: 'created', dir: 'desc' }], onChange: () => { state.us.page = 1; loadUsersDebounced(); } });
         usSort.bindHeaders();
         document.querySelectorAll('#us-tabs .source-tab').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
-        $('us-search').addEventListener('input', debounce(() => { state.us.search = $('us-search').value.trim(); state.us.page = 1; loadUsers(); }, 300));
+        $('us-search').addEventListener('input', debounce(() => { state.us.search = $('us-search').value.trim(); state.us.page = 1; loadUsers(); }, window.AdminCommon.DEBOUNCE.search));
         bindSearchClear($('us-search'), $('us-search-clear'), () => { state.us.search = ''; state.us.page = 1; loadUsers(); });
         $('us-filter-status').addEventListener('change', () => { state.us.status = $('us-filter-status').value; state.us.page = 1; loadUsers(); });
         $('us-filter-group').addEventListener('change', () => { state.us.group = $('us-filter-group').value; state.us.page = 1; loadUsers(); });

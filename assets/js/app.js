@@ -24,14 +24,14 @@ async function fetchWithCaptcha(endpoint, data) {
         });
         json = await res.json();
     } catch {
-        return { error: 'Server returned an invalid response. The request may be too large.' };
+        return { error: t('js.app.invalid_response') };
     }
 
     if (json.captcha_required) {
         const token = await requestCaptchaToken(endpoint);
         // No token: either the visitor closed the box, or the widget itself failed (bad site key,
         // domain not allow-listed, provider blocked) — those two need different advice.
-        if (!token) return { error: captchaUnavailable() ? 'CAPTCHA could not load — reload the page or try again later.' : 'CAPTCHA cancelled' };
+        if (!token) return { error: captchaUnavailable() ? t('js.app.captcha_unavailable') : t('js.app.captcha_cancelled') };
         // Send under both names: `captcha_token` (generic) and the legacy reCAPTCHA field name.
         data['captcha_token'] = token;
         data['g-recaptcha-response'] = token;
@@ -48,7 +48,7 @@ async function fetchWithCaptcha(endpoint, data) {
                 });
                 last = await res2.json();
             } catch {
-                last = { error: 'Server returned an invalid response after CAPTCHA.' };
+                last = { error: t('js.app.invalid_response_after_captcha') };
             }
             const failed = last && typeof last.error === 'string' && last.error.indexOf('CAPTCHA verification failed') !== -1;
             if (!failed) return last;
@@ -63,7 +63,7 @@ function startCooldown(btn, seconds) {
     const originalText = btn.textContent;
     let remaining = seconds;
     btn.disabled = true;
-    btn.textContent = `Wait (${remaining}s)`;
+    btn.textContent = t('js.app.wait_seconds', {n: remaining});
     const interval = setInterval(() => {
         remaining--;
         if (remaining <= 0) {
@@ -71,7 +71,7 @@ function startCooldown(btn, seconds) {
             btn.disabled = false;
             btn.textContent = originalText;
         } else {
-            btn.textContent = `Wait (${remaining}s)`;
+            btn.textContent = t('js.app.wait_seconds', {n: remaining});
         }
     }, 1000);
 }
@@ -80,10 +80,10 @@ function startCooldown(btn, seconds) {
 // identically here). `messages` maps error codes to friendly text; `rate_limit` has a default.
 // Highlights any `fields` the server flagged and starts the resubmit cooldown.
 function showFormSubmitError(form, alert, btn, json, messages = {}) {
-    const map = { rate_limit: 'Rate limit exceeded. Try again in an hour.', ...messages };
+    const map = { rate_limit: t('js.app.rate_limit'), ...messages };
     const code = json && json.error;
     alert.className = 'alert alert-error show';
-    alert.textContent = (code && map[code]) ? map[code] : (code || 'An error occurred.');
+    alert.textContent = (code && map[code]) ? map[code] : (code || t('js.app.error_occurred'));
     if (json && Array.isArray(json.fields)) {
         json.fields.forEach(f => {
             const input = form.querySelector(`[name="${f}"]`);
@@ -96,7 +96,7 @@ function showFormSubmitError(form, alert, btn, json, messages = {}) {
 // Shared handling for a network/transport failure on form submit.
 function showFormNetworkError(alert, btn) {
     alert.className = 'alert alert-error show';
-    alert.textContent = 'Network error. Please try again.';
+    alert.textContent = t('js.app.network_error_retry');
     startCooldown(btn, 5);
 }
 
@@ -127,13 +127,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!v) { hashHint.textContent = ''; hashHint.style.color = ''; return; }
             const nonHex = v.replace(/[a-fA-F0-9]/g, '');
             if (nonHex.length > 0) {
-                hashHint.textContent = '— contains non-hex characters';
+                hashHint.textContent = t('js.app.hash_non_hex');
                 hashHint.style.color = 'var(--error)';
             } else if (v.length < 40) {
-                hashHint.textContent = '— ' + v.length + '/40 characters';
+                hashHint.textContent = t('js.app.hash_length', {n: v.length});
                 hashHint.style.color = 'var(--warning)';
             } else {
-                hashHint.textContent = '— valid';
+                hashHint.textContent = t('js.app.hash_valid');
                 hashHint.style.color = 'var(--success)';
             }
             validateMagnetCross();
@@ -300,20 +300,20 @@ function validateMagnetCross() {
     }
 
     if (!magnet.startsWith('magnet:?')) {
-        magnetHint.textContent = '— must start with magnet:?';
+        magnetHint.textContent = t('js.app.magnet_prefix');
         magnetHint.style.color = 'var(--error)';
         return;
     }
 
     if (!/[?&]xt=urn:btih:/i.test(magnet)) {
-        magnetHint.textContent = '— missing xt=urn:btih: parameter';
+        magnetHint.textContent = t('js.app.magnet_missing_xt');
         magnetHint.style.color = 'var(--error)';
         return;
     }
 
     const extractedHash = extractHashFromMagnet(magnet);
     if (!extractedHash) {
-        magnetHint.textContent = '— invalid hash format (expected 40 hex or 32 base32 chars)';
+        magnetHint.textContent = t('js.app.magnet_invalid_hash');
         magnetHint.style.color = 'var(--error)';
         return;
     }
@@ -321,14 +321,14 @@ function validateMagnetCross() {
     const currentHash = hashInput.value.trim().toLowerCase();
     if (currentHash && currentHash.length === 40 && /^[a-f0-9]{40}$/.test(currentHash)) {
         if (extractedHash === currentHash) {
-            magnetHint.textContent = '— hash matches';
+            magnetHint.textContent = t('js.app.magnet_hash_matches');
             magnetHint.style.color = 'var(--success)';
         } else {
-            magnetHint.textContent = '— hash MISMATCH with Info Hash field';
+            magnetHint.textContent = t('js.app.magnet_hash_mismatch');
             magnetHint.style.color = 'var(--error)';
         }
     } else {
-        magnetHint.textContent = '— hash extracted: ' + extractedHash.substring(0, 8) + '...';
+        magnetHint.textContent = t('js.app.magnet_hash_extracted', {hash: extractedHash.substring(0, 8)});
         magnetHint.style.color = 'var(--text-muted)';
     }
 }
@@ -410,10 +410,10 @@ async function handleReportSubmit(e) {
 
         if (json.success) {
             alert.className = 'alert alert-success show';
-            alert.textContent = 'Report submitted successfully! Your report number: #' + json.id;
+            alert.textContent = t('js.app.report_submitted', {id: json.id});
             // Whitelist mode: the reported hash may not even be registered here (nothing to serve).
             if (json.whitelisted === false) {
-                alert.textContent += ' Note: this info hash is not registered on this tracker (nothing to serve); the report is kept so the hash can be pre-banned.';
+                alert.textContent += ' ' + t('js.app.report_not_registered_note');
             }
             form.reset();
             const mc = document.getElementById('msg-counter');
@@ -425,7 +425,7 @@ async function handleReportSubmit(e) {
             btn.disabled = false;
         } else {
             showFormSubmitError(form, alert, btn, json, {
-                duplicate: 'A report with this Info Hash already exists.',
+                duplicate: t('js.app.report_duplicate'),
             });
         }
     } catch {
@@ -457,7 +457,7 @@ async function handleStatusCheck(e) {
         if (!extracted) {
             form.querySelector('[name="search_query"]').closest('.form-group').classList.add('has-error');
             alert.className = 'alert alert-error show';
-            alert.textContent = 'Could not extract a valid hash from the magnet link.';
+            alert.textContent = t('js.app.magnet_extract_failed');
             return;
         }
         query = extracted;
@@ -468,7 +468,7 @@ async function handleStatusCheck(e) {
     if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
         emailField.closest('.form-group').classList.add('has-error');
         alert.className = 'alert alert-error show';
-        alert.textContent = 'Email address is required to check report status.';
+        alert.textContent = t('js.app.status_email_required');
         return;
     }
 
@@ -515,17 +515,17 @@ async function handleStatusCheck(e) {
             }
             document.getElementById('res-date').textContent = json.timestamp;
 
-            const statusLabels = { pending: 'Awaiting Review', checked: 'Reviewed', blocked: 'Blocked', archived: 'Archived / Closed' };
+            const statusLabels = { pending: t('js.app.status_pending'), checked: t('js.app.status_checked'), blocked: t('js.app.status_blocked'), archived: t('js.app.status_archived') };
             const statusEl = document.getElementById('res-status');
             let badges = '';
             if (json.blocked) {
-                badges += '<span class="status-badge blocked">Blocked</span> ';
+                badges += '<span class="status-badge blocked">' + escHtml(t('js.app.status_blocked')) + '</span> ';
             }
             if (json.checked && !json.blocked && json.archived) {
-                badges += '<span class="status-badge checked">Reviewed</span> ';
+                badges += '<span class="status-badge checked">' + escHtml(t('js.app.status_checked')) + '</span> ';
             }
             if (json.archived) {
-                badges += '<span class="status-badge archived">Archived / Closed</span>';
+                badges += '<span class="status-badge archived">' + escHtml(t('js.app.status_archived')) + '</span>';
             }
             if (!badges) {
                 badges = '<span class="status-badge ' + json.status + '">' + (statusLabels[json.status] || json.status) + '</span>';
@@ -540,7 +540,7 @@ async function handleStatusCheck(e) {
                     document.getElementById('status-appeal-hash').value = json.infoHash;
                     document.getElementById('status-appeal-type').value = 'block';
                     document.getElementById('status-appeal-report-id').value = json.id;
-                    document.getElementById('status-appeal-desc').textContent = 'This report was archived without blocking. If you believe this hash should be blocked, you can submit an appeal for re-examination.';
+                    document.getElementById('status-appeal-desc').textContent = t('js.app.status_appeal_desc');
                 } else {
                     statusAppealSection.style.display = 'none';
                 }
@@ -549,11 +549,11 @@ async function handleStatusCheck(e) {
             result.style.display = 'block';
         } else {
             alert.className = 'alert alert-error show';
-            alert.textContent = json.error === 'not_found' ? 'No report found for the provided data.' : (json.error || 'Error');
+            alert.textContent = json.error === 'not_found' ? t('js.app.status_not_found') : (json.error || t('js.app.error'));
         }
     } catch {
         alert.className = 'alert alert-error show';
-        alert.textContent = 'Network error.';
+        alert.textContent = t('js.app.network_error');
     }
 }
 
@@ -581,7 +581,7 @@ async function handleBlockCheck(e) {
         hash = extractHashFromMagnet(query);
         if (!hash) {
             alert.className = 'alert alert-error show';
-            alert.textContent = 'Could not extract a valid hash from the magnet link.';
+            alert.textContent = t('js.app.magnet_extract_failed');
             return;
         }
     }
@@ -589,7 +589,7 @@ async function handleBlockCheck(e) {
     if (!/^[a-fA-F0-9]{40}$/.test(hash)) {
         form.querySelector('[name="block_query"]').closest('.form-group').classList.add('has-error');
         alert.className = 'alert alert-error show';
-        alert.textContent = 'Enter a valid 40-character hex hash or a magnet link.';
+        alert.textContent = t('js.app.block_enter_valid_hash');
         return;
     }
 
@@ -600,9 +600,9 @@ async function handleBlockCheck(e) {
             document.getElementById('bc-hash').textContent = json.infoHash;
             const statusEl = document.getElementById('bc-status');
             if (json.blocked) {
-                statusEl.innerHTML = '<span class="status-badge blocked">Blocked</span>';
+                statusEl.innerHTML = '<span class="status-badge blocked">' + escHtml(t('js.app.status_blocked')) + '</span>';
             } else {
-                statusEl.innerHTML = '<span class="status-badge checked">Not Blocked</span>';
+                statusEl.innerHTML = '<span class="status-badge checked">' + escHtml(t('js.app.status_not_blocked')) + '</span>';
             }
             // Whitelist mode: a second badge — registered (served) / not registered — independent of blocks
             const wlRow = document.getElementById('bc-row-whitelist');
@@ -612,9 +612,9 @@ async function handleBlockCheck(e) {
                     wlEl.textContent = '';
                     const badge = document.createElement('span');
                     badge.className = 'status-badge ' + (json.whitelisted ? 'checked' : 'blocked');
-                    badge.textContent = json.whitelisted ? 'Whitelisted' : 'Not whitelisted';
+                    badge.textContent = json.whitelisted ? t('js.app.whitelisted') : t('js.app.not_whitelisted');
                     wlEl.appendChild(badge);
-                    wlEl.appendChild(document.createTextNode(json.whitelisted ? ' — registered, the tracker serves this swarm' : ' — not registered on this tracker (nothing is served)'));
+                    wlEl.appendChild(document.createTextNode(json.whitelisted ? t('js.app.whitelisted_desc') : t('js.app.not_whitelisted_desc')));
                     wlRow.style.display = '';
                 } else {
                     wlRow.style.display = 'none';
@@ -635,11 +635,11 @@ async function handleBlockCheck(e) {
             result.style.display = 'block';
         } else {
             alert.className = 'alert alert-error show';
-            alert.textContent = json.error || 'Error';
+            alert.textContent = json.error || t('js.app.error');
         }
     } catch {
         alert.className = 'alert alert-error show';
-        alert.textContent = 'Network error.';
+        alert.textContent = t('js.app.network_error');
     }
 }
 
@@ -683,7 +683,7 @@ async function handleAppealSubmit(e) {
 
         if (json.success) {
             alert.className = 'alert alert-success show';
-            alert.textContent = 'Appeal submitted successfully! You will be notified by email when it is reviewed.';
+            alert.textContent = t('js.app.appeal_submitted');
             form.reset();
             document.getElementById('appeal-hash').value = document.getElementById('bc-hash').textContent;
             const counter = document.getElementById('appeal-counter');
@@ -737,7 +737,7 @@ async function handleStatusAppealSubmit(e) {
 
         if (json.success) {
             alert.className = 'alert alert-success show';
-            alert.textContent = 'Appeal submitted successfully! You will be notified by email when it is reviewed.';
+            alert.textContent = t('js.app.appeal_submitted');
             form.querySelector('[name="name"]').value = '';
             form.querySelector('[name="email"]').value = '';
             form.querySelector('[name="message"]').value = '';
@@ -771,8 +771,8 @@ async function loadTransparency(page) {
         document.getElementById('transparency-content').style.display = 'block';
 
         if (!json.success || !json.data.length) {
-            document.getElementById('trans-body').innerHTML = '<tr><td colspan="7" class="transparency-empty">No data available.</td></tr>';
-            document.getElementById('trans-summary').innerHTML = '<p>No transparency data available yet.</p>';
+            document.getElementById('trans-body').innerHTML = '<tr><td colspan="7" class="transparency-empty">' + t('js.app.trans_no_data') + '</td></tr>';
+            document.getElementById('trans-summary').innerHTML = '<p>' + t('js.app.trans_no_data_yet') + '</p>';
             document.getElementById('trans-pagination').innerHTML = '';
             return;
         }
@@ -781,12 +781,12 @@ async function loadTransparency(page) {
         const pct = (n) => a.total_requests ? ' (' + Math.round(n / a.total_requests * 100) + '%)' : '';
         document.getElementById('trans-summary').innerHTML =
             '<div class="trans-stats">' +
-            '<div class="trans-stat-accent"><strong>' + (a.total_entities || 0) + '</strong><br><small>Organizations</small></div>' +
-            '<div class="trans-stat-accent"><strong>' + (a.total_groups || json.total) + '</strong><br><small>Groups</small></div>' +
-            '<div class="trans-stat-text"><strong>' + (a.total_requests || 0) + '</strong><br><small>Total Requests</small></div>' +
-            '<div class="trans-stat-success"><strong>' + (a.total_reviewed || 0) + pct(a.total_reviewed || 0) + '</strong><br><small>Reviewed</small></div>' +
-            '<div class="trans-stat-error"><strong>' + (a.total_blocked || 0) + pct(a.total_blocked || 0) + '</strong><br><small>Blocked</small></div>' +
-            '<div class="trans-stat-warning"><strong>' + (a.total_pending || 0) + pct(a.total_pending || 0) + '</strong><br><small>Awaiting Review</small></div>' +
+            '<div class="trans-stat-accent"><strong>' + (a.total_entities || 0) + '</strong><br><small>' + t('js.app.trans_organizations') + '</small></div>' +
+            '<div class="trans-stat-accent"><strong>' + (a.total_groups || json.total) + '</strong><br><small>' + t('js.app.trans_groups') + '</small></div>' +
+            '<div class="trans-stat-text"><strong>' + (a.total_requests || 0) + '</strong><br><small>' + t('js.app.trans_total_requests') + '</small></div>' +
+            '<div class="trans-stat-success"><strong>' + (a.total_reviewed || 0) + pct(a.total_reviewed || 0) + '</strong><br><small>' + t('js.app.trans_reviewed') + '</small></div>' +
+            '<div class="trans-stat-error"><strong>' + (a.total_blocked || 0) + pct(a.total_blocked || 0) + '</strong><br><small>' + t('js.app.trans_blocked') + '</small></div>' +
+            '<div class="trans-stat-warning"><strong>' + (a.total_pending || 0) + pct(a.total_pending || 0) + '</strong><br><small>' + t('js.app.trans_awaiting_review') + '</small></div>' +
             '</div>';
 
         // json.data.length is the size of THIS page, and the last page is short — using it
@@ -812,13 +812,13 @@ async function loadTransparency(page) {
             pagEl.innerHTML = '';
         } else {
             pagEl.innerHTML = `
-                <button ${json.page <= 1 ? 'disabled' : ''} onclick="loadTransparency(${json.page - 1})">Prev</button>
-                <span>Page ${json.page} of ${json.pages}</span>
-                <button ${json.page >= json.pages ? 'disabled' : ''} onclick="loadTransparency(${json.page + 1})">Next</button>
+                <button ${json.page <= 1 ? 'disabled' : ''} onclick="loadTransparency(${json.page - 1})">${t('js.app.prev')}</button>
+                <span>${t('js.app.page_of', {page: json.page, pages: json.pages})}</span>
+                <button ${json.page >= json.pages ? 'disabled' : ''} onclick="loadTransparency(${json.page + 1})">${t('js.app.next')}</button>
             `;
         }
     } catch {
-        document.getElementById('transparency-loading').textContent = 'Failed to load data.';
+        document.getElementById('transparency-loading').textContent = t('js.app.load_failed');
     }
 }
 
@@ -896,7 +896,7 @@ function initWhitelistPage() {
         const max = parseInt(ta.dataset.max || '20', 10);
         const refresh = () => {
             const c = wlCountInput(ta.value);
-            counter.textContent = `${c.valid} valid` + (c.invalid ? ` / ${c.invalid} invalid` : '') + (c.valid > max ? ` — max ${max}` : '');
+            counter.textContent = t('js.app.wl_count_valid', {n: c.valid}) + (c.invalid ? ' / ' + t('js.app.wl_count_invalid', {n: c.invalid}) : '') + (c.valid > max ? ' — ' + t('js.app.wl_count_max', {n: max}) : '');
             counter.style.color = (c.valid > max) ? 'var(--error)' : (c.invalid ? 'var(--warning)' : '');
         };
         ta.addEventListener('input', refresh);
@@ -921,12 +921,12 @@ async function handleWhitelistSubmit(e) {
     if (c.valid === 0) { group.classList.add('has-error'); return; }
     if (c.valid > max) {
         alert.className = 'alert alert-error show';
-        alert.textContent = `Too many hashes — at most ${max} per submission.`;
+        alert.textContent = t('js.app.wl_too_many', {n: max});
         return;
     }
     btn.disabled = true;
     const orig = btn.textContent;
-    btn.textContent = 'Registering…';
+    btn.textContent = t('js.app.wl_registering');
     try {
         // The optional fields only make sense for a single torrent: one description cannot describe
         // twelve of them, and silently attaching it to all twelve would be worse than refusing.
@@ -944,44 +944,43 @@ async function handleWhitelistSubmit(e) {
             alert.className = 'alert alert-success show';
             const s = json.summary || {};
             const parts = [];
-            if (s.added) parts.push(`${s.added} registered`);
-            if (s.exists) parts.push(`${s.exists} already registered`);
-            if (s.banned) parts.push(`${s.banned} banned`);
-            if (s.invalid) parts.push(`${s.invalid} invalid`);
+            if (s.added) parts.push(t('js.app.wl_sum_added', {n: s.added}));
+            if (s.exists) parts.push(t('js.app.wl_sum_exists', {n: s.exists}));
+            if (s.banned) parts.push(t('js.app.wl_sum_banned', {n: s.banned}));
+            if (s.invalid) parts.push(t('js.app.wl_sum_invalid', {n: s.invalid}));
             let msg = parts.join(', ') + '.';
             if (s.added) {
                 const secs = parseInt(json.active_in_seconds || 0, 10);
-                msg += secs > 0 ? ` New hashes become active on the tracker within ~${secs} s.` : ' New hashes are active on the tracker.';
+                msg += secs > 0 ? ' ' + t('js.app.wl_active_within', {n: secs}) : ' ' + t('js.app.wl_active_now');
             }
-            if (json.file_ok === false) msg += ' (Warning: the tracker list file could not be updated — the admin has been notified.)';
+            if (json.file_ok === false) msg += ' ' + t('js.app.wl_file_warning');
             // When the tracker checks submissions, "registered" is not the end of the story yet.
             if (json.probe && json.probe.on && (json.probe.hashes || []).length) {
-                msg += ' They are being checked now — see below.';
+                msg += ' ' + t('js.app.wl_probe_checking');
                 if (window.wlWatchProbe) window.wlWatchProbe(json.probe.hashes, json.probe.timeout_minutes);
             }
             if (json.content_proposed) {
-                msg += ' This torrent already had a description, so yours was submitted as a proposed '
-                     + 'change for a moderator to look at.';
+                msg += ' ' + t('js.app.wl_content_proposed');
             } else if (json.content_pending) {
-                msg += ' Your description and link are waiting to be reviewed.';
+                msg += ' ' + t('js.app.wl_content_pending');
             }
             alert.textContent = msg;
             renderWhitelistResults(json);
             ta.value = '';
-            document.getElementById('wl-counter').textContent = '0 valid';
+            document.getElementById('wl-counter').textContent = t('js.app.wl_count_valid', {n: 0});
             btn.textContent = orig;
             startCooldown(btn, 10);
         } else {
             btn.textContent = orig;
             const messages = {
-                rate_limit: 'Too many submissions from your network. Try again later.',
-                daily_cap: 'Daily registration limit reached. Try again tomorrow.',
-                too_many: `Too many hashes — at most ${max} per submission.`,
-                no_valid: 'No valid magnet links or info hashes found.',
-                registration_disabled: 'Public registration is disabled on this tracker.',
-                registration_unavailable: 'Registration is temporarily unavailable (CAPTCHA not configured).',
-                'CAPTCHA cancelled': 'CAPTCHA cancelled — please try again.',
-                'CAPTCHA verification failed': 'CAPTCHA verification failed — please try again.',
+                rate_limit: t('js.app.wl_err_rate_limit'),
+                daily_cap: t('js.app.wl_err_daily_cap'),
+                too_many: t('js.app.wl_too_many', {n: max}),
+                no_valid: t('js.app.wl_err_no_valid'),
+                registration_disabled: t('js.app.wl_err_disabled'),
+                registration_unavailable: t('js.app.wl_err_unavailable'),
+                'CAPTCHA cancelled': t('js.app.captcha_cancelled_2'),
+                'CAPTCHA verification failed': t('js.app.captcha_failed'),
             };
             showFormSubmitError(form, alert, btn, json, messages);
             if (json && json.retry_after) startCooldown(btn, Math.min(120, parseInt(json.retry_after, 10) || 60));
@@ -1001,7 +1000,7 @@ function renderWhitelistResults(json) {
     list.textContent = '';
     const results = Array.isArray(json.results) ? json.results : [];
     if (!results.length) { box.hidden = true; return; }
-    const labels = { added: 'Registered', exists: 'Already registered', banned: 'Banned', invalid: 'Invalid' };
+    const labels = { added: t('js.app.wl_label_added'), exists: t('js.app.wl_label_exists'), banned: t('js.app.wl_label_banned'), invalid: t('js.app.wl_label_invalid') };
     results.forEach(r => {
         const row = document.createElement('div');
         row.className = 'wl-row wl-' + (r.status || 'invalid');
@@ -1029,10 +1028,10 @@ function renderWhitelistResults(json) {
             const b = document.createElement('button');
             b.type = 'button';
             b.className = 'copy-btn wl-copy';
-            b.title = 'Copy magnet link';
-            b.textContent = 'Copy';
+            b.title = t('js.app.copy_magnet');
+            b.textContent = t('js.app.copy');
             b.addEventListener('click', () => {
-                navigator.clipboard.writeText(magnet).then(() => { b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1500); });
+                navigator.clipboard.writeText(magnet).then(() => { b.textContent = t('js.app.copied'); setTimeout(() => { b.textContent = t('js.app.copy'); }, 1500); });
             });
             mrow.appendChild(mcode);
             mrow.appendChild(b);
@@ -1056,7 +1055,7 @@ async function handleWhitelistCheck(e) {
     const h = wlParseToken(raw);
     if (!h) {
         alert.className = 'alert alert-error show';
-        alert.textContent = 'Enter a magnet link or a 40-character info hash.';
+        alert.textContent = t('js.app.wl_check_enter');
         return;
     }
     btn.disabled = true;
@@ -1066,21 +1065,21 @@ async function handleWhitelistCheck(e) {
         if (json.success) {
             if (json.banned) {
                 alert.className = 'alert alert-error show';
-                alert.textContent = `Hash ${json.hash} is BANNED on this tracker.`;
+                alert.textContent = t('js.app.wl_check_banned', {hash: json.hash});
             } else if (json.whitelisted) {
                 alert.className = 'alert alert-success show';
-                alert.textContent = `Hash ${json.hash} is registered` + (json.added_at ? ` (since ${json.added_at})` : '') + '.';
+                alert.textContent = t('js.app.wl_check_registered', {hash: json.hash}) + (json.added_at ? ' ' + t('js.app.wl_check_since', {date: json.added_at}) : '') + '.';
             } else {
                 alert.className = 'alert alert-error show';
-                alert.textContent = json.mode === 'whitelist' ? `Hash ${json.hash} is NOT registered on this tracker.` : `Hash ${json.hash} is served (open tracker mode).`;
+                alert.textContent = json.mode === 'whitelist' ? t('js.app.wl_check_not_registered', {hash: json.hash}) : t('js.app.wl_check_open', {hash: json.hash});
             }
         } else {
             alert.className = 'alert alert-error show';
-            alert.textContent = json.error || 'Lookup failed.';
+            alert.textContent = json.error || t('js.app.lookup_failed');
         }
     } catch {
         alert.className = 'alert alert-error show';
-        alert.textContent = 'Network error. Please try again.';
+        alert.textContent = t('js.app.network_error_2');
     } finally {
         startCooldown(btn, 3);
     }
@@ -1118,10 +1117,10 @@ const SYNCING_UI_DEFER_MS = 400;
 // Honest, generic progress messages (cycled while genuinely waiting on the upstream fetch).
 // Kept accurate on purpose — they describe what's actually happening, not invented "steps".
 let statsLoadingTexts = [
-    { title: "Contacting tracker", sub: "Requesting live statistics..." },
-    { title: "Fetching swarm data", sub: "Waiting for the tracker to respond..." },
-    { title: "Loading statistics", sub: "Reading peer and connection counts..." },
-    { title: "Almost ready", sub: "Preparing the dashboard..." }
+    { title: t('js.app.stats_load1_title'), sub: t('js.app.stats_load1_sub') },
+    { title: t('js.app.stats_load2_title'), sub: t('js.app.stats_load2_sub') },
+    { title: t('js.app.stats_load3_title'), sub: t('js.app.stats_load3_sub') },
+    { title: t('js.app.stats_load4_title'), sub: t('js.app.stats_load4_sub') }
 ];
 let statsLoadingCycleIndex = 0;
 let statsLoadingCycleTimer = null;
@@ -1200,7 +1199,7 @@ function initTrackerStats() {
             const beacon = homeWidget.querySelector('.home-stat-beacon');
             if (beacon) {
                 beacon.classList.remove('syncing');
-                beacon.title = "Live Syncing";
+                beacon.title = t('js.app.stats_live');
             }
             clearTimeout(statsHomePollTimer);
             statsHomePollTimer = setTimeout(() => {
@@ -1269,10 +1268,10 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
             countdownBar.style.width = '100%';
             countdownBar.classList.add('syncing');
         }
-        if (countdownText) countdownText.textContent = "Syncing Swarms...";
+        if (countdownText) countdownText.textContent = t('js.app.stats_syncing');
         if (!isFirstLoad && badge) {
             badge.classList.add('syncing');
-            if (beaconText) beaconText.textContent = "Syncing Swarms...";
+            if (beaconText) beaconText.textContent = t('js.app.stats_syncing');
         }
     }, SYNCING_UI_DEFER_MS);
 
@@ -1297,7 +1296,7 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
         if (e.name === 'AbortError') return;
         stopStatsLoadingAnimation();
         // Retry after a longer pause on transport-level errors.
-        showStatsError('Connection timed out or network error. Retrying soon...');
+        showStatsError(t('js.app.stats_net_error'));
         clearTimeout(statsPollTimer);
         statsPollTimer = setTimeout(() => {
             document.getElementById('stats-error')?.classList.add('hidden');
@@ -1319,7 +1318,7 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
 
         if (!json || !json.success) {
             // Server returned a non-success payload (e.g. 503 with no cache). Wait, then retry.
-            const errMsg = (json && json.error) ? json.error : 'Server error occurred.';
+            const errMsg = (json && json.error) ? json.error : t('js.app.stats_server_error');
             if (json && (json.syncing_in_background || json.sync_required)) {
                 // The server is busy but answering — fall back to polling rather than an error UI.
                 const d = syncPollDelayMs(statsSyncBackoff);
@@ -1350,14 +1349,14 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
             if (badge) {
                 badge.classList.remove('hidden');
                 badge.classList.add('syncing');
-                if (beaconText) beaconText.textContent = "Syncing Swarms...";
+                if (beaconText) beaconText.textContent = t('js.app.stats_syncing');
             }
             if (countdownBar) {
                 countdownBar.style.transition = 'none';
                 countdownBar.style.width = '100%';
                 countdownBar.classList.add('syncing');
             }
-            if (countdownText) countdownText.textContent = "Syncing Swarms...";
+            if (countdownText) countdownText.textContent = t('js.app.stats_syncing');
 
             const d = syncPollDelayMs(statsSyncBackoff);
             statsSyncBackoff++;
@@ -1370,14 +1369,14 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
             if (badge) {
                 badge.classList.remove('hidden');
                 badge.classList.add('syncing');
-                if (beaconText) beaconText.textContent = "Syncing Swarms...";
+                if (beaconText) beaconText.textContent = t('js.app.stats_syncing');
             }
             if (countdownBar) {
                 countdownBar.style.transition = 'none';
                 countdownBar.style.width = '100%';
                 countdownBar.classList.add('syncing');
             }
-            if (countdownText) countdownText.textContent = "Syncing Swarms...";
+            if (countdownText) countdownText.textContent = t('js.app.stats_syncing');
             // Fire a blocking sync. statsInFlight guard prevents re-entry; the call schedules
             // its own next poll/countdown on completion.
             loadStatsFull(true, false);
@@ -1387,7 +1386,7 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
             if (badge) {
                 badge.classList.remove('hidden');
                 badge.classList.remove('syncing');
-                if (beaconText) beaconText.textContent = "Live Syncing";
+                if (beaconText) beaconText.textContent = t('js.app.stats_live');
             }
             const remainingSec = json.remaining_seconds !== undefined ? parseInt(json.remaining_seconds) : intervalSec;
             startStatsCountdown(remainingSec);
@@ -1448,16 +1447,16 @@ function renderStatsDashboard(res) {
     const subLeechEl = document.getElementById('sub-leechers');
     const subPeersEl = document.getElementById('sub-peers');
     if (peerStyle === 'percent') {
-        if (subSeedsEl) subSeedsEl.textContent = `${seedPct}% of total peers`;
-        if (subLeechEl) subLeechEl.textContent = `${leechPct}% of total peers`;
+        if (subSeedsEl) subSeedsEl.textContent = t('js.app.pct_of_total_peers', {pct: seedPct});
+        if (subLeechEl) subLeechEl.textContent = t('js.app.pct_of_total_peers', {pct: leechPct});
     } else {
-        if (subSeedsEl) subSeedsEl.textContent = `of ${peersFmt} peers`;
-        if (subLeechEl) subLeechEl.textContent = `of ${peersFmt} peers`;
+        if (subSeedsEl) subSeedsEl.textContent = t('js.app.of_peers', {peers: peersFmt});
+        if (subLeechEl) subLeechEl.textContent = t('js.app.of_peers', {peers: peersFmt});
     }
-    if (subPeersEl) subPeersEl.textContent = `${leechFmt} leechers · ${seedsFmt} seeds`;
+    if (subPeersEl) subPeersEl.textContent = t('js.app.leech_seed_summary', {leechers: leechFmt, seeds: seedsFmt});
     
     document.getElementById('val-uptime').textContent = res.uptime_string;
-    document.getElementById('val-tracker-id').textContent = res.tracker_id || 'N/A';
+    document.getElementById('val-tracker-id').textContent = res.tracker_id || t('js.app.na');
     
     const versionEl = document.getElementById('val-version');
     // res.version comes from the upstream tracker XML — treat it as untrusted. Only render it as
@@ -1471,10 +1470,10 @@ function renderStatsDashboard(res) {
         a.rel = 'noopener noreferrer';
         a.className = 'status-link font-mono';
         a.style.fontSize = '0.75rem';
-        a.innerHTML = 'Git Commit <i class="bi bi-box-arrow-up-right"></i>';
+        a.innerHTML = escHtml(t('js.app.git_commit')) + ' <i class="bi bi-box-arrow-up-right"></i>';
         versionEl.appendChild(a);
     } else {
-        versionEl.textContent = res.version || 'N/A';
+        versionEl.textContent = res.version || t('js.app.na');
     }
     
     const udpCount = res.connections.udp.connect + res.connections.udp.announce + res.connections.udp.scrape;
@@ -1512,13 +1511,13 @@ function renderStatsDashboard(res) {
             debugPanel.classList.remove('hidden');
             errorsBody.innerHTML = res.http_errors.map(err => {
                 let badgeClass = 'status-badge-sm status-badge ';
-                let severity = 'Low';
+                let severity = t('js.app.severity_low');
                 if (err.code.startsWith('5')) {
                     badgeClass += 'blocked';
-                    severity = 'Critical';
+                    severity = t('js.app.severity_critical');
                 } else if (err.code.startsWith('400')) {
                     badgeClass += 'pending';
-                    severity = 'Moderate';
+                    severity = t('js.app.severity_moderate');
                 } else {
                     badgeClass += 'archived';
                 }
@@ -1539,7 +1538,7 @@ function renderRenewHeatmap(intervals) {
     if (!container) return;
     
     if (intervals.length === 0) {
-        container.innerHTML = '<div class="text-center text-muted w-100 py-3">No activity heat profile available.</div>';
+        container.innerHTML = '<div class="text-center text-muted w-100 py-3">' + escHtml(t('js.app.no_heat_profile')) + '</div>';
         return;
     }
     
@@ -1557,7 +1556,7 @@ function renderRenewHeatmap(intervals) {
         
         // item.interval comes from upstream XML — escape before interpolating into markup.
         const label = escHtml(item.interval);
-        const tooltipText = escAttr(`Interval ${item.interval}m: ${item.count.toLocaleString()} renews`);
+        const tooltipText = escAttr(t('js.app.interval_tooltip', {interval: item.interval, count: item.count.toLocaleString()}));
 
         return `<div class="heat-block level-${level}" data-tooltip="${tooltipText}">
             <span>${label}</span>
@@ -1613,7 +1612,7 @@ function startStatsCountdown(seconds) {
     }
 
     if (seconds <= 0) {
-        if (text) text.textContent = "Syncing Swarms...";
+        if (text) text.textContent = t('js.app.syncing_swarms');
         if (bar) {
             bar.style.transition = 'none';
             bar.style.width = '100%';
@@ -1635,7 +1634,7 @@ function startStatsCountdown(seconds) {
         bar.style.width = '0%';
     }
 
-    if (text) text.textContent = `Next update in ${seconds}s`;
+    if (text) text.textContent = t('js.app.next_update_in', {n: seconds});
 
     // The TEXT label still ticks down — but it only changes the textContent, no layout work.
     const totalTime = seconds * 1000;
@@ -1644,7 +1643,7 @@ function startStatsCountdown(seconds) {
     statsCountdownTimer = setInterval(() => {
         const elapsed = performance.now() - startTime;
         const currentRemaining = Math.max(0, Math.ceil(seconds - (elapsed / 1000)));
-        if (text) text.textContent = `Next update in ${currentRemaining}s`;
+        if (text) text.textContent = t('js.app.next_update_in', {n: currentRemaining});
 
         if (elapsed >= totalTime) {
             clearInterval(statsCountdownTimer);
@@ -1653,7 +1652,7 @@ function startStatsCountdown(seconds) {
                 bar.style.width = '100%';
                 bar.classList.add('syncing');
             }
-            if (text) text.textContent = "Syncing Swarms...";
+            if (text) text.textContent = t('js.app.syncing_swarms');
             loadStatsFull(true, false);
         }
     }, 250);
@@ -1700,7 +1699,7 @@ async function loadStatsHome(forceSync = false) {
     statsHomeSyncingUiTimer = setTimeout(() => {
         if (beacon) {
             beacon.classList.add('syncing');
-            beacon.title = "Syncing Swarms...";
+            beacon.title = t('js.app.syncing_swarms');
         }
     }, SYNCING_UI_DEFER_MS);
 
@@ -1722,7 +1721,7 @@ async function loadStatsHome(forceSync = false) {
         statsHomeInFlight = false;
         clearTimeout(statsHomeSyncingUiTimer);
         if (e.name === 'AbortError') return;
-        if (beacon) { beacon.classList.remove('syncing'); beacon.title = "Sync failed"; }
+        if (beacon) { beacon.classList.remove('syncing'); beacon.title = t('js.app.sync_failed'); }
         clearTimeout(statsHomePollTimer);
         statsHomePollTimer = setTimeout(() => loadStatsHome(false), 15000);
         return;
@@ -1735,7 +1734,7 @@ async function loadStatsHome(forceSync = false) {
 
         if (json.syncing_in_background) {
             // Wait for the existing sync to finish — exponential backoff, not fixed 2s.
-            if (beacon) { beacon.classList.add('syncing'); beacon.title = "Syncing Swarms..."; }
+            if (beacon) { beacon.classList.add('syncing'); beacon.title = t('js.app.syncing_swarms'); }
             const d = syncPollDelayMs(statsHomeSyncBackoff);
             statsHomeSyncBackoff++;
             statsHomePollTimer = setTimeout(() => loadStatsHome(false), d);
@@ -1746,7 +1745,7 @@ async function loadStatsHome(forceSync = false) {
         } else {
             // Fresh cache. Schedule the next poll at the home interval (not the server cache TTL).
             statsHomeSyncBackoff = 0;
-            if (beacon) { beacon.classList.remove('syncing'); beacon.title = "Live Syncing"; }
+            if (beacon) { beacon.classList.remove('syncing'); beacon.title = t('js.app.live_syncing'); }
             const remainingSec = json.remaining_seconds !== undefined ? parseInt(json.remaining_seconds) : intervalSec;
             statsHomePollTimer = setTimeout(() => loadStatsHome(false), Math.max(1, remainingSec) * 1000);
         }
@@ -1757,7 +1756,7 @@ async function loadStatsHome(forceSync = false) {
             statsHomeSyncBackoff++;
             statsHomePollTimer = setTimeout(() => loadStatsHome(false), d);
         } else {
-            if (beacon) { beacon.classList.remove('syncing'); beacon.title = "Sync failed"; }
+            if (beacon) { beacon.classList.remove('syncing'); beacon.title = t('js.app.sync_failed'); }
             statsHomePollTimer = setTimeout(() => loadStatsHome(false), 15000);
         }
     }
@@ -1828,11 +1827,11 @@ const getJson = async (endpoint) => {
     }
     // ── password policy (mirrors userPasswordIssues() server-side) + live checklist UI ──
     const PW_REQS = [
-        ['At least 8 characters', (p) => p.length >= 8 && p.length <= 200],
-        ['A lowercase letter', (p) => /[a-z]/.test(p)],
-        ['An uppercase letter', (p) => /[A-Z]/.test(p)],
-        ['A special character', (p) => /[^a-zA-Z0-9]/.test(p)],
-        ['A digit', (p) => /[0-9]/.test(p)],
+        [t('js.app.pw_min_len'), (p) => p.length >= 8 && p.length <= 200],
+        [t('js.app.pw_lower'), (p) => /[a-z]/.test(p)],
+        [t('js.app.pw_upper'), (p) => /[A-Z]/.test(p)],
+        [t('js.app.pw_special'), (p) => /[^a-zA-Z0-9]/.test(p)],
+        [t('js.app.pw_digit'), (p) => /[0-9]/.test(p)],
     ];
     const pwValid = (p) => PW_REQS.every(([, t]) => t(p));
     /** Requirement checklist under a password box; optional=true hides it while the box is empty. */
@@ -1951,10 +1950,10 @@ const getJson = async (endpoint) => {
                 session: ($id('login-session') || { value: 'forever' }).value,
             });
             if (json && json.success) {
-                showAlert(alert, 'Signed in — loading your account…', true);
+                showAlert(alert, t('js.app.signed_in_loading'), true);
                 window.location.href = APP_BASE + '?action=account';
             } else {
-                showAlert(alert, (json && json.error) || 'Sign-in failed', false);
+                showAlert(alert, (json && json.error) || t('js.app.signin_failed'), false);
                 btn.disabled = false;
             }
         });
@@ -1996,10 +1995,10 @@ const getJson = async (endpoint) => {
                 terms_accepted: 1,
             });
             if (json && json.success) {
-                showAlert(alert, 'Account created — welcome!' + (json.verify_sent ? ' A confirmation link was sent to your email address.' : ''), true);
+                showAlert(alert, t('js.app.account_created') + (json.verify_sent ? ' ' + t('js.app.verify_link_sent') : ''), true);
                 window.location.href = APP_BASE + '?action=account';
             } else {
-                showAlert(alert, (json && json.error) || 'Registration failed', false);
+                showAlert(alert, (json && json.error) || t('js.app.register_failed'), false);
                 btn.disabled = false;
             }
         });
@@ -2009,12 +2008,12 @@ const getJson = async (endpoint) => {
     async function loadAccount() {
         const groupsBox = $id('acc-groups');
         const me = await getJson('user_me');
-        if (!me || !me.success) { groupsBox.textContent = 'Could not load your groups.'; return; }
+        if (!me || !me.success) { groupsBox.textContent = t('js.app.groups_load_failed'); return; }
         groupsBox.textContent = '';
         if (!me.groups.length) {
             const none = document.createElement('span');
             none.className = 'text-muted';
-            none.textContent = 'No groups yet.';
+            none.textContent = t('js.app.no_groups');
             groupsBox.appendChild(none);
         } else {
             me.groups.forEach(g => {
@@ -2026,7 +2025,7 @@ const getJson = async (endpoint) => {
                 div.appendChild(name);
                 const until = document.createElement('span');
                 until.className = 'text-muted';
-                until.textContent = g.expires_at ? ' — until ' + fmtDatePub(g.expires_at) : ' — permanent';
+                until.textContent = ' — ' + (g.expires_at ? t('js.app.group_until', {date: fmtDatePub(g.expires_at)}) : t('js.app.group_permanent'));
                 div.appendChild(until);
                 if (g.description) {
                     const d = document.createElement('div');
@@ -2039,7 +2038,7 @@ const getJson = async (endpoint) => {
         }
         const navBadge = $id('nav-unread'), accBadge = $id('acc-unread-badge');
         if (navBadge) { navBadge.textContent = String(me.unread); navBadge.hidden = me.unread <= 0; }
-        if (accBadge) { accBadge.textContent = me.unread + ' unread'; accBadge.hidden = me.unread <= 0; }
+        if (accBadge) { accBadge.textContent = t('js.app.unread_count', {n: me.unread}); accBadge.hidden = me.unread <= 0; }
     }
     let notifPage = 1;
     async function loadNotifications(page) {
@@ -2047,13 +2046,13 @@ const getJson = async (endpoint) => {
         const box = $id('acc-notifications');
         const pag = $id('acc-notif-pagination');
         const json = await getJson('user_notifications&page=' + notifPage);
-        if (!json || !json.success) { box.textContent = 'Could not load notifications.'; return; }
+        if (!json || !json.success) { box.textContent = t('js.app.notif_load_failed'); return; }
         box.textContent = '';
         if (pag) pag.textContent = '';
         if (!json.notifications.length) {
             const none = document.createElement('span');
             none.className = 'text-muted';
-            none.textContent = 'Nothing here yet.';
+            none.textContent = t('js.common.nothing_here');
             box.appendChild(none);
             return;
         }
@@ -2062,9 +2061,9 @@ const getJson = async (endpoint) => {
             item.className = 'acc-notif' + (n.read_at ? ' acc-notif-read' : '');
             const head = document.createElement('div');
             head.className = 'acc-notif-head';
-            const t = document.createElement('strong');
-            t.textContent = n.title;
-            head.appendChild(t);
+            const strongEl = document.createElement('strong');
+            strongEl.textContent = n.title;
+            head.appendChild(strongEl);
             const when = document.createElement('span');
             when.className = 'text-muted';
             when.textContent = fmtDatePub(n.created_at);
@@ -2080,7 +2079,7 @@ const getJson = async (endpoint) => {
                 const mark = document.createElement('button');
                 mark.type = 'button';
                 mark.className = 'btn btn-secondary btn-small';
-                mark.textContent = 'Mark read';
+                mark.textContent = t('js.app.mark_read');
                 mark.addEventListener('click', async () => {
                     await postJson('user_notifications', { csrf_token: $id('account-csrf').value, ids: [n.id] });
                     loadNotifications(); loadAccount();
@@ -2098,11 +2097,11 @@ const getJson = async (endpoint) => {
                 b.addEventListener('click', () => loadNotifications(target));
                 return b;
             };
-            pag.appendChild(mk('‹ Prev', json.page - 1, json.page <= 1));
+            pag.appendChild(mk(t('js.app.pg_prev'), json.page - 1, json.page <= 1));
             const info = document.createElement('span');
-            info.textContent = 'Page ' + json.page + ' of ' + json.pages + ' · ' + json.total + ' total';
+            info.textContent = t('js.app.page_of_total', {page: json.page, pages: json.pages, total: json.total});
             pag.appendChild(info);
-            pag.appendChild(mk('Next ›', json.page + 1, json.page >= json.pages));
+            pag.appendChild(mk(t('js.app.pg_next'), json.page + 1, json.page >= json.pages));
         }
     }
     function initAccount() {
@@ -2120,14 +2119,14 @@ const getJson = async (endpoint) => {
         $id('acc-mark-all').addEventListener('click', async (e) => {
             const btn = e.currentTarget;
             const r = await postJson('user_notifications', { csrf_token: $id('account-csrf').value, all: 1 });
-            pubTip(btn, r && r.success ? (r.marked > 0 ? 'Marked ' + r.marked + ' read' : 'Nothing unread') : 'Failed');
+            pubTip(btn, r && r.success ? (r.marked > 0 ? t('js.app.marked_read', {n: r.marked}) : t('js.app.nothing_unread')) : t('js.app.failed'));
             loadNotifications(); loadAccount();
         });
         const delRead = $id('acc-delete-read');
         if (delRead) delRead.addEventListener('click', async (e) => {
             const btn = e.currentTarget;
             const r = await postJson('user_notifications', { csrf_token: $id('account-csrf').value, delete_read: 1 });
-            pubTip(btn, r && r.success ? (r.deleted > 0 ? 'Deleted ' + r.deleted : 'Nothing to delete') : 'Failed');
+            pubTip(btn, r && r.success ? (r.deleted > 0 ? t('js.app.deleted_n', {n: r.deleted}) : t('js.app.nothing_to_delete')) : t('js.app.failed'));
             if (r && r.success) loadNotifications(1);
         });
         const cancelEc = $id('acc-cancel-echange');
@@ -2146,19 +2145,19 @@ const getJson = async (endpoint) => {
             const bulkLabel = $id('acc-bulk-pref-label');
             getJson('user_email_prefs').then(r => {
                 if (!r || !r.success) {
-                    if (label) label.textContent = 'unavailable';
-                    if (bulkLabel) bulkLabel.textContent = 'unavailable';
+                    if (label) label.textContent = t('js.app.pref_unavailable');
+                    if (bulkLabel) bulkLabel.textContent = t('js.app.pref_unavailable');
                     return;
                 }
-                if (mailPref) { mailPref.checked = !!r.enabled; label.textContent = r.enabled ? 'enabled' : 'disabled'; }
-                if (bulkPref) { bulkPref.checked = !!r.bulk_enabled; bulkLabel.textContent = r.bulk_enabled ? 'enabled' : 'disabled'; }
+                if (mailPref) { mailPref.checked = !!r.enabled; label.textContent = r.enabled ? t('js.app.pref_enabled') : t('js.app.pref_disabled'); }
+                if (bulkPref) { bulkPref.checked = !!r.bulk_enabled; bulkLabel.textContent = r.bulk_enabled ? t('js.app.pref_enabled') : t('js.app.pref_disabled'); }
             });
             const bind = (box, lab, type) => {
                 if (!box) return;
                 box.addEventListener('change', async () => {
                     const r = await postJson('user_email_prefs', {
                         csrf_token: $id('account-csrf').value, enabled: box.checked ? 1 : 0, type });
-                    if (r && r.success) lab.textContent = r.enabled ? 'enabled' : 'disabled';
+                    if (r && r.success) lab.textContent = r.enabled ? t('js.app.pref_enabled') : t('js.app.pref_disabled');
                     else { box.checked = !box.checked; }
                 });
             };
@@ -2180,8 +2179,8 @@ const getJson = async (endpoint) => {
         if (verifyBtn) verifyBtn.addEventListener('click', async () => {
             verifyBtn.disabled = true;
             const r = await postJson('user_verify_send', { csrf_token: $id('account-csrf').value });
-            if (r && r.success && r.sent) { verifyBtn.textContent = 'Sent ✓'; }
-            else { verifyBtn.textContent = 'Failed'; verifyBtn.title = (r && (r.message || r.error)) || 'Could not send'; setTimeout(() => { verifyBtn.textContent = 'Resend link'; verifyBtn.disabled = false; }, 4000); }
+            if (r && r.success && r.sent) { verifyBtn.textContent = t('js.app.verify_sent'); }
+            else { verifyBtn.textContent = t('js.app.failed'); verifyBtn.title = (r && (r.message || r.error)) || t('js.app.verify_could_not_send'); setTimeout(() => { verifyBtn.textContent = t('js.app.verify_resend'); verifyBtn.disabled = false; }, 4000); }
         });
         $id('account-logout').addEventListener('click', async () => {
             await postJson('user_logout', { csrf_token: $id('account-csrf').value });
@@ -2222,25 +2221,25 @@ const getJson = async (endpoint) => {
             // an emptied box removes the address; anything different from the current one changes it
             if (newEmail !== (hadEmail ? curEmail : '')) body.email = newEmail;
             if (passIn.value !== '') body.new_password = passIn.value;
-            if (body.email === undefined && body.new_password === undefined) { showAlert(alert, 'Nothing to change.', false); return; }
+            if (body.email === undefined && body.new_password === undefined) { showAlert(alert, t('js.app.nothing_to_change'), false); return; }
             btn.disabled = true;
             const json = await postJson('user_update', body);
             btn.disabled = false;
             if (json && json.success) {
-                let msg = 'Saved.';
-                if (json.changed.includes('password')) msg += ' Use the new password next time you sign in.';
-                if (json.email_stage === 'old') msg += ' Email change started — confirm it from your CURRENT mailbox first (step 1 of 2), then from the new one.';
-                else if (json.email_stage === 'done_direct') msg += json.verify_sent ? ' A verification link was sent to the new address.' : ' Email saved.';
+                let msg = t('js.app.saved');
+                if (json.changed.includes('password')) msg += ' ' + t('js.app.acc_use_new_password');
+                if (json.email_stage === 'old') msg += ' ' + t('js.app.acc_email_change_started');
+                else if (json.email_stage === 'done_direct') msg += ' ' + (json.verify_sent ? t('js.app.acc_verify_link_sent') : t('js.app.acc_email_saved'));
                 showAlert(alert, msg, true);
                 $id('acc-cur-pass').value = ''; passIn.value = ''; pass2In.value = ''; pass2Group.hidden = true;
                 email2In.value = ''; email2Group.hidden = true; $id('acc-pw-checklist').hidden = true;
                 if (json.email_stage === 'done_direct') {
-                    $id('acc-email').textContent = body.email || 'none';
+                    $id('acc-email').textContent = body.email || t('js.app.acc_email_none');
                 } else if (json.email_stage === 'old') {
                     setTimeout(() => location.reload(), 2500);   // show the pending-change banner
                 }
             } else {
-                showAlert(alert, (json && json.error) || 'Update failed', false);
+                showAlert(alert, (json && json.error) || t('js.app.update_failed'), false);
             }
         });
     }
@@ -2257,8 +2256,8 @@ const getJson = async (endpoint) => {
                     csrf_token: csrfOf(reqForm), login: $id('reset-login').value.trim(),
                 });
                 btn.disabled = false;
-                if (json && json.success) showAlert(alert, json.message || 'Check your inbox.', true);
-                else showAlert(alert, (json && json.error) || 'Request failed', false);
+                if (json && json.success) showAlert(alert, json.message || t('js.app.reset_check_inbox'), true);
+                else showAlert(alert, (json && json.error) || t('js.app.request_failed'), false);
             });
         }
         const confForm = $id('reset-confirm-form');
@@ -2268,15 +2267,15 @@ const getJson = async (endpoint) => {
                 e.preventDefault();
                 const alert = $id('resetc-alert'), btn = $id('resetc-submit');
                 const p1 = $id('resetc-password'), p2 = $id('resetc-password2');
-                if (!pwValid(p1.value)) { showAlert(alert, 'The password does not meet the requirements.', false); return; }
-                if (p1.value !== p2.value) { showAlert(alert, 'Passwords do not match.', false); return; }
+                if (!pwValid(p1.value)) { showAlert(alert, t('js.app.pw_requirements'), false); return; }
+                if (p1.value !== p2.value) { showAlert(alert, t('js.app.pw_mismatch'), false); return; }
                 btn.disabled = true;
                 const json = await postJson('user_reset_confirm', { csrf_token: csrfOf(confForm), token: $id('resetc-token').value, password: p1.value });
                 btn.disabled = false;
                 if (json && json.success) {
-                    showAlert(alert, 'Password changed — you can sign in now.', true);
+                    showAlert(alert, t('js.app.pw_changed_sign_in'), true);
                     setTimeout(() => { window.location.href = APP_BASE + '?action=login'; }, 1200);
-                } else showAlert(alert, (json && json.error) || 'Reset failed', false);
+                } else showAlert(alert, (json && json.error) || t('js.app.reset_failed'), false);
             });
         }
     }
@@ -2335,7 +2334,7 @@ const getJson = async (endpoint) => {
             else if (sortStack[idx].dir === 'desc') sortStack[idx].dir = 'asc';
             else sortStack.splice(idx, 1);
             updateSortIcons();
-            run(1);
+            runSortDebounced();
         }));
         if (bestBox) bestBox.addEventListener('change', () => run(1));
         const perPageSel = $id('search-perpage');
@@ -2346,8 +2345,8 @@ const getJson = async (endpoint) => {
         function setLoading(on) {
             const table = $id('search-table');
             table.classList.toggle('search-loading', on);
-            const t = $id('search-total');
-            if (on) { t.dataset.prev = t.textContent; t.textContent = 'Searching…'; }
+            const tot = $id('search-total');
+            if (on) { tot.dataset.prev = tot.textContent; tot.textContent = t('js.app.searching'); }
         }
         async function run(page) {
             curPage = page;
@@ -2372,9 +2371,9 @@ const getJson = async (endpoint) => {
                 $id('search-total').textContent = '';
                 renderPager(1, 1, 0);
                 const code = json && json.error;
-                showAlert(alert, code === 'rate_limit' ? 'Rate limit reached — try again later.'
-                    : code === 'login_required' ? 'Please sign in to search.'
-                    : code || 'Search failed.', false);
+                showAlert(alert, code === 'rate_limit' ? t('js.app.search_rate_limit')
+                    : code === 'login_required' ? t('js.app.search_login_required')
+                    : code || t('js.app.search_failed'), false);
                 return;
             }
             lastTokens = q ? queryTokens(q) : [];
@@ -2386,13 +2385,13 @@ const getJson = async (endpoint) => {
                 nameTd.className = 'search-name';
                 const nameSpan = document.createElement('span');
                 nameSpan.title = r.name || '';
-                if (lastTokens.length) markInto(nameSpan, r.name || '(no name)', lastTokens);
-                else nameSpan.textContent = r.name || '(no name)';
+                if (lastTokens.length) markInto(nameSpan, r.name || t('js.app.no_name'), lastTokens);
+                else nameSpan.textContent = r.name || t('js.app.no_name');
                 nameTd.appendChild(nameSpan);
                 if (r.src === 'whitelist') {
                     const wb = document.createElement('span');
                     wb.className = 'search-wl-badge';
-                    wb.title = 'Registered on this tracker (whitelisted)';
+                    wb.title = t('js.app.wl_badge_title');
                     wb.textContent = 'WL';
                     nameTd.appendChild(wb);
                 }
@@ -2404,10 +2403,10 @@ const getJson = async (endpoint) => {
                 if (r.files_count) {
                     const fc = document.createElement(canFiles && r.info_hash ? 'button' : 'span');
                     fc.className = 'search-files-chip' + (lastFilesSearch ? ' chip-hit' : '');
-                    fc.textContent = r.files_count + (r.files_count === 1 ? ' file' : ' files');
+                    fc.textContent = r.files_count === 1 ? t('js.app.files_one') : t('js.app.files_many', {n: r.files_count});
                     if (canFiles && r.info_hash) {
                         fc.type = 'button';
-                        fc.title = lastFilesSearch ? 'Show the file list (your query also matched file names here)' : 'Show the file list';
+                        fc.title = lastFilesSearch ? t('js.app.show_files_matched') : t('js.app.show_files');
                         fc.addEventListener('click', () => openFiles(r.info_hash, r.name));
                     }
                     nameTd.appendChild(fc);
@@ -2429,17 +2428,17 @@ const getJson = async (endpoint) => {
                         // every row of a fifty-row table is noise, and the tooltip carries the count.
                         repTd.className += ' search-rep-stars';
                         repTd.textContent = r.rep.stars.toFixed(1) + ' ★';
-                        repTd.title = r.rep.stars.toFixed(1) + ' out of 5, from ' + r.rep.total
-                                    + (r.rep.total === 1 ? ' rating' : ' ratings');
+                        repTd.title = r.rep.total === 1 ? t('js.app.rep_stars_title_one', {stars: r.rep.stars.toFixed(1)})
+                                    : t('js.app.rep_stars_title_many', {stars: r.rep.stars.toFixed(1), n: r.rep.total});
                     } else if (r.rep) {
                         // The count comes with the percentage, always. A column that shows only
                         // "100%" makes one vote look like four hundred.
                         repTd.className += r.rep.pct >= 50 ? ' search-rep-up' : ' search-rep-down';
                         repTd.textContent = r.rep.pct + '%';
-                        repTd.title = r.rep.total + (r.rep.total === 1 ? ' rating' : ' ratings');
+                        repTd.title = r.rep.total === 1 ? t('js.app.ratings_one') : t('js.app.ratings_many', {n: r.rep.total});
                     } else {
                         repTd.textContent = '—';
-                        repTd.title = 'Too few ratings to show a score';
+                        repTd.title = t('js.app.rep_too_few');
                     }
                     tr.appendChild(repTd);
                 }
@@ -2457,26 +2456,26 @@ const getJson = async (endpoint) => {
                         const a = document.createElement('a');
                         a.href = magnetFor(r.info_hash, r.name);
                         a.className = 'btn btn-small search-act-btn';
-                        a.title = 'Open in your torrent client';
-                        a.textContent = 'Magnet';
+                        a.title = t('js.app.magnet_title');
+                        a.textContent = t('js.app.magnet');
                         actWrap.appendChild(a);
                         const copy = document.createElement('button');
                         copy.type = 'button';
                         copy.className = 'btn btn-secondary btn-small search-act-btn';
-                        copy.title = 'Copy the magnet link';
-                        copy.textContent = 'Copy';
+                        copy.title = t('js.app.copy_magnet_title');
+                        copy.textContent = t('js.app.copy');
                         copy.addEventListener('click', () => {
                             if (!navigator.clipboard) return;
                             navigator.clipboard.writeText(magnetFor(r.info_hash, r.name))
-                                .then(() => { copy.textContent = '✓'; copy.classList.add('copied'); setTimeout(() => { copy.textContent = 'Copy'; copy.classList.remove('copied'); }, 1200); })
+                                .then(() => { copy.textContent = '✓'; copy.classList.add('copied'); setTimeout(() => { copy.textContent = t('js.app.copy'); copy.classList.remove('copied'); }, 1200); })
                                 .catch(() => {});
                         });
                         actWrap.appendChild(copy);
                         const info = document.createElement('button');
                         info.type = 'button';
                         info.className = 'btn btn-secondary btn-small search-act-btn';
-                        info.title = 'What this is, where it came from, and how the swarm looks';
-                        info.textContent = 'Info';
+                        info.title = t('js.app.info_title');
+                        info.textContent = t('js.app.info');
                         info.addEventListener('click', () => openInfo(r.info_hash, r.name));
                         actWrap.appendChild(info);
                     }
@@ -2486,9 +2485,9 @@ const getJson = async (endpoint) => {
                 body.appendChild(tr);
             });
             table.hidden = json.rows.length === 0;
-            $id('search-total').textContent = json.total === 0 ? '' : json.total.toLocaleString() + ' result' + (json.total === 1 ? '' : 's');
+            $id('search-total').textContent = json.total === 0 ? '' : (json.total === 1 ? t('js.app.results_one') : t('js.app.results_many', {n: json.total.toLocaleString()}));
             note.hidden = json.total !== 0;
-            note.textContent = json.total === 0 ? 'Nothing found.' : '';
+            note.textContent = json.total === 0 ? t('js.app.nothing_found') : '';
             renderPager(json.page, json.pages, json.total);
         }
         // « First / ‹ Prev / Page [n] of M · X rows / Next › / Last » — same pattern as the admin tables
@@ -2506,29 +2505,29 @@ const getJson = async (endpoint) => {
                 b.addEventListener('click', () => go(target));
                 return b;
             };
-            box.appendChild(mk('« First', 1, page <= 1, 'pg-edge'));
-            box.appendChild(mk('‹ Prev', page - 1, page <= 1));
+            box.appendChild(mk(t('js.app.pg_first'), 1, page <= 1, 'pg-edge'));
+            box.appendChild(mk(t('js.app.pg_prev'), page - 1, page <= 1));
             const jump = document.createElement('span');
             jump.className = 'pg-jump';
-            jump.appendChild(document.createTextNode('Page '));
+            jump.appendChild(document.createTextNode(t('js.app.pg_page') + ' '));
             const inp = document.createElement('input');
             inp.type = 'number'; inp.min = '1'; inp.max = String(pages); inp.value = String(page);
-            inp.className = 'pg-input'; inp.title = 'Go to page (Enter)';
+            inp.className = 'pg-input'; inp.title = t('js.app.pg_goto');
             const jumpTo = () => { const n = Number(String(inp.value).trim()); if (isFinite(n) && n >= 1) go(n); else inp.value = String(page); };
             inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); jumpTo(); } });
             inp.addEventListener('change', jumpTo);
             inp.addEventListener('focus', () => inp.select());
             jump.appendChild(inp);
-            jump.appendChild(document.createTextNode(' of ' + pages));
+            jump.appendChild(document.createTextNode(' ' + t('js.app.pg_of', {pages: pages})));
             box.appendChild(jump);
             if (total) {
                 const tot = document.createElement('span');
                 tot.className = 'pg-total';
-                tot.textContent = '· ' + total.toLocaleString() + ' rows';
+                tot.textContent = '· ' + t('js.app.pg_rows', {n: total.toLocaleString()});
                 box.appendChild(tot);
             }
-            box.appendChild(mk('Next ›', page + 1, page >= pages));
-            box.appendChild(mk('Last »', pages, page >= pages, 'pg-edge'));
+            box.appendChild(mk(t('js.app.pg_next'), page + 1, page >= pages));
+            box.appendChild(mk(t('js.app.pg_last'), pages, page >= pages, 'pg-edge'));
         }
         // ── file-list modal: collapsible folder tree; matches marked when searching file names ──
         const overlay = $id('files-overlay');
@@ -2660,8 +2659,8 @@ const getJson = async (endpoint) => {
                         hit.type = 'button';
                         hit.className = 'star-hit star-hit-' + (part === 0.5 ? 'l' : 'r');
                         const value = i + part;
-                        hit.title = value + (value === 1 ? ' star' : ' stars');
-                        hit.setAttribute('aria-label', 'Rate ' + value + ' out of 5');
+                        hit.title = value === 1 ? t('js.app.stars_one') : t('js.app.stars_many', {n: value});
+                        hit.setAttribute('aria-label', t('js.app.rate_aria', {n: value}));
                         hit.addEventListener('mouseenter', () => paint(value));
                         hit.addEventListener('focus', () => paint(value));
                         hit.addEventListener('click', () => castVote(hash, Math.round(value * 2), wrap));
@@ -2682,17 +2681,17 @@ const getJson = async (endpoint) => {
             if (r.stars === null) {
                 label.classList.add('text-muted');
                 label.textContent = r.total === 0
-                    ? 'Nobody has rated this yet.'
-                    : r.total + ' of ' + r.min_votes + ' ratings needed before an average is shown.';
+                    ? t('js.app.stars_nobody_yet')
+                    : t('js.app.stars_needed', {n: r.total, min: r.min_votes});
             } else {
                 label.textContent = r.stars.toFixed(1) + ' / 5 · '
-                    + r.total + (r.total === 1 ? ' rating' : ' ratings')
-                    + (mine ? ' · yours: ' + mine : '');
+                    + (r.total === 1 ? t('js.app.ratings_one') : t('js.app.ratings_many', {n: r.total}))
+                    + (mine ? ' · ' + t('js.app.stars_yours', {n: mine}) : '');
             }
             wrap.appendChild(label);
             row.title = r.stars === null
-                ? (r.total + ' of ' + r.min_votes + ' ratings so far')
-                : (r.stars.toFixed(1) + ' out of 5, from ' + r.total + (r.total === 1 ? ' rating' : ' ratings'));
+                ? t('js.app.stars_so_far', {n: r.total, min: r.min_votes})
+                : (r.total === 1 ? t('js.app.rep_stars_title_one', {stars: r.stars.toFixed(1)}) : t('js.app.rep_stars_title_many', {stars: r.stars.toFixed(1), n: r.total}));
             if (!json.can_vote && json.vote_refusal) row.title += ' — ' + json.vote_refusal;
             return wrap;
         }
@@ -2704,13 +2703,13 @@ const getJson = async (endpoint) => {
             if (r.captcha) {
                 // The points scheme decided this visitor needs a challenge. Reopening the panel is
                 // the honest way to get one: the CAPTCHA belongs to the page, not to this button.
-                holder.textContent = 'Please solve the CAPTCHA on the page and try again.';
+                holder.textContent = t('js.app.vote_captcha');
                 return;
             }
             if (!r.success) {
                 const why = document.createElement('div');
                 why.className = 'rep-label text-muted';
-                why.textContent = r.error || 'That did not go through.';
+                why.textContent = r.error || t('js.app.vote_failed');
                 holder.appendChild(why);
                 return;
             }
@@ -2741,9 +2740,9 @@ const getJson = async (endpoint) => {
                 rejected: 'M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z',
             };
             const TITLES = {
-                pending:  'Waiting for review — somebody wrote a description and a moderator has not looked at it yet',
-                approved: 'Reviewed and published',
-                rejected: 'Reviewed and turned down — the torrent itself is unaffected',
+                pending:  t('js.app.cs_pending'),
+                approved: t('js.app.cs_approved'),
+                rejected: t('js.app.cs_rejected'),
             };
             const NS = 'http://www.w3.org/2000/svg';
             const svg = document.createElementNS(NS, 'svg');
@@ -2770,18 +2769,18 @@ const getJson = async (endpoint) => {
             if (!infoOverlay) return;
             const body = $id('info-body'), title = $id('info-title');
             infoHash = hash;
-            title.textContent = name || 'Details';
-            body.textContent = 'Loading…';
+            title.textContent = name || t('js.app.details');
+            body.textContent = t('js.common.loading');
             infoOverlay.hidden = false;
             document.addEventListener('keydown', escInfo);
             const json = await getJson('index_info&hash=' + encodeURIComponent(hash));
             if (infoOverlay.hidden || infoHash !== hash) return;
             body.textContent = '';
             if (!json || !json.success) {
-                body.textContent = (json && json.error) || 'Could not load the details.';
+                body.textContent = (json && json.error) || t('js.app.details_load_failed');
                 return;
             }
-            title.textContent = json.name || name || 'Details';
+            title.textContent = json.name || name || t('js.app.details');
 
             const st = json.stats || {};
 
@@ -2811,11 +2810,11 @@ const getJson = async (endpoint) => {
             const leechV = document.createElement('span');
             leechV.id = 'info-sl-leech';
             leechV.textContent = st.leechers == null ? '—' : Number(st.leechers).toLocaleString();
-            strip.appendChild(statCell(seedV, 'seeders', 'info-stat-seed'));
-            strip.appendChild(statCell(leechV, 'leechers', 'info-stat-leech'));
-            if (st.completed != null) strip.appendChild(statCell(Number(st.completed).toLocaleString(), 'completed'));
-            if (st.total_size != null) strip.appendChild(statCell(fmtBytesPub(st.total_size), 'size'));
-            if (st.files_count != null) strip.appendChild(statCell(Number(st.files_count).toLocaleString(), st.files_count === 1 ? 'file' : 'files'));
+            strip.appendChild(statCell(seedV, t('js.app.stat_seeders'), 'info-stat-seed'));
+            strip.appendChild(statCell(leechV, t('js.app.stat_leechers'), 'info-stat-leech'));
+            if (st.completed != null) strip.appendChild(statCell(Number(st.completed).toLocaleString(), t('js.app.stat_completed')));
+            if (st.total_size != null) strip.appendChild(statCell(fmtBytesPub(st.total_size), t('js.app.stat_size')));
+            if (st.files_count != null) strip.appendChild(statCell(Number(st.files_count).toLocaleString(), st.files_count === 1 ? t('js.app.stat_file') : t('js.app.stat_files')));
             body.appendChild(strip);
 
             // 2. the two chips that qualify those numbers, on one line with the refresh control.
@@ -2824,34 +2823,34 @@ const getJson = async (endpoint) => {
             if (json.whitelisted) {
                 const chip = document.createElement('span');
                 chip.className = 'info-chip info-chip-ok';
-                chip.textContent = 'Registered';
-                chip.title = 'On the whitelist — this tracker serves it';
+                chip.textContent = t('js.app.chip_registered');
+                chip.title = t('js.app.chip_registered_title');
                 chips.appendChild(chip);
             }
             if (st.last_seen) {
                 const chip = document.createElement('span');
                 chip.className = 'info-chip';
-                chip.textContent = 'Last seen ' + fmtDatePub(st.last_seen);
+                chip.textContent = t('js.app.last_seen', {date: fmtDatePub(st.last_seen)});
                 chips.appendChild(chip);
             }
             if (json.can_refresh) {
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'btn btn-secondary btn-small info-refresh';
-                btn.textContent = 'Refresh';
-                btn.title = 'Ask the tracker for the swarm counts again';
+                btn.textContent = t('js.app.refresh');
+                btn.title = t('js.app.refresh_title');
                 btn.addEventListener('click', async () => {
                     btn.disabled = true;
                     const prev = btn.textContent;
-                    btn.textContent = 'Asking…';
+                    btn.textContent = t('js.app.asking');
                     const r = await postJson('index_info&hash=' + encodeURIComponent(hash), {
                         op: 'refresh', csrf_token: ($id('search-csrf') || {}).value || '' });
                     if (r && r.success) {
                         seedV.textContent = Number(r.seeders).toLocaleString();
                         leechV.textContent = Number(r.leechers).toLocaleString();
-                        btn.textContent = 'Refreshed';
+                        btn.textContent = t('js.app.refreshed');
                     } else {
-                        btn.textContent = (r && r.error) || 'No answer';
+                        btn.textContent = (r && r.error) || t('js.app.no_answer');
                     }
                     setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 4000);
                 });
@@ -2864,7 +2863,7 @@ const getJson = async (endpoint) => {
                 const row = document.createElement('div');
                 row.className = 'rt-src-row info-section';
                 const lab = document.createElement('strong');
-                lab.textContent = 'Source:';
+                lab.textContent = t('js.app.source_label');
                 const a = document.createElement('a');
                 a.className = 'rt-src-url';
                 a.href = json.source_url;
@@ -2879,8 +2878,8 @@ const getJson = async (endpoint) => {
                     // between "the uploader vouched for this link" and "this is where we found it".
                     const tag = document.createElement('span');
                     tag.className = 'info-chip info-chip-auto';
-                    tag.textContent = 'added automatically';
-                    tag.title = json.source_auto_note || 'Recorded by the importer that first saw this torrent';
+                    tag.textContent = t('js.app.source_auto');
+                    tag.title = json.source_auto_note || t('js.app.source_auto_title');
                     row.appendChild(lab); row.appendChild(a); row.appendChild(tag);
                 } else {
                     row.appendChild(lab); row.appendChild(a);
@@ -2899,7 +2898,7 @@ const getJson = async (endpoint) => {
             } else if (!json.source_url) {
                 const none = document.createElement('p');
                 none.className = 'text-muted info-section';
-                none.textContent = 'Nobody has written anything about this one.';
+                none.textContent = t('js.app.no_description');
                 body.appendChild(none);
             }
 
@@ -2919,7 +2918,7 @@ const getJson = async (endpoint) => {
                     const bar = document.createElement('div');
                     bar.className = 'rep-bar';
                     bar.setAttribute('role', 'img');
-                    bar.setAttribute('aria-label', r.percent + '% positive from ' + r.total + ' ratings');
+                    bar.setAttribute('aria-label', t('js.app.rating_aria', {percent: r.percent, total: r.total}));
                     const up = document.createElement('span');
                     up.className = 'rep-bar-up';
                     up.style.width = r.percent + '%';
@@ -2927,14 +2926,14 @@ const getJson = async (endpoint) => {
                     rep.appendChild(bar);
                     const label = document.createElement('div');
                     label.className = 'rep-label';
-                    label.textContent = r.percent + '% positive · ' + r.up + ' up, ' + r.down + ' down';
+                    label.textContent = t('js.app.rating_label', {percent: r.percent, up: r.up, down: r.down});
                     rep.appendChild(label);
                 } else {
                     const label = document.createElement('div');
                     label.className = 'rep-label text-muted';
                     label.textContent = r.total === 0
-                        ? 'Nobody has rated this yet.'
-                        : r.total + ' of ' + r.min_votes + ' ratings needed before a score is shown.';
+                        ? t('js.app.no_ratings')
+                        : t('js.app.ratings_needed', {total: r.total, min: r.min_votes});
                     rep.appendChild(label);
                 }
 
@@ -2950,8 +2949,8 @@ const getJson = async (endpoint) => {
                         b.addEventListener('click', () => castVote(hash, dir, rep));
                         return b;
                     };
-                    acts.appendChild(mk(1, '▲ Good', 'This is what it says it is'));
-                    acts.appendChild(mk(-1, '▼ Bad', 'Fake, mislabelled or broken'));
+                    acts.appendChild(mk(1, '▲ ' + t('js.app.vote_good'), t('js.app.vote_good_title')));
+                    acts.appendChild(mk(-1, '▼ ' + t('js.app.vote_bad'), t('js.app.vote_bad_title')));
                     rep.appendChild(acts);
                 } else if (!json.can_vote && json.vote_refusal) {
                     const why = document.createElement('div');
@@ -2966,18 +2965,18 @@ const getJson = async (endpoint) => {
             //    strip above rather than as another list of equally important facts.
             const grid = document.createElement('div');
             grid.className = 'info-grid';
-            if (st.peak_seeders != null) grid.appendChild(infoRow('Peak seeders', Number(st.peak_seeders).toLocaleString()));
-            if (st.first_seen) grid.appendChild(infoRow('First seen', fmtDatePub(st.first_seen)));
-            if (st.seen_count != null) grid.appendChild(infoRow('Times seen', Number(st.seen_count).toLocaleString()));
+            if (st.peak_seeders != null) grid.appendChild(infoRow(t('js.app.row_peak_seeders'), Number(st.peak_seeders).toLocaleString()));
+            if (st.first_seen) grid.appendChild(infoRow(t('js.app.row_first_seen'), fmtDatePub(st.first_seen)));
+            if (st.seen_count != null) grid.appendChild(infoRow(t('js.app.row_times_seen'), Number(st.seen_count).toLocaleString()));
             const hashEl = document.createElement('code');
             hashEl.className = 'info-hash';
             hashEl.textContent = json.info_hash;
-            grid.appendChild(infoRow('Info hash', hashEl));
+            grid.appendChild(infoRow(t('js.app.row_info_hash'), hashEl));
             const det = document.createElement('div');
             det.className = 'info-section';
             const detH = document.createElement('div');
             detH.className = 'info-sub';
-            detH.textContent = 'Record';
+            detH.textContent = t('js.app.record_heading');
             det.appendChild(detH);
             det.appendChild(grid);
             body.appendChild(det);
@@ -2988,11 +2987,11 @@ const getJson = async (endpoint) => {
                 det.className = 'rt-collapse info-section';
                 det.open = true;
                 const sum = document.createElement('summary');
-                sum.textContent = 'Files (' + Number(st.files_count).toLocaleString() + ')';
+                sum.textContent = t('js.app.files_count', {n: Number(st.files_count).toLocaleString()});
                 det.appendChild(sum);
                 const holder = document.createElement('div');
                 holder.className = 'rt-body';
-                holder.textContent = 'Loading…';
+                holder.textContent = t('js.common.loading');
                 det.appendChild(holder);
                 body.appendChild(det);
                 const fj = await getJson('index_files&hash=' + encodeURIComponent(hash));
@@ -3003,11 +3002,11 @@ const getJson = async (endpoint) => {
                     if (fj.truncated) {
                         const more = document.createElement('p');
                         more.className = 'text-muted';
-                        more.textContent = 'List truncated — this torrent has more files.';
+                        more.textContent = t('js.app.files_truncated');
                         holder.appendChild(more);
                     }
                 } else {
-                    holder.textContent = 'No file list stored for this entry.';
+                    holder.textContent = t('js.app.no_file_list');
                 }
             }
         }
@@ -3021,24 +3020,24 @@ const getJson = async (endpoint) => {
         async function openFiles(hash, name) {
             if (!overlay) return;
             const body = $id('files-body'), title = $id('files-title');
-            title.textContent = name || 'Files';
-            body.textContent = 'Loading…';
+            title.textContent = name || t('js.app.files');
+            body.textContent = t('js.common.loading');
             overlay.hidden = false;
             document.addEventListener('keydown', escFiles);
             const json = await getJson('index_files&hash=' + encodeURIComponent(hash));
             if (overlay.hidden) return;
             body.textContent = '';
             if (!json || !json.success) {
-                body.textContent = (json && json.error) || 'Could not load the file list.';
+                body.textContent = (json && json.error) || t('js.app.files_load_failed');
                 return;
             }
-            title.textContent = (json.name || name || 'Files') + ' — ' + json.files.length + (json.truncated ? '+' : '') + ' files';
-            if (!json.files.length) { body.textContent = 'No file list stored for this entry.'; return; }
+            title.textContent = (json.name || name || t('js.app.files')) + ' — ' + t('js.app.files_n', {n: json.files.length + (json.truncated ? '+' : '')});
+            if (!json.files.length) { body.textContent = t('js.app.no_file_list'); return; }
             body.appendChild(buildTreePub(json.files, lastFilesSearch ? lastTokens : []));
             if (json.truncated) {
                 const more = document.createElement('p');
                 more.className = 'text-muted';
-                more.textContent = 'List truncated — this torrent has more files.';
+                more.textContent = t('js.app.files_truncated');
                 body.appendChild(more);
             }
         }
@@ -3047,7 +3046,11 @@ const getJson = async (endpoint) => {
             $id('files-close').addEventListener('click', closeFiles);
         }
         // ── wiring: live search (debounced), accelerating clear-X, checkboxes, Enter = immediate ──
-        const runDebounced = debounce(() => run(1), 300);
+        // The same two waits as the panel's lists (AdminCommon.DEBOUNCE in admin-common.js, which the
+        // public site does not load): a sort click redraws the arrows at once and fetches when the
+        // decision is made; typing waits the shorter one.
+        const runDebounced = debounce(() => run(1), 400);
+        const runSortDebounced = debounce(() => run(1), 1200);
         const syncClear = () => { if (clearBtn) clearBtn.hidden = input.value === ''; };
         input.addEventListener('input', () => { syncClear(); runDebounced(); });
         if (clearBtn) clearBtn.addEventListener('click', () => animatedClearPub(input, () => { syncClear(); input.focus(); run(1); }));
@@ -3100,13 +3103,11 @@ const getJson = async (endpoint) => {
         inner.className = 'leave-box';
 
         const h = document.createElement('h3');
-        h.textContent = 'You are leaving this site';
+        h.textContent = t('js.app.leave_title');
         inner.appendChild(h);
 
         const p1 = document.createElement('p');
-        p1.textContent = 'This link was written by whoever registered the torrent, not by us. '
-            + 'We have not checked where it goes and we are not responsible for what is there. '
-            + 'Open it at your own risk.';
+        p1.textContent = t('js.app.leave_body');
         inner.appendChild(p1);
 
         // textContent, never innerHTML: the URL is the untrusted part of this dialog, and a dialog
@@ -3121,14 +3122,14 @@ const getJson = async (endpoint) => {
         const cancel = document.createElement('button');
         cancel.type = 'button';
         cancel.className = 'btn btn-secondary';
-        cancel.textContent = 'Stay here';
+        cancel.textContent = t('js.app.leave_stay');
         cancel.addEventListener('click', () => { closeLeave(box); openBox = null; });
         const go = document.createElement('a');
         go.className = 'btn';
         go.href = url;
         go.target = '_blank';
         go.rel = 'nofollow noopener noreferrer ugc';
-        go.textContent = 'Open anyway';
+        go.textContent = t('js.app.leave_open');
         go.addEventListener('click', () => { closeLeave(box); openBox = null; });
         acts.appendChild(cancel);
         acts.appendChild(go);
@@ -3214,8 +3215,8 @@ const getJson = async (endpoint) => {
         },
     };
     const HINT = {
-        markdown: 'Markdown: **bold**, *italic*, ~~strike~~, ==mark==, # heading, - list, 1. list, - [ ] task, > quote, > [!NOTE], `code`, tables, [^footnote], ||spoiler||, :rocket:, [text](url), ![](image). Ctrl+B / Ctrl+I / Ctrl+K.',
-        bbcode:   'BBCode: [b] [i] [u] [s] [color=#hex] [size=18] [font] [center] [right] [hr] [quote=Name] [list] [list=1] [table] [spoiler=Title] [sub] [sup] [highlight] [url] [img] [email] [youtube] [hide]. Ctrl+B / Ctrl+I / Ctrl+K.',
+        markdown: t('js.app.hint_markdown'),
+        bbcode:   t('js.app.hint_bbcode'),
     };
     const fmt = () => (fmtEl && fmtEl.value === 'markdown') ? 'markdown' : 'bbcode';
 
@@ -3267,23 +3268,23 @@ const getJson = async (endpoint) => {
         if (!text.trim()) {
             box.textContent = '';
             box.appendChild(Object.assign(document.createElement('p'), {
-                className: 'text-muted', textContent: 'Nothing to preview yet.' }));
+                className: 'text-muted', textContent: t('js.app.nothing_to_preview') }));
             lastShown = { key, ok: true };
             return;
         }
-        box.textContent = 'Rendering…';
+        box.textContent = t('js.app.rendering');
         const r = await postJson('richtext_preview', {
             text, format: f, csrf_token: csrf ? csrf.value : '' });
-        if (!r) { box.textContent = 'Could not reach the server.'; lastShown = { key, ok: false }; return; }
-        if (!r.success) { box.textContent = r.error || 'Could not render that.'; lastShown = { key, ok: false }; return; }
+        if (!r) { box.textContent = t('js.app.server_unreachable'); lastShown = { key, ok: false }; return; }
+        if (!r.success) { box.textContent = r.error || t('js.app.render_failed'); lastShown = { key, ok: false }; return; }
         // The server built this from fully escaped input with a fixed tag whitelist
         // (includes/richtext.php). It is the same string the public page will show.
         box.innerHTML = r.html;
         lastShown = { key, ok: true };
         if (counter) {
-            const bits = [r.length + '/' + r.limit + ' characters'];
-            if (r.images.limit > 0 || r.images.used) bits.push(r.images.used + '/' + r.images.limit + ' images');
-            if (r.links.limit > 0 || r.links.used) bits.push(r.links.used + '/' + r.links.limit + ' links');
+            const bits = [t('js.app.count_characters', {used: r.length, limit: r.limit})];
+            if (r.images.limit > 0 || r.images.used) bits.push(t('js.app.count_images', {used: r.images.used, limit: r.images.limit}));
+            if (r.links.limit > 0 || r.links.used) bits.push(t('js.app.count_links', {used: r.links.used, limit: r.links.limit}));
             counter.textContent = bits.join(' · ');
         }
         if (help) {
@@ -3322,12 +3323,12 @@ const getJson = async (endpoint) => {
         clearTimeout(timer);
         // The counter is worth having while WRITING too, not only after a preview — it is the only
         // thing that tells somebody they are near the character limit before the form refuses them.
-        if (counter && ta.maxLength > 0) counter.textContent = ta.value.length + '/' + ta.maxLength + ' characters';
+        if (counter && ta.maxLength > 0) counter.textContent = t('js.app.count_characters', {used: ta.value.length, limit: ta.maxLength});
         if (!box.hidden) timer = setTimeout(render, 400);
     });
     if (fmtEl && fmtEl.tagName === 'SELECT') fmtEl.addEventListener('change', syncFormat);
     syncFormat();
-    if (counter && ta.maxLength > 0) counter.textContent = '0/' + ta.maxLength + ' characters';
+    if (counter && ta.maxLength > 0) counter.textContent = t('js.app.count_characters', {used: 0, limit: ta.maxLength});
 })();
 
 /* ── watching a submission prove itself ─────────────────────────────────────
@@ -3350,11 +3351,11 @@ const getJson = async (endpoint) => {
     let started = 0;
 
     const LABEL = {
-        probing: ['Checking…', 'wl-probe-wait'],
-        passed:  ['Registered and being served', 'wl-probe-ok'],
-        failed:  ['Not registered', 'wl-probe-bad'],
-        none:    ['Registered', 'wl-probe-ok'],
-        unknown: ['Not registered', 'wl-probe-bad'],
+        probing: [t('js.app.probe_checking'), 'wl-probe-wait'],
+        passed:  [t('js.app.probe_passed'), 'wl-probe-ok'],
+        failed:  [t('js.app.probe_failed'), 'wl-probe-bad'],
+        none:    [t('js.app.chip_registered'), 'wl-probe-ok'],
+        unknown: [t('js.app.probe_failed'), 'wl-probe-bad'],
     };
 
     function draw(items) {
@@ -3380,16 +3381,16 @@ const getJson = async (endpoint) => {
             detail.className = 'wl-probe-detail';
             if (it.state === 'passed' || it.state === 'none') {
                 const bits = [];
-                if (it.seeders != null) bits.push(it.seeders + ' seeders, ' + (it.leechers || 0) + ' leechers');
-                if (it.files != null) bits.push(it.files + (it.files === 1 ? ' file' : ' files'));
+                if (it.seeders != null) bits.push(t('js.app.probe_swarm', {seeders: it.seeders, leechers: it.leechers || 0}));
+                if (it.files != null) bits.push(it.files === 1 ? t('js.app.probe_one_file') : t('js.app.probe_files', {n: it.files}));
                 detail.textContent = bits.join(' · ');
             } else if (it.state === 'failed' || it.state === 'unknown') {
                 // The reason, verbatim from the server. It is the whole point of the line.
-                detail.textContent = it.error || 'it did not pass the check';
+                detail.textContent = it.error || t('js.app.probe_not_passed');
             } else {
                 detail.textContent = it.meta === 'done'
-                    ? 'metadata is in — looking for peers on this tracker…'
-                    : 'waiting for the torrent metadata…';
+                    ? t('js.app.probe_meta_done')
+                    : t('js.app.probe_meta_wait');
             }
             li.appendChild(detail);
             list.appendChild(li);
@@ -3399,20 +3400,19 @@ const getJson = async (endpoint) => {
     async function poll(hashes, timeoutMinutes) {
         const r = await getJson('whitelist_probe&hashes=' + encodeURIComponent(hashes.join(',')));
         if (!r || !r.success) {
-            note.textContent = (r && r.error) || 'Could not read the progress.';
+            note.textContent = (r && r.error) || t('js.app.probe_progress_failed');
             return;
         }
         draw(r.items);
         const waiting = Object.keys(r.items).filter(h => r.items[h].state === 'probing').length;
         if (waiting === 0) {
-            note.textContent = 'Done.';
+            note.textContent = t('js.app.done');
             clearTimeout(timer);
             return;
         }
         const mins = Math.round((Date.now() - started) / 60000);
-        note.textContent = waiting + (waiting === 1 ? ' still being checked' : ' still being checked')
-            + ' — this can take a few minutes, and gives up after ' + timeoutMinutes + '.'
-            + (mins >= 1 ? ' (' + mins + ' min so far)' : '');
+        note.textContent = t('js.app.probe_waiting', {n: waiting, timeout: timeoutMinutes})
+            + (mins >= 1 ? ' ' + t('js.app.probe_so_far', {mins: mins}) : '');
         // Every three seconds. Faster tells nobody anything: the worker polls its queue on its own
         // schedule and the answer cannot change in between.
         timer = setTimeout(() => poll(hashes, timeoutMinutes), 3000);
@@ -3422,7 +3422,7 @@ const getJson = async (endpoint) => {
         if (!hashes || !hashes.length) return;
         started = Date.now();
         box.hidden = false;
-        note.textContent = 'Checking ' + hashes.length + (hashes.length === 1 ? ' submission…' : ' submissions…');
+        note.textContent = hashes.length === 1 ? t('js.app.probe_start_one') : t('js.app.probe_start_many', {n: hashes.length});
         clearTimeout(timer);
         poll(hashes, timeoutMinutes || 10);
     };

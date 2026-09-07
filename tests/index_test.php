@@ -70,11 +70,24 @@ $r1 = $db->query("SELECT last_seeders, peak_seeders, last_leechers FROM index_ha
 check('kept row seeders/peak/leechers', (int)$r1['last_seeders'] === 1 && (int)$r1['peak_seeders'] === 1 && (int)$r1['last_leechers'] === 1, json_encode($r1));
 
 // ── 2. second poll: seen_count++, peak tracks max ─────────────────────────────
+// A row is stamped "seen" at most once per IDX_SEEN_WINDOW_SEC (six hours): a poll every thirty
+// minutes used to rewrite every unchanged row and four indexes with it, and that was 96 % of the
+// poll's time on production. So the second poll only counts if the row's last stamp is older than
+// the window — age it by hand first, the way six hours would.
+$db->exec("UPDATE index_hashes SET last_seen = NOW() - INTERVAL 7 HOUR WHERE info_hash = '" . h(1) . "'");
 $entries2 = [[h(1), 5, 2, 10], [h(2), 0, 3, 4]]; // h(1) now 5 seeders, h(2) now 0 (won't re-touch since not kept, but exists already? h(2) complete=2 first time so exists)
 $file2 = $tmp . '/idx_test2.gz'; makeScrape($entries2, true, $file2);
 $p2 = indexPoll($db, $cfg, function () use ($file2) { return ['file' => $file2, 'gzip' => true]; }, 1000100);
-$r1b = $db->query("SELECT seen_count, last_seeders, peak_seeders FROM index_hashes WHERE info_hash = '" . h(1) . "'")->fetch(PDO::FETCH_ASSOC);
+$r1b = $db->query("SELECT seen_count, last_seeders, peak_seeders, last_seen FROM index_hashes WHERE info_hash = '" . h(1) . "'")->fetch(PDO::FETCH_ASSOC);
 check('second poll: seen_count incremented, peak=max(1,5)=5', (int)$r1b['seen_count'] === 2 && (int)$r1b['last_seeders'] === 5 && (int)$r1b['peak_seeders'] === 5, json_encode($r1b));
+check('second poll: last_seen stamped now (the window had passed)', strtotime((string)$r1b['last_seen']) > time() - 120, (string)$r1b['last_seen']);
+// ── 2b. a poll INSIDE the window: the counters follow the tracker, the stamp does not move ────────
+$file2b = $tmp . '/idx_test2b.gz'; makeScrape([[h(1), 7, 1, 11], [h(2), 3, 3, 4]], true, $file2b);
+$p2b = indexPoll($db, $cfg, function () use ($file2b) { return ['file' => $file2b, 'gzip' => true]; }, 1000150);
+$r1c = $db->query("SELECT seen_count, last_seeders, last_leechers, peak_seeders, last_seen FROM index_hashes WHERE info_hash = '" . h(1) . "'")->fetch(PDO::FETCH_ASSOC);
+check('inside the window: seeders/leechers/peak updated', (int)$r1c['last_seeders'] === 7 && (int)$r1c['last_leechers'] === 1 && (int)$r1c['peak_seeders'] === 7, json_encode($r1c));
+check('inside the window: seen_count and last_seen untouched', (int)$r1c['seen_count'] === 2 && $r1c['last_seen'] === $r1b['last_seen'], json_encode([$r1c['seen_count'], $r1c['last_seen'], $r1b['last_seen']]));
+check('inside the window: the poll still counts the row as kept', $p2b['kept'] === 2, json_encode($p2b));
 
 // ── 3. whitelist / banned removal ─────────────────────────────────────────────
 $db->exec("INSERT INTO whitelist (info_hash, source) VALUES ('" . h(1) . "', 'admin')");

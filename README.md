@@ -184,9 +184,9 @@ the smoke-test accounts) — nothing from production appears in them.*
 
 This is an admin panel for [opentracker](https://erdgeist.org/arts/software/opentracker/), and the
 package ships the two builds it is developed against — `tools/opentracker/bin/opentracker.white` and
-`opentracker.black` — together with the three patches applied to them (two to opentracker, one to
-libowfat), the exact commit and feature flags they were built from, and the recipe to rebuild them
-yourself.
+`opentracker.black` — together with the four patch files applied to them (three to opentracker,
+one to libowfat), the exact commit and feature flags they were built from, and the recipe to
+rebuild them yourself.
 
 **Two binaries, because white or black is a compile-time choice in opentracker**, not a runtime one:
 `WANT_ACCESSLIST_WHITE` and `WANT_ACCESSLIST_BLACK` are mutually exclusive `#ifdef`s. Switching modes
@@ -204,7 +204,11 @@ The third patch is to **libowfat**, the I/O library opentracker links: its `iob_
 anyone slower than the tracker arrives with heap pointers where chunk headers belong. The panel's
 full-scrape polls failed ten times in thirteen until the block was compiled out
 (`tools/opentracker/libowfat-no-zerocopy.patch`, 1.33.0 found it, 1.34.0 put it in production).
-The write-up meant for upstream is `tools/opentracker/UPSTREAM-REPORT.md`.
+The write-up meant for upstream is `tools/opentracker/UPSTREAM-REPORT.md`. The fourth file,
+`opentracker-review-fixes.patch` (1.35.0), carries seven fixes from a source review — a forgeable
+UDP connection-id secret, a use-after-free on accesslist reload, a `/stats` result delivered to a
+reused socket, and four smaller ones — each adversarially reviewed and put through a lab before
+it was shipped.
 
 Built and tested on **Debian 13 (trixie)**, x86-64, gcc 14.2.0. Details, checksums, feature flags,
 the build recipe and the install steps: **[tools/opentracker/README.md](tools/opentracker/README.md)**.
@@ -474,6 +478,16 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
   into **Stop** while its loop runs.
 - **CLI** — `sudo -u www-data php tools/whitelist_cli.php index [--poll] [--tick]` prints the status /
   forces a poll / runs one janitor tick.
+
+**What a poll writes (1.35.0).** A row whose seeders, leechers and completed count did not move since
+the last poll is not written at all, and `last_seen` / `seen_count` advance at most once per six
+hours. Measured on production before the change: the download took 6 s, the parse 3 s and the
+upsert 82 s — every other poll ran out of its budget — because 78 % of the 621 000 kept rows were
+identical to the poll before and were rewritten anyway, four secondary indexes each. With the
+conditional statement the same pass takes 43 s. Consequences to know about: **`seen_count` counts
+six-hour windows the hash was seen in, not polls**, and *Last seen* on the catalogue page can lag
+the truth by up to six hours for a swarm nobody joined or left. The protection window of resolved
+rows is pushed forward once a day instead of on every poll, which changes nothing about when it ends.
 
 > **Before enabling on a busy tracker, measure the full-scrape cost during OPEN hours.** During
 > whitelist hours the full scrape only contains the whitelisted torrents (tiny); during OPEN it is the
@@ -1820,9 +1834,18 @@ nothing blank.
 work on different areas without touching the same file. `python tools/lang_src.py .` rebuilds both
 languages; `tests/lang_test.php` fails if they stop agreeing.
 
-**What is translated (1.32.0).** The whole public site and the admin panel templates. A missing key
-falls back to English, so a partial translation reads as English rather than as blanks — which is
-also what happens to any language installed from a JSON file that is not yet complete.
+**What is translated (1.35.0).** Everything: the public site, every admin template including the
+3 900-line settings page, and every browser script. Scripts get their strings through a small
+bridge — `langJsBridge()` in `includes/lang.php` writes a JSON bundle of every `js.*` key for the
+active language into the page head, and `assets/js/i18n.js` defines `t('js.area.key', {n: 5})`,
+which reads it and replaces `:n` placeholders the way `__()` does. Only the `js.` prefix is sent
+(a few hundred strings, not the whole dictionary), so a script string lives under `js.` by
+definition; the source module is `tools/lang_src.d/js.py`. The settings sub-menu group names come
+from the catalogue in `includes/settings_catalog.php` and are translated at the output point
+(`settingsGroupTitle()`), so the keyword index and the tests keep the English source.
+A missing key falls back to English, so a partial translation reads as English rather than as
+blanks — which is also what happens to any language installed from a JSON file that is not yet
+complete.
 
 ---
 

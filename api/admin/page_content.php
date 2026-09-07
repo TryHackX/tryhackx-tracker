@@ -87,10 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         // Every condition a page may test, with its state right now — the editor lists them.
         'markers'  => array_map(fn($k, $v) => ['name' => $k, 'on' => (bool)$v[0], 'what' => $v[1]],
                                 array_keys(pageContentConditions($cfg, $db)), pageContentConditions($cfg, $db)),
-        'note'     => 'Blocks wrapped in [[if:name]] … [[/if]] (or [[ifnot:name]]) appear only while '
-                    . 'that setting is on, so a page you save keeps following the tracker mode and the '
-                    . 'account system exactly as the built-in one does. Restore brings back the built-in '
-                    . 'text for this language, markers included.',
+        'note'     => __('settings.pc_markers_note'),
     ]);
 }
 

@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
+    <?= langJsBridge($baseUrl) ?>
     <?php if (isCaptchaEnabled($cfg, 'login')): ?>
     <!-- CAPTCHA modal styles (.captcha-overlay / .captcha-box) are shared in assets/css/admin.css -->
     <?= captchaHeadTags($cfg) ?>

@@ -24,38 +24,34 @@
         const grid = el('div', { className: 'wl-status-grid' });
 
         const armed = !!st.armed;
-        grid.appendChild(kv('State', [
-            badge(armed ? 'ON' : 'off', armed ? 'wl-b-ok' : 'wl-b-muted'),
+        grid.appendChild(kv(t('js.livesync.state'), [
+            badge(armed ? t('js.livesync.on') : t('js.livesync.off'), armed ? 'wl-b-ok' : 'wl-b-muted'),
             ' ',
             el('span', { className: 'wl-small text-muted',
-                text: armed ? 'opentracker is started with the sync flags' : 'opentracker runs with its own command line' }),
+                text: armed ? t('js.livesync.state_armed') : t('js.livesync.state_own_cmdline') }),
         ]));
-        grid.appendChild(kv('Tunnel', [
+        grid.appendChild(kv(t('js.livesync.tunnel'), [
             el('span', { text: (st.bind_ip || '—') + ' → ' + (st.peer || '—') }),
             ' ',
-            st.iface ? badge(st.iface, st.iface_is_tunnel ? 'wl-b-ok' : 'wl-b-bad') : badge('no interface', 'wl-b-warn'),
+            st.iface ? badge(st.iface, st.iface_is_tunnel ? 'wl-b-ok' : 'wl-b-bad') : badge(t('js.livesync.no_interface'), 'wl-b-warn'),
         ]));
-        grid.appendChild(kv('Sync port', [
+        grid.appendChild(kv(t('js.livesync.sync_port'), [
             el('span', { text: st.port ? ('UDP ' + st.port) : '—' }), ' ',
-            st.listening ? badge('listening on ' + st.listening, 'wl-b-ok')
-                         : badge(armed ? 'NOT listening' : 'not armed', armed ? 'wl-b-bad' : 'wl-b-muted'),
+            st.listening ? badge(t('js.livesync.listening_on', {addr: st.listening}), 'wl-b-ok')
+                         : badge(armed ? t('js.livesync.not_listening') : t('js.livesync.not_armed'), armed ? 'wl-b-bad' : 'wl-b-muted'),
         ]));
         grid.appendChild(kv('WireGuard', st.wg_ifaces && st.wg_ifaces.length
             ? [el('span', { text: st.wg_ifaces.join(', ') })]
-            : [badge('none found', 'wl-b-warn'), ' ',
-               el('span', { className: 'wl-small text-muted', text: 'the sync port may only live inside a tunnel' })]));
-        if (st.at) grid.appendChild(kv('Checked', [el('span', { className: 'wl-small text-muted', text: fmtDate(new Date(st.at * 1000).toISOString()) })]));
+            : [badge(t('js.livesync.none_found'), 'wl-b-warn'), ' ',
+               el('span', { className: 'wl-small text-muted', text: t('js.livesync.port_only_in_tunnel') })]));
+        if (st.at) grid.appendChild(kv(t('js.livesync.checked'), [el('span', { className: 'wl-small text-muted', text: fmtDate(new Date(st.at * 1000).toISOString()) })]));
         body.appendChild(grid);
 
         const notes = $('ls-notes');
         notes.textContent = '';
         (warnings || []).forEach(w => notes.appendChild(el('div', { className: 'nl-note nl-note-bad', text: w })));
         if (!armed && !(st.wg_ifaces || []).length) {
-            notes.appendChild(el('div', { className: 'nl-note nl-note-info', text:
-                'There is no tunnel on this machine yet, so there is nothing safe to bind to. Press Test in '
-                + 'Settings — it prints the WireGuard commands. The panel does not run them for you: '
-                + 'generating a private key and writing it into /etc is not something it should do '
-                + 'half-blind, without being able to see the other end.' }));
+            notes.appendChild(el('div', { className: 'nl-note nl-note-info', text: t('js.livesync.no_tunnel_note') }));
         }
         $('btn-ls-arm').disabled = armed;
         $('btn-ls-off').disabled = !armed;
@@ -65,7 +61,7 @@
         const r = await apiCall('admin/livesync_apply', 'POST', { op: 'status' });
         if (!r || !r.success) {
             $('ls-body').textContent = '';
-            $('ls-body').appendChild(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || 'Could not read the status.' }));
+            $('ls-body').appendChild(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || t('js.livesync.status_read_failed') }));
             return;
         }
         render(r.status || {}, r.warnings || []);
@@ -73,35 +69,31 @@
 
     async function plan() {
         const r = await apiCall('admin/livesync_apply', 'POST', { op: 'plan' });
-        if (!r || !r.success) { showToast((r && r.error) || 'Refused', 'error'); return; }
+        if (!r || !r.success) { showToast((r && r.error) || t('js.livesync.refused'), 'error'); return; }
         // The exact command line, before anything is written. This is the one place an operator can
         // see what overriding ExecStart actually means on their machine.
-        await confirmAction('This is what would run', 'opentracker would be started with:',
-            { code: r.execstart || '', after: 'Nothing has been changed. Use "Turn on" to apply it.',
-              okLabel: 'Understood', danger: false });
+        await confirmAction(t('js.livesync.plan_title'), t('js.livesync.plan_body'),
+            { code: r.execstart || '', after: t('js.livesync.plan_after'),
+              okLabel: t('js.livesync.understood'), danger: false });
     }
 
     async function arm() {
-        if (!await confirmAction('Turn on live peer sync',
-            'This restarts opentracker with a sync port bound to the tunnel address. The protocol has '
-            + 'no authentication: anything that can reach that port can inject peers into every swarm '
-            + 'this tracker serves. The helper refuses if the address is not on a tunnel.',
-            { okLabel: 'Turn it on', danger: true })) return;
-        const pw = await promptPassword('Turn on live peer sync', 'Confirm with the admin password.');
+        if (!await confirmAction(t('js.livesync.arm_title'), t('js.livesync.arm_body'),
+            { okLabel: t('js.livesync.arm_ok'), danger: true })) return;
+        const pw = await promptPassword(t('js.livesync.arm_title'), t('js.livesync.confirm_password'));
         if (!pw) return;
         const r = await apiCall('admin/livesync_apply', 'POST', { op: 'apply', password: pw });
-        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.livesync.failed'), r && r.success ? 'success' : 'error');
         load();
     }
 
     async function disarm() {
-        if (!await confirmAction('Turn off live peer sync',
-            'opentracker restarts with its own command line and the sync port closes.',
-            { okLabel: 'Turn it off', danger: false })) return;
-        const pw = await promptPassword('Turn off live peer sync', 'Confirm with the admin password.');
+        if (!await confirmAction(t('js.livesync.disarm_title'), t('js.livesync.disarm_body'),
+            { okLabel: t('js.livesync.disarm_ok'), danger: false })) return;
+        const pw = await promptPassword(t('js.livesync.disarm_title'), t('js.livesync.confirm_password'));
         if (!pw) return;
         const r = await apiCall('admin/livesync_apply', 'POST', { op: 'revert', password: pw });
-        showToast((r && (r.message || r.error)) || 'Failed', r && r.success ? 'success' : 'error');
+        showToast((r && (r.message || r.error)) || t('js.livesync.failed'), r && r.success ? 'success' : 'error');
         load();
     }
 

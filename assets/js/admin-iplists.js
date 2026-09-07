@@ -39,22 +39,22 @@
     };
 
     function ago(sqlDate) {
-        if (!sqlDate) return 'never';
-        const t = Date.parse(String(sqlDate).replace(' ', 'T') + 'Z');
-        if (!isFinite(t)) return String(sqlDate);
-        const s = Math.max(0, (Date.now() - t) / 1000);
-        if (s < 90) return Math.round(s) + ' s ago';
-        if (s < 5400) return Math.round(s / 60) + ' min ago';
-        if (s < 172800) return Math.round(s / 3600) + ' h ago';
-        return Math.round(s / 86400) + ' d ago';
+        if (!sqlDate) return t('js.iplists.never');
+        const ts = Date.parse(String(sqlDate).replace(' ', 'T') + 'Z');
+        if (!isFinite(ts)) return String(sqlDate);
+        const s = Math.max(0, (Date.now() - ts) / 1000);
+        if (s < 90) return t('js.iplists.ago_s', { n: Math.round(s) });
+        if (s < 5400) return t('js.iplists.ago_min', { n: Math.round(s / 60) });
+        if (s < 172800) return t('js.iplists.ago_h', { n: Math.round(s / 3600) });
+        return t('js.iplists.ago_d', { n: Math.round(s / 86400) });
     }
 
     // A row's label has to say which of the three behaviours it has: "block" on its own is exactly
     // the ambiguity this feature exists to remove.
     function badge(l) {
-        if (l.kind === 'allow') return ['Allow', 'text-success', 'never dropped, whatever else says'];
-        if (l.mode === 'soft') return ['Under pressure', 'text-warning', 'dropped only when the machine is busy'];
-        return ['Block', 'text-danger', 'dropped always'];
+        if (l.kind === 'allow') return [t('js.iplists.badge_allow'), 'text-success', t('js.iplists.badge_allow_desc')];
+        if (l.mode === 'soft') return [t('js.iplists.badge_soft'), 'text-warning', t('js.iplists.badge_soft_desc')];
+        return [t('js.iplists.badge_block'), 'text-danger', t('js.iplists.badge_block_desc')];
     }
 
     function iconBtn(icon, title, cls, fn) {
@@ -78,27 +78,26 @@
             // Networks first, addresses second: the ceiling is on networks, and the reader's question
             // ("is this enough to block a country?") is about addresses.
             head.textContent = state.enabled
-                ? fmt(total) + ' networks enforced'
-                  + (totalAddr ? ' · ' + short(totalAddr) + ' addresses' : '')
-                  + ' · ' + fmt(state.max) + ' networks max'
-                : 'switched off in Settings — nothing here is enforced';
+                ? t('js.iplists.head_enforced', { n: fmt(total) })
+                  + (totalAddr ? ' · ' + t('js.iplists.head_addresses', { n: short(totalAddr) }) : '')
+                  + ' · ' + t('js.iplists.head_max', { n: fmt(state.max) })
+                : t('js.iplists.head_off');
             head.className = 'wl-status-updated' + (state.enabled ? '' : ' text-warning');
         }
 
         if (!state.lists.length) {
             box.appendChild(el('p', { className: 'wl-small text-muted mb-0',
-                text: 'No lists yet. "Add a list" takes a URL such as a country zone file from ipdeny.com, '
-                    + 'or a file you upload.' }));
+                text: t('js.iplists.no_lists') }));
             return;
         }
 
         const thead = el('thead', null, [el('tr', null, [
             el('th', { style: 'width:1%' }),
-            el('th', { text: 'List' }),
-            el('th', { text: 'What it does' }),
-            el('th', { className: 'text-end', text: 'Networks' }),
-            el('th', { text: 'Source' }),
-            el('th', { className: 'text-end', text: 'Actions' }),
+            el('th', { text: t('js.iplists.th_list') }),
+            el('th', { text: t('js.iplists.th_what') }),
+            el('th', { className: 'text-end', text: t('js.iplists.th_networks') }),
+            el('th', { text: t('js.iplists.th_source') }),
+            el('th', { className: 'text-end', text: t('js.iplists.th_actions') }),
         ])]);
         const tb = el('tbody');
 
@@ -106,7 +105,7 @@
             const tr = el('tr', { className: l.enabled ? null : 'ipl-off' });
 
             const cb = el('input', { type: 'checkbox', className: 'form-check-input',
-                                     title: l.enabled ? 'Enabled' : 'Disabled' });
+                                     title: l.enabled ? t('js.iplists.enabled') : t('js.iplists.disabled') });
             cb.checked = !!l.enabled;
             cb.addEventListener('change', () => act('toggle', { id: l.id, enabled: cb.checked }));
             tr.appendChild(el('td', null, [el('div', { className: 'form-check form-switch mb-0' }, [cb])]));
@@ -116,7 +115,7 @@
                 name.appendChild(el('br'));
                 name.appendChild(el('span', {
                     className: 'wl-small text-danger',
-                    title: 'The entries shown are the last copy that worked — a failed refresh changes nothing',
+                    title: t('js.iplists.last_error_title'),
                     text: '⚠ ' + l.last_error,
                 }));
             }
@@ -136,12 +135,12 @@
             if (l.addr4 || l.nets6) {
                 n.appendChild(el('br'));
                 const parts = [];
-                if (l.addr4) parts.push(short(l.addr4) + ' addr');
-                if (l.nets6) parts.push(fmt(l.nets6) + ' v6');
+                if (l.addr4) parts.push(t('js.iplists.addr_short', { n: short(l.addr4) }));
+                if (l.nets6) parts.push(t('js.iplists.v6_short', { n: fmt(l.nets6) }));
                 n.appendChild(el('span', { className: 'wl-small text-muted', text: parts.join(' · '),
-                    title: (l.addr4 ? fmt(l.addr4) + ' IPv4 addresses' : '')
+                    title: (l.addr4 ? t('js.iplists.ipv4_addresses', { n: fmt(l.addr4) }) : '')
                         + (l.addr4 && l.nets6 ? ', ' : '')
-                        + (l.nets6 ? fmt(l.nets6) + ' IPv6 ranges' : '') }));
+                        + (l.nets6 ? t('js.iplists.ipv6_ranges', { n: fmt(l.nets6) }) : '') }));
             }
             tr.appendChild(n);
 
@@ -153,24 +152,23 @@
                 }));
                 src.appendChild(el('br'));
                 src.appendChild(el('span', { className: 'wl-small text-muted',
-                    text: 'fetched ' + ago(l.last_fetch_at) + ' · every ' + fmt(l.ttl_minutes) + ' min' }));
+                    text: t('js.iplists.fetched_every', { ago: ago(l.last_fetch_at), n: fmt(l.ttl_minutes) }) }));
             } else {
-                src.appendChild(el('span', { className: 'wl-small text-muted', text: 'uploaded ' + ago(l.last_fetch_at) }));
+                src.appendChild(el('span', { className: 'wl-small text-muted', text: t('js.iplists.uploaded', { ago: ago(l.last_fetch_at) }) }));
             }
             tr.appendChild(src);
 
             const acts = el('td', { className: 'text-end text-nowrap' });
             if (l.source === 'url') {
-                acts.appendChild(iconBtn('bi-arrow-clockwise', 'Download it again now', 'btn-outline-info',
+                acts.appendChild(iconBtn('bi-arrow-clockwise', t('js.iplists.refresh_now'), 'btn-outline-info',
                     () => act('refresh', { id: l.id })));
             } else {
-                acts.appendChild(iconBtn('bi-upload', 'Replace the entries from a file', 'btn-outline-info',
+                acts.appendChild(iconBtn('bi-upload', t('js.iplists.replace_from_file'), 'btn-outline-info',
                     () => replaceEntries(l)));
             }
-            acts.appendChild(iconBtn('bi-trash', 'Delete this list', 'btn-outline-danger', async () => {
-                const ok = await confirmAction('Delete this list?',
-                    'This removes "' + l.name + '" and its ' + fmt(l.entries) + ' entries. '
-                    + 'The firewall keeps enforcing it until the next push.', { danger: true, okLabel: 'Delete' });
+            acts.appendChild(iconBtn('bi-trash', t('js.iplists.delete_list'), 'btn-outline-danger', async () => {
+                const ok = await confirmAction(t('js.iplists.delete_title'),
+                    t('js.iplists.delete_body', { name: l.name, count: fmt(l.entries) }), { danger: true, okLabel: t('js.iplists.delete') });
                 if (ok) act('delete', { id: l.id });
             }));
             tr.appendChild(acts);
@@ -184,28 +182,21 @@
         // the list they just imported says it should.
         (state.conflicts || []).length && box.appendChild(el('div', {
             className: 'alert alert-info py-2 wl-small mb-0 mt-2',
-            text: state.conflicts.map(c => c.manual + ' (inside ' + c.covered_by + ')').join(', ')
-                + (state.conflicts.length === 1 ? ' is' : ' are')
-                + ' trusted AND covered by something that drops. Trusted is matched first, so '
-                + (state.conflicts.length === 1 ? 'it' : 'they') + ' will not be dropped.' }));
+            text: t(state.conflicts.length === 1 ? 'js.iplists.conflict_one' : 'js.iplists.conflict_many',
+                { list: state.conflicts.map(c => t('js.iplists.conflict_item', { addr: c.manual, net: c.covered_by })).join(', ') }) }));
 
         (state.exceptions || []).length && box.appendChild(el('div', {
             className: 'alert alert-secondary py-2 wl-small mb-0 mt-2',
-            text: state.exceptions.map(c => c.manual + ' (inside the allowed ' + c.covered_by + ')').join(', ')
-                + ' — blocked by hand from inside an allow list. That is what the blocked box is for, '
-                + 'and it is taking effect: it is matched before every list.' }));
+            text: t('js.iplists.exceptions', { list: state.exceptions.map(c => t('js.iplists.exception_item', { addr: c.manual, net: c.covered_by })).join(', ') }) }));
         const cov = state.cover || {};
-        const withCover = (n, a) => fmt(n) + (a ? ' (' + short(a) + ' addresses)' : '');
+        const withCover = (n, a) => a ? t('js.iplists.with_cover', { n: fmt(n), a: short(a) }) : fmt(n);
         box.appendChild(el('p', { className: 'wl-small text-muted mb-0 mt-2',
-            text: 'Enforced now: ' + withCover(c.allow, cov.allow) + ' allowed, '
-                + withCover(c.hard, cov.hard) + ' blocked, '
-                + withCover(c.soft, cov.soft) + ' dropped only under pressure'
+            text: t('js.iplists.enforced_now', { allow: withCover(c.allow, cov.allow), hard: withCover(c.hard, cov.hard), soft: withCover(c.soft, cov.soft) })
                 + (state.manual && state.manual.length
-                    ? ' — plus ' + state.manual.length + ' trusted addresses, which win over all of it'
+                    ? t('js.iplists.plus_trusted', { n: state.manual.length })
                     : '')
                 + (state.blocked && state.blocked.length
-                    ? (state.manual && state.manual.length ? ', and ' : ' — plus ')
-                      + state.blocked.length + ' blocked by hand, which beat every allow list.'
+                    ? t(state.manual && state.manual.length ? 'js.iplists.plus_blocked_and' : 'js.iplists.plus_blocked', { n: state.blocked.length })
                     : '.') }));
     }
 
@@ -214,7 +205,7 @@
         if (r.error) {
             $('ipl-list').textContent = '';
             $('ipl-list').appendChild(el('p', { className: 'wl-small text-danger mb-0',
-                text: 'Could not read the lists: ' + r.error }));
+                text: t('js.iplists.load_failed', { error: r.error }) }));
             return;
         }
         state = r;
@@ -227,7 +218,7 @@
         try {
             const r = await apiCall('admin/ip_list_action', 'POST', Object.assign({ op: op }, body));
             if (r.error) showToast(r.error, 'danger');
-            else showToast(r.message || 'Done.', r.note ? 'warning' : 'success');
+            else showToast(r.message || t('js.iplists.done'), r.note ? 'warning' : 'success');
             await load();
         } finally {
             busy = false;
@@ -245,10 +236,10 @@
      */
     function readFile(file, onText) {
         if (file.size > MAX_UPLOAD) {
-            showToast('That file is ' + fmtSize(file.size) + ' — the limit is 8 MiB.', 'danger');
+            showToast(t('js.iplists.file_too_big', { size: fmtSize(file.size) }), 'danger');
             return;
         }
-        if (file.size === 0) { showToast('That file is empty.', 'danger'); return; }
+        if (file.size === 0) { showToast(t('js.iplists.file_empty'), 'danger'); return; }
         const rd = new FileReader();
         rd.onload = () => {
             const text = String(rd.result || '');
@@ -256,12 +247,12 @@
             // JPEG as text would otherwise produce a page of mojibake, parse to zero entries, and
             // leave the reader wondering why their upload did nothing.
             if (text.indexOf('\u0000') !== -1) {
-                showToast('That looks like a binary file, not a list of addresses.', 'danger');
+                showToast(t('js.iplists.file_binary'), 'danger');
                 return;
             }
             onText(text, file);
         };
-        rd.onerror = () => showToast('Could not read that file.', 'danger');
+        rd.onerror = () => showToast(t('js.iplists.file_read_failed'), 'danger');
         rd.readAsText(file);
     }
 
@@ -319,20 +310,19 @@
         const d = describe(text);
         box.classList.remove('d-none');
         const head = el('div', null, [
-            el('strong', { text: fmt(d.entries) + (d.entries === 1 ? ' entry' : ' entries') }),
-            el('span', { text: file ? ' read from ' + file.name + ' (' + fmtSize(file.size) + ')' : ' pasted' }),
+            el('strong', { text: t(d.entries === 1 ? 'js.iplists.entries_one' : 'js.iplists.entries_many', { n: fmt(d.entries) }) }),
+            el('span', { text: file ? t('js.iplists.read_from', { name: file.name, size: fmtSize(file.size) }) : t('js.iplists.pasted') }),
         ]);
         box.appendChild(head);
         if (d.addr4 || d.nets6) {
             const parts = [];
-            if (d.addr4) parts.push(fmt(d.addr4) + ' IPv4 addresses');
-            if (d.nets6) parts.push(fmt(d.nets6) + (d.nets6 === 1 ? ' IPv6 range' : ' IPv6 ranges'));
-            box.appendChild(el('div', { text: 'covering ' + parts.join(' and ') }));
+            if (d.addr4) parts.push(t('js.iplists.ipv4_addresses', { n: fmt(d.addr4) }));
+            if (d.nets6) parts.push(t(d.nets6 === 1 ? 'js.iplists.ipv6_range_one' : 'js.iplists.ipv6_ranges', { n: fmt(d.nets6) }));
+            box.appendChild(el('div', { text: t('js.iplists.covering', { parts: parts.join(t('js.iplists.join_and')) }) }));
         }
         if (d.bad) {
             box.appendChild(el('div', { className: 'ipl-preview-bad',
-                text: fmt(d.bad) + (d.bad === 1 ? ' line was' : ' lines were')
-                    + ' not an address and will be ignored: ' + d.badSamples.join(' · ') }));
+                text: t(d.bad === 1 ? 'js.iplists.bad_lines_one' : 'js.iplists.bad_lines_many', { n: fmt(d.bad), samples: d.badSamples.join(' · ') }) }));
         }
     }
 
@@ -343,12 +333,12 @@
             if (f) {
                 readFile(f, async (t, file) => {
                     const d = describe(t);
-                    if (!d.entries) { showToast('Nothing in that file looked like an address.', 'danger'); return; }
-                    const ok = await confirmAction('Replace the entries?',
-                        'Read ' + fmt(d.entries) + ' entries from ' + file.name
-                        + (d.bad ? ' (' + fmt(d.bad) + ' lines ignored)' : '')
-                        + '. This replaces everything currently in "' + l.name + '".',
-                        { okLabel: 'Replace' });
+                    if (!d.entries) { showToast(t('js.iplists.no_addresses'), 'danger'); return; }
+                    const ok = await confirmAction(t('js.iplists.replace_title'),
+                        t('js.iplists.replace_body', { count: fmt(d.entries),
+                            file: file.name + (d.bad ? t('js.iplists.lines_ignored', { n: fmt(d.bad) }) : ''),
+                            name: l.name }),
+                        { okLabel: t('js.iplists.replace') });
                     if (ok) act('entries', { id: l.id, text: t });
                 });
             }
@@ -374,7 +364,7 @@
         if (dz) {
             dz.classList.remove('has-file', 'dragging');
             const main = dz.querySelector('.ipl-drop-main');
-            if (main) { main.textContent = 'Drop a list here, or '; main.appendChild(el('u', { text: 'choose a file' })); }
+            if (main) { main.textContent = t('js.iplists.drop_here'); main.appendChild(el('u', { text: t('js.iplists.choose_file') })); }
         }
         const pv = $('ipl-preview');
         if (pv) { pv.textContent = ''; pv.classList.add('d-none'); }
@@ -400,11 +390,11 @@
             ttl_minutes: parseInt($('ipl-ttl').value, 10) || 720,
             text: $('ipl-text').value,
         };
-        const bad = !body.name ? 'Give the list a name.'
+        const bad = !body.name ? t('js.iplists.need_name')
             : (body.source === 'url' && !/^https?:\/\//i.test(body.url))
-                ? 'A URL list needs an http:// or https:// address.'
+                ? t('js.iplists.need_url')
                 : (body.source === 'manual' && body.text.trim() === '')
-                    ? 'Paste some addresses or choose a file.' : '';
+                    ? t('js.iplists.need_text') : '';
         if (bad) { err.textContent = bad; err.classList.remove('d-none'); return; }
 
         const save = $('ipl-save');
@@ -413,7 +403,7 @@
             const r = await apiCall('admin/ip_list_action', 'POST', body);
             if (r.error) { err.textContent = r.error; err.classList.remove('d-none'); return; }
             bootstrap.Modal.getOrCreateInstance($('iplAddModal')).hide();
-            showToast(r.message || 'Added.', r.note ? 'warning' : 'success');
+            showToast(r.message || t('js.iplists.added'), r.note ? 'warning' : 'success');
             await load();
         } finally {
             save.disabled = false;
@@ -422,16 +412,14 @@
 
     // ── pushing to the firewall ─────────────────────────────────────────────
     async function push() {
-        const pw = await promptPassword('Load the lists',
-            'This is the moment packets start being dropped. The enabled lists below go into the '
-            + 'firewall; everything you have done so far only touched the panel.');
+        const pw = await promptPassword(t('js.iplists.push_title'), t('js.iplists.push_body'));
         if (!pw) return;
         const b = $('btn-ipl-push');
         b.disabled = true;
         try {
             const r = await apiCall('admin/ip_list_action', 'POST', { op: 'push', password: pw, enabled: true });
             if (r.error) { showToast(r.error, 'danger'); return; }
-            showToast(r.message || 'Loaded.', 'success');
+            showToast(r.message || t('js.iplists.loaded'), 'success');
             card.dataset.enabled = '1';
             await load();
         } finally {
@@ -456,7 +444,7 @@
         if (!z) return;
         z.classList.add('has-file');
         const main = z.querySelector('.ipl-drop-main');
-        if (main) main.textContent = file ? file.name : 'File loaded';
+        if (main) main.textContent = file ? file.name : t('js.iplists.file_loaded');
     }
 
     const drop = $('ipl-drop');

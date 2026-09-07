@@ -4,6 +4,82 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.35.0] — 2026-09-06
+
+### Changed — a poll no longer rewrites what did not change
+
+Measured on production before the change (1.5 M rows, 621 000 kept per poll): the download took
+6 s, the parse 3 s, and the upsert **82 s** — 96 % of the poll, and the reason every other poll ran
+out of its budget and the coverage chart sat at 44 %. Of the kept rows 99 % already existed and
+78 % carried exactly the same seeders, leechers and completed count as the poll before; the old
+statement rewrote every one of them (`last_seen = NOW()`, `seen_count + 1`) and four secondary
+indexes with each. `indexUpsertBatch()` now leaves an unchanged row alone: the counters only move
+when the tracker's numbers moved, `last_seen` / `seen_count` advance at most once per six hours
+(`IDX_SEEN_WINDOW_SEC`), and the protection window is pushed forward once a day. Same rows, same
+machine, rolled back after measuring: **43 s** for the full pass — inside the 90-second budget with
+room. Consequences: `seen_count` counts six-hour windows rather than polls, and *Last seen* on the
+catalogue can lag by up to six hours for a swarm nobody joined or left. `tests/index_test.php`
+encodes the rule (a poll inside the window updates seeders and leaves the stamp; one outside
+advances it).
+
+### Added — the browser scripts speak the site's language
+
+Every string a script shows — toasts, confirmations, table headers built in JS, empty states,
+button captions, the public search page, the CAPTCHA overlay, the home beacon — now comes from the
+dictionary. `langJsBridge()` writes a JSON bundle of the `js.*` keys for the active language into
+the page head and `assets/js/i18n.js` defines `t(key, {n: 5})`, the client-side twin of `__()`.
+Only the `js.` prefix is sent, so the bundle stays a few hundred strings. The settings page, which
+was translated in part, is translated in full (about 900 strings), and its sub-menu group names
+come from the catalogue through `settingsGroupTitle()` so the search index and the tests keep the
+English source. Dictionary: 1 130 → about 3 000 strings, EN and PL, one source under
+`tools/lang_src.d/`.
+
+### Changed — one wait for every list
+
+`AdminCommon.DEBOUNCE = { sort: 1200, search: 400 }` is the one place the numbers live. A header
+click redraws the arrows at once and fetches when the decision is made (desc → asc → off is two or
+three clicks); the Index page had this, Users and the Whitelist tabs had a shorter one, Reports
+another, Backups re-sorted on every click, and the public search page fetched on every click.
+Now every list in the panel and the search page wait the same, and the two scripts that do not
+load `admin-common.js` carry the numbers with a comment saying where they come from.
+
+### Fixed
+
+- **The settings search box offered a saved e-mail and password.** Not autofill: Chrome's password
+  manager pairs the nearest text box before a password field as the username, and the credentials
+  form on the same page has three. The form now names its own username field
+  (`autocomplete="username"`) and the password roles (`current-password`, `new-password`), so the
+  search box is no longer the candidate; the other managers get their `data-*` opt-outs.
+- **The page editor's preview looked nothing like the page.** It was a `<div>` inside the panel's
+  stylesheet, which knows nothing about the stats widget or the announce box. It is an `<iframe>`
+  carrying the public stylesheet and nothing else; the markup is still the same `richtextRender()`
+  call the public page makes.
+- **"Nothing is waiting." as a bare sentence in a table cell.** One empty-state block for the panel
+  (`AdminCommon.emptyState(text, icon, hint)`, `.empty-state`): icon, sentence, an optional hint
+  saying what would fill the list. Used in the review queue and the federation queue; the
+  translation pass put the other empty states through the same words.
+- The public site's text colour is `#cdd1da` (was the neutral `#d0d0d0`, which read warm against
+  the blue-black ground).
+
+### OpenTracker — the review findings, verified and seven of them patched
+
+The six findings the earlier review had left unverified got two independent refuters each; all
+six stand (the missing access gate on the full `/scrape` was confirmed high by both — an
+unauthenticated client can park ~114 MB per connection for fifteen minutes; report-only here
+because the port is loopback-only and a gate would change behaviour for every client). Nine
+patches were written and each was reviewed by an agent that had to apply it on a copy and find
+what was wrong with it: seven survived, two were rejected as incomplete and are not shipped.
+`tools/opentracker/opentracker-review-fixes.patch`: the UDP connection-id secret from
+`getrandom(2)` instead of `srandom(time(NULL))` (forgeable ids), the accesslist reload that freed
+a list announce threads were still searching, the `/stats` task that survived its client and
+wrote to a reused fd, an atomic `g_torrent_count`, the tpbs one-byte overrun, UDP workers started
+after init and the first accesslist load, and the mmap bound on a whitelist without a trailing
+newline. Built on the VPS on a copy of the sources and put through a lab on a private port under
+valgrind — announces, scrapes, twenty aborted `/stats` clients, sixty SIGHUP reloads under load:
+zero invalid memory accesses, the process serving throughout. The binaries in
+`tools/opentracker/bin` are these builds; **production still runs the round-five build** — the
+swap restarts the tracker and empties the swarm, so it waits for the operator's word.
+
 ## [1.34.0] — 2026-09-05
 
 ### OpenTracker — the fix is in production, and a review of what else is there

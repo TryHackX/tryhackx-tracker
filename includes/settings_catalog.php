@@ -352,6 +352,24 @@ function settingsCatalogKeywords(): array {
 }
 
 /** Catalogue payload for api/admin/settings_catalog.php (and any future consumer). */
+/**
+ * A group's title in the visitor's language, or the English one when no language is loaded (CLI,
+ * tests): the dictionary key is `settings.group_<id>` and the catalogue itself stays English so the
+ * keyword index and the tests keep one source of truth.
+ */
+function settingsGroupTitle(array $g): string {
+    $k = 'settings.group_' . $g['id'];
+    return (function_exists('langHas') && langHas($k)) ? __($k) : (string)$g['title'];
+}
+
 function settingsCatalogPayload(): array {
-    return ['success' => true, 'groups' => settingsCatalogGroups(), 'keywords' => settingsCatalogKeywords()];
+    // The page gets translated titles; the English title joins the keywords so a search in either
+    // language still finds the group.
+    $groups = [];
+    foreach (settingsCatalogGroups() as $g) {
+        $g['keywords'] = strtolower((string)$g['title']) . ' ' . ($g['keywords'] ?? '');
+        $g['title'] = settingsGroupTitle($g);
+        $groups[] = $g;
+    }
+    return ['success' => true, 'groups' => $groups, 'keywords' => settingsCatalogKeywords()];
 }

@@ -122,26 +122,19 @@
         const cpus = Math.max(1, Number(s.cpus || 1));
         const workers = Number(s.workers || 0);
         const share = (m.total / (cpus * 100)) * 100;
-        const head = 'One instance is using ' + m.total.toFixed(0) + '% of the ' + (cpus * 100)
-            + '% this machine has (' + share.toFixed(0) + '% of the box), busiest thread '
-            + m.hottest.toFixed(0) + '%.';
+        const head = t('js.otperf.verdict_head', { total: m.total.toFixed(0), cap: cpus * 100, share: share.toFixed(0), hottest: m.hottest.toFixed(0) });
 
         if (m.hottest >= 85 && workers > 0 && workers >= cpus) {
-            return { level: 'warn', text: head + ' The busiest UDP worker is at the ceiling and there is already '
-                + 'one per core — this is the case where a second instance is the next step, and the only one.' };
+            return { level: 'warn', text: head + ' ' + t('js.otperf.verdict_ceiling_second') };
         }
         if (m.hottest >= 85) {
-            return { level: 'warn', text: head + ' The busiest UDP worker is at the ceiling but there are only '
-                + workers + ' of them on ' + cpus + ' cores. Raise the worker count first: it is one setting and a '
-                + 'restart, against a second instance, which means teaching white/black switching, the schedule, '
-                + 'the whitelist reload and the stats page to work with more than one tracker.' };
+            return { level: 'warn', text: head + ' ' + t('js.otperf.verdict_ceiling_workers', { workers: workers, cpus: cpus }) };
         }
         const why = (m.dropsPerSec !== null && m.dropsPerSec > 1)
-            ? ' Packets are being lost, but not for want of CPU — look at the receive buffer and the inbound '
-              + 'firewall budget on this page, which is where they are actually going.'
-            : ' Nothing is being dropped either.';
-        return { level: 'info', text: head + ' Nowhere near the limit.' + why
-            + ' A second instance would add tracker capacity, which is not what is short.' };
+            ? ' ' + t('js.otperf.verdict_drops')
+            : ' ' + t('js.otperf.verdict_no_drops');
+        return { level: 'info', text: head + ' ' + t('js.otperf.verdict_far') + why
+            + ' ' + t('js.otperf.verdict_second_useless') };
     }
 
     function badge(text, cls) { return el('span', { className: 'wl-badge ' + (cls || ''), text: text }); }
@@ -177,7 +170,7 @@
         try {
             j = await apiCall('admin/ot_status');
         } catch (e) {
-            if (my > painted) { painted = my; fatal('Could not reach the status endpoint (' + ((e && e.message) || 'network error') + ').'); }
+            if (my > painted) { painted = my; fatal(t('js.otperf.status_unreachable', { err: (e && e.message) || t('js.otperf.net_error_short') })); }
             return;
         } finally {
             if (busy === my) { busy = 0; clearWd(); }
@@ -193,19 +186,19 @@
     function arm() {
         clearWd();
         if (painted) return;
-        watchdog = setTimeout(() => { watchdog = null; if (!painted) fatal('The service status has not answered for 15 seconds.'); }, 15000);
+        watchdog = setTimeout(() => { watchdog = null; if (!painted) fatal(t('js.otperf.status_timeout')); }, 15000);
     }
     function clearWd() { if (watchdog) { clearTimeout(watchdog); watchdog = null; } }
 
     function fatal(msg) {
         const g = $('ot-grid');
         g.textContent = '';
-        g.appendChild(kv('Service', [badge('unavailable', 'wl-b-bad'), ' ',
-            el('span', { className: 'wl-small text-muted', text: msg || 'The helper did not answer.' }),
+        g.appendChild(kv(t('js.otperf.service'), [badge(t('js.otperf.unavailable'), 'wl-b-bad'), ' ',
+            el('span', { className: 'wl-small text-muted', text: msg || t('js.otperf.helper_silent') }),
             el('div', {}, [el('button', {
                 className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button',
                 onclick: () => { painted = 0; busy = 0; load(true); },
-            }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' Try again'])])]));
+            }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ' + t('js.otperf.try_again')])])]));
         $('ot-notes').textContent = '';
     }
 
@@ -214,37 +207,37 @@
         const c = j.configured || {};
         const g = $('ot-grid');
         g.textContent = '';
-        $('ot-updated').textContent = s.unit ? ('unit ' + s.unit + ' · ' + s.cpus + ' cores') : '';
+        $('ot-updated').textContent = s.unit ? t('js.otperf.updated_unit', { unit: s.unit, cpus: s.cpus }) : '';
 
-        g.appendChild(kv('Service', [
-            badge(s.active ? 'running' : 'stopped', s.active ? 'wl-b-ok' : 'wl-b-bad'), ' ',
+        g.appendChild(kv(t('js.otperf.service'), [
+            badge(s.active ? t('js.otperf.running') : t('js.otperf.stopped'), s.active ? 'wl-b-ok' : 'wl-b-bad'), ' ',
             el('span', { className: 'wl-small text-muted', text: s.unit || '' })]));
 
         // What is loaded versus what the panel would write. Two numbers, and the gap between them
         // is the only thing on this card worth acting on.
-        const wparts = [badge(num(s.workers) + ' threads', s.workers > 0 ? 'wl-b-ok' : 'wl-b-muted')];
+        const wparts = [badge(t('js.otperf.threads_count', { n: num(s.workers) }), s.workers > 0 ? 'wl-b-ok' : 'wl-b-muted')];
         if (c.udp_workers && !j.workers_in_sync) {
             wparts.push(' ', el('span', { className: 'wl-small text-warning',
-                text: 'settings say ' + num(c.udp_workers) + ' — needs a restart to take effect' }));
+                text: t('js.otperf.settings_say', { n: num(c.udp_workers) }) }));
         }
         if (s.workers_consistent === false) {
             wparts.push(el('div', { className: 'wl-small text-warning',
-                text: 'The white and black config files disagree, so this would change when the tracker switches mode.' }));
+                text: t('js.otperf.configs_disagree') }));
         }
-        g.appendChild(kv('UDP workers', wparts));
+        g.appendChild(kv(t('js.otperf.udp_workers'), wparts));
 
-        g.appendChild(kv('Scheduling', [
+        g.appendChild(kv(t('js.otperf.scheduling'), [
             el('span', { text: 'nice ' + (s.nice === undefined ? '—' : s.nice) }),
-            el('span', { className: 'nl-unit', text: '  ·  weight ' + (s.cpu_weight || 'default') }),
-            el('div', { className: 'wl-small text-muted', text: (s.cpu_affinity ? 'pinned to cores ' + s.cpu_affinity : 'every core') })]));
+            el('span', { className: 'nl-unit', text: t('js.otperf.weight', { w: s.cpu_weight || t('js.otperf.default') }) }),
+            el('div', { className: 'wl-small text-muted', text: (s.cpu_affinity ? t('js.otperf.pinned', { cores: s.cpu_affinity }) : t('js.otperf.every_core')) })]));
 
-        g.appendChild(kv('Open files', [el('span', { text: num(s.limit_nofile) }),
+        g.appendChild(kv(t('js.otperf.open_files'), [el('span', { text: num(s.limit_nofile) }),
             el('div', { className: 'wl-small text-muted', text: 'LimitNOFILE' })]));
 
         // The panel's own file: present or not, and whether what it says is what is running.
-        const dparts = [badge(s.dropin_present ? 'written' : 'not written', s.dropin_present ? 'wl-b-ok' : 'wl-b-muted')];
+        const dparts = [badge(s.dropin_present ? t('js.otperf.written') : t('js.otperf.not_written'), s.dropin_present ? 'wl-b-ok' : 'wl-b-muted')];
         if (s.dropin_present && j.in_sync === false) {
-            dparts.push(' ', el('span', { className: 'wl-small text-warning', text: 'in force differs from Settings — press Apply' }));
+            dparts.push(' ', el('span', { className: 'wl-small text-warning', text: t('js.otperf.out_of_sync') }));
         }
         dparts.push(el('div', { className: 'wl-small text-muted', text: s.dropin || '' }));
         if (s.dropin_writable === false) {
@@ -252,13 +245,11 @@
             // the helper reports `deferred`, the panel records what was asked for, and the janitor
             // writes the file within a minute. Saying it fails made a working feature look broken.
             dparts.push(el('div', { className: 'wl-small text-muted',
-                text: 'Read-only for the panel’s PHP (systemd ProtectSystem), so Apply hands the change '
-                    + 'to the janitor, which writes it within a minute. “Not written” only means no '
-                    + 'override has been applied yet.' }));
+                text: t('js.otperf.dropin_readonly') }));
         }
         // Two columns: it is the only tile carrying a sentence, and five tiles in a three-column grid
         // otherwise leave a hole where the sixth would be.
-        const dropTile = kv('Panel drop-in', dparts);
+        const dropTile = kv(t('js.otperf.panel_dropin'), dparts);
         dropTile.classList.add('ot-dropin-tile');
         g.appendChild(dropTile);
 
@@ -269,8 +260,8 @@
         if (m) {
             const box = el('div', { className: 'wl-kv-v' });
             box.appendChild(el('div', { className: 'wl-small text-muted',
-                text: 'over the last ' + Math.round(m.secs) + ' s'
-                      + (m.machine !== null ? ' · whole machine ' + m.machine.toFixed(0) + '% busy' : '') }));
+                text: t('js.otperf.over_last', { secs: Math.round(m.secs) })
+                      + (m.machine !== null ? t('js.otperf.whole_machine', { pct: m.machine.toFixed(0) }) : '') }));
             m.threads.slice(0, 12).forEach(t => {
                 const row = el('div', { className: 'ot-thread' });
                 row.appendChild(el('span', { className: 'ot-thread-tid', text: String(t.tid) }));
@@ -287,12 +278,12 @@
             // auto-fill grid leaves a hole the size of the tall one; the bar chart wants the width
             // anyway, and the small facts want to sit together.
             const wrap = el('div', { className: 'wl-kv-item ot-load-tile' });
-            wrap.appendChild(el('div', { className: 'wl-kv-k', text: 'Load per thread' }));
+            wrap.appendChild(el('div', { className: 'wl-kv-k', text: t('js.otperf.load_per_thread') }));
             wrap.appendChild(box);
             g.appendChild(wrap);
         } else if (s.threads) {
-            g.appendChild(kv('Load per thread', el('span', { className: 'wl-small text-muted',
-                text: 'measuring — a rate needs two readings, so this fills in on the next poll.' })));
+            g.appendChild(kv(t('js.otperf.load_per_thread'), el('span', { className: 'wl-small text-muted',
+                text: t('js.otperf.measuring') })));
         }
 
         const notes = $('ot-notes');
@@ -312,32 +303,28 @@
     // ── the operations ───────────────────────────────────────────────────────
     const COPY = {
         apply: {
-            title: 'Apply the performance settings',
-            ok: 'Apply', okClass: 'btn-outline-success',
-            text: () => 'Write nice, CPU weight, affinity and the file limit into the panel’s own drop-in and reload systemd. '
-                + 'Nice and CPU weight take effect immediately; affinity and the file limit only on a restart.',
-            undo: () => 'Undo: the Reset button, which deletes that one file. Nothing the installer put there is touched.',
+            title: t('js.otperf.apply_title'),
+            ok: t('js.otperf.apply_ok'), okClass: 'btn-outline-success',
+            text: () => t('js.otperf.apply_text'),
+            undo: () => t('js.otperf.apply_undo'),
         },
         workers: {
-            title: 'Change the UDP worker count',
-            ok: 'Write workers', okClass: 'btn-outline-warning',
-            text: () => 'Write listen.udp.workers into BOTH mode config files, so the count cannot change when the tracker '
-                + 'switches white/black. opentracker reads it only at start-up, so this does nothing until a restart.',
-            undo: () => 'More threads help only while packets are queueing. If the dropped count on this card is zero, this will not make the tracker faster.',
+            title: t('js.otperf.workers_title'),
+            ok: t('js.otperf.workers_ok'), okClass: 'btn-outline-warning',
+            text: () => t('js.otperf.workers_text'),
+            undo: () => t('js.otperf.workers_undo'),
         },
         reset: {
-            title: 'Remove the panel’s drop-in',
-            ok: 'Remove it', okClass: 'btn-outline-secondary',
-            text: () => 'Delete 90-tracker-panel.conf and reload systemd. Everything the panel ever changed about the unit goes with it; '
-                + 'the installer’s own files stay exactly as they are.',
-            undo: () => 'listen.udp.workers is deliberately left alone — that is opentracker’s own setting, not ours.',
+            title: t('js.otperf.reset_title'),
+            ok: t('js.otperf.reset_ok'), okClass: 'btn-outline-secondary',
+            text: () => t('js.otperf.reset_text'),
+            undo: () => t('js.otperf.reset_undo'),
         },
         restart: {
-            title: 'Restart the tracker',
-            ok: 'Restart', okClass: 'btn-outline-danger',
-            text: () => 'Restart the service. Announces in flight are lost and peers retry, which for a UDP tracker means a '
-                + 'few seconds of raised traffic — not an outage, but not free either.',
-            undo: () => 'This is what makes affinity, the file limit and the worker count actually take effect.',
+            title: t('js.otperf.restart_title'),
+            ok: t('js.otperf.restart_ok'), okClass: 'btn-outline-danger',
+            text: () => t('js.otperf.restart_text'),
+            undo: () => t('js.otperf.restart_undo'),
         },
     };
 
@@ -375,7 +362,7 @@
         const btn = $('ot-confirm-ok');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Working…';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.otperf.working');
         alert.textContent = '';
         const body = { op: op, password: $('ot-confirm-password').value };
         if (op === 'workers') body.workers = parseInt($('ot-workers-input').value, 10) || 4;
@@ -383,17 +370,17 @@
             const r = await apiCall('admin/ot_apply', 'POST', body);
             if (r.success) {
                 bootstrap.Modal.getInstance($('otConfirmModal')).hide();
-                showToast(r.message || 'Done.', 'success');
+                showToast(r.message || t('js.otperf.done'), 'success');
                 painted = 0;
                 load(true);
             } else {
                 alert.textContent = '';
-                alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: r.error || 'Failed.' }));
+                alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: r.error || t('js.otperf.failed') }));
                 if (r.output) alert.appendChild(el('pre', { className: 'nl-preview mt-1', text: String(r.output).slice(0, 600) }));
             }
         } catch (err) {
             alert.textContent = '';
-            alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: 'Network error.' }));
+            alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.otperf.network_error') }));
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -403,10 +390,10 @@
     async function preview() {
         try {
             const r = await apiCall('admin/ot_apply', 'POST', { op: 'preview' });
-            $('ot-preview-title').textContent = r.file || 'Drop-in preview';
-            $('ot-preview-body').textContent = r.content || r.error || '(nothing)';
+            $('ot-preview-title').textContent = r.file || t('js.otperf.preview_title');
+            $('ot-preview-body').textContent = r.content || r.error || t('js.otperf.nothing');
             bootstrap.Modal.getOrCreateInstance($('otPreviewModal')).show();
-        } catch (e) { showToast('Network error', 'error'); }
+        } catch (e) { showToast(t('js.otperf.network_error_toast'), 'error'); }
     }
 
     function init() {

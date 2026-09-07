@@ -19,18 +19,20 @@ them; older glibc will not.
 | `bin/opentracker.black` | blacklist build — serves everything **except** the hashes in the file |
 | `sighup-udp-workers.patch` | fixes `systemctl reload` killing the tracker |
 | `libowfat-no-zerocopy.patch` | libowfat: compiles out `MSG_ZEROCOPY` in `iob_send()` — the chunked `/scrape` corruption (round four) |
+| `opentracker-review-fixes.patch` | seven fixes from the 2026-09 source review (connid secret, accesslist reload UAF, /stats task on a dead fd, atomic torrent count, tpbs one-byte write, worker start order, mmap bound) |
 | `UPSTREAM-REPORT.md` | the bug report for libowfat/opentracker, ready to send |
 | `udp-reject-interval.patch` | adds `access.udp_reject_interval` |
 | `egress-budget/ottrack.nft` | the reply-rate budget (see the Traffic page) |
 | `tracker-*.sh` | the root helpers the panel calls (see [INSTALL.md](../../INSTALL.md)) |
 
 ```
-sha256  164a37c53b352253911c4ce5d9b82f554c23f2212f4f6897071e59cb0083f849  opentracker.white
-sha256  02c3d8e3eea919657b85515f8adcd168af9597003efca22f331c8011cf5c6d74  opentracker.black
+sha256  d1a319cd999812a98c4fa2d6fedfee7a8a259b1d0ca0816d58bf2dc5f264fe8d  opentracker.white
+sha256  ef5e162e7cba1c3fd73b72c04f267c2699e5975d433c154699bc89cdc49da3cf  opentracker.black
 ```
 
-Both are 113 840 bytes, stripped, position-independent — the 2026-09-05 builds with the libowfat
-zerocopy patch (round five below); the unpatched 117 936-byte builds of 2026-08-18 are retired.
+Both are 113 840 bytes, stripped, position-independent — the 2026-09-06 builds with the libowfat
+zerocopy patch (round five) and the seven review fixes (round six); the unpatched 117 936-byte
+builds of 2026-08-18 are retired.
 
 ### Why two binaries and not one switch
 
@@ -570,3 +572,40 @@ settings decision, not a tracker bug.
 client, and four low ones), six raised but not confirmed, three refuted. Nothing from it is
 patched here; the zerocopy fix is the only change these binaries carry beyond the two patches
 above.
+
+## Round six: the review fixes (2026-09-06)
+
+The source review's findings went through a second pass: every unconfirmed one got two
+independent refuters, every confirmed one a patch writer and then an adversarial reviewer who had
+to apply the diff on a copy and find what was wrong with it. Seven patches survived and are in
+`opentracker-review-fixes.patch`; two were rejected by their reviewers as incomplete (the NULL
+`free_peerlist()` and the `iovec_increase` leak — both on `malloc`-failure paths) and are not
+shipped. Three findings are report-only by design because a fix would change behaviour or cost
+memory: the missing access gate on the full `/scrape` (high — an unauthenticated client can park
+~114 MB per connection for fifteen minutes; the panel is the only intended client and the port is
+loopback-only here), the kernel-default UDP receive buffer (the host sets `rmem_default`), and the
+per-packet `recvfrom`/`sendto` without batching.
+
+**What the patches change.** The UDP connection-id secret is read from `getrandom(2)` instead of
+`srandom(time(NULL))`, so a client can no longer forge connection ids for other addresses. An
+accesslist reload keeps the superseded list alive for the grace period whatever its age, instead
+of freeing a list the announce threads may still be searching (the SIGHUP use-after-free). A
+`/stats` task is cancelled when its client disconnects, like the fullscrape tasks already were, so
+a reused fd never receives someone else's stats. `g_torrent_count` is an atomic add instead of a
+read-modify-write after the bucket lock is dropped. The tpbs stats path no longer writes a NUL one
+byte past a full request buffer. UDP worker threads start after `trackerlogic_init()` and the
+first accesslist load, not during option parsing (the process serves nothing until the list is
+in). A whitelist whose last line has no trailing newline no longer reads one byte past the mmap.
+
+**The lab** (`/tmp/otlab2.sh` on the VPS, whitelist build on 127.0.0.1:16969 under valgrind):
+announce for a listed hash returns the peer, an unlisted one gets the 300-second reject reply,
+`/stats` and `/scrape` answer 200, twenty `/stats` requests aborted mid-flight and sixty SIGHUP
+reloads with the list rewritten each time under concurrent announces leave the process serving,
+and valgrind reports zero invalid reads, writes or frees across the whole run. The only entries in
+its summary are twenty `realloc(ptr, 0)` notes from upstream's `iovec_fix_increase_or_free()` on
+the stats path — a deprecated-pattern warning, not a memory error, and present before the patches.
+Compiler warnings went from 13 to 11.
+
+Built as `/home/debian/build-fixed2/opentracker.{white,black}` (the sources with every patch in
+`/home/debian/build-p2/`); shipped in `bin/`. The swap on production is the operator's decision:
+it restarts the tracker and the swarm rebuilds from empty.

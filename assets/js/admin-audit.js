@@ -17,25 +17,25 @@
     // Actions get a colour by AREA rather than one per action: twelve colours would be a legend, and
     // a legend nobody reads is decoration.
     const GROUP_STYLE = {
-        auth:     { cls: 'au-g-auth',     label: 'sign-in' },
-        settings: { cls: 'au-g-settings', label: 'settings' },
-        content:  { cls: 'au-g-content',  label: 'content' },
-        hashes:   { cls: 'au-g-hashes',   label: 'hashes' },
-        reports:  { cls: 'au-g-reports',  label: 'reports' },
-        users:    { cls: 'au-g-users',    label: 'users' },
-        machine:  { cls: 'au-g-machine',  label: 'machine' },
-        mail:     { cls: 'au-g-mail',     label: 'mail' },
-        api:      { cls: 'au-g-api',      label: 'api' },
-        other:    { cls: 'au-g-other',    label: 'other' },
+        auth:     { cls: 'au-g-auth',     label: t('js.audit.group_auth') },
+        settings: { cls: 'au-g-settings', label: t('js.audit.group_settings') },
+        content:  { cls: 'au-g-content',  label: t('js.audit.group_content') },
+        hashes:   { cls: 'au-g-hashes',   label: t('js.audit.group_hashes') },
+        reports:  { cls: 'au-g-reports',  label: t('js.audit.group_reports') },
+        users:    { cls: 'au-g-users',    label: t('js.audit.group_users') },
+        machine:  { cls: 'au-g-machine',  label: t('js.audit.group_machine') },
+        mail:     { cls: 'au-g-mail',     label: t('js.audit.group_mail') },
+        api:      { cls: 'au-g-api',      label: t('js.audit.group_api') },
+        other:    { cls: 'au-g-other',    label: t('js.audit.group_other') },
     };
 
     const ACTOR_TITLE = {
-        owner:     'Signed in with the panel password — the site owner',
-        admin:     'A user account in the admin group',
-        moderator: 'A user account with panel access but not admin',
-        user:      'An ordinary signed-in visitor',
-        api:       'A server-to-server API client',
-        system:    'The janitor or another automatic process',
+        owner:     t('js.audit.actor_owner'),
+        admin:     t('js.audit.actor_admin'),
+        moderator: t('js.audit.actor_moderator'),
+        user:      t('js.audit.actor_user'),
+        api:       t('js.audit.actor_api'),
+        system:    t('js.audit.actor_system'),
     };
 
     async function load() {
@@ -47,17 +47,16 @@
         body.textContent = '';
         if (!r || !r.success) {
             body.appendChild(el('tr', {}, el('td', { colSpan: 5, className: 'table-empty-state' },
-                (r && r.error) || 'Could not read the log.')));
+                (r && r.error) || t('js.audit.read_failed'))));
             return;
         }
 
         $('au-note').textContent = r.enabled
-            ? 'Kept for ' + r.keep_days + ' days, then removed by the janitor. Credentials are never recorded — a '
-              + 'setting that holds one shows as “changed”, not as its value.'
-            : 'Logging is switched OFF in Settings, so nothing new is being recorded. What is here is history.';
+            ? t('js.audit.note_enabled', { days: r.keep_days })
+            : t('js.audit.note_disabled');
 
         $('au-total').textContent = r.total
-            ? r.total.toLocaleString() + (r.total === 1 ? ' entry' : ' entries')
+            ? (r.total === 1 ? t('js.audit.entry_one', { n: r.total.toLocaleString() }) : t('js.audit.entry_many', { n: r.total.toLocaleString() }))
             : '';
 
         fillGroups(r.groups);
@@ -65,8 +64,8 @@
         if (!r.rows.length) {
             body.appendChild(el('tr', {}, el('td', { colSpan: 5, className: 'table-empty-state' },
                 state.search || state.failed || state.group !== 'all' || state.actor
-                    ? 'Nothing matches those filters.'
-                    : 'Nothing has been recorded yet.')));
+                    ? t('js.audit.no_match')
+                    : t('js.audit.nothing_recorded'))));
             renderPagination($('au-pagination'), { total: 0, page: 1, pages: 1, onPage: () => {} });
             return;
         }
@@ -96,7 +95,7 @@
         const what = el('td', { className: 'au-c-what' }, [
             el('span', { className: 'au-badge ' + g.cls, text: row.action }),
         ]);
-        if (!row.ok) what.appendChild(el('span', { className: 'au-badge au-failed-badge', text: 'failed' }));
+        if (!row.ok) what.appendChild(el('span', { className: 'au-badge au-failed-badge', text: t('js.audit.failed_badge') }));
         tr.appendChild(what);
 
         const cell = el('td', {});
@@ -115,23 +114,23 @@
 
     function detailEl(detail) {
         const det = el('details', { className: 'au-detail' });
-        det.appendChild(el('summary', { text: 'details' }));
+        det.appendChild(el('summary', { text: t('js.audit.details') }));
         // A settings diff has a shape worth rendering as a table; anything else is shown as it came.
         const isDiff = Object.values(detail).every(v => v && typeof v === 'object'
             && ('from' in v || 'to' in v || 'changed' in v));
         if (isDiff && Object.keys(detail).length) {
-            const t = el('table', { className: 'au-diff' });
+            const tbl = el('table', { className: 'au-diff' });
             Object.keys(detail).forEach(k => {
                 const v = detail[k];
-                t.appendChild(el('tr', {}, [
+                tbl.appendChild(el('tr', {}, [
                     el('td', { className: 'au-diff-k' }, el('code', { text: k })),
                     v.changed
-                        ? el('td', { className: 'au-diff-hidden', colSpan: 2, text: 'changed (value not recorded)' })
-                        : el('td', { className: 'au-diff-from' }, el('code', { text: String(v.from ?? '') || '(empty)' })),
-                    v.changed ? '' : el('td', { className: 'au-diff-to' }, el('code', { text: String(v.to ?? '') || '(empty)' })),
+                        ? el('td', { className: 'au-diff-hidden', colSpan: 2, text: t('js.audit.changed_hidden') })
+                        : el('td', { className: 'au-diff-from' }, el('code', { text: String(v.from ?? '') || t('js.audit.empty_value') })),
+                    v.changed ? '' : el('td', { className: 'au-diff-to' }, el('code', { text: String(v.to ?? '') || t('js.audit.empty_value') })),
                 ]));
             });
-            det.appendChild(t);
+            det.appendChild(tbl);
         } else {
             det.appendChild(el('pre', { className: 'au-json', text: JSON.stringify(detail, null, 2) }));
         }
@@ -157,7 +156,7 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         const search = $('au-search');
-        const doSearch = debounce(() => { state.search = search.value.trim(); state.page = 1; load(); }, 350);
+        const doSearch = debounce(() => { state.search = search.value.trim(); state.page = 1; load(); }, window.AdminCommon.DEBOUNCE.search);
         search.addEventListener('input', doSearch);
         bindSearchClear(search, $('au-search-clear'), () => { state.search = ''; state.page = 1; load(); });
         $('au-group').addEventListener('change', e => { state.group = e.target.value; state.page = 1; load(); });

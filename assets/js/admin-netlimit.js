@@ -34,10 +34,10 @@
     const NL_BUSY_LOAD = 0.85;
     const RANGES = [['1h', '1h'], ['6h', '6h'], ['24h', '24h'], ['7d', '7d'], ['14d', '2w'], ['30d', '1m']];
     const SERIES = [
-        { key: 'pps_total',  label: 'Arriving',  color: '#4a9eff', on: true },
-        { key: 'pps_passed', label: 'Served',    color: '#66bb6a', on: true },
-        { key: 'pps_capped', label: 'Dropped',   color: '#ff5252', on: true },
-        { key: 'limit_pps',  label: 'Limit',     color: '#ffb74d', on: true, dash: [6, 4] },
+        { key: 'pps_total',  label: t('js.net.series_arriving'),  color: '#4a9eff', on: true },
+        { key: 'pps_passed', label: t('js.net.series_served'),    color: '#66bb6a', on: true },
+        { key: 'pps_capped', label: t('js.net.series_dropped'),   color: '#ff5252', on: true },
+        { key: 'limit_pps',  label: t('js.net.series_limit'),     color: '#ffb74d', on: true, dash: [6, 4] },
     ];
     const STORE_RANGE = 'tracker_net_range';
     const STORE_COLLAPSE = 'tracker_net_collapsed';
@@ -121,7 +121,7 @@
         } catch (e) {
             // Returning quietly here is indistinguishable, on screen, from a server that never
             // answers: the loading state stays up and the admin has no idea anything went wrong.
-            if (seq > statusPainted) { statusPainted = seq; renderFatal('The panel could not reach the status endpoint (' + (e && e.message ? e.message : 'network error') + ').', true); }
+            if (seq > statusPainted) { statusPainted = seq; renderFatal(t('js.net.status_unreachable', {err: (e && e.message ? e.message : t('js.net.network_error'))}), true); }
             return;
         } finally {
             if (statusBusy === seq) { statusBusy = 0; clearWatchdog(); }
@@ -151,7 +151,7 @@
         watchdog = setTimeout(() => {
             watchdog = null;
             if (statusPainted) return;
-            renderFatal('The status endpoint has not answered for 15 seconds. The server may be out of PHP workers.', true);
+            renderFatal(t('js.net.status_timeout'), true);
         }, 15000);
     }
     function clearWatchdog() { if (watchdog) { clearTimeout(watchdog); watchdog = null; } }
@@ -159,20 +159,20 @@
     function renderFatal(msg, retry) {
         const grid = $('net-grid');
         grid.textContent = '';
-        const parts = [badge('unavailable', 'wl-b-bad'), ' ',
-            el('span', { className: 'wl-small text-muted', text: msg || 'The status endpoint did not answer.' })];
+        const parts = [badge(t('js.net.unavailable'), 'wl-b-bad'), ' ',
+            el('span', { className: 'wl-small text-muted', text: msg || t('js.net.status_no_answer') })];
         if (retry) parts.push(el('div', {}, [el('button', {
             className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button',
             onclick: () => { statusPainted = 0; statusBusy = 0; renderLoading(); loadStatus(true); },
-        }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' Try again'])]));
-        grid.appendChild(kv('Firewall', parts));
+        }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ' + t('js.net.try_again')])]));
+        grid.appendChild(kv(t('js.net.firewall'), parts));
     }
 
     function renderLoading() {
         const grid = $('net-grid');
         grid.textContent = '';
         grid.appendChild(el('div', { className: 'wl-status-loading' }, [
-            el('span', { className: 'spinner-border spinner-border-sm', role: 'status' }), ' Reading the firewall…']));
+            el('span', { className: 'spinner-border spinner-border-sm', role: 'status' }), ' ' + t('js.net.reading_firewall')]));
     }
 
     // "Not persistent" has three different causes and only one of them is the admin's to fix, so
@@ -183,20 +183,16 @@
         if (fw.dir_writable === false || j.persist_deferred) {
             return el('div', { className: 'wl-small text-muted' }, [
                 el('i', { className: 'bi bi-clock-history' }),
-                ' Live, not saved yet — the panel’s PHP cannot write ' + (fw.file_path || '/etc/nftables.d') +
-                ' (systemd ProtectSystem). The janitor saves it within a minute; until then a reboot would undo it.']);
+                ' ' + t('js.net.persist_deferred', {path: (fw.file_path || '/etc/nftables.d')})]);
         }
         if (fw.include_ok === false) {
-            return el('div', { className: 'wl-small text-warning', text:
-                'Loaded, but nftables.conf does not include the directory, so it will be gone after a reboot. Run the availability test in Settings for the one line to add.' });
+            return el('div', { className: 'wl-small text-warning', text: t('js.net.persist_no_include') });
         }
         if (fw.file_matches === false && fw.file_present) {
             return el('div', { className: 'wl-small text-warning', text:
-                'Loaded, but the saved copy is a DIFFERENT ruleset (' + (fw.file_mode === 'count' ? 'counting only' : num(fw.file_pps) + ' pps') +
-                ') — after a reboot that one comes back, not this one.' });
+                t('js.net.persist_differs', {what: (fw.file_mode === 'count' ? t('js.net.counting_only') : t('js.net.pps_value', {n: num(fw.file_pps)}))}) });
         }
-        return el('div', { className: 'wl-small text-warning', text:
-            'Loaded, but NOT saved — it will be gone after a reboot. Run the availability test in Settings.' });
+        return el('div', { className: 'wl-small text-warning', text: t('js.net.persist_not_saved') });
     }
 
     function renderStatus(j) {
@@ -210,39 +206,39 @@
 
         // 1. what the firewall is doing right now
         if (j.error) {
-            grid.appendChild(kv('Firewall', [badge('unavailable', 'wl-b-bad'), ' ',
+            grid.appendChild(kv(t('js.net.firewall'), [badge(t('js.net.unavailable'), 'wl-b-bad'), ' ',
                 el('span', { className: 'wl-small text-muted', text: j.error })]));
         } else if (!fw.nft) {
-            grid.appendChild(kv('Firewall', [badge('no nftables', 'wl-b-bad'), ' ',
-                el('span', { className: 'wl-small text-muted', text: 'nft is not installed — the limit cannot be loaded on this machine.' })]));
+            grid.appendChild(kv(t('js.net.firewall'), [badge(t('js.net.no_nftables'), 'wl-b-bad'), ' ',
+                el('span', { className: 'wl-small text-muted', text: t('js.net.nft_missing') })]));
         } else if (fw.table && fw.mode === 'count') {
             // counters loaded, no drop rule: measuring, not throttling — say so unambiguously
-            const parts = [badge('counting only', 'wl-b-pending'), ' ',
-                el('span', { className: 'text-muted', text: 'port ' + fw.port + ' · nothing is dropped' }),
-                el('div', { className: 'wl-small text-muted', text: 'The rules in force contain no drop at all — they exist to measure. Pick a limit below once there are enough samples.' })];
+            const parts = [badge(t('js.net.counting_only'), 'wl-b-pending'), ' ',
+                el('span', { className: 'text-muted', text: t('js.net.port_nothing_dropped', {port: fw.port}) }),
+                el('div', { className: 'wl-small text-muted', text: t('js.net.counting_rules_note') })];
             if (!fw.persistent) parts.push(persistNote(fw, j));
-            grid.appendChild(kv('Inbound limit', parts));
+            grid.appendChild(kv(t('js.net.inbound_limit'), parts));
         } else if (fw.table) {
-            const parts = [badge(num(fw.pps) + ' pps', 'wl-b-ok'), ' ',
-                el('span', { className: 'text-muted', text: 'burst ' + num(fw.burst) + ' · port ' + fw.port })];
+            const parts = [badge(t('js.net.pps_value', {n: num(fw.pps)}), 'wl-b-ok'), ' ',
+                el('span', { className: 'text-muted', text: t('js.net.burst_port', {burst: num(fw.burst), port: fw.port}) })];
             if (!fw.persistent) parts.push(persistNote(fw, j));
             const src = j.last_apply && j.last_apply.source;
-            if (src) parts.push(el('div', { className: 'wl-small text-muted', text: 'set by ' + src + ' ' + (j.last_apply.at ? fmtAgo(Math.floor(j.server_time - j.last_apply.at)) + ' ago' : '') }));
-            grid.appendChild(kv('Inbound limit', parts));
+            if (src) parts.push(el('div', { className: 'wl-small text-muted', text: t('js.net.set_by', {src: src, ago: (j.last_apply.at ? t('js.net.ago', {t: fmtAgo(Math.floor(j.server_time - j.last_apply.at))}) : '')}) }));
+            grid.appendChild(kv(t('js.net.inbound_limit'), parts));
         } else {
-            grid.appendChild(kv('Inbound limit', [badge('not loaded', 'wl-b-muted'), ' ',
-                el('span', { className: 'wl-small text-muted', text: cfg.limit ? 'Settings say it should be on — press "Apply limit" to load it.' : 'Nothing is being dropped by the panel.' })]));
+            grid.appendChild(kv(t('js.net.inbound_limit'), [badge(t('js.net.not_loaded'), 'wl-b-muted'), ' ',
+                el('span', { className: 'wl-small text-muted', text: cfg.limit ? t('js.net.settings_say_on') : t('js.net.panel_drops_nothing') })]));
         }
 
         // 2. the three numbers this whole card exists for
         const hasLive = Object.keys(pps).length > 0;
-        const stale = live.stale ? ' (last known)' : '';
+        const stale = live.stale ? ' ' + t('js.net.last_known') : '';
         // "Arriving" is the honest word for it: our chain runs before everything else on this port,
         // so this is the raw arrival rate, whatever anybody else drops afterwards.
-        grid.appendChild(kv('Arriving' + stale, hasLive
+        grid.appendChild(kv(t('js.net.arriving') + stale, hasLive
             ? [el('strong', { text: num(pps.in_total) }), el('span', { className: 'nl-unit', text: ' pps' }),
-               el('div', { className: 'wl-small text-muted', text: 'measured over the last ' + (live.span || 0) + ' s' })]
-            : [el('span', { className: 'text-muted', text: 'measuring…' })]));
+               el('div', { className: 'wl-small text-muted', text: t('js.net.measured_over', {s: (live.span || 0)}) })]
+            : [el('span', { className: 'text-muted', text: t('js.net.measuring') })]));
         // Our chain sits at `priority filter - 5`, i.e. BEFORE the distribution's filter table. So this
         // is what got past OUR rules — if somebody else's rule limits the same port downstream, the
         // tracker receives less than this, and saying "served to the tracker" would overstate it.
@@ -250,51 +246,50 @@
         const passedParts = hasLive
             ? [el('strong', { text: num(pps.in_passed) }), el('span', { className: 'nl-unit', text: ' pps' })]
             : [el('span', { className: 'text-muted', text: '—' })];
-        if (hasLive && foreign) passedParts.push(el('div', { className: 'wl-small text-warning', text:
-            'Another rule further down the chain limits this port as well, so the tracker actually receives less than this. See the note below.' }));
-        grid.appendChild(kv(foreign ? 'Past our rules' : 'Served to the tracker', passedParts));
+        if (hasLive && foreign) passedParts.push(el('div', { className: 'wl-small text-warning', text: t('js.net.foreign_rule_less') }));
+        grid.appendChild(kv(foreign ? t('js.net.past_our_rules') : t('js.net.served_to_tracker'), passedParts));
         const dropped = hasLive ? (pps.in_capped || 0) : null;
-        grid.appendChild(kv('Dropped by the limit', hasLive
+        grid.appendChild(kv(t('js.net.dropped_by_limit'), hasLive
             ? [el('strong', { className: dropped > 0 ? 'text-warning' : '', text: num(dropped) }), el('span', { className: 'nl-unit', text: ' pps' }),
                el('div', { className: 'wl-small text-muted', text: dropped > 0
-                   ? Math.round((dropped / Math.max(1, pps.in_total)) * 100) + ' % of what arrives never reaches OpenTracker'
-                   : 'nothing is being dropped right now' })]
+                   ? t('js.net.pct_never_reaches', {pct: Math.round((dropped / Math.max(1, pps.in_total)) * 100)})
+                   : t('js.net.nothing_dropped_now') })]
             : [el('span', { className: 'text-muted', text: '—' })]));
 
         // 3. the other lever, side by side (we only show it — it is installed by hand)
         const eg = fw.egress || {};
         if (eg.table) {
             const hasE = Object.keys(epps).length > 0;
-            grid.appendChild(kv('Outbound budget (replies)', [
-                badge(num(eg.pps) + ' pps', 'wl-b-ok'), ' ',
-                el('span', { className: 'wl-small text-muted', text: hasE ? num((epps.announce_ok || 0) + (epps.passed_good || 0)) + ' pps out · ' + num(epps.capped) + ' pps capped' : 'measuring…' }),
-                el('div', { className: 'wl-small text-muted', text: 'table inet ottrack — what the tracker answers. Capping it is what keeps the rest of the machine reachable.' }),
+            grid.appendChild(kv(t('js.net.outbound_budget'), [
+                badge(t('js.net.pps_value', {n: num(eg.pps)}), 'wl-b-ok'), ' ',
+                el('span', { className: 'wl-small text-muted', text: hasE ? t('js.net.out_capped', {out: num((epps.announce_ok || 0) + (epps.passed_good || 0)), capped: num(epps.capped)}) : t('js.net.measuring') }),
+                el('div', { className: 'wl-small text-muted', text: t('js.net.egress_note') }),
             ]));
         }
 
         // 4. automatic mode
         if (cfg.auto) {
             const a = j.auto_state || {};
-            const parts = [badge('on', 'wl-b-ok'), ' ',
-                el('span', { className: 'text-muted', text: 'target ' + num(cfg.auto_target) + ' pps, band ' + num(cfg.auto_min) + '–' + num(cfg.auto_max) })];
-            if (a.over || a.under) parts.push(el('div', { className: 'wl-small text-muted', text: (a.over ? 'above target' : 'below target') + ' for ' + Math.max(a.over, a.under) + ' of ' + a.hysteresis + ' samples' }));
-            if (a.last_move_at) parts.push(el('div', { className: 'wl-small text-muted', text: 'last move: ' + (a.last_move || '?') + ' ' + fmtAgo(Math.floor(j.server_time - a.last_move_at)) + ' ago' + (a.note ? ' — ' + a.note : '') }));
-            grid.appendChild(kv('Automatic mode', parts));
+            const parts = [badge(t('js.net.on'), 'wl-b-ok'), ' ',
+                el('span', { className: 'text-muted', text: t('js.net.auto_target', {target: num(cfg.auto_target), min: num(cfg.auto_min), max: num(cfg.auto_max)}) })];
+            if (a.over || a.under) parts.push(el('div', { className: 'wl-small text-muted', text: t('js.net.for_samples', {dir: (a.over ? t('js.net.above_target') : t('js.net.below_target')), n: Math.max(a.over, a.under), h: a.hysteresis}) }));
+            if (a.last_move_at) parts.push(el('div', { className: 'wl-small text-muted', text: t('js.net.last_move', {move: (a.last_move || '?'), ago: t('js.net.ago', {t: fmtAgo(Math.floor(j.server_time - a.last_move_at))}), note: (a.note ? ' — ' + a.note : '')}) }));
+            grid.appendChild(kv(t('js.net.automatic_mode'), parts));
         }
 
         // 5. panic countdown
         if (j.panic) {
-            grid.appendChild(kv('Emergency throttle', [
-                badge(Math.ceil(j.panic.seconds_left / 60) + ' min left', 'wl-b-warn'), ' ',
-                el('span', { className: 'wl-small text-muted', text: j.panic.restore_enabled ? 'then back to ' + num(j.panic.restore_pps) + ' pps' : 'then the limit is removed again' }),
-                el('button', { className: 'btn btn-sm btn-outline-secondary ms-2', type: 'button', onclick: () => ask('restore') }, [el('i', { className: 'bi bi-arrow-counterclockwise' }), ' Undo now']),
+            grid.appendChild(kv(t('js.net.emergency_throttle'), [
+                badge(t('js.net.min_left', {n: Math.ceil(j.panic.seconds_left / 60)}), 'wl-b-warn'), ' ',
+                el('span', { className: 'wl-small text-muted', text: j.panic.restore_enabled ? t('js.net.then_back_to', {n: num(j.panic.restore_pps)}) : t('js.net.then_removed') }),
+                el('button', { className: 'btn btn-sm btn-outline-secondary ms-2', type: 'button', onclick: () => ask('restore') }, [el('i', { className: 'bi bi-arrow-counterclockwise' }), ' ' + t('js.net.undo_now')]),
             ]));
         }
 
         if (typeof j.load_per_core === 'number') {
-            grid.appendChild(kv('Machine load', [
-                el('span', { text: j.load_per_core.toFixed(2) + ' per core' }), ' ',
-                el('span', { className: 'wl-small text-muted', text: j.cpus ? '(' + j.cpus + ' cores)' : '' }),
+            grid.appendChild(kv(t('js.net.machine_load'), [
+                el('span', { text: t('js.net.per_core', {n: j.load_per_core.toFixed(2)}) }), ' ',
+                el('span', { className: 'wl-small text-muted', text: j.cpus ? t('js.net.cores', {n: j.cpus}) : '' }),
             ]));
         }
 
@@ -314,27 +309,27 @@
         if (wcpu !== null) lastWorkerCpu = wcpu;
         const shown = wcpu || lastWorkerCpu;
         if (shown) {
-            grid.appendChild(kv('Metadata worker', [
+            grid.appendChild(kv(t('js.net.metadata_worker'), [
                 el('span', { className: shown.core > 90 ? 'text-warning' : '',
-                             text: shown.core.toFixed(0) + '% of a core' }), ' ',
+                             text: t('js.net.pct_of_core', {n: shown.core.toFixed(0)}) }), ' ',
                 el('span', { className: 'wl-small text-muted',
-                             text: '(' + shown.box.toFixed(1) + '% of the box, over ' + shown.window + ' s)' }),
+                             text: t('js.net.pct_of_box', {box: shown.box.toFixed(1), s: shown.window}) }),
             ]));
         } else if (j.worker_cpu) {
             // First reading of the session: there is genuinely nothing to show yet, and a row that
             // appears from nowhere a moment later is worse than a row that says what it is waiting for.
-            grid.appendChild(kv('Metadata worker', [
-                el('span', { className: 'wl-small text-muted', text: 'running · first reading in a few seconds' }),
+            grid.appendChild(kv(t('js.net.metadata_worker'), [
+                el('span', { className: 'wl-small text-muted', text: t('js.net.worker_first_reading') }),
             ]));
         } else if (j.worker_cpu === null) {
             lastWorkerCpu = null;
-            grid.appendChild(kv('Metadata worker', [
-                el('span', { className: 'wl-small text-muted', text: 'not running here' }),
+            grid.appendChild(kv(t('js.net.metadata_worker'), [
+                el('span', { className: 'wl-small text-muted', text: t('js.net.worker_not_here') }),
             ]));
         }
 
         renderNotes(j);
-        $('net-updated').textContent = 'port ' + (fw.port || cfg.port) + ' · updated ' + new Date().toLocaleTimeString();
+        $('net-updated').textContent = t('js.net.port_updated', {port: (fw.port || cfg.port), time: new Date().toLocaleTimeString()});
     }
 
     /** Warnings that need a sentence, not a tile: foreign rules on the same port, persistence, errors. */
@@ -386,21 +381,21 @@
                     el('code', { text: r.family + ' ' + r.table + ' / ' + r.chain }), ' ',
                     el('span', { className: 'text-muted', text: r.rule }),
                     el('div', { className: 'wl-small' }, [
-                        el('span', { className: 'text-muted', text: 'remove it yourself when you no longer want it: ' }),
+                        el('span', { className: 'text-muted', text: t('js.net.remove_yourself') + ' ' }),
                         el('code', { text: r.undo }),
                     ]),
                 ]));
             });
             box.appendChild(el('div', { className: 'nl-note nl-note-info' }, [
-                el('div', {}, [el('i', { className: 'bi bi-info-circle' }), el('strong', { text: ' Another rule already limits this port.' }),
-                    el('span', { text: ' It is not ours and the panel never touches it — both limits apply, the stricter one wins. Rules added by hand usually live only in RAM and disappear on reboot; the panel\'s does not.' })]),
+                el('div', {}, [el('i', { className: 'bi bi-info-circle' }), el('strong', { text: ' ' + t('js.net.foreign_rule_title') }),
+                    el('span', { text: ' ' + t('js.net.foreign_rule_body') })]),
                 list,
             ]));
         }
         if (j.last_error) {
             box.appendChild(el('div', { className: 'nl-note nl-note-bad' }, [
                 el('i', { className: 'bi bi-exclamation-triangle' }),
-                el('span', { text: ' Last failure: ' + j.last_error + (j.last_error_at ? ' (' + fmtAgo(Math.floor(j.server_time - j.last_error_at)) + ' ago)' : '') }),
+                el('span', { text: ' ' + t('js.net.last_failure', {err: j.last_error, ago: (j.last_error_at ? ' (' + t('js.net.ago', {t: fmtAgo(Math.floor(j.server_time - j.last_error_at))}) + ')' : '')}) }),
             ]));
         }
         // The counters live in the firewall: with no table of ours there is nothing to count, so the
@@ -409,16 +404,16 @@
         if (j.configured && j.configured.monitor && fw.nft && !fw.table && !j.error) {
             box.appendChild(el('div', { className: 'nl-note nl-note-warn' }, [
                 el('div', {}, [el('i', { className: 'bi bi-exclamation-triangle' }),
-                    el('strong', { text: ' The monitor is on but nothing is being counted.' }),
-                    el('span', { text: ' The counters live in the firewall, and none of our rules are loaded — every sample would be zero. Load the counting-only rules: they contain no drop at all, so nothing is throttled.' })]),
+                    el('strong', { text: ' ' + t('js.net.monitor_not_counting_title') }),
+                    el('span', { text: ' ' + t('js.net.monitor_not_counting_body') })]),
                 el('button', { className: 'btn btn-sm btn-outline-info mt-2', type: 'button',
-                               onclick: () => ask('monitor') }, [el('i', { className: 'bi bi-activity' }), ' Start counting…']),
+                               onclick: () => ask('monitor') }, [el('i', { className: 'bi bi-activity' }), ' ' + t('js.net.start_counting')]),
             ]));
         }
         if (j.configured && j.configured.monitor && j.last_tick_at && (j.server_time - j.last_tick_at) > 300) {
             box.appendChild(el('div', { className: 'nl-note nl-note-warn' }, [
                 el('i', { className: 'bi bi-clock-history' }),
-                el('span', { text: ' The janitor has not sampled for ' + fmtAgo(Math.floor(j.server_time - j.last_tick_at)) + ' — check that tracker-whitelist-janitor.timer is running, or the chart will stay flat.' }),
+                el('span', { text: ' ' + t('js.net.janitor_stale', {t: fmtAgo(Math.floor(j.server_time - j.last_tick_at))}) }),
             ]));
         }
     }
@@ -453,9 +448,9 @@
         const r = state.recommend;
         if (!r || !r.samples) return;
         const defs = [
-            ['median', r.median, 'nl-mark-median', 'Median — the ordinary rate'],
-            ['P95', r.p95, 'nl-mark-p95', 'P95 — busier than 95 % of the time'],
-            ['peak', r.peak, 'nl-mark-peak', 'Peak — the busiest sample recorded'],
+            [t('js.net.mark_median'), r.median, 'nl-mark-median', t('js.net.mark_median_title')],
+            ['P95', r.p95, 'nl-mark-p95', t('js.net.mark_p95_title')],
+            [t('js.net.mark_peak'), r.peak, 'nl-mark-peak', t('js.net.mark_peak_title')],
         ].filter(d => d[1]).map(([label, value, cls, title]) => ({
             label, value, cls, title, pct: ppsToPct(value),
         })).sort((a, b) => a.pct - b.pct);
@@ -481,10 +476,10 @@
         if (lc && lc.busy_pps) {
             const pctB = ppsToPct(lc.busy_pps);
             const b = el('span', { className: 'nl-mark nl-mark-busy' + (pctB > 72 ? ' nl-mark-flip' : ''),
-                title: 'Median load reached ' + NL_BUSY_LOAD + ' per core around ' + num(lc.busy_pps) + ' pps' });
+                title: t('js.net.busy_title', {load: NL_BUSY_LOAD, n: num(lc.busy_pps)}) });
             b.style.left = pctB + '%';
             b.style.setProperty('--nl-tick-h', '2.6rem');
-            b.appendChild(el('span', { className: 'nl-mark-label', text: 'busy' }));
+            b.appendChild(el('span', { className: 'nl-mark-label', text: t('js.net.busy') }));
             b.querySelector('.nl-mark-label').style.top = (0.15 + 3 * MARK_ROW_REM) + 'rem';
             marks.appendChild(b);
         }
@@ -524,25 +519,23 @@
             const lc2 = (state.status && state.status.load_curve) || null;
             if (lc2 && lc2.busy_pps && cur > lc2.busy_pps) {
                 box.appendChild(el('div', { className: 'text-warning wl-small', text:
-                    'This machine was already at ' + NL_BUSY_LOAD + ' load per core around ' + num(lc2.busy_pps)
-                    + ' pps, so a limit of ' + num(cur) + ' pps would let it get there before the rule ever fires.'
-                    + ' (Load is the whole box — mail and the forum live here too — so treat it as a ceiling, not a verdict.)' }));
+                    t('js.net.advice_busy', {load: NL_BUSY_LOAD, busy: num(lc2.busy_pps), cur: num(cur)}) }));
             } else if (lc2 && !lc2.busy_pps && lc2.why) {
-                box.appendChild(el('div', { className: 'wl-small text-muted', text: 'Load study: ' + lc2.why }));
+                box.appendChild(el('div', { className: 'wl-small text-muted', text: t('js.net.load_study', {why: lc2.why}) }));
             }
             const ref = inboundReference();
             if (ref > 0) {
                 if (cur < ref) {
-                    box.appendChild(el('div', { className: 'text-danger wl-small', text: 'At ' + num(cur) + ' pps you would be cutting into the ' + num(ref) + ' pps that is getting through right now.' }));
+                    box.appendChild(el('div', { className: 'text-danger wl-small', text: t('js.net.advice_cutting', {cur: num(cur), ref: num(ref)}) }));
                 } else if (cur < ref * ZONE_HEADROOM) {
-                    box.appendChild(el('div', { className: 'text-warning wl-small', text: 'At ' + num(cur) + ' pps there is little headroom over the ' + num(ref) + ' pps getting through right now — a normal spike would hit the limit.' }));
+                    box.appendChild(el('div', { className: 'text-warning wl-small', text: t('js.net.advice_headroom', {cur: num(cur), ref: num(ref)}) }));
                 } else if (cur > r.peak * 2 && r.peak > 0) {
-                    box.appendChild(el('div', { className: 'text-muted wl-small', text: 'At ' + num(cur) + ' pps the limit is far above anything measured — it would effectively never trigger.' }));
+                    box.appendChild(el('div', { className: 'text-muted wl-small', text: t('js.net.advice_far_above', {cur: num(cur)}) }));
                 }
             } else if (cur < r.floor) {
-                box.appendChild(el('div', { className: 'text-warning wl-small', text: 'At ' + num(cur) + ' pps you would be dropping packets that are currently arriving.' }));
+                box.appendChild(el('div', { className: 'text-warning wl-small', text: t('js.net.adv_dropping_arriving', {n: num(cur)}) }));
             } else if (cur > r.peak * 2 && r.peak > 0) {
-                box.appendChild(el('div', { className: 'text-muted wl-small', text: 'At ' + num(cur) + ' pps the limit is far above anything measured — it would effectively never trigger.' }));
+                box.appendChild(el('div', { className: 'text-muted wl-small', text: t('js.net.adv_never_trigger', {n: num(cur)}) }));
             }
         }
     }
@@ -644,10 +637,7 @@
             const adv = $('net-eadvice');
             if (adv) {
                 adv.textContent = '';
-                adv.appendChild(el('div', { className: 'nl-note nl-note-info', text:
-                    'There is no outbound rule to tune yet. The panel creates the table inet ottrack the '
-                    + 'first time a budget is applied, or the firewall helper does when it sets one — until '
-                    + 'then the tracker answers at whatever rate it likes, which is the default behaviour.' }));
+                adv.appendChild(el('div', { className: 'nl-note nl-note-info', text: t('js.net.egress_no_rule') }));
             }
             return;
         }
@@ -683,10 +673,10 @@
         if (!eState.ref) return;
         const pctE = ppsToPct(eState.ref);
         const m = el('span', { className: 'nl-mark nl-mark-median' + (pctE > 72 ? ' nl-mark-flip' : ''),
-                               title: 'Measured outbound rate: ' + num(eState.ref) + ' pps' });
+                               title: t('js.net.egress_measured_title', {n: num(eState.ref)}) });
         m.style.left = pctE + '%';
         m.style.setProperty('--nl-tick-h', '0.5rem');
-        m.appendChild(el('span', { className: 'nl-mark-label', text: 'sending now' }));
+        m.appendChild(el('span', { className: 'nl-mark-label', text: t('js.net.egress_sending_now') }));
         marks.appendChild(m);
     }
 
@@ -696,26 +686,22 @@
         box.textContent = '';
         const inForce = parseInt(eg.pps, 10) || 0;
         const lines = [];
-        lines.push(el('div', { text: 'In force: ' + num(inForce) + ' pps. This is table inet ottrack, on the way OUT — what the tracker '
-            + 'answers. Capping it is what keeps the rest of the machine reachable while a swarm is shouting.' }));
+        lines.push(el('div', { text: t('js.net.egress_in_force', {n: num(inForce)}) }));
         // A budget that is live but missing from the file is gone at the next reboot, and there is
         // no way to find that out except by rebooting. So say it here instead.
         if (eg.file === false) {
-            lines.push(el('div', { className: 'text-warning', text:
-                'There is no file for this budget on disk, so it will not come back after a reboot — the egress table was installed by hand.' }));
+            lines.push(el('div', { className: 'text-warning', text: t('js.net.egress_no_file') }));
         } else if (eg.file_matches === false) {
-            lines.push(el('div', { className: 'text-warning', text:
-                'Live, but the saved copy still says ' + num(eg.file_pps || 0) + ' pps — after a reboot that is what would come back.'
-                + ' The janitor rewrites it within a minute; if this sticks, the availability test in Settings says why.' }));
+            lines.push(el('div', { className: 'text-warning', text: t('js.net.egress_file_mismatch', {n: num(eg.file_pps || 0)}) }));
         }
         if (!eState.ref) {
-            lines.push(el('div', { className: 'text-muted', text: 'No outbound rate measured yet, so there is nothing to judge a number against — the coloured zones appear once there is.' }));
+            lines.push(el('div', { className: 'text-muted', text: t('js.net.egress_no_rate') }));
         } else {
-            lines.push(el('div', { text: 'Measured going out right now: ' + num(eState.ref) + ' pps (replies plus whatever the budget already refused).' }));
+            lines.push(el('div', { text: t('js.net.egress_measured_now', {n: num(eState.ref)}) }));
             if (eState.pps < eState.ref) {
-                lines.push(el('div', { className: 'text-danger', text: 'At ' + num(eState.pps) + ' pps you would be refusing replies the tracker is sending right now — peers would see timeouts, not a slower tracker.' }));
+                lines.push(el('div', { className: 'text-danger', text: t('js.net.egress_too_low', {n: num(eState.pps)}) }));
             } else if (eState.pps < eState.ref * ZONE_HEADROOM) {
-                lines.push(el('div', { className: 'text-warning', text: 'At ' + num(eState.pps) + ' pps there is almost no headroom over what is already going out; a normal spike would hit the cap.' }));
+                lines.push(el('div', { className: 'text-warning', text: t('js.net.egress_tight', {n: num(eState.pps)}) }));
             }
         }
         lines.forEach(l => box.appendChild(l));
@@ -768,7 +754,7 @@
         const host = $('net-chart');
         const w = Math.max(200, host.clientWidth || card.clientWidth || 800);
         const axisBase = () => ({ stroke: '#8a8a9a', font: '11px system-ui, -apple-system, Segoe UI, sans-serif', ticks: { stroke: '#2a2a3a', width: 1 }, grid: { stroke: 'rgba(255,255,255,0.06)', width: 1 } });
-        const series = [{ label: 'Time', value: (u, v) => v == null ? '—' : fmtTime(v) }];
+        const series = [{ label: t('js.net.chart_time'), value: (u, v) => v == null ? '—' : fmtTime(v) }];
         /**
          * Draw a marker ONLY where the line cannot show the value on its own.
          *
@@ -845,7 +831,7 @@
         const empty = !(s.t && s.t.length);
         $('net-chart').classList.toggle('nl-chart-empty', empty);
         $('net-chart').dataset.empty = empty
-            ? (j.monitor ? 'No samples in this range yet — the janitor records one per interval.' : 'The traffic monitor is off (Settings → UDP traffic & rate limit).')
+            ? (j.monitor ? t('js.net.chart_no_samples') : t('js.net.chart_monitor_off'))
             : '';
     }
 
@@ -862,55 +848,50 @@
     // ── actions ──────────────────────────────────────────────────────────────
     const MODAL_COPY = {
         apply: {
-            title: 'Apply the inbound limit',
-            ok: 'Apply limit',
+            title: t('js.net.modal_apply_title'),
+            ok: t('js.net.modal_apply_ok'),
             okClass: 'btn-outline-success',
-            text: () => 'Load an nftables rule that drops everything above ' + num(state.pps) + ' packets/second on UDP port ' + state.port
-                + ' (burst ' + num(state.burst) + '). Packets dropped here never reach OpenTracker.',
-            undo: () => 'Undo: the "Remove limit" button — or on the server, ' ,
+            text: () => t('js.net.modal_apply_text', {pps: num(state.pps), port: state.port, burst: num(state.burst)}),
+            undo: () => t('js.net.modal_apply_undo'),
             undoCode: () => 'sudo nft delete table inet ottrack_in && sudo rm /etc/nftables.d/ottrack-in.nft',
         },
         off: {
-            title: 'Remove the inbound limit',
-            ok: 'Remove limit',
+            title: t('js.net.modal_off_title'),
+            ok: t('js.net.modal_off_ok'),
             okClass: 'btn-outline-warning',
-            text: () => 'Delete our nftables table and its file. The tracker port stops being throttled by the panel — anything else limiting it (your own rules, the outbound budget) keeps working.',
-            undo: () => 'This also switches the automatic mode off, because there would be no limit left for it to move.',
+            text: () => t('js.net.modal_off_text'),
+            undo: () => t('js.net.modal_off_undo'),
             undoCode: () => '',
         },
         panic: {
-            title: 'Throttle hard for 15 minutes',
-            ok: 'Throttle now',
+            title: t('js.net.modal_panic_title'),
+            ok: t('js.net.modal_panic_ok'),
             okClass: 'btn-outline-danger',
-            text: () => 'Clamp UDP port ' + state.port + ' to 10 000 packets/second right now. This WILL drop traffic the tracker normally serves — it is the "the box is drowning, buy me fifteen minutes" button.',
-            undo: () => 'The janitor puts the previous setting back automatically after 15 minutes (and "Undo now" appears in the card meanwhile), so it cannot be forgotten.',
+            text: () => t('js.net.modal_panic_text', {port: state.port}),
+            undo: () => t('js.net.modal_panic_undo'),
             undoCode: () => '',
         },
         egress: {
-            title: 'Change the outbound budget',
-            ok: 'Apply budget',
+            title: t('js.net.modal_egress_title'),
+            ok: t('js.net.modal_egress_ok'),
             okClass: 'btn-outline-success',
-            text: () => 'Set the reply budget in table inet ottrack to ' + num(eState.pps) + ' packets/second. This is what the '
-                + 'tracker is allowed to SEND: below what it is actually sending, peers get timeouts rather than a slower tracker; '
-                + 'far above it, nothing protects the rest of the machine when a swarm shouts.',
-            undo: () => 'One rule is swapped by handle, so the counters keep running. Undo: set it back, or on the server, ',
+            text: () => t('js.net.modal_egress_text', {n: num(eState.pps)}),
+            undo: () => t('js.net.modal_egress_undo'),
             undoCode: () => 'sudo nft -f /etc/nftables.d/ottrack.nft',
         },
         monitor: {
-            title: 'Start counting (nothing is dropped)',
-            ok: 'Start counting',
+            title: t('js.net.modal_monitor_title'),
+            ok: t('js.net.modal_monitor_ok'),
             okClass: 'btn-outline-info',
-            text: () => 'Loads an nftables table with three counters on UDP port ' + state.port + ' and NO drop rule — '
-                      + 'the chain accepts by default and contains nothing that can discard a packet. It is a meter, not a valve. '
-                      + 'After an hour or two the slider below will carry the median, P95 and peak that were actually measured.',
-            undo: () => 'Undo: the "Remove limit" button — or on the server, ',
+            text: () => t('js.net.modal_monitor_text', {port: state.port}),
+            undo: () => t('js.net.modal_apply_undo'),
             undoCode: () => 'sudo nft delete table inet ottrack_in && sudo rm /etc/nftables.d/ottrack-in.nft',
         },
         restore: {
-            title: 'Undo the emergency throttle',
-            ok: 'Restore',
+            title: t('js.net.modal_restore_title'),
+            ok: t('js.net.modal_restore_ok'),
             okClass: 'btn-outline-success',
-            text: () => 'Put back the limit that was in force before the emergency throttle (or remove the limit entirely, if there was none).',
+            text: () => t('js.net.modal_restore_text'),
             undo: () => '',
             undoCode: () => '',
         },
@@ -949,7 +930,7 @@
         const btn = $('net-confirm-ok');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Working…';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.net.working');
         alert.textContent = '';
         const body = { op: op, password: $('net-confirm-password').value };
         if (op === 'apply') { body.pps = state.pps; body.burst = state.burst; body.port = state.port; }
@@ -959,18 +940,18 @@
             const r = await apiCall('admin/net_apply', 'POST', body);
             if (r.success) {
                 bootstrap.Modal.getOrCreateInstance($('netConfirmModal')).hide();
-                showToast(r.message || 'Done', 'success');
+                showToast(r.message || t('js.net.done'), 'success');
                 if ((op === 'apply' || op === 'monitor') && r.persistent === false) {
-                    showToast('The rule is live but will not survive a reboot — see the availability test in Settings.', 'warning');
+                    showToast(t('js.net.not_persistent'), 'warning');
                 }
                 state.pending = null;
                 loadStatus();
             } else {
-                alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || 'Failed' }));
+                alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t('js.net.failed') }));
                 if (r.output) alert.appendChild(el('pre', { className: 'nl-preview nl-preview-sm', text: r.output }));
             }
         } catch {
-            alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: 'Network error' }));
+            alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: t('js.net.network_error_2') }));
         }
         btn.disabled = false;
         btn.innerHTML = orig;
@@ -980,7 +961,7 @@
         const btn = $('btn-net-preview');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Rendering…';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.net.rendering');
         try {
             const r = await apiCall('admin/net_apply', 'POST', { op: 'preview', pps: state.pps, burst: state.burst, port: state.port });
             if (r.success) {
@@ -988,9 +969,9 @@
                 $('net-preview-body').textContent = r.ruleset || '';
                 bootstrap.Modal.getOrCreateInstance($('netPreviewModal')).show();
             } else {
-                showToast(r.error || 'Preview failed', 'error');
+                showToast(r.error || t('js.net.preview_failed'), 'error');
             }
-        } catch { showToast('Network error', 'error'); }
+        } catch { showToast(t('js.net.network_error_2'), 'error'); }
         btn.disabled = false;
         btn.innerHTML = orig;
     }
@@ -1006,7 +987,7 @@
         const btn = $('btn-net-toggle');
         btn.setAttribute('aria-expanded', v ? 'false' : 'true');
         const label = btn.querySelector('span'), icon = btn.querySelector('i');
-        if (label) label.textContent = v ? 'Expand' : 'Collapse';
+        if (label) label.textContent = v ? t('js.net.expand') : t('js.net.collapse');
         if (icon) icon.className = v ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
         try { localStorage.setItem(STORE_COLLAPSE, v ? '1' : '0'); } catch (e) {}
         if (!v && !booting) { loadStatus(true); loadChart(true); }
@@ -1031,9 +1012,9 @@
         });
         $('btn-net-suggest').addEventListener('click', () => {
             const r = state.recommend;
-            if (!r || !r.suggested) { showToast('No measurements yet — turn the monitor on and come back in an hour.', 'warning'); return; }
+            if (!r || !r.suggested) { showToast(t('js.net.toast_no_measurements'), 'warning'); return; }
             setPps(r.suggested);
-            showToast('Slider set to the suggested ' + num(r.suggested) + ' pps. Nothing has been applied yet.', 'success');
+            showToast(t('js.net.toast_suggested', {n: num(r.suggested)}), 'success');
         });
         const eRange = $('net-epps-range'), eInput = $('net-epps-input');
         if (eRange) eRange.addEventListener('input', (e) => setEpps(posToPps(parseInt(e.target.value, 10))));
@@ -1043,11 +1024,11 @@
         }
         const eSuggest = $('btn-net-esuggest');
         if (eSuggest) eSuggest.addEventListener('click', () => {
-            if (!eState.ref) { showToast('Nothing measured going out yet — there is no number to suggest from.', 'warning'); return; }
+            if (!eState.ref) { showToast(t('js.net.toast_egress_none'), 'warning'); return; }
             // Twice what is going out: clear of the amber band, and still a real cap.
             const v = Math.min(PPS_MAX, Math.max(PPS_MIN, Math.round(eState.ref * 2 / 1000) * 1000));
             setEpps(v);
-            showToast('Slider set to ' + num(v) + ' pps — twice what is measured going out. Nothing applied yet.', 'success');
+            showToast(t('js.net.toast_egress_suggested', {n: num(v)}), 'success');
         });
         const eApply = $('btn-net-eapply');
         if (eApply) eApply.addEventListener('click', () => ask('egress'));

@@ -2096,11 +2096,10 @@ textarea.pc-text {
     resize: vertical;
 }
 .pc-preview {
-    min-height: 52vh;
-    max-height: 52vh;
-    overflow: auto;
-    padding: 0.7rem 0.9rem;
-    background: #0d1117;
+    display: block;
+    width: 100%;
+    height: 52vh;
+    background: #000011;          /* the public page's ground, so an empty frame is not a white hole */
     border: 1px solid #2a3a4c;
     border-radius: 6px;
 }
@@ -2295,3 +2294,13 @@ textarea.pc-text {
 .pc-ph code { color: inherit; background: transparent; padding: 0; font-size: 0.74rem; }
 .hl-content { --bs-btn-padding-x: 0.5rem; }
 .hl-acts .pc-lang-dot { margin-left: 0.2rem; }
+
+/* ── Empty states ───────────────────────────────────────────────────────────
+   One shape for "there is nothing here": an icon, the sentence, an optional hint. A bare sentence
+   in a table cell reads like an error; this reads like a state. */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.35rem;
+    padding: 1.6rem 1rem; color: #7f8a97; text-align: center; }
+.empty-state i { font-size: 1.6rem; color: #3b4855; line-height: 1; }
+.empty-state .es-text { font-size: 0.9rem; color: #9aa5b1; }
+.empty-state .es-hint { font-size: 0.78rem; color: #66717d; max-width: 42rem; }
+td > .empty-state { padding: 1.2rem 0.5rem; }

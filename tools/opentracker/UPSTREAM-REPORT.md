@@ -159,3 +159,48 @@ Four invalid reads from `clean_worker` (`ot_clean.c:56/106/122`) into blocks fre
 `trackerlogic_deinit()` (`trackerlogic.c:588/592`) — the signal handler frees the torrent tables
 while the cleaner is still walking them. Harmless for a service that is being stopped, but it is
 the reason valgrind's exit summary is never clean.
+
+---
+
+## Addendum 2 — patches (2026-09-06)
+
+*Attached as `opentracker-review-fixes.patch` (apply with `patch -p1` inside the opentracker
+directory, after the two earlier patches). Each hunk was written against 1c7fac4, reviewed by a
+second reader who had to apply it and try to break it, then built and run under valgrind through
+a lab of announces, scrapes, aborted `/stats` clients and sixty accesslist reloads under load.*
+
+1. **`ot_udp.c` — connection-id secret from `getrandom(2)`.** With neither `WANT_ARC4RANDOM` nor
+   `WANT_DEV_RANDOM`, `srandom(time(NULL))` seeded every word of the secret; a client that knows
+   the start time to the minute can compute connection ids for any source address and announce
+   as it. The patch fills the secret from `getrandom()` (glibc ≥ 2.25) and keeps the rotation
+   exactly as it was. Nothing changes per packet.
+2. **`ot_accesslist.c` — keep the superseded list for the grace period.** `accesslist_clean()`
+   freed the list being replaced immediately when the list's own creation minute was older than
+   five minutes — i.e. on every reload that comes more than five minutes after the previous one,
+   which is the normal case — while announce threads that fetched the head a moment earlier were
+   still in `bsearch`. The patch tests the age of the list *after* the head, so the immediately
+   superseded list always lives the full grace period. Transient RSS grows by one list for five
+   minutes after a reload; nothing else changes.
+3. **`ot_http.c` — cancel the `/stats` task on disconnect.** The two fullscrape branches set the
+   flag that makes `handle_dead()` cancel the queued task; the `TASK_STATS` branch did not, so a
+   client that disconnected left a task keyed by its fd number, delivered to whoever got that
+   number next. The patch sets the same flag.
+4. **`ot_mutex.c` — atomic `g_torrent_count`.** The count was read-modify-written after the
+   bucket mutex was released, from five threads; `/stats` drifted from the real count over uptime.
+   One `__atomic_add_fetch`, relaxed, only when the delta is non-zero (which it almost never is on
+   the hot path).
+5. **`ot_http.c` — tpbs one-byte overrun.** `ws->request[ws->request_size] = 0` with a request
+   that fills the 8 192-byte buffer exactly wrote one byte past it.
+6. **`opentracker.c` — start UDP workers after init.** `ot_try_bind()` spawned the workers while
+   options were still being parsed, before `trackerlogic_init()` and before the accesslist was
+   loaded, so a whitelist tracker served an empty list for the first second of its life. The
+   sockets are remembered and the workers spawned from `main()` after init and the first
+   `accesslist_readfile()`; the worker count in force is the final one from the config.
+7. **`ot_accesslist.c` — mmap bound.** A file whose last line is a 40-hex hash without a
+   trailing newline made the parser read `map[maplen]`; the bound check now happens before the
+   read.
+
+Two more findings from the review were patched and then rejected by their reviewers as
+incomplete — `free_peerlist(NULL)` on the allocation-failure path only covered one of the two
+failing allocations, and the `iovec_increase` fix still leaked one slot when the very first data
+`malloc` failed. Both are on `malloc`-failure paths and are left for upstream.
