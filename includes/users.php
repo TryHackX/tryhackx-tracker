@@ -47,6 +47,10 @@ function userPermissionList(): array {
     return [
         'index.view'     => 'Search the observed-hash index (the public search page)',
         'index.files'    => 'See file lists in index search results',
+        // The first 2 000 files come with index.files; loading the rest of a long list — page after
+        // page, as far as the torrent goes — is its own grant, so a group can be shown a list
+        // without being handed 40 000 rows of it.
+        'index.files_all' => 'Load the whole file list in index search results (beyond the first page)',
         'index.magnet'   => 'See info hashes / copy magnet links in index search results',
         'whitelist.view' => 'Browse the public whitelist page (whitelisted torrents also show up in search)',
         'whitelist.add'  => 'Register hashes on the whitelist (used when registration is set to "registered users")',
@@ -141,7 +145,7 @@ function userGroupPresets(): array {
         'member' => [
             'label' => 'Site member',
             'about' => 'The public-site features, no panel at all.',
-            'perms' => ['index.view', 'index.files', 'index.magnet', 'whitelist.view', 'whitelist.add',
+            'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'whitelist.view', 'whitelist.add',
                         'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose'],
         ],
     ];

@@ -327,7 +327,7 @@ sudo install -m 0755 tools/opentracker/tracker-cluster.sh  /usr/local/sbin/
 One file per helper, mode `0440`:
 
 ```bash
-for h in mode netlimit sysctl instance backup cluster; do
+for h in mode netlimit sysctl instance backup cluster dbmem; do
   echo "www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-$h.sh" \
     | sudo tee /etc/sudoers.d/tracker-$h > /dev/null
   sudo chmod 0440 /etc/sudoers.d/tracker-$h

@@ -4,6 +4,73 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.37.0] — 2026-09-08
+
+### Added — the database engine's memory, from the panel (MariaDB and MySQL)
+
+The buffer pool and the other memory limits used to be set in two places by hand — `SET GLOBAL`
+on the running server and a drop-in under `/etc/mysql` for the next restart — and the two
+drifted. A new card on the **Traffic** page (with its switch and helper command under
+Settings → **Database memory**) shows what runs, what the drop-in says and what the counters say
+about it: buffer-pool fill, reads from disk, temporary tables on disk, connections against the
+limit. Seven keys are managed — `innodb_buffer_pool_size`, its MariaDB 11 ceiling
+`innodb_buffer_pool_size_max`, `innodb_log_file_size`, `max_connections`, `tmp_table_size`,
+`max_heap_table_size`, `table_open_cache` — each with a badge saying whether **this** engine and
+version changes it live or waits for a restart (the helper decides that per engine: MariaDB ≥ 10.2
+and MySQL ≥ 5.7 grow the pool live, MariaDB ≥ 10.9 resizes the redo log live, MySQL does not,
+the ceiling is startup-only). *Apply* changes what can be changed live and reads it back, then
+writes one drop-in (`70-tracker-panel.cnf`, in bytes) so a restart keeps it; *Restart the
+database* is a separate button behind its own acknowledgement and password, because the database
+on this class of machine is shared with the mail, the forum and the files. The root helper is
+`tools/opentracker/tracker-dbmem.sh` — seven literal keys with floors and ceilings (the pool may
+never take the machine's last 512 MiB), integers only, every statement assembled from a validated
+name and a number; when php-fpm cannot write `/etc` the write is deferred to the janitor, the same
+protocol as the kernel buffers. Sibling `.cnf` files that set the same keys are reported as
+conflicts. `tests/dbmem_test.php` drives the helper against a stub client for MariaDB 10.6,
+11.8 and MySQL 8. Schema **42** (two settings).
+
+The helper went through an adversarial review before its first install, and the review changed
+it. Whether a key exists is asked of the running server, never read off a version table: the pool
+ceiling was backported to MariaDB 10.11.12 / 11.4.6 / 11.8.2 (MDEV-29445), and a drop-in that names
+a variable the engine lacks stops the engine from starting — at the next restart, whoever does it,
+weeks later. The ceiling key is written with the `loose-` prefix on top of that. Every call to the
+client and the `systemctl restart` are bounded by `timeout`, so a wedged server costs the panel
+seconds rather than a hung worker; the helper sets its own `PATH` and refuses its test hooks when
+it runs as root; two restarts within two minutes are refused; the redo log may not exceed a quarter
+of the free space on the data disk; conflicts are looked for in every directory the engine reads,
+in every spelling the engine accepts (`loose-`, dashes, `1GiB`); and the reply is built whole and
+printed once. Seventy checks in the suite, twenty of them from the review.
+
+### Added — `index.files_all`
+
+The first 2 000 files of a torrent come with `index.files`; loading the rest — page after page,
+by scrolling or by button, on the search page's file modals — is its own grant now, so a group can
+be shown a list without being handed 40 000 rows of it. Without the grant the list stops at the
+first page and says so. The *Site member* preset includes it.
+
+### Changed
+
+- **Switching the language keeps your place.** The switcher has to reload the page (the strings
+  are rendered server-side), and a reload landed at the top. A click on the switcher now stores the
+  scroll position — and on the Settings page the search text and the active group — for a few
+  seconds, and the next load of the same page puts them back before anything is visible. The
+  public header does the same for Info and Terms.
+- Every button whose whole label ended in an ellipsis (*Back up now…*, *Apply limit…*, *Add
+  instance…* and twenty more) reads as a clipped label; the ellipsis is gone from buttons and kept
+  for progress states, placeholders and dropdown headings, where it means something.
+
+### Fixed
+
+- **The Settings page declared itself English** whatever language it was rendered in. The switcher
+  worked and the words changed; the document said `lang="en"`, so a screen reader read Polish in an
+  English voice and the browser offered to translate a page already in the reader's language. It now
+  declares the language it was rendered in, like every other template, and a check in
+  `tests/lang_test.php` fails if any template ever hard-codes it again.
+- The runtime state the code writes under `config/` (process-cost readings, the tuner's state, the
+  database-memory helper's pending set, every lock file) and translations installed through the
+  Languages panel are ignored by git now; the tuner state and two lock files that had been
+  committed are removed from the repository.
+
 ## [1.36.0] — 2026-09-07
 
 ### OpenTracker — round six is in production

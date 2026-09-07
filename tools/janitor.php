@@ -35,6 +35,7 @@ require_once $root . '/includes/netlimit.php';
 require_once $root . '/includes/iplist.php';
 require_once $root . '/includes/opentracker.php';
 require_once $root . '/includes/sysctl.php';
+require_once $root . '/includes/dbmem.php';
 require_once $root . '/includes/cluster.php';
 require_once $root . '/includes/backup.php';
 require_once $root . '/includes/bulkmail.php';
@@ -175,6 +176,13 @@ try {
             $sy['reverted'] ? ' reverted=yes' : '',
             $sy['error'] !== null ? ' error=' . $sy['error'] : ''), "
 ";
+    }
+
+    // Database memory: a drop-in the web request could not write (ProtectSystem=full) is owed to
+    // this process, the same way the kernel buffers are.
+    $dm = dbmemTick($cfg);
+    if ($dm['did'] !== null) {
+        echo sprintf('[dbmem] %s ok=%s%s', $dm['did'], $dm['ok'] ? 'yes' : 'no', $dm['error'] !== null ? ' error=' . $dm['error'] : ''), "\n";
     }
 
     // Extra opentracker instances: SIGHUP them when the accesslist has changed under them.

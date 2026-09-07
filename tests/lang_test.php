@@ -315,5 +315,19 @@ foreach (['enabled_languages', 'switcher_languages', 'user_languages'] as $k) {
     check("$k is not in the settings allow-list", !str_contains($save, "'$k'"));
 }
 
+
+/* ── every rendered page declares the language it is actually in ─────────────
+   The settings page shipped `<html lang="en">` while its content was Polish: the switcher worked,
+   the document lied about it, and a screen reader read Polish with an English voice. */
+$badLang = [];
+foreach (glob($root . '/templates/*.php') + glob($root . '/templates/admin/*.php') + glob($root . '/templates/pages/*.php') as $f) {
+    $src = (string)@file_get_contents($f);
+    if (!preg_match('/<html[^>]*lang="([^"]*)"/i', $src, $m)) continue;
+    if (str_contains($m[1], 'langCurrent()')) continue;
+    if (basename($f) === 'maintenance.php') continue;   // deliberate: it prints both languages, English first
+    $badLang[] = basename($f) . ' -> ' . $m[1];
+}
+check('every template takes <html lang> from langCurrent()', $badLang === [], implode(', ', $badLang));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

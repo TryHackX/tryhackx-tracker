@@ -3049,7 +3049,10 @@ const getJson = async (endpoint) => {
                     if (!fj || !fj.success) { if (next === 0) holder.textContent = t('js.app.no_file_list'); return; }
                     (fj.files || []).forEach(f => allFiles.push(f));
                     next = typeof fj.next === 'number' ? fj.next : allFiles.length;
-                    more = !!fj.truncated;
+                    // More pages exist AND this visitor may ask for them (index.files_all); without
+                    // the grant the list stops here and says so.
+                    more = !!fj.truncated && !!fj.can_more;
+                    if (fj.truncated && !fj.can_more) { const p = document.createElement('p'); p.className = 'text-muted'; p.textContent = t('js.app.files_truncated'); holder.appendChild(p); }
                     if (next === 0 || !allFiles.length) { holder.textContent = t('js.app.no_file_list'); return; }
                     if (!tree.parentNode) { holder.textContent = ''; holder.appendChild(tree); holder.appendChild(foot); }
                     render();
@@ -3083,15 +3086,42 @@ const getJson = async (endpoint) => {
                 body.textContent = (json && json.error) || t('js.app.files_load_failed');
                 return;
             }
-            title.textContent = (json.name || name || t('js.app.files')) + ' — ' + t('js.app.files_n', {n: json.files.length + (json.truncated ? '+' : '')});
-            if (!json.files.length) { body.textContent = t('js.app.no_file_list'); return; }
-            body.appendChild(buildTreePub(json.files, lastFilesSearch ? lastTokens : []));
-            if (json.truncated) {
-                const more = document.createElement('p');
-                more.className = 'text-muted';
-                more.textContent = t('js.app.files_truncated');
-                body.appendChild(more);
+            if (!json.files.length) { title.textContent = (json.name || name || t('js.app.files')); body.textContent = t('js.app.no_file_list'); return; }
+            // The same paging as the info overlay: the first page now, the next when the reader
+            // reaches the end of the list or presses the button — only with index.files_all.
+            const allFiles = json.files.slice();
+            let next = typeof json.next === 'number' ? json.next : allFiles.length;
+            let more = !!json.truncated && !!json.can_more, loading = false;
+            const tree = document.createElement('div');
+            const foot = document.createElement('div'); foot.className = 'files-more';
+            const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-secondary btn-small';
+            const sentinel = document.createElement('div'); sentinel.className = 'files-sentinel';
+            foot.appendChild(btn); foot.appendChild(sentinel);
+            const render = () => {
+                title.textContent = (json.name || name || t('js.app.files')) + ' — ' + t('js.app.files_n', {n: allFiles.length.toLocaleString() + (more || (json.truncated && !json.can_more) ? '+' : '')});
+                tree.replaceChildren(buildTreePub(allFiles, lastFilesSearch ? lastTokens : []));
+                btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
+                btn.disabled = loading; foot.hidden = !more;
+            };
+            const loadMore = async () => {
+                if (loading || !more) return;
+                loading = true; render();
+                const fj = await getJson('index_files&hash=' + encodeURIComponent(hash) + '&offset=' + next);
+                loading = false;
+                if (overlay.hidden) return;
+                if (fj && fj.success) { (fj.files || []).forEach(f => allFiles.push(f)); next = typeof fj.next === 'number' ? fj.next : allFiles.length; more = !!fj.truncated && !!fj.can_more; }
+                else more = false;
+                render();
+            };
+            btn.addEventListener('click', loadMore);
+            if ('IntersectionObserver' in window) {
+                new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more) loadMore(); }, { root: null, rootMargin: '200px' }).observe(sentinel);
             }
+            body.appendChild(tree); body.appendChild(foot);
+            if (json.truncated && !json.can_more) {
+                const p = document.createElement('p'); p.className = 'text-muted'; p.textContent = t('js.app.files_truncated'); body.appendChild(p);
+            }
+            render();
         }
         if (overlay) {
             overlay.addEventListener('click', (e) => { if (e.target === overlay) closeFiles(); });
@@ -3122,6 +3152,24 @@ const getJson = async (endpoint) => {
         initReset();
         initSearch();
     });
+})();
+
+/* ── switching the language keeps the scroll position ─────────────────────────
+ * The header switcher reloads the page; the reader was halfway down Info or Terms comparing the two
+ * languages. Store the position for a few seconds, restore it on the next load of the same page. */
+(function () {
+    const KEY = 'thx_lang_place_pub';
+    document.addEventListener('click', (e) => {
+        const a = e.target.closest('a.lang-opt');
+        if (!a) return;
+        try { sessionStorage.setItem(KEY, JSON.stringify({ path: location.pathname + location.search.replace(/([?&])lang=[^&]*&?/, '$1').replace(/[?&]$/, ''), y: window.scrollY, at: Date.now() })); } catch (err) {}
+    }, true);
+    let place = null;
+    try { place = JSON.parse(sessionStorage.getItem(KEY) || 'null'); sessionStorage.removeItem(KEY); } catch (err) { place = null; }
+    if (!place || Date.now() - (place.at || 0) > 15000) return;
+    const here = location.pathname + location.search.replace(/([?&])lang=[^&]*&?/, '$1').replace(/[?&]$/, '');
+    if (place.path !== here) return;
+    document.addEventListener('DOMContentLoaded', () => { window.scrollTo(0, place.y || 0); setTimeout(() => window.scrollTo(0, place.y || 0), 400); });
 })();
 
 /* ── leaving the site ───────────────────────────────────────────────────────

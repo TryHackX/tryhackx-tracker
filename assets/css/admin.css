@@ -2323,3 +2323,21 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .nl-proc-name { color: #9aa5b1; }
 .nl-proc-cpu { color: #dfe6ee; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .nl-proc-rss { color: #7f8a97; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.76rem; }
+
+/* ── Database memory card ──────────────────────────────────────────────────── */
+.dm-facts { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-bottom: 0.8rem; }
+.dm-fact { display: inline-flex; flex-direction: column; gap: 0.1rem; }
+.dm-fact-k { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: #7f8a97; }
+.dm-fact-v { font-size: 0.9rem; color: #dfe6ee; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.dm-table { --bs-table-bg: transparent; font-size: 0.84rem; }
+.dm-table th, .dm-table td { border-color: #1b232d; vertical-align: middle; }
+.dm-key { color: #dfe6ee; }
+.dm-hint { color: #7f8a97; font-size: 0.74rem; max-width: 34rem; }
+.dm-input-cell { white-space: nowrap; }
+.dm-input { display: inline-block; width: 8.5rem; }
+.dm-unit { display: inline-block; width: 5rem; margin-left: 0.3rem; }
+.dm-badge { display: inline-block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid; }
+.dm-badge-live { color: #6cc38a; border-color: #2f5d3d; }
+.dm-badge-restart { color: #e0b15a; border-color: #6b4f1a; }
+.dm-row-dirty td { background: rgba(74, 158, 255, 0.06); }
+.dm-row-pending .dm-key::after { content: ' •'; color: #e0b15a; }

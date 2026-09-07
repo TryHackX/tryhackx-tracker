@@ -628,5 +628,52 @@
     const DEBOUNCE = { sort: 1200, search: 400 };
     function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+    /**
+     * Switching the language reloads the page — it has to, the strings are rendered server-side —
+     * and a reload lands at the top. Somebody comparing the two languages halfway down Settings
+     * loses their place every time. So a click on a switcher link stores where they were (scroll
+     * position, the settings search and group) for a few seconds, and the next load of the same
+     * page puts them back before anything is visible.
+     */
+    (function keepPlaceAcrossLanguageSwitch() {
+        const KEY = 'thx_lang_place';
+        document.addEventListener('click', (e) => {
+            const a = e.target.closest('a.admin-lang-opt');
+            if (!a) return;
+            try {
+                const search = document.getElementById('settings-search');
+                const group = document.querySelector('.settings-group-btn.active');
+                sessionStorage.setItem(KEY, JSON.stringify({
+                    path: location.pathname + location.search.replace(/([?&])lang=[^&]*&?/, '$1').replace(/[?&]$/, ''),
+                    y: window.scrollY, at: Date.now(),
+                    search: search ? search.value : '', group: group ? group.dataset.group : '',
+                }));
+            } catch (err) { /* storage unavailable: nothing to keep */ }
+        }, true);
+        let place = null;
+        try { place = JSON.parse(sessionStorage.getItem(KEY) || 'null'); sessionStorage.removeItem(KEY); } catch (err) { place = null; }
+        if (!place || Date.now() - (place.at || 0) > 15000) return;
+        const here = location.pathname + location.search.replace(/([?&])lang=[^&]*&?/, '$1').replace(/[?&]$/, '');
+        if (place.path !== here) return;
+        const restore = () => {
+            const search = document.getElementById('settings-search');
+            if (search && place.search && search.value !== place.search) {
+                search.removeAttribute('readonly'); search.value = place.search;
+                search.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            if (place.group && place.group !== 'all') {
+                const b = document.querySelector('.settings-group-btn[data-group="' + place.group + '"]');
+                if (b && !b.classList.contains('active')) b.click();
+            }
+            window.scrollTo(0, place.y || 0);
+        };
+        // twice: once when the DOM is there, once after the page scripts have laid things out.
+        // If this file happens to load after DOMContentLoaded has already fired, the event never
+        // comes and the place would be lost — so ask the document where it is rather than assume.
+        const schedule = () => { restore(); setTimeout(restore, 350); setTimeout(() => window.scrollTo(0, place.y || 0), 900); };
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', schedule);
+        else schedule();
+    })();
+
     window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot };
 })();

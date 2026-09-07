@@ -26,6 +26,10 @@ if (!isValidInfoHash($hash)) jsonResponse(['error' => __('api.common.invalid_has
 // scrolls, so a 40 000-file torrent is readable without one 5 MB answer.
 $limit  = max(100, min(5000, (int)($_GET['limit'] ?? 2000)));
 $offset = max(0, (int)($_GET['offset'] ?? 0));
+// The first page comes with index.files; every page after it needs index.files_all. The reply says
+// whether the caller may ask for more (`can_more`), so the page shows a button only where one works.
+$canMore = userCan($db, $cfg, 'index.files_all');
+if ($offset > 0 && !$canMore) jsonResponse(['error' => 'no_permission'], 403);
 $files = [];
 $name = null;
 
@@ -59,4 +63,4 @@ if ($name === null && !$files) jsonResponse(['error' => __('api.common.not_found
 $truncated = count($files) > $limit;
 if ($truncated) $files = array_slice($files, 0, $limit);
 jsonResponse(['success' => true, 'name' => $name, 'files' => $files, 'truncated' => $truncated,
-              'offset' => $offset, 'next' => $offset + count($files)]);
+              'offset' => $offset, 'next' => $offset + count($files), 'can_more' => $canMore]);

@@ -1,6 +1,6 @@
 <?php require_once __DIR__ . '/../../includes/settings_catalog.php'; ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?= sanitize(langCurrent()) ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1102,6 +1102,32 @@
                 <div class="mt-3">
                     <button type="button" class="btn btn-sm btn-outline-info" id="btn-sysctl-test"><i class="bi bi-plug"></i> <?= _h('settings.sysctl_test') ?></button>
                     <div id="sysctl-test-result" class="mt-2"></div>
+                </div>
+            </div>
+
+
+            <!-- Database memory (MariaDB / MySQL) -->
+            <div class="settings-section" id="section-dbmem" data-group="network" data-title="<?= _h('settings.dbmem_title') ?>">
+                <h5><?= _h('settings.dbmem_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.dbmem_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#dbmem-card"><?= _h('settings.dbmem_card_link') ?></a></small>
+                <div class="row g-3">
+                    <div class="col-md-8">
+                        <label class="form-label"><?= _h('settings.dbmem_cmd') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="dbmem_cmd" value="<?= sanitize($cfg['dbmem_cmd'] ?? '') ?>" placeholder="sudo -n /usr/local/sbin/tracker-dbmem.sh" autocomplete="off" spellcheck="false">
+                        <small class="settings-hint"><?= __('settings.dbmem_cmd_hint') ?></small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.dbmem_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="dbmem_enabled">
+                            <option value="0" <?= ($cfg['dbmem_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.sysctl_no') ?></option>
+                            <option value="1" <?= ($cfg['dbmem_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.sysctl_yes') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.dbmem_enabled_hint') ?></small>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-dbmem-test"><i class="bi bi-plug"></i> <?= _h('settings.dbmem_test') ?></button>
+                    <div id="dbmem-test-result" class="mt-2"></div>
                 </div>
             </div>
 
@@ -3401,6 +3427,40 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             const res = await fetch(API_BASE + 'admin/sysctl_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
             box.innerHTML = renderTestResult(j, <?= json_encode(__('settings.js_sysctl_test_ok')) ?>);
+            let html = '';
+            html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
+            (j.checks || []).forEach(c => {
+                const mark = c.ok ? '<span class="text-success">&#10003;</span>'
+                                  : (c.info ? '<span style="color:#a0a0b0;">&#8226;</span>' : '<span class="text-danger">&#10007;</span>');
+                html += '<li>' + mark + ' ' + esc(c.name)
+                     + (c.detail ? ' <small style="color:#a0a0b0;">&mdash; ' + esc(c.detail) + '</small>' : '') + '</li>';
+            });
+            html += '</ul>';
+            (j.errors || []).forEach(x => { html += '<div class="text-warning" style="font-size:.85rem;">' + esc(x) + '</div>'; });
+            if ((j.suggestions || []).length) {
+                html += '<pre class="nl-preview mt-2" style="white-space:pre-wrap;">' + esc(j.suggestions.join(String.fromCharCode(10))) + '</pre>';
+            }
+            if (html) box.innerHTML = html;
+        } catch {
+            box.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
+    });
+
+    // The database-memory helper: the same test, the same rendering, its own endpoint.
+    document.getElementById('btn-dbmem-test')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const box = document.getElementById('dbmem-test-result');
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_testing')) ?>;
+        box.innerHTML = '<span class="text-info">' + <?= json_encode(__('settings.js_asking_helper')) ?> + '</span>';
+        try {
+            const res = await fetch(API_BASE + 'admin/dbmem_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
+            const j = await res.json();
+            box.innerHTML = renderTestResult(j, <?= json_encode(__('settings.js_dbmem_test_ok')) ?>);
             let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {

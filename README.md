@@ -479,10 +479,13 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
 - **CLI** — `sudo -u www-data php tools/whitelist_cli.php index [--poll] [--tick]` prints the status /
   forces a poll / runs one janitor tick.
 
-**The file list (1.36.0).** On the public search page the list is paged — 2 000 files per
-answer, the next slice loaded when the reader reaches the end of the list or presses *Load more
-files* — so a torrent with tens of thousands of files is readable without one multi-megabyte
-reply. The admin modals cap at 5 000 and offer *Load the whole file list*.
+**The file list (1.36.0, permission in 1.37.0).** On the public search page the list is paged —
+2 000 files per answer, the next slice loaded when the reader reaches the end of the list or presses
+*Load more files* — so a torrent with tens of thousands of files is readable without one
+multi-megabyte reply. Whether a member may load past that first page is `index.files_all`: without
+it the list stops where it stopped before and says so, the button is not shown, and a request for
+the next page is refused by the endpoint, not only hidden by the page. The admin modals cap at
+5 000 and offer *Load the whole file list*.
 
 **What a poll writes (1.35.0).** A row whose seeders, leechers and completed count did not move since
 the last poll is not written at all, and `last_seen` / `seen_count` advance at most once per six
@@ -613,7 +616,8 @@ default — with it off, everything behaves exactly like the classic single-admi
   limits still apply, and panel logout leaves the site session alone). The mirrored owner account
   is protected — it cannot be deleted, banned or stripped of the admin group.
 - **Groups with permissions** (Admin → **Users** → *Groups*): each group carries a set of
-  permissions — `index.view` / `index.files` / `index.magnet` (the member search),
+  permissions — `index.view` / `index.files` / `index.files_all` / `index.magnet` (the member search;
+  `files_all` loads a file list past its first 2 000 rows, 1.37.0),
   `whitelist.view` (the public whitelist page + whitelisted rows in search), `whitelist.add`
   (registering hashes when `whitelist_submit_mode=users`), `stats.view` / `stats.timeline` /
   `home.stats` (the statistics surfaces). **Semantics (changed in 1.7.0 / schema v8):** the seeded
@@ -995,6 +999,36 @@ sudo install -m 0755 tools/opentracker/tracker-mode.sh /usr/local/sbin/tracker-m
 
 Remove every trace: `tracker-cluster.sh remove <name>` per instance, which takes the systemd template
 with the last one.
+
+### The database engine's memory (1.37.0)
+
+**Traffic → Database memory** (switch and helper command under Settings → *Database memory*).
+One card for the buffer pool and the other memory limits of MariaDB or MySQL: what runs now, what
+the drop-in says, a field for the new value, and a badge per row saying whether *this* engine and
+version changes it live or needs a restart — the helper decides that, not the page. The counters
+that say whether any of it matters sit above the table: buffer-pool fill, page reads from disk,
+temporary tables spilled to disk, connections against the limit.
+
+| key | what it is | live? |
+| --- | --- | --- |
+| `innodb_buffer_pool_size` | the cache for table and index pages — how much of the database lives in RAM | MariaDB ≥ 10.2, MySQL ≥ 5.7 (MariaDB 11 up to the ceiling) |
+| `innodb_buffer_pool_size_max` | MariaDB 11's ceiling for growing the pool at runtime | startup only |
+| `innodb_log_file_size` | the redo log; bigger means fewer checkpoints under write load | MariaDB ≥ 10.9; MySQL restart |
+| `max_connections` | each connection can take several MB | live |
+| `tmp_table_size`, `max_heap_table_size` | in-memory temporary tables spill to disk above the smaller | live |
+| `table_open_cache` | open table handles kept ready | live |
+
+*Apply* asks for the password, sets what it can live, reads the result back, and writes
+`70-tracker-panel.cnf` in the engine's drop-in directory (bytes, with the human form in a comment)
+so a restart keeps it. When php-fpm cannot write `/etc` (it cannot, under `ProtectSystem=full`)
+the write is deferred to the janitor, exactly like the kernel buffers. *Restart the database* is
+its own button with its own acknowledgement and password: the database is shared with every other
+service on the machine. The helper, `tools/opentracker/tracker-dbmem.sh`, manages those seven keys
+and nothing else, with floors and ceilings narrower than the engines accept, and reports other
+`.cnf` files that set the same keys as conflicts. It asks the running server whether a key exists
+rather than trusting a version table (a drop-in naming a variable the engine lacks would stop it
+from starting), bounds every call to the client and the restart with `timeout`, refuses a second
+restart within two minutes, and caps the redo log at a quarter of the free space on the data disk.
 
 ### What the machine's own processes cost (1.36.0)
 

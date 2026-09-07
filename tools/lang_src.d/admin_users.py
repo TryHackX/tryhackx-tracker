@@ -91,7 +91,7 @@ add('a.users', {
                        'Wybierz odbiorców, aby zobaczyć, kto to dostanie.'),
     'recount':        ('Recount', 'Przelicz'),
     'send_test':      ('Send one to me', 'Wyślij do mnie'),
-    'send_dots':      ('Send&hellip;', 'Wyślij&hellip;'),
+    'send_dots':      ('Send', 'Wyślij'),
 
     # recent sends
     'recent_head':    ('Recent sends', 'Ostatnie wysyłki'),

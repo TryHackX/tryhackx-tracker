@@ -474,6 +474,29 @@
         </div>
         <?php endif; ?>
 
+        <?php if (dbmemEnabled($cfg)): ?>
+        <!-- Database memory. The other machine-level setting next to the kernel buffers: what the
+             engine can change live is changed live and read back, the rest goes to a drop-in and
+             waits for a restart the operator asks for by name. The database is shared with every
+             other service on this box, which is why both buttons want the password. -->
+        <div class="wl-status-card nl-card" id="dbmem-card">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-database-gear"></i> <?= _h('a.traffic.dm_head') ?> <span class="wl-status-updated" id="dm-updated"></span></h6>
+                <div class="wl-status-actions">
+                    <a href="<?= $baseUrl ?>?action=settings#section-dbmem" class="btn btn-sm btn-outline-secondary" title="<?= _h('a.traffic.dm_settings_title') ?>"><i class="bi bi-gear"></i> <?= _h('a.traffic.dm_settings') ?></a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-dm-reload" title="<?= _h('a.traffic.dm_reload_title') ?>"><i class="bi bi-arrow-clockwise"></i> <?= _h('a.traffic.dm_reload') ?></button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-dm-reset" disabled><i class="bi bi-eraser"></i> <?= _h('a.traffic.dm_reset') ?></button>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="btn-dm-apply" disabled><i class="bi bi-check2-circle"></i> <?= _h('a.traffic.dm_apply') ?></button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="btn-dm-restart" disabled title="<?= _h('a.traffic.dm_restart_title') ?>"><i class="bi bi-bootstrap-reboot"></i> <?= _h('a.traffic.dm_restart') ?></button>
+                </div>
+            </div>
+            <div class="sy-body" id="dm-grid">
+                <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> <?= _h('a.traffic.dm_reading') ?></div>
+            </div>
+            <div id="dm-notes"></div>
+        </div>
+        <?php endif; ?>
+
         <?php if (otClusterEnabled($cfg)): ?>
         <!-- Extra opentracker instances. Last card on the page on purpose: everything above measures
              whether this is needed, and on most machines the answer is no. The installer's own unit is
@@ -615,6 +638,7 @@
     <script src="<?= $baseUrl ?>assets/js/admin-otperf.js<?= assetVer('assets/js/admin-otperf.js') ?>"></script>
     <?php if (sysctlEnabled($cfg)): ?>
     <script src="<?= $baseUrl ?>assets/js/admin-sysctl.js<?= assetVer('assets/js/admin-sysctl.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-dbmem.js<?= assetVer('assets/js/admin-dbmem.js') ?>"></script>
     <?php endif; ?>
     <?php if (otClusterEnabled($cfg)): ?>
     <script src="<?= $baseUrl ?>assets/js/admin-cluster.js<?= assetVer('assets/js/admin-cluster.js') ?>"></script>

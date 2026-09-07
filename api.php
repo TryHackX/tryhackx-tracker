@@ -47,6 +47,7 @@ require_once __DIR__ . '/includes/iplist.php';
 require_once __DIR__ . '/includes/backup.php';
 require_once __DIR__ . '/includes/opentracker.php';
 require_once __DIR__ . '/includes/sysctl.php';
+require_once __DIR__ . '/includes/dbmem.php';
 require_once __DIR__ . '/includes/cluster.php';
 require_once __DIR__ . '/includes/lang.php';
 
@@ -150,6 +151,10 @@ $apiRoutes = [
     'admin/sysctl_status'   => 'api/admin/sysctl_status.php',
     'admin/sysctl_apply'    => 'api/admin/sysctl_apply.php',
     'admin/sysctl_test'     => 'api/admin/sysctl_test.php',
+    // ── Database memory (admin; includes/dbmem.php) ──
+    'admin/dbmem_status'    => 'api/admin/dbmem_status.php',
+    'admin/dbmem_apply'     => 'api/admin/dbmem_apply.php',
+    'admin/dbmem_test'      => 'api/admin/dbmem_test.php',
     // -- Extra opentracker instances (admin; includes/cluster.php) --
     'admin/ot_cluster_status' => 'api/admin/ot_cluster_status.php',
     'admin/ot_cluster_apply'  => 'api/admin/ot_cluster_apply.php',
@@ -353,6 +358,7 @@ function adminEndpointPermission(string $endpoint): ?string {
         'admin/ot_status'          => 'panel.traffic.view',
         'admin/ot_cluster_status'  => 'panel.traffic.view',
         'admin/sysctl_status'      => 'panel.traffic.view',
+        'admin/dbmem_status'       => 'panel.traffic.view',
         'admin/tracker_service_status' => 'panel.traffic.view',
         // Shared chrome every panel page needs to render at all
         'admin/logout'             => 'panel.access',
@@ -393,7 +399,7 @@ if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login' && $endp
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && in_array($endpoint, [
             'admin/net_status', 'admin/net_samples', 'admin/backup_status',
             'admin/whitelist_status', 'admin/index_status', 'admin/tracker_service_status',
-            'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status',
+            'admin/ot_status', 'admin/sysctl_status', 'admin/dbmem_status', 'admin/ot_cluster_status',
             'admin/fetch_index', 'admin/fetch_whitelist', 'admin/fetch_banned',
             'admin/fetch_reports', 'admin/fetch_appeals', 'admin/fetch_users',
             'admin/fetch_groups', 'admin/fetch_api_clients', 'admin/fetch_api_bans',

@@ -104,6 +104,7 @@ $allowed = [
     // deliberately no key here that could rewrite the record of what the machine looked like
     // before the panel first touched it.
     'sysctl_cmd', 'sysctl_enabled', 'sysctl_confirm_seconds',
+    'dbmem_cmd', 'dbmem_enabled',
     'ot_cluster_cmd', 'ot_cluster_enabled', 'ot_cluster_port_base',
 ];
 
@@ -128,6 +129,7 @@ $reauthKeys = [
     'livesync_cmd'                 => '',                     // includes/livesync.php
     'ot_perf_cmd'                  => '',                     // includes/opentracker.php
     'sysctl_cmd'                   => '',                     // includes/sysctl.php
+    'dbmem_cmd'                    => '',                     // includes/dbmem.php
     'ot_cluster_cmd'               => '',                     // includes/cluster.php
     'tuner_python'                 => 'python3',              // includes/tuner.php
     'opentracker_service_name'     => '',                     // restart/reload_tracker, functions.php
@@ -265,6 +267,9 @@ if (isset($data['ot_cluster_cmd']) && !otClusterValidCommand((string)$data['ot_c
 if (isset($data['ot_cluster_port_base']) && trim((string)$data['ot_cluster_port_base']) !== ''
     && ((int)$data['ot_cluster_port_base'] < 1024 || (int)$data['ot_cluster_port_base'] > 65500)) {
     jsonResponse(['error' => __('api.settings.cluster_port_base_invalid')], 400);
+}
+if (isset($data['dbmem_cmd']) && !dbmemValidCommand((string)$data['dbmem_cmd'])) {
+    jsonResponse(['error' => __('api.settings.dbmem_cmd_invalid')], 400);
 }
 if (isset($data['sysctl_cmd']) && !sysctlValidCommand((string)$data['sysctl_cmd'])) {
     jsonResponse(['error' => __('api.settings.sysctl_cmd_invalid')], 400);

@@ -23,7 +23,7 @@ them; older glibc will not.
 | `UPSTREAM-REPORT.md` | the bug report for libowfat/opentracker, ready to send |
 | `udp-reject-interval.patch` | adds `access.udp_reject_interval` |
 | `egress-budget/ottrack.nft` | the reply-rate budget (see the Traffic page) |
-| `tracker-*.sh` | the root helpers the panel calls (see [INSTALL.md](../../INSTALL.md)) |
+| `tracker-*.sh` | the root helpers the panel calls (see [INSTALL.md](../../INSTALL.md)); `tracker-dbmem.sh` (1.37.0) is the database-memory one — seven MariaDB/MySQL keys, live where the engine allows, a drop-in for the rest |
 
 ```
 sha256  d1a319cd999812a98c4fa2d6fedfee7a8a259b1d0ca0816d58bf2dc5f264fe8d  opentracker.white

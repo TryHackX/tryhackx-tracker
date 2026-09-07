@@ -27,13 +27,13 @@ add('a.backups', {
     'status_head': ('Backup status', 'Stan kopii zapasowych'),
     'run_title':   ('Make a backup now, with the profile from Settings',
                     'Zrób kopię zapasową teraz, z profilem z Ustawień'),
-    'run_btn':     ('Back up now&hellip;', 'Zrób kopię teraz&hellip;'),
+    'run_btn':     ('Back up now', 'Zrób kopię teraz'),
     'cancel_title': ('Stop the backup that is running',
                      'Zatrzymaj trwające tworzenie kopii'),
-    'cancel_btn':  ('Cancel run&hellip;', 'Przerwij&hellip;'),
+    'cancel_btn':  ('Cancel run', 'Przerwij'),
     'prune_title': ('Apply the retention rules from Settings right now',
                     'Zastosuj teraz reguły retencji z Ustawień'),
-    'prune_btn':   ('Rotate now&hellip;', 'Rotuj teraz&hellip;'),
+    'prune_btn':   ('Rotate now', 'Rotuj teraz'),
     'asking':      ('Asking the server&hellip;', 'Pytam serwer&hellip;'),
     'working':     ('Working…', 'Pracuję…'),
 
@@ -88,7 +88,7 @@ add('a.backups', {
                           'Jej przywrócenie nadpisuje bieżące dane, więc ma własny przycisk: poprosi '
                           'Cię o wpisanie nazwy bazy, a serwer zrzuci bazę w stanie z tej chwili '
                           '<em>zanim</em> cokolwiek zaimportuje.'),
-    'restore_db_btn':    ('Restore the database&hellip;', 'Przywróć bazę danych&hellip;'),
+    'restore_db_btn':    ('Restore the database', 'Przywróć bazę danych'),
     'dry_run':           ('Dry run', 'Symulacja'),
-    'restore_files_btn': ('Restore files&hellip;', 'Przywróć pliki&hellip;'),
+    'restore_files_btn': ('Restore files', 'Przywróć pliki'),
 })

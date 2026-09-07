@@ -78,3 +78,23 @@ _i.html
 _t.html
 _u.html
 _s.html
+
+# Runtime state added in 1.35–1.37: process-cost readings, the database-memory helper's pending
+# set, the tuner's state, every lock file. None of it is source.
+config/proc_usage.json
+config/proc_usage.json.tmp.*
+config/dbmem_state.json
+config/dbmem_state.json.tmp.*
+config/dbmem_state.lock
+config/tuner_state.json
+config/*.lock
+config/*.tmp.*
+
+# Translations installed by the operator through the Languages panel are site data. The two
+# shipped languages are generated from tools/lang_src.d and stay in the repository.
+lang/*.php
+!lang/en.php
+!lang/pl.php
+
+# Hand-made backups on the server (config/database.php.bak-20260907 and the like)
+*.bak-*

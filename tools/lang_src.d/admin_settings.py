@@ -605,8 +605,8 @@ add('', {
         'Interwał pull (min)'),
     'settings.federation_pull_minutes_hint': ('Honoured by <code>federation.py</code> when run in loop mode; a systemd timer uses its own schedule.',
         'Respektowany przez <code>federation.py</code> w trybie pętli; timer systemd ma własny harmonogram.'),
-    'settings.federation_review_accept_peer': ('Accept whole peer…',
-        'Akceptuj całego peera…'),
+    'settings.federation_review_accept_peer': ('Accept whole peer',
+        'Akceptuj całego peera'),
     'settings.federation_review_accept_peer_title': ('Accept everything still waiting from the peer selected on the left',
         'Akceptuj wszystko, co wciąż czeka od peera wybranego po lewej'),
     'settings.federation_review_accept_sel': ('Accept selected',
@@ -1949,4 +1949,26 @@ add('', {
         'Zmieniasz ustawienie, które decyduje o tym, co serwer uruchamia lub komu ufa. Podaj hasło administratora, aby potwierdzić i zastosować te zmiany.'),
     'settings.lang_upload_dropped': (':count keys were dropped because their text carried markup that is not allowed: :keys',
         'Pominięto :count kluczy, bo ich tekst zawierał niedozwolone znaczniki HTML: :keys'),
+})
+
+# ── database memory (1.37.0) ─────────────────────────────
+add('', {
+    'settings.dbmem_title': ('Database memory (MariaDB / MySQL)',
+        'Pamięć bazy danych (MariaDB / MySQL)'),
+    'settings.dbmem_intro': ('The buffer pool and the other memory limits of the database engine, from the panel. What the engine can change live is changed live and read back; the rest is written to a drop-in under /etc/mysql and waits for a restart you ask for by name. The database on this class of machine is shared with the other services — every number here is theirs too.',
+        'Pula buforów i pozostałe limity pamięci silnika bazy, z panelu. To, co silnik potrafi zmienić na żywo, jest zmieniane na żywo i odczytywane z powrotem; reszta trafia do pliku drop-in w /etc/mysql i czeka na restart, o który prosisz osobno. Baza na takiej maszynie jest wspólna z innymi usługami — każda liczba tutaj jest też ich.'),
+    'settings.dbmem_card_link': ('Open the card on the Traffic page.',
+        'Otwórz kartę na stronie Ruch.'),
+    'settings.dbmem_cmd': ('Helper command',
+        'Polecenie pomocnika'),
+    'settings.dbmem_cmd_hint': ('A root helper installed from <code>tools/opentracker/tracker-dbmem.sh</code> with its own sudoers line (see INSTALL). Empty means the feature is off. Press <em>Test</em> after saving.',
+        'Pomocnik roota instalowany z <code>tools/opentracker/tracker-dbmem.sh</code> z własną linią sudoers (patrz INSTALL). Puste = funkcja wyłączona. Po zapisie naciśnij <em>Testuj</em>.'),
+    'settings.dbmem_enabled': ('Enabled',
+        'Włączone'),
+    'settings.dbmem_enabled_hint': ('Renders the card on the Traffic page and lets the janitor finish deferred writes.',
+        'Pokazuje kartę na stronie Ruch i pozwala janitorowi dokończyć odroczone zapisy.'),
+    'settings.dbmem_test': ('Test the helper',
+        'Testuj pomocnika'),
+    'settings.js_dbmem_test_ok': ('The helper answers and root can query the engine.',
+        'Pomocnik odpowiada, a root może odpytać silnik.'),
 })

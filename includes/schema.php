@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 41;  // 41 = page_content.lang — Terms and Info are written per language
+const TRACKER_SCHEMA_VERSION = 42;  // 42 = settings only (dbmem_cmd, dbmem_enabled: the database-memory helper). 41 = page_content.lang — Terms and Info are written per language
 // 40 = users.language — the interface language follows the account
 // 39 = page_content — Terms and Info editable through the panel's own editor
 // 38 = net_limit_blocked — hand-typed addresses that beat an allow list
@@ -430,7 +430,7 @@ function trackerSchemaStatements(): array {
             ('member', 'Member', 'Default group for newly registered users.', 1, 1, 1,
              '{\"whitelist.view\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}'),
             ('admin', 'Admin', 'Site administrators — members pass every permission check.', 1000, 0, 1,
-             '{\"index.view\":true,\"index.files\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}')",
+             '{\"index.view\":true,\"index.files\":true,\"index.files_all\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}')",
 
         // ── Federation peers (schema v7, includes/federation.php): other tracker nodes we exchange index
         //    metadata with. Inbound access = an api_clients row with scope 'federation' (api_client_id);
@@ -978,7 +978,7 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // admin group (INSERT IGNORE above only fires on fresh CREATE; existing installs need it too)
     $db->exec("INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
         ('admin', 'Admin', 'Site administrators — members pass every permission check.', 1000, 0, 1,
-         '{\"index.view\":true,\"index.files\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}')");
+         '{\"index.view\":true,\"index.files\":true,\"index.files_all\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}')");
     // flag legacy guest/member rows as system if an old install lost the flag
     $db->exec("UPDATE `user_groups` SET is_system = 1 WHERE slug IN ('guest','member','admin')");
     // refresh the guest seed description ONLY if the admin never touched it (old wording implied
@@ -999,7 +999,7 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // is_default is 0. Nobody becomes a moderator by signing up.
     $db->exec("INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `color`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
         ('moderator', 'Moderator', 'Works the queues: reports, appeals, the whitelist and submitted descriptions. Settings, backups, the machine controls and anything needing the owner password stay out of reach.', '#4a9eff', 500, 0, 1,
-         '{\"panel.access\":true,\"panel.reports.view\":true,\"panel.reports.status\":true,\"panel.reports.block\":true,\"panel.reports.email\":true,\"panel.reports.archive\":true,\"panel.appeals.resolve\":true,\"panel.whitelist.view\":true,\"panel.whitelist.add\":true,\"panel.whitelist.ban\":true,\"panel.whitelist.meta\":true,\"panel.whitelist.content\":true,\"panel.users.view\":true,\"panel.users.notify\":true,\"index.view\":true,\"index.files\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true,\"rating.vote\":true,\"content.submit\":true,\"content.propose\":true}')");
+         '{\"panel.access\":true,\"panel.reports.view\":true,\"panel.reports.status\":true,\"panel.reports.block\":true,\"panel.reports.email\":true,\"panel.reports.archive\":true,\"panel.appeals.resolve\":true,\"panel.whitelist.view\":true,\"panel.whitelist.add\":true,\"panel.whitelist.ban\":true,\"panel.whitelist.meta\":true,\"panel.whitelist.content\":true,\"panel.users.view\":true,\"panel.users.notify\":true,\"index.view\":true,\"index.files\":true,\"index.files_all\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true,\"rating.vote\":true,\"content.submit\":true,\"content.propose\":true}')");
     $db->exec("UPDATE `user_groups` SET is_system = 1 WHERE slug = 'moderator'");
 
     // v24: the permissions v1.19.0 registered and never granted.
@@ -1014,6 +1014,14 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // Guest gets them too, for the same reason: an anonymous visitor's ability to rate was governed by
     // rep_who_can_vote (which defaults to signed-in accounts anyway), not by a permission. Withholding
     // the grant here would not be caution, it would be a behaviour change disguised as one.
+    // index.files_all (v42): the first page of a file list came with index.files, and until now so did
+    // every page after it. The grant keeps that for the seeded member group; a group the operator
+    // made by hand with index.files gets the new id only if the operator hands it out, which is the
+    // point of having it.
+    schemaGrantOnce($db, 'v42_index_files_all', [
+        'member' => ['index.files_all'],
+    ]);
+
     schemaGrantOnce($db, 'v24_content_rating', [
         'guest'  => ['rating.vote', 'content.submit', 'content.propose'],
         'member' => ['rating.vote', 'content.submit', 'content.propose'],
@@ -1255,6 +1263,9 @@ function trackerSchemaDefaultSettings(): array {
         'sysctl_cmd'                  => '',
         'sysctl_enabled'              => '0',
         'sysctl_confirm_seconds'      => '120',   // clamped to whole minutes, 60-900
+        // Database memory (includes/dbmem.php): the root helper that reads and sets the engine's memory knobs
+        'dbmem_cmd'                   => '',
+        'dbmem_enabled'               => '0',
 
         // Extra opentracker instances (v17). Three rows is the ENTIRE database cost of the
         // feature: systemd and the filesystem already hold the roster, and a second copy in the

@@ -51,7 +51,7 @@ add('a.traffic', {
                             'puts the previous setting back automatically',
                             'Zaciska port do 10 000 pakietów/sekundę na 15 minut; janitor sam '
                             'przywraca poprzednie ustawienie'),
-    'panic':               ('Throttle hard&hellip;', 'Mocno zdław&hellip;'),
+    'panic':               ('Throttle hard', 'Mocno zdław'),
     'net_reading':         ('Reading the firewall&hellip;', 'Odczytywanie firewalla&hellip;'),
     'in_limit':            ('Inbound limit', 'Limit wejściowy'),
     'pps_aria':            ('Packets per second', 'Pakiety na sekundę'),
@@ -61,8 +61,8 @@ add('a.traffic', {
     'preview_rules_title': ('Render and syntax-check the ruleset without touching the firewall',
                             'Wygeneruj ruleset i sprawdź jego składnię bez ruszania firewalla'),
     'preview_rules':       ('Preview ruleset', 'Podgląd rulesetu'),
-    'apply_limit':         ('Apply limit&hellip;', 'Zastosuj limit&hellip;'),
-    'remove_limit':        ('Remove limit&hellip;', 'Usuń limit&hellip;'),
+    'apply_limit':         ('Apply limit', 'Zastosuj limit'),
+    'remove_limit':        ('Remove limit', 'Usuń limit'),
 })
 
 # ── outbound budget (the other half of the same decision) ───────────────────
@@ -76,7 +76,7 @@ add('a.traffic', {
                          'Odczytywanie reguły wyjściowej z firewalla&hellip;'),
     'eg_suggest_title': ('Set the slider to a value with headroom over what was measured',
                          'Ustaw suwak na wartość z zapasem ponad to, co zmierzono'),
-    'apply_budget':     ('Apply budget&hellip;', 'Zastosuj budżet&hellip;'),
+    'apply_budget':     ('Apply budget', 'Zastosuj budżet'),
     'chart_title':      ('Packets / second', 'Pakiety / sekundę'),
     'chart_range_aria': ('Chart range', 'Zakres wykresu'),
 })
@@ -101,7 +101,7 @@ add('a.traffic', {
     'ipl_add':            ('Add a list', 'Dodaj listę'),
     'ipl_push_title':     ('Load what is below into the firewall',
                            'Załaduj to, co poniżej, do firewalla'),
-    'ipl_push':           ('Push to firewall&hellip;', 'Wyślij do firewalla&hellip;'),
+    'ipl_push':           ('Push to firewall', 'Wyślij do firewalla'),
     'ipl_intro':          ('Whole networks and whole countries, from a file you paste or upload or '
                            'from a URL that is re-downloaded on a timer. '
                            '<strong class="text-light">Allow</strong> is never dropped &middot; '
@@ -139,7 +139,7 @@ add('a.traffic', {
     'ipl_src_manual':  ('A file or pasted text', 'Plik albo wklejony tekst'),
     'ipl_url':         ('URL', 'URL'),
     'ipl_ttl':         ('Re-download every (minutes)', 'Pobieraj ponownie co (minuty)'),
-    'ipl_upload':      ('Upload a file&hellip;', 'Wyślij plik&hellip;'),
+    'ipl_upload':      ('Upload a file', 'Wyślij plik'),
     'ipl_drop_aria':   ('Choose a file, or drop one here', 'Wybierz plik albo upuść go tutaj'),
     'ipl_drop_main':   ('Drop a list here, or <u>choose a file</u>',
                         'Upuść tu listę albo <u>wybierz plik</u>'),
@@ -162,12 +162,12 @@ add('a.traffic', {
     'ot_preview_title':  ('Render the drop-in without writing it',
                           'Wygeneruj drop-in bez zapisywania go'),
     'ot_preview':        ('Preview drop-in', 'Podgląd drop-inu'),
-    'ot_apply':          ('Apply&hellip;', 'Zastosuj&hellip;'),
-    'ot_workers':        ('Set workers&hellip;', 'Ustaw workery&hellip;'),
+    'ot_apply':          ('Apply', 'Zastosuj'),
+    'ot_workers':        ('Set workers', 'Ustaw workery'),
     'ot_restart_title':  ('Restart the tracker service', 'Zrestartuj usługę trackera'),
-    'ot_restart':        ('Restart the tracker&hellip;', 'Zrestartuj tracker&hellip;'),
+    'ot_restart':        ('Restart the tracker', 'Zrestartuj tracker'),
     'ot_reset_title':    ("Delete the panel's drop-in", 'Usuń drop-in panelu'),
-    'ot_reset':          ('Reset&hellip;', 'Reset&hellip;'),
+    'ot_reset':          ('Reset', 'Reset'),
     'ot_reading':        ('Reading the service&hellip;', 'Odczytywanie usługi&hellip;'),
     'ot_modal_title':    ('Change how the tracker runs', 'Zmiana sposobu działania trackera'),
     'ot_workers_label':  ('UDP worker threads', 'Wątki robocze UDP'),
@@ -191,13 +191,13 @@ add('a.traffic', {
                           'Wpisz to, na co naprawdę pozwalają pomiary powyżej'),
     'sy_preview_title':  ('Render the file without writing it', 'Wygeneruj plik bez zapisywania go'),
     'sy_preview':        ('Preview file', 'Podgląd pliku'),
-    'sy_arm':            ('Apply for a while&hellip;', 'Zastosuj na chwilę&hellip;'),
+    'sy_arm':            ('Apply for a while', 'Zastosuj na chwilę'),
     'sy_restore':        ('Restore defaults', 'Przywróć domyślne'),
     'sy_armed_text':     ('A change is in force and will undo itself.',
                           'Zmiana obowiązuje i sama się cofnie.'),
     'sy_revert':         ('Put it back now', 'Cofnij teraz'),
-    'sy_keep':           ('Keep it (survives a reboot)&hellip;',
-                          'Zostaw ją (przetrwa reboot)&hellip;'),
+    'sy_keep':           ('Keep it (survives a reboot)',
+                          'Zostaw ją (przetrwa reboot)'),
     'sy_reading':        ('Reading the kernel&hellip;', 'Odczytywanie jądra&hellip;'),
     'sy_modal_title':    ('Apply the kernel buffers', 'Zastosowanie buforów jądra'),
     'sy_file_preview':   ('File preview', 'Podgląd pliku'),
@@ -210,7 +210,7 @@ add('a.traffic', {
                         'Wyślij SIGHUP do każdej instancji, żeby ponownie wczytała wspólną '
                         'accesslistę'),
     'cl_reload':       ('Reload all', 'Przeładuj wszystkie'),
-    'cl_add':          ('Add instance&hellip;', 'Dodaj instancję&hellip;'),
+    'cl_add':          ('Add instance', 'Dodaj instancję'),
     'cl_reading':      ('Reading the roster&hellip;', 'Odczytywanie listy instancji&hellip;'),
     'cl_modal_title':  ('Add a tracker instance', 'Dodaj instancję trackera'),
     'cl_note':         ('A new instance starts answering announces as soon as it exists. It shares '
@@ -239,8 +239,8 @@ add('a.traffic', {
 # ── live peer sync ──────────────────────────────────────────────────────────
 add('a.traffic', {
     'ls_head':    ('Live peer sync', 'Synchronizacja peerów na żywo'),
-    'ls_on':      ('Turn on&hellip;', 'Włącz&hellip;'),
-    'ls_off':     ('Turn off&hellip;', 'Wyłącz&hellip;'),
+    'ls_on':      ('Turn on', 'Włącz'),
+    'ls_off':     ('Turn off', 'Wyłącz'),
     'ls_reading': ('Reading the tunnel&hellip;', 'Odczytywanie tunelu&hellip;'),
 })
 
@@ -261,6 +261,30 @@ add('a.traffic', {
                       'Przejdź ten sam plan bez ruszania firewalla &mdash; sprawdza, czy mechanika '
                       'działa, zanim ruszy prawdziwy przebieg'),
     'tn_dry':        ('Test', 'Test'),
-    'tn_start':      ('Run it&hellip;', 'Uruchom&hellip;'),
+    'tn_start':      ('Run it', 'Uruchom'),
     'tn_cancel':     ('Stop', 'Zatrzymaj'),
+})
+
+# ── database memory card (1.37.0) ─────────────────────────────
+add('a.traffic', {
+    'dm_head': ('Database memory',
+        'Pamięć bazy danych'),
+    'dm_settings': ('Settings',
+        'Ustawienia'),
+    'dm_settings_title': ('The helper command and the switch live in Settings',
+        'Polecenie pomocnika i przełącznik są w Ustawieniach'),
+    'dm_reload': ('Reload',
+        'Odśwież'),
+    'dm_reload_title': ('Read the engine again',
+        'Odczytaj silnik ponownie'),
+    'dm_reset': ('Reset',
+        'Reset'),
+    'dm_apply': ('Apply',
+        'Zastosuj'),
+    'dm_restart': ('Restart the database',
+        'Zrestartuj bazę'),
+    'dm_restart_title': ('Restarts the database service for every service on this machine',
+        'Restartuje usługę bazy dla wszystkich usług na tej maszynie'),
+    'dm_reading': ('Reading the engine…',
+        'Odczytywanie silnika…'),
 })
