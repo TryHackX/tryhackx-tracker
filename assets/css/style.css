@@ -1753,6 +1753,11 @@ body.page-search .container { max-width: 86em; }
 }
 .search-check input:checked ~ * { color: var(--text); }
 .search-total { margin-left: auto; font-size: 0.82rem; white-space: nowrap; }
+/* The "type at least 3 characters" line. A full-width flex item so it wraps onto its own row under
+   the box instead of squeezing in beside the selects. [hidden] spelled out the way the overlays do
+   it: the moment somebody gives this class a display of its own, the attribute alone stops working. */
+.search-hint { flex: 1 0 100%; margin: 0; font-size: 0.82rem; }
+.search-hint[hidden] { display: none; }
 .search-table { table-layout: fixed; }
 .search-table thead th { border-top: 0; }
 .search-c-size { width: 6.5em; }

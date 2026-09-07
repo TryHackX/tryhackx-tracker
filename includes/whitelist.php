@@ -68,26 +68,26 @@ function normalizeListPath(string $path): string {
  */
 function validateWhitelistPath(string $path): array {
     $path = normalizeListPath($path);
-    if ($path === '') return ['ok' => false, 'error' => 'Whitelist path is empty.'];
+    if ($path === '') return ['ok' => false, 'error' => __('api.wl.path_empty')];
     $isWindows = PHP_OS_FAMILY === 'Windows';
-    if (!$isWindows && $path[0] !== '/') return ['ok' => false, 'error' => 'Whitelist path must be absolute.'];
+    if (!$isWindows && $path[0] !== '/') return ['ok' => false, 'error' => __('api.wl.path_not_absolute')];
     $base = strtolower(basename($path));
     if (preg_match('/\.(php\d*|phtml|phar|htaccess|htpasswd)$/i', $base) || $base === '.htaccess') {
-        return ['ok' => false, 'error' => 'Refusing a whitelist path that looks like a web-executable or Apache config file.'];
+        return ['ok' => false, 'error' => __('api.wl.path_web_executable')];
     }
     $dir = dirname($path);
     $realDir = @realpath($dir);
-    if ($realDir === false) return ['ok' => false, 'error' => "Directory does not exist: $dir"];
+    if ($realDir === false) return ['ok' => false, 'error' => __('api.wl.path_dir_missing', ['dir' => $dir])];
     $appRoot = @realpath(__DIR__ . '/..');
     $dr = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
     $docRoot = $dr !== '' ? @realpath($dr) : false;   // CLI: realpath('') would be the cwd
     foreach (array_filter([$appRoot, $docRoot]) as $root) {
         $root = rtrim($root, '/\\');
         if ($root !== '' && ($realDir === $root || str_starts_with($realDir . DIRECTORY_SEPARATOR, $root . DIRECTORY_SEPARATOR))) {
-            return ['ok' => false, 'error' => 'Whitelist path must be outside the web application directory (' . $root . ').'];
+            return ['ok' => false, 'error' => __('api.wl.path_inside_app', ['root' => $root])];
         }
     }
-    if (is_link($path)) return ['ok' => false, 'error' => 'Whitelist path must not be a symlink.'];
+    if (is_link($path)) return ['ok' => false, 'error' => __('api.wl.path_symlink')];
     return ['ok' => true, 'error' => null];
 }
 
@@ -253,7 +253,7 @@ function whitelistRegenerate(PDO $db, array $cfg): array {
     try {
         $fh = @fopen($tmp, 'wb');
         if (!$fh) {
-            $err = 'Cannot create temp file in ' . dirname($path);
+            $err = __('api.wl.regen_tmp_failed', ['dir' => dirname($path)]);
             whitelistStateUpdate(function (&$s) use ($err) { $s['regen_needed'] = true; $s['last_error'] = $err; $s['last_error_at'] = time(); });
             return ['ok' => false, 'count' => 0, 'bytes' => 0, 'ms' => 0, 'error' => $err, 'busy' => false];
         }
@@ -293,20 +293,20 @@ function whitelistRegenerate(PDO $db, array $cfg): array {
         clearstatcache(true, $tmp);
         if ($writeFailed || $bytes !== $count * 41 || @filesize($tmp) !== $bytes) {
             @unlink($tmp);
-            $err = 'Writing the temp whitelist file failed or was truncated (disk full?) — kept the previous file.';
+            $err = __('api.wl.regen_write_failed');
             whitelistStateUpdate(function (&$s) use ($err) { $s['regen_needed'] = true; if (!$s['regen_needed_since']) $s['regen_needed_since'] = time(); $s['last_error'] = $err; $s['last_error_at'] = time(); });
             return ['ok' => false, 'count' => $count, 'bytes' => $bytes, 'ms' => (int)((microtime(true) - $t0) * 1000), 'error' => $err, 'busy' => false];
         }
         if ($count === 0) {
             @unlink($tmp);
-            $err = 'Refusing to write an EMPTY whitelist — OpenTracker in whitelist mode would reject every announce. Add at least one hash first.';
+            $err = __('api.wl.regen_empty_refused');
             whitelistStateUpdate(function (&$s) use ($err) { $s['regen_needed'] = true; if (!$s['regen_needed_since']) $s['regen_needed_since'] = time(); $s['last_error'] = $err; $s['last_error_at'] = time(); });
             return ['ok' => false, 'count' => 0, 'bytes' => 0, 'ms' => (int)((microtime(true) - $t0) * 1000), 'error' => $err, 'busy' => false];
         }
         @chmod($tmp, 0644);
         if (!@rename($tmp, $path)) {
             @unlink($tmp);
-            $err = 'rename() to ' . $path . ' failed (directory not writable or target is protected).';
+            $err = __('api.wl.regen_rename_failed', ['path' => $path]);
             whitelistStateUpdate(function (&$s) use ($err) { $s['regen_needed'] = true; if (!$s['regen_needed_since']) $s['regen_needed_since'] = time(); $s['last_error'] = $err; $s['last_error_at'] = time(); });
             return ['ok' => false, 'count' => $count, 'bytes' => $bytes, 'ms' => (int)((microtime(true) - $t0) * 1000), 'error' => $err, 'busy' => false];
         }
@@ -332,7 +332,7 @@ function whitelistAppendHashes(PDO $db, array $cfg, array $hashes): array {
     $hashes = array_values(array_unique(array_filter(array_map('strtolower', $hashes), 'isValidInfoHash')));
     if (!$hashes) return ['ok' => true, 'mode' => 'skipped', 'error' => null];
     $path = whitelistPath($cfg);
-    if ($path === '') return ['ok' => false, 'mode' => 'skipped', 'error' => 'Whitelist path is not configured.'];
+    if ($path === '') return ['ok' => false, 'mode' => 'skipped', 'error' => __('api.wl.path_not_configured')];
     $needRegen = !is_file($path) || @filesize($path) === 0 || !is_writable($path);
     if (!$needRegen) {
         $lock = whitelistRegenLock(false, 5);
@@ -503,12 +503,12 @@ function parseMagnetOrHash(string $token): array {
     if ($token === '') { $out['error'] = 'empty'; return $out; }
     if (preg_match('/^magnet:\?/i', $token)) {
         if (!preg_match('/[?&]xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})(?![a-zA-Z0-9])/i', $token, $m)) {
-            $out['error'] = 'Magnet link has no valid btih info hash';
+            $out['error'] = __('api.wl.magnet_no_btih');
             return $out;
         }
         $raw = $m[1];
         $hash = strlen($raw) === 40 ? strtolower($raw) : (base32ToHex(strtoupper($raw)) ?? null);
-        if (!$hash || !isValidInfoHash($hash)) { $out['error'] = 'Invalid base32 info hash'; return $out; }
+        if (!$hash || !isValidInfoHash($hash)) { $out['error'] = __('api.wl.invalid_base32'); return $out; }
         $out['hash'] = strtolower($hash);
         // dn= is percent-encoded (and '+' means space in practice) — decode HERE only, never for plain names
         if (preg_match('/[?&]dn=([^&]+)/i', $token, $dn)) $out['name'] = cleanTorrentName(rawurldecode(str_replace('+', ' ', $dn[1])));
@@ -519,9 +519,9 @@ function parseMagnetOrHash(string $token): array {
     if (preg_match('/^(?:urn:btih:)?([a-zA-Z2-7]{32})$/i', $token, $m)) {
         $hash = base32ToHex(strtoupper($m[1]));
         if ($hash && isValidInfoHash($hash)) { $out['hash'] = strtolower($hash); return $out; }
-        $out['error'] = 'Invalid base32 info hash'; return $out;
+        $out['error'] = __('api.wl.invalid_base32'); return $out;
     }
-    $out['error'] = 'Not a magnet link or 40-hex info hash';
+    $out['error'] = __('api.wl.not_magnet_or_hash');
     return $out;
 }
 
@@ -683,7 +683,7 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
         foreach ($valid as $i => $it) {
             $h = $it['hash'];
             if (isset($banned[$h]) || (isset($existing[$h]) && $existing[$h] === 1)) {
-                $results[$i] = ['index' => $i, 'input' => $it['input'], 'hash' => $h, 'status' => 'banned', 'error' => 'This info hash is banned on this tracker'];
+                $results[$i] = ['index' => $i, 'input' => $it['input'], 'hash' => $h, 'status' => 'banned', 'error' => __('api.wl.hash_banned')];
                 $summary['banned']++;
                 continue;
             }
@@ -1014,7 +1014,7 @@ function whitelistHttpGet(string $url, int $timeout = 4): ?string {
 function scrapeOpenTrackerMany(PDO $db, array $cfg, array $rows, float $budget = WL_SCRAPE_BULK_BUDGET): array {
     $out = ['scraped' => 0, 'requests' => 0, 'failed' => 0, 'processed' => 0, 'truncated' => false, 'last_id' => null, 'error' => null];
     $base = trim((string)($cfg['whitelist_scrape_url'] ?? ''));
-    if ($base === '' || !preg_match('#^https?://#i', $base)) { $out['error'] = 'Scrape URL is not configured'; return $out; }
+    if ($base === '' || !preg_match('#^https?://#i', $base)) { $out['error'] = __('api.wl.scrape_url_missing'); return $out; }
     $items = [];
     foreach ($rows as $r) {
         $h = strtolower((string)($r['info_hash'] ?? ''));
@@ -1039,7 +1039,7 @@ function scrapeOpenTrackerMany(PDO $db, array $cfg, array $rows, float $budget =
         if ($files === null) {
             $out['failed']++;
             // a dead tracker: do not burn the whole budget on connect timeouts
-            if ($out['scraped'] === 0 && $out['failed'] >= 2) { $out['error'] = 'Tracker did not answer'; break; }
+            if ($out['scraped'] === 0 && $out['failed'] >= 2) { $out['error'] = __('api.wl.tracker_no_answer'); break; }
             continue;
         }
         $db->beginTransaction();
@@ -1055,7 +1055,7 @@ function scrapeOpenTrackerMany(PDO $db, array $cfg, array $rows, float $budget =
             throw $e;
         }
     }
-    if ($out['error'] === null && $out['requests'] > 0 && $out['scraped'] === 0 && $out['failed'] === $out['requests']) $out['error'] = 'Tracker did not answer';
+    if ($out['error'] === null && $out['requests'] > 0 && $out['scraped'] === 0 && $out['failed'] === $out['requests']) $out['error'] = __('api.wl.tracker_no_answer');
     return $out;
 }
 
@@ -1247,16 +1247,16 @@ function whitelistStatus(PDO $db, array $cfg): array {
     $hb = $workerHb['age'];
     $warnings = [];
     if ($mode === 'whitelist') {
-        if (!$perm['ok']) $warnings[] = ['level' => 'danger', 'text' => 'Whitelist file problem: ' . implode(' ', $perm['errors'])];
-        elseif (!$file['exists'] || $file['size'] === 0) $warnings[] = ['level' => 'danger', 'text' => 'Whitelist file is missing or EMPTY — OpenTracker in whitelist mode rejects every announce. Use "Regenerate file".'];
-        if (!empty($state['last_error'])) $warnings[] = ['level' => 'danger', 'text' => 'Last whitelist file write failed: ' . $state['last_error']];
-        if (!empty($state['regen_needed'])) $warnings[] = ['level' => 'warn', 'text' => 'Whitelist file regeneration pending (a removal/ban is not yet reflected in the file).'];
+        if (!$perm['ok']) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_file_problem', ['errors' => implode(' ', $perm['errors'])])];
+        elseif (!$file['exists'] || $file['size'] === 0) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_file_empty')];
+        if (!empty($state['last_error'])) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_last_write_failed', ['error' => $state['last_error']])];
+        if (!empty($state['regen_needed'])) $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_regen_pending')];
         $min = max(10, (int)($cfg['whitelist_reload_min_interval'] ?? 45));
         if (!empty($state['pending_reload']) && $state['dirty_since'] && (time() - (int)$state['dirty_since']) > 2 * $min) {
-            $warnings[] = ['level' => 'warn', 'text' => 'Tracker reload pending for ' . formatUptime(time() - (int)$state['dirty_since']) . ' — the tracker still serves the previous whitelist.'];
+            $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_reload_pending', ['age' => formatUptime(time() - (int)$state['dirty_since'])])];
         }
-        if ((int)$state['fail_count'] >= 2) $warnings[] = ['level' => 'danger', 'text' => 'The last ' . (int)$state['fail_count'] . ' tracker reloads failed: ' . ($state['last_reload_output'] ?: 'unknown error') . ' — is the service running?'];
-        if ($counts['pending_meta'] > 0 && ($hb === null || $hb > 300)) $warnings[] = ['level' => 'warn', 'text' => 'Metadata worker heartbeat ' . ($hb === null ? 'missing' : formatUptime($hb) . ' old') . ' — ' . $counts['pending_meta'] . ' hashes wait for metadata.'];
+        if ((int)$state['fail_count'] >= 2) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_reloads_failed', ['n' => (int)$state['fail_count'], 'output' => ($state['last_reload_output'] ?: __('api.wl.unknown_error'))])];
+        if ($counts['pending_meta'] > 0 && ($hb === null || $hb > 300)) $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_meta_heartbeat', ['age' => ($hb === null ? __('api.wl.hb_missing') : __('api.wl.hb_old', ['age' => formatUptime($hb)])), 'n' => $counts['pending_meta']])];
         // What the worker RUNS versus what Settings asked for. A worker started before the file was
         // last updated keeps running the old code, which is how "set 32, gets 4" happens with every
         // number in the panel looking right.
@@ -1265,11 +1265,9 @@ function whitelistStatus(PDO $db, array $cfg): array {
         if ($asked !== '' && is_array($wi) && isset($wi['concurrency'])) {
             $running = (int)$wi['concurrency'];
             if ($running !== (int)$asked) {
-                $warnings[] = ['level' => 'warn', 'text' => 'The metadata worker is running '
-                    . $running . ' parallel fetches, not the ' . (int)$asked . ' set in Settings'
-                    . (isset($wi['concurrency_max']) && (int)$asked > (int)$wi['concurrency_max']
-                        ? ' — that build tops out at ' . (int)$wi['concurrency_max'] . '.'
-                        : ' — restart tracker-metadata if worker.py was updated since it started.')];
+                $warnings[] = ['level' => 'warn', 'text' => (isset($wi['concurrency_max']) && (int)$asked > (int)$wi['concurrency_max']
+                        ? __('api.wl.warn_meta_concurrency_max', ['running' => $running, 'asked' => (int)$asked, 'max' => (int)$wi['concurrency_max']])
+                        : __('api.wl.warn_meta_concurrency', ['running' => $running, 'asked' => (int)$asked]))];
             }
         }
         // Same question for the fetch order, and the same reason for asking it: an order changed in
@@ -1280,9 +1278,9 @@ function whitelistStatus(PDO $db, array $cfg): array {
         if (is_array($wi) && $wantOrder !== '' && $wantOrder !== 'oldest') {
             $runOrder = isset($wi['order']) ? strtolower((string)$wi['order']) : null;
             if ($runOrder === null) {
-                $warnings[] = ['level' => 'warn', 'text' => 'Settings ask for the "' . htmlspecialchars($wantOrder, ENT_QUOTES) . '" fetch order, but the running metadata worker predates that option and is still taking the longest-waiting hash first — restart tracker-metadata.'];
+                $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_meta_order_unsupported', ['want' => htmlspecialchars($wantOrder, ENT_QUOTES)])];
             } elseif ($runOrder !== $wantOrder) {
-                $warnings[] = ['level' => 'warn', 'text' => 'The metadata worker is fetching in "' . htmlspecialchars($runOrder, ENT_QUOTES) . '" order, not the "' . htmlspecialchars($wantOrder, ENT_QUOTES) . '" set in Settings — it re-reads this about once a minute.'];
+                $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_meta_order_mismatch', ['run' => htmlspecialchars($runOrder, ENT_QUOTES), 'want' => htmlspecialchars($wantOrder, ENT_QUOTES)])];
             }
         }
     }
@@ -1291,14 +1289,14 @@ function whitelistStatus(PDO $db, array $cfg): array {
     if (function_exists('scheduleStatus')) {
         $schedule = scheduleStatus($cfg);
         if ($schedule['enabled']) {
-            if (!$schedule['valid']) $warnings[] = ['level' => 'danger', 'text' => 'Scheduled mode is ON but the schedule JSON is invalid — fix it in Settings (the mode will not switch).'];
+            if (!$schedule['valid']) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_schedule_invalid')];
             elseif ($schedule['desired'] !== null && $schedule['desired'] !== $mode) {
                 // out of sync: a failed switch is an error right away; otherwise give the minute timer a
                 // grace period, then suspect the timer itself (tools/janitor.php not running)
                 if ($schedule['last_result'] === 'failed') {
-                    $warnings[] = ['level' => 'danger', 'text' => 'Schedule wants ' . strtoupper($schedule['desired']) . ' mode but the tracker is in ' . strtoupper($mode) . ' — the last switch FAILED: ' . ($schedule['last_error'] ?: 'unknown error')];
+                    $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_schedule_switch_failed', ['desired' => strtoupper($schedule['desired']), 'mode' => strtoupper($mode), 'error' => ($schedule['last_error'] ?: __('api.wl.unknown_error'))])];
                 } elseif ((time() - (int)$schedule['last_check_at']) > 180) {
-                    $warnings[] = ['level' => 'warn', 'text' => 'Schedule wants ' . strtoupper($schedule['desired']) . ' mode but the tracker is in ' . strtoupper($mode) . ' and the schedule was not evaluated in the last 3 minutes — is the janitor timer (tools/janitor.php) running?'];
+                    $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_schedule_overdue', ['desired' => strtoupper($schedule['desired']), 'mode' => strtoupper($mode)])];
                 }
             }
         }
@@ -1317,7 +1315,7 @@ function whitelistStatus(PDO $db, array $cfg): array {
 function whitelistImportBlacklist(PDO $db, array $cfg): array {
     $out = ['imported' => 0, 'skipped' => 0, 'invalid' => 0, 'error' => null];
     $path = normalizeListPath((string)($cfg['blacklist_path'] ?? ''));
-    if ($path === '' || !is_file($path) || !is_readable($path)) { $out['error'] = 'Blacklist file not configured or not readable.'; return $out; }
+    if ($path === '' || !is_file($path) || !is_readable($path)) { $out['error'] = __('api.wl.blacklist_unreadable'); return $out; }
     $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
     $hashes = [];
     foreach ($lines as $l) {

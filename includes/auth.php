@@ -162,7 +162,7 @@ function adminPanelSessionExpire(): void {
 function requireAuth(?array $cfg = null): void {
     $cfg = $cfg ?? ($GLOBALS['cfg'] ?? []);
     if (!adminSessionValid($cfg)) {
-        jsonResponse(['error' => 'Unauthorized'], 401);
+        jsonResponse(['error' => __('api.auth.unauthorized')], 401);
     }
 }
 
@@ -189,12 +189,6 @@ function adminGrantSession(): void {
     $_SESSION['loggedin'] = true;
     $_SESSION['login_time'] = time();
     $_SESSION['last_activity'] = time();
-}
-
-function attemptLogin(string $username, string $password, array $cfg): bool {
-    if (!adminCredentialsValid($username, $password, $cfg)) return false;
-    adminGrantSession();
-    return true;
 }
 
 /** How long the half-finished login may sit waiting for a code. */
@@ -337,7 +331,7 @@ function adminReauth(string $password, array $cfg): array {
     $failed = (int)($_SESSION['reauth_failures'] ?? 0);
 
     if ($password === '' || ADMIN_PASSWORD_HASH === '') {
-        return ['ok' => false, 'error' => 'Password required', 'left' => max(0, $max - $failed),
+        return ['ok' => false, 'error' => __('api.auth.password_required'), 'left' => max(0, $max - $failed),
                 'locked_out' => false];
     }
     if (password_verify($password, ADMIN_PASSWORD_HASH)) {
@@ -355,13 +349,11 @@ function adminReauth(string $password, array $cfg): array {
     if ($failed >= $max) {
         logout();
         return ['ok' => false, 'left' => 0, 'locked_out' => true,
-                'error' => 'Wrong password ' . $failed . ' times — you have been signed out. '
-                         . 'Sign in again to continue; repeated failures there lock the address out.'];
+                'error' => __('api.auth.locked_out', ['n' => $failed])];
     }
     $left = $max - $failed;
     return ['ok' => false, 'left' => $left, 'locked_out' => false,
-            'error' => 'Wrong password. ' . $left . ' ' . ($left === 1 ? 'attempt' : 'attempts')
-                     . ' left before this session is signed out.'];
+            'error' => __($left === 1 ? 'api.auth.wrong_password_one' : 'api.auth.wrong_password_many', ['n' => $left])];
 }
 
 /**

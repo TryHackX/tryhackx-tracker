@@ -7,7 +7,7 @@ $newPassword = $input['new_password'] ?? '';
 $newUsername = trim($input['admin_username'] ?? '');
 
 if (!$currentPassword) {
-    jsonResponse(['error' => 'Current password is required'], 400);
+    jsonResponse(['error' => __('api.account.current_password_required')], 400);
 }
 
 requireAdminReauth($currentPassword, $cfg);
@@ -17,41 +17,41 @@ $changes = [];
 // Handle username change
 if ($newUsername && $newUsername !== ($cfg['admin_username'] ?? 'admin')) {
     if (mb_strlen($newUsername) < 3) {
-        jsonResponse(['error' => 'Username must be at least 3 characters'], 400);
+        jsonResponse(['error' => __('api.account.username_min')], 400);
     }
     setSettings($db, ['admin_username' => $newUsername]);
-    $changes[] = 'Username updated';
+    $changes[] = __('api.account.username_updated');
 }
 
 // Handle password change (optional — only if new password provided)
 if ($newPassword) {
     if (mb_strlen($newPassword) < 10) {
-        jsonResponse(['error' => 'New password must be at least 10 characters long'], 400);
+        jsonResponse(['error' => __('api.account.pw_min')], 400);
     }
     if (!preg_match('/[a-z]/', $newPassword)) {
-        jsonResponse(['error' => 'New password must contain at least one lowercase letter (a-z)'], 400);
+        jsonResponse(['error' => __('api.account.pw_lower')], 400);
     }
     if (!preg_match('/[A-Z]/', $newPassword)) {
-        jsonResponse(['error' => 'New password must contain at least one uppercase letter (A-Z)'], 400);
+        jsonResponse(['error' => __('api.account.pw_upper')], 400);
     }
     if (!preg_match('/[0-9]/', $newPassword)) {
-        jsonResponse(['error' => 'New password must contain at least one digit (0-9)'], 400);
+        jsonResponse(['error' => __('api.account.pw_digit')], 400);
     }
     if (!preg_match('/[^a-zA-Z0-9]/', $newPassword)) {
-        jsonResponse(['error' => 'New password must contain at least one special character (!@#$...)'], 400);
+        jsonResponse(['error' => __('api.account.pw_special')], 400);
     }
 
     $newHash = password_hash($newPassword, PASSWORD_BCRYPT);
     $hashFile = __DIR__ . '/../../config/hash.txt';
 
     if (file_put_contents($hashFile, $newHash) === false) {
-        jsonResponse(['error' => 'Failed to write new password hash'], 500);
+        jsonResponse(['error' => __('api.account.hash_write_failed')], 500);
     }
-    $changes[] = 'Password changed';
+    $changes[] = __('api.account.password_changed');
 }
 
 if (empty($changes)) {
-    jsonResponse(['error' => 'No changes to save'], 400);
+    jsonResponse(['error' => __('api.account.no_changes')], 400);
 }
 
 jsonResponse(['success' => true, 'message' => implode('. ', $changes)]);

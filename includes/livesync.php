@@ -119,10 +119,10 @@ function livesyncValidate(array $cfg): array {
 function livesyncRun(array $cfg, array $args, int $timeout = 25): array {
     $cmd = livesyncCommand($cfg);
     if ($cmd === '' || !livesyncValidCommand($cmd)) {
-        return ['ok' => false, 'error' => 'no helper command is configured', 'json' => null];
+        return ['ok' => false, 'error' => __('api.livesync.no_helper'), 'json' => null];
     }
     if (!function_exists('trackerExecAvailable') || !trackerExecAvailable()) {
-        return ['ok' => false, 'error' => 'exec() is disabled in php.ini', 'json' => null];
+        return ['ok' => false, 'error' => __('api.livesync.exec_disabled'), 'json' => null];
     }
     $full = $cmd;
     foreach ($args as $a) $full .= ' ' . escapeshellarg((string)$a);
@@ -131,7 +131,7 @@ function livesyncRun(array $cfg, array $args, int $timeout = 25): array {
     $raw = trim(implode("\n", $lines));
     $json = json_decode($raw, true);
     if (!is_array($json)) {
-        return ['ok' => false, 'error' => 'the helper did not answer with JSON: ' . mb_substr($raw, 0, 200),
+        return ['ok' => false, 'error' => __('api.livesync.no_json', ['out' => mb_substr($raw, 0, 200)]),
                 'json' => null, 'raw' => $raw];
     }
     return ['ok' => !empty($json['ok']), 'error' => $json['error'] ?? null, 'json' => $json];
@@ -163,7 +163,7 @@ function livesyncStatus(array $cfg, bool $fresh = false): array {
 
     $r = livesyncRun($cfg, ['status']);
     if (!$r['ok'] || !is_array($r['json'])) {
-        return $cached + ['cached' => true, 'error' => $r['error'] ?? 'the helper did not answer'];
+        return $cached + ['cached' => true, 'error' => $r['error'] ?? __('api.helper.no_answer')];
     }
     $status = $r['json'];
     $status['at'] = time();

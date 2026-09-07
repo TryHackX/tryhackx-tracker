@@ -20,7 +20,7 @@ requirePost();
 $input = readJsonBody();
 $peer = mb_substr(trim((string)($input['peer'] ?? '')), 0, 64);
 $op = (string)($input['op'] ?? 'count');
-if ($peer === '' || !fedPeerValidName($peer)) jsonResponse(['error' => 'Which peer?'], 400);
+if ($peer === '' || !fedPeerValidName($peer)) jsonResponse(['error' => __('api.federation.which_peer')], 400);
 
 const PURGE_SLICE = 2000;     // rows per request — a second or two of work, never a locked table
 
@@ -30,7 +30,7 @@ if ($op === 'count') {
         'cli' => 'sudo -u www-data python3 /opt/tracker-metadata/federation.py /etc/tracker-metadata.conf --purge ' . $peer,
     ]);
 }
-if ($op !== 'run') jsonResponse(['error' => 'Unknown operation'], 400);
+if ($op !== 'run') jsonResponse(['error' => __('api.federation.unknown_op')], 400);
 
 $password = (string)($input['password'] ?? '');
 requireAdminReauth($password, $cfg);
@@ -45,7 +45,7 @@ try {
     $db->prepare("DELETE FROM fed_review WHERE peer_name = ?")->execute([$peer]);
 } catch (\Throwable $e) {
     error_log('[fed purge] ' . $e->getMessage());
-    jsonResponse(['error' => 'Stopped after ' . number_format($done) . ' row(s): ' . $e->getMessage()], 500);
+    jsonResponse(['error' => __('api.federation.purge_stopped', ['n' => number_format($done), 'err' => $e->getMessage()])], 500);
 }
 $left = fedPurgeCount($db, $peer);
 jsonResponse([
@@ -53,6 +53,6 @@ jsonResponse([
     'done'      => $done,
     'remaining' => $left['rows'],
     'message'   => $left['rows'] > 0
-        ? number_format($done) . ' row(s) undone, ' . number_format($left['rows']) . ' still to go.'
-        : number_format($done) . ' row(s) returned to unresolved. Nothing from this peer is left.',
+        ? __('api.federation.purge_progress', ['n' => number_format($done), 'left' => number_format($left['rows'])])
+        : __('api.federation.purge_done', ['n' => number_format($done)]),
 ]);

@@ -496,6 +496,19 @@ seconds.
 ⚠ **A settings-only release still bumps the schema number.** Default rows are inserted by the
 migration block, and that block only runs when the version moves.
 
+⚠ **`config/database.php` is generated once and never touched by an upgrade.** Installs made
+with 1.35.0 or earlier do not have the connect timeout that stops a downed MariaDB from holding
+every php-fpm child until the TCP timeout. Add this line to the options array in
+`config/database.php`, next to `PDO::ATTR_EMULATE_PREPARES => false,`:
+
+```php
+                PDO::ATTR_TIMEOUT => 3,
+```
+
+With it, a database that is down answers as a `503` with `Retry-After: 60` (a small maintenance page
+for the site, `{"success":false,"retry_after":60}` for the API) within three seconds instead of a
+blank error after thirty.
+
 ---
 
 ## When something looks wrong

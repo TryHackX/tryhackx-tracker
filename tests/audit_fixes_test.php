@@ -86,6 +86,44 @@ check('the index status card keeps the last good numbers on a failed poll', str_
 check('transparency numbers rows from the page size the server used', str_contains($src('api/transparency.php'), "'per_page' => \$perPage"));
 check('the coverage chart destroys uPlot before dropping it', str_contains($src('assets/js/admin-index-coverage.js'), 'chart.destroy()'));
 
+// ── fail fast in the web bootstrap ──────────────────────────────────────────
+// A deferred heavy migration leaves schema_version stale for minutes, and every request went to
+// ensureSchema() and waited five seconds for a lock the janitor was holding. The web wait is now
+// zero; the CLI keeps its five. Grepped for the exact expression: a refactor that puts one number
+// back for both is exactly the regression.
+$schema = $src('includes/schema.php');
+check('the web never waits for the schema lock', str_contains($schema, "\$lockWait = PHP_SAPI === 'cli' ? 5 : 0;"));
+check('… and the wait reaches GET_LOCK as a bound parameter',
+      str_contains($schema, "\$db->prepare(\"SELECT GET_LOCK('tracker_schema', ?)\")") && str_contains($schema, '$st->execute([$lockWait]);'));
+check('… and a taken lock means "run on the schema you have", not "wait for the rebuild"',
+      (bool)preg_match('/\$lock = \$st->fetchColumn\(\);\s*\n\s*if \(\(int\)\$lock !== 1\) return;/', $schema));
+check('the version is still only recorded when nothing was deferred', str_contains($schema, 'if (!schemaDeferHeavy()) {'));
+// The maintenance page is shown BECAUSE the database is gone, so it may not need the database.
+$mtPath = 'templates/maintenance.php';
+check('the maintenance template exists', is_file($root . '/' . $mtPath));
+$mt = is_file($root . '/' . $mtPath) ? $src($mtPath) : '';
+// Its doc comment may well SAY "$cfg" while explaining why it must not use it, so the grep runs on
+// the code with the block comments taken out.
+$mtCode = preg_replace('#/\*.*?\*/#s', '', $mt);
+check('… and contains no PHP that touches the database',
+      $mt !== '' && !preg_match('/getDb\(|\$db\b|\bPDO\b|->query\(|->prepare\(|->exec\(|getSettings\(|\$cfg\b|currentUser\(/', $mtCode));
+check('… nor the layout, whose nav would ask the database who is signed in', !preg_match('/(include|require)[^;]*layout\.php/', $mt));
+// langFor() and not __()/_h(): nothing has run langInit() when this page is shown, and a lookup in
+// the request's own dictionary before that hands back the key.
+check('… and says it in both shipped languages, each read straight from its language file',
+      str_contains($mt, "langFor('en', 'maintenance.body')") && str_contains($mt, "langFor('pl', 'maintenance.body')")
+      && !preg_match('/(?<![a-z_])(__|_h)\(/', $mtCode));
+$idx = $src('index.php');
+check('index.php catches a failed connect and sends 503 + Retry-After',
+      (bool)preg_match('/try \{\s*\$db = getDb\(\);\s*\} catch \(PDOException \$e\) \{.*?http_response_code\(503\);.*?Retry-After: 60.*?maintenance\.php/s', $idx));
+$apiSrc = $src('api.php');
+check('api.php does the same with a JSON body, its message read straight from the English file',
+      (bool)preg_match('/try \{\s*\$db = getDb\(\);\s*\} catch \(PDOException \$e\) \{.*?http_response_code\(503\);.*?Retry-After: 60.*?langFor\(\'en\', \'api\.db_unavailable\'\).*?\'retry_after\' => 60/s', $apiSrc));
+check('… and neither prints the exception to the visitor',
+      !preg_match('/echo[^;]*\$e->getMessage\(\)/', $idx) && !preg_match('/echo[^;]*\$e->getMessage\(\)/', $apiSrc));
+check('a fresh install gets a connect timeout', str_contains($src('install.php'), 'PDO::ATTR_TIMEOUT => 3,'));
+check('… and the upgrade notes tell an existing one how to add it', str_contains($src('INSTALL.md'), 'PDO::ATTR_TIMEOUT => 3,'));
+
 // ── behaviour, where it is cheap ────────────────────────────────────────────
 require_once $root . '/config/database.php';
 require_once $root . '/includes/settings.php';

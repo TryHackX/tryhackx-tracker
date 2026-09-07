@@ -5,8 +5,8 @@ $input = readJsonBody();
 $id = (int)($input['id'] ?? 0);
 $groupId = (int)($input['group_id'] ?? 0);
 $victim = userFindById($db, $id);
-if (!$victim) jsonResponse(['error' => 'User not found'], 404);
-if ($groupId <= 0) jsonResponse(['error' => 'group_id required'], 400);
+if (!$victim) jsonResponse(['error' => __('api.users.not_found')], 404);
+if ($groupId <= 0) jsonResponse(['error' => __('api.users.group_id_required')], 400);
 
 // Symmetric to user_grant.php: a moderator may not TAKE a panel group away either. Revoking is not
 // obviously dangerous until you picture one moderator quietly removing another, or stripping the
@@ -21,14 +21,14 @@ if ($grow) {
     }
     if ($carriesPanel && !empty($_SESSION['admin_via_user'])
         && !userIsAdminGroup($db, (int)$_SESSION['admin_via_user'])) {
-        jsonResponse(['error' => 'Only the site owner can change a group that carries panel access.'], 403);
+        jsonResponse(['error' => __('api.users.owner_only_panel_group_revoke')], 403);
     }
 }
 if (userIsRootAdmin($victim, $cfg)) {
     $slug = $db->prepare("SELECT slug FROM user_groups WHERE id = ?");
     $slug->execute([$groupId]);
     if ($slug->fetchColumn() === 'admin') {
-        jsonResponse(['error' => 'The site owner cannot lose the admin group.'], 400);
+        jsonResponse(['error' => __('api.users.owner_keeps_admin')], 400);
     }
 }
 $ok = userRevokeGroup($db, $id, $groupId);

@@ -5,7 +5,7 @@ $input = readJsonBody();
 $id = (int)($input['id'] ?? 0);
 
 if ($id < 1) {
-    jsonResponse(['error' => 'Invalid ID'], 400);
+    jsonResponse(['error' => __('api.report.invalid_id')], 400);
 }
 
 $stmt = $db->prepare("SELECT * FROM archives WHERE id = ?");
@@ -13,11 +13,11 @@ $stmt->execute([$id]);
 $report = $stmt->fetch();
 
 if (!$report) {
-    jsonResponse(['error' => 'Archived report not found'], 404);
+    jsonResponse(['error' => __('api.report.archived_not_found')], 404);
 }
 
 if ($report['blocked']) {
-    jsonResponse(['error' => 'Already blocked'], 400);
+    jsonResponse(['error' => __('api.report.already_blocked_2')], 400);
 }
 
 // Update DB — mark as blocked in archives
@@ -37,9 +37,9 @@ if ($report['email']) {
 $autoClosedUnblock = autoCloseRelatedAppeals($db, $report['infoHash'], 'unblock', 0, $cfg);
 $autoClosedBlock = autoCloseRelatedAppeals($db, $report['infoHash'], 'block', 0, $cfg);
 
-$response = ['success' => true, 'message' => $block['mode'] === 'whitelist' ? 'Hash banned in archive' : 'Hash blocked in archive'];
+$response = ['success' => true, 'message' => $block['mode'] === 'whitelist' ? __('api.report.hash_banned_archive') : __('api.report.hash_blocked_archive')];
 if (!$block['file_ok'] && ($block['errors'] || ($block['mode'] === 'blacklist' && ($cfg['blacklist_path'] ?? '') !== ''))) {
-    $response['blacklist_warning'] = 'Hash blocked in database but the tracker list file could not be updated.';
+    $response['blacklist_warning'] = __('api.report.list_file_not_updated');
     $response['blacklist_errors'] = $block['errors'];
     $response['blacklist_suggestions'] = $block['suggestions'];
 }

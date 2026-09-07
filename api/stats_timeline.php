@@ -14,25 +14,25 @@
  * most as many files as the slider has stops) instead of the uncached &from/&to window below — that
  * window exists for interactive zooming, where every visitor asks for something different anyway.
  */
-if ($_SERVER['REQUEST_METHOD'] !== 'GET') jsonResponse(['error' => 'Method not allowed'], 405);
-if (!statsTimelineEnabled($cfg)) jsonResponse(['error' => 'Statistics timeline is disabled'], 403);
+if ($_SERVER['REQUEST_METHOD'] !== 'GET') jsonResponse(['error' => __('api.common.method_not_allowed')], 405);
+if (!statsTimelineEnabled($cfg)) jsonResponse(['error' => __('api.timeline.disabled')], 403);
 // Evaluate while the session is still open: adminSessionValid() enforces the idle/absolute limits and
 // refreshes last_activity. Public mode short-circuits so anonymous pollers never touch the session.
 $public = statsTimelinePublic($cfg) && userCan($db, $cfg, 'stats.timeline');
 $allowed = $public || adminSessionValid($cfg);
 if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
-if (!$allowed) jsonResponse(['error' => 'Statistics timeline is not public'], 403);
-if (!rateLimitAllow('timeline', ipBucket(getClientIp($cfg)), 60, 60)) jsonResponse(['error' => 'Too many requests'], 429);
+if (!$allowed) jsonResponse(['error' => __('api.timeline.not_public')], 403);
+if (!rateLimitAllow('timeline', ipBucket(getClientIp($cfg)), 60, 60)) jsonResponse(['error' => __('api.timeline.too_many')], 429);
 
 $range = (string)($_GET['range'] ?? '24h');
 if ($range === 'custom') {
     $spanRaw = isset($_GET['span']) && is_numeric($_GET['span']) ? (int)$_GET['span'] : 0;
-    if ($spanRaw <= 0) jsonResponse(['error' => 'A custom range needs a span in seconds.'], 400);
+    if ($spanRaw <= 0) jsonResponse(['error' => __('api.timeline.custom_needs_span')], 400);
     $rangeSec = statsTimelineSnapSpan($spanRaw);
     $rangeKey = 'custom' . $rangeSec;   // its own cache file, one per slider stop
 } else {
     $rangeSec = statsTimelineRangeSeconds($range);
-    if ($rangeSec === null) jsonResponse(['error' => 'Unknown range. Use 24h, 7d, 14d, 30d, 60d, 90d, all or custom+span.'], 400);
+    if ($rangeSec === null) jsonResponse(['error' => __('api.timeline.unknown_range')], 400);
     $rangeKey = statsTimelineRangeKey($range);
 }
 
@@ -51,7 +51,7 @@ if ($winFrom !== null && $winTo !== null && $winTo > $winFrom && ($winTo - $winF
         $payload = statsTimelineSeries($db, $cfg, $rangeSec, time(), $winFrom, $winTo);
     } catch (\Throwable $e) {
         error_log('[stats timeline] window series: ' . $e->getMessage());
-        jsonResponse(['error' => 'Timeline query failed'], 500);
+        jsonResponse(['error' => __('api.timeline.query_failed')], 500);
     }
     $payload['range'] = $rangeKey;
     $payload['cache_age'] = 0;
@@ -117,7 +117,7 @@ if ($payload === null) {
             } catch (\Throwable $e) {
                 if ($lh) { @flock($lh, LOCK_UN); @fclose($lh); }
                 error_log('[stats timeline] series: ' . $e->getMessage());
-                jsonResponse(['error' => 'Timeline query failed'], 500);
+                jsonResponse(['error' => __('api.timeline.query_failed')], 500);
             }
             $payload['range'] = $rangeKey;
             $tmp = $cacheFile . '.tmp.' . getmypid();

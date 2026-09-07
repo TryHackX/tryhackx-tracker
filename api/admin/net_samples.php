@@ -30,7 +30,7 @@ if ($from <= 0 || $to <= $from) {
 try {
     $data = netlimitSeries($db, $cfg, $from, $to);
 } catch (\Throwable $e) {
-    jsonResponse(['error' => 'Could not read the traffic samples: ' . $e->getMessage()], 500);
+    jsonResponse(['error' => __('api.net.samples_read_failed', ['msg' => $e->getMessage()])], 500);
 }
 
 $data['ok'] = true;

@@ -48,9 +48,9 @@ function otClusterPortBase(array $cfg): int {
 function otClusterRun(array $cfg, array $args): array {
     $out = ['ok' => false, 'json' => null, 'output' => '', 'code' => null, 'error' => null];
     $cmd = otClusterCommand($cfg);
-    if ($cmd === '') { $out['error'] = 'No cluster helper is configured (Settings → OpenTracker instances).'; return $out; }
-    if (!otClusterValidCommand($cmd)) { $out['error'] = 'The helper command contains characters that are not allowed.'; return $out; }
-    if (!trackerExecAvailable()) { $out['error'] = 'PHP exec() is disabled on this server — the panel cannot reach the helper.'; return $out; }
+    if ($cmd === '') { $out['error'] = __('api.cluster.no_helper'); return $out; }
+    if (!otClusterValidCommand($cmd)) { $out['error'] = __('api.cluster.bad_command'); return $out; }
+    if (!trackerExecAvailable()) { $out['error'] = __('api.cluster.exec_disabled'); return $out; }
     $full = $cmd;
     foreach ($args as $a) $full .= ' ' . escapeshellarg((string)$a);
     $full .= ' 2>&1';
@@ -66,12 +66,12 @@ function otClusterRun(array $cfg, array $args): array {
     }
     if ($out['json'] === null) {
         $out['error'] = $out['output'] !== ''
-            ? 'The helper did not answer with JSON: ' . mb_substr($out['output'], 0, 300)
-            : 'The helper produced no output (exit ' . (int)$rc . '). Check the sudoers rule.';
+            ? __('api.helper.no_json', ['out' => mb_substr($out['output'], 0, 300)])
+            : __('api.helper.no_output', ['code' => (int)$rc]);
         return $out;
     }
     $out['ok'] = !empty($out['json']['ok']) && $out['code'] === 0;
-    if (!$out['ok'] && $out['error'] === null) $out['error'] = (string)($out['json']['error'] ?? ('Helper exited with code ' . (int)$rc));
+    if (!$out['ok'] && $out['error'] === null) $out['error'] = (string)($out['json']['error'] ?? __('api.helper.exit_code', ['code' => (int)$rc]));
     return $out;
 }
 
@@ -102,7 +102,7 @@ function otClusterRoster(array $cfg, bool $fresh = false): array {
 
     $r = otClusterRun($cfg, ['status']);
     if (!$r['ok'] || !is_array($r['json'])) {
-        return $cached + ['cached' => true, 'error' => $r['error'] ?? 'the helper did not answer'];
+        return $cached + ['cached' => true, 'error' => $r['error'] ?? __('api.helper.no_answer')];
     }
     $roster = [
         'instances' => array_values((array)($r['json']['instances'] ?? [])),
@@ -254,21 +254,19 @@ function otClusterWarnings(array $cfg): array {
     foreach ((array)($roster['instances'] ?? []) as $i) {
         $n = (string)($i['name'] ?? '?');
         if (($i['state'] ?? '') !== 'active') {
-            $out[] = ['level' => 'danger', 'text' => 'Tracker instance "' . $n . '" is not running (' . ($i['state'] ?? 'unknown') . ').'];
+            $out[] = ['level' => 'danger', 'text' => __('api.cluster.warn_not_running', ['name' => $n, 'state' => $i['state'] ?? 'unknown'])];
             continue;
         }
         // The one thing the shared binary symlink cannot prevent: a config symlink that drifted.
         $rb = (string)($i['running_build'] ?? '');
         $cm = (string)($i['conf_mode'] ?? '');
         if ($rb !== '' && $cm !== '' && $rb !== 'unknown' && $cm !== 'unknown' && $rb !== $cm) {
-            $out[] = ['level' => 'danger', 'text' => 'Tracker instance "' . $n . '" is running the ' . $rb
-                . ' build while its config says ' . $cm . '. It needs a restart, or it is serving the wrong list.'];
+            $out[] = ['level' => 'danger', 'text' => __('api.cluster.warn_build_drift', ['name' => $n, 'build' => $rb, 'mode' => $cm])];
         }
     }
     foreach ((array)($state['last_reload_units'] ?? []) as $n => $u) {
         if (empty($u['ok'])) {
-            $out[] = ['level' => 'warning', 'text' => 'Tracker instance "' . $n . '" did not reload its accesslist ('
-                . ($u['state'] ?? '?') . '), so it is still serving the previous one.'];
+            $out[] = ['level' => 'warning', 'text' => __('api.cluster.warn_reload_failed', ['name' => $n, 'state' => $u['state'] ?? '?'])];
         }
     }
     return $out;

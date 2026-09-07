@@ -188,6 +188,71 @@ $cov = langCoverage('en');
 check('English measures itself at 100 %', $cov['percent'] === 100);
 check('coverage of something that is not installed is 0, not an error', langCoverage('zz')['percent'] === 0);
 
+// ── sanitising contributed values ───────────────────────────────────────────
+// The templates print __() unescaped by design, so a language file is the one place a stranger's
+// text reaches the page as HTML. The fixture is the JSON a hostile contributor would send: the two
+// payloads have to go, and the two honest strings have to survive UNCHANGED — a sanitiser that
+// "cleaned" <strong> into text would break every hint that uses it and nobody would notice until
+// the language was live.
+$hostile = json_decode('{"h.img": "<img src=x onerror=alert(1)>",'
+                     . ' "h.js": "<a href=\"javascript:alert(1)\">x</a>",'
+                     . ' "h.ok": "<a href=\"https://ok\">x</a>",'
+                     . ' "h.strong": "<strong>bold</strong>"}', true);
+check('the hostile fixture parsed', is_array($hostile) && count($hostile) === 4);
+$kept = []; $dropped = [];
+foreach ($hostile as $k => $v) { if (langSanitizeValue($v) === null) $dropped[] = $k; else $kept[$k] = $v; }
+check('<img onerror> is dropped', in_array('h.img', $dropped, true));
+check('<a href="javascript:…"> is dropped', in_array('h.js', $dropped, true));
+check('<a href="https://…"> is kept verbatim', ($kept['h.ok'] ?? null) === $hostile['h.ok']);
+check('<strong> is kept verbatim', ($kept['h.strong'] ?? null) === $hostile['h.strong']);
+check('… and nothing else was touched', $dropped === ['h.img', 'h.js'], implode(',', $dropped));
+// The shapes the rule has to refuse beyond the obvious ones. Each of these is a way the first
+// version of a filter like this gets past: a scheme hidden behind entities or a tab (a browser
+// decodes the one and strips the other before it reads the scheme), a payload on the CLOSING tag,
+// a tag left open, a protocol-relative URL, an event handler on an allowed tag.
+foreach ([
+    'an event handler on an allowed tag'   => '<strong onclick=alert(1)>x</strong>',
+    'a payload on a closing tag'           => '<a href="https://x">x</a onclick=alert(1)>',
+    'an entity-encoded javascript: href'   => '<a href="&#106;avascript:alert(1)">x</a>',
+    'a tab inside the scheme'              => "<a href=\"java\tscript:alert(1)\">x</a>",
+    'a leading space before the scheme'    => '<a href=" javascript:alert(1)">x</a>',
+    'a data: href'                         => '<a href="data:text/html,x">x</a>',
+    'a protocol-relative href'             => '<a href="//evil.example">x</a>',
+    'a backslash where the second slash goes' => '<a href="/\\evil.example">x</a>',
+    'a numeric entity with no semicolon'   => '<a href="&#106avascript:alert(1)">x</a>',
+    'a hex entity with no semicolon'       => '<a href="j&#x61vascript:alert(1)">x</a>',
+    'any attribute but href on an <a>'     => '<a href="https://x" target="_blank">x</a>',
+    'an unterminated tag'                  => '<a href="https://x',
+    'a comment'                            => '<!-- x -->',
+    'a tag not in the list'                => '<u>x</u>',
+    '<svg>'                                => '<svg onload=alert(1)>',
+    '<script> in any case'                 => '<SCRIPT>1</SCRIPT>',
+    'a control character'                  => "x\0y",
+] as $what => $v) {
+    check("refused: $what", langSanitizeValue($v) === null, $v);
+}
+foreach ([
+    'plain text with a placeholder'        => 'Ta strona nie istnieje na :site.',
+    'a bare < in prose'                    => 'a < b and 3 <4',
+    'every allowed tag'                    => 'Use <code>?lang=</code>, <kbd>Ctrl</kbd><sup>1</sup> <small>x</small> <span>y</span> <em>z</em> <b>1</b> <i>2</i>',
+    '<br> in both spellings'               => 'one<br>two<br/>three<br />four',
+    'a relative href'                      => '<a href="/terms">x</a>',
+    'a placeholder href, as the shipped strings use' => '<a href=":url">x</a>',
+    'a terminated entity in an href'       => '<a href="https://x/?a=1&amp;b=&#50;">x</a>',
+    'an upper-case tag and scheme'         => '<A HREF="HTTPS://X">x</A>',
+    'the word "metadata:" in prose'        => 'the metadata: name and size',
+] as $what => $v) {
+    check("kept verbatim: $what", langSanitizeValue($v) === $v, $v);
+}
+// The endpoint has to actually call it, on both paths that write a file from foreign strings.
+$ep = (string)file_get_contents($root . '/api/admin/languages.php');
+check('the upload path runs every value through it',
+      preg_match('/op === \'upload\'.*langSanitizeValue\(\$v\)/s', $ep) === 1);
+check('… and so does the duplicate path',
+      preg_match('/op === \'duplicate\'.*langSanitizeValue\(\$v\).*op === \'upload\'/s', $ep) === 1);
+check('a dropped key is named in the reply, not just counted', str_contains($ep, "'dropped' => \$dropped"));
+check('the sentence that names them is translated', langHas('settings.lang_upload_dropped'));
+
 // ── writing a language file ─────────────────────────────────────────────────
 check('a bad code is refused before anything is written', !langWriteFile('BAD!', ['a.b' => 'c'], 'x'));
 check('a non-string value is refused', !langWriteFile('zz', ['a.b' => ['nested']], 'x'));

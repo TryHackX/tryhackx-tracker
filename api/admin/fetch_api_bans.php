@@ -6,7 +6,7 @@ if ($single > 0) {
     $st = $db->prepare("SELECT * FROM api_bans WHERE id = ?");
     $st->execute([$single]);
     $ban = $st->fetch();
-    if (!$ban) jsonResponse(['error' => 'Not found'], 404);
+    if (!$ban) jsonResponse(['error' => __('api.common.not_found')], 404);
     $ban['id'] = (int)$ban['id'];
     $snap = null;
     if ($ban['request_snapshot'] !== null && $ban['request_snapshot'] !== '') {

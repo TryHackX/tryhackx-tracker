@@ -15,6 +15,7 @@ require_once $root . '/includes/schema.php';
 require_once $root . '/includes/whitelist.php';
 require_once $root . '/includes/index.php';
 require_once $root . '/includes/api_auth.php';
+require_once $root . '/includes/lang.php';
 require_once $root . '/includes/federation.php';
 
 $fails = 0; $n = 0;

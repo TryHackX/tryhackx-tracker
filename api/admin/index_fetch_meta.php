@@ -14,19 +14,19 @@ if ($scope === 'restore') {
 }
 if ($scope === 'date') {
     $range = parseDateRangeInput($input);
-    if ($range === null) jsonResponse(['error' => 'Invalid date range: pass since_hours=N, or from (Y-m-d [H:i]) and optional to.'], 400);
+    if ($range === null) jsonResponse(['error' => __('api.index.invalid_date_range')], 400);
     $queued = indexQueueMetaByDate($db, $range[0], $range[1]);
     jsonResponse(['success' => true, 'scope' => 'date', 'from' => $range[0], 'to' => $range[1], 'queued' => $queued,
                   'worker_heartbeat_age' => whitelistWorkerHeartbeatAge($cfg)]);
 }
 if ($scope !== '') {
     $queued = indexQueueMetaByScope($db, $scope);
-    if ($queued === null) jsonResponse(['error' => 'Invalid scope (missing | failed | missing_failed | all | date | cancel)'], 400);
+    if ($queued === null) jsonResponse(['error' => __('api.index.invalid_meta_scope')], 400);
     jsonResponse(['success' => true, 'scope' => $scope, 'queued' => $queued, 'worker_heartbeat_age' => whitelistWorkerHeartbeatAge($cfg)]);
 }
 $hashes = $input['hashes'] ?? [];
 if (!is_array($hashes)) $hashes = [$hashes];
-if (!$hashes) jsonResponse(['error' => 'No hashes or scope provided'], 400);
-if (count($hashes) > 500) jsonResponse(['error' => 'Too many hashes (max 500)'], 400);
+if (!$hashes) jsonResponse(['error' => __('api.index.no_hashes_or_scope')], 400);
+if (count($hashes) > 500) jsonResponse(['error' => __('api.index.too_many_hashes')], 400);
 $queued = indexRequestMeta($db, $hashes, 5);
 jsonResponse(['success' => true, 'queued' => $queued, 'worker_heartbeat_age' => whitelistWorkerHeartbeatAge($cfg)]);

@@ -479,6 +479,11 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
 - **CLI** — `sudo -u www-data php tools/whitelist_cli.php index [--poll] [--tick]` prints the status /
   forces a poll / runs one janitor tick.
 
+**The file list (1.36.0).** On the public search page the list is paged — 2 000 files per
+answer, the next slice loaded when the reader reaches the end of the list or presses *Load more
+files* — so a torrent with tens of thousands of files is readable without one multi-megabyte
+reply. The admin modals cap at 5 000 and offer *Load the whole file list*.
+
 **What a poll writes (1.35.0).** A row whose seeders, leechers and completed count did not move since
 the last poll is not written at all, and `last_seen` / `seen_count` advance at most once per six
 hours. Measured on production before the change: the download took 6 s, the parse 3 s and the
@@ -900,6 +905,14 @@ Wrong answers cost progressively more time from the first one; after `admin_reau
 and address lockout — and the failures count against that lockout too, so guessing here poisons the
 way back in rather than being a side door around it.
 
+The same prompt now guards the *definitions* of those actions, not only their triggers. Saving a
+different helper command (`*_cmd`), interpreter or script path (`tuner_python`,
+`backup_script_path`), the tracker's service name or sudo switch, the reverse-proxy trust pair
+(`trusted_proxy_ips`, `client_ip_header`) or the `hmac_secret` asks for the owner's password —
+an admin-group account holds a panel session too, and on that session alone it could quietly change
+what www-data runs on the next schedule tick. Only a value that differs from the stored one triggers
+the prompt; an untouched field never does.
+
 The session gate keeps strangers out of the panel. This is for whoever is already sitting at the
 machine: a borrowed laptop, an unlocked screen, a stolen cookie — which is the case the password
 prompt existed for in the first place.
@@ -982,6 +995,14 @@ sudo install -m 0755 tools/opentracker/tracker-mode.sh /usr/local/sbin/tracker-m
 
 Remove every trace: `tracker-cluster.sh remove <name>` per instance, which takes the systemd template
 with the last one.
+
+### What the machine's own processes cost (1.36.0)
+
+The Traffic page's machine-load card also lists **MariaDB, opentracker, php-fpm and the metadata
+worker** with their CPU (of one core, like `top`) and resident memory, read from `/proc` by
+`includes/procstat.php`. CPU is a rate, so it is measured over the interval since the previous
+poll — the previous reading is kept in `config/proc_usage.json` — and the first reading after a
+restart shows memory only. It answers the question machine load never does: *who* is busy.
 
 ### Addresses the rate limit never drops (1.26.0)
 
@@ -1790,7 +1811,9 @@ language — install one from a JSON export, or copy an existing language and ed
 
 The session cookie outranks the account setting on purpose: someone who clicks **PL** in the
 header means *now*, and the account page is where they say *always*. The switcher sits in the
-public header, the admin header and the account page (1.34.0).
+public header, the admin header and the account page (1.34.0). On the Settings page — the one long
+enough for the header to be a scroll away — a copy of the switcher fades into the sticky toolbar
+while the header is out of view (1.36.0).
 
 **Three lists, and they are different questions:**
 
@@ -1812,6 +1835,14 @@ every request, so accepting one as an upload would be a way to put code on the i
 The payload is parsed as data, every pair is checked to be a flat `string => string`, and the file
 is written from `var_export()`; what lands on disk is a literal array the app generated. A new
 translation starts **switched off** so it can be finished before anyone sees it.
+
+The values are checked as well. Templates print strings unescaped on purpose — the shipped
+ones carry `<strong>`, `<code>` and `<a href>` — so a translation is HTML that reaches every page.
+An uploaded or copied value may use `a`, `strong`, `em`, `b`, `i`, `code`, `kbd`, `br`, `span`,
+`small` and `sup`, with no attribute except an `<a>`'s `href` (`http:`, `https:` or a relative
+path). Anything else — a `<script>`, an `onerror=`, a `javascript:` link, an unknown tag — gets
+that **key dropped**, and the reply names the dropped keys so the translator knows what to fix.
+The two shipped dictionaries are vetted with the code and are not measured against this rule.
 
 The two shipped languages are never replaced by an upload (a partial file would hollow out the
 fallback for every other translation) — copy one to a free code and edit that.

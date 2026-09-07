@@ -81,7 +81,7 @@ function tunerStatus(array $cfg): array {
 /** Ask for a run. The janitor picks it up within a minute. */
 function tunerRequest(array $opts): array {
     $st = tunerStateRead();
-    if (tunerIsAlive($st)) return ['error' => 'A run is already going.'];
+    if (tunerIsAlive($st)) return ['error' => __('api.tuner.already_running')];
     tunerStateUpdate(function (array &$s) use ($opts) {
         $s['requested'] = [
             'at'      => time(),

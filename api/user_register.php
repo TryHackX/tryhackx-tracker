@@ -9,7 +9,7 @@ requirePost();
 
 $input = readJsonBody();
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 if (!usersRegistrationEnabled($cfg)) {
     jsonResponse(['error' => 'registration_disabled'], 400);
@@ -32,20 +32,20 @@ if (!rateLimitAllow('user_register', ipBucket($ip), $perHour, 3600)) {
 // terms must be accepted, and with the verification gate on an email address is REQUIRED
 // (unverified accounts act as guests until the link is clicked)
 if (empty($input['terms_accepted'])) {
-    jsonResponse(['error' => 'You must accept the terms to register.', 'code' => 'terms_required'], 400);
+    jsonResponse(['error' => __('api.users.terms_required'), 'code' => 'terms_required'], 400);
 }
 if (userEmailVerifyRequired($cfg) && trim((string)($input['email'] ?? '')) === '') {
-    jsonResponse(['error' => 'An email address is required — member access is activated by the confirmation link.', 'code' => 'email_required'], 400);
+    jsonResponse(['error' => __('api.users.email_required'), 'code' => 'email_required'], 400);
 }
 
 $r = userCreate($db, $cfg, (string)($input['username'] ?? ''), (string)($input['email'] ?? ''), (string)($input['password'] ?? ''), $ip);
 if (isset($r['error'])) {
     $msgs = [
-        'invalid_username' => 'Username: 3-32 characters, letters/digits and _ . - only.',
-        'invalid_email'    => 'That email address does not look valid.',
-        'weak_password'    => 'Password: ' . USER_PASSWORD_RULES . '.',
-        'username_taken'   => 'This username is already taken.',
-        'email_taken'      => 'An account with this email already exists.',
+        'invalid_username' => __('api.users.invalid_username'),
+        'invalid_email'    => __('api.users.invalid_email'),
+        'weak_password'    => __('api.users.weak_password', ['rules' => USER_PASSWORD_RULES]),
+        'username_taken'   => __('api.users.username_taken'),
+        'email_taken'      => __('api.users.email_taken'),
     ];
     jsonResponse(['error' => $msgs[$r['error']] ?? $r['error'], 'code' => $r['error']], 400);
 }

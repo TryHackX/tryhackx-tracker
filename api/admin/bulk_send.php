@@ -20,7 +20,7 @@ requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? '');
 if (!in_array($op, ['preview', 'render', 'test', 'queue', 'status', 'batches', 'cancel'], true)) {
-    jsonResponse(['error' => 'Unknown operation'], 400);
+    jsonResponse(['error' => __('api.bulk.unknown_op')], 400);
 }
 
 $audience = (array)($input['audience'] ?? []);
@@ -62,22 +62,21 @@ if ($op === 'cancel') {
     if ($id === '') jsonResponse(['error' => 'batch_id required'], 400);
     $n = bulkCancelBatch($db, $id);
     jsonResponse(['success' => true, 'cancelled' => $n,
-                  'message' => $n . ' message' . ($n === 1 ? '' : 's') . ' that had not gone out yet '
-                             . 'will not be sent. Anything already delivered cannot be recalled.']);
+                  'message' => $n === 1 ? __('api.bulk.cancelled_one', ['n' => $n]) : __('api.bulk.cancelled_many', ['n' => $n])]);
 }
 
 if ($op === 'test') {
     // A copy to the site's own address, so the admin sees exactly what lands before anyone else does.
-    if (!bulkMailEnabled($cfg)) jsonResponse(['error' => 'Bulk mail is off. Turn it on in Settings first.'], 409);
+    if (!bulkMailEnabled($cfg)) jsonResponse(['error' => __('api.bulk.mail_off_first')], 409);
     $to = trim((string)($cfg['site_email'] ?? ''));
-    if ($to === '') jsonResponse(['error' => 'No site email address is configured to send the test to.'], 400);
-    if (trim($subject) === '' || trim($body) === '') jsonResponse(['error' => 'A subject and a message are both required.'], 400);
+    if ($to === '') jsonResponse(['error' => __('api.bulk.no_site_email')], 400);
+    if (trim($subject) === '' || trim($body) === '') jsonResponse(['error' => __('api.bulk.subject_body_required')], 400);
     $unsub = getUnsubscribeUrl($to, $cfg);
     $html = buildEmailHtml(['title' => $subject, 'greeting' => '',
                             'body' => bulkBodyHtml($body, $format, $cfg), 'unsubscribe_url' => $unsub], $cfg);
     $ok = sendEmail($to, $subject, $body, $html, $cfg, $unsub);
     jsonResponse(['success' => $ok, 'to' => $to,
-                  'message' => $ok ? 'Sent one copy to ' . $to . '.' : 'The mailer refused it.']);
+                  'message' => $ok ? __('api.bulk.test_sent', ['to' => $to]) : __('api.bulk.mailer_refused')]);
 }
 
 // ── queue ───────────────────────────────────────────────────────────────────
@@ -86,17 +85,17 @@ requireAdminReauth((string)($input['password'] ?? ''), $cfg);
 $wantMail   = !empty($input['email']);
 $wantNotify = !empty($input['notify']);
 if (!$wantMail && !$wantNotify) {
-    jsonResponse(['error' => 'Choose at least one: an email, an in-app notification, or both.'], 400);
+    jsonResponse(['error' => __('api.bulk.choose_channel')], 400);
 }
 if ($wantMail && !bulkMailEnabled($cfg)) {
-    jsonResponse(['error' => 'Bulk mail is off. Turn it on in Settings, or send the notification only.'], 409);
+    jsonResponse(['error' => __('api.bulk.mail_off_notify_only')], 409);
 }
 
 $out = ['success' => true, 'notified' => 0, 'queued' => 0, 'skipped' => 0, 'batch_id' => null];
 
 if ($wantNotify) {
     $title = mb_substr(trim($subject), 0, 190);
-    if ($title === '') jsonResponse(['error' => 'A subject is required for the notification.'], 400);
+    if ($title === '') jsonResponse(['error' => __('api.bulk.subject_required')], 400);
     $out['notified'] = bulkNotify($db, $audience, $title, $body);
 }
 
@@ -109,12 +108,12 @@ if ($wantMail) {
 }
 
 $parts = [];
-if ($out['notified']) $parts[] = $out['notified'] . ' notification' . ($out['notified'] === 1 ? '' : 's') . ' delivered';
+if ($out['notified']) $parts[] = $out['notified'] === 1 ? __('api.bulk.notified_one', ['n' => $out['notified']]) : __('api.bulk.notified_many', ['n' => $out['notified']]);
 if ($out['queued']) {
     $mins = (int)ceil($out['queued'] / max(1, bulkMailPerTick($cfg)));
-    $parts[] = $out['queued'] . ' email' . ($out['queued'] === 1 ? '' : 's') . ' queued — about '
-             . ($mins <= 1 ? 'a minute' : $mins . ' minutes') . ' to go out';
+    $eta = $mins <= 1 ? __('api.bulk.eta_minute') : __('api.bulk.eta_minutes', ['m' => $mins]);
+    $parts[] = $out['queued'] === 1 ? __('api.bulk.queued_one', ['n' => $out['queued'], 'eta' => $eta]) : __('api.bulk.queued_many', ['n' => $out['queued'], 'eta' => $eta]);
 }
-if ($out['skipped']) $parts[] = $out['skipped'] . ' skipped (no address, opted out, or unsubscribed)';
-$out['message'] = $parts ? ucfirst(implode(', ', $parts)) . '.' : 'Nothing to do.';
+if ($out['skipped']) $parts[] = __('api.bulk.skipped', ['n' => $out['skipped']]);
+$out['message'] = $parts ? ucfirst(implode(', ', $parts)) . '.' : __('api.bulk.nothing_to_do');
 jsonResponse($out);

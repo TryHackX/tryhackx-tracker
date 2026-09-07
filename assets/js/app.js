@@ -2294,6 +2294,16 @@ const getJson = async (endpoint) => {
             .filter(Boolean);
         const input = $id('search-input'), clearBtn = $id('search-clear');
         const bestBox = $id('search-best'), filesBox = $id('search-files');
+        // Mirrors indexSearchTooShort() in includes/index.php, same regex and same floor. A one- or
+        // two-character term cannot use the fulltext index and scans the whole catalogue twice, and
+        // the 400 ms debounce below sends exactly that on the first keystroke of every search — so it
+        // is not sent at all, and the sentence the server would answer with is shown under the box
+        // instead. [...q] counts characters the way mb_strlen does; "ąę".length would say 2 as well,
+        // but an emoji would come out as 2 for one character.
+        const hint = $id('search-hint');
+        const HASH_PREFIX_RE = /^[a-f0-9]{6,40}$/i;
+        const tooShort = (q) => q !== '' && [...q].length < 3 && !HASH_PREFIX_RE.test(q);
+        const showHint = (msg) => { if (!hint) return; hint.textContent = msg || ''; hint.hidden = !msg; };
         const magnetFor = (hash, name) => {
             let m = 'magnet:?xt=urn:btih:' + hash;
             if (name) m += '&dn=' + encodeURIComponent(name);
@@ -2353,10 +2363,22 @@ const getJson = async (endpoint) => {
             const my = ++seq;   // stale responses (fast typing) must not overwrite newer ones
             const alert = $id('search-alert'), table = $id('search-table'), body = $id('search-body'), note = $id('search-note');
             alert.className = 'alert';
+            const q = input.value.trim();
+            if (tooShort(q)) {
+                // The counter was still bumped above: a reply to "abc" that lands after the user
+                // deleted a letter must not repaint the table under a term that is not being searched.
+                setLoading(false);
+                table.hidden = true;
+                note.hidden = true;
+                $id('search-total').textContent = '';
+                renderPager(1, 1, 0);
+                showHint(t('js.app.search_too_short'));
+                return;
+            }
+            showHint('');
             setLoading(true);
             const qs = new URLSearchParams({ page: String(page), sort: serializeSort() });
             if (perPageSel) qs.set('per_page', perPageSel.value);
-            const q = input.value.trim();
             if (q) qs.set('search', q);
             const filesOn = !!(filesBox && filesBox.checked);
             if (filesOn) qs.set('search_files', '1');
@@ -2370,6 +2392,10 @@ const getJson = async (endpoint) => {
                 note.hidden = true;
                 $id('search-total').textContent = '';
                 renderPager(1, 1, 0);
+                // The server applying the same rule (a stale page, or a hex floor that moved on one
+                // side first) is the hint line, not a red alert: the message is the one the box
+                // would have shown before sending, in the language the server rendered it in.
+                if (json && json.code === 'search_too_short') { showHint(json.error || t('js.app.search_too_short')); return; }
                 const code = json && json.error;
                 showAlert(alert, code === 'rate_limit' ? t('js.app.search_rate_limit')
                     : code === 'login_required' ? t('js.app.search_login_required')
@@ -2994,20 +3020,46 @@ const getJson = async (endpoint) => {
                 holder.textContent = t('js.common.loading');
                 det.appendChild(holder);
                 body.appendChild(det);
-                const fj = await getJson('index_files&hash=' + encodeURIComponent(hash));
-                if (infoOverlay.hidden || infoHash !== hash) return;
-                holder.textContent = '';
-                if (fj && fj.success && fj.files && fj.files.length) {
-                    holder.appendChild(buildTreePub(fj.files, []));
-                    if (fj.truncated) {
-                        const more = document.createElement('p');
-                        more.className = 'text-muted';
-                        more.textContent = t('js.app.files_truncated');
-                        holder.appendChild(more);
-                    }
-                } else {
-                    holder.textContent = t('js.app.no_file_list');
+                // Paged: the first slice now, the next one whenever the reader reaches the end of the
+                // list (an IntersectionObserver on a sentinel) or presses the button. The tree is
+                // rebuilt from everything loaded so far — cheap next to the fetch, and it keeps one
+                // code path for the folder structure.
+                const allFiles = [];
+                let next = 0, more = false, loading = false;
+                const tree = document.createElement('div');
+                const foot = document.createElement('div');
+                foot.className = 'files-more';
+                const btn = document.createElement('button');
+                btn.type = 'button'; btn.className = 'btn btn-secondary btn-small';
+                const sentinel = document.createElement('div');
+                sentinel.className = 'files-sentinel';
+                foot.appendChild(btn); foot.appendChild(sentinel);
+                const render = () => {
+                    tree.replaceChildren(buildTreePub(allFiles, []));
+                    btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
+                    btn.disabled = loading;
+                    foot.hidden = !more;
+                };
+                const loadMore = async () => {
+                    if (loading || (!more && next > 0)) return;
+                    loading = true; if (next > 0) render();
+                    const fj = await getJson('index_files&hash=' + encodeURIComponent(hash) + '&offset=' + next);
+                    loading = false;
+                    if (infoOverlay.hidden || infoHash !== hash) return;
+                    if (!fj || !fj.success) { if (next === 0) holder.textContent = t('js.app.no_file_list'); return; }
+                    (fj.files || []).forEach(f => allFiles.push(f));
+                    next = typeof fj.next === 'number' ? fj.next : allFiles.length;
+                    more = !!fj.truncated;
+                    if (next === 0 || !allFiles.length) { holder.textContent = t('js.app.no_file_list'); return; }
+                    if (!tree.parentNode) { holder.textContent = ''; holder.appendChild(tree); holder.appendChild(foot); }
+                    render();
+                };
+                btn.addEventListener('click', loadMore);
+                if ('IntersectionObserver' in window) {
+                    new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more) loadMore(); },
+                                             { root: null, rootMargin: '200px' }).observe(sentinel);
                 }
+                await loadMore();
             }
         }
 

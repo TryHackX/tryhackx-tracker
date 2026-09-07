@@ -5,7 +5,7 @@
  * its configuration before the first pull.
  */
 if ($_SERVER['REQUEST_METHOD'] !== 'GET' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
-    jsonResponse(['error' => 'Method not allowed'], 405);
+    jsonResponse(['error' => __('api.common.method_not_allowed')], 405);
 }
 $rawBody = $_SERVER['REQUEST_METHOD'] === 'POST' ? apiReadRawBody() : '';
 $client = apiAuthenticate($db, $cfg, 'v1/federation/ping', $rawBody);

@@ -14,10 +14,10 @@
  * rate-limited per hash across everybody — otherwise it is a load generator with a nice icon.
  */
 if (!indexEnabled($cfg) || ($cfg['index_search_enabled'] ?? '1') !== '1') {
-    jsonResponse(['error' => 'Search is not available.'], 404);
+    jsonResponse(['error' => __('api.index.search_unavailable')], 404);
 }
 if (!userCan($db, $cfg, 'index.view')) {
-    jsonResponse(['error' => 'Search access is required.'], 403);
+    jsonResponse(['error' => __('api.index.search_access_required')], 403);
 }
 
 $hash = strtolower(trim((string)($_GET['hash'] ?? '')));
@@ -26,7 +26,7 @@ $hash = strtolower(trim((string)($_GET['hash'] ?? '')));
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && session_status() === PHP_SESSION_ACTIVE) {
     session_write_close();   // see api/index_search.php for why this is here and not in the router
 }
-if (!preg_match('/^[0-9a-f]{40}$/', $hash)) jsonResponse(['error' => 'Invalid hash'], 400);
+if (!preg_match('/^[0-9a-f]{40}$/', $hash)) jsonResponse(['error' => __('api.common.invalid_hash')], 400);
 
 /** Everything about this hash from both tables, whichever has it. */
 $loadRow = function () use ($db, $hash): array {
@@ -51,26 +51,26 @@ $loadRow = function () use ($db, $hash): array {
 // ── the live refresh ────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = readJsonBody();
-    if ((string)($input['op'] ?? '') !== 'refresh') jsonResponse(['error' => 'Unknown operation'], 400);
+    if ((string)($input['op'] ?? '') !== 'refresh') jsonResponse(['error' => __('api.index.unknown_op')], 400);
     if (($cfg['search_allow_sl_refresh'] ?? '0') !== '1') {
-        jsonResponse(['error' => 'Refreshing is not enabled on this tracker.'], 403);
+        jsonResponse(['error' => __('api.index.refresh_disabled')], 403);
     }
     if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-        jsonResponse(['error' => 'Invalid CSRF token'], 403);
+        jsonResponse(['error' => __('api.csrf.invalid')], 403);
     }
     // Per hash, across every visitor. A per-session limit would be no limit at all.
     $cool = max(10, min(3600, (int)($cfg['search_sl_refresh_seconds'] ?? 120) ?: 120));
     $stamp = sys_get_temp_dir() . '/idx_sl_' . $hash . '.stamp';
     $age = is_file($stamp) ? (time() - (int)@filemtime($stamp)) : PHP_INT_MAX;
     if ($age < $cool) {
-        jsonResponse(['error' => 'Just refreshed — try again in ' . ($cool - $age) . ' s.',
+        jsonResponse(['error' => __('api.index.just_refreshed', ['s' => $cool - $age]),
                       'retry_after' => $cool - $age], 429);
     }
     @touch($stamp);
     // force = true: the caller has already paid the cooldown above, and a cached answer is exactly
     // what they pressed the button to avoid.
     $sl = scrapeOpenTracker($db, $cfg, ['info_hash' => $hash], true);
-    if (!is_array($sl)) jsonResponse(['error' => 'The tracker did not answer.'], 502);
+    if (!is_array($sl)) jsonResponse(['error' => __('api.index.tracker_no_answer_2')], 502);
     $db->prepare("UPDATE index_hashes SET last_seeders = ?, last_leechers = ?, last_completed = ?,
                          peak_seeders = GREATEST(peak_seeders, ?) WHERE info_hash = ?")
        ->execute([(int)$sl['seeders'], (int)$sl['leechers'], (int)$sl['completed'], (int)$sl['seeders'], $hash]);
@@ -79,13 +79,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
        ->execute([(int)$sl['seeders'], (int)$sl['leechers'], (int)$sl['completed'], $hash]);
     jsonResponse(['success' => true, 'seeders' => (int)$sl['seeders'],
                   'leechers' => (int)$sl['leechers'], 'completed' => (int)$sl['completed'],
-                  'message' => 'Refreshed from the tracker.']);
+                  'message' => __('api.index.refreshed')]);
 }
 
 $row = $loadRow();
 $idx = $row['index'];
 $wl  = $row['whitelist'];
-if (!$idx && !$wl) jsonResponse(['error' => 'Not found.'], 404);
+if (!$idx && !$wl) jsonResponse(['error' => __('api.index.not_found_dot')], 404);
 
 $canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
 
@@ -121,8 +121,7 @@ jsonResponse([
     'source_trusted' => $sourceUrl ? richtextIsTrusted($sourceUrl, $cfg) : false,
     'source_auto'    => $sourceAuto,
     'source_auto_note' => $sourceAuto
-        ? 'Recorded by the ' . (($wl['source'] ?? '') === 'forum' ? 'forum' : 'importer')
-          . ' that registered this torrent, not typed in by an uploader.'
+        ? ((($wl['source'] ?? '') === 'forum') ? __('api.index.source_auto_forum') : __('api.index.source_auto_importer'))
         : null,
     'description_html' => $descHtml,
     'stats' => [

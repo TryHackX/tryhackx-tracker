@@ -529,9 +529,9 @@ function panelCan(PDO $db, array $cfg, string $perm): bool {
 /** panelCan() or a 403. For endpoints; mirrors requireAuth()'s shape. */
 function panelRequire(string $perm): void {
     global $db, $cfg;
-    if (!($db instanceof PDO) || !is_array($cfg)) { jsonResponse(['error' => 'Forbidden'], 403); }
+    if (!($db instanceof PDO) || !is_array($cfg)) { jsonResponse(['error' => __('api.users.forbidden')], 403); }
     if (!panelCan($db, $cfg, $perm)) {
-        jsonResponse(['error' => 'Your panel account does not have access to that.'], 403);
+        jsonResponse(['error' => __('api.users.panel_no_access')], 403);
     }
 }
 

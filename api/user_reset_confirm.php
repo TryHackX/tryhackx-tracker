@@ -7,7 +7,7 @@ requirePost();
 
 $input = readJsonBody();
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 if (!usersEnabled($cfg)) jsonResponse(['error' => 'accounts_disabled'], 400);
 $ip = getClientIp($cfg);
@@ -16,11 +16,11 @@ if (!rateLimitAllow('user_reset', ipBucket($ip), 10, 3600)) {
 }
 $password = (string)($input['password'] ?? '');
 if (!userValidPassword($password)) {
-    jsonResponse(['error' => 'Password: ' . USER_PASSWORD_RULES . '.'], 400);
+    jsonResponse(['error' => __('api.users.weak_password', ['rules' => USER_PASSWORD_RULES])], 400);
 }
 $userId = userResetConsume($db, (string)($input['token'] ?? ''), true);
 if ($userId === null) {
-    jsonResponse(['error' => 'This reset link is invalid or has expired. Request a new one.'], 400);
+    jsonResponse(['error' => __('api.users.reset_link_invalid')], 400);
 }
 $db->prepare("UPDATE users SET pass_hash = ? WHERE id = ?")->execute([password_hash($password, PASSWORD_DEFAULT), $userId]);
 $db->prepare("DELETE FROM user_tokens WHERE type = 'remember' AND user_id = ?")->execute([$userId]);

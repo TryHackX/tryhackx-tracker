@@ -73,8 +73,11 @@ $tmpDir = sys_get_temp_dir() . '/twofa_test_' . getmypid();
 copy($root . '/includes/twofa.php', $tmpDir . '/includes/twofa.php');
 
 $runner = $tmpDir . '/run.php';
-file_put_contents($runner, <<<'PHP'
-<?php
+// The copied library speaks through __() now, and the copy has no lang/ beside it: load the real
+// dictionary from the repository first, so a refusal is the sentence and not its key.
+file_put_contents($runner, "<?php
+require " . var_export($root . '/includes/lang.php', true) . ";
+" . <<<'PHP'
 require __DIR__ . '/includes/twofa.php';
 $op = $argv[1] ?? '';
 $arg = $argv[2] ?? '';

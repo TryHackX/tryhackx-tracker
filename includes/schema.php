@@ -1387,7 +1387,17 @@ function schemaDeferHeavy(?string $what = null): array {
 function ensureSchema(PDO $db, array &$cfg): void {
     if ((int)($cfg['schema_version'] ?? 0) >= TRACKER_SCHEMA_VERSION) return;
     try {
-        $lock = $db->query("SELECT GET_LOCK('tracker_schema', 5)")->fetchColumn();
+        // The web never waits for this lock. While a deferred heavy migration is running (the janitor
+        // rebuilding index_hashes, which takes minutes) schema_version stays stale, so EVERY request
+        // came here and sat in GET_LOCK for five seconds -- with a five-child php-fpm pool that was the
+        // whole site, gone for the length of the rebuild. A request that finds the lock taken simply
+        // runs on the schema it already has (it did before too, it just paid five seconds first) and
+        // the holder records the version when it is done. The CLI keeps its wait: two janitors meeting
+        // at the same migration is exactly the case the lock exists for, and there the wait is cheap.
+        $lockWait = PHP_SAPI === 'cli' ? 5 : 0;
+        $st = $db->prepare("SELECT GET_LOCK('tracker_schema', ?)");
+        $st->execute([$lockWait]);
+        $lock = $st->fetchColumn();
         if ((int)$lock !== 1) return; // someone else is migrating — they will set the version
         try {
             // Re-check under the lock: another worker may have just finished.

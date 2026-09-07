@@ -160,6 +160,60 @@ foreach (glob($root . '/api/admin/*.php') ?: [] as $f) {
 }
 check('and the gate is actually used by the dangerous endpoints', $gated >= 12, (string)$gated);
 
+/* ── the settings that DEFINE the dangerous actions are behind the same gate ─ */
+//
+// Running a backup, switching the tracker mode, applying a firewall limit: each asks for the
+// password. The setting that says WHICH command those actions run used to save on the session cookie
+// alone, and an admin-group account holds such a cookie — so the prompt guarded the trigger while the
+// gun was reloaded around it. save_settings.php now keeps a list of those settings ($reauthKeys) and
+// requires the owner's password when any of them changes. These checks read the list back out of the
+// source rather than trusting a count, so a key that is executed but falls off the list is a failure
+// here and not a surprise later.
+
+$sv = (string)file_get_contents($root . '/api/admin/save_settings.php');
+preg_match('/\$allowed\s*=\s*\[(.*?)\];/s', $sv, $ma);
+preg_match_all("/'([a-z0-9_]+)'/", $ma[1] ?? '', $mk);
+$allowKeys = $mk[1];
+preg_match('/\$reauthKeys\s*=\s*\[(.*?)\];/s', $sv, $mr);
+preg_match_all("/'([a-z0-9_]+)'\s*=>/", $mr[1] ?? '', $mk);
+$reauthKeys = $mk[1];
+check('save_settings names the settings that need the password again', count($reauthKeys) >= 10, (string)count($reauthKeys));
+check('every one of them is a setting the endpoint accepts at all',
+      array_diff($reauthKeys, $allowKeys) === [], implode(', ', array_diff($reauthKeys, $allowKeys)));
+// Every helper command in the allow-list, by name: a new *_cmd registered without joining the list
+// is exactly the omission this exists to catch.
+$cmdKeys = array_values(array_filter($allowKeys, fn($k) => str_ends_with($k, '_cmd')));
+check('every *_cmd the endpoint accepts is on the list', count($cmdKeys) >= 6 && array_diff($cmdKeys, $reauthKeys) === [],
+      implode(', ', array_diff($cmdKeys, $reauthKeys)));
+// …and the ones whose name does not say so: the interpreter that is exec()ed, the script the backup
+// helper runs, what systemctl is told, and the two that decide whose address the panel believes.
+foreach (['tuner_python', 'backup_script_path', 'opentracker_service_name', 'opentracker_restart_use_sudo',
+          'trusted_proxy_ips', 'client_ip_header', 'hmac_secret'] as $k) {
+    check("$k is on the list", in_array($k, $reauthKeys, true));
+}
+check('the gate compares against the stored value and goes through requireAdminReauth()',
+      preg_match('/foreach \(\$reauthKeys as \$k => \$fallback\).*?\$cfg\[\$k\] \?\? \$fallback.*?requireAdminReauth\(\$confirmPassword, \$cfg\)/s', $sv) === 1);
+check('a save without the password is refused with a flag, not silently applied',
+      preg_match('/\$reauthChanged\).*?\'reauth_required\' => true.*?, 403\)/s', $sv) === 1);
+// The page must not keep its own copy of the list — it acts on the reply.
+$tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
+check('the settings page opens the password modal on that flag', str_contains($tpl, 'json.reauth_required'));
+check('… with a body that says why', str_contains($tpl, "settings.confirm_body_exec") && str_contains($tpl, 'id="settings-confirm-body"'));
+
+// attemptLogin() granted a session on the password alone, which two-factor authentication made
+// wrong — the sign-in path was split into adminCredentialsValid() + adminGrantSession() and nothing
+// called it since. A function that hands out a session and has no caller is a function waiting for
+// one, so it is gone; this makes sure it stays gone.
+$callers = [];
+$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+foreach ($it as $f) {
+    if ($f->getExtension() !== 'php' || realpath($f->getPathname()) === __FILE__) continue;   // this file names it
+    if (preg_match('/\battemptLogin\s*\(/', (string)file_get_contents($f->getPathname()))) {
+        $callers[] = str_replace($root . DIRECTORY_SEPARATOR, '', $f->getPathname());
+    }
+}
+check('attemptLogin() no longer exists and nothing calls it', $callers === [], implode(', ', $callers));
+
 /* == panel permissions: the moderator boundary ============================= */
 //
 // The panel had no permissions at all until 1.21.0 — every endpoint was gated by "is there a session"

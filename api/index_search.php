@@ -15,6 +15,17 @@ if (!userCan($db, $cfg, 'index.view')) {
     jsonResponse(['error' => currentUser($db) ? 'no_permission' : 'login_required'], 403);
 }
 
+// Refused before it costs anything, and before it counts. A one- or two-character term skips the
+// fulltext index and scans the whole catalogue twice (see indexSearchTooShort); the browser does not
+// send one, so what arrives here is a script or a stale client, and neither should be able to spend
+// this IP's hourly budget on requests that were never going to be answered. The message is a
+// sentence rather than a code because it is shown as-is under the search box; `code` is there for
+// the client to recognise it without comparing translated text.
+$search = mb_substr(trim((string)($_GET['search'] ?? '')), 0, 200);
+if (indexSearchTooShort($search)) {
+    jsonResponse(['success' => false, 'error' => __('api.search.too_short'), 'code' => 'search_too_short'], 400);
+}
+
 $perHour = (int)($cfg['rate_limit_index_search'] ?? 120);
 if (!rateLimitAllow('idxsearch', ipBucket(getClientIp($cfg)), $perHour, 3600)) {
     jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
@@ -51,7 +62,7 @@ $res = indexSearchCatalogue($db, $cfg, [
     'page'              => $_GET['page'] ?? 1,
     'per_page'          => $perPage,
     'sort'              => $sort,
-    'search'            => mb_substr(trim((string)($_GET['search'] ?? '')), 0, 200),
+    'search'            => $search,
     'search_files'      => $canFiles && ($_GET['search_files'] ?? '') === '1',
     'include_whitelist' => $canWl,
     'content'           => (string)($_GET['content'] ?? 'not_rejected'),

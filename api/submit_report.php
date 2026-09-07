@@ -5,7 +5,7 @@ $input = readJsonBody();
 
 // CSRF
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 
 // CAPTCHA (smart)
@@ -46,7 +46,7 @@ if (!isValidInfoHash($infoHash)) $errors[] = 'infoHash';
 $magnetLink = null;
 $maxMagnetLen = (int)($cfg['max_magnet_link_length'] ?? 0);
 if ($rawMagnet !== '' && $maxMagnetLen > 0 && mb_strlen($rawMagnet) > $maxMagnetLen) {
-    jsonResponse(['error' => 'Magnet link too long (max ' . $maxMagnetLen . ' characters)', 'fields' => ['magnet_link']], 400);
+    jsonResponse(['error' => __('api.report.magnet_too_long', ['max' => $maxMagnetLen]), 'fields' => ['magnet_link']], 400);
 }
 if ($rawMagnet !== '') {
     if (!preg_match('/^magnet:\?/', $rawMagnet) || !preg_match('/[?&]xt=urn:btih:/i', $rawMagnet)) {
@@ -71,17 +71,17 @@ if ($rawMagnet !== '') {
 }
 
 if ($errors) {
-    jsonResponse(['error' => 'Validation failed', 'fields' => $errors], 400);
+    jsonResponse(['error' => __('api.common.validation_failed'), 'fields' => $errors], 400);
 }
 
 // Length limits (check raw input before sanitization to avoid htmlspecialchars inflation)
 $maxMsg = (int)($cfg['max_message_length'] ?? 2000);
 if (mb_strlen($name) > 255 || mb_strlen($representative) > 255 || mb_strlen($company) > 255 ||
     mb_strlen($objectTitle) > 255 || mb_strlen($link) > 500) {
-    jsonResponse(['error' => 'Field too long', 'fields' => ['length']], 400);
+    jsonResponse(['error' => __('api.report.field_too_long'), 'fields' => ['length']], 400);
 }
 if (mb_strlen($rawMessage) > $maxMsg) {
-    jsonResponse(['error' => 'Message too long (max ' . $maxMsg . ' characters)', 'fields' => ['add_message']], 400);
+    jsonResponse(['error' => __('api.report.message_too_long', ['max' => $maxMsg]), 'fields' => ['add_message']], 400);
 }
 $message = sanitize($rawMessage);
 
@@ -102,7 +102,7 @@ if ($stmt->fetch()) {
 
 // Check if hash is already blocked on the tracker (banned in whitelist mode / listed in blacklist mode)
 if (isHashBlocked($db, $cfg, $infoHash)) {
-    jsonResponse(['error' => 'This info hash is already blocked on the tracker.', 'fields' => ['infoHash']], 409);
+    jsonResponse(['error' => __('api.report.already_blocked'), 'fields' => ['infoHash']], 409);
 }
 // Whitelist mode: tell the reporter whether the hash is even registered here (a report for an
 // unregistered hash is still accepted — blocking it pre-bans the hash).

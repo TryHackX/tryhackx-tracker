@@ -10,14 +10,14 @@ requirePost();
 $input = readJsonBody();
 $id = (int)($input['id'] ?? 0);
 $u = userFindById($db, $id);
-if (!$u) jsonResponse(['error' => 'User not found'], 404);
+if (!$u) jsonResponse(['error' => __('api.users.not_found')], 404);
 
 $groupRef = trim((string)($input['group'] ?? ''));
 $group = ctype_digit($groupRef)
     ? (function () use ($db, $groupRef) { $s = $db->prepare("SELECT * FROM user_groups WHERE id = ?"); $s->execute([(int)$groupRef]); return $s->fetch(PDO::FETCH_ASSOC) ?: null; })()
     : userGroupBySlug($db, $groupRef);
-if (!$group) jsonResponse(['error' => 'Group not found'], 404);
-if ($group['slug'] === 'guest') jsonResponse(['error' => 'The guest group is the implicit baseline — it cannot be granted'], 400);
+if (!$group) jsonResponse(['error' => __('api.groups.not_found')], 404);
+if ($group['slug'] === 'guest') jsonResponse(['error' => __('api.users.guest_not_grantable')], 400);
 auditNote(['target_type' => 'user', 'target_id' => (string)$u['username'],
            'summary' => 'granted group "' . $group['slug'] . '" to ' . $u['username']]);
 
@@ -32,7 +32,7 @@ $carriesPanel = false;
 foreach (array_keys($groupPerms) as $gp) { if (userIsPanelPermission($gp)) { $carriesPanel = true; break; } }
 if (($carriesPanel || $group['slug'] === 'admin') && !empty($_SESSION['admin_via_user'])
     && !userIsAdminGroup($db, (int)$_SESSION['admin_via_user'])) {
-    jsonResponse(['error' => 'Only the site owner can grant a group that carries panel access.'], 403);
+    jsonResponse(['error' => __('api.users.owner_only_panel_group')], 403);
 }
 
 $parseDt = function (string $s, bool $endOfDay): ?string {
@@ -49,16 +49,16 @@ $grantedAt = null;
 if ($duration === 'custom') {
     $from = $parseDt((string)($input['from'] ?? ''), false);
     $to = $parseDt((string)($input['to'] ?? ''), true);
-    if ($from === '' || $to === '') jsonResponse(['error' => 'Invalid date — use YYYY-MM-DD or YYYY-MM-DD HH:MM'], 400);
-    if ($from !== null && $to !== null && $to <= $from) jsonResponse(['error' => '"To" must be after "from"'], 400);
+    if ($from === '' || $to === '') jsonResponse(['error' => __('api.users.invalid_date')], 400);
+    if ($from !== null && $to !== null && $to <= $from) jsonResponse(['error' => __('api.users.to_after_from')], 400);
     // an already-past expiry would be reaped by the next janitor tick a minute later (with a bogus
     // "access expired" notification) — reject it like the v1 endpoint does
-    if ($to !== null && strtotime($to) <= time()) jsonResponse(['error' => '"To" must be in the future'], 400);
+    if ($to !== null && strtotime($to) <= time()) jsonResponse(['error' => __('api.users.to_in_future')], 400);
     $grantedAt = $from;    // null = now
     $expiresAt = $to;      // null = permanent
 } else {
     $expiresAt = userDurationExpiry($db, $id, (int)$group['id'], $duration);
-    if ($expiresAt === '') jsonResponse(['error' => 'Invalid duration (1d | 7d | 14d | 1m | 3m | 6m | 1y | permanent | custom)'], 400);
+    if ($expiresAt === '') jsonResponse(['error' => __('api.users.invalid_duration')], 400);
 }
 
 $note = mb_substr(trim((string)($input['note'] ?? '')), 0, 255);

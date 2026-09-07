@@ -3,7 +3,7 @@ requirePost();
 
 $input = readJsonBody();
 if (!$input || !is_array($input)) {
-    jsonResponse(['error' => 'Invalid input'], 400);
+    jsonResponse(['error' => __('api.settings.invalid_input')], 400);
 }
 
 // Whitelist of allowed setting keys
@@ -107,6 +107,36 @@ $allowed = [
     'ot_cluster_cmd', 'ot_cluster_enabled', 'ot_cluster_port_base',
 ];
 
+// The settings that decide what www-data EXECUTES, or whom the panel BELIEVES, are not ordinary
+// settings either. A helper command is handed to the shell on every schedule tick, backup run and
+// firewall change; the interpreter path is exec()ed; the service name and the sudo switch are the
+// command line systemctl gets; the proxy pair decides which header names the client for every rate
+// limit and lockout in the panel; the HMAC key signs the unsubscribe links. Every dangerous ACTION
+// asks for the password again — but until now the setting that told the action what to run saved
+// with a session cookie alone, and an admin-group account reaches this endpoint on that cookie. So
+// the definition is put behind the same gate as the deed: any of these arriving with a value other
+// than the stored one needs the OWNER's password, the same way the deletion limits below do.
+//
+// key => what the form shows when nothing is stored yet. The comparison must use the same
+// fallback the template prints, or an untouched field on a fresh install would read as a change
+// and the password would be asked for every save.
+$reauthKeys = [
+    'tracker_mode_switch_cmd'      => SCHEDULE_DEFAULT_CMD,   // includes/schedule.php
+    'net_limit_cmd'                => NET_DEFAULT_CMD,        // includes/netlimit.php
+    'backup_cmd'                   => BACKUP_DEFAULT_CMD,     // includes/backup.php
+    'backup_script_path'           => BACKUP_DEFAULT_SCRIPT,
+    'livesync_cmd'                 => '',                     // includes/livesync.php
+    'ot_perf_cmd'                  => '',                     // includes/opentracker.php
+    'sysctl_cmd'                   => '',                     // includes/sysctl.php
+    'ot_cluster_cmd'               => '',                     // includes/cluster.php
+    'tuner_python'                 => 'python3',              // includes/tuner.php
+    'opentracker_service_name'     => '',                     // restart/reload_tracker, functions.php
+    'opentracker_restart_use_sudo' => '1',
+    'trusted_proxy_ips'            => '',                     // getClientIp()
+    'client_ip_header'             => '',
+    'hmac_secret'                  => '',                     // generateUnsubscribeToken()
+];
+
 $data = [];
 foreach ($allowed as $key) {
     if (array_key_exists($key, $input)) {
@@ -115,30 +145,30 @@ foreach ($allowed as $key) {
 }
 
 if (empty($data)) {
-    jsonResponse(['error' => 'No valid settings provided'], 400);
+    jsonResponse(['error' => __('api.settings.no_valid_settings')], 400);
 }
 
 // ── Whitelist / API / CAPTCHA settings validation ──
 if (isset($data['tracker_mode']) && !in_array($data['tracker_mode'], ['blacklist', 'whitelist'], true)) {
-    jsonResponse(['error' => 'Invalid tracker mode.'], 400);
+    jsonResponse(['error' => __('api.settings.invalid_tracker_mode')], 400);
 }
 if (isset($data['whitelist_path'])) {
     $data['whitelist_path'] = normalizeListPath($data['whitelist_path']);
     if ($data['whitelist_path'] !== '') {
         $v = validateWhitelistPath($data['whitelist_path']);
-        if (!$v['ok']) jsonResponse(['error' => 'Whitelist path rejected: ' . $v['error']], 400);
+        if (!$v['ok']) jsonResponse(['error' => __('api.settings.whitelist_path_rejected', ['error' => $v['error']])], 400);
     }
 }
 if (isset($data['captcha_provider']) && !in_array($data['captcha_provider'], captchaProviders(), true)) {
-    jsonResponse(['error' => 'Invalid CAPTCHA provider.'], 400);
+    jsonResponse(['error' => __('api.settings.invalid_captcha_provider')], 400);
 }
 // ── Where the admin panel lives ──
 if (isset($data['admin_login_path'])) {
     $path = preg_replace('/[^a-z0-9_-]/', '', strtolower(trim($data['admin_login_path'])));
     if ($path === '' || $path === null) $path = 'admin';
-    if (strlen($path) > 64) jsonResponse(['error' => 'Admin sign-in address is too long (max 64 characters).'], 400);
+    if (strlen($path) > 64) jsonResponse(['error' => __('api.settings.login_path_too_long')], 400);
     if ($path !== 'admin' && in_array($path, adminReservedActions(), true)) {
-        jsonResponse(['error' => 'That admin sign-in address is already used by another page. Pick a different one.'], 400);
+        jsonResponse(['error' => __('api.settings.login_path_taken')], 400);
     }
     $data['admin_login_path'] = $path;
 }
@@ -164,7 +194,7 @@ if (isset($data['recaptcha_v3_min_score'])) {
     $data['recaptcha_v3_min_score'] = number_format(max(0.0, min(1.0, $score)), 1, '.', '');
 }
 if (isset($data['whitelist_scrape_url']) && $data['whitelist_scrape_url'] !== '' && !preg_match('#^https?://[^\s]+$#i', $data['whitelist_scrape_url'])) {
-    jsonResponse(['error' => 'Scrape URL must be an http(s) URL.'], 400);
+    jsonResponse(['error' => __('api.settings.scrape_url_invalid')], 400);
 }
 $intClamp = [
     'whitelist_max_per_submission' => [1, 500, 20], 'rate_limit_whitelist' => [0, 1000, 10],
@@ -230,14 +260,14 @@ if (isset($data['whitelist_tracker_hosts'])) {
 }
 if (isset($data['fed_import_mode'])) $data['fed_import_mode'] = $data['fed_import_mode'] === 'review' ? 'review' : 'fill';
 if (isset($data['ot_cluster_cmd']) && !otClusterValidCommand((string)$data['ot_cluster_cmd'])) {
-    jsonResponse(['error' => 'The instance helper command may only contain letters, digits, spaces and _ . / -'], 400);
+    jsonResponse(['error' => __('api.settings.cluster_cmd_invalid')], 400);
 }
 if (isset($data['ot_cluster_port_base']) && trim((string)$data['ot_cluster_port_base']) !== ''
     && ((int)$data['ot_cluster_port_base'] < 1024 || (int)$data['ot_cluster_port_base'] > 65500)) {
-    jsonResponse(['error' => 'The first instance port must be between 1024 and 65500 (below 1024 belongs to things that were here first).'], 400);
+    jsonResponse(['error' => __('api.settings.cluster_port_base_invalid')], 400);
 }
 if (isset($data['sysctl_cmd']) && !sysctlValidCommand((string)$data['sysctl_cmd'])) {
-    jsonResponse(['error' => 'The kernel-buffer helper command may only contain letters, digits, spaces and _ . / -'], 400);
+    jsonResponse(['error' => __('api.settings.sysctl_cmd_invalid')], 400);
 }
 foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
@@ -251,64 +281,64 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
 // The helper command is handed to the shell, so it gets the same treatment as the mode switch
 // command: a strict character class here, escapeshellarg() on every argument in includes/netlimit.php.
 if (isset($data['net_limit_cmd']) && !netlimitValidCommand($data['net_limit_cmd'])) {
-    jsonResponse(['error' => 'Invalid rate-limit helper command: only letters, digits, space and _ . / - are allowed (no shell metacharacters); the action arguments are appended automatically. Leave empty to disable the feature.'], 400);
+    jsonResponse(['error' => __('api.settings.net_limit_cmd_invalid')], 400);
 }
 // An upside-down automatic band would let one save lock the limit at a single value.
 if (isset($data['net_auto_min']) || isset($data['net_auto_max'])) {
     $min = (int)($data['net_auto_min'] ?? netlimitAutoMin($cfg));
     $max = (int)($data['net_auto_max'] ?? netlimitAutoMax($cfg));
-    if ($max < $min) jsonResponse(['error' => 'The automatic band is upside down: the maximum (' . number_format($max) . ' pps) must not be below the minimum (' . number_format($min) . ' pps).'], 400);
+    if ($max < $min) jsonResponse(['error' => __('api.settings.net_auto_band_inverted', ['max' => number_format($max), 'min' => number_format($min)])], 400);
 }
 // ── Backups ──
 // The directory is where archives full of database passwords land, so it is checked here as well as
 // in the helper — a save must never be able to point it at the web root.
 if (isset($data['backup_dir']) && $data['backup_dir'] !== '') {
     $v = backupValidateDir($data['backup_dir']);
-    if (!$v['ok']) jsonResponse(['error' => 'Backup directory rejected: ' . $v['error'] . ($v['hint'] ? ' ' . $v['hint'] : '')], 400);
+    if (!$v['ok']) jsonResponse(['error' => __('api.settings.backup_dir_rejected', ['error' => $v['error'], 'hint' => ($v['hint'] ? ' ' . $v['hint'] : '')])], 400);
     $data['backup_dir'] = rtrim(preg_replace('/[\x00-\x1F\x7F]/', '', trim($data['backup_dir'])), '/');
 }
 if (isset($data['backup_cmd']) && !backupValidCommand($data['backup_cmd'])) {
-    jsonResponse(['error' => 'Invalid backup helper command: only letters, digits, space and _ . / - are allowed (no shell metacharacters); the action arguments are appended automatically.'], 400);
+    jsonResponse(['error' => __('api.settings.backup_cmd_invalid')], 400);
 }
 if (isset($data['backup_script_path']) && $data['backup_script_path'] !== ''
     && !preg_match('#^/[A-Za-z0-9 _./-]{1,255}$#', $data['backup_script_path'])) {
-    jsonResponse(['error' => 'The path to Backup-serwera.sh must be absolute and free of shell metacharacters.'], 400);
+    jsonResponse(['error' => __('api.settings.backup_script_path_invalid')], 400);
 }
 if (isset($data['backup_profile']) && !in_array($data['backup_profile'], BACKUP_PROFILES, true)) {
-    jsonResponse(['error' => 'Unknown backup profile.'], 400);
+    jsonResponse(['error' => __('api.settings.backup_profile_unknown')], 400);
 }
 if (isset($data['backup_items'])) {
     $data['backup_items'] = backupSanitizeItems($data['backup_items']);
 }
 if (isset($data['backup_schedule']) && trim($data['backup_schedule']) !== ''
     && backupParseSchedule($data['backup_schedule']) === null) {
-    jsonResponse(['error' => 'Invalid backup schedule: pick at least one weekday and a time between 00:00 and 23:59.'], 400);
+    jsonResponse(['error' => __('api.settings.backup_schedule_invalid')], 400);
 }
 if (isset($data['backup_schedule_tz']) && $data['backup_schedule_tz'] !== ''
     && !in_array($data['backup_schedule_tz'], timezone_identifiers_list(), true)) {
-    jsonResponse(['error' => 'Invalid backup timezone. Use an IANA identifier such as Europe/Warsaw or UTC.'], 400);
+    jsonResponse(['error' => __('api.settings.backup_tz_invalid')], 400);
 }
 if (isset($data['backup_gpg_recipient']) && $data['backup_gpg_recipient'] !== ''
     && !preg_match('/^[A-Za-z0-9@._+-]{1,128}$/', $data['backup_gpg_recipient'])) {
-    jsonResponse(['error' => 'Invalid GPG recipient: use a key id, fingerprint or email address.'], 400);
+    jsonResponse(['error' => __('api.settings.backup_gpg_invalid')], 400);
 }
 if (isset($data['backup_db_name']) && $data['backup_db_name'] !== ''
     && !preg_match('/^[A-Za-z0-9_]{1,64}$/', $data['backup_db_name'])) {
-    jsonResponse(['error' => 'Invalid database name: letters, digits and _ only.'], 400);
+    jsonResponse(['error' => __('api.settings.backup_db_name_invalid')], 400);
 }
 if (isset($data['users_default_group'])) {
     $data['users_default_group'] = strtolower($data['users_default_group']);
     if (!preg_match('/^[a-z0-9_-]{2,64}$/', $data['users_default_group'])) $data['users_default_group'] = 'member';
 }
 if (isset($data['whitelist_submit_mode']) && !in_array($data['whitelist_submit_mode'], ['public', 'users'], true)) {
-    jsonResponse(['error' => 'Invalid whitelist registration audience.'], 400);
+    jsonResponse(['error' => __('api.settings.whitelist_submit_mode_invalid')], 400);
 }
 if (isset($data['users_terms_text'])) {
     $data['users_terms_text'] = mb_substr($data['users_terms_text'], 0, 10000);
 }
 if (isset($data['mail_from_email']) && $data['mail_from_email'] !== '') {
     if (!filter_var($data['mail_from_email'], FILTER_VALIDATE_EMAIL)) {
-        jsonResponse(['error' => 'Sender address is not a valid email.'], 400);
+        jsonResponse(['error' => __('api.settings.mail_from_invalid')], 400);
     }
     // From must live on the site's own domain (or a parent of it) — anything else breaks
     // SPF/DKIM/DMARC alignment and lands in spam. The check uses the site_url being saved
@@ -316,7 +346,7 @@ if (isset($data['mail_from_email']) && $data['mail_from_email'] !== '') {
     $allowed = mailFromAllowedHosts(['site_url' => $data['site_url'] ?? ($cfg['site_url'] ?? '')]);
     $fromHost = strtolower(substr(strrchr($data['mail_from_email'], '@'), 1));
     if ($allowed && !in_array($fromHost, $allowed, true)) {
-        jsonResponse(['error' => 'Sender domain must be the site domain or its parent (' . implode(', ', $allowed) . ').'], 400);
+        jsonResponse(['error' => __('api.settings.mail_from_domain', ['hosts' => implode(', ', $allowed)])], 400);
     }
 }
 // ── the metadata fetch order ─────────────────────────────────────────────────
@@ -343,14 +373,14 @@ if (isset($data['meta_worker_concurrency']) && $data['meta_worker_concurrency'] 
     $data['meta_worker_concurrency'] = (string)max(1, min(64, $n));
 }
 if (isset($data['ot_perf_cmd']) && $data['ot_perf_cmd'] !== '' && !otValidCommand($data['ot_perf_cmd'])) {
-    jsonResponse(['error' => 'The OpenTracker helper command may contain only letters, digits, spaces, dots, slashes, dashes and underscores.'], 400);
+    jsonResponse(['error' => __('api.settings.ot_perf_cmd_invalid')], 400);
 }
 if (isset($data['ot_cpu_affinity'])) {
     // systemd refuses to START a unit whose CPUAffinity it cannot parse, so a typo saved here would
     // take the tracker down at the next restart rather than at the moment of the mistake.
     $data['ot_cpu_affinity'] = trim((string)$data['ot_cpu_affinity']);
     if ($data['ot_cpu_affinity'] !== '' && !otValidAffinity($data['ot_cpu_affinity'])) {
-        jsonResponse(['error' => 'CPU affinity must look like "2-5" or "0 2 4" — a list systemd understands.'], 400);
+        jsonResponse(['error' => __('api.settings.ot_cpu_affinity_invalid')], 400);
     }
 }
 if (isset($data['ot_udp_workers'])) {
@@ -358,7 +388,7 @@ if (isset($data['ot_udp_workers'])) {
     $v = trim((string)$data['ot_udp_workers']);
     if ($v !== '') {
         if (!ctype_digit($v) || (int)$v < 1 || (int)$v > OT_WORKERS_MAX) {
-            jsonResponse(['error' => 'UDP workers must be empty (leave alone) or a number from 1 to ' . OT_WORKERS_MAX . '.'], 400);
+            jsonResponse(['error' => __('api.settings.ot_udp_workers_invalid', ['max' => OT_WORKERS_MAX])], 400);
         }
         $v = (string)(int)$v;
     }
@@ -370,7 +400,7 @@ if (isset($data['api_rate_limit_bytes_day'])) {
     $v = $data['api_rate_limit_bytes_day'];
     $n = is_numeric($v) ? (int)$v : -1;
     if ($n < 0 || $n > 1099511627776) {
-        jsonResponse(['error' => 'Daily API byte budget must be between 0 (no limit) and 1 TB.'], 400);
+        jsonResponse(['error' => __('api.settings.api_bytes_budget_invalid')], 400);
     }
     $data['api_rate_limit_bytes_day'] = (string)$n;
 }
@@ -378,19 +408,19 @@ if (isset($data['fed_node_name'])) {
     $data['fed_node_name'] = mb_substr(preg_replace('/[^\w .\-]/u', '', $data['fed_node_name']) ?? '', 0, 64);
 }
 if (isset($data['index_source_url']) && $data['index_source_url'] !== '' && !preg_match('#^https?://[^\s]+$#i', $data['index_source_url'])) {
-    jsonResponse(['error' => 'Index source URL must be an http(s) URL.'], 400);
+    jsonResponse(['error' => __('api.settings.index_source_url_invalid')], 400);
 }
 // ── Scheduled tracker mode ──
 if (isset($data['tracker_schedule'])) {
     $sched = scheduleParseJson($data['tracker_schedule']);
-    if ($sched === null) jsonResponse(['error' => 'Invalid schedule: use "all", "none" or {"from":"HH:MM","to":"HH:MM"} for each of mon..sun (times 00:00–23:59).'], 400);
+    if ($sched === null) jsonResponse(['error' => __('api.settings.schedule_invalid')], 400);
     $data['tracker_schedule'] = json_encode($sched);   // normalised, all 7 keys
 }
 if (isset($data['tracker_schedule_tz']) && !scheduleValidTimezone($data['tracker_schedule_tz'])) {
-    jsonResponse(['error' => 'Invalid schedule timezone. Use an IANA identifier such as Europe/Warsaw or UTC.'], 400);
+    jsonResponse(['error' => __('api.settings.schedule_tz_invalid')], 400);
 }
 if (isset($data['tracker_mode_switch_cmd']) && !scheduleValidSwitchCommand($data['tracker_mode_switch_cmd'])) {
-    jsonResponse(['error' => 'Invalid mode switch command: only letters, digits, space and _ . / - are allowed (no shell metacharacters); the mode argument is appended automatically. Leave empty to only flip the setting.'], 400);
+    jsonResponse(['error' => __('api.settings.mode_switch_cmd_invalid')], 400);
 }
 if (isset($data['api_ban_exempt_ips'])) {
     $clean = [];
@@ -421,7 +451,7 @@ if (isset($data['donation_fields'])) {
 // plain systemd unit name (letters, digits and . _ @ -). Empty is allowed — it disables the feature.
 if (isset($data['opentracker_service_name']) && $data['opentracker_service_name'] !== ''
     && !isServiceNameValid($data['opentracker_service_name'])) {
-    jsonResponse(['error' => 'Invalid tracker service name. Use only letters, digits and . _ @ - (e.g. "opentracker").'], 400);
+    jsonResponse(['error' => __('api.settings.service_name_invalid')], 400);
 }
 
 // Password confirmation when changing deletion limits
@@ -440,7 +470,26 @@ $limitsChanged = $deleteCaptchaAttempts !== $currentDeleteCaptcha ||
 if ($limitsChanged) {
     $confirmPassword = $input['confirm_password'] ?? '';
     if (empty($confirmPassword)) {
-        jsonResponse(['error' => 'Password confirmation is required to change deletion limits.'], 403);
+        jsonResponse(['error' => __('api.settings.reauth_required_limits'),
+                      'reauth_required' => true], 403);
+    }
+    requireAdminReauth($confirmPassword, $cfg);
+}
+
+// Password confirmation when changing what the server runs or whom it trusts ($reauthKeys above).
+// Checked AFTER validation so the prompt is only ever shown for a save that would otherwise go
+// through, and against the normalised value, so a cosmetic difference (trailing space) is not a
+// change. `reauth_required` is what the settings page keys the password modal on: the page does
+// not carry a copy of the list, it asks, gets this, and asks the operator.
+$reauthChanged = [];
+foreach ($reauthKeys as $k => $fallback) {
+    if (array_key_exists($k, $data) && $data[$k] !== (string)($cfg[$k] ?? $fallback)) $reauthChanged[] = $k;
+}
+if ($reauthChanged) {
+    $confirmPassword = (string)($input['confirm_password'] ?? '');
+    if ($confirmPassword === '') {
+        jsonResponse(['error' => __('api.settings.reauth_required', ['keys' => implode(', ', $reauthChanged)]),
+                      'reauth_required' => true, 'reauth_keys' => $reauthChanged], 403);
     }
     requireAdminReauth($confirmPassword, $cfg);
 }
@@ -483,13 +532,9 @@ if ($modeWasChanged) {
     $cfg['tracker_mode'] = (string)$data['tracker_mode'];
     $agree = function_exists('scheduleModeAgreement') ? scheduleModeAgreement($cfg, true) : ['known' => false];
     if (!empty($agree['known']) && $agree['match'] === false) {
-        $warning = 'Saved — but the TRACKER has not been switched. It is still running '
-                 . $agree['actual'] . ' mode while the panel now says ' . $agree['panel'] . '. '
-                 . 'Use “Switch the tracker now” on the Whitelist page, or turn the schedule on.';
+        $warning = __('api.settings.saved_tracker_not_switched', ['actual' => $agree['actual'], 'panel' => $agree['panel']]);
     } elseif (empty($agree['known'])) {
-        $warning = 'Saved — but the panel could not confirm which mode the tracker is actually running'
-                 . (!empty($agree['error']) ? ' (' . $agree['error'] . ')' : '')
-                 . '. Check it on the Whitelist page before relying on this.';
+        $warning = __('api.settings.saved_mode_unconfirmed', ['detail' => (!empty($agree['error']) ? ' (' . $agree['error'] . ')' : '')]);
     }
 }
 

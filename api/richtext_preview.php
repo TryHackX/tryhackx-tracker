@@ -14,21 +14,21 @@ requirePost();
 $input = readJsonBody();
 
 if (($cfg['wl_allow_description'] ?? '0') !== '1') {
-    jsonResponse(['error' => 'Descriptions are not enabled on this tracker.'], 404);
+    jsonResponse(['error' => __('api.content.descriptions_disabled')], 404);
 }
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 
 // Same permission as writing one: a preview is a parser, and handing it to somebody who may not
 // submit is handing out the parser for nothing.
 if (!userCan($db, $cfg, 'content.submit')) {
-    jsonResponse(['error' => 'Content access is required.'], 403);
+    jsonResponse(['error' => __('api.content.access_required')], 403);
 }
 
 $perMin = max(5, min(300, (int)($cfg['rate_limit_preview'] ?? 30) ?: 30));
 if (!rateLimitAllow('rtpreview', ipBucket(getClientIp($cfg)), $perMin, 60)) {
-    jsonResponse(['error' => 'Too many previews — wait a moment.'], 429);
+    jsonResponse(['error' => __('api.content.too_many_previews')], 429);
 }
 
 $text = (string)($input['text'] ?? '');
@@ -39,7 +39,7 @@ if (!in_array($fmt, richtextFormats($cfg), true)) $fmt = richtextFormats($cfg)[0
 // cheaper than rendering it and then deciding it was too long.
 $max = richtextMaxChars($cfg);
 if ($max > 0 && mb_strlen($text) > $max) {
-    jsonResponse(['error' => 'That description is ' . mb_strlen($text) . ' characters; the limit is ' . $max . '.',
+    jsonResponse(['error' => __('api.content.description_too_long', ['length' => mb_strlen($text), 'limit' => $max]),
                   'too_long' => true, 'length' => mb_strlen($text), 'limit' => $max], 400);
 }
 

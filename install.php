@@ -296,8 +296,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
 
             // Write database config. Every dynamic value (DSN, user, pass) is emitted via
             // var_export so quotes/special chars can't break out of the generated PHP string.
+            //
+            // ATTR_TIMEOUT: without it a MariaDB that is down (rather than refusing) holds the connect
+            // for the TCP timeout, and a php-fpm pool of five is five stuck connects away from serving
+            // nobody. Three seconds is a lifetime for a local socket and short enough that the 503 the
+            // bootstrap sends instead still counts as an answer. This file is generated once and never
+            // rewritten, so an install from before this line has to add it by hand (INSTALL.md).
             $dsn = 'mysql:host=' . $db['host'] . ';dbname=' . $db['name'] . ';charset=utf8mb4';
-            $dbConfig = "<?php\n\nfunction getDb(): PDO {\n    static \$pdo = null;\n    if (\$pdo === null) {\n        \$pdo = new PDO(\n            " . var_export($dsn, true) . ",\n            " . var_export($db['user'], true) . ",\n            " . var_export($db['pass'], true) . ",\n            [\n                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,\n                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,\n                PDO::ATTR_EMULATE_PREPARES => false,\n            ]\n        );\n        // keep MySQL's session clock in the SAME zone as PHP so NOW()/CURRENT_TIMESTAMP\n        // and PHP date() agree (date filters, samplers and DEFAULT columns mix both)\n        \$pdo->exec(\"SET time_zone = '\" . date('P') . \"'\");\n    }\n    return \$pdo;\n}\n";
+            $dbConfig = "<?php\n\nfunction getDb(): PDO {\n    static \$pdo = null;\n    if (\$pdo === null) {\n        \$pdo = new PDO(\n            " . var_export($dsn, true) . ",\n            " . var_export($db['user'], true) . ",\n            " . var_export($db['pass'], true) . ",\n            [\n                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,\n                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,\n                PDO::ATTR_EMULATE_PREPARES => false,\n                PDO::ATTR_TIMEOUT => 3,\n            ]\n        );\n        // keep MySQL's session clock in the SAME zone as PHP so NOW()/CURRENT_TIMESTAMP\n        // and PHP date() agree (date filters, samplers and DEFAULT columns mix both)\n        \$pdo->exec(\"SET time_zone = '\" . date('P') . \"'\");\n    }\n    return \$pdo;\n}\n";
             file_put_contents(__DIR__ . '/config/database.php', $dbConfig);
 
             // Insert default settings into DB

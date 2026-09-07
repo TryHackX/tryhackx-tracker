@@ -35,7 +35,7 @@ try {
     $rows = array_reverse($st->fetchAll(PDO::FETCH_ASSOC));
 } catch (\Throwable $e) {
     jsonResponse(['success' => true, 'range' => $key, 'points' => [], 'unavailable' => true,
-                  'message' => 'No poll history yet — it starts filling on the next scrape poll.']);
+                  'message' => __('api.index.no_poll_history')]);
 }
 
 $points = [];

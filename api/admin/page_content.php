@@ -20,7 +20,7 @@ $input = $_SERVER['REQUEST_METHOD'] === 'POST' ? readJsonBody() : [];
 $page = (string)($_GET['page'] ?? '');
 if ($input) $page = (string)($input['page'] ?? $page);
 if (!pageContentPageKnown($page, $cfg)) {
-    jsonResponse(['error' => 'Unknown page.'], 400);
+    jsonResponse(['error' => __('api.pages.unknown_page')], 400);
 }
 $isHome = str_starts_with($page, 'home:');
 
@@ -94,7 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 requirePost();
 $op = strtolower(trim((string)($input['op'] ?? '')));
 if (!in_array($op, ['save', 'reset', 'preview'], true)) {
-    jsonResponse(['error' => 'Unknown operation. Use save, reset or preview.'], 400);
+    jsonResponse(['error' => __('api.pages.unknown_op_save_reset_preview')], 400);
 }
 
 $format = (string)($input['format'] ?? 'markdown');
@@ -105,7 +105,7 @@ if ($op === 'preview') {
     // Rendered exactly as the page will be, including the signed-in state of whoever is looking —
     // a preview that hides what a [hide] block does would be a preview of a different page.
     if (strlen($body) > PAGECONTENT_MAX) {
-        jsonResponse(['error' => 'That is longer than ' . number_format(PAGECONTENT_MAX) . ' characters.'], 400);
+        jsonResponse(['error' => __('api.pages.body_too_long', ['max' => number_format(PAGECONTENT_MAX)])], 400);
     }
     $err = trim($body) === '' ? null : richtextValidate($body, $format, $cfg);
     // Resolved the way the public page resolves them, so the preview is the page. A marker nobody
@@ -113,8 +113,8 @@ if ($op === 'preview') {
     $unknown = [];
     $resolved = pageContentResolveMarkers($body, $cfg, $db, $unknown);
     if ($unknown && $err === null) {
-        $err = 'Unknown marker' . (count($unknown) === 1 ? '' : 's') . ': ' . implode(', ', $unknown)
-             . ' — the block is hidden. Known: ' . implode(', ', array_keys(pageContentConditions($cfg, $db))) . '.';
+        $err = __(count($unknown) === 1 ? 'api.pages.unknown_marker' : 'api.pages.unknown_markers',
+                  ['list' => implode(', ', $unknown), 'known' => implode(', ', array_keys(pageContentConditions($cfg, $db)))]);
     }
     $html = richtextRender($resolved, $format, $cfg, true);
     if ($isHome) {
@@ -122,8 +122,8 @@ if ($op === 'preview') {
         $unknownPh = [];
         $html = homeApplyPlaceholders($html, homePlaceholders($db, $cfg, $baseUrl), $unknownPh);
         if ($unknownPh && $err === null) {
-            $err = 'Unknown placeholder' . (count($unknownPh) === 1 ? '' : 's') . ': ' . implode(', ', $unknownPh)
-                 . ' — removed. Known: ' . implode(', ', array_keys(homePlaceholderList())) . '.';
+            $err = __(count($unknownPh) === 1 ? 'api.pages.unknown_placeholder' : 'api.pages.unknown_placeholders',
+                      ['list' => implode(', ', $unknownPh), 'known' => implode(', ', array_keys(homePlaceholderList()))]);
         }
         $html = '<div class="rt-home">' . $html . '</div>';
     }
@@ -133,12 +133,12 @@ if ($op === 'preview') {
 if ($op === 'reset') {
     // This language only. "Restore" while editing Polish must not delete an English page somebody
     // spent an afternoon writing.
-    if (!pageContentReset($db, $page, $lang)) jsonResponse(['error' => 'Could not restore the page.'], 500);
+    if (!pageContentReset($db, $page, $lang)) jsonResponse(['error' => __('api.pages.restore_failed')], 500);
     auditNote(['target_id' => $page . '/' . $lang,
                'summary' => 'restored the built-in ' . pageContentLabel($page, $cfg) . ' (' . strtoupper($lang) . ')']);
     jsonResponse(['success' => true, 'stored' => false, 'enabled' => false, 'lang' => $lang,
                   'body' => pageContentDefault($cfg, $page, $format, $baseUrl, $lang),
-                  'message' => pageContentLabel($page, $cfg) . ' (' . strtoupper($lang) . ') is the built-in page again.']);
+                  'message' => __('api.pages.page_restored', ['page' => pageContentLabel($page, $cfg), 'lang' => strtoupper($lang)])]);
 }
 
 $who = (string)($_SESSION['admin_user'] ?? $_SESSION['username'] ?? 'owner');
@@ -149,5 +149,5 @@ auditNote(['target_id' => $page . '/' . $lang,
                       . ' ' . pageContentLabel($page, $cfg) . ' (' . strtoupper($lang) . ')']);
 jsonResponse(['success' => true, 'stored' => true, 'enabled' => !empty($input['enabled']), 'lang' => $lang,
               'message' => !empty($input['enabled'])
-                  ? pageContentLabel($page, $cfg) . ' (' . strtoupper($lang) . ') is now your version — it is live.'
-                  : 'Saved as a draft. The built-in ' . ($isHome ? 'section' : 'page') . ' is still the one visitors see.']);
+                  ? __('api.pages.page_published', ['page' => pageContentLabel($page, $cfg), 'lang' => strtoupper($lang)])
+                  : __($isHome ? 'api.pages.draft_saved_section' : 'api.pages.draft_saved_page')]);

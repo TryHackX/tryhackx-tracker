@@ -94,6 +94,22 @@
 
     // The search box is rendered readonly (see settings.php) so the browser's profile autofill
     // leaves it alone; it becomes editable the moment anyone reaches for it.
+    // The toolbar's language switcher: a clone of the header's, shown only while the header is
+    // out of view. The header is the source of truth (same links, same active state); the clone is
+    // rebuilt from it once, and an IntersectionObserver on the header decides which one you see.
+    (function () {
+        const slot = document.getElementById('tb-lang');
+        const src = document.querySelector('.admin-header-actions .admin-lang');
+        const header = document.querySelector('.admin-header-actions');
+        if (!slot || !src || !header || !('IntersectionObserver' in window)) return;
+        slot.appendChild(src.cloneNode(true));
+        slot.removeAttribute('aria-hidden');
+        new IntersectionObserver((entries) => {
+            const headerVisible = entries.some(e => e.isIntersecting);
+            slot.classList.toggle('show', !headerVisible);
+        }, { root: null, threshold: 0 }).observe(header);
+    })();
+
     document.querySelectorAll('[data-unlock-on-focus]').forEach(el => {
         const unlock = () => el.removeAttribute('readonly');
         el.addEventListener('focus', unlock, { once: true });

@@ -27,19 +27,19 @@ $deny = function (string $msg, int $code = 403) {
     exit;
 };
 
-if (!backupValidId($id)) $deny('That is not an archive this panel made.', 400);
+if (!backupValidId($id)) $deny(__('api.backup.not_our_archive'), 400);
 
 $secret = (string)($cfg['hmac_secret'] ?? '');
-if ($secret === '') $deny('The site has no HMAC secret configured, so download links cannot be verified.', 500);
+if ($secret === '') $deny(__('api.backup.dl_no_secret'), 500);
 if (!backupVerifyToken($token, $id, $secret)) {
-    $deny('This download link is not valid any more. Links last ' . BACKUP_TOKEN_TTL . ' seconds and work once — ask for a new one on the Backups page.', 410);
+    $deny(__('api.backup.dl_invalid', ['ttl' => BACKUP_TOKEN_TTL]), 410);
 }
 if (!backupBurnToken($token)) {
-    $deny('This download link has already been used. Ask for a new one on the Backups page.', 410);
+    $deny(__('api.backup.dl_used'), 410);
 }
 
 if (backupCommand($cfg) === '' || !trackerExecAvailable()) {
-    $deny('The backup helper is not available on this server.', 500);
+    $deny(__('api.backup.dl_no_helper'), 500);
 }
 
 // Find the archive so the browser gets the real name and, when we know it, the real size.
@@ -61,6 +61,6 @@ if ($size > 0) header('Content-Length: ' . $size);
 
 if (!backupStream($cfg, $id)) {
     // Nothing has been written yet at this point, so a plain message is still possible.
-    $deny('Could not read the archive from the server.', 500);
+    $deny(__('api.backup.dl_read_failed'), 500);
 }
 exit;

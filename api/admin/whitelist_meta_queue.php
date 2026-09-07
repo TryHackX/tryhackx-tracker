@@ -17,18 +17,18 @@ if ($scope === 'restore') {
 }
 if ($scope === 'date') {
     $range = parseDateRangeInput($input);
-    if ($range === null) jsonResponse(['error' => 'Invalid date range: pass since_hours=N, or from (Y-m-d [H:i]) and optional to.'], 400);
+    if ($range === null) jsonResponse(['error' => __('api.index.invalid_date_range')], 400);
     $queued = whitelistQueueMetaByDate($db, $range[0], $range[1]);
     jsonResponse(['success' => true, 'scope' => 'date', 'from' => $range[0], 'to' => $range[1], 'queued' => $queued,
                   'worker_heartbeat_age' => whitelistWorkerHeartbeatAge($cfg)]);
 }
 if (!in_array($scope, ['missing', 'failed', 'missing_failed', 'all'], true)) {
-    jsonResponse(['error' => 'Invalid scope (missing | failed | missing_failed | all | date | cancel)'], 400);
+    jsonResponse(['error' => __('api.index.invalid_meta_scope')], 400);
 }
 
 $queued = whitelistQueueMetaByScope($db, $scope);
 if ($queued === null) {
-    jsonResponse(['error' => 'Invalid scope'], 400);
+    jsonResponse(['error' => __('api.wl.invalid_scope')], 400);
 }
 
 jsonResponse(['success' => true, 'scope' => $scope, 'queued' => $queued, 'worker_heartbeat_age' => whitelistWorkerHeartbeatAge($cfg)]);

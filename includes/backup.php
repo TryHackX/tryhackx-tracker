@@ -205,21 +205,20 @@ function backupProfileLabel(string $profile): string {
 function backupValidateDir(string $path): array {
     $p = preg_replace('/[\x00-\x1F\x7F]/', '', trim($path));
     $bad = fn(string $e, string $h = '') => ['ok' => false, 'error' => $e, 'hint' => $h];
-    if ($p === '') return $bad('The backup directory is not set.', 'Something like ' . BACKUP_DEFAULT_DIR . ' — outside the web root, on a filesystem with room.');
-    if ($p[0] !== '/') return $bad('The backup directory must be an absolute path.', 'It starts with a "/", e.g. ' . BACKUP_DEFAULT_DIR . '.');
-    if (str_contains($p, '..')) return $bad('The backup directory must not contain "..".');
+    if ($p === '') return $bad(__('api.backup.dir_not_set'), __('api.backup.dir_not_set_hint', ['dir' => BACKUP_DEFAULT_DIR]));
+    if ($p[0] !== '/') return $bad(__('api.backup.dir_not_absolute'), __('api.backup.dir_not_absolute_hint', ['dir' => BACKUP_DEFAULT_DIR]));
+    if (str_contains($p, '..')) return $bad(__('api.backup.dir_dotdot'));
     $p = rtrim($p, '/');
-    if ($p === '') return $bad('Refusing to use the filesystem root as the backup directory.', 'Give the archives a directory of their own, e.g. ' . BACKUP_DEFAULT_DIR . '.');
+    if ($p === '') return $bad(__('api.backup.dir_root'), __('api.backup.dir_own_hint', ['dir' => BACKUP_DEFAULT_DIR]));
 
     $refused = ['/bin', '/boot', '/dev', '/etc', '/home', '/lib', '/lib64', '/proc', '/root', '/run',
                 '/sbin', '/srv', '/sys', '/usr', '/var', '/tmp'];
     if (in_array($p, $refused, true)) {
-        return $bad('Refusing to use ' . $p . ' as the backup directory.', 'Give the archives a directory of their own, e.g. ' . BACKUP_DEFAULT_DIR . '.');
+        return $bad(__('api.backup.dir_refused', ['path' => $p]), __('api.backup.dir_own_hint', ['dir' => BACKUP_DEFAULT_DIR]));
     }
     foreach (['/var/www/', '/srv/www/', '/usr/share/nginx/'] as $web) {
         if (str_starts_with($p . '/', $web)) {
-            return $bad('The backup directory must be OUTSIDE the web root — an archive contains every database password on this machine.',
-                        'Use something like ' . BACKUP_DEFAULT_DIR . '.');
+            return $bad(__('api.backup.dir_webroot'), __('api.backup.dir_use_hint', ['dir' => BACKUP_DEFAULT_DIR]));
         }
     }
     // …and outside this application, wherever it happens to be installed
@@ -230,8 +229,7 @@ function backupValidateDir(string $path): array {
         $r = rtrim(str_replace('\\', '/', (string)$r), '/');
         $cmp = str_replace('\\', '/', $p);
         if ($r !== '' && ($cmp === $r || str_starts_with($cmp . '/', $r . '/'))) {
-            return $bad('The backup directory must be outside the application directory (' . $r . ') — it is served over HTTP.',
-                        'Use something like ' . BACKUP_DEFAULT_DIR . '.');
+            return $bad(__('api.backup.dir_appdir', ['path' => $r]), __('api.backup.dir_use_hint', ['dir' => BACKUP_DEFAULT_DIR]));
         }
     }
     return ['ok' => true, 'error' => null, 'hint' => null];
@@ -439,8 +437,8 @@ function backupBurnToken(string $token, ?int $now = null): bool {
 function backupRun(array $cfg, array $args, bool $raw = false): array {
     $out = ['ok' => false, 'json' => null, 'output' => '', 'code' => null, 'error' => null];
     $cmd = backupCommand($cfg);
-    if ($cmd === '') { $out['error'] = 'No backup helper command is configured (Settings → Backups).'; return $out; }
-    if (!trackerExecAvailable()) { $out['error'] = 'PHP exec() is disabled on this server — the panel cannot reach the backup helper.'; return $out; }
+    if ($cmd === '') { $out['error'] = __('api.backup.no_helper_2'); return $out; }
+    if (!trackerExecAvailable()) { $out['error'] = __('api.backup.exec_disabled'); return $out; }
 
     $script = backupScriptPath($cfg);
     $full = $cmd;
@@ -460,13 +458,13 @@ function backupRun(array $cfg, array $args, bool $raw = false): array {
     }
     if ($out['json'] === null) {
         $out['error'] = $out['output'] !== ''
-            ? 'The helper did not answer with JSON: ' . mb_substr($out['output'], 0, 300)
-            : 'The helper produced no output (exit ' . (int)$rc . '). Check the sudoers rule.';
+            ? __('api.helper.no_json', ['out' => mb_substr($out['output'], 0, 300)])
+            : __('api.helper.no_output', ['code' => (int)$rc]);
         return $out;
     }
     $out['ok'] = !empty($out['json']['ok']) && $out['code'] === 0;
     if (!$out['ok'] && $out['error'] === null) {
-        $out['error'] = (string)($out['json']['error'] ?? ('Helper exited with code ' . (int)$rc));
+        $out['error'] = (string)($out['json']['error'] ?? __('api.helper.exit_code', ['code' => (int)$rc]));
     }
     return $out;
 }
@@ -483,7 +481,7 @@ function backupTestPath(array $cfg, string $dir): array {
         return ['ok' => false, 'path' => $dir, 'errors' => [$own['error']], 'suggestions' => array_filter([$own['hint']]), 'local' => true];
     }
     $r = backupRun($cfg, ['test-path', $dir]);
-    if (!is_array($r['json'])) return ['ok' => false, 'path' => $dir, 'errors' => [$r['error'] ?? 'The helper did not answer.'], 'suggestions' => [], 'output' => $r['output']];
+    if (!is_array($r['json'])) return ['ok' => false, 'path' => $dir, 'errors' => [$r['error'] ?? __('api.backup.helper_no_answer')], 'suggestions' => [], 'output' => $r['output']];
     return $r['json'];
 }
 

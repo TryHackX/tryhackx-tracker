@@ -16,7 +16,7 @@ requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? 'status');
 if (!in_array($op, ['status', 'start', 'cancel', 'apply'], true)) {
-    jsonResponse(['error' => 'Unknown operation'], 400);
+    jsonResponse(['error' => __('api.admin.unknown_op')], 400);
 }
 
 if ($op === 'status') {
@@ -29,19 +29,18 @@ requireAdminReauth((string)($input['password'] ?? ''), $cfg);
 if ($op === 'cancel') {
     $r = tunerCancel();
     auditNote(['summary' => 'stability probe cancelled']);
-    jsonResponse(['success' => true, 'message' => 'Asked the run to stop. It restores on its way out; '
-                . 'if it cannot, the janitor puts the settings back within a minute.'] + tunerStatus($cfg));
+    jsonResponse(['success' => true, 'message' => __('api.tuner.cancel_requested')] + tunerStatus($cfg));
 }
 
 if ($op === 'apply') {
     $pps = (int)($input['pps'] ?? 0);
-    if ($pps < 1000 || $pps > 5000000) jsonResponse(['error' => 'That is not a usable limit.'], 400);
+    if ($pps < 1000 || $pps > 5000000) jsonResponse(['error' => __('api.tuner.unusable_limit')], 400);
     $st = tunerStatus($cfg);
     // Only a value the run actually reached. Applying a number nobody measured would make the report
     // decorative — the whole point is that this figure was held and watched.
     $tried = array_map(fn($s) => (int)($s['limit_pps'] ?? 0), (array)($st['steps'] ?? []));
     if (!in_array($pps, $tried, true)) {
-        jsonResponse(['error' => 'That limit was not one of the steps this run measured.'], 400);
+        jsonResponse(['error' => __('api.tuner.not_a_step')], 400);
     }
     // Through the same accessors the Traffic page uses, so the clamps apply and the port is the one
     // actually configured. `tracker_port` was never a setting: this always applied to 6969, and on a
@@ -51,8 +50,7 @@ if ($op === 'apply') {
     // to apply — the report withholds the suggestion and this refuses the number even if it is asked
     // for directly.
     if (!empty($st['report']['inconclusive'])) {
-        jsonResponse(['error' => 'That run could not tell its steps apart, so none of its values were '
-                               . 'measured. Run the probe again before applying anything.'], 409);
+        jsonResponse(['error' => __('api.tuner.inconclusive')], 409);
     }
 
     // WHICH LIMIT THE RUN WAS MOVING.
@@ -63,26 +61,25 @@ if ($op === 'apply') {
     // firewall limit". `both` moves two limits at once and there is no single honest thing to apply.
     $what = (string)($st['what'] ?? 'inbound');
     if ($what === 'both') {
-        jsonResponse(['error' => 'That run moved the receive limit and the reply budget together, so '
-                               . 'there is no single value to apply. Set them from their own cards.'], 400);
+        jsonResponse(['error' => __('api.tuner.both_limits')], 400);
     }
     if ($what === 'outbound') {
         $r = netlimitEgress($cfg, $pps, false);
         auditNote(['target_id' => (string)$pps, 'summary' => 'applied ' . $pps . ' pps egress from a stability probe']);
         jsonResponse(['success' => !empty($r['ok']), 'message' => !empty($r['ok'])
-            ? 'Reply budget set to ' . number_format($pps) . ' packets/second.'
-            : ($r['error'] ?? 'The helper refused it.')] + tunerStatus($cfg));
+            ? __('api.tuner.reply_budget_set', ['pps' => number_format($pps)])
+            : ($r['error'] ?? __('api.tuner.helper_refused'))] + tunerStatus($cfg));
     }
     $r = netlimitApply($cfg, $pps, netlimitBurst($cfg), netlimitPort($cfg));
     auditNote(['target_id' => (string)$pps, 'summary' => 'applied ' . $pps . ' pps from a stability probe']);
     jsonResponse(['success' => !empty($r['ok']), 'message' => !empty($r['ok'])
-        ? 'Inbound limit set to ' . number_format($pps) . ' pps.'
-        : ($r['error'] ?? 'The helper refused it.')] + tunerStatus($cfg));
+        ? __('api.tuner.inbound_set', ['pps' => number_format($pps)])
+        : ($r['error'] ?? __('api.tuner.helper_refused'))] + tunerStatus($cfg));
 }
 
 // ── start ───────────────────────────────────────────────────────────────────
 if (!tunerEnabled($cfg)) {
-    jsonResponse(['error' => 'The stability probe is switched off in Settings.'], 409);
+    jsonResponse(['error' => __('api.tuner.disabled')], 409);
 }
 $r = tunerRequest([
     'steps'   => (int)($input['steps'] ?? 6),
@@ -95,5 +92,4 @@ if (!empty($r['error'])) jsonResponse(['error' => $r['error']], 409);
 auditNote(['summary' => 'stability probe requested (' . (int)($input['steps'] ?? 6) . ' steps, '
                       . (int)($input['dwell'] ?? 180) . 's each)']);
 jsonResponse(['success' => true,
-    'message' => 'Requested. The janitor starts it within a minute; the settings are recorded first, '
-               . 'so they go back even if the run is interrupted.'] + tunerStatus($cfg));
+    'message' => __('api.tuner.requested')] + tunerStatus($cfg));

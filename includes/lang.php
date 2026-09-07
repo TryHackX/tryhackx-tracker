@@ -257,7 +257,22 @@ function langFromAcceptLanguage(array $cfg): ?string {
  * A miss returns the key. That is deliberate: a blank page tells nobody which string is missing,
  * and `whitelist.form.submit` on a button says exactly where to look.
  */
+/**
+ * English when nobody chose a language: the CLI (janitor, worker, the tests) never runs langInit(),
+ * and a string built there — an API message a test compares, a line the janitor logs — must still
+ * be the English text, not the key. Loads the fallback once and only when needed.
+ */
+function langEnsure(): void {
+    // `strings` starts as [] (not null), and `current` is what langInit() sets — so "nobody chose a
+    // language yet" is: no current AND nothing loaded. `current` is left alone on purpose: setting
+    // it here would make a later langInit() return early and skip the cookie and the account.
+    if ($GLOBALS['__lang']['current'] !== null || !empty($GLOBALS['__lang']['strings'])) return;
+    $GLOBALS['__lang']['strings']  = langLoad(LANG_FALLBACK);
+    $GLOBALS['__lang']['fallback'] = $GLOBALS['__lang']['strings'];
+}
+
 function __(string $key, array $params = []): string {
+    langEnsure();
     $s = $GLOBALS['__lang']['strings'][$key] ?? $GLOBALS['__lang']['fallback'][$key] ?? $key;
     if ($params) {
         $repl = [];
@@ -274,6 +289,7 @@ function _h(string $key, array $params = []): string {
 
 /** Is this key known at all? For a key that came from outside, where a miss must show nothing. */
 function langHas(string $key): bool {
+    langEnsure();
     return isset($GLOBALS['__lang']['strings'][$key]) || isset($GLOBALS['__lang']['fallback'][$key]);
 }
 
@@ -349,6 +365,83 @@ function langCoverage(string $code): array {
     return ['strings' => count($mine), 'total' => $total,
             'percent' => $total > 0 ? (int)round($have / $total * 100) : 0,
             'missing' => max(0, $total - $have)];
+}
+
+/**
+ * The tags a CONTRIBUTED translation may carry. Nothing else, and no attribute but an <a>'s href.
+ *
+ * Some three hundred templates print __() unescaped, on purpose: the shipped strings carry <strong>,
+ * <code>, <a href> and <br>, and a hint that rendered as a line of angle brackets would be no hint.
+ * That makes a language file the one place where a stranger's text reaches the page as HTML — an
+ * <img onerror> in an uploaded JSON runs in the owner's session the moment the panel renders that
+ * key, and in every visitor's browser once the language is switched on. langWriteFile() keeps PHP
+ * out of the file; this keeps script out of the strings.
+ *
+ * An allow-list rather than a blacklist, for the reason richtext.php gives at length: what a browser
+ * will execute is an open set, what a translation needs is not. The shipped dictionaries are not
+ * measured against this list (they carry a `class=` here and there, and they are vetted with the
+ * code); it is the rule for what arrives from outside.
+ */
+const LANG_SAFE_TAGS = ['a', 'strong', 'em', 'b', 'i', 'code', 'kbd', 'br', 'span', 'small', 'sup'];
+
+/**
+ * A contributed value as it may be written to a language file, or null when it must not be.
+ *
+ * Refused WHOLE, never cleaned: a translator who pasted markup by accident wants to know which key
+ * to fix, and a silently stripped tag hides exactly that; one who did it on purpose gets nothing.
+ * The reply names the dropped keys for the same reason.
+ *
+ * Two layers, because they catch different things. The first is a plain scan of the raw text for
+ * the shapes nobody needs in a translation — <script, <svg, `javascript:` and friends — cheap, and
+ * a reader can see at a glance what it refuses. The second walks every tag: the name must be in
+ * LANG_SAFE_TAGS, a closing tag carries nothing, an opening tag carries nothing unless it is an <a>
+ * with a lone href — and that href, after the entities a browser would decode, is http, https or a
+ * relative path. The href is decoded before it is judged because `&#106;avascript:` never contains
+ * the letters the first layer looks for, and it is checked for whitespace and control characters
+ * because a browser strips those from a scheme before reading it, so `java\tscript:` runs. A `<`
+ * that is not a tag ("a < b") is text and stays; a `<` that starts something the tag walk did not
+ * recognise — a comment, an unterminated tag, `<?` — is refused, because whatever a browser makes
+ * of it, this code did not check it.
+ */
+function langSanitizeValue(string $v): ?string {
+    if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $v)) return null;
+    // The lookbehind keeps "metadata: …" as prose: a scheme can only ever start where a URL starts,
+    // never in the middle of a word.
+    if (preg_match('/<(?:script|iframe|object|embed|svg|style)|(?<![a-z0-9])(?:javascript|vbscript|data):/i', $v)) {
+        return null;
+    }
+    if (strpos($v, '<') === false) return $v;
+
+    $bad = false;
+    $rest = preg_replace_callback('~<(/?)([a-zA-Z][a-zA-Z0-9]*)([^<>]*)>~', function (array $m) use (&$bad): string {
+        $tag = strtolower($m[2]);
+        $attrs = trim($m[3]);
+        if (!in_array($tag, LANG_SAFE_TAGS, true) || preg_match('/on\w+\s*=/i', $attrs)) { $bad = true; return ''; }
+        if ($m[1] === '/') { if ($attrs !== '') $bad = true; return ''; }
+        $attrs = rtrim(preg_replace('~/\z~', '', $attrs));      // <br/> is still a bare <br>
+        if ($tag !== 'a') { if ($attrs !== '') $bad = true; return ''; }
+        if ($attrs === '') return '';                             // a bare <a> is an anchor, not a link
+        if (!preg_match('~\Ahref\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'=<>`]+))\z~i', $attrs, $h)) { $bad = true; return ''; }
+        $href = $h[1] !== '' ? $h[1] : (($h[2] ?? '') !== '' ? $h[2] : ($h[3] ?? ''));
+        // A browser also decodes a numeric reference that has NO semicolon — to its tokenizer
+        // `&#106avascript:` is `javascript:`, the digits consumed greedily up to the first character
+        // that is not one (a parse error, but the code point is still emitted). PHP decodes only the
+        // terminated form, so the semicolon is put back first, consuming the digits the way the
+        // tokenizer does; possessive, so `&#106;` is left exactly as it is.
+        $href = preg_replace('/&#(x[0-9a-f]++|[0-9]++)(?!;)/i', '$0;', $href) ?? $href;
+        $url = html_entity_decode($href, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if (preg_match('/[\x00-\x20\x7F]/', $url)) { $bad = true; return ''; }
+        if (preg_match('~\A[a-z][a-z0-9+.\-]*:~i', $url)) {
+            if (!preg_match('~\Ahttps?://~i', $url)) $bad = true;
+        } elseif (preg_match('~\A(?:/[/\\\\]|\\\\)~', $url)) {
+            // Not a relative path: `//host` follows the page's scheme to whichever host it names, and
+            // a browser reads `/\host` the same way — in an http URL a backslash is a slash.
+            $bad = true;
+        }
+        return '';
+    }, $v);
+    if ($bad || $rest === null || preg_match('~<[a-zA-Z/!?]~', $rest)) return null;
+    return $v;
 }
 
 /**

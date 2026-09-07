@@ -165,7 +165,7 @@ add('a.traffic', {
     'ot_apply':          ('Apply&hellip;', 'Zastosuj&hellip;'),
     'ot_workers':        ('Set workers&hellip;', 'Ustaw workery&hellip;'),
     'ot_restart_title':  ('Restart the tracker service', 'Zrestartuj usługę trackera'),
-    'ot_restart':        ('Restart&hellip;', 'Restart&hellip;'),
+    'ot_restart':        ('Restart the tracker&hellip;', 'Zrestartuj tracker&hellip;'),
     'ot_reset_title':    ("Delete the panel's drop-in", 'Usuń drop-in panelu'),
     'ot_reset':          ('Reset&hellip;', 'Reset&hellip;'),
     'ot_reading':        ('Reading the service&hellip;', 'Odczytywanie usługi&hellip;'),

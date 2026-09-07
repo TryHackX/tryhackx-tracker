@@ -5,10 +5,10 @@ requirePost();
 $input = readJsonBody();
 $ip = trim((string)($input['ip'] ?? ''));
 if (!filter_var($ip, FILTER_VALIDATE_IP)) {
-    jsonResponse(['error' => 'Invalid IP address'], 400);
+    jsonResponse(['error' => __('api.apiban.invalid_ip')], 400);
 }
 if (apiIpExempt($ip, $cfg)) {
-    jsonResponse(['error' => 'This IP is on the exempt list (server / trusted address) and cannot be banned.'], 400);
+    jsonResponse(['error' => __('api.apiban.exempt')], 400);
 }
 $days = (int)($input['days'] ?? 0);
 if ($days < 1) $days = max(1, (int)($cfg['api_ban_days'] ?? 30));

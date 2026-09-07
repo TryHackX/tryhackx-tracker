@@ -194,11 +194,11 @@ function indexStateUpdate(callable $fn): array {
 function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array {
     $t0 = microtime(true);
     $out = ['file' => null, 'gzip' => false, 'bytes' => 0, 'ms' => 0, 'error' => null, 'partial' => null];
-    if ($url === '' || !preg_match('#^https?://#i', $url)) { $out['error'] = 'Invalid source URL'; return $out; }
-    if (!function_exists('curl_init')) { $out['error'] = 'curl is required for the full scrape'; return $out; }
+    if ($url === '' || !preg_match('#^https?://#i', $url)) { $out['error'] = __('api.index.invalid_source_url'); return $out; }
+    if (!function_exists('curl_init')) { $out['error'] = __('api.index.curl_required'); return $out; }
     $tmp = rtrim($tmpDir, '/\\') . '/index_scrape_' . getmypid() . '_' . bin2hex(random_bytes(4)) . '.bin';
     $fh = @fopen($tmp, 'wb');
-    if (!$fh) { $out['error'] = 'Cannot open temp file'; return $out; }
+    if (!$fh) { $out['error'] = __('api.index.temp_file'); return $out; }
     $ch = curl_init();
     $tooBig = false;
     curl_setopt_array($ch, [
@@ -219,7 +219,7 @@ function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array 
     curl_close($ch);
     fclose($fh);
     $out['ms'] = (int)round((microtime(true) - $t0) * 1000);
-    if ($tooBig) { @unlink($tmp); $out['error'] = 'Full scrape exceeds ' . IDX_FETCH_MAX_BYTES . ' bytes'; return $out; }
+    if ($tooBig) { @unlink($tmp); $out['error'] = __('api.index.scrape_too_big', ['n' => IDX_FETCH_MAX_BYTES]); return $out; }
     if ($ok === false) {
         // KEEP WHAT ARRIVED. A full scrape that dies at 90 % is 90 % of the catalogue, and this
         // parser is built for partial passes already — the poll-time budget stops it mid-file every
@@ -237,7 +237,7 @@ function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array 
             $out['bytes'] = $have;
             $out['gzip'] = strncmp($head, "\x1f\x8b", 2) === 0;
             $out['file'] = $tmp;
-            $out['partial'] = $err !== '' ? $err : 'the transfer ended early';
+            $out['partial'] = $err !== '' ? $err : __('api.index.transfer_ended_early');
             return $out;
         }
         @unlink($tmp);
@@ -252,12 +252,8 @@ function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array 
         // answers the next one with 402 (see below), so it would spend the allowance and report a
         // second, different-looking failure. The next poll gets a clean snapshot.
         $out['error'] = ($errno === 56 && stripos($err, 'chunk') !== false)
-            ? 'The tracker’s reply lost its chunked framing before enough of it had arrived to be '
-            . 'worth keeping (' . $err . '). That is the tracker mis-framing a multi-megabyte full '
-            . 'scrape while it is busy, not a problem with this panel or with the data. The next '
-            . 'poll picks it up; retrying now would only spend the full-scrape allowance and get an '
-            . 'HTTP 402.'
-            : 'cURL error: ' . $err;
+            ? __('api.index.chunked_framing_lost', ['err' => $err])
+            : __('api.index.curl_error', ['err' => $err]);
         return $out;
     }
     if ($code !== 200) {
@@ -267,13 +263,12 @@ function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array 
         // bare "HTTP 402" sends whoever reads it hunting through rate limits that have nothing to
         // do with it -- the throttle on this machine is UDP-only and this request is HTTP.
         $out['error'] = $code === 402
-            ? 'HTTP 402 — the tracker refused a full scrape, which is how it rate-limits them. '
-            . 'Nothing is wrong: the next poll picks it up.'
-            : 'HTTP ' . $code;
+            ? __('api.index.http_402')
+            : __('api.index.http_code', ['code' => $code]);
         return $out;
     }
     $out['bytes'] = (int)@filesize($tmp);
-    if ($out['bytes'] < 9) { @unlink($tmp); $out['error'] = 'Empty scrape reply'; return $out; }
+    if ($out['bytes'] < 9) { @unlink($tmp); $out['error'] = __('api.index.empty_reply'); return $out; }
     // gzip magic
     $magic = '';
     if ($m = @fopen($tmp, 'rb')) { $magic = fread($m, 2); fclose($m); }
@@ -292,7 +287,7 @@ function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array 
 function indexParseScrapeFile(string $file, bool $gzip, int $minSeeders, callable $onBatch, float $deadline, int $skip = 0): array {
     $out = ['entries' => 0, 'kept' => 0, 'truncated' => false];
     $fh = $gzip ? @gzopen($file, 'rb') : @fopen($file, 'rb');
-    if (!$fh) { $out['error'] = 'cannot open scrape file'; return $out; }
+    if (!$fh) { $out['error'] = __('api.index.open_scrape_file'); return $out; }
     $read = $gzip ? 'gzread' : 'fread';
     $eof = $gzip ? 'gzeof' : 'feof';
     $close = $gzip ? 'gzclose' : 'fclose';
@@ -309,7 +304,7 @@ function indexParseScrapeFile(string $file, bool $gzip, int $minSeeders, callabl
             if ($first) {
                 $first = false;
                 // a real scrape reply starts with d5:filesd… — reject an HTML error page / wrong endpoint
-                if (strncmp($buf, 'd5:files', 8) !== 0) { $out['error'] = 'source did not look like a scrape reply'; break; }
+                if (strncmp($buf, 'd5:files', 8) !== 0) { $out['error'] = __('api.index.not_scrape_reply'); break; }
             }
             $last = 0;
             if (preg_match_all(IDX_ENTRY_RE, $buf, $mm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
@@ -471,7 +466,7 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
             $out['removed_ban'] = (int)$db->exec("DELETE i FROM index_hashes i JOIN banned_hashes b ON b.info_hash = i.info_hash");
             $out['ok'] = $out['error'] === null;
         } catch (\Throwable $e) {
-            $out['error'] = 'poll: ' . $e->getMessage();
+            $out['error'] = __('api.index.poll_exception', ['msg' => $e->getMessage()]);
             error_log('[index poll] ' . $e->getMessage());
         } finally {
             if ($ownFile) @unlink($file);
@@ -732,13 +727,13 @@ function indexPromote(PDO $db, array $cfg, array $hashes): array {
     $clean = [];
     foreach ($hashes as $h) { $h = strtolower(trim((string)$h)); if (isValidInfoHash($h)) $clean[$h] = true; }
     $clean = array_keys($clean);
-    if (!$clean) { $out['error'] = 'No valid hashes'; return $out; }
+    if (!$clean) { $out['error'] = __('api.index.no_valid_hashes'); return $out; }
     $in = implode(',', array_fill(0, count($clean), '?'));
     $rows = $db->prepare("SELECT info_hash, name FROM index_hashes WHERE info_hash IN ($in)");
     $rows->execute($clean);
     $items = [];
     foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $r) $items[] = ['hash' => $r['info_hash'], 'name' => $r['name'], 'input' => $r['info_hash']];
-    if (!$items) { $out['error'] = 'No matching index rows'; return $out; }
+    if (!$items) { $out['error'] = __('api.index.no_matching_rows'); return $out; }
     $res = whitelistAddHashes($db, $cfg, $items, ['source' => 'admin', 'ip' => '', 'auto_meta' => true]);
     $out['summary'] = $res['summary'] ?? null;
     $upd = $db->prepare("UPDATE index_hashes SET promoted_at = NOW() WHERE info_hash IN ($in)");
@@ -843,7 +838,7 @@ function indexQueueMetaByScope(PDO $db, string $scope): ?int {
 function indexScrapeMany(PDO $db, array $cfg, array $rows, float $budget = WL_SCRAPE_BULK_BUDGET): array {
     $out = ['scraped' => 0, 'requests' => 0, 'failed' => 0, 'processed' => 0, 'truncated' => false, 'last_id' => null, 'error' => null];
     $base = trim((string)($cfg['whitelist_scrape_url'] ?? ''));
-    if ($base === '' || !preg_match('#^https?://#i', $base)) { $out['error'] = 'Scrape URL is not configured'; return $out; }
+    if ($base === '' || !preg_match('#^https?://#i', $base)) { $out['error'] = __('api.index.scrape_url_missing'); return $out; }
     $items = [];
     foreach ($rows as $r) { $h = strtolower((string)($r['info_hash'] ?? '')); if (isValidInfoHash($h)) $items[] = $h; }
     if (!$items) return $out;
@@ -859,7 +854,7 @@ function indexScrapeMany(PDO $db, array $cfg, array $rows, float $budget = WL_SC
         $files = $body !== null ? parseScrapeReply($body) : null;
         if ($files === null) {
             $out['failed']++;
-            if ($out['scraped'] === 0 && $out['failed'] >= 2) { $out['error'] = 'Tracker did not answer'; break; }
+            if ($out['scraped'] === 0 && $out['failed'] >= 2) { $out['error'] = __('api.index.tracker_no_answer'); break; }
             continue;
         }
         $db->beginTransaction();
@@ -872,7 +867,7 @@ function indexScrapeMany(PDO $db, array $cfg, array $rows, float $budget = WL_SC
             $db->commit();
         } catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
     }
-    if ($out['error'] === null && $out['requests'] > 0 && $out['scraped'] === 0 && $out['failed'] === $out['requests']) $out['error'] = 'Tracker did not answer';
+    if ($out['error'] === null && $out['requests'] > 0 && $out['scraped'] === 0 && $out['failed'] === $out['requests']) $out['error'] = __('api.index.tracker_no_answer');
     return $out;
 }
 
@@ -952,7 +947,7 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     $searchFiles = !empty($q['search_files']) && $q['search_files'] !== '0';
     $fulltextClause = null; $likeClause = null;
     if ($search !== '') {
-        if (preg_match('/^[a-f0-9]{6,40}$/i', $search)) {
+        if (preg_match(INDEX_HASH_PREFIX_RE, $search)) {
             $where[] = "info_hash LIKE ?";
             $params[] = strtolower($search) . '%';
         } else {
@@ -1068,6 +1063,31 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
  */
 const INDEX_FILE_MATCH_CAP = 5000;
 
+/**
+ * What a search term has to look like to be treated as the START of an info hash. Six hex digits at
+ * least: fewer would match too much of the table to be a lookup, and a two-letter English word
+ * like "ad" or "be" is hex too. Named once so the admin listing, the catalogue and the too-short
+ * guard below cannot drift apart on what counts as a hash.
+ */
+const INDEX_HASH_PREFIX_RE = '/^[a-f0-9]{6,40}$/i';
+
+/**
+ * Is $search too short to be searched at all?
+ *
+ * The catalogue uses the fulltext index only from three characters up and falls back to
+ * `name LIKE '%x%'` for anything shorter — a full scan of the table, repeated by the COUNT arm.
+ * One visitor typing "a" is the shape of the twenty-four-minute outage the file cap above is
+ * named after, and the debounce in the browser sends exactly that on the first keystroke.
+ * Empty is NOT too short: it is browsing, and the empty listing is served from an index.
+ * Counted in characters, not bytes — "ąę" is two characters, whatever UTF-8 makes of it. The hash
+ * clause can never be true below three characters today; it is written out so the rule stays
+ * "a hash prefix is always allowed" even if the prefix floor ever moves.
+ */
+function indexSearchTooShort(string $search): bool {
+    $search = trim($search);
+    return $search !== '' && mb_strlen($search) < 3 && !preg_match(INDEX_HASH_PREFIX_RE, $search);
+}
+
 function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     $page = max(1, (int)($q['page'] ?? 1));
     $perPage = max(1, min(100, (int)($q['per_page'] ?? 25)));
@@ -1104,7 +1124,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     if (!$orderParts) $orderParts = ['score' => 'score DESC', 'seeders' => 'seeders DESC'];
     elseif (count($orderParts) === 1 && isset($orderParts['score'])) $orderParts['seeders'] = 'seeders DESC';
 
-    $isHash = $search !== '' && preg_match('/^[a-f0-9]{6,40}$/i', $search);
+    $isHash = $search !== '' && preg_match(INDEX_HASH_PREFIX_RE, $search);
     $ft = ($search !== '' && !$isHash && mb_strlen($search) >= 3) ? indexFulltextTerm($search) : '';
 
     /**

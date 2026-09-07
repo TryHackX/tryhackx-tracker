@@ -273,8 +273,8 @@ function netlimitStateUpdate(callable $fn): array {
 function netlimitRun(array $cfg, array $args): array {
     $out = ['ok' => false, 'json' => null, 'output' => '', 'code' => null, 'error' => null];
     $cmd = netlimitCommand($cfg);
-    if ($cmd === '') { $out['error'] = 'No rate-limit helper command is configured (Settings → UDP traffic & rate limit).'; return $out; }
-    if (!trackerExecAvailable()) { $out['error'] = 'PHP exec() is disabled on this server — the panel cannot reach the firewall helper.'; return $out; }
+    if ($cmd === '') { $out['error'] = __('api.net.no_helper_2'); return $out; }
+    if (!trackerExecAvailable()) { $out['error'] = __('api.net.exec_disabled'); return $out; }
 
     $full = $cmd;
     foreach ($args as $a) $full .= ' ' . escapeshellarg((string)$a);
@@ -292,13 +292,13 @@ function netlimitRun(array $cfg, array $args): array {
     }
     if ($out['json'] === null) {
         $out['error'] = $out['output'] !== ''
-            ? 'The helper did not answer with JSON: ' . mb_substr($out['output'], 0, 300)
-            : 'The helper produced no output (exit ' . (int)$rc . '). Check the sudoers rule.';
+            ? __('api.helper.no_json', ['out' => mb_substr($out['output'], 0, 300)])
+            : __('api.helper.no_output', ['code' => (int)$rc]);
         return $out;
     }
     $out['ok'] = !empty($out['json']['ok']) && $out['code'] === 0;
     if (!$out['ok'] && $out['error'] === null) {
-        $out['error'] = (string)($out['json']['error'] ?? ('Helper exited with code ' . (int)$rc));
+        $out['error'] = (string)($out['json']['error'] ?? __('api.helper.exit_code', ['code' => (int)$rc]));
     }
     return $out;
 }

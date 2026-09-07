@@ -16,10 +16,10 @@ requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? '');
 if (!in_array($op, ['plan', 'create', 'remove', 'restart', 'reload'], true)) {
-    jsonResponse(['error' => 'Unknown operation'], 400);
+    jsonResponse(['error' => __('api.admin.unknown_op')], 400);
 }
 if (!otClusterEnabled($cfg)) {
-    jsonResponse(['error' => 'Extra instances are not configured or not enabled (Settings → OpenTracker instances).'], 400);
+    jsonResponse(['error' => __('api.cluster.not_enabled')], 400);
 }
 
 $name = trim((string)($input['name'] ?? ''));
@@ -27,7 +27,7 @@ $udp  = (int)($input['udp'] ?? 0);
 $tcp  = (int)($input['tcp'] ?? 0);
 
 if (in_array($op, ['plan', 'create', 'remove', 'restart'], true) && !otClusterValidName($name)) {
-    jsonResponse(['error' => 'An instance name is 1-16 characters of a-z, 0-9 and -, and "primary" is reserved for the installer\'s own unit.'], 400);
+    jsonResponse(['error' => __('api.cluster.bad_name')], 400);
 }
 
 if ($op === 'plan') {
@@ -38,7 +38,7 @@ if ($op === 'plan') {
 if ($op === 'reload') {
     $r = otClusterRun($cfg, ['reload', '--all']);
     jsonResponse(['success' => $r['ok'], 'result' => $r['json'],
-                  'message' => $r['ok'] ? 'Every instance reloaded its accesslist.' : null,
+                  'message' => $r['ok'] ? __('api.cluster.reloaded') : null,
                   'error' => $r['ok'] ? null : $r['error']]);
 }
 
@@ -52,30 +52,28 @@ if ($op === 'create') {
     // again, while the traffic chart shows a packet rate saying it should not be. Two feedback loops
     // pulling opposite ways is not something to warn about.
     if (netlimitAutoEnabled($cfg)) {
-        jsonResponse(['error' => 'The automatic inbound limiter is on. It only counts the primary\'s port, '
-                              . 'so a second instance would hide most of the traffic from it while leaving the '
-                              . 'load - and it would answer by throttling the primary. Turn it off in Settings first.'], 409);
+        jsonResponse(['error' => __('api.cluster.auto_limiter_on')], 409);
     }
     $affinity = trim((string)($input['affinity'] ?? ''));
     if ($affinity !== '' && !otValidAffinity($affinity)) {
-        jsonResponse(['error' => 'CPU affinity must look like "2-5" or "0 2 4" - systemd refuses to start a unit it cannot parse.'], 400);
+        jsonResponse(['error' => __('api.cluster.bad_affinity')], 400);
     }
     $workers = max(0, min(64, (int)($input['workers'] ?? 0)));
     $r = otClusterRun($cfg, ['create', $name, (string)$udp, (string)$tcp, $affinity, (string)$workers]);
     otClusterRoster($cfg, true);
     jsonResponse(['success' => $r['ok'], 'result' => $r['json'], 'error' => $r['ok'] ? null : $r['error'],
                   'output' => $r['ok'] ? null : mb_substr($r['output'], 0, 600),
-                  'message' => $r['ok'] ? ('Instance "' . $name . '" is running on UDP ' . $udp . '.') : null]);
+                  'message' => $r['ok'] ? __('api.cluster.created', ['name' => $name, 'udp' => $udp]) : null]);
 }
 
 if ($op === 'remove') {
     $r = otClusterRun($cfg, ['remove', $name]);
     otClusterRoster($cfg, true);
     jsonResponse(['success' => $r['ok'], 'result' => $r['json'], 'error' => $r['ok'] ? null : $r['error'],
-                  'message' => $r['ok'] ? ('Instance "' . $name . '" is gone, with its unit and its files.') : null]);
+                  'message' => $r['ok'] ? __('api.cluster.removed', ['name' => $name]) : null]);
 }
 
 $r = otClusterRun($cfg, ['restart', $name]);
 otClusterRoster($cfg, true);
 jsonResponse(['success' => $r['ok'], 'result' => $r['json'], 'error' => $r['ok'] ? null : $r['error'],
-              'message' => $r['ok'] ? ('Instance "' . $name . '" restarted.') : null]);
+              'message' => $r['ok'] ? __('api.cluster.restarted', ['name' => $name]) : null]);

@@ -11,7 +11,7 @@ requirePost();
 
 $input = readJsonBody();
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 if (!usersEnabled($cfg)) {
     jsonResponse(['error' => 'accounts_disabled'], 400);
@@ -19,7 +19,7 @@ if (!usersEnabled($cfg)) {
 $ip = getClientIp($cfg);
 $perWindow = (int)($cfg['rate_limit_user_login'] ?? 10);
 if (!rateLimitAllow('user_login', ipBucket($ip), $perWindow, 900)) {
-    jsonResponse(['error' => 'Too many login attempts. Please wait a few minutes and try again.'], 429);
+    jsonResponse(['error' => __('api.login.too_many')], 429);
 }
 if (isCaptchaRequired($cfg, 'login')) {
     if (!verifyCaptcha(captchaTokenFromInput($input), $cfg)) {
@@ -31,10 +31,10 @@ if (isCaptchaRequired($cfg, 'login')) {
 $user = userAuthenticate($db, (string)($input['login'] ?? ''), (string)($input['password'] ?? ''));
 if (!$user) {
     resetCaptchaGrace($cfg);
-    jsonResponse(['error' => 'Invalid credentials'], 401);
+    jsonResponse(['error' => __('api.login.invalid_credentials')], 401);
 }
 if ($user['status'] !== 'active') {
-    jsonResponse(['error' => 'This account is suspended.'], 403);
+    jsonResponse(['error' => __('api.login.suspended')], 403);
 }
 $choice = (string)($input['session'] ?? '');
 if ($choice === '' && !empty($input['remember'])) $choice = '30d';   // legacy checkbox

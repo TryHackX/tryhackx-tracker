@@ -16,12 +16,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 if (!isValidInfoHash($hash)) {
-    jsonResponse(['error' => 'Invalid info hash'], 400);
+    jsonResponse(['error' => __('api.check.invalid_info_hash')], 400);
 }
 
 // Per-IP rate limit (defence against automated blacklist scraping).
 if (!rateLimitAllow('block_check', getClientIp($cfg), (int)($cfg['rate_limit_block_check'] ?? 30))) {
-    jsonResponse(['error' => 'Too many lookups. Please wait a while and try again.'], 429);
+    jsonResponse(['error' => __('api.check.too_many_lookups')], 429);
 }
 
 // Search in reports first, then archives

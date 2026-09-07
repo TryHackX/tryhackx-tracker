@@ -4,13 +4,13 @@ requirePost();
 $input = readJsonBody();
 
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.login.invalid_csrf')], 403);
 }
 
 // Brute-force lockout (defense in depth, independent of reCAPTCHA)
 $ip = getClientIp();
 if (isLoginLocked($ip, $cfg)) {
-    jsonResponse(['error' => 'Too many failed login attempts. Please wait a few minutes and try again.'], 429);
+    jsonResponse(['error' => __('api.login.locked')], 429);
 }
 
 // Moved sign-in address: this endpoint's URL cannot move with it, so without a marker a bot could
@@ -21,7 +21,7 @@ if (isLoginLocked($ip, $cfg)) {
 if (adminLoginPathCustom($cfg)) {
     $seen = (int)($_SESSION['admin_login_form_at'] ?? 0);
     if ($seen <= 0 || (time() - $seen) > 12 * 3600) {
-        jsonResponse(['error' => 'Invalid credentials'], 401);   // same answer as a wrong password
+        jsonResponse(['error' => __('api.login.invalid_credentials')], 401);   // same answer as a wrong password
     }
 }
 
@@ -52,7 +52,7 @@ if (adminCredentialsValid($username, $password, $cfg)) {
         twofaPendingStart();
         jsonResponse(['success' => false, 'needs_2fa' => true,
                       'recovery_left' => twofaRecoveryLeft(),
-                      'message' => 'Enter the six-digit code from your authenticator app.']);
+                      'message' => __('api.login.enter_2fa_code')]);
     }
     adminGrantSession();
     clearLoginFailures($ip);
@@ -60,5 +60,5 @@ if (adminCredentialsValid($username, $password, $cfg)) {
 } else {
     recordLoginFailure($ip, $cfg);
     resetCaptchaGrace($cfg);
-    jsonResponse(['error' => 'Invalid credentials'], 401);
+    jsonResponse(['error' => __('api.login.invalid_credentials')], 401);
 }

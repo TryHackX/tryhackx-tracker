@@ -5,7 +5,7 @@ $input = readJsonBody();
 $hash = strtolower(trim((string)($input['hash'] ?? '')));
 
 if (!isValidInfoHash($hash)) {
-    jsonResponse(['error' => 'Invalid info hash'], 400);
+    jsonResponse(['error' => __('api.wl.invalid_info_hash')], 400);
 }
 
 whitelistUnban($db, $cfg, $hash);

@@ -31,6 +31,11 @@
  * on the way down. Pages are shown everywhere and typed nowhere.
  */
 
+// The labels, the advice and the validation messages are read by a person, so they go through the
+// dictionary. Named here rather than assumed: the janitor and the tests load this file without
+// api.php, and __() must exist there too (in CLI it returns English).
+require_once __DIR__ . '/lang.php';
+
 /** The whole allow-list. Anything not in this table cannot be read, written or named. */
 function sysctlKeys(): array {
     static $k = null;
@@ -38,63 +43,50 @@ function sysctlKeys(): array {
     return $k = [
         'rmem_max' => [
             'sysctl' => 'net.core.rmem_max', 'unit' => 'bytes', 'group' => 'receive',
-            'label' => 'Receive buffer ceiling',
-            'what'  => 'The most a socket may be given, IF it asks. Raising this allocates nothing by '
-                     . 'itself — only a program that calls setsockopt(SO_RCVBUF) ever sees the difference.',
+            'label' => __('api.sysctl.key_rmem_max_label'),
+            'what'  => __('api.sysctl.key_rmem_max_what'),
             'min' => 4096, 'max' => 268435456,
         ],
         'rmem_default' => [
             'sysctl' => 'net.core.rmem_default', 'unit' => 'bytes', 'group' => 'receive',
-            'label' => 'Receive buffer given to every socket',
-            'what'  => 'What a socket gets without asking. This is the one that costs: it applies to '
-                     . 'every socket created afterwards that does not set its own size. TCP is not '
-                     . 'affected — it has its own net.ipv4.tcp_rmem — so in practice this is UDP.',
+            'label' => __('api.sysctl.key_rmem_default_label'),
+            'what'  => __('api.sysctl.key_rmem_default_what'),
             'min' => 4096, 'max' => 268435456, 'ack' => true,
         ],
         'wmem_max' => [
             'sysctl' => 'net.core.wmem_max', 'unit' => 'bytes', 'group' => 'send',
-            'label' => 'Send buffer ceiling',
-            'what'  => 'The same as the receive ceiling, on the way out. Nothing measured here has '
-                     . 'ever pointed at the send side; it is offered for symmetry, not as a claim.',
+            'label' => __('api.sysctl.key_wmem_max_label'),
+            'what'  => __('api.sysctl.key_wmem_max_what'),
             'min' => 4096, 'max' => 268435456,
         ],
         'wmem_default' => [
             'sysctl' => 'net.core.wmem_default', 'unit' => 'bytes', 'group' => 'send',
-            'label' => 'Send buffer given to every socket',
-            'what'  => 'Same blast radius as the receive default, and the same absence of evidence. '
-                     . 'If you are here to stop announces being dropped, this is not the knob.',
+            'label' => __('api.sysctl.key_wmem_default_label'),
+            'what'  => __('api.sysctl.key_wmem_default_what'),
             'min' => 4096, 'max' => 268435456, 'ack' => true,
         ],
         'netdev_max_backlog' => [
             'sysctl' => 'net.core.netdev_max_backlog', 'unit' => 'packets', 'group' => 'queue',
-            'label' => 'Packets queued before the kernel starts dropping',
-            'what'  => 'PER CPU. Lengthening this under a flood does not save the packets — the '
-                     . 'firewall drops them a few milliseconds later anyway — it just makes every '
-                     . 'other packet on the machine wait behind them. This is the knob that makes an '
-                     . 'interactive SSH session stutter.',
+            'label' => __('api.sysctl.key_netdev_max_backlog_label'),
+            'what'  => __('api.sysctl.key_netdev_max_backlog_what'),
             'min' => 100, 'max' => 32768,
         ],
         'udp_mem' => [
             'sysctl' => 'net.ipv4.udp_mem', 'unit' => 'pages3', 'group' => 'global',
-            'label' => 'Total memory UDP may use (min / pressure / max)',
-            'what'  => 'A machine-wide ceiling for ALL UDP sockets together, counted in pages. Below '
-                     . '"min" the kernel never reclaims, so min is memory promised away rather than a '
-                     . 'limit; above "max" it refuses. Under a flood the kernel really will take what '
-                     . 'max allows, and the database is on the same machine.',
+            'label' => __('api.sysctl.key_udp_mem_label'),
+            'what'  => __('api.sysctl.key_udp_mem_what'),
             'min' => 4096, 'max' => 0,
         ],
         'udp_rmem_min' => [
             'sysctl' => 'net.ipv4.udp_rmem_min', 'unit' => 'bytes', 'group' => 'receive',
-            'label' => 'Receive floor guaranteed to each UDP socket',
-            'what'  => 'How much a UDP socket keeps even when the total above is under pressure. '
-                     . 'Small and cheap; raising it protects the tracker from being squeezed when '
-                     . 'something else on the box floods UDP.',
+            'label' => __('api.sysctl.key_udp_rmem_min_label'),
+            'what'  => __('api.sysctl.key_udp_rmem_min_what'),
             'min' => 4096, 'max' => 16777216,
         ],
         'udp_wmem_min' => [
             'sysctl' => 'net.ipv4.udp_wmem_min', 'unit' => 'bytes', 'group' => 'send',
-            'label' => 'Send floor guaranteed to each UDP socket',
-            'what'  => 'The same on the way out.',
+            'label' => __('api.sysctl.key_udp_wmem_min_label'),
+            'what'  => __('api.sysctl.key_udp_wmem_min_what'),
             'min' => 4096, 'max' => 16777216,
         ],
     ];
@@ -132,9 +124,9 @@ function sysctlConfirmSeconds(array $cfg): int {
 function sysctlRun(array $cfg, array $args): array {
     $out = ['ok' => false, 'json' => null, 'output' => '', 'code' => null, 'error' => null];
     $cmd = sysctlCommand($cfg);
-    if ($cmd === '') { $out['error'] = 'No kernel-buffer helper is configured (Settings → Kernel network buffers).'; return $out; }
-    if (!sysctlValidCommand($cmd)) { $out['error'] = 'The helper command contains characters that are not allowed.'; return $out; }
-    if (!trackerExecAvailable()) { $out['error'] = 'PHP exec() is disabled on this server — the panel cannot reach the helper.'; return $out; }
+    if ($cmd === '') { $out['error'] = __('api.sysctl.run_no_helper'); return $out; }
+    if (!sysctlValidCommand($cmd)) { $out['error'] = __('api.sysctl.run_bad_command'); return $out; }
+    if (!trackerExecAvailable()) { $out['error'] = __('api.sysctl.run_exec_disabled'); return $out; }
 
     $full = $cmd;
     foreach ($args as $a) $full .= ' ' . escapeshellarg((string)$a);
@@ -153,19 +145,19 @@ function sysctlRun(array $cfg, array $args): array {
     }
     if ($out['json'] === null) {
         $out['error'] = $out['output'] !== ''
-            ? 'The helper did not answer with JSON: ' . mb_substr($out['output'], 0, 300)
-            : 'The helper produced no output (exit ' . (int)$rc . '). Check the sudoers rule.';
+            ? __('api.sysctl.run_no_json', ['out' => mb_substr($out['output'], 0, 300)])
+            : __('api.sysctl.run_no_output', ['code' => (int)$rc]);
         return $out;
     }
     $out['ok'] = !empty($out['json']['ok']) && $out['code'] === 0;
-    if (!$out['ok'] && $out['error'] === null) $out['error'] = (string)($out['json']['error'] ?? ('Helper exited with code ' . (int)$rc));
+    if (!$out['ok'] && $out['error'] === null) $out['error'] = (string)($out['json']['error'] ?? __('api.sysctl.run_exit_code', ['code' => (int)$rc]));
     return $out;
 }
 
 /** Status is polled by a card; one helper call per request is enough. */
 function sysctlStatus(array $cfg, int $port = 6969): array {
     $r = sysctlRun($cfg, ['status', (string)$port]);
-    if (!$r['ok'] || !is_array($r['json'])) return ['ok' => false, 'error' => $r['error'] ?? 'unknown error', 'output' => $r['output']];
+    if (!$r['ok'] || !is_array($r['json'])) return ['ok' => false, 'error' => $r['error'] ?? __('api.sysctl.unknown_error'), 'output' => $r['output']];
     return $r['json'];
 }
 
@@ -188,10 +180,10 @@ function sysctlValidate(string $key, string $value, array $st): string {
 
     if ($k['unit'] === 'pages3') {
         $parts = preg_split('/\s+/', trim($value));
-        if (count($parts) !== 3) return 'udp_mem needs exactly three numbers: min, pressure and max.';
-        foreach ($parts as $p) if (!ctype_digit($p)) return 'udp_mem values must be whole page counts.';
+        if (count($parts) !== 3) return __('api.sysctl.udp_mem_three');
+        foreach ($parts as $p) if (!ctype_digit($p)) return __('api.sysctl.udp_mem_digits');
         [$a, $b, $c] = array_map('intval', $parts);
-        if (!($a < $b && $b < $c)) return 'udp_mem must be strictly increasing: min < pressure < max.';
+        if (!($a < $b && $b < $c)) return __('api.sysctl.udp_mem_increasing');
         if ($memKb > 0) {
             $totalPages = (int)($memKb * 1024 / $pageSize);
             // The ceiling cannot be a flat fraction of RAM, because the kernel's OWN defaults are a
@@ -209,35 +201,27 @@ function sysctlValidate(string $key, string $value, array $st): string {
             $capB = max((int)($totalPages / 10),  $refB * 2);
             $capC = max((int)($totalPages / 4),   $refC * 2);
             if ($a > $capA) {
-                return 'udp_mem min is too high for this machine (' . number_format($a) . ' pages, '
-                     . sysctlHumanBytes($a * $pageSize) . '). Below min the kernel never reclaims UDP '
-                     . 'memory, so that is memory promised away permanently rather than a ceiling — the '
-                     . 'most this panel will accept here is ' . number_format($capA) . ' pages.';
+                return __('api.sysctl.udp_mem_min_high', ['pages' => number_format($a), 'bytes' => sysctlHumanBytes($a * $pageSize), 'cap' => number_format($capA)]);
             }
-            if ($b > $capB) return 'udp_mem pressure is too high for this machine (max ' . number_format($capB) . ' pages).';
+            if ($b > $capB) return __('api.sysctl.udp_mem_pressure_high', ['cap' => number_format($capB)]);
             if ($c > $capC) {
-                return 'udp_mem max is too high for this machine (' . number_format($c) . ' pages, '
-                     . sysctlHumanBytes($c * $pageSize) . ' against ' . sysctlHumanBytes($memKb * 1024)
-                     . ' of RAM). Under a flood the kernel really will take it, and the database is on '
-                     . 'this same machine.';
+                return __('api.sysctl.udp_mem_max_high', ['pages' => number_format($c), 'bytes' => sysctlHumanBytes($c * $pageSize), 'ram' => sysctlHumanBytes($memKb * 1024)]);
             }
         }
         return '';
     }
 
-    if (!ctype_digit(trim($value))) return $k['label'] . ': must be a whole number.';
+    if (!ctype_digit(trim($value))) return __('api.sysctl.not_integer', ['label' => $k['label']]);
     $v = (int)$value;
-    if ($v < $k['min']) return $k['label'] . ': below ' . number_format($k['min']) . '.';
+    if ($v < $k['min']) return __('api.sysctl.below_min', ['label' => $k['label'], 'min' => number_format($k['min'])]);
     if ($k['max'] > 0 && $v > $k['max']) {
         if ($key === 'netdev_max_backlog') {
-            return 'The queue length is per CPU: ' . number_format($k['max']) . ' on ' . $cpus
-                 . ' cores is already ' . number_format($k['max'] * $cpus) . ' packets buffered ahead '
-                 . 'of the firewall. Anything larger is refused.';
+            return __('api.sysctl.backlog_too_high', ['max' => number_format($k['max']), 'cpus' => $cpus, 'total' => number_format($k['max'] * $cpus)]);
         }
-        return $k['label'] . ': above ' . number_format($k['max']) . '.';
+        return __('api.sysctl.above_max', ['label' => $k['label'], 'max' => number_format($k['max'])]);
     }
     if ($k['unit'] === 'bytes' && $memKb > 0 && $v > (int)($memKb * 1024 / 8)) {
-        return $k['label'] . ': more than an eighth of this machine\'s RAM in one socket buffer — did you mean KiB?';
+        return __('api.sysctl.eighth_of_ram', ['label' => $k['label']]);
     }
     return '';
 }
@@ -312,21 +296,13 @@ function sysctlSocketVerdict(array $st): array {
     if ($rb === $rmemDef && $rb !== 2 * $rmemMax) {
         return [
             'known' => true, 'asks' => false, 'rb' => $rb,
-            'text' => 'This tracker never asks the kernel for a bigger receive buffer: its socket is '
-                    . 'sitting at exactly the system default (' . sysctlHumanBytes($rb) . '), not at '
-                    . 'twice the ceiling, which is where it would be if it had asked. So raising the '
-                    . 'ceiling alone will change nothing at all here — the only knob that moves this '
-                    . 'socket is the default, and that one applies to every socket on the machine.',
+            'text' => __('api.sysctl.verdict_no_ask', ['rb' => sysctlHumanBytes($rb)]),
         ];
     }
     if ($rb >= 2 * $rmemMax) {
         return [
             'known' => true, 'asks' => true, 'rb' => $rb,
-            'text' => 'This tracker does ask for a bigger receive buffer and is being clamped by the '
-                    . 'ceiling (its socket is at ' . sysctlHumanBytes($rb) . ', exactly twice '
-                    . 'net.core.rmem_max — the kernel doubles what a program requests). Raising the '
-                    . 'ceiling is the cheap fix here: it allocates nothing by itself and touches no '
-                    . 'other socket.',
+            'text' => __('api.sysctl.verdict_clamped', ['rb' => sysctlHumanBytes($rb)]),
         ];
     }
     // The socket is SMALLER than the current default, so no socket created now could look like this.
@@ -342,19 +318,12 @@ function sysctlSocketVerdict(array $st): array {
     if ($rmemDef > 0 && $rb < $rmemDef) {
         return [
             'known' => true, 'asks' => false, 'stale' => true, 'rb' => $rb,
-            'text' => 'This socket is SMALLER than the current default (' . sysctlHumanBytes($rb)
-                    . ' against ' . sysctlHumanBytes($rmemDef) . '), and no socket created now could '
-                    . 'be. A receive buffer is fixed when the socket is opened, so the tracker is '
-                    . 'still using the value that was in force when it last started — your change is '
-                    . 'live in the kernel and has not reached this socket. '
-                    . 'RESTART THE TRACKER and this socket becomes ' . sysctlHumanBytes($rmemDef)
-                    . '; until then the discarded-packet counter will keep climbing for the old reason.',
+            'text' => __('api.sysctl.verdict_stale', ['rb' => sysctlHumanBytes($rb), 'def' => sysctlHumanBytes($rmemDef)]),
         ];
     }
 
     return ['known' => true, 'asks' => true, 'rb' => $rb,
-            'text' => 'This tracker asks for its own receive buffer size (' . sysctlHumanBytes($rb)
-                    . ') and is not being clamped by the ceiling.'];
+            'text' => __('api.sysctl.verdict_fine', ['rb' => sysctlHumanBytes($rb)])];
 }
 
 /**
@@ -438,10 +407,7 @@ function sysctlAdvice(array $st, array $cfg): array {
     $cpus = max(1, (int)($st['cpus'] ?? 1));
 
     if (empty($st['netns_shared'])) {
-        $out[] = ['level' => 'bad', 'text' =>
-            'This process is in a private network namespace, so writing any of these would change a '
-            . 'copy of the network stack that nothing else on the machine can see. The panel refuses '
-            . 'to arm from here rather than report a change that did not happen.'];
+        $out[] = ['level' => 'bad', 'text' => __('api.sysctl.adv_netns')];
     }
 
     $verdict = sysctlSocketVerdict($st);
@@ -451,49 +417,28 @@ function sysctlAdvice(array $st, array $cfg): array {
 
     $drops = (int)($st['socket']['drops'] ?? 0);
     if ($drops > 0) {
-        $out[] = ['level' => 'warn', 'text' =>
-            'The tracker socket has discarded ' . number_format($drops) . ' packets because its queue '
-            . 'was full. That is the one loss on this page that the buffers below can actually fix — '
-            . 'a packet dropped there cost the machine everything except the answer.'];
+        $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_socket_drops', ['n' => number_format($drops)])];
     }
 
     // netdev_max_backlog gets a suggestion only when the counter that justifies it has moved.
     $softDrop = (int)($st['softnet_dropped'] ?? 0);
     if ($softDrop === 0) {
-        $out[] = ['level' => 'info', 'text' =>
-            'The per-CPU packet queue has never overflowed on this machine (softnet dropped = 0 across '
-            . 'all ' . $cpus . ' cores), so there is nothing to gain from lengthening it — and it is '
-            . 'the change most likely to make an SSH session stutter, because every packet then waits '
-            . 'behind a longer queue. Leave it alone.'];
+        $out[] = ['level' => 'info', 'text' => __('api.sysctl.adv_softnet_zero', ['cpus' => $cpus])];
     } else {
-        $out[] = ['level' => 'warn', 'text' =>
-            'The per-CPU packet queue has overflowed ' . number_format($softDrop) . ' times. This is '
-            . 'the only measurement that justifies raising it — and remember the value is per CPU, so '
-            . 'on ' . $cpus . ' cores it multiplies.'];
+        $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_softnet_over', ['n' => number_format($softDrop), 'cpus' => $cpus])];
     }
 
     // One core doing all the receive work is invisible in every other number on this page.
     $spread = sysctlPacketSpread();
     if ($spread !== null && $spread['concentrated']) {
         $pct = round($spread['share'] * 100);
-        $out[] = ['level' => 'warn', 'text' =>
-            'ALL inbound packets are being processed by one core: CPU ' . $spread['busiest'] . ' has handled '
-            . $pct . '% of everything this machine has received, across ' . $spread['cpus'] . ' cores. '
-            . 'That is a single-queue NIC delivering every interrupt to the same core, and '
-            . ($spread['rps_on']
-                ? 'Receive Packet Steering is on, so this is as spread as it gets here.'
-                : 'Receive Packet Steering is OFF (rps_cpus is zero on every receive queue).')
-            . ' It explains a symptom none of the buffers can: the tracker looks idle, the per-CPU '
-            . 'queue never overflows, and yet raising the inbound limit makes everything else on the '
-            . 'box stutter — because everything else is waiting behind that one core.'
-            . ($spread['rps_on'] ? '' :
-               ' Spreading it needs no restart and takes effect immediately. It is system-wide, like '
-               . 'the sysctls beside it, so the panel does not write it.'),
+        $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_one_core', [
+                'busiest' => $spread['busiest'], 'pct' => $pct, 'cpus' => $spread['cpus'],
+                'rps'  => $spread['rps_on'] ? __('api.sysctl.adv_rps_on') : __('api.sysctl.adv_rps_off'),
+                'hint' => $spread['rps_on'] ? '' : __('api.sysctl.adv_rps_hint')]),
             'command' => $spread['rps_on'] ? null : sysctlRpsCommand($spread['cpus'])];
     } elseif ($spread !== null && !$spread['concentrated']) {
-        $out[] = ['level' => 'info', 'text' =>
-            'Receive processing is spread across ' . $spread['cpus'] . ' cores (the busiest has '
-            . round($spread['share'] * 100) . '% of the packets), so no single core is the bottleneck.'];
+        $out[] = ['level' => 'info', 'text' => __('api.sysctl.adv_spread_ok', ['cpus' => $spread['cpus'], 'pct' => round($spread['share'] * 100)])];
     }
 
     // udp_mem only matters when the global pool is actually being approached.
@@ -502,47 +447,28 @@ function sysctlAdvice(array $st, array $cfg): array {
     if (count($mem) === 3 && ctype_digit($mem[1])) {
         $pressure = (int)$mem[1];
         if ($pressure > 0 && $used < (int)($pressure / 10)) {
-            $out[] = ['level' => 'info', 'text' =>
-                'All UDP sockets on this machine together are using ' . number_format($used) . ' pages '
-                . '(' . sysctlHumanBytes(sysctlPagesToBytes($used, $pageSize)) . ') against a pressure '
-                . 'threshold of ' . number_format($pressure) . ' pages '
-                . '(' . sysctlHumanBytes(sysctlPagesToBytes($pressure, $pageSize)) . '). Nothing is '
-                . 'anywhere near it, so raising udp_mem would change nothing — the values circulated in '
-                . 'tuning guides are usually a larger fraction of RAM than the machine has.'];
+            $out[] = ['level' => 'info', 'text' => __('api.sysctl.adv_udp_mem_fine', [
+                'used' => number_format($used), 'used_bytes' => sysctlHumanBytes(sysctlPagesToBytes($used, $pageSize)),
+                'pressure' => number_format($pressure), 'pressure_bytes' => sysctlHumanBytes(sysctlPagesToBytes($pressure, $pageSize))])];
         } elseif ($pressure > 0) {
-            $out[] = ['level' => 'warn', 'text' =>
-                'UDP memory is within reach of the pressure threshold (' . number_format($used) . ' of '
-                . number_format($pressure) . ' pages). This is the measurement that justifies raising udp_mem.'];
+            $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_udp_mem_near', ['used' => number_format($used), 'pressure' => number_format($pressure)])];
         }
     }
 
     if (!empty($st['conflicts'])) {
-        $out[] = ['level' => 'warn', 'text' =>
-            'These keys are also set in: ' . implode(', ', array_map('strval', (array)$st['conflicts']))
-            . '. A file sorting after the panel\'s own wins at the next boot, so a change can look '
-            . 'permanent for weeks and then evaporate at a reboot nobody connects to it.'];
+        $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_conflicts', ['files' => implode(', ', array_map('strval', (array)$st['conflicts']))])];
     }
 
     if (empty($st['systemd_run'])) {
-        $out[] = ['level' => 'warn', 'text' =>
-            'systemd-run is not available, so an armed change could only be undone by the janitor '
-            . 'timer. If that timer is not running, nothing will put the old values back for you.'];
+        $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_no_systemd_run')];
     }
 
     if ($memKb > 0) {
-        $out[] = ['level' => 'info', 'text' =>
-            'This machine has ' . sysctlHumanBytes($memKb * 1024) . ' of memory and ' . $cpus
-            . ' cores; the page size is ' . number_format($pageSize) . ' bytes, which is what udp_mem '
-            . 'is counted in. Every limit below is checked against those numbers rather than against a '
-            . 'recommended value from somewhere else.'];
+        $out[] = ['level' => 'info', 'text' => __('api.sysctl.adv_machine', ['ram' => sysctlHumanBytes($memKb * 1024), 'cpus' => $cpus, 'page' => number_format($pageSize)])];
     }
 
     if (netlimitAutoEnabled($cfg)) {
-        $out[] = ['level' => 'bad', 'text' =>
-            'The automatic inbound limiter is on. It tightens when the machine\'s load rises — and '
-            . 'processing packets you previously dropped raises exactly that load, so it would read '
-            . 'this change as distress and ratchet the tracker\'s own budget down. Turn it off before '
-            . 'arming anything here.'];
+        $out[] = ['level' => 'bad', 'text' => __('api.sysctl.adv_auto_limiter')];
     }
 
     return $out;
@@ -566,13 +492,13 @@ function sysctlSuggest(array $st): array {
         $target = 8 * 1024 * 1024;
         if ($memKb > 0 && $target > (int)($memKb * 1024 / 32)) $target = (int)($memKb * 1024 / 32);
         $out['rmem_max'] = ['value' => (string)$target,
-            'why' => 'so nothing clamps a program that does ask, now or after an upgrade'];
+            'why' => __('api.sysctl.why_rmem_max')];
         if (!empty($verdict['known']) && empty($verdict['asks'])) {
             $out['rmem_default'] = ['value' => (string)$target,
-                'why' => 'this tracker never asks, so the default is the only knob that reaches its socket'];
+                'why' => __('api.sysctl.why_rmem_default')];
         }
         $out['udp_rmem_min'] = ['value' => '16384',
-            'why' => 'a floor each UDP socket keeps when the machine is under memory pressure'];
+            'why' => __('api.sysctl.why_udp_rmem_min')];
     }
     return $out;
 }

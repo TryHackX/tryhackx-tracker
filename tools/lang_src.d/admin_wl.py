@@ -35,7 +35,7 @@ add('a.wl', {
     'reload':           ('Reload tracker now', 'Przeładuj tracker teraz'),
     'reload_title':     ('Send SIGHUP to the tracker service so it re-reads the whitelist (requires the admin password)',
                          'Wyślij SIGHUP do usługi trackera, żeby wczytał whitelistę na nowo (wymaga hasła administratora)'),
-    'restart':          ('Restart&hellip;', 'Restart&hellip;'),
+    'restart':          ('Restart (on the dashboard)', 'Restart (na pulpicie)'),
     'restart_title':    ('The tracker restart button lives on the dashboard',
                          'Przycisk restartu trackera znajdziesz na pulpicie'),
 

@@ -9,7 +9,7 @@ requirePost();
 $input = readJsonBody();
 
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 // Registration is open in whitelist mode and, under a SCHEDULE, in blacklist mode too (the hashes are
 // served during the next whitelist hours; the file is regenerated at the switch).
@@ -66,12 +66,12 @@ $items = $parsed['items'];
 // us would occupy the whitelist for nothing). Bare hashes cannot prove it, so they are refused too.
 if (($cfg['whitelist_require_tracker'] ?? '0') === '1') {
     $ourHosts = whitelistTrackerHosts($cfg);
-    $need = 'Magnet link must include our tracker (' . implode(' or ', array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')])) . ')';
+    $need = __('api.wl.magnet_needs_tracker', ['trackers' => implode(' ' . __('api.wl.or') . ' ', array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')]))]);
     foreach ($items as &$it) {
         if (empty($it['hash'])) continue;
         if (empty($it['magnet']) || !magnetHasTrackerHost((string)$it['magnet'], $ourHosts)) {
             $it['hash'] = null;
-            $it['error'] = empty($it['magnet']) ? 'Bare hashes are not accepted — paste the full magnet link containing our tracker' : $need;
+            $it['error'] = empty($it['magnet']) ? __('api.wl.bare_hash_refused') : $need;
         }
     }
     unset($it);
@@ -116,21 +116,17 @@ $descFmt   = (string)($input['description_format'] ?? 'bbcode');
 // capped to what the metadata worker can actually work on at once: five hundred rows in the priority
 // lane are not resolved any faster, they just make everyone in the queue wait together.
 if (wlProbeEnabled($cfg) && $validCount > wlProbeMaxPerSubmit($cfg)) {
-    jsonResponse(['error' => 'This tracker checks each submission before serving it, so they go '
-                           . 'through a few at a time. Send at most ' . wlProbeMaxPerSubmit($cfg)
-                           . ' per submission.',
+    jsonResponse(['error' => __('api.wl.probe_max_per_submit', ['max' => wlProbeMaxPerSubmit($cfg)]),
                   'max' => wlProbeMaxPerSubmit($cfg)], 400);
 }
 
 if (($sourceUrl !== '' || $descText !== '') && $validCount > 1) {
-    jsonResponse(['error' => 'A source link or description can only be added when you register one '
-                           . 'torrent at a time — it would otherwise be attached to all of them.'], 400);
+    jsonResponse(['error' => __('api.wl.content_one_at_a_time')], 400);
 }
 // Attaching words to a torrent is its own permission: an operator may want registration open and
 // descriptions restricted, and before this there was no way to say so.
 if (($sourceUrl !== '' || $descText !== '') && !userCan($db, $cfg, 'content.submit')) {
-    jsonResponse(['error' => 'Adding a source link or description needs an account with content '
-                           . 'access on this tracker. The torrent itself can still be registered.'], 403);
+    jsonResponse(['error' => __('api.wl.content_needs_access')], 403);
 }
 if ($sourceUrl !== '') {
     $e = richtextValidateSourceUrl($sourceUrl, $cfg);
@@ -169,19 +165,16 @@ if ($sourceUrl !== '' || $descText !== '') {
 
         if ($occupied) {
             if (!userCan($db, $cfg, 'content.propose')) {
-                jsonResponse(['error' => 'This torrent already has a description. Proposing a change '
-                                       . 'to somebody else\'s needs an account with that access.'], 403);
+                jsonResponse(['error' => __('api.wl.propose_needs_access')], 403);
             }
             $maxPending = max(0, min(50, (int)($cfg['wl_edit_max_pending'] ?? 3)));
             if ($maxPending === 0) {
-                jsonResponse(['error' => 'This torrent already has a description, and this tracker does '
-                                       . 'not accept proposals to change one.'], 409);
+                jsonResponse(['error' => __('api.wl.proposals_not_accepted')], 409);
             }
             $st = $db->prepare("SELECT COUNT(*) FROM wl_content_edits WHERE whitelist_id = ? AND status = 'pending'");
             $st->execute([(int)$row['id']]);
             if ((int)$st->fetchColumn() >= $maxPending) {
-                jsonResponse(['error' => 'There are already ' . $maxPending . ' proposals waiting for this '
-                                       . 'torrent. A moderator has to work through those first.'], 429);
+                jsonResponse(['error' => __('api.wl.proposals_pending_limit', ['max' => $maxPending])], 429);
             }
             $db->prepare("INSERT INTO wl_content_edits (whitelist_id, info_hash, source_url, description,
                                  description_format, ip, user_id)

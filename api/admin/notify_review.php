@@ -5,7 +5,7 @@ $input = readJsonBody();
 $id = (int)($input['id'] ?? 0);
 
 if ($id < 1) {
-    jsonResponse(['error' => 'Invalid ID'], 400);
+    jsonResponse(['error' => __('api.report.invalid_id')], 400);
 }
 
 // Mark as reviewed (checked) when admin opens it
@@ -19,13 +19,13 @@ $stmt->execute([$id]);
 $alreadySent = $stmt->fetchColumn() > 0;
 
 if ($alreadySent) {
-    jsonResponse(['success' => true, 'already_sent' => true, 'marked_reviewed' => $wasMarked, 'message' => 'Review notification was already sent']);
+    jsonResponse(['success' => true, 'already_sent' => true, 'marked_reviewed' => $wasMarked, 'message' => __('api.report.review_already_sent')]);
 }
 
 $result = sendUnderReviewNotification($db, $id, $cfg);
 
 if ($result) {
-    jsonResponse(['success' => true, 'marked_reviewed' => $wasMarked, 'message' => 'Review notification sent']);
+    jsonResponse(['success' => true, 'marked_reviewed' => $wasMarked, 'message' => __('api.report.review_sent')]);
 } else {
-    jsonResponse(['success' => true, 'skipped' => true, 'marked_reviewed' => $wasMarked, 'message' => 'Notification skipped (no email or unsubscribed)']);
+    jsonResponse(['success' => true, 'skipped' => true, 'marked_reviewed' => $wasMarked, 'message' => __('api.report.notification_skipped')]);
 }

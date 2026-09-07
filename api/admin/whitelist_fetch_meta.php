@@ -9,10 +9,10 @@ $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($v) 
 $refresh = !empty($input['refresh']) && $input['refresh'] !== '0' && $input['refresh'] !== 'false';
 
 if (!$ids) {
-    jsonResponse(['error' => 'No IDs provided'], 400);
+    jsonResponse(['error' => __('api.wl.no_ids')], 400);
 }
 if (count($ids) > 500) {
-    jsonResponse(['error' => 'Too many IDs (max 500)'], 400);
+    jsonResponse(['error' => __('api.wl.too_many_ids')], 400);
 }
 
 $queued = whitelistRequestMeta($db, $ids, 10, $refresh);

@@ -37,19 +37,19 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-    jsonResponse(['error' => 'Method not allowed'], 405);
+    jsonResponse(['error' => __('api.common.method_not_allowed')], 405);
 }
 
 if (($cfg['tracker_stats_enabled'] ?? '0') !== '1') {
-    jsonResponse(['error' => 'Tracker statistics are disabled'], 403);
+    jsonResponse(['error' => __('api.stats.disabled')], 403);
 }
 if (!$statsPermOk) {
-    jsonResponse(['error' => 'Tracker statistics are not available for your account'], 403);
+    jsonResponse(['error' => __('api.stats.no_access')], 403);
 }
 
 $url = $cfg['tracker_stats_url'] ?? '';
 if (empty($url)) {
-    jsonResponse(['error' => 'Tracker stats URL is not configured'], 400);
+    jsonResponse(['error' => __('api.stats.url_missing')], 400);
 }
 
 $cacheFile = __DIR__ . '/../config/stats_cache.json';
@@ -206,7 +206,7 @@ if ($staleOk) {
     // No cache at all + stale_ok=1: client must wait. Tell them to retry.
     $resp = [
         'success'              => false,
-        'error'                => 'No cached statistics yet. A refresh is required.',
+        'error'                => __('api.stats.no_cache'),
         'sync_required'        => true,
         'syncing_in_background'=> $lockExists,
         'min_loading_ms'       => $minLoadingMs,
@@ -236,7 +236,7 @@ if ($lockExists) {
     }
     jsonResponse([
         'success'              => false,
-        'error'                => 'Tracker statistics are being updated. Please retry.',
+        'error'                => __('api.stats.updating'),
         'syncing_in_background'=> true,
         'sync_started_at'      => $lockStart,
         'lock_age'             => $lockAge,
@@ -263,7 +263,7 @@ if ($lockHandle === false) {
     }
     jsonResponse([
         'success'              => false,
-        'error'                => 'Tracker statistics are being updated. Please retry.',
+        'error'                => __('api.stats.updating'),
         'syncing_in_background'=> true,
         'sync_started_at'      => $lockStart,
         'lock_age'             => $lockAge,
@@ -307,14 +307,14 @@ if (empty($xmlContent)) {
     if ($cacheData) {
         $resp = $cacheData;
         $resp['cached']            = true;
-        $resp['fetch_error']       = 'Unable to refresh stats: ' . $errorMsg;
+        $resp['fetch_error']       = __('api.stats.refresh_failed', ['error' => $errorMsg]);
         $resp['min_loading_ms']    = $minLoadingMs;
         $resp['remaining_seconds'] = $clientInterval;
         jsonResponse($resp);
     }
     jsonResponse([
         'success'        => false,
-        'error'          => 'Unable to fetch tracker statistics. Connection timed out or server unreachable.',
+        'error'          => __('api.stats.fetch_failed'),
         'details'        => $errorMsg,
         'min_loading_ms' => $minLoadingMs,
     ], 502);
@@ -334,14 +334,14 @@ if ($parsed === null) {
     if ($cacheData) {
         $resp = $cacheData;
         $resp['cached']            = true;
-        $resp['fetch_error']       = 'Invalid XML response from tracker.';
+        $resp['fetch_error']       = __('api.stats.invalid_xml');
         $resp['min_loading_ms']    = $minLoadingMs;
         $resp['remaining_seconds'] = $clientInterval;
         jsonResponse($resp);
     }
     jsonResponse([
         'success'        => false,
-        'error'          => 'Failed to parse XML response from tracker.',
+        'error'          => __('api.stats.xml_parse_failed'),
         'min_loading_ms' => $minLoadingMs,
     ], 502);
 }

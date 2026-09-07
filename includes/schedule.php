@@ -285,7 +285,7 @@ function scheduleActualMode(array $cfg, bool $fresh = false): array {
     $out = ['ok' => false, 'mode' => null, 'error' => null, 'output' => '', 'at' => 0, 'cached' => false];
     $cmd = scheduleSwitchCommand($cfg);
     if ($cmd === '') {
-        $out['error'] = 'No mode switch command is configured, so the panel cannot ask what is running.';
+        $out['error'] = __('api.schedule.no_switch_cmd');
         return $out;
     }
     $state = function_exists('whitelistStateRead') ? whitelistStateRead() : [];
@@ -295,7 +295,7 @@ function scheduleActualMode(array $cfg, bool $fresh = false): array {
                 'output' => (string)($state['mode_actual_output'] ?? ''), 'at' => $at, 'cached' => true];
     }
     if (!trackerExecAvailable()) {
-        $out['error'] = 'exec() is disabled — cannot ask the helper which mode is running.';
+        $out['error'] = __('api.schedule.exec_disabled_status');
         return $out;
     }
     $lines = []; $rc = null;
@@ -304,14 +304,13 @@ function scheduleActualMode(array $cfg, bool $fresh = false): array {
     $out['output'] = mb_substr($output, 0, 500);
     $last = strtolower(trim((string)end($lines)));
     if ($rc !== 0) {
-        $out['error'] = "The helper failed (exit $rc): " . ($output !== '' ? mb_substr($output, 0, 200) : 'no output');
+        $out['error'] = __('api.schedule.helper_failed', ['code' => $rc, 'out' => $output !== '' ? mb_substr($output, 0, 200) : __('api.schedule.no_output')]);
         return $out;
     }
     if ($last !== 'white' && $last !== 'black') {
         // Exit 0 with an unreadable answer is NOT "probably fine". Reporting a mode we did not read
         // is how the panel got into trouble in the first place.
-        $out['error'] = 'The helper exited 0 but its last line was not "white" or "black": '
-                      . ($last === '' ? '(empty)' : mb_substr($last, 0, 80));
+        $out['error'] = __('api.schedule.bad_last_line', ['line' => $last === '' ? __('api.schedule.empty') : mb_substr($last, 0, 80)]);
         return $out;
     }
     $out['ok'] = true;
@@ -360,7 +359,7 @@ function scheduleModeAgreement(array $cfg, bool $fresh = false): array {
 function scheduleSyncBansToBlacklist(PDO $db, array $cfg): array {
     $out = ['ok' => true, 'added' => 0, 'error' => null];
     $path = normalizeListPath((string)($cfg['blacklist_path'] ?? ''));
-    if ($path === '') { $out['ok'] = false; $out['error'] = 'Blacklist path is not configured.'; return $out; }
+    if ($path === '') { $out['ok'] = false; $out['error'] = __('api.schedule.bl_path_missing'); return $out; }
     try {
         $banned = $db->query("SELECT info_hash FROM banned_hashes")->fetchAll(PDO::FETCH_COLUMN) ?: [];
     } catch (\Throwable $e) {
@@ -374,11 +373,11 @@ function scheduleSyncBansToBlacklist(PDO $db, array $cfg): array {
     return withBlacklistLock($path, function () use ($db, $path, $banned, $out) {
     $present = [];
     if (is_file($path)) {
-        if (!is_readable($path)) return ['ok' => false, 'added' => 0, 'error' => "Blacklist file is not readable: $path"];
+        if (!is_readable($path)) return ['ok' => false, 'added' => 0, 'error' => __('api.schedule.bl_not_readable', ['path' => $path])];
         foreach ((array)@file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $l) $present[strtolower(trim($l))] = true;
-        if (!is_writable($path)) return ['ok' => false, 'added' => 0, 'error' => "Blacklist file is not writable: $path"];
+        if (!is_writable($path)) return ['ok' => false, 'added' => 0, 'error' => __('api.schedule.bl_not_writable', ['path' => $path])];
     } elseif (!is_writable(dirname($path))) {
-        return ['ok' => false, 'added' => 0, 'error' => 'Blacklist directory is not writable: ' . dirname($path)];
+        return ['ok' => false, 'added' => 0, 'error' => __('api.schedule.bl_dir_not_writable', ['path' => dirname($path)])];
     }
     $missing = [];
     foreach ($banned as $h) {
@@ -387,11 +386,11 @@ function scheduleSyncBansToBlacklist(PDO $db, array $cfg): array {
     }
     if (!$missing) return $out;
     $fh = @fopen($path, 'ab');
-    if (!$fh) return ['ok' => false, 'added' => 0, 'error' => "Cannot open blacklist file for append: $path"];
+    if (!$fh) return ['ok' => false, 'added' => 0, 'error' => __('api.schedule.bl_open_failed', ['path' => $path])];
     @flock($fh, LOCK_EX);
     $ok = @fwrite($fh, implode("\n", $missing) . "\n") !== false;
     @fflush($fh); @flock($fh, LOCK_UN); @fclose($fh);
-    if (!$ok) return ['ok' => false, 'added' => 0, 'error' => "Write to blacklist file failed: $path"];
+    if (!$ok) return ['ok' => false, 'added' => 0, 'error' => __('api.schedule.bl_write_failed', ['path' => $path])];
     $out['added'] = count($missing);
     if (function_exists('recordBlacklistChange')) recordBlacklistChange('add');
     return $out;
@@ -452,7 +451,7 @@ function scheduleSwitchTo(PDO $db, array &$cfg, string $desired, array &$out): b
     // 2) switch the service
     if ($cmd !== '') {
         if (!trackerExecAvailable()) {
-            $out['ok'] = false; $out['error'] = 'exec() is disabled — cannot run the mode switch command.';
+            $out['ok'] = false; $out['error'] = __('api.schedule.exec_disabled_switch');
             error_log('[schedule] ' . $out['error']);
             scheduleRecordResult($out);
             return false;
@@ -466,14 +465,14 @@ function scheduleSwitchTo(PDO $db, array &$cfg, string $desired, array &$out): b
         $lastLine = strtolower(trim((string)end($lines)));
         if ($rc !== 0) {
             $out['ok'] = false;
-            $out['error'] = "Switch command failed (exit $rc): " . ($output !== '' ? mb_substr($output, 0, 300) : 'no output');
+            $out['error'] = __('api.schedule.switch_failed', ['code' => $rc, 'out' => $output !== '' ? mb_substr($output, 0, 300) : __('api.schedule.no_output')]);
             error_log('[schedule] ' . $out['error']);
             scheduleRecordResult($out);
             return false;
         }
         if (($lastLine === 'white' || $lastLine === 'black') && $lastLine !== $arg) {
             $out['ok'] = false;
-            $out['error'] = "Switch command exited 0 but reports mode '$lastLine' (wanted '$arg').";
+            $out['error'] = __('api.schedule.switch_wrong_mode', ['mode' => $lastLine, 'wanted' => $arg]);
             error_log('[schedule] ' . $out['error']);
             scheduleRecordResult($out);
             return false;

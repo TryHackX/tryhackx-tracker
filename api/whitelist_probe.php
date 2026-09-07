@@ -10,15 +10,15 @@
  * not read the torrent" send somebody to completely different places, and collapsing them into
  * "failed" would be throwing away the only useful half of the answer.
  */
-if (!wlProbeEnabled($cfg)) jsonResponse(['error' => 'This tracker does not check submissions.'], 404);
+if (!wlProbeEnabled($cfg)) jsonResponse(['error' => __('api.wl.probe_disabled')], 404);
 
 $raw = (string)($_GET['hashes'] ?? '');
 $hashes = array_values(array_filter(array_map('trim', explode(',', $raw))));
-if (!$hashes) jsonResponse(['error' => 'No hashes given'], 400);
-if (count($hashes) > 64) jsonResponse(['error' => 'Too many at once'], 400);
+if (!$hashes) jsonResponse(['error' => __('api.wl.probe_no_hashes')], 400);
+if (count($hashes) > 64) jsonResponse(['error' => __('api.wl.probe_too_many')], 400);
 
 if (!rateLimitAllow('wlprobe', ipBucket(getClientIp($cfg)), 240, 60)) {
-    jsonResponse(['error' => 'Slow down.'], 429);
+    jsonResponse(['error' => __('api.wl.slow_down')], 429);
 }
 
 $status = wlProbeStatus($db, $hashes);

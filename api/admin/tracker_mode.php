@@ -19,30 +19,28 @@
 requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? 'status');
-if (!in_array($op, ['status', 'switch'], true)) jsonResponse(['error' => 'Unknown operation'], 400);
+if (!in_array($op, ['status', 'switch'], true)) jsonResponse(['error' => __('api.index.unknown_op')], 400);
 
 if ($op === 'status') {
     // fresh: the whole point of pressing Test is not to be told what we already believed
     $agree = scheduleModeAgreement($cfg, true);
     $msg = $agree['known']
         ? ($agree['match']
-            ? 'The tracker is running ' . $agree['actual'] . ' mode, which is what the panel says.'
-            : 'MISMATCH — the panel says ' . $agree['panel'] . ' but the tracker is running '
-              . $agree['actual'] . '. Press “Switch the tracker now”, or change the panel back.')
-        : 'Could not read the running mode. ' . ($agree['error'] ?? '');
+            ? __('api.schedule.mode_matches', ['actual' => $agree['actual']])
+            : __('api.schedule.mode_mismatch', ['panel' => $agree['panel'], 'actual' => $agree['actual']]))
+        : __('api.schedule.mode_unreadable', ['error' => $agree['error'] ?? '']);
     jsonResponse(['success' => $agree['known'], 'message' => $msg] + $agree);
 }
 
 // ── switching ───────────────────────────────────────────────────────────────
 $mode = (string)($input['mode'] ?? '');
 if (!in_array($mode, ['whitelist', 'blacklist'], true)) {
-    jsonResponse(['error' => 'mode must be "whitelist" or "blacklist"'], 400);
+    jsonResponse(['error' => __('api.schedule.mode_invalid')], 400);
 }
 requireAdminReauth((string)($input['password'] ?? ''), $cfg);
 
 if (scheduleSwitchCommand($cfg) === '') {
-    jsonResponse(['error' => 'No mode switch command is configured, so the panel cannot switch the '
-                           . 'tracker. Set it under Tracker mode & whitelist, or switch by hand on the server.'], 409);
+    jsonResponse(['error' => __('api.schedule.no_switch_cmd_switch')], 409);
 }
 
 $out = ['ok' => true, 'changed' => false, 'from' => trackerMode($cfg), 'to' => $mode,
@@ -50,7 +48,7 @@ $out = ['ok' => true, 'changed' => false, 'from' => trackerMode($cfg), 'to' => $
 if (!scheduleSwitchTo($db, $cfg, $mode, $out)) {
     auditNote(['target_id' => $mode, 'summary' => 'switch to ' . $mode . ' failed']);
     // The setting was NOT flipped: scheduleSwitchTo only writes it after the service really changed.
-    jsonResponse(['error' => $out['error'] ?? 'The switch failed.', 'output' => $out['output'],
+    jsonResponse(['error' => $out['error'] ?? __('api.schedule.switch_failed_short'), 'output' => $out['output'],
                   'notes' => $out['notes']], 500);
 }
 scheduleRecordResult($out);
@@ -60,8 +58,7 @@ auditNote(['target_id' => $mode, 'summary' => 'tracker switched to ' . $mode,
 $agree = scheduleModeAgreement($cfg, true);
 jsonResponse([
     'success' => true,
-    'message' => 'The tracker is now in ' . $mode . ' mode'
-               . ($agree['known'] ? ' (confirmed with the helper).' : '.')
+    'message' => ($agree['known'] ? __('api.schedule.now_in_mode_confirmed', ['mode' => $mode]) : __('api.schedule.now_in_mode', ['mode' => $mode]))
                . ($out['notes'] ? ' ' . implode(' · ', $out['notes']) : ''),
     'mode' => $mode,
     'notes' => $out['notes'],

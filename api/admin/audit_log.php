@@ -12,7 +12,7 @@
 requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? 'list');
-if (!in_array($op, ['list', 'actors'], true)) jsonResponse(['error' => 'Unknown operation'], 400);
+if (!in_array($op, ['list', 'actors'], true)) jsonResponse(['error' => __('api.admin.unknown_op')], 400);
 
 // Reading the log is not itself an event worth a line; otherwise every page load of this screen
 // would appear in the thing it is showing.

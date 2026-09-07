@@ -3882,3 +3882,25 @@ add('js.users', {
     'write_why_unsubscribed': (':n unsubscribed',
         ':n wypisało się'),
 })
+
+
+# ── 1.36.0: file paging, process cost ──────────────────────────────────────
+add('js.app', {
+    'files_load_more': ('Load more files (:n loaded)', 'Wczytaj więcej plików (wczytano :n)'),
+})
+add('js.index', {
+    'files_load_all': ('Load the whole file list', 'Wczytaj całą listę plików'),
+})
+add('js.wl', {
+    'files_load_all': ('Load the whole file list', 'Wczytaj całą listę plików'),
+})
+add('js.net', {
+    'procs':      ('Processes', 'Procesy'),
+    'proc_title': (':n process(es) — CPU of one core over the last poll interval, resident memory now',
+                   ':n proces(ów) — CPU jednego rdzenia w ostatnim interwale odpytywania, pamięć rezydentna teraz'),
+})
+
+add('js.app', {
+    'search_too_short': ('Type at least 3 characters (or a hex prefix of an info hash).',
+        'Wpisz co najmniej 3 znaki (albo szesnastkowy początek info hasha).'),
+})

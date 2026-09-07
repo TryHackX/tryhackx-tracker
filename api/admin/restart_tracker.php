@@ -22,15 +22,15 @@ requireAdminReauth($password, $cfg);
 
 $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
 if ($service === '') {
-    jsonResponse(['error' => 'No tracker service name is configured. Set it in Settings first.'], 400);
+    jsonResponse(['error' => __('api.reload.no_service')], 400);
 }
 if (!isServiceNameValid($service)) {
-    jsonResponse(['error' => 'The configured service name is invalid. Fix it in Settings.'], 400);
+    jsonResponse(['error' => __('api.reload.bad_service')], 400);
 }
 
 // exec() must exist and not be blacklisted in disable_functions.
 if (!trackerExecAvailable()) {
-    jsonResponse(['error' => 'PHP exec() is disabled on this server — the service cannot be restarted from the panel.'], 500);
+    jsonResponse(['error' => __('api.restart.exec_disabled')], 500);
 }
 
 $useSudo = (($cfg['opentracker_restart_use_sudo'] ?? '1') === '1');
@@ -46,17 +46,17 @@ if ($res['ok']) {
     whitelistNoteReloaded(true, $outStr ?? '');
     jsonResponse([
         'success' => true,
-        'message' => 'Tracker service "' . $service . '" restarted.',
+        'message' => __('api.restart.restarted', ['service' => $service]),
         'output'  => $outStr,
     ]);
 }
 
 $hint = $useSudo
-    ? 'Grant the web user permission, e.g. sudoers line: "www-data ALL=(root) NOPASSWD: /bin/systemctl restart ' . $service . '".'
-    : 'The web user must be allowed to run "systemctl restart ' . $service . '" (consider enabling "Run via sudo").';
+    ? __('api.restart.hint_sudo', ['service' => $service])
+    : __('api.restart.hint_nosudo', ['service' => $service]);
 
 jsonResponse([
-    'error'  => 'Restart failed (exit ' . (int)$ret . '). ' . ($outStr !== '' ? $outStr : $hint),
+    'error'  => __('api.restart.failed', ['code' => (int)$ret, 'detail' => ($outStr !== '' ? $outStr : $hint)]),
     'output' => $outStr,
     'hint'   => $hint,
 ], 500);

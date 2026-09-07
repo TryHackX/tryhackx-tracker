@@ -4,6 +4,90 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.36.0] — 2026-09-07
+
+### OpenTracker — round six is in production
+
+Both binaries swapped at 12:42 (the round-five builds are kept in
+`/home/debian/backup-opentracker-20260907/`); the service restarted once and the swarm is
+rebuilding. The seven review fixes from 1.35.0 are what runs now.
+
+### Changed — every poll gets its whole file
+
+The conditional upsert made a full pass take 67–92 s against a 90-second budget, so three morning
+polls still ran out of time. Production runs `index_poll_budget = 120` now (the setting's cap);
+the default stays 45 for a fresh install, where the catalogue is small.
+
+### Added
+
+- **The file list on the public search page is paged.** `index_files` takes `offset=` and
+  answers 2 000 files at a time; the page loads the next slice when the reader scrolls to the end
+  of the list (an IntersectionObserver on a sentinel) or presses *Load more files*. The admin
+  modals on the Index and Whitelist pages, which cap at 5 000, gained a *Load the whole file
+  list* button (`files_all=1`).
+- **What the machine's own processes cost** on the Traffic page: CPU of one core and resident
+  memory for MariaDB, the tracker, php-fpm and the metadata worker, read from `/proc`
+  (`includes/procstat.php`). CPU is a rate, so it is measured over the interval since the previous
+  poll — the previous reading lives in `config/proc_usage.json` — and the first reading after a
+  restart shows memory only.
+- **The language switcher follows you down the Settings page.** A copy of the header's switcher
+  sits at the right end of the sticky toolbar and fades in when the header has scrolled away
+  (an IntersectionObserver on the header; one 280 ms transition, no layout shift; hidden on phones
+  where the toolbar is not sticky).
+
+### Added — the API answers in the visitor's language
+
+The last untranslated layer: the sentences the PHP side sends to the browser — every
+`jsonResponse(['error' => …])` and `message`, the whitelist status warnings, the poll's error
+texts, the federation and page-editor replies — go through `__('api.*')` now, about 750 keys in
+`tools/lang_src.d/api.py`. The English values are byte-identical to the former literals, and
+`__()` returns English in CLI code without `langInit()` (`langEnsure()`), so the tests that
+compare messages and the janitor's log lines are unchanged. Machine codes the client or the tests
+compare (`not_found`, `rate_limit`, `login_required` …) and the one sentence the public script
+matches by content stay as they are; the one sentence left in English is a server-to-server
+reply (`api/v1/whitelist_submit.php`) read by machines. Dictionary: 3 936 → 4 697 strings.
+
+### Security — four of the review's "do now" items, each written and adversarially reviewed
+
+- **The owner's password before changing what the server executes or whom it trusts.** Every
+  dangerous action re-asked the password, but the settings that define the commands those
+  actions run (`tracker_mode_switch_cmd`, `backup_cmd`, `sysctl_cmd`, `ot_cluster_cmd`, the
+  interpreter and script paths, the service name), the proxy trust pair (`trusted_proxy_ips`,
+  `client_ip_header`) and `hmac_secret` saved on a session cookie alone, and admin-group accounts
+  reach that endpoint. `save_settings` keeps one `$reauthKeys` list, compared against the same
+  fallbacks the form prints; a changed value answers `reauth_required` and the settings page
+  opens its confirm-password modal with a body saying why. The never-called `attemptLogin()`,
+  which granted a session without 2FA, is gone.
+- **A public search of one or two characters is refused** (HTTP 400, "Type at least 3 characters
+  (or a hex prefix of an info hash)"; the page says the same under the box and does not fire the
+  request). Such a term skipped fulltext and fell to `name LIKE '%x%'` over 1.5 M rows, twice —
+  the shape of a recorded 24-minute outage. Hex prefixes keep working; they are indexed.
+- **Translation uploads are sanitised.** Values printed by `__()` are HTML by design, so a
+  contributed JSON was site-wide stored XSS. `langSanitizeValue()` allows `a strong em b i code
+  kbd br span small sup` with no attributes except `href` on `a` limited to http, https and
+  relative paths — decoded first, so `&#106avascript:` and `/\host` do not slip through — and
+  refuses anything else; dropped keys are listed in the reply. Hostile fixtures in `tests/lang_test.php`.
+- **The web bootstrap fails fast.** A deferred heavy migration no longer makes every request wait
+  five seconds on the schema lock (0-second wait outside the CLI, the request runs on the current
+  schema); a database that is down answers 503 with `Retry-After: 60` — a static maintenance page
+  for the site, JSON for the API — instead of a blank 500; the installer writes
+  `PDO::ATTR_TIMEOUT => 3` into `config/database.php` (existing installs add the line by hand,
+  see INSTALL).
+
+### Fixed
+
+- **Chrome offered a saved e-mail and password in the search boxes of Reports, Whitelist, Users
+  and Settings.** Every one of those pages has a confirm-password modal, and a form with a password
+  field and no named username is a sign-in form to the password manager, which then picks the
+  nearest text box on the page — the search box — as the username. Each confirm-password input now
+  has a visually hidden username sibling (`autocomplete="username"`, the admin login) and its own
+  `autocomplete="current-password"` role, so the manager has its pairing and leaves the search
+  boxes alone.
+- Two buttons whose whole label was *Restart…* read as clipped; they say *Restart (on the
+  dashboard)* and *Restart the tracker…* now.
+- `harness.c`, a 38-line lab harness from the accesslist review, had been committed to the
+  repository root by mistake; removed.
+
 ## [1.35.0] — 2026-09-06
 
 ### Changed — a poll no longer rewrites what did not change

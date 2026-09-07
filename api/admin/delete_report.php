@@ -5,7 +5,7 @@ $input = readJsonBody();
 $id = (int)($input['id'] ?? 0);
 
 if ($id < 1) {
-    jsonResponse(['error' => 'Invalid ID'], 400);
+    jsonResponse(['error' => __('api.report.invalid_id')], 400);
 }
 
 $db = getDb();
@@ -14,7 +14,7 @@ $stmt->execute([$id]);
 $report = $stmt->fetch();
 
 if (!$report) {
-    jsonResponse(['error' => 'Report not found'], 404);
+    jsonResponse(['error' => __('api.report.not_found')], 404);
 }
 
 // Notify reporter about archiving

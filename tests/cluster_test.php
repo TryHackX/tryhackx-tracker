@@ -164,7 +164,9 @@ check('a reload that returned 0 is re-checked, because a SIGHUP can kill an unpa
 
 $apply = file_get_contents($root . '/api/admin/ot_cluster_apply.php');
 check('creating an instance is refused while the automatic limiter is on',
-      str_contains($apply, 'netlimitAutoEnabled($cfg)') && str_contains($apply, 'throttling the primary'));
+      // the sentence lives in the dictionary now: the endpoint must ask for its key, and the key must still say it
+      str_contains($apply, 'netlimitAutoEnabled($cfg)') && str_contains($apply, "__('api.cluster.auto_limiter_on')")
+      && str_contains(__('api.cluster.auto_limiter_on'), 'throttling the primary'));
 check('create, remove and restart are password-gated', str_contains($apply, 'requireAdminReauth($password, $cfg)'));
 check('plan and reload are not — neither changes the roster',
       strpos($apply, "if (\$op === 'plan')") < strpos($apply, '$password = (string)'));
@@ -183,7 +185,8 @@ check('the schema version was bumped past the kernel-buffer release', TRACKER_SC
 $sv = file_get_contents($root . '/api/admin/save_settings.php');
 check('the three keys are in the save allow-list', str_contains($sv, "'ot_cluster_cmd', 'ot_cluster_enabled', 'ot_cluster_port_base'"));
 check('the command is validated on save', str_contains($sv, 'otClusterValidCommand'));
-check('a privileged port base is refused on save', str_contains($sv, 'below 1024 belongs to things that were here first'));
+check('a privileged port base is refused on save',
+      str_contains($sv, "__('api.settings.cluster_port_base_invalid')") && str_contains(__('api.settings.cluster_port_base_invalid'), 'below 1024 belongs to things that were here first'));
 check('findable in the settings search', str_contains(file_get_contents($root . '/includes/settings_catalog.php'), "'ot_cluster_cmd'"));
 $tpl = file_get_contents($root . '/templates/admin/settings.php');
 check('the Settings section exists with all three controls',

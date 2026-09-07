@@ -3,7 +3,7 @@ requirePost();
 
 $input = readJsonBody();
 if (!$input) {
-    jsonResponse(['error' => 'Invalid input'], 400);
+    jsonResponse(['error' => __('api.appeal.invalid_input')], 400);
 }
 
 $id = (int)($input['id'] ?? 0);
@@ -11,11 +11,11 @@ $newStatus = $input['status'] ?? '';
 $adminResponse = trim($input['admin_response'] ?? '');
 
 if ($id < 1) {
-    jsonResponse(['error' => 'Invalid appeal ID'], 400);
+    jsonResponse(['error' => __('api.appeal.invalid_id')], 400);
 }
 
 if (!in_array($newStatus, ['accepted', 'rejected'], true)) {
-    jsonResponse(['error' => 'Status must be accepted or rejected'], 400);
+    jsonResponse(['error' => __('api.appeal.status_invalid')], 400);
 }
 
 // Fetch appeal
@@ -23,7 +23,7 @@ $stmt = $db->prepare("SELECT * FROM appeals WHERE id = ?");
 $stmt->execute([$id]);
 $appeal = $stmt->fetch();
 if (!$appeal) {
-    jsonResponse(['error' => 'Appeal not found'], 404);
+    jsonResponse(['error' => __('api.appeal.not_found')], 404);
 }
 
 $appealType = $appeal['appeal_type'] ?? 'unblock';
@@ -167,7 +167,7 @@ $reload = isset($listChange) ? ($listChange['reload'] ?? null) : null;
 
 $response = [
     'success' => true,
-    'message' => 'Appeal ' . $newStatus,
+    'message' => __('api.appeal.resolved', ['status' => $newStatus]),
     'unblocked' => $unblocked,
     'blocked' => $blocked,
     'auto_closed' => $autoClosed,

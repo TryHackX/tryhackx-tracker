@@ -1,7 +1,7 @@
 <?php
 // Force a full-scrape poll right now (admin button). Bounded by index_poll_budget.
 requirePost();
-if (!indexEnabled($cfg)) jsonResponse(['success' => false, 'error' => 'Index is disabled'], 400);
+if (!indexEnabled($cfg)) jsonResponse(['success' => false, 'error' => __('api.index.disabled')], 400);
 // Long CPU-bound work (download + parse + upsert of a full scrape): release the session so other admin
 // requests (status poll, other tabs) don't block behind us, keep running if the tab closes, and give PHP
 // enough execution time for the fetch (min(90,budget)) + parse budget + the DELETE-JOIN overhead.

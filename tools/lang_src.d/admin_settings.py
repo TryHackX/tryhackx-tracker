@@ -1942,3 +1942,11 @@ add('', {
     'settings.pc_markers_note': ('Blocks wrapped in [[if:name]] … [[/if]] (or [[ifnot:name]]) appear only while that setting is on, so a page you save keeps following the tracker mode and the account system exactly as the built-in one does. Restore brings back the built-in text for this language, markers included.',
         'Bloki ujęte w [[if:name]] … [[/if]] (albo [[ifnot:name]]) pojawiają się tylko wtedy, gdy dane ustawienie jest włączone, więc zapisana strona nadal podąża za trybem trackera i systemem kont dokładnie tak jak wbudowana. „Przywróć" przywraca wbudowany tekst dla tego języka, razem ze znacznikami.'),
 })
+
+# ── re-authentication and the translation upload (1.36.0) ──────────────────
+add('', {
+    'settings.confirm_body_exec': ('You are changing a setting that decides what the server executes or whom it trusts. Enter your admin password to confirm and apply these changes.',
+        'Zmieniasz ustawienie, które decyduje o tym, co serwer uruchamia lub komu ufa. Podaj hasło administratora, aby potwierdzić i zastosować te zmiany.'),
+    'settings.lang_upload_dropped': (':count keys were dropped because their text carried markup that is not allowed: :keys',
+        'Pominięto :count kluczy, bo ich tekst zawierał niedozwolone znaczniki HTML: :keys'),
+})

@@ -169,7 +169,10 @@
                     <form id="delete-perm-form">
                         <div class="mb-3">
                             <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.reports.admin_pass') ?></label>
-                            <input type="password" class="form-control bg-dark text-light border-secondary" id="del-password" required>
+                            <?php // For the browser's password manager: this form has a password field, so without a named
+                                  // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
+                            <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
+                            <input type="password" autocomplete="current-password" class="form-control bg-dark text-light border-secondary" id="del-password" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= __('a.reports.del_reason') ?></label>
@@ -215,7 +218,10 @@
                     <form id="restart-tracker-form">
                         <div class="mb-3">
                             <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.reports.admin_pass') ?></label>
-                            <input type="password" class="form-control bg-dark text-light border-secondary" id="restart-password" required>
+                            <?php // For the browser's password manager: this form has a password field, so without a named
+                                  // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
+                            <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
+                            <input type="password" autocomplete="current-password" class="form-control bg-dark text-light border-secondary" id="restart-password" required>
                         </div>
                         <div class="d-flex justify-content-center gap-2 mt-3">
                             <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
@@ -242,7 +248,10 @@
                     <form id="reload-tracker-form">
                         <div class="mb-3">
                             <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.reports.admin_pass') ?></label>
-                            <input type="password" class="form-control bg-dark text-light border-secondary" id="reload-password" required>
+                            <?php // For the browser's password manager: this form has a password field, so without a named
+                                  // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
+                            <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
+                            <input type="password" autocomplete="current-password" class="form-control bg-dark text-light border-secondary" id="reload-password" required>
                         </div>
                         <div class="d-flex justify-content-center gap-2 mt-3">
                             <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>

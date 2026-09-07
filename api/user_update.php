@@ -13,7 +13,7 @@ requirePost();
 
 $input = readJsonBody();
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 if (!usersEnabled($cfg)) jsonResponse(['error' => 'accounts_disabled'], 400);
 $u = currentUser($db);
@@ -26,15 +26,15 @@ if (!empty($input['cancel_email_change'])) {
 }
 
 if (!password_verify((string)($input['current_password'] ?? ''), (string)$u['pass_hash'])) {
-    jsonResponse(['error' => 'Current password is incorrect.'], 403);
+    jsonResponse(['error' => __('api.account.current_password_wrong')], 403);
 }
 
 $emailSet = array_key_exists('email', $input);
 $newPass = (string)($input['new_password'] ?? '');
 if ($newPass !== '' && !userValidPassword($newPass)) {
-    jsonResponse(['error' => 'New password: ' . USER_PASSWORD_RULES . '.'], 400);
+    jsonResponse(['error' => __('api.account.new_password_rules', ['rules' => USER_PASSWORD_RULES])], 400);
 }
-if (!$emailSet && $newPass === '') jsonResponse(['error' => 'Nothing to change.'], 400);
+if (!$emailSet && $newPass === '') jsonResponse(['error' => __('api.account.nothing_to_change')], 400);
 
 $changed = [];
 $emailStage = null;
@@ -43,10 +43,10 @@ if ($emailSet) {
     $r = userEmailChangeStart($db, $cfg, $u, (string)$input['email']);
     if (isset($r['error'])) {
         $msgs = [
-            'invalid_email' => 'That email address does not look valid.',
-            'same_email'    => 'That is already your address.',
-            'email_taken'   => 'An account with this email already exists.',
-            'cooldown'      => 'The email address was changed recently — the next change is possible after ' . ($r['until'] ?? '') . '.',
+            'invalid_email' => __('api.users.invalid_email'),
+            'same_email'    => __('api.account.email_same_yours'),
+            'email_taken'   => __('api.users.email_taken'),
+            'cooldown'      => __('api.account.email_cooldown_2', ['until' => $r['until'] ?? '']),
         ];
         jsonResponse(['error' => $msgs[$r['error']] ?? $r['error']], 400);
     }

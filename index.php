@@ -46,7 +46,21 @@ require_once __DIR__ . '/includes/cluster.php';
 // still invisible.
 require_once __DIR__ . '/includes/tuner.php';
 
-$db = getDb();
+// MariaDB being down used to be a blank 500 from an uncaught PDOException -- the one page that ought
+// to say "come back in a minute" said nothing at all, and said it slowly (the connect waited for the
+// TCP timeout). A 503 with Retry-After is what a crawler, a load balancer and a person all understand,
+// and the template behind it touches nothing but the dictionary, so it cannot fail the same way.
+// One log line per failed request: the message names the host and the reason, and that is what the
+// operator greps for at three in the morning.
+try {
+    $db = getDb();
+} catch (PDOException $e) {
+    error_log('[tracker] database unavailable: ' . $e->getMessage());
+    http_response_code(503);
+    header('Retry-After: 60');
+    include __DIR__ . '/templates/maintenance.php';
+    exit;
+}
 // A ceiling on how long ONE query may run inside a web request. Not a substitute for writing the
 // query properly — a bad plan is still a bug — but the difference between a bad plan costing one
 // visitor an error page and it holding a php-fpm child until the whole site stops answering. The

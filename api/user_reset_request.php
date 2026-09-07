@@ -8,7 +8,7 @@ requirePost();
 
 $input = readJsonBody();
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 if (!usersEnabled($cfg)) jsonResponse(['error' => 'accounts_disabled'], 400);
 if (!captchaConfigured($cfg)) jsonResponse(['error' => 'unavailable'], 503);
@@ -31,7 +31,7 @@ $u = userFindByLogin($db, (string)($input['login'] ?? ''));
 ignore_user_abort(true);
 while (ob_get_level()) ob_end_clean();
 header('Content-Type: application/json; charset=utf-8');
-echo json_encode(['success' => true, 'message' => 'If that account exists and has an email address, a reset link is on its way.']);
+echo json_encode(['success' => true, 'message' => __('api.account.reset_link_sent')]);
 if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
 else flush();

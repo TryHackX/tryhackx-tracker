@@ -5,11 +5,11 @@ requirePost();
 $input = readJsonBody();
 $label = trim((string)($input['label'] ?? ''));
 if ($label === '') {
-    jsonResponse(['error' => 'Label is required'], 400);
+    jsonResponse(['error' => __('api.api_client.label_required')], 400);
 }
 $scope = trim((string)($input['scope'] ?? 'whitelist'));
 if (!in_array($scope, apiClientScopes(), true)) {
-    jsonResponse(['error' => 'Invalid scope (whitelist | users | federation | all)'], 400);
+    jsonResponse(['error' => __('api.api_client.invalid_scope')], 400);
 }
 $c = apiClientCreate($db, $label, $scope);
 jsonResponse([

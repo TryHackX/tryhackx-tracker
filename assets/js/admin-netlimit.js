@@ -291,6 +291,22 @@
                 el('span', { text: t('js.net.per_core', {n: j.load_per_core.toFixed(2)}) }), ' ',
                 el('span', { className: 'wl-small text-muted', text: j.cpus ? t('js.net.cores', {n: j.cpus}) : '' }),
             ]));
+            // The processes behind the load: CPU of one core (like top) and resident memory, from
+            // /proc, over the interval since the previous poll. Nothing here is a setting; it is the
+            // answer to "is it the database or the tracker".
+            if (j.procs && Object.keys(j.procs).length) {
+                const wrap = el('div', { className: 'nl-procs' });
+                Object.keys(j.procs).forEach(k => {
+                    const p = j.procs[k];
+                    if (!p.procs) return;
+                    wrap.appendChild(el('span', { className: 'nl-proc', title: t('js.net.proc_title', { n: p.procs }) }, [
+                        el('span', { className: 'nl-proc-name', text: p.label }),
+                        el('span', { className: 'nl-proc-cpu', text: p.cpu_pct === null || p.cpu_pct === undefined ? '—' : p.cpu_pct.toFixed(p.cpu_pct < 10 ? 1 : 0) + ' %' }),
+                        el('span', { className: 'nl-proc-rss', text: window.AdminCommon.fmtBytes(p.rss_bytes || 0) }),
+                    ]));
+                });
+                grid.appendChild(kv(t('js.net.procs'), [wrap]));
+            }
         }
 
         // The metadata worker's share of the machine, from two polls of raw counters.

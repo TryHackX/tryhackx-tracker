@@ -23,6 +23,7 @@
              synonyms come from api.php?endpoint=admin/settings_catalog and are never printed here. -->
         <div class="settings-toolbar" id="settings-toolbar">
             <div class="settings-search-row">
+                <span class="tb-lang" id="tb-lang" aria-hidden="true"></span>
                 <div class="settings-search-box">
                     <i class="bi bi-search settings-search-icon"></i>
                     <?php // readonly until the first focus keeps Chrome's PROFILE autofill away; what still offered a saved
@@ -31,6 +32,9 @@
       // and its password roles, so this box is no longer the candidate. data-* attributes tell the other
       // managers the same. admin-settings.js drops readonly on focus. ?>
                     <input type="search" id="settings-search" name="settings-q" class="form-control bg-dark text-light border-secondary" placeholder="<?= _h('settings.search_ph') ?>" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" autocapitalize="off" spellcheck="false" readonly data-unlock-on-focus="1" aria-label="<?= _h('settings.search_aria') ?>" aria-describedby="settings-search-count">
+                    <?php // The language switcher's understudy: a copy of the header's switcher that fades in here
+                          // when the header has scrolled away (admin-settings.js clones it and watches the header).
+                          // Settings is the one page long enough for the header to be a scroll away. ?>
                     <button type="button" class="settings-search-clear d-hidden" id="settings-search-clear" title="<?= _h('settings.search_clear') ?>" aria-label="<?= _h('settings.search_clear') ?>"><i class="bi bi-x-lg"></i></button>
                 </div>
                 <span class="settings-search-count" id="settings-search-count" role="status" aria-live="polite"></span>
@@ -49,7 +53,7 @@
 
         <form id="settings-form">
             <!-- Site Configuration -->
-            <div class="settings-section" id="section-site" data-group="general" data-title="Site Configuration">
+            <div class="settings-section" id="section-site" data-group="general" data-title="<?= _h('settings.site_heading') ?>">
                 <h5><?= _h('settings.site_heading') ?></h5>
                 <div class="row g-3">
                     <div class="col-md-6">
@@ -77,7 +81,7 @@
             </div>
 
             <!-- Contact & Email -->
-            <div class="settings-section" id="section-mail" data-group="mail" data-title="Contact &amp; Email">
+            <div class="settings-section" id="section-mail" data-group="mail" data-title="<?= _h('settings.mail_heading') ?>">
                 <h5><?= _h('settings.mail_heading') ?></h5>
                 <div class="row g-3">
                     <div class="col-md-6">
@@ -142,7 +146,7 @@
 
             <!-- CAPTCHA (reCAPTCHA v2 / reCAPTCHA v3 / Cloudflare Turnstile) -->
             <?php $captchaProviderSel = captchaProvider($cfg); ?>
-            <div class="settings-section" id="section-captcha" data-group="security" data-title="CAPTCHA">
+            <div class="settings-section" id="section-captcha" data-group="security" data-title="<?= _h('settings.captcha_heading') ?>">
                 <h5><?= _h('settings.captcha_heading') ?></h5>
                 <p class="settings-hint mb-2"><?= _h('settings.captcha_intro') ?></p>
                 <div class="row g-3">
@@ -239,7 +243,7 @@
             </div>
 
             <!-- Smart CAPTCHA -->
-            <div class="settings-section" id="section-captcha-smart" data-group="security" data-title="Smart CAPTCHA">
+            <div class="settings-section" id="section-captcha-smart" data-group="security" data-title="<?= _h('settings.captcha_smart_heading') ?>">
                 <h5><?= _h('settings.captcha_smart_heading') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= _h('settings.captcha_smart_intro') ?></small>
                 <div class="row g-3">
@@ -298,7 +302,7 @@
             </div>
 
             <!-- Public Pages -->
-            <div class="settings-section" id="section-public-pages" data-group="general" data-title="Public Pages">
+            <div class="settings-section" id="section-public-pages" data-group="general" data-title="<?= _h('settings.pages_heading') ?>">
                 <h5><?= _h('settings.pages_heading') ?></h5>
                 <div class="row g-3">
                     <div class="col-md-4">
@@ -320,7 +324,7 @@
             </div>
 
             <!-- Tracker mode & whitelist -->
-            <div class="settings-section" id="section-reputation" data-group="content" data-title="Ratings">
+            <div class="settings-section" id="section-reputation" data-group="content" data-title="<?= _h('settings.rep_heading') ?>">
                 <h5><i class="bi bi-hand-thumbs-up"></i> <?= _h('settings.rep_heading') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.rep_intro_1') ?>
                 <br><br><?= __('settings.rep_intro_2') ?>
@@ -380,7 +384,7 @@
                 </div>
             </div>
 
-            <div class="settings-section" id="section-livesync" data-group="opentracker" data-title="Live peer sync (second machine)">
+            <div class="settings-section" id="section-livesync" data-group="opentracker" data-title="<?= _h('settings.livesync_title') ?>">
                 <h5><i class="bi bi-diagram-3"></i> <?= _h('settings.livesync_title') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.livesync_intro_p1') ?>
                 <br><br><?= __('settings.livesync_intro_p2') ?></small>
@@ -419,7 +423,7 @@
                 </div>
             </div>
 
-            <div class="settings-section" id="section-whitelist" data-group="tracker" data-title="Tracker mode &amp; the accesslist file">
+            <div class="settings-section" id="section-whitelist" data-group="tracker" data-title="<?= _h('settings.whitelist_title') ?>">
                 <h5><?= _h('settings.whitelist_title') ?></h5>
                 <p class="settings-hint mb-2">
                     <?= __('settings.whitelist_intro_black') ?>
@@ -504,7 +508,7 @@
                 <!-- A submission has to prove itself (includes/wlprobe.php) -->
             </div>
 
-            <div class="settings-section" id="section-probe" data-group="tracker" data-title="Submissions must prove themselves">
+            <div class="settings-section" id="section-probe" data-group="tracker" data-title="<?= _h('settings.probe_title') ?>">
                 <h5><?= _h('settings.probe_title') ?></h5>
                 <p class="settings-hint mb-2"><?= _h('settings.probe_subtitle') ?></p>
                 <small class="settings-hint d-block mb-3"><?= _h('settings.probe_intro_p1') ?>
@@ -541,7 +545,7 @@
                 <!-- Keeping the list honest over time (includes/wlmaint.php) -->
             </div>
 
-            <div class="settings-section" id="section-wlupkeep" data-group="tracker" data-title="Whitelist upkeep">
+            <div class="settings-section" id="section-wlupkeep" data-group="tracker" data-title="<?= _h('settings.wlupkeep_title') ?>">
                 <h5><?= _h('settings.wlupkeep_title') ?></h5>
                 <p class="settings-hint mb-2"><?= _h('settings.wlupkeep_subtitle') ?></p>
                 <small class="settings-hint d-block mb-3"><?= __('settings.wlupkeep_intro') ?></small>
@@ -589,7 +593,7 @@
                 <!-- Source link + description on a whitelist row (includes/richtext.php) -->
             </div>
 
-            <div class="settings-section" id="section-content" data-group="content" data-title="Descriptions &amp; source links">
+            <div class="settings-section" id="section-content" data-group="content" data-title="<?= _h('settings.content_title') ?>">
                 <h5><?= _h('settings.content_title') ?></h5>
                 <p class="settings-hint mb-2"><?= _h('settings.content_subtitle') ?></p>
                 <small class="settings-hint d-block mb-3"><?= __('settings.content_intro') ?></small>
@@ -691,7 +695,7 @@
                 ?>
             </div>
 
-            <div class="settings-section" id="section-schedule" data-group="tracker" data-title="Scheduled tracker mode">
+            <div class="settings-section" id="section-schedule" data-group="tracker" data-title="<?= _h('settings.schedule_title') ?>">
                 <h5><?= _h('settings.schedule_title') ?></h5>
                 <p class="settings-hint mb-2"><?= _h('settings.schedule_subtitle') ?></p>
                 <p class="settings-hint mb-2">
@@ -776,7 +780,7 @@
             </div>
 
             <!-- Server-to-server API -->
-            <div class="settings-section" id="section-api" data-group="integrations" data-title="Server-to-server API">
+            <div class="settings-section" id="section-api" data-group="integrations" data-title="<?= _h('settings.api_title') ?>">
                 <h5><?= _h('settings.api_title') ?></h5>
                 <p class="settings-hint mb-2">
                     <?= __('settings.api_intro') ?>
@@ -832,7 +836,7 @@
             </div>
 
             <!-- User accounts -->
-            <div class="settings-section" id="section-tuner" data-group="network" data-title="Stability probe">
+            <div class="settings-section" id="section-tuner" data-group="network" data-title="<?= _h('settings.tuner_title') ?>">
                 <h5><?= _h('settings.tuner_title') ?></h5>
                 <p class="settings-hint mb-2">
                     <?= __('settings.tuner_intro') ?>
@@ -864,7 +868,7 @@
                 </div>
             </div>
 
-            <div class="settings-section" id="section-audit" data-group="users" data-title="Audit log">
+            <div class="settings-section" id="section-audit" data-group="users" data-title="<?= _h('settings.audit_title') ?>">
                 <h5><?= _h('settings.audit_title') ?></h5>
                 <p class="settings-hint mb-2"><?= _h('settings.audit_intro') ?></p>
                 <div class="row g-3">
@@ -884,7 +888,7 @@
                 </div>
             </div>
 
-            <div class="settings-section" id="section-users" data-group="users" data-title="User Accounts">
+            <div class="settings-section" id="section-users" data-group="users" data-title="<?= _h('settings.users_title') ?>">
                 <h5><?= _h('settings.users_title') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.users_intro_a') ?> <a href="<?= $baseUrl ?>?action=admin-users"><?= _h('settings.users_page_link') ?></a>. <?= __('settings.users_intro_b') ?></small>
                 <div class="row g-3">
@@ -995,7 +999,7 @@
             </div>
 
             <!-- OpenTracker performance -->
-            <div class="settings-section" id="section-ot-perf" data-group="opentracker" data-title="OpenTracker Performance">
+            <div class="settings-section" id="section-ot-perf" data-group="opentracker" data-title="<?= _h('settings.ot_perf_title') ?>">
                 <h5><?= _h('settings.ot_perf_title') ?></h5>
                 <p class="settings-hint mb-2">
                     <?= __('settings.ot_perf_intro_a') ?>
@@ -1041,7 +1045,7 @@
 
             <!-- Kernel network buffers -->
             <!-- Extra opentracker instances -->
-            <div class="settings-section" id="section-cluster" data-group="opentracker" data-title="OpenTracker instances">
+            <div class="settings-section" id="section-cluster" data-group="opentracker" data-title="<?= _h('settings.cluster_title') ?>">
                 <h5><?= _h('settings.cluster_title') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.cluster_intro_a') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#ot-card"><?= _h('settings.cluster_perf_card_link') ?></a> <?= __('settings.cluster_intro_b') ?></small>
                 <div class="row g-3">
@@ -1072,7 +1076,7 @@
             </div>
 
 
-            <div class="settings-section" id="section-sysctl" data-group="network" data-title="Kernel network buffers">
+            <div class="settings-section" id="section-sysctl" data-group="network" data-title="<?= _h('settings.sysctl_title') ?>">
                 <h5><?= _h('settings.sysctl_title') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.sysctl_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#sysctl-card"><?= _h('settings.sysctl_intro_link') ?></a><?= _h('settings.sysctl_intro_tail') ?></small>
                 <div class="row g-3">
@@ -1103,7 +1107,7 @@
 
 
             <!-- Federation / cluster -->
-            <div class="settings-section" id="section-federation" data-group="integrations" data-title="Federation / Cluster">
+            <div class="settings-section" id="section-federation" data-group="integrations" data-title="<?= _h('settings.federation_title') ?>">
                 <h5><?= _h('settings.federation_title') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.federation_intro') ?></small>
                 <div class="row g-3">
@@ -1273,7 +1277,7 @@
             </div>
 
             <!-- Rate Limits & Blacklist -->
-            <div class="settings-section" id="section-limits" data-group="security" data-title="Rate Limits &amp; Blacklist">
+            <div class="settings-section" id="section-limits" data-group="security" data-title="<?= _h('settings.limits_title') ?>">
                 <h5><?= _h('settings.limits_title') ?></h5>
                 <div class="row g-3">
                     <div class="col-md-4">
@@ -1327,7 +1331,7 @@
             </div>
 
             <!-- Admin address, Sessions, Login Lockout & Proxy -->
-            <div class="settings-section" id="section-admin-access" data-group="security" data-title="Admin Access &amp; Sessions">
+            <div class="settings-section" id="section-admin-access" data-group="security" data-title="<?= _h('settings.admin_access_title') ?>">
                 <h5><?= _h('settings.admin_access_title') ?></h5>
                 <?php $adminPathNow = adminLoginPath($cfg); $adminHiddenNow = adminHiddenBehavior($cfg); ?>
                 <div class="row g-3">
@@ -1385,7 +1389,7 @@
             </div>
 
             <!-- Donation Fields -->
-            <div class="settings-section" id="section-donations" data-group="general" data-title="Donation Fields">
+            <div class="settings-section" id="section-donations" data-group="general" data-title="<?= _h('settings.donations_title') ?>">
                 <h5><?= _h('settings.donations_title') ?></h5>
                 <div class="row g-3">
                     <div class="col-md-3">
@@ -1734,7 +1738,7 @@
             </div>
 
             <!-- Observed-hash Index -->
-            <div class="settings-section" id="section-index" data-group="index" data-title="Index (observed hashes)">
+            <div class="settings-section" id="section-index" data-group="index" data-title="<?= _h('settings.index_title') ?>">
                 <h5><?= _h('settings.index_title') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.index_intro_1') ?> <a href="<?= $baseUrl ?>?action=admin-index"><?= _h('settings.index_intro_link') ?></a>. <?= __('settings.index_intro_2') ?></small>
                 <div class="row g-3">
@@ -1803,7 +1807,7 @@
             </div>
 
             <!-- Metadata fetch order -->
-            <div class="settings-section" id="section-fetch-order" data-group="index" data-title="Metadata Fetch Order">
+            <div class="settings-section" id="section-fetch-order" data-group="index" data-title="<?= _h('settings.fetch_order_title') ?>">
                 <h5><?= _h('settings.fetch_order_title') ?></h5>
 <?php
 require_once __DIR__ . '/../../includes/meta_order.php';
@@ -1912,7 +1916,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
             </div>
 
             <!-- Index, continued -->
-            <div class="settings-section" id="section-index-files" data-group="index" data-title="Index File Lists">
+            <div class="settings-section" id="section-index-files" data-group="index" data-title="<?= _h('settings.index_files_title') ?>">
                 <h5><?= _h('settings.index_files_title') ?></h5>
                 <div class="row g-3">
                     <div class="col-md-3">
@@ -1936,7 +1940,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
             </div>
 
             <!-- OpenTracker Service -->
-            <div class="settings-section" id="section-service" data-group="opentracker" data-title="OpenTracker Service">
+            <div class="settings-section" id="section-service" data-group="opentracker" data-title="<?= _h('settings.ot_title') ?>">
                 <h5><?= _h('settings.ot_title') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.ot_intro_1') ?> <span class="text-warning"><?= _h('settings.ot_intro_orange') ?></span> <?= _h('settings.ot_intro_or') ?> <span class="text-danger"><?= _h('settings.ot_intro_red') ?></span> <?= __('settings.ot_intro_2') ?></small>
                 <div class="row g-3">
@@ -1999,7 +2003,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
             </div>
 
             <!-- UDP traffic & rate limit — includes/netlimit.php + tools/opentracker/tracker-netlimit.sh -->
-            <div class="settings-section" id="section-netlimit" data-group="network" data-title="UDP traffic &amp; rate limit">
+            <div class="settings-section" id="section-netlimit" data-group="network" data-title="<?= _h('settings.net_title') ?>">
                 <h5><?= _h('settings.net_title') ?></h5>
                 <p class="settings-hint mb-2">
                     <?= __('settings.net_intro_1') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#net-card"><?= _h('settings.net_intro_link') ?></a>.
@@ -2142,7 +2146,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
             </div>
 
             <!-- Address lists — includes/iplist.php -->
-            <div class="settings-section" id="section-iplists" data-group="tracker" data-title="Address lists">
+            <div class="settings-section" id="section-iplists" data-group="tracker" data-title="<?= _h('settings.iplists_heading') ?>">
                 <h5><?= _h('settings.iplists_heading') ?></h5>
                 <p class="settings-hint mb-2">
                     <?= __('settings.iplists_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#section-iplists-card"><?= _h('settings.iplists_intro_link') ?></a> <?= _h('settings.iplists_intro_after') ?>
@@ -2193,7 +2197,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
             $bkItems = backupSanitizeItems((string)($cfg['backup_items'] ?? ''));
             $bkItemsSel = $bkItems === '' ? [] : explode(',', $bkItems);
             ?>
-            <div class="settings-section" id="section-backups" data-group="maintenance" data-title="Backups">
+            <div class="settings-section" id="section-backups" data-group="maintenance" data-title="<?= _h('settings.backups_heading') ?>">
                 <h5><?= _h('settings.backups_heading') ?></h5>
                 <p class="settings-hint mb-2">
                     <?= __('settings.backups_intro') ?>
@@ -2349,7 +2353,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             </div>
 
             <!-- Footer -->
-            <div class="settings-section" id="section-footer" data-group="general" data-title="Footer">
+            <div class="settings-section" id="section-footer" data-group="general" data-title="<?= _h('settings.footer_heading') ?>">
                 <h5><?= _h('settings.footer_heading') ?></h5>
                 <div class="row g-3">
                     <div class="col-md-3">
@@ -2526,11 +2530,14 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-light mb-3" style="font-size:0.9rem;"><?= _h('settings.confirm_body') ?></p>
+                    <p class="text-light mb-3" style="font-size:0.9rem;" id="settings-confirm-body"><?= _h('settings.confirm_body') ?></p>
                     <form id="settings-confirm-form">
                         <div class="mb-3">
                             <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('settings.confirm_password') ?></label>
-                            <input type="password" class="form-control bg-dark text-light border-secondary" id="settings-confirm-password" required>
+                            <?php // For the browser's password manager: this form has a password field, so without a named
+                                  // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
+                            <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
+                            <input type="password" autocomplete="current-password" class="form-control bg-dark text-light border-secondary" id="settings-confirm-password" required>
                         </div>
                         <div class="d-flex justify-content-center gap-2 mt-3">
                             <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('settings.confirm_cancel') ?></button>
@@ -3498,6 +3505,22 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
 
     let settingsPayloadToSubmit = null;
 
+    // The password modal, opened for one of two reasons. The deletion limits are known to this page
+    // (it compares the three fields itself, below); the settings that decide what the server runs
+    // or whom it trusts are NOT listed here on purpose -- the list lives in save_settings.php, the
+    // page sends the save, and the reply's `reauth_required` says whether to ask. One list, one
+    // place to extend it, and the page cannot be out of date about it.
+    function settingsConfirmOpen(payload, reason, keys) {
+        settingsPayloadToSubmit = payload;
+        let body = reason === 'exec' ? <?= json_encode(__('settings.confirm_body_exec')) ?> : <?= json_encode(__('settings.confirm_body')) ?>;
+        if (Array.isArray(keys) && keys.length) body += ' (' + keys.join(', ') + ')';
+        document.getElementById('settings-confirm-body').textContent = body;
+        document.getElementById('settings-confirm-password').value = '';
+        document.getElementById('settings-confirm-alert').innerHTML = '';
+        const modal = new bootstrap.Modal(document.getElementById('settingsConfirmModal'));
+        modal.show();
+    }
+
     async function saveSettingsSubmit(data) {
         try {
             const res = await fetch(API_BASE + 'admin/save_settings', {
@@ -3515,6 +3538,12 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 if (json.warning) showToast('error', json.warning);
                 else showToast('success', <?= json_encode(__('settings.js_saved_ok')) ?>);
                 return true;
+            } else if (json.reauth_required && !data.confirm_password) {
+                // Not an error yet: the server wants the password for this particular save. Only when
+                // none was sent -- a wrong one comes back WITHOUT this flag and is shown as the error
+                // it is, inside the modal that is already open.
+                settingsConfirmOpen(data, Array.isArray(json.reauth_keys) && json.reauth_keys.length ? 'exec' : 'limits', json.reauth_keys);
+                return false;
             } else {
                 const errMsg = json.error || <?= json_encode(__('settings.js_save_error')) ?>;
                 const confirmAlert = document.getElementById('settings-confirm-alert');
@@ -3587,11 +3616,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                               data.delete_lockout_minutes !== currentLockoutMinutes;
 
         if (limitsChanged) {
-            settingsPayloadToSubmit = data;
-            document.getElementById('settings-confirm-password').value = '';
-            document.getElementById('settings-confirm-alert').innerHTML = '';
-            const modal = new bootstrap.Modal(document.getElementById('settingsConfirmModal'));
-            modal.show();
+            settingsConfirmOpen(data, 'limits');
         } else {
             const success = await saveSettingsSubmit(data);
             if (success) {

@@ -88,24 +88,24 @@ function repVoterKey(PDO $db, array $cfg): ?array {
 
 /** Why this visitor may not vote right now, or null. */
 function repVoteRefusal(PDO $db, array $cfg): ?string {
-    if (!repEnabled($cfg)) return 'Ratings are off on this tracker.';
+    if (!repEnabled($cfg)) return __('api.rep.off');
     $who = repWhoCanVote($cfg);
-    if ($who === 'off') return 'Ratings are read-only here.';
+    if ($who === 'off') return __('api.rep.read_only');
     $voter = repVoterKey($db, $cfg);
     if ($voter === null) {
-        return $who === 'users' ? 'Sign in to rate.' : 'Could not identify you well enough to accept a rating.';
+        return $who === 'users' ? __('api.rep.sign_in') : __('api.rep.cannot_identify');
     }
-    if ($who === 'users' && $voter['type'] !== 'user') return 'Sign in to rate.';
+    if ($who === 'users' && $voter['type'] !== 'user') return __('api.rep.sign_in');
     // A group can be denied rating without being denied everything else. Anonymous voters are
     // governed by the guest group, which is what "who can vote: anyone" really means.
     if (function_exists('userCan') && !userCan($db, $cfg, 'rating.vote')) {
         return $voter['type'] === 'user'
-            ? 'Your account does not have rating access.'
-            : 'Ratings are limited to accounts with rating access here.';
+            ? __('api.rep.no_access_account')
+            : __('api.rep.no_access_anon');
     }
     if (function_exists('rateLimitAllow')
         && !rateLimitAllow('repvote', $voter['type'] . ':' . $voter['key'], repRatePerHour($cfg), 3600)) {
-        return 'That is a lot of ratings in one hour. Try again later.';
+        return __('api.rep.rate_limited');
     }
     return null;
 }
@@ -120,11 +120,11 @@ function repVoteRefusal(PDO $db, array $cfg): ?string {
  */
 function repCastVote(PDO $db, array $cfg, string $hash, int $vote): array {
     $hash = strtolower(trim($hash));
-    if (!preg_match('/^[0-9a-f]{40}$/', $hash)) return ['error' => 'Invalid hash'];
+    if (!preg_match('/^[0-9a-f]{40}$/', $hash)) return ['error' => __('api.common.invalid_hash')];
     if (!in_array($vote, repAllowedValues($cfg), true)) {
         return ['error' => repMode($cfg) === 'stars'
-            ? 'A rating is between half a star and five stars.'
-            : 'A rating is either up or down.'];
+            ? __('api.rep.value_stars')
+            : __('api.rep.value_thumbs')];
     }
     $refusal = repVoteRefusal($db, $cfg);
     if ($refusal !== null) return ['error' => $refusal];

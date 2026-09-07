@@ -154,10 +154,10 @@ function bulkQueue(PDO $db, array $cfg, array $spec, string $subject, string $bo
     $body    = trim($body);
     if (!in_array($format, ['plain', 'bbcode', 'markdown'], true)) $format = 'plain';
     if ($subject === '' || $body === '') {
-        return ['error' => 'A subject and a message are both required.'];
+        return ['error' => __('api.bulk.subject_body_required')];
     }
     $rows = bulkAudience($db, $spec);
-    if (!$rows) return ['error' => 'That audience is empty — nobody would receive this.'];
+    if (!$rows) return ['error' => __('api.bulk.audience_empty')];
 
     $batch = bulkNewBatchId();
     $queued = 0; $skipped = 0;

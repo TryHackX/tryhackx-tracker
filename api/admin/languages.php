@@ -14,6 +14,12 @@
  * to put arbitrary code on the include path. Instead the payload is parsed as data, every pair is
  * checked to be a flat string→string, and the file is written by var_export() — what lands on disk
  * is a literal array this code generated, never anything the uploader wrote.
+ *
+ * That keeps PHP out of the file; the VALUES are the other half. The templates print __() without
+ * escaping, because the shipped strings carry <strong> and <a href> on purpose, so a value is also
+ * HTML that reaches every page — and a stranger's <img onerror> would run in the owner's session
+ * and, once the language is switched on, in every visitor's. Every value therefore goes through
+ * langSanitizeValue() (includes/lang.php) and a key it refuses is dropped and named in the reply.
  */
 
 require_once __DIR__ . '/../../includes/lang.php';
@@ -27,11 +33,24 @@ $LISTS = [
     'users'    => 'user_languages',
 ];
 
+/**
+ * The sentence that names the keys langSanitizeValue() refused.
+ *
+ * Named, not counted: the count already comes back as `skipped` for entries of the wrong shape, and
+ * "3 dropped" tells a translator nothing about where to look. Ten keys is enough to find the
+ * pattern; the full list travels in the reply's `dropped` array for anyone who needs the rest.
+ */
+$droppedNote = function (array $dropped): string {
+    $shown = array_slice($dropped, 0, 10);
+    if (count($dropped) > count($shown)) $shown[] = '…';
+    return __('settings.lang_upload_dropped', ['count' => count($dropped), 'keys' => implode(', ', $shown)]);
+};
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     // Export is a GET so the browser can hand the result straight to a download.
     if (isset($_GET['export'])) {
         $code = strtolower(trim((string)$_GET['export']));
-        if (!langInstalled($code)) jsonResponse(['error' => 'No such language.'], 404);
+        if (!langInstalled($code)) jsonResponse(['error' => __('api.lang.no_such_language')], 404);
         jsonResponse(['success' => true, 'code' => $code, 'strings' => langLoad($code)]);
     }
 
@@ -82,34 +101,33 @@ if ($op === 'default') {
     // 'auto' is a real answer, not a missing one: it says "let Accept-Language decide", which is a
     // different intention from picking a language and is worth being able to express directly.
     if ($code !== 'auto' && !langSupported($cfg, $code)) {
-        jsonResponse(['error' => 'That language is not enabled, so it cannot be the site default.'], 400);
+        jsonResponse(['error' => __('api.lang.default_not_enabled')], 400);
     }
     setSetting($db, 'default_language', $code);
     langInvalidate();
     auditNote(['target_id' => $code, 'summary' => 'set the site language to ' . strtoupper($code)]);
     jsonResponse(['success' => true, 'message' => $code === 'auto'
-        ? 'Visitors now get the language their browser asks for.'
-        : strtoupper($code) . ' is now the site default.']);
+        ? __('api.lang.default_auto')
+        : __('api.lang.default_set', ['code' => strtoupper($code)])]);
 }
 if ($op === 'auto') {
     $on = !empty($input['enabled']);
     setSetting($db, 'language_auto', $on ? '1' : '0');
     auditNote(['summary' => 'turned browser language detection ' . ($on ? 'on' : 'off')]);
     jsonResponse(['success' => true, 'message' => $on
-        ? 'A visitor with no saved choice now gets the language their browser asks for.'
-        : 'Visitors with no saved choice now get the site default.']);
+        ? __('api.lang.auto_on')
+        : __('api.lang.auto_off')]);
 }
 
 // ── everything below is about one language ──────────────────────────────────
 if ($op === 'toggle') {
-    if (!langInstalled($code)) jsonResponse(['error' => 'No such language.'], 400);
+    if (!langInstalled($code)) jsonResponse(['error' => __('api.lang.no_such_language')], 400);
     $scope = (string)($input['scope'] ?? 'enabled');
-    if (!isset($LISTS[$scope])) jsonResponse(['error' => 'Unknown list.'], 400);
+    if (!isset($LISTS[$scope])) jsonResponse(['error' => __('api.lang.unknown_list')], 400);
     $on = !empty($input['enabled']);
 
     if ($scope === 'enabled' && !$on && in_array($code, LANG_BUILT_IN, true)) {
-        jsonResponse(['error' => strtoupper($code) . ' ships with the panel and is the end of every '
-                               . 'fallback chain — it cannot be switched off.'], 400);
+        jsonResponse(['error' => __('api.lang.builtin_cannot_disable', ['code' => strtoupper($code)])], 400);
     }
 
     $current = array_keys($scope === 'enabled' ? langEnabled($cfg)
@@ -120,8 +138,7 @@ if ($op === 'toggle') {
     if (!$next) {
         // An empty list reads as "no restriction", which would silently re-show everything —
         // the exact opposite of what was asked for. Refuse rather than do the opposite.
-        jsonResponse(['error' => 'That would empty the list, which means "no restriction" — '
-                               . 'leave at least one language on.'], 400);
+        jsonResponse(['error' => __('api.lang.list_would_empty')], 400);
     }
     setSetting($db, $LISTS[$scope], implode(',', $next));
     langInvalidate();
@@ -132,80 +149,103 @@ if ($op === 'toggle') {
 
 if ($op === 'duplicate') {
     $source = strtolower(trim((string)($input['source'] ?? '')));
-    if (!langInstalled($source)) jsonResponse(['error' => 'No such language to copy.'], 400);
+    if (!langInstalled($source)) jsonResponse(['error' => __('api.lang.no_such_source')], 400);
     if (!preg_match('/^[a-z]{2,3}$/', $code)) {
-        jsonResponse(['error' => 'A language code is two or three letters, like "de" or "ast".'], 400);
+        jsonResponse(['error' => __('api.lang.code_format')], 400);
     }
-    if (langInstalled($code)) jsonResponse(['error' => strtoupper($code) . ' is already installed.'], 400);
+    if (langInstalled($code)) jsonResponse(['error' => __('api.lang.already_installed', ['code' => strtoupper($code)])], 400);
     $strings = langLoad($source);
-    if (!$strings) jsonResponse(['error' => 'That language file is empty.'], 400);
+    if (!$strings) jsonResponse(['error' => __('api.lang.file_empty')], 400);
+
+    // A copy is held to the same rule as an upload, because the source may be an upload that a
+    // version before this one wrote without ever looking at a value — and copying it must not be
+    // the way an old payload gets a fresh file. The shipped dictionaries are the exception: they are
+    // vetted with the code and carry a handful of attributes (a `class=`, an `id=`) the rule does
+    // not allow, and a copy of English with those keys missing would be a copy nobody asked for.
+    $dropped = [];
+    if (!in_array($source, LANG_BUILT_IN, true)) {
+        foreach ($strings as $k => $v) {
+            if (!is_string($v) || langSanitizeValue($v) === null) { $dropped[] = $k; unset($strings[$k]); }
+        }
+        if (!$strings) jsonResponse(['error' => $droppedNote($dropped), 'dropped' => $dropped], 400);
+    }
 
     // Freeze the current allow-list FIRST, so the copy does not go live the moment it exists — an
     // empty `enabled_languages` means "everything installed", and a half-translated copy appearing
     // in the switcher unannounced is not what "duplicate" means.
     setSetting($db, 'enabled_languages', implode(',', array_keys(langEnabled($cfg))));
     if (!langWriteFile($code, $strings, 'Copied from ' . strtoupper($source) . '.')) {
-        jsonResponse(['error' => 'Could not write the language file. Is lang/ writable by the web user?'], 500);
+        jsonResponse(['error' => __('api.lang.write_failed')], 500);
     }
     langInvalidate();
-    auditNote(['target_id' => $code, 'summary' => 'copied ' . strtoupper($source) . ' to ' . strtoupper($code)]);
-    jsonResponse(['success' => true, 'code' => $code, 'strings' => count($strings),
-                  'message' => strtoupper($code) . ' created from ' . strtoupper($source)
-                             . ' with ' . number_format(count($strings)) . ' strings. It starts switched off.']);
+    auditNote(['target_id' => $code, 'summary' => 'copied ' . strtoupper($source) . ' to ' . strtoupper($code)
+                                                . ($dropped ? ' (' . count($dropped) . ' strings dropped)' : '')]);
+    jsonResponse(['success' => true, 'code' => $code, 'strings' => count($strings), 'dropped' => $dropped,
+                  'message' => __('api.lang.duplicated', ['code' => strtoupper($code), 'source' => strtoupper($source),
+                                                         'count' => number_format(count($strings))])
+                             . ($dropped ? ' ' . $droppedNote($dropped) : '')]);
 }
 
 if ($op === 'upload') {
     if (!preg_match('/^[a-z]{2,3}$/', $code)) {
-        jsonResponse(['error' => 'A language code is two or three letters, like "de" or "ast".'], 400);
+        jsonResponse(['error' => __('api.lang.code_format')], 400);
     }
     // The shipped languages are the end of every fallback chain and the reference the coverage
     // figure is measured against. A partial upload over one would hollow out the fallback for every
     // other translation without saying so. Duplicate to a free code and switch to that instead.
     if (in_array($code, LANG_BUILT_IN, true)) {
-        jsonResponse(['error' => strtoupper($code) . ' ships with the panel and is never replaced by an '
-                               . 'upload — every other language falls back to it. Duplicate it to a '
-                               . 'free code and edit that.'], 400);
+        jsonResponse(['error' => __('api.lang.builtin_no_upload', ['code' => strtoupper($code)])], 400);
     }
     $strings = $input['strings'] ?? null;
-    if (!is_array($strings) || !$strings) jsonResponse(['error' => 'That file has no strings in it.'], 400);
-    if (count($strings) > 10000) jsonResponse(['error' => 'That file has more than 10 000 strings.'], 400);
+    if (!is_array($strings) || !$strings) jsonResponse(['error' => __('api.lang.upload_no_strings')], 400);
+    if (count($strings) > 10000) jsonResponse(['error' => __('api.lang.upload_too_many')], 400);
 
     $clean = [];
     $bytes = 0;
     $skipped = 0;
+    $dropped = [];
     foreach ($strings as $k => $v) {
         // Flat "some.dotted.key" => "text" only. Anything else is DROPPED rather than written out,
         // and the count comes back so a file full of the wrong shape does not look like a success.
         if (!is_string($k) || !is_string($v) || strlen($k) > 160 || strlen($v) > 10000
             || !preg_match('/^[a-z0-9_.]+$/i', $k)) { $skipped++; continue; }
+        // The value is checked too, because the templates print it unescaped and the shape checks
+        // above would wave an <img onerror> through as a perfectly flat string. A refused key is
+        // named in the reply rather than counted with the malformed ones: it is a string a
+        // translator wrote and can fix, not a line of the wrong shape.
+        if (langSanitizeValue($v) === null) { $dropped[] = $k; continue; }
         $bytes += strlen($k) + strlen($v);
-        if ($bytes > 2 * 1024 * 1024) jsonResponse(['error' => 'That file is larger than 2 MB of text.'], 400);
+        if ($bytes > 2 * 1024 * 1024) jsonResponse(['error' => __('api.lang.upload_too_large')], 400);
         $clean[$k] = $v;
     }
-    if (!$clean) jsonResponse(['error' => 'Nothing in that file looked like a translation.'], 400);
+    if (!$clean) {
+        jsonResponse(['error' => $dropped ? $droppedNote($dropped) : __('api.lang.upload_nothing_usable'),
+                      'dropped' => $dropped], 400);
+    }
 
     $isNew = !langInstalled($code);
     if ($isNew) setSetting($db, 'enabled_languages', implode(',', array_keys(langEnabled($cfg))));
     if (!langWriteFile($code, $clean, 'Installed from an uploaded JSON file.')) {
-        jsonResponse(['error' => 'Could not write the language file. Is lang/ writable by the web user?'], 500);
+        jsonResponse(['error' => __('api.lang.write_failed')], 500);
     }
     langInvalidate();
     auditNote(['target_id' => $code,
                'summary' => ($isNew ? 'installed ' : 'replaced ') . strtoupper($code)
-                          . ' (' . count($clean) . ' strings)']);
+                          . ' (' . count($clean) . ' strings' . ($dropped ? ', ' . count($dropped) . ' dropped' : '') . ')']);
     jsonResponse(['success' => true, 'code' => $code, 'strings' => count($clean),
-                  'skipped' => $skipped, 'enabled' => !$isNew,
-                  'message' => strtoupper($code) . ': ' . number_format(count($clean)) . ' strings'
-                             . ($skipped ? ', ' . number_format($skipped) . ' entries ignored' : '')
-                             . ($isNew ? '. It starts switched off — turn it on when you are happy with it.' : '.')]);
+                  'skipped' => $skipped, 'dropped' => $dropped, 'enabled' => !$isNew,
+                  'message' => __('api.lang.uploaded_count', ['code' => strtoupper($code), 'count' => number_format(count($clean))])
+                             . ($skipped ? __('api.lang.uploaded_skipped', ['skipped' => number_format($skipped)]) : '')
+                             . ($isNew ? __('api.lang.uploaded_new_tail') : '.')
+                             . ($dropped ? ' ' . $droppedNote($dropped) : '')]);
 }
 
 if ($op === 'delete') {
-    if (!langInstalled($code)) jsonResponse(['error' => 'No such language.'], 400);
+    if (!langInstalled($code)) jsonResponse(['error' => __('api.lang.no_such_language')], 400);
     if (in_array($code, LANG_BUILT_IN, true)) {
-        jsonResponse(['error' => strtoupper($code) . ' ships with the panel and cannot be removed.'], 400);
+        jsonResponse(['error' => __('api.lang.builtin_cannot_remove', ['code' => strtoupper($code)])], 400);
     }
-    if (!langDeleteFile($code)) jsonResponse(['error' => 'Could not remove the language file.'], 500);
+    if (!langDeleteFile($code)) jsonResponse(['error' => __('api.lang.remove_failed')], 500);
 
     // A deleted language must not stay the site default or linger in an allow-list. Only lists that
     // were ACTUALLY set are rewritten: an untouched one is stored empty, meaning "everything
@@ -224,7 +264,7 @@ if ($op === 'delete') {
     catch (\Throwable $e) { /* the column may pre-date this version */ }
     langInvalidate();
     auditNote(['target_id' => $code, 'summary' => 'removed the ' . strtoupper($code) . ' translation']);
-    jsonResponse(['success' => true, 'message' => strtoupper($code) . ' removed.']);
+    jsonResponse(['success' => true, 'message' => __('api.lang.removed', ['code' => strtoupper($code)])]);
 }
 
-jsonResponse(['error' => 'Unknown operation.'], 400);
+jsonResponse(['error' => __('api.lang.unknown_op')], 400);

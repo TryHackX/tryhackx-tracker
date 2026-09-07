@@ -197,13 +197,13 @@ function ipListCreate(PDO $db, array $in): array {
     $url  = trim((string)($in['url'] ?? ''));
     $ttl  = (int)($in['ttl_minutes'] ?? IPLIST_TTL_DEFAULT);
 
-    if ($name === '' || mb_strlen($name) > 64)      return ['error' => 'A name of 1–64 characters is required.'];
-    if (!in_array($kind, IPLIST_KINDS, true))       return ['error' => 'Unknown list kind.'];
-    if (!in_array($mode, IPLIST_MODES, true))       return ['error' => 'Unknown block mode.'];
-    if (!in_array($src, IPLIST_SOURCES, true))      return ['error' => 'Unknown source.'];
+    if ($name === '' || mb_strlen($name) > 64)      return ['error' => __('api.iplist.name_required')];
+    if (!in_array($kind, IPLIST_KINDS, true))       return ['error' => __('api.iplist.unknown_kind')];
+    if (!in_array($mode, IPLIST_MODES, true))       return ['error' => __('api.iplist.unknown_mode')];
+    if (!in_array($src, IPLIST_SOURCES, true))      return ['error' => __('api.iplist.unknown_source')];
     if ($src === 'url') {
         if (!preg_match('#^https?://#i', $url) || mb_strlen($url) > 500) {
-            return ['error' => 'A URL list needs an http(s) address.'];
+            return ['error' => __('api.iplist.url_required')];
         }
     } else {
         $url = '';
@@ -218,15 +218,15 @@ function ipListCreate(PDO $db, array $in): array {
         $st->execute([$name, $kind, $mode, $src, $url, $ttl]);
         return ['id' => (int)$db->lastInsertId()];
     } catch (PDOException $e) {
-        if ((int)($e->errorInfo[1] ?? 0) === 1062) return ['error' => 'A list with that name already exists.'];
-        return ['error' => 'Could not create the list.'];
+        if ((int)($e->errorInfo[1] ?? 0) === 1062) return ['error' => __('api.iplist.name_exists')];
+        return ['error' => __('api.iplist.create_failed')];
     }
 }
 
 /** Replace a list's entries in one transaction. Returns ['added'=>int,'skipped'=>int] or ['error'=>…]. */
 function ipListSetEntries(PDO $db, int $id, string $text): array {
     $p = ipListParse($text);
-    if (!$p['entries']) return ['error' => 'Nothing in there looked like an address or a CIDR.'];
+    if (!$p['entries']) return ['error' => __('api.iplist.no_entries')];
     try {
         $db->beginTransaction();
         $db->prepare("DELETE FROM ip_list_entries WHERE list_id = ?")->execute([$id]);
@@ -241,7 +241,7 @@ function ipListSetEntries(PDO $db, int $id, string $text): array {
         $db->commit();
     } catch (\Throwable $e) {
         if ($db->inTransaction()) $db->rollBack();
-        return ['error' => 'Could not store the entries.'];
+        return ['error' => __('api.iplist.store_failed')];
     }
     return ['added' => count($p['entries']), 'skipped' => $p['skipped']];
 }
@@ -278,14 +278,14 @@ function ipListDelete(PDO $db, int $id): bool {
  */
 function ipListRefresh(PDO $db, int $id, bool $force = false): array {
     $l = ipListFind($db, $id);
-    if (!$l) return ['error' => 'No such list.'];
-    if ($l['source'] !== 'url') return ['error' => 'That list is not fetched from a URL.'];
+    if (!$l) return ['error' => __('api.iplist.no_such_list')];
+    if ($l['source'] !== 'url') return ['error' => __('api.iplist.not_url_list')];
 
     $ttl = max(IPLIST_TTL_MIN, (int)$l['ttl_minutes']);
     $age = $l['last_fetch_at'] ? (time() - strtotime((string)$l['last_fetch_at'])) : PHP_INT_MAX;
     if (!$force && $age < $ttl * 60) return ['skipped' => true, 'age_s' => $age];
 
-    if (!function_exists('curl_init')) return ['error' => 'curl is required to fetch a list.'];
+    if (!function_exists('curl_init')) return ['error' => __('api.iplist.curl_required')];
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL => $l['url'],
@@ -306,9 +306,9 @@ function ipListRefresh(PDO $db, int $id, bool $force = false): array {
     curl_close($ch);
 
     $fail = null;
-    if ($body === false)      $fail = 'fetch failed: ' . $err;
+    if ($body === false)      $fail = __('api.iplist.fetch_failed', ['err' => $err]);
     elseif ($code !== 200)    $fail = 'HTTP ' . $code;
-    elseif (trim((string)$body) === '') $fail = 'the reply was empty';
+    elseif (trim((string)$body) === '') $fail = __('api.iplist.reply_empty');
 
     if ($fail === null) {
         $r = ipListSetEntries($db, $id, (string)$body);

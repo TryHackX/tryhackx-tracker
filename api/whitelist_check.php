@@ -11,14 +11,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw = trim((string)($_GET['hash'] ?? ''));
 }
 if ($raw === '' || strlen($raw) > 2100) {
-    jsonResponse(['error' => 'Invalid info hash'], 400);
+    jsonResponse(['error' => __('api.wl.invalid_info_hash')], 400);
 }
 $p = parseMagnetOrHash($raw);
 if (empty($p['hash'])) {
-    jsonResponse(['error' => 'Invalid info hash or magnet link'], 400);
+    jsonResponse(['error' => __('api.wl.invalid_info_hash_or_magnet')], 400);
 }
 if (!rateLimitAllow('whitelist_check', ipBucket(getClientIp($cfg)), 30, 3600)) {
-    jsonResponse(['error' => 'Too many lookups. Please wait a while and try again.'], 429);
+    jsonResponse(['error' => __('api.wl.too_many_lookups')], 429);
 }
 $row = isHashWhitelisted($db, $p['hash']);
 $banned = isHashBanned($db, $p['hash']) || ($row && (int)$row['banned'] === 1);

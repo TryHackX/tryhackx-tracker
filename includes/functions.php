@@ -1,5 +1,26 @@
 <?php
 
+// The dictionary, loaded with the functions: every include that sends a sentence to a person
+// (whitelist warnings, poll errors, backup replies) now goes through __(), and the entry points
+// that never chose a language — the janitor, the CLI, the tests — must still be able to call it.
+// __() returns English until langInit() picks a language (see langEnsure()).
+require_once __DIR__ . '/lang.php';
+
+/**
+ * Redirect from inside a page template.
+ *
+ * The templates are included by the layout AFTER it has started writing the page, so a plain
+ * header('Location') there is a "headers already sent" warning printed into the half-built page
+ * instead of a redirect — which is what the stats page did whenever statistics were switched off.
+ * Send the header while it can still be sent; otherwise hand the browser a meta refresh and a
+ * script that do the same thing. The caller `return`s to end its template either way.
+ */
+function pageRedirect(string $url): void {
+    if (!headers_sent()) { header('Location: ' . $url); exit; }
+    $u = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+    echo '<meta http-equiv="refresh" content="0;url=' . $u . '"><script>location.replace(' . json_encode($url) . ');</script>';
+}
+
 function sanitize(string $input): string {
     return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
 }
@@ -537,7 +558,7 @@ function jsonResponse(array $data, int $code = 200): void {
 /** Reject anything but POST with a 405. Call at the top of POST-only endpoints. */
 function requirePost(): void {
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
-        jsonResponse(['error' => 'Method not allowed'], 405);
+        jsonResponse(['error' => __('api.common.method_not_allowed')], 405);
     }
 }
 
@@ -904,12 +925,12 @@ function classifyTrackerWarnings(int $pendingAdds, int $pendingDels, ?int $uptim
         $blLevel = $pendingTotal >= $dangerCount ? 'danger' : ($pendingTotal >= $warnCount ? 'warn' : 'none');
         if ($blLevel !== 'none') {
             $parts = [];
-            if ($pendingAdds > 0) $parts[] = $pendingAdds . ' added';
-            if ($pendingDels > 0) $parts[] = $pendingDels . ' removed';
+            if ($pendingAdds > 0) $parts[] = __('api.restart.warn_added', ['n' => $pendingAdds]);
+            if ($pendingDels > 0) $parts[] = __('api.restart.warn_removed', ['n' => $pendingDels]);
             $detail = implode(' · ', $parts);
             $text = $blLevel === 'danger'
-                ? $pendingTotal . ' blacklist changes since last start (' . $detail . ') — restart required to apply them'
-                : 'Blacklist changed since last start (' . $detail . ') — restart recommended to load it';
+                ? __('api.restart.warn_blacklist_danger', ['n' => $pendingTotal, 'detail' => $detail])
+                : __('api.restart.warn_blacklist_warn', ['detail' => $detail]);
             $items[] = ['level' => $blLevel, 'text' => $text];
             $bump($blLevel);
         }
@@ -918,10 +939,10 @@ function classifyTrackerWarnings(int $pendingAdds, int $pendingDels, ?int $uptim
     if ($uptimeSeconds !== null && $uptimeSeconds > 0) {
         $days = intdiv($uptimeSeconds, 86400);
         if ($days >= $dangerDays) {
-            $items[] = ['level' => 'danger', 'text' => 'Tracker up for ' . $days . ' days — a restart is overdue'];
+            $items[] = ['level' => 'danger', 'text' => __('api.restart.warn_uptime_danger', ['days' => $days])];
             $bump('danger');
         } elseif ($days >= $warnDays) {
-            $items[] = ['level' => 'warn', 'text' => 'Tracker up for ' . $days . ' days — consider a periodic restart'];
+            $items[] = ['level' => 'warn', 'text' => __('api.restart.warn_uptime_warn', ['days' => $days])];
             $bump('warn');
         }
     }

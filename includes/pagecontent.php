@@ -125,16 +125,16 @@ function pageContentAll(PDO $db): array {
 
 /** Store (or replace) a page. Returns ['error' => …] or ['ok' => true]. */
 function pageContentSave(PDO $db, array $cfg, string $page, string $lang, string $format, string $body, bool $enabled, string $who): array {
-    if (!pageContentPageKnown($page, $cfg)) return ['error' => 'Unknown page.'];
+    if (!pageContentPageKnown($page, $cfg)) return ['error' => __('api.pages.unknown_page')];
     // Any INSTALLED language, not merely an enabled one: a translation is written before it is
     // switched on, and refusing to store the page for it would make that impossible.
-    if (!langInstalled($lang)) return ['error' => 'That language is not installed.'];
-    if (!in_array($format, ['bbcode', 'markdown'], true)) return ['error' => 'Unknown format.'];
+    if (!langInstalled($lang)) return ['error' => __('api.pages.lang_not_installed')];
+    if (!in_array($format, ['bbcode', 'markdown'], true)) return ['error' => __('api.pages.unknown_format')];
     if (strlen($body) > PAGECONTENT_MAX) {
-        return ['error' => 'That is longer than ' . number_format(PAGECONTENT_MAX) . ' characters.'];
+        return ['error' => __('api.pages.body_too_long', ['max' => number_format(PAGECONTENT_MAX)])];
     }
     if (trim($body) === '' && $enabled) {
-        return ['error' => 'An empty page cannot replace the built-in one. Turn it off instead, or press Restore.'];
+        return ['error' => __('api.pages.empty_page_enabled')];
     }
     // The same validator every other author-written text goes through — link rules, image counts and
     // the rest. A page written by the owner is not a reason to skip it: the owner can still paste
@@ -152,7 +152,7 @@ function pageContentSave(PDO $db, array $cfg, string $page, string $lang, string
                                               updated_by = VALUES(updated_by)")
            ->execute([$page, $lang, $format, $body, $enabled ? 1 : 0, mb_substr($who, 0, 64)]);
     } catch (\Throwable $e) {
-        return ['error' => 'Could not store the page.'];
+        return ['error' => __('api.pages.store_failed')];
     }
     return ['ok' => true];
 }
@@ -223,25 +223,25 @@ function pageContentConditions(array $cfg, ?PDO $db = null): array {
     $index = function_exists('indexEnabled') && indexEnabled($cfg);
     $langs = function_exists('langEnabled') ? count(langEnabled($cfg)) : 1;
     return [
-        'whitelist'    => [$wl,    'the tracker serves registered torrents only'],
-        'open'         => [!$wl,   'the tracker is open — every torrent is served'],
-        'schedule'     => [$sched, 'whitelist hours are scheduled'],
+        'whitelist'    => [$wl,    __('api.pages.cond_whitelist')],
+        'open'         => [!$wl,   __('api.pages.cond_open')],
+        'schedule'     => [$sched, __('api.pages.cond_schedule')],
         'registration' => [($wl || $sched) && ($cfg['whitelist_public_enabled'] ?? '1') === '1',
-                                   'the public can register torrents on the whitelist'],
-        'users'        => [$users, 'user accounts are switched on'],
-        'signup'       => [$users && usersRegistrationEnabled($cfg), 'visitors can create an account'],
-        'email_verify' => [$users && userEmailVerifyRequired($cfg), 'an account needs a verified email'],
-        'index'        => [$index, 'the observed-hash index is on'],
+                                   __('api.pages.cond_registration')],
+        'users'        => [$users, __('api.pages.cond_users')],
+        'signup'       => [$users && usersRegistrationEnabled($cfg), __('api.pages.cond_signup')],
+        'email_verify' => [$users && userEmailVerifyRequired($cfg), __('api.pages.cond_email_verify')],
+        'index'        => [$index, __('api.pages.cond_index')],
         'search'       => [$index && $users && ($cfg['index_search_enabled'] ?? '1') === '1',
-                                   'members can search the index'],
-        'stats'        => [($cfg['tracker_stats_enabled'] ?? '0') === '1', 'the statistics page is on'],
-        'donations'    => [($cfg['donations_enabled'] ?? '0') === '1', 'donations are shown'],
-        'contact'      => [($cfg['contact_visible'] ?? '1') === '1', 'the contact section is shown'],
-        'transparency' => [($cfg['transparency_enabled'] ?? '1') === '1', 'the transparency report is public'],
-        'languages'    => [$langs > 1, 'more than one interface language is offered'],
-        'ratings'      => [($cfg['rating_enabled'] ?? '0') === '1', 'torrent ratings are on'],
+                                   __('api.pages.cond_search')],
+        'stats'        => [($cfg['tracker_stats_enabled'] ?? '0') === '1', __('api.pages.cond_stats')],
+        'donations'    => [($cfg['donations_enabled'] ?? '0') === '1', __('api.pages.cond_donations')],
+        'contact'      => [($cfg['contact_visible'] ?? '1') === '1', __('api.pages.cond_contact')],
+        'transparency' => [($cfg['transparency_enabled'] ?? '1') === '1', __('api.pages.cond_transparency')],
+        'languages'    => [$langs > 1, __('api.pages.cond_languages')],
+        'ratings'      => [($cfg['rating_enabled'] ?? '0') === '1', __('api.pages.cond_ratings')],
         'descriptions' => [($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1',
-                                   'registrants may attach a description or a source link'],
+                                   __('api.pages.cond_descriptions')],
     ];
 }
 

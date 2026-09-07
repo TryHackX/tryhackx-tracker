@@ -6,24 +6,24 @@ requirePost();
 $input = readJsonBody();
 $id = (int)($input['id'] ?? 0);
 $u = userFindById($db, $id);
-if (!$u) jsonResponse(['error' => 'User not found'], 404);
+if (!$u) jsonResponse(['error' => __('api.users.not_found')], 404);
 
 // ── validate everything first ──
 $status = null;
 if (isset($input['status'])) {
     $status = (string)$input['status'];
-    if (!in_array($status, ['active', 'banned'], true)) jsonResponse(['error' => 'Invalid status'], 400);
-    if ($status === 'banned' && userIsRootAdmin($u, $cfg)) jsonResponse(['error' => 'The site owner account cannot be banned.'], 400);
+    if (!in_array($status, ['active', 'banned'], true)) jsonResponse(['error' => __('api.users.invalid_status')], 400);
+    if ($status === 'banned' && userIsRootAdmin($u, $cfg)) jsonResponse(['error' => __('api.users.owner_cannot_ban')], 400);
 }
 $email = null; $emailSet = false;
 if (array_key_exists('email', $input)) {
     $emailSet = true;
     $email = trim((string)$input['email']);
-    if ($email !== '' && !userValidEmail($email)) jsonResponse(['error' => 'Invalid email'], 400);
+    if ($email !== '' && !userValidEmail($email)) jsonResponse(['error' => __('api.users.invalid_email_2')], 400);
 }
 $password = (string)($input['password'] ?? '');
 if ($password !== '' && !userValidPassword($password)) {
-    jsonResponse(['error' => 'Password: ' . USER_PASSWORD_RULES], 400);
+    jsonResponse(['error' => __('api.users.password_rules', ['rules' => USER_PASSWORD_RULES])], 400);
 }
 
 // TAKING OVER AN ACCOUNT IS NOT "EDITING" IT.
@@ -48,12 +48,11 @@ if (!$actorIsOwner && ($password !== '' || $emailSet || isset($input['email_veri
         }
     }
     if ($targetCarriesPanel) {
-        jsonResponse(['error' => 'Only the site owner can change the password or email of an account '
-                               . 'that carries panel access.'], 403);
+        jsonResponse(['error' => __('api.users.owner_only_credentials')], 403);
     }
 }
 if ($status === null && !$emailSet && $password === '' && !isset($input['email_verified'])) {
-    jsonResponse(['error' => 'Nothing to change'], 400);
+    jsonResponse(['error' => __('api.users.nothing_to_change')], 400);
 }
 
 // ── apply atomically ──
@@ -86,7 +85,7 @@ try {
     $db->commit();
 } catch (PDOException $e) {
     if ($db->inTransaction()) $db->rollBack();
-    if ((int)$e->errorInfo[1] === 1062) jsonResponse(['error' => 'Another account already uses this email'], 400);
+    if ((int)$e->errorInfo[1] === 1062) jsonResponse(['error' => __('api.users.email_in_use')], 400);
     throw $e;
 }
 jsonResponse(['success' => true, 'changed' => $changed]);

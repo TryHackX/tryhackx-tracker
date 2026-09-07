@@ -21,7 +21,7 @@ $op = (string)($input['op'] ?? '');
 // Reading the queue is not an action; everything else changes what the public sees and is recorded
 // at the end of this file, once it has actually happened.
 if (!in_array($op, ['list', 'approve', 'reject', 'clear', 'edits', 'edit_apply', 'edit_reject'], true)) {
-    jsonResponse(['error' => 'Unknown operation'], 400);
+    jsonResponse(['error' => __('api.content.unknown_op')], 400);
 }
 
 if ($op === 'list') {
@@ -108,15 +108,15 @@ if ($op === 'edits') {
 
 if ($op === 'edit_apply' || $op === 'edit_reject') {
     $eid = (int)($input['id'] ?? 0);
-    if ($eid < 1) jsonResponse(['error' => 'Invalid id'], 400);
+    if ($eid < 1) jsonResponse(['error' => __('api.content.invalid_id')], 400);
     $st = $db->prepare("SELECT * FROM wl_content_edits WHERE id = ? AND status = 'pending' LIMIT 1");
     $st->execute([$eid]);
     $e = $st->fetch();
-    if (!$e) jsonResponse(['error' => 'That proposal is not waiting any more.'], 404);
+    if (!$e) jsonResponse(['error' => __('api.content.proposal_gone')], 404);
 
     if ($op === 'edit_reject') {
         $db->prepare("UPDATE wl_content_edits SET status = 'rejected', reviewed_at = NOW() WHERE id = ?")->execute([$eid]);
-        jsonResponse(['success' => true, 'message' => 'Proposal rejected. What is published is unchanged.']);
+        jsonResponse(['success' => true, 'message' => __('api.content.proposal_rejected')]);
     }
 
     // Applying keeps the version it replaces, as a rejected proposal of its own, so an accepted
@@ -135,16 +135,16 @@ if ($op === 'edit_apply' || $op === 'edit_reject') {
                          content_status = 'approved', content_reviewed_at = NOW() WHERE id = ?")
        ->execute([$e['source_url'], $e['description'], (string)$e['description_format'], (int)$e['whitelist_id']]);
     $db->prepare("UPDATE wl_content_edits SET status = 'applied', reviewed_at = NOW() WHERE id = ?")->execute([$eid]);
-    jsonResponse(['success' => true, 'message' => 'Applied and published. The version it replaced is kept.']);
+    jsonResponse(['success' => true, 'message' => __('api.content.proposal_applied')]);
 }
 
 $id = (int)($input['id'] ?? 0);
-if ($id < 1) jsonResponse(['error' => 'Invalid id'], 400);
+if ($id < 1) jsonResponse(['error' => __('api.content.invalid_id')], 400);
 
 if ($op === 'approve') {
     $db->prepare("UPDATE whitelist SET content_status = 'approved', content_reviewed_at = NOW(),
                          content_rejected_note = NULL WHERE id = ?")->execute([$id]);
-    jsonResponse(['success' => true, 'message' => 'Published. It is on the public pages now.']);
+    jsonResponse(['success' => true, 'message' => __('api.content.published')]);
 }
 
 if ($op === 'reject') {
@@ -152,11 +152,11 @@ if ($op === 'reject') {
     // Kept, not deleted. If the same submitter argues, the text they actually sent is still here.
     $db->prepare("UPDATE whitelist SET content_status = 'rejected', content_reviewed_at = NOW(),
                          content_rejected_note = ? WHERE id = ?")->execute([$note !== '' ? $note : null, $id]);
-    jsonResponse(['success' => true, 'message' => 'Rejected. Nothing is shown publicly; the text is kept for the record.']);
+    jsonResponse(['success' => true, 'message' => __('api.content.rejected')]);
 }
 
 // clear — the one that cannot be undone
 requireAdminReauth((string)($input['password'] ?? ''), $cfg);
 $db->prepare("UPDATE whitelist SET source_url = NULL, description = NULL, content_status = 'none',
                      content_reviewed_at = NOW(), content_rejected_note = NULL WHERE id = ?")->execute([$id]);
-jsonResponse(['success' => true, 'message' => 'Deleted. The torrent stays registered.']);
+jsonResponse(['success' => true, 'message' => __('api.content.deleted')]);

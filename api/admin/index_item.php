@@ -1,12 +1,12 @@
 <?php
 // Details for one index row (details modal), by info_hash.
 $hash = strtolower(trim((string)($_GET['hash'] ?? '')));
-if (!isValidInfoHash($hash)) jsonResponse(['error' => 'Invalid hash'], 400);
+if (!isValidInfoHash($hash)) jsonResponse(['error' => __('api.common.invalid_hash')], 400);
 
 $stmt = $db->prepare("SELECT * FROM index_hashes WHERE info_hash = ?");
 $stmt->execute([$hash]);
 $row = $stmt->fetch();
-if (!$row) jsonResponse(['error' => 'Not found'], 404);
+if (!$row) jsonResponse(['error' => __('api.common.not_found')], 404);
 
 $item = $row;
 unset($item['meta_claim']);
@@ -26,7 +26,8 @@ if ($scrape) {
     $item['scraped_at'] = $scrape['scraped_at'];
 }
 
-$filesLimit = 5000;
+// files_all=1 lifts the cap: the operator pressed "load all" on a page that is theirs to wait on.
+$filesLimit = (($_GET['files_all'] ?? '') === '1') ? 1000000 : 5000;
 $fs = $db->prepare("SELECT path, size FROM index_files WHERE info_hash = ? ORDER BY id LIMIT ?");
 $fs->bindValue(1, $hash, PDO::PARAM_STR);
 $fs->bindValue(2, $filesLimit + 1, PDO::PARAM_INT);

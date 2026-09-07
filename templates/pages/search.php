@@ -54,6 +54,7 @@ $meUser = currentUser($db);
             <?php endforeach; ?>
         </select>
         <span class="search-total text-muted" id="search-total"></span>
+        <p class="search-hint text-muted" id="search-hint" hidden></p>
     </div>
 </form>
 <div id="search-alert" class="alert"></div>

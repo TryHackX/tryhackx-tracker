@@ -16,7 +16,7 @@ foreach ($hashesIn as $h) {
 }
 
 if (count($ids) > 500 || count($hashes) > 500) {
-    jsonResponse(['error' => 'Too many items (max 500)'], 400);
+    jsonResponse(['error' => __('api.wl.too_many_items')], 400);
 }
 
 // Resolve ids → hashes
@@ -29,10 +29,10 @@ if ($ids) {
 $hashes = array_keys($hashes);
 
 if (!$hashes) {
-    jsonResponse(['error' => 'No valid hashes to ban'], 400);
+    jsonResponse(['error' => __('api.wl.no_hashes_to_ban')], 400);
 }
 if (count($hashes) > 500) {
-    jsonResponse(['error' => 'Too many items (max 500)'], 400);
+    jsonResponse(['error' => __('api.wl.too_many_items')], 400);
 }
 
 $r = whitelistBan($db, $cfg, $hashes, ['source' => 'admin', 'reason' => $reason !== '' ? $reason : 'Banned from admin panel']);

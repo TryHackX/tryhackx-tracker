@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../../includes/procstat.php';
 /**
  * GET — everything the "UDP traffic" card shows: whether the feature can run at all, what the
  * firewall currently enforces, the live packets/second, the measured recommendation and the state
@@ -35,6 +36,8 @@ $out = [
     ],
     'exec_available' => trackerExecAvailable(),
     'cpus'          => netlimitCpuCount(),
+    // what the machine's own processes cost right now — MariaDB, the tracker, php-fpm, the worker
+    'procs'         => procstatUsage(),
     'load_per_core' => netlimitLoadPerCore(),
     // Raw counters, not a percentage — the card subtracts two polls. See netlimitWorkerCpu().
     'worker_cpu'    => netlimitWorkerCpu(),

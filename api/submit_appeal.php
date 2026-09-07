@@ -5,7 +5,7 @@ $input = readJsonBody();
 
 // CSRF
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 
 // Per-IP rate limit (appeals were previously unthrottled — open to spam flooding the queue).
@@ -37,7 +37,7 @@ if (empty($rawMessage)) $errors[] = 'message';
 if (!in_array($appealType, ['unblock', 'block'], true)) $appealType = 'unblock';
 
 if ($errors) {
-    jsonResponse(['error' => 'Validation failed', 'fields' => $errors], 400);
+    jsonResponse(['error' => __('api.common.validation_failed'), 'fields' => $errors], 400);
 }
 
 // If report_id is provided, verify it exists and matches infoHash
@@ -52,7 +52,7 @@ if ($reportId > 0) {
         $report = $stmt->fetch();
     }
     if (!$report) {
-        jsonResponse(['error' => 'Report not found or hash mismatch', 'fields' => ['report_id']], 404);
+        jsonResponse(['error' => __('api.appeal.report_mismatch'), 'fields' => ['report_id']], 404);
     }
 } else {
     // Verify hash exists in reports or archives
@@ -65,7 +65,7 @@ if ($reportId > 0) {
         $report = $stmt->fetch();
     }
     if (!$report) {
-        jsonResponse(['error' => 'No report found for this info hash'], 404);
+        jsonResponse(['error' => __('api.appeal.no_report_for_hash')], 404);
     }
     $reportId = (int)$report['id'];
 }
@@ -83,13 +83,13 @@ if ((int)$stmt->fetchColumn() >= $maxPerHour) {
 $stmt = $db->prepare("SELECT id FROM appeals WHERE infoHash = ? AND email = ? AND status = 'pending'");
 $stmt->execute([$infoHash, $email]);
 if ($stmt->fetch()) {
-    jsonResponse(['error' => 'You already have a pending appeal for this hash.'], 409);
+    jsonResponse(['error' => __('api.appeal.pending_exists')], 409);
 }
 
 // Message length
 $maxMsg = (int)($cfg['max_appeal_message_length'] ?? $cfg['max_message_length'] ?? 2000);
 if (mb_strlen($rawMessage) > $maxMsg) {
-    jsonResponse(['error' => 'Message too long (max ' . $maxMsg . ' characters)', 'fields' => ['message']], 400);
+    jsonResponse(['error' => __('api.report.message_too_long', ['max' => $maxMsg]), 'fields' => ['message']], 400);
 }
 $message = sanitize($rawMessage);
 
@@ -98,7 +98,7 @@ $message = sanitize($rawMessage);
 $dupStmt = $db->prepare("SELECT id FROM appeals WHERE infoHash = ? AND email = ? AND appeal_type = ? AND status = 'pending' LIMIT 1");
 $dupStmt->execute([$infoHash, $email, $appealType]);
 if ($dupStmt->fetch()) {
-    jsonResponse(['error' => 'You already have a pending appeal for this info hash awaiting review.'], 409);
+    jsonResponse(['error' => __('api.appeal.pending_exists_review')], 409);
 }
 
 // Insert

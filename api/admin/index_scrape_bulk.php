@@ -5,11 +5,11 @@ $input = readJsonBody();
 $scope = strtolower(trim((string)($input['scope'] ?? '')));
 $after = strtolower(trim((string)($input['after'] ?? '')));
 if (!preg_match('/^[a-f0-9]{0,40}$/', $after)) $after = '';
-if (!in_array($scope, ['page', 'stale', 'all', 'date'], true)) jsonResponse(['error' => 'Invalid scope (page | stale | all | date)'], 400);
+if (!in_array($scope, ['page', 'stale', 'all', 'date'], true)) jsonResponse(['error' => __('api.index.invalid_scrape_scope')], 400);
 $dateRange = null;
 if ($scope === 'date') {
     $dateRange = parseDateRangeInput($input);
-    if ($dateRange === null) jsonResponse(['error' => 'Invalid date range: pass since_hours=N, or from (Y-m-d [H:i]) and optional to.'], 400);
+    if ($dateRange === null) jsonResponse(['error' => __('api.index.invalid_date_range')], 400);
 }
 
 $cap = WL_SCRAPE_BULK_MAX_ROWS;
@@ -21,8 +21,8 @@ if ($scope === 'page') {
     $clean = [];
     foreach ($hashes as $h) { $h = strtolower(trim((string)$h)); if (isValidInfoHash($h)) $clean[$h] = true; }
     $clean = array_keys($clean);
-    if (!$clean) jsonResponse(['error' => 'No hashes provided'], 400);
-    if (count($clean) > 500) jsonResponse(['error' => 'Too many hashes (max 500)'], 400);
+    if (!$clean) jsonResponse(['error' => __('api.index.no_hashes')], 400);
+    if (count($clean) > 500) jsonResponse(['error' => __('api.index.too_many_hashes')], 400);
     $ph = implode(',', array_fill(0, count($clean), '?'));
     $st = $db->prepare("SELECT info_hash FROM index_hashes WHERE info_hash IN ($ph) AND info_hash > ? ORDER BY info_hash");
     $st->execute(array_merge($clean, [$after]));
@@ -40,7 +40,7 @@ if ($scope === 'page') {
 
 $res = ['scraped' => 0, 'requests' => 0, 'failed' => 0, 'processed' => 0, 'truncated' => false, 'last_id' => null, 'error' => null];
 try { if ($rows) $res = indexScrapeMany($db, $cfg, $rows); }
-catch (\Throwable $e) { $res['error'] = 'Scrape failed: ' . $e->getMessage(); }
+catch (\Throwable $e) { $res['error'] = __('api.index.scrape_failed', ['error' => $e->getMessage()]); }
 
 $lastHash = $res['last_id'] !== null ? (string)$res['last_id'] : ($rows ? (string)end($rows)['info_hash'] : $after);
 $truncated = ($res['error'] === null) && (!empty($res['truncated']) || $more);

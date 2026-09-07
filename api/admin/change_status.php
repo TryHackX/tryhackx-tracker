@@ -5,7 +5,7 @@ $input = readJsonBody();
 $id = (int)($input['id'] ?? 0);
 
 if ($id < 1) {
-    jsonResponse(['error' => 'Invalid ID'], 400);
+    jsonResponse(['error' => __('api.common.invalid_id')], 400);
 }
 
 $stmt = $db->prepare("SELECT id, checked, email FROM reports WHERE id = ?");
@@ -13,7 +13,7 @@ $stmt->execute([$id]);
 $report = $stmt->fetch();
 
 if (!$report) {
-    jsonResponse(['error' => 'Report not found'], 404);
+    jsonResponse(['error' => __('api.report.not_found')], 404);
 }
 
 $newChecked = $report['checked'] ? 0 : 1;
@@ -28,5 +28,5 @@ if ($report['email']) {
 jsonResponse([
     'success' => true,
     'checked' => $newChecked,
-    'message' => $newChecked ? 'Marked as checked' : 'Unchecked',
+    'message' => $newChecked ? __('api.report.marked_checked') : __('api.report.unchecked'),
 ]);

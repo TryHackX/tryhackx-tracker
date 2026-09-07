@@ -1172,6 +1172,18 @@
         const filesBox = el('div', { className: 'wl-files' });
         filesBox.appendChild(el('div', { className: 'wl-label mb-1', text: r.files && r.files.length ? t('js.wl.files_n', { n: r.files.length, more: r.files_truncated ? t('js.wl.files_truncated') : '' }) : t('js.wl.files') }));
         if (r.files && r.files.length) filesBox.appendChild(buildFileTree(r.files));
+        if (r.files_truncated) {
+            // Capped for a fast modal; the operator can ask for the whole list.
+            const all = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary mt-2', text: t('js.wl.files_load_all') });
+            all.addEventListener('click', async () => {
+                all.disabled = true; all.textContent = t('js.common.loading');
+                try {
+                    const full = await apiCall('admin/whitelist_item&files_all=1&id=' + encodeURIComponent(id));
+                    if (full && full.files) { filesBox.replaceChildren(el('div', { className: 'wl-label mb-1', text: t('js.wl.files_n', { n: full.files.length, more: '' }) }), buildFileTree(full.files)); }
+                } catch (e) { all.disabled = false; all.textContent = t('js.wl.files_load_all'); }
+            });
+            filesBox.appendChild(all);
+        }
         else filesBox.appendChild(el('div', { className: 'text-muted wl-small', text: it.meta_status === 'done' ? t('js.wl.single_file_or_no_list') : t('js.wl.no_file_list_yet') }));
         body.appendChild(filesBox);
 

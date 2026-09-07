@@ -331,6 +331,18 @@
         if (d.files && d.files.length) {
             const list = el('div', { className: 'idx-files mt-2' }, [el('h6', { className: 'text-muted', text: t('js.index.files_n', { n: d.files.length + (d.files_truncated ? '+' : '') }) })]);
             list.appendChild(buildFileTree(d.files));
+            if (d.files_truncated) {
+                // The reply is capped so the modal opens fast; the operator can ask for the rest.
+                const all = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary mt-2', text: t('js.index.files_load_all') });
+                all.addEventListener('click', async () => {
+                    all.disabled = true; all.textContent = t('js.common.loading');
+                    try {
+                        const full = await apiCall('admin/index_item&files_all=1&hash=' + encodeURIComponent(hash));
+                        if (full && full.files) { list.replaceChildren(el('h6', { className: 'text-muted', text: t('js.index.files_n', { n: full.files.length }) }), buildFileTree(full.files)); }
+                    } catch (e) { all.disabled = false; all.textContent = t('js.index.files_load_all'); }
+                });
+                list.appendChild(all);
+            }
             body.appendChild(list);
         }
     }

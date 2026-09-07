@@ -26,15 +26,15 @@ requireAdminReauth($password, $cfg);
 
 $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
 if ($service === '') {
-    jsonResponse(['error' => 'No tracker service name is configured. Set it in Settings first.'], 400);
+    jsonResponse(['error' => __('api.reload.no_service')], 400);
 }
 if (!isServiceNameValid($service)) {
-    jsonResponse(['error' => 'The configured service name is invalid. Fix it in Settings.'], 400);
+    jsonResponse(['error' => __('api.reload.bad_service')], 400);
 }
 
 // exec() must exist and not be blacklisted in disable_functions.
 if (!trackerExecAvailable()) {
-    jsonResponse(['error' => 'PHP exec() is disabled on this server — the service cannot be reloaded from the panel.'], 500);
+    jsonResponse(['error' => __('api.reload.exec_disabled')], 500);
 }
 
 $useSudo = (($cfg['opentracker_restart_use_sudo'] ?? '1') === '1');
@@ -48,17 +48,17 @@ if ($res['ok']) {
     whitelistNoteReloaded(true, $outStr ?? '');
     jsonResponse([
         'success' => true,
-        'message' => 'Tracker service "' . $service . '" reloaded its blacklist (SIGHUP).',
+        'message' => __('api.reload.reloaded', ['service' => $service]),
         'output'  => $outStr,
     ]);
 }
 
 $hint = $useSudo
-    ? 'Grant the web user permission, e.g. sudoers line: "www-data ALL=(root) NOPASSWD: /bin/systemctl reload ' . $service . '". Also make sure the unit defines ExecReload (e.g. ExecReload=/bin/kill -HUP $MAINPID).'
-    : 'The web user must be allowed to run "systemctl reload ' . $service . '" (consider enabling "Run via sudo"). The unit must also define ExecReload.';
+    ? __('api.reload.hint_sudo', ['service' => $service])
+    : __('api.reload.hint_nosudo', ['service' => $service]);
 
 jsonResponse([
-    'error'  => 'Reload failed (exit ' . (int)$ret . '). ' . ($outStr !== '' ? $outStr : $hint),
+    'error'  => __('api.reload.failed', ['code' => (int)$ret, 'detail' => ($outStr !== '' ? $outStr : $hint)]),
     'output' => $outStr,
     'hint'   => $hint,
 ], 500);

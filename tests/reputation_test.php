@@ -36,8 +36,11 @@ check('ratings are off by default', !repEnabled([]));
 // The refusal path is checked against the real function, not a placeholder. A helper that returns
 // true unconditionally is a test that can never fail, which is worse than not having one.
 $src = (string)file_get_contents($root . '/includes/reputation.php');
+// The sentence lives in the dictionary now (api.rep.off): the function must return that key first,
+// and the key must still say ratings are off — the source check alone would pass a renamed key.
 check('… and the refusal names that as the first reason it says no',
-      preg_match('/function repVoteRefusal.*?!repEnabled.*?return .Ratings are off/s', $src) === 1);
+      preg_match('/function repVoteRefusal.*?!repEnabled.*?return __\(.api\.rep\.off.\)/s', $src) === 1
+      && str_starts_with(__('api.rep.off'), 'Ratings are off'));
 check('a vote goes nowhere while they are off, checked in repCastVote too',
       preg_match('/function repCastVote.*?repVoteRefusal\(/s', $src) === 1);
 

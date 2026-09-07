@@ -52,7 +52,21 @@ require_once __DIR__ . '/includes/lang.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-$db = getDb();
+// Same failure as in index.php, in the API's own shape: a 503 the pollers already treat as "keep the
+// last good numbers" (markStale in admin-index.js) and a Retry-After the S2S clients can honour.
+// English only -- langInit() needs $cfg and $cfg needs the database, so this is the one message that
+// cannot follow the visitor's language, and it is better to say it in English than not at all.
+// langFor() rather than __(): before langInit() the request has no dictionary loaded and __() hands
+// back the key; langFor() reads the language file itself and is right whatever ran before it.
+try {
+    $db = getDb();
+} catch (PDOException $e) {
+    error_log('[tracker] database unavailable: ' . $e->getMessage());
+    http_response_code(503);
+    header('Retry-After: 60');
+    echo json_encode(['success' => false, 'error' => langFor('en', 'api.db_unavailable'), 'retry_after' => 60]);
+    exit;
+}
 // A ceiling on how long ONE query may run inside a web request. Not a substitute for writing the
 // query properly — a bad plan is still a bug — but the difference between a bad plan costing one
 // visitor an error page and it holding a php-fpm child until the whole site stops answering. The

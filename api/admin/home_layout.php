@@ -30,33 +30,33 @@ function homeSectionAvailable(array $cfg, PDO $db, string $key): array {
     switch ($key) {
         case 'stats':
             if (($cfg['tracker_stats_enabled'] ?? '0') !== '1') {
-                return [false, 'Tracker statistics are switched off (Statistics → Live statistics).'];
+                return [false, __('api.pages.why_stats_off')];
             }
             if (($cfg['tracker_stats_show_home'] ?? '1') !== '1') {
-                return [false, 'The widget is switched off for the home page (Statistics → Show on home page).'];
+                return [false, __('api.pages.why_stats_home_off')];
             }
             if (!userCan($db, $cfg, 'home.stats')) {
-                return [false, 'Visitors do not have the home.stats permission, so they never see it.'];
+                return [false, __('api.pages.why_stats_no_permission')];
             }
             return [true, ''];
         case 'announce':
             if (empty($cfg['announce_url']) && empty($cfg['announce_url_https'])) {
-                return [false, 'No announce URL is configured (Site & pages → Announce address).'];
+                return [false, __('api.pages.why_no_announce')];
             }
             return [true, ''];
         case 'donations':
             if (($cfg['donations_enabled'] ?? '0') !== '1') {
-                return [false, 'Donations are switched off (Site & pages → Donations).'];
+                return [false, __('api.pages.why_donations_off')];
             }
             $f = json_decode((string)($cfg['donation_fields'] ?? '[]'), true);
             $legacy = !empty($cfg['wallet_xmr']) || !empty($cfg['wallet_btc']) || !empty($cfg['wallet_eth']);
             if ((!is_array($f) || !$f) && !$legacy) {
-                return [false, 'Donations are on but no wallet or link is filled in.'];
+                return [false, __('api.pages.why_donations_empty')];
             }
             return [true, ''];
         case 'contact':
             if (($cfg['contact_visible'] ?? '1') !== '1') {
-                return [false, 'The contact block is switched off (Contact & email → Show contact section).'];
+                return [false, __('api.pages.why_contact_off')];
             }
             return [true, ''];
     }
@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     foreach ($layout['order'] as $key) {
         $isCustom = homeSectionIsCustom($key);
         $meta = $isCustom
-            ? ['label' => homeSectionLabel($cfg, $key), 'about' => 'Your own section — its text is whatever you write.',
+            ? ['label' => homeSectionLabel($cfg, $key), 'about' => __('api.pages.custom_about'),
                'fixed' => false, 'heading' => 'custom']
             : $catalog[$key];
         [$live, $why] = $isCustom ? [true, ''] : homeSectionAvailable($cfg, $db, $key);
@@ -104,9 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         'max'        => HOME_HEADING_MAX,
         'custom_max' => HOME_CUSTOM_MAX,
         'custom'     => $layout['custom'],
-        'note'       => 'Hiding a section here removes it from the page. It does not switch the '
-                      . 'feature off, and dragging one back does not switch it on — a section whose '
-                      . 'own setting is off says so on its row.',
+        'note'       => __('api.pages.layout_note'),
     ]);
 }
 
@@ -119,9 +117,9 @@ if ($op === 'reset') {
     // A full reset: every section's own text goes too — the dialog says so before asking.
     try { $db->prepare("DELETE FROM page_content WHERE page LIKE 'home:%'")->execute(); } catch (\Throwable $e) {}
     auditNote(['summary' => 'restored the built-in home page layout and removed every custom section text']);
-    jsonResponse(['success' => true, 'message' => 'The home page is back to its built-in layout.']);
+    jsonResponse(['success' => true, 'message' => __('api.pages.layout_reset')]);
 }
-if ($op !== 'save') jsonResponse(['error' => 'Unknown operation. Use save or reset.'], 400);
+if ($op !== 'save') jsonResponse(['error' => __('api.pages.unknown_op_save_reset')], 400);
 
 $order    = is_array($input['order'] ?? null) ? $input['order'] : [];
 $hidden   = is_array($input['hidden'] ?? null) ? $input['hidden'] : [];
@@ -173,5 +171,5 @@ if (isset($stored['tagline'])) $parts[] = 'new tagline';
 if (!empty($stored['custom'])) $parts[] = count($stored['custom']) . ' custom section' . (count($stored['custom']) === 1 ? '' : 's');
 auditNote(['summary' => 'changed the home page layout' . ($parts ? ' (' . implode('; ', $parts) . ')' : '')]);
 
-jsonResponse(['success' => true, 'message' => 'Home page saved.',
+jsonResponse(['success' => true, 'message' => __('api.pages.layout_saved'),
               'is_default' => homeLayoutIsDefault(array_merge($cfg, ['home_layout' => $r['json']]))]);

@@ -22,11 +22,11 @@ $choices = langForUsers($cfg);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = readJsonBody();
     if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-        jsonResponse(['error' => 'Invalid CSRF token'], 403);
+        jsonResponse(['error' => __('api.csrf.invalid')], 403);
     }
     $lang = strtolower(trim((string)($input['language'] ?? '')));
     if ($lang !== '' && !isset($choices[$lang])) {
-        jsonResponse(['error' => 'That language is not one this site offers.'], 400);
+        jsonResponse(['error' => __('api.lang.not_offered')], 400);
     }
     $db->prepare("UPDATE users SET language = ? WHERE id = ?")
        ->execute([$lang === '' ? null : $lang, (int)$u['id']]);

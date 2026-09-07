@@ -3,7 +3,7 @@ requirePost();
 
 $input = readJsonBody();
 if (!$input || !is_array($input)) {
-    jsonResponse(['error' => 'Invalid input'], 400);
+    jsonResponse(['error' => __('api.account.invalid_input')], 400);
 }
 
 $email = trim($input['email'] ?? '');
@@ -11,16 +11,16 @@ $token = trim($input['token'] ?? '');
 $preferences = $input['preferences'] ?? [];
 
 if (!$email || !$token) {
-    jsonResponse(['error' => 'Missing parameters'], 400);
+    jsonResponse(['error' => __('api.unsubscribe.missing_params')], 400);
 }
 
 $secret = $cfg['hmac_secret'] ?? '';
 if (!verifyUnsubscribeToken($email, $token, $secret)) {
-    jsonResponse(['error' => 'Invalid token'], 403);
+    jsonResponse(['error' => __('api.unsubscribe.invalid_token')], 403);
 }
 
 if (!is_array($preferences)) {
-    jsonResponse(['error' => 'Invalid preferences'], 400);
+    jsonResponse(['error' => __('api.unsubscribe.invalid_preferences')], 400);
 }
 
 $validTypes = ['submission', 'review', 'status', 'custom', 'appeal'];

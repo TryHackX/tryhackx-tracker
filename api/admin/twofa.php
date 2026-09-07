@@ -20,7 +20,7 @@ requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? '');
 if (!in_array($op, ['status', 'begin', 'confirm', 'cancel', 'disable', 'regen'], true)) {
-    jsonResponse(['error' => 'Unknown operation'], 400);
+    jsonResponse(['error' => __('api.twofa.unknown_op')], 400);
 }
 
 twofaSyncSetting($db, $cfg);
@@ -60,13 +60,10 @@ if ($needPassword) {
 
 if ($op === 'begin') {
     if (twofaEnabled()) {
-        jsonResponse(['error' => 'Two-factor authentication is already on. Turn it off first if you want a new secret — '
-                              . 'that way the old one stops working the moment the new one starts.'], 409);
+        jsonResponse(['error' => __('api.twofa.already_on')], 409);
     }
     if (!is_writable(dirname(twofaFile()))) {
-        jsonResponse(['error' => 'config/ is not writable, so the secret could not be stored. Fix that before '
-                              . 'starting: a setup that cannot be saved would leave you with an app generating '
-                              . 'codes for a secret this server has forgotten.'], 500);
+        jsonResponse(['error' => __('api.twofa.config_not_writable')], 500);
     }
     $r = twofaBeginSetup($cfg);
     if (!empty($r['error'])) jsonResponse(['error' => $r['error']], 500);
@@ -86,14 +83,11 @@ if ($op === 'begin') {
     }
     // Nothing has changed yet. The secret is pending until a code proves it arrived intact.
     jsonResponse(['success' => true] + $r + [
-        'note' => 'Nothing is switched on yet. Add the key to your authenticator app, then enter a code from '
-                . 'it below — that is what proves the key arrived intact, and only then does anything change.',
+        'note' => __('api.twofa.begin_note'),
         'qr' => $qr,
         'qr_note' => $qr === null
-            ? 'The QR code could not be drawn on this server, so add the key by hand — every authenticator '
-            . 'app supports that, and the key below carries exactly what the QR would have.'
-            : 'Drawn on this server and never sent anywhere: this secret is as good as your password, so it '
-            . 'does not go to a QR service. Cannot scan it? The key below is the same thing, by hand.',
+            ? __('api.twofa.qr_unavailable')
+            : __('api.twofa.qr_local'),
     ]);
 }
 
@@ -102,24 +96,22 @@ if ($op === 'confirm') {
     if (!empty($r['error'])) jsonResponse(['error' => $r['error']], 400);
     twofaSyncSetting($db, $cfg);
     jsonResponse(['success' => true, 'recovery_left' => twofaRecoveryLeft(),
-                  'message' => 'Two-factor authentication is on. Your next sign-in will ask for a code.']);
+                  'message' => __('api.twofa.confirmed')]);
 }
 
-if (!twofaEnabled()) jsonResponse(['error' => 'Two-factor authentication is not on.'], 409);
+if (!twofaEnabled()) jsonResponse(['error' => __('api.twofa.not_on')], 409);
 
 if (!$secondFactorOk((string)($input['code'] ?? ''))) {
-    jsonResponse(['error' => 'A current code (or a recovery code) is required as well as the password. '
-                          . 'Two-factor authentication is for the case where somebody else has the password, so '
-                          . 'the password alone cannot switch it off.'], 403);
+    jsonResponse(['error' => __('api.twofa.code_required')], 403);
 }
 
 if ($op === 'disable') {
-    if (!twofaDisable()) jsonResponse(['error' => 'Could not clear the stored secret.'], 500);
+    if (!twofaDisable()) jsonResponse(['error' => __('api.twofa.disable_failed')], 500);
     twofaSyncSetting($db, $cfg);
-    jsonResponse(['success' => true, 'message' => 'Two-factor authentication is off. The secret and every recovery code are gone.']);
+    jsonResponse(['success' => true, 'message' => __('api.twofa.disabled')]);
 }
 
 $r = twofaRegenerateRecovery();
 if (!empty($r['error'])) jsonResponse(['error' => $r['error']], 500);
 jsonResponse(['success' => true, 'recovery' => $r['recovery'],
-              'message' => 'Ten new recovery codes. Every previous code stopped working just now — save these.']);
+              'message' => __('api.twofa.regenerated')]);

@@ -15,18 +15,18 @@ $query = trim($input['search_query'] ?? '');
 $email = trim($input['email'] ?? '');
 
 if (empty($query)) {
-    jsonResponse(['error' => 'Please provide a report number or info hash'], 400);
+    jsonResponse(['error' => __('api.status.query_required')], 400);
 }
 
 // Email is always required — prevents information leakage
 if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-    jsonResponse(['error' => 'Email address is required to check report status'], 400);
+    jsonResponse(['error' => __('api.status.email_required')], 400);
 }
 
 // Per-IP rate limit: report IDs are sequential, so without a throttle an attacker could iterate
 // them against a target email to confirm ownership. CAPTCHA is optional; this always applies.
 if (!rateLimitAllow('status', getClientIp($cfg), (int)($cfg['rate_limit_status'] ?? 20))) {
-    jsonResponse(['error' => 'Too many status checks. Please wait a while and try again.'], 429);
+    jsonResponse(['error' => __('api.status.too_many')], 429);
 }
 
 // maskName() / maskEmail() live in includes/functions.php (shared + unit-tested).
@@ -54,7 +54,7 @@ if (preg_match('/^[a-fA-F0-9]{40}$/', $query)) {
     // Search by report ID + email (must match)
     $reportId = (int)$query;
     if ($reportId < 1) {
-        jsonResponse(['error' => 'Invalid report number'], 400);
+        jsonResponse(['error' => __('api.status.invalid_number')], 400);
     }
 
     $stmt = $db->prepare("SELECT $cols FROM reports WHERE id = ? AND email = ?");

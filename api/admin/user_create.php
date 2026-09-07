@@ -26,7 +26,7 @@ const USER_USERNAME_RULES_TXT = '3-32 characters, letters, digits, dot, dash or 
 
 // The permission gate is the map in api.php (default deny), the same as every other admin endpoint;
 // nothing to check again here.
-if (!usersEnabled($cfg)) jsonResponse(['error' => 'User accounts are disabled.'], 400);
+if (!usersEnabled($cfg)) jsonResponse(['error' => __('api.users.accounts_disabled_msg')], 400);
 
 $input    = readJsonBody();
 $username = trim((string)($input['username'] ?? ''));
@@ -35,26 +35,26 @@ $password = (string)($input['password'] ?? '');
 $verify   = (string)($input['verify'] ?? 'auto');
 $status   = (string)($input['status'] ?? 'active');
 
-if (!in_array($verify, ['auto', 'send', 'none'], true)) jsonResponse(['error' => 'Invalid verification mode'], 400);
-if (!in_array($status, ['active', 'banned'], true))     jsonResponse(['error' => 'Invalid status'], 400);
-if (!userValidUsername($username)) jsonResponse(['error' => 'Username: ' . USER_USERNAME_RULES_TXT], 400);
-if (!userValidPassword($password)) jsonResponse(['error' => 'Password: ' . USER_PASSWORD_RULES], 400);
+if (!in_array($verify, ['auto', 'send', 'none'], true)) jsonResponse(['error' => __('api.users.invalid_verify_mode')], 400);
+if (!in_array($status, ['active', 'banned'], true))     jsonResponse(['error' => __('api.users.invalid_status')], 400);
+if (!userValidUsername($username)) jsonResponse(['error' => __('api.users.username_rules', ['rules' => USER_USERNAME_RULES_TXT])], 400);
+if (!userValidPassword($password)) jsonResponse(['error' => __('api.users.password_rules', ['rules' => USER_PASSWORD_RULES])], 400);
 if ($email === '' && $verify !== 'none') {
     // Saying "verified" or "we sent a link" about an address that does not exist would be a lie the
     // panel then displays as a badge.
-    jsonResponse(['error' => 'An email address is required unless verification is set to "no email".'], 400);
+    jsonResponse(['error' => __('api.users.email_required_unless_none')], 400);
 }
-if ($email !== '' && !userValidEmail($email)) jsonResponse(['error' => 'Invalid email'], 400);
+if ($email !== '' && !userValidEmail($email)) jsonResponse(['error' => __('api.users.invalid_email_2')], 400);
 
 $res = userCreate($db, $cfg, $username, $email, $password, getClientIp(), 'admin');
 if (isset($res['error'])) {
     $msg = [
-        'invalid_username' => 'Username: ' . USER_USERNAME_RULES_TXT,
-        'invalid_email'    => 'Invalid email',
-        'weak_password'    => 'Password: ' . USER_PASSWORD_RULES,
-        'username_taken'   => 'That username is already taken.',
-        'email_taken'      => 'That email address is already registered.',
-    ][$res['error']] ?? 'Could not create the account.';
+        'invalid_username' => __('api.users.username_rules', ['rules' => USER_USERNAME_RULES_TXT]),
+        'invalid_email'    => __('api.users.invalid_email_2'),
+        'weak_password'    => __('api.users.password_rules', ['rules' => USER_PASSWORD_RULES]),
+        'username_taken'   => __('api.users.username_taken_2'),
+        'email_taken'      => __('api.users.email_registered'),
+    ][$res['error']] ?? __('api.users.create_failed');
     jsonResponse(['error' => $msg], 400);
 }
 
@@ -87,9 +87,9 @@ jsonResponse([
     'verified'  => $verify === 'auto' && $email !== '',
     'mail_sent' => $sent,
     'message'   => $verify === 'auto'
-        ? 'Account created and the address marked verified — it can sign in now.'
+        ? __('api.users.created_verified')
         : ($verify === 'send'
-            ? ($sent ? 'Account created; a verification link has been emailed.'
-                     : 'Account created, but the verification mail could NOT be sent — check the mail settings, or verify the address by hand.')
-            : 'Account created without verification. It acts as a guest until the address is verified.'),
+            ? ($sent ? __('api.users.created_mail_sent')
+                     : __('api.users.created_mail_failed'))
+            : __('api.users.created_unverified')),
 ]);

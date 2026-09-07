@@ -17,7 +17,7 @@ if (!empty($input['grant_inbound'])) {
     $st->execute([$peerId]);
     $peer = $st->fetch(PDO::FETCH_ASSOC);
     if ($peer && (int)($peer['api_client_id'] ?? 0) > 0) {
-        jsonResponse(['error' => 'This peer already has inbound access. Delete and re-add the peer (or the API client) to rotate the key.'], 400);
+        jsonResponse(['error' => __('api.federation.inbound_exists')], 400);
     }
     $c = apiClientCreate($db, 'federation: ' . $peer['name'], 'federation');
     $db->prepare("UPDATE fed_peers SET api_client_id = ? WHERE id = ?")->execute([(int)$c['id'], $peerId]);

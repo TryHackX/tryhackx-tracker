@@ -5,7 +5,7 @@ $input = readJsonBody();
 $id = (int)($input['id'] ?? 0);
 
 if ($id < 1) {
-    jsonResponse(['error' => 'Invalid ID'], 400);
+    jsonResponse(['error' => __('api.report.invalid_id')], 400);
 }
 
 $stmt = $db->prepare("SELECT * FROM archives WHERE id = ?");
@@ -13,7 +13,7 @@ $stmt->execute([$id]);
 $report = $stmt->fetch();
 
 if (!$report) {
-    jsonResponse(['error' => 'Archived report not found'], 404);
+    jsonResponse(['error' => __('api.report.archived_not_found')], 404);
 }
 
 // Move back to reports
@@ -62,7 +62,7 @@ try {
 
 $reload = $reload ?? null;
 
-$response = ['success' => true, 'message' => 'Report restored to active'];
+$response = ['success' => true, 'message' => __('api.report.restored')];
 if ($blacklistChanged) $response['blacklist_updated'] = true;
 if ($reload) $response['reload'] = $reload;
 jsonResponse($response);

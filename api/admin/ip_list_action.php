@@ -24,13 +24,13 @@ $input = readJsonBody();
 $op = strtolower(trim((string)($input['op'] ?? '')));
 $known = ['create', 'entries', 'refresh', 'toggle', 'delete', 'push'];
 if (!in_array($op, $known, true)) {
-    jsonResponse(['error' => 'Unknown operation. Use one of: ' . implode(', ', $known) . '.'], 400);
+    jsonResponse(['error' => __('api.iplist.unknown_op', ['ops' => implode(', ', $known)])], 400);
 }
 
 $id = (int)($input['id'] ?? 0);
 $needId = ['entries', 'refresh', 'toggle', 'delete'];
 if (in_array($op, $needId, true)) {
-    if ($id <= 0 || !ipListFind($db, $id)) jsonResponse(['error' => 'No such list.'], 404);
+    if ($id <= 0 || !ipListFind($db, $id)) jsonResponse(['error' => __('api.iplist.no_such_list')], 404);
 }
 
 /** Re-write the file the firewall helper reads. Called after anything that changes what is enabled. */
@@ -50,7 +50,7 @@ switch ($op) {
         if (($input['source'] ?? 'manual') === 'url') {
             $f = ipListRefresh($db, $newId, true);
             if (isset($f['error'])) {
-                $note = 'The list was created but the first download failed: ' . $f['error'];
+                $note = __('api.iplist.created_download_failed', ['error' => $f['error']]);
             } else {
                 $added = (int)($f['added'] ?? 0);
             }
@@ -63,24 +63,24 @@ switch ($op) {
         jsonResponse(['success' => true, 'id' => $newId, 'added' => $added, 'note' => $note,
                       'lines' => $s['lines'],
                       'message' => $added
-                          ? 'Created with ' . number_format($added) . ($added === 1 ? ' entry' : ' entries')
-                            . '. Press "Push to firewall" to load it.'
-                          : ($note !== '' ? $note : 'Created. It is empty until you add entries.')]);
+                          ? __($added === 1 ? 'api.iplist.created_with_one' : 'api.iplist.created_with_many', ['n' => number_format($added)])
+                          : ($note !== '' ? $note : __('api.iplist.created_empty'))]);
     }
 
     case 'entries': {
         $text = (string)($input['text'] ?? '');
         if (strlen($text) > IPLIST_FETCH_MAX_BYTES) {
-            jsonResponse(['error' => 'That file is larger than ' . (IPLIST_FETCH_MAX_BYTES >> 20) . ' MiB.'], 400);
+            jsonResponse(['error' => __('api.iplist.file_too_large', ['mib' => (IPLIST_FETCH_MAX_BYTES >> 20)])], 400);
         }
         $e = ipListSetEntries($db, $id, $text);
         if (isset($e['error'])) jsonResponse(['error' => $e['error']], 400);
         $s = $sync();
         jsonResponse(['success' => true, 'added' => $e['added'], 'skipped' => $e['skipped'], 'lines' => $s['lines'],
-                      'message' => number_format($e['added']) . ($e['added'] === 1 ? ' entry' : ' entries') . ' stored'
-                                   . ($e['skipped'] ? ', ' . number_format($e['skipped'])
-                                       . ($e['skipped'] === 1 ? ' line ignored' : ' lines ignored') : '')
-                                   . '. Press "Push to firewall" to load them.']);
+                      'message' => __('api.iplist.entries_stored', [
+                          'stored'  => __($e['added'] === 1 ? 'api.iplist.stored_one' : 'api.iplist.stored_many', ['n' => number_format($e['added'])]),
+                          'skipped' => $e['skipped']
+                              ? __($e['skipped'] === 1 ? 'api.iplist.ignored_one' : 'api.iplist.ignored_many', ['n' => number_format($e['skipped'])])
+                              : ''])]);
     }
 
     case 'refresh': {
@@ -88,32 +88,32 @@ switch ($op) {
         if (isset($r['error'])) jsonResponse(['error' => $r['error']], 502);
         $s = $sync();
         jsonResponse(['success' => true, 'added' => (int)($r['added'] ?? 0), 'lines' => $s['lines'],
-                      'message' => 'Downloaded ' . number_format((int)($r['added'] ?? 0))
-                                   . ((int)($r['added'] ?? 0) === 1 ? ' entry.' : ' entries.')]);
+                      'message' => __((int)($r['added'] ?? 0) === 1 ? 'api.iplist.downloaded_one' : 'api.iplist.downloaded_many',
+                                      ['n' => number_format((int)($r['added'] ?? 0))])]);
     }
 
     case 'toggle': {
         $on = !empty($input['enabled']);
-        if (!ipListToggle($db, $id, $on)) jsonResponse(['error' => 'Could not change the list.'], 500);
+        if (!ipListToggle($db, $id, $on)) jsonResponse(['error' => __('api.iplist.toggle_failed')], 500);
         $s = $sync();
         jsonResponse(['success' => true, 'enabled' => $on, 'lines' => $s['lines'],
-                      'message' => ($on ? 'Enabled' : 'Disabled') . '. Press "Push to firewall" to make it so.']);
+                      'message' => __($on ? 'api.iplist.enabled_push' : 'api.iplist.disabled_push')]);
     }
 
     case 'delete': {
-        if (!ipListDelete($db, $id)) jsonResponse(['error' => 'Could not delete the list.'], 500);
+        if (!ipListDelete($db, $id)) jsonResponse(['error' => __('api.iplist.delete_failed')], 500);
         $s = $sync();
         jsonResponse(['success' => true, 'lines' => $s['lines'],
-                      'message' => 'Deleted. Press "Push to firewall" to stop enforcing it.']);
+                      'message' => __('api.iplist.deleted_push')]);
     }
 
     case 'push': {
         requireAdminReauth((string)($input['password'] ?? ''), $cfg);
         if (netlimitCommand($cfg) === '') {
-            jsonResponse(['error' => 'No rate-limit helper command is configured. Set it in Settings → UDP traffic & rate limit first.'], 400);
+            jsonResponse(['error' => __('api.iplist.no_helper_command')], 400);
         }
         if (!trackerExecAvailable()) {
-            jsonResponse(['error' => 'PHP exec() is disabled on this server — the panel cannot reach the firewall helper.'], 500);
+            jsonResponse(['error' => __('api.iplist.exec_disabled')], 500);
         }
         // The master switch travels with the push, so "off" genuinely clears the sets rather than
         // leaving the last ruleset enforcing a list the page says is not in use.
@@ -123,18 +123,18 @@ switch ($op) {
         }
         $s = ipListWriteSetsFile($db, $cfg);
         if (!$s['written']) {
-            jsonResponse(['error' => 'Could not write ' . basename($s['path']) . ' — check that config/ is writable.'], 500);
+            jsonResponse(['error' => __('api.iplist.write_failed', ['file' => basename($s['path'])])], 500);
         }
         if (!netlimitEnabled($cfg)) {
-            jsonResponse(['error' => 'The inbound limit is not running, and the lists live inside its table. '
-                                   . 'Start the limit (or the counters) first, then push.'], 400);
+            jsonResponse(['error' => __('api.iplist.limit_not_running')], 400);
         }
         $r = netlimitApply($cfg, netlimitPps($cfg), netlimitBurst($cfg), netlimitPort($cfg), false, 'lists');
-        if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? 'Could not load the lists.', 'output' => $r['output']], 500);
+        if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? __('api.iplist.load_failed'), 'output' => $r['output']], 500);
         $loaded = (array)($r['json']['lists'] ?? []);
         jsonResponse(['success' => true, 'applied' => $r['json'], 'lines' => $s['lines'], 'loaded' => $loaded,
-                      'message' => 'Loaded: ' . number_format((int)($loaded['allow4'] ?? 0) + (int)($loaded['allow6'] ?? 0)) . ' allowed, '
-                                   . number_format((int)($loaded['block4'] ?? 0) + (int)($loaded['block6'] ?? 0)) . ' blocked, '
-                                   . number_format((int)($loaded['soft4'] ?? 0) + (int)($loaded['soft6'] ?? 0)) . ' throttled first.']);
+                      'message' => __('api.iplist.loaded_summary', [
+                          'allowed' => number_format((int)($loaded['allow4'] ?? 0) + (int)($loaded['allow6'] ?? 0)),
+                          'blocked' => number_format((int)($loaded['block4'] ?? 0) + (int)($loaded['block6'] ?? 0)),
+                          'soft'    => number_format((int)($loaded['soft4'] ?? 0) + (int)($loaded['soft6'] ?? 0))])]);
     }
 }

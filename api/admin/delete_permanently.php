@@ -11,7 +11,7 @@ $source = trim($input['source'] ?? 'reports');
 if (isset($_SESSION['delete_lockout_until'])) {
     if (time() < $_SESSION['delete_lockout_until']) {
         $timeLeft = ceil(($_SESSION['delete_lockout_until'] - time()) / 60);
-        jsonResponse(['error' => "Too many failed attempts. Locked out for another $timeLeft minutes."], 403);
+        jsonResponse(['error' => __('api.report.locked_out_remaining', ['minutes' => $timeLeft])], 403);
     } else {
         // Lockout expired, reset attempts counter
         unset($_SESSION['delete_attempts']);
@@ -43,11 +43,11 @@ if ($deleteAttempts >= $captchaAttempts && isRecaptchaEnabled($cfg, 'login')) {
 }
 
 if ($id < 1) {
-    jsonResponse(['error' => 'Invalid ID'], 400);
+    jsonResponse(['error' => __('api.report.invalid_id')], 400);
 }
 
 if (empty($password)) {
-    jsonResponse(['error' => 'Admin password is required'], 400);
+    jsonResponse(['error' => __('api.report.admin_password_required')], 400);
 }
 
 // The password itself goes through the one shared check, so this action is throttled and signs the
@@ -65,10 +65,9 @@ if (!$reauth['ok']) {
     if ($_SESSION['delete_attempts'] >= $lockoutAttempts) {
         $lockoutMinutes = (int)($cfg['delete_lockout_minutes'] ?? 60);
         $_SESSION['delete_lockout_until'] = time() + ($lockoutMinutes * 60);
-        jsonResponse(['error' => "Incorrect admin password. Too many failed attempts, locked out for $lockoutMinutes minutes."], 403);
+        jsonResponse(['error' => __('api.report.incorrect_password_locked_out', ['minutes' => $lockoutMinutes])], 403);
     }
-    jsonResponse(['error' => $reauth['error'] . ' Failed attempts on this action: '
-                           . $_SESSION['delete_attempts'] . '/' . $lockoutAttempts,
+    jsonResponse(['error' => $reauth['error'] . ' ' . __('api.report.failed_attempts', ['n' => $_SESSION['delete_attempts'], 'max' => $lockoutAttempts]),
                   'attempts_left' => $reauth['left']], 403);
 }
 
@@ -85,7 +84,7 @@ $stmt->execute([$id]);
 $report = $stmt->fetch();
 
 if (!$report) {
-    jsonResponse(['error' => 'Report not found'], 404);
+    jsonResponse(['error' => __('api.report.not_found')], 404);
 }
 
 // Remove hash from blacklist file if it was blocked and no other blocked reports exist for it
@@ -136,7 +135,7 @@ try {
     $db->rollBack();
     // Log the detail server-side; never echo raw DB errors (schema/paths) back to the client.
     error_log('delete_permanently failed: ' . $e->getMessage());
-    jsonResponse(['error' => 'A database error occurred while deleting the report.'], 500);
+    jsonResponse(['error' => __('api.report.delete_db_error')], 500);
 }
 
 // The tracker list changed — reload status came from the mode-aware unblock helper.
@@ -144,7 +143,7 @@ $reload = $unblockReload ?? null;
 
 $response = [
     'success' => true,
-    'message' => 'Report and all associated data deleted permanently. Reporter notified: ' . ($emailSent ? 'Yes' : 'No')
+    'message' => __('api.report.deleted_permanently', ['notified' => $emailSent ? __('api.report.yes') : __('api.report.no')])
 ];
 if ($reload) $response['reload'] = $reload;
 jsonResponse($response);

@@ -2304,3 +2304,22 @@ textarea.pc-text {
 .empty-state .es-text { font-size: 0.9rem; color: #9aa5b1; }
 .empty-state .es-hint { font-size: 0.78rem; color: #66717d; max-width: 42rem; }
 td > .empty-state { padding: 1.2rem 0.5rem; }
+
+/* ── The settings toolbar's language switcher ─────────────────────────────────
+   A copy of the header switcher, parked at the right end of the sticky toolbar. Hidden while the
+   real one is on screen; when the header scrolls away it rises into place. One transition, no
+   layout shift: it always occupies its slot, only its opacity and a 6-px slide change. */
+.settings-search-row .tb-lang { order: 99; margin-left: auto; display: inline-flex; gap: 0.2rem; align-items: center;
+    opacity: 0; transform: translateY(-6px) scale(0.96); pointer-events: none;
+    transition: opacity 0.28s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.28s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.settings-search-row .tb-lang.show { opacity: 1; transform: none; pointer-events: auto; }
+.settings-search-row .tb-lang .admin-lang { margin-left: 0; }
+@media (prefers-reduced-motion: reduce) { .settings-search-row .tb-lang { transition: none; } }
+@media (max-width: 767px) { .settings-search-row .tb-lang { display: none; } }
+
+/* ── Process cost on the Traffic page ───────────────────────────────────────── */
+.nl-procs { display: flex; flex-wrap: wrap; gap: 0.35rem 0.8rem; }
+.nl-proc { display: inline-flex; align-items: baseline; gap: 0.35rem; font-size: 0.82rem; white-space: nowrap; }
+.nl-proc-name { color: #9aa5b1; }
+.nl-proc-cpu { color: #dfe6ee; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.nl-proc-rss { color: #7f8a97; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.76rem; }

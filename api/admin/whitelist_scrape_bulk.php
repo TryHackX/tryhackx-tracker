@@ -10,12 +10,12 @@ $input = readJsonBody();
 $scope = strtolower(trim((string)($input['scope'] ?? '')));
 $afterId = max(0, (int)($input['after_id'] ?? 0));
 if (!in_array($scope, ['page', 'stale', 'all', 'date'], true)) {
-    jsonResponse(['error' => 'Invalid scope (page | stale | all | date)'], 400);
+    jsonResponse(['error' => __('api.index.invalid_scrape_scope')], 400);
 }
 $dateRange = null;
 if ($scope === 'date') {
     $dateRange = parseDateRangeInput($input);
-    if ($dateRange === null) jsonResponse(['error' => 'Invalid date range: pass since_hours=N, or from (Y-m-d [H:i]) and optional to.'], 400);
+    if ($dateRange === null) jsonResponse(['error' => __('api.index.invalid_date_range')], 400);
 }
 
 $cap = WL_SCRAPE_BULK_MAX_ROWS;
@@ -26,10 +26,10 @@ if ($scope === 'page') {
     if (!is_array($ids)) $ids = [$ids];
     $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($v) => $v > 0)));
     if (!$ids) {
-        jsonResponse(['error' => 'No IDs provided'], 400);
+        jsonResponse(['error' => __('api.wl.no_ids')], 400);
     }
     if (count($ids) > 500) {
-        jsonResponse(['error' => 'Too many IDs (max 500)'], 400);
+        jsonResponse(['error' => __('api.wl.too_many_ids')], 400);
     }
     $ph = implode(',', array_fill(0, count($ids), '?'));
     $st = $db->prepare("SELECT id, info_hash FROM whitelist WHERE id IN ($ph) AND id > ? ORDER BY id");
@@ -51,7 +51,7 @@ try {
     if ($rows) $res = scrapeOpenTrackerMany($db, $cfg, $rows);
 } catch (\Throwable $e) {
     // never 500 on a tracker/DB hiccup — the UI shows the warning inline
-    $res['error'] = 'Scrape failed: ' . $e->getMessage();
+    $res['error'] = __('api.index.scrape_failed', ['error' => $e->getMessage()]);
 }
 
 // Cursor: last row attempted (a budget cut leaves the tail of $rows for the next call); when nothing was

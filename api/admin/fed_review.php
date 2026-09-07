@@ -33,10 +33,10 @@ if ($op === 'list') {
 }
 
 if (!in_array($op, ['accept', 'reject', 'unreject'], true)) {
-    jsonResponse(['error' => 'Unknown operation'], 400);
+    jsonResponse(['error' => __('api.federation.unknown_op')], 400);
 }
 if (!$ids && $peer === '') {
-    jsonResponse(['error' => 'Nothing selected'], 400);
+    jsonResponse(['error' => __('api.federation.nothing_selected')], 400);
 }
 // The password gate is on the sweeping form only. A whole peer's queue can be tens of thousands of
 // descriptions nobody has looked at, and "accept all" publishes every one of them.
@@ -48,20 +48,20 @@ if (!$ids) {
 try {
     if ($op === 'accept') {
         $t = fedReviewAccept($db, $ids, $peer);
-        $msg = 'Accepted ' . number_format($t['accepted']) . ' package(s)'
-             . ($t['files'] ? ', ' . number_format($t['files']) . ' file records' : '')
-             . ($t['skipped'] ? '; ' . number_format($t['skipped']) . ' were already resolved here and were left alone' : '') . '.';
+        $msg = __('api.federation.review_accepted', ['n' => number_format($t['accepted'])])
+             . ($t['files'] ? __('api.federation.review_accepted_files', ['n' => number_format($t['files'])]) : '')
+             . ($t['skipped'] ? __('api.federation.review_accepted_skipped', ['n' => number_format($t['skipped'])]) : '') . '.';
         jsonResponse(['success' => true, 'message' => $msg, 'tally' => $t, 'counts' => fedReviewCounts($db)]);
     }
     if ($op === 'reject') {
         $n = fedReviewReject($db, $ids, $peer);
         jsonResponse(['success' => true, 'counts' => fedReviewCounts($db),
-            'message' => 'Rejected ' . number_format($n) . ' package(s). They will not be offered again.']);
+            'message' => __('api.federation.review_rejected', ['n' => number_format($n)])]);
     }
     $n = fedReviewUnreject($db, $ids, $peer);
     jsonResponse(['success' => true, 'counts' => fedReviewCounts($db),
-        'message' => 'Cleared ' . number_format($n) . ' rejection(s). The peer may offer them again on the next pull.']);
+        'message' => __('api.federation.review_unrejected', ['n' => number_format($n)])]);
 } catch (\Throwable $e) {
     error_log('[fed review] ' . $e->getMessage());
-    jsonResponse(['error' => 'The queue could not be updated: ' . $e->getMessage()], 500);
+    jsonResponse(['error' => __('api.federation.review_failed', ['err' => $e->getMessage()])], 500);
 }

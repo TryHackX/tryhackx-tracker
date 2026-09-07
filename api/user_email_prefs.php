@@ -22,7 +22,7 @@ if ($email === '') jsonResponse(['error' => 'no_email'], 400);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = readJsonBody();
     if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-        jsonResponse(['error' => 'Invalid CSRF token'], 403);
+        jsonResponse(['error' => __('api.csrf.invalid')], 403);
     }
     $enabled = !empty($input['enabled']) ? 1 : 0;
     $type = ((string)($input['type'] ?? 'account')) === 'bulk' ? 'bulk' : 'account';

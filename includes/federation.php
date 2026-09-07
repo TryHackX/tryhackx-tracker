@@ -306,18 +306,18 @@ function fedPeerValidName(string $name): bool { return (bool)preg_match('/^[A-Za
 function fedPeerSave(PDO $db, ?int $id, array $data): array {
     $name = trim((string)($data['name'] ?? ''));
     $url = trim((string)($data['base_url'] ?? ''));
-    if (!fedPeerValidName($name)) return ['error' => 'Peer name: 2-64 chars, letters/digits/space/._-'];
+    if (!fedPeerValidName($name)) return ['error' => __('api.federation.peer_name_invalid')];
     // The bearer we hold for this partner travels in a header on EVERY pull. Over http it is
     // readable by anything on the path, and a leaked federation key is a licence to read our whole
     // resolved index. No amount of convenience is worth that, so http is refused outright.
-    if (!preg_match('#^https?://[^\s]+$#i', $url)) return ['error' => 'Base URL must be an https URL (the peer site root, no /api.php)'];
+    if (!preg_match('#^https?://[^\s]+$#i', $url)) return ['error' => __('api.federation.base_url_invalid')];
     if (!preg_match('#^https://#i', $url)) {
-        return ['error' => 'Base URL must start with https:// — the bearer for this peer is sent on every pull, and http would put it on the wire in clear text'];
+        return ['error' => __('api.federation.base_url_not_https')];
     }
     $url = rtrim($url, '/');
     $bearer = trim((string)($data['bearer'] ?? ''));
     if ($bearer !== '' && $bearer !== 'CLEAR' && !preg_match('/^[a-f0-9]{16}\.[a-f0-9]{64}$/i', $bearer)) {
-        return ['error' => 'Bearer must look like <16 hex>.<64 hex> (from the peer\'s API client), or be left empty'];
+        return ['error' => __('api.federation.bearer_invalid')];
     }
     $pull = !empty($data['pull_enabled']) ? 1 : 0;
     $pullFiles = !empty($data['pull_files']) ? 1 : 0;
@@ -336,7 +336,7 @@ function fedPeerSave(PDO $db, ?int $id, array $data): array {
         $st->execute($args);
         return ['id' => $id];
     } catch (PDOException $e) {
-        if ((int)$e->errorInfo[1] === 1062) return ['error' => 'A peer with this name already exists'];
+        if ((int)$e->errorInfo[1] === 1062) return ['error' => __('api.federation.peer_name_taken')];
         throw $e;
     }
 }

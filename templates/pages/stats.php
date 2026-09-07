@@ -5,8 +5,8 @@
  */
 if (($cfg['tracker_stats_enabled'] ?? '0') !== '1' || !userCan($db, $cfg, 'stats.view')) {
     // Stats disabled, or this visitor's groups don't include stats access
-    header('Location: ' . $baseUrl);
-    exit;
+    pageRedirect($baseUrl);
+    return;
 }
 
 // Load stats cache for server-side pre-rendering

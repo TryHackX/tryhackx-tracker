@@ -4,16 +4,16 @@ $email = $_GET['email'] ?? ($_POST['email'] ?? '');
 $token = $_GET['token'] ?? ($_POST['token'] ?? '');
 
 if (!$email || !$token) {
-    jsonResponse(['error' => 'Missing parameters'], 400);
+    jsonResponse(['error' => __('api.unsubscribe.missing_params')], 400);
 }
 
 $secret = $cfg['hmac_secret'] ?? '';
 if (!verifyUnsubscribeToken($email, $token, $secret)) {
-    jsonResponse(['error' => 'Invalid token'], 403);
+    jsonResponse(['error' => __('api.unsubscribe.invalid_token')], 403);
 }
 
 if (isUnsubscribed($db, $email)) {
-    jsonResponse(['success' => true, 'message' => 'Already unsubscribed']);
+    jsonResponse(['success' => true, 'message' => __('api.unsubscribe.already')]);
 }
 
 // One-click unsubscribe (POST from email client) → disable all
@@ -41,7 +41,7 @@ if ($stmt->fetchColumn() == 0) {
         $stmt = $db->prepare("SELECT COUNT(*) FROM appeals WHERE email = ?");
         $stmt->execute([$email]);
         if ($stmt->fetchColumn() == 0) {
-            jsonResponse(['error' => 'Email not found'], 404);
+            jsonResponse(['error' => __('api.unsubscribe.email_not_found')], 404);
         }
     }
 }

@@ -15,14 +15,14 @@
  * GET returns the current standing without voting, so a page can show a score to somebody who is
  * not allowed to change it.
  */
-if (!repEnabled($cfg)) jsonResponse(['error' => 'Ratings are off on this tracker.'], 404);
+if (!repEnabled($cfg)) jsonResponse(['error' => __('api.rep.disabled')], 404);
 
 $hash = strtolower(trim((string)($_GET['hash'] ?? ($_SERVER['REQUEST_METHOD'] === 'POST' ? '' : ''))));
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = readJsonBody();
     $hash = strtolower(trim((string)($input['hash'] ?? '')));
 }
-if (!preg_match('/^[0-9a-f]{40}$/', $hash)) jsonResponse(['error' => 'Invalid hash'], 400);
+if (!preg_match('/^[0-9a-f]{40}$/', $hash)) jsonResponse(['error' => __('api.common.invalid_hash')], 400);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     jsonResponse(['success' => true, 'rating' => repFor($db, $cfg, $hash),
@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 
 // The CAPTCHA joins in through the points scheme already here: steady use is never interrupted,

@@ -394,7 +394,9 @@ $db->prepare("DELETE FROM settings WHERE `key` LIKE ?")->execute(['schema_grant_
 $src = (string)file_get_contents(dirname(__DIR__) . '/api/admin/user_update.php');
 check('user_update refuses password/email changes against a panel-carrying target from a moderator',
       str_contains($src, 'admin_via_user') && str_contains($src, 'userIsPanelPermission')
-      && str_contains($src, 'carries panel access'));
+      // the refusal's sentence is in the dictionary: the endpoint asks for the key, the key says it
+      && str_contains($src, "__('api.users.owner_only_credentials')")
+      && str_contains(__('api.users.owner_only_credentials'), 'carries panel access'));
 check('…and it checks what the target HOLDS, not just its group name',
       str_contains($src, 'userEffectivePermissions') && str_contains($src, 'userIsRootAdmin'));
 

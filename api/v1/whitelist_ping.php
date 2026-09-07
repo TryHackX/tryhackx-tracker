@@ -4,7 +4,7 @@
  * Response: {"ok":true,"server_time":T,"mode":"whitelist|blacklist","whitelist_count":N,"api_version":1,"client":"label"}
  */
 if ($_SERVER['REQUEST_METHOD'] !== 'GET' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
-    jsonResponse(['error' => 'Method not allowed'], 405);
+    jsonResponse(['error' => __('api.common.method_not_allowed')], 405);
 }
 $rawBody = $_SERVER['REQUEST_METHOD'] === 'POST' ? apiReadRawBody() : '';
 $client  = apiAuthenticate($db, $cfg, 'v1/whitelist/ping', $rawBody);

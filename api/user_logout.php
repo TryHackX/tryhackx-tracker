@@ -3,7 +3,7 @@
 requirePost();
 $input = readJsonBody();
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-    jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 userSessionLogout($db);
 jsonResponse(['success' => true]);

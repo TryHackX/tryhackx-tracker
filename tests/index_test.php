@@ -300,6 +300,36 @@ check('scope invalid → null', indexQueueMetaByScope($db, 'bogus') === null);
 $status = indexStatus($db, $cfg);
 check('status shape', isset($status['counts']['total'], $status['state']['last_poll_at']) && $status['enabled'] === true);
 
+// ── 11. public search: the too-short guard, and the hash-prefix path it must leave alone ───────
+// api/index_search.php answers 400 from indexSearchTooShort() before touching the catalogue; the
+// rule is tested here as a function because the endpoint exits through jsonResponse(). What
+// matters: empty is browsing (allowed), one and two CHARACTERS are refused whatever their byte
+// count, three are allowed, and a hex prefix is never refused — that path is an indexed lookup.
+check('too short: empty is browsing, not a search', !indexSearchTooShort('') && !indexSearchTooShort('   '));
+check('too short: one and two characters refused', indexSearchTooShort('a') && indexSearchTooShort('ab'));
+check('too short: surrounding whitespace does not count as length', indexSearchTooShort(' a ') && indexSearchTooShort("ab\t"));
+check('too short: three characters allowed', !indexSearchTooShort('abc') && !indexSearchTooShort('a b'));
+check('too short: counts characters, not bytes (ąę = 2, ąęó = 3)', indexSearchTooShort('ąę') && !indexSearchTooShort('ąęó'));
+check('too short: two hex digits are still too short (not a hash prefix)', indexSearchTooShort('ab') && indexSearchTooShort('1f'));
+check('too short: a hash prefix is never refused', !indexSearchTooShort('abcdef') && !indexSearchTooShort(strtoupper(h(1))));
+check('hash prefix regex is the shared constant', preg_match(INDEX_HASH_PREFIX_RE, 'abcdef') === 1 && preg_match(INDEX_HASH_PREFIX_RE, 'abcde') === 0
+    && preg_match(INDEX_HASH_PREFIX_RE, 'abcdeg') === 0 && preg_match(INDEX_HASH_PREFIX_RE, h(1) . '0') === 0);
+
+// the indexed path the guard exists to protect: a prefix of the hash finds the row. Not h(): its
+// hashes are a small number zero-padded to 40 digits, so they all share the same first 29 characters
+// and a prefix would match every row — hand-made heads that differ from the first character on.
+$hA = 'cafe' . str_repeat('0', 36); $hB = 'beef' . str_repeat('0', 36);
+$db->exec("TRUNCATE TABLE index_hashes"); $db->exec("TRUNCATE TABLE index_files");
+$db->exec("INSERT INTO index_hashes (info_hash, name, last_seen, grace_until, meta_status, last_seeders, last_leechers) VALUES ('$hA', 'Prefix Lookup Target', NOW(), NOW() + INTERVAL 3 DAY, 'done', 4, 1)");
+$db->exec("INSERT INTO index_hashes (info_hash, name, last_seen, grace_until, meta_status, last_seeders, last_leechers) VALUES ('$hB', 'Another Resolved Row', NOW(), NOW() + INTERVAL 3 DAY, 'done', 2, 0)");
+$byPrefix = indexSearchCatalogue($db, $cfg, ['search' => 'CAFE0000', 'include_whitelist' => false]);
+check('catalogue: 8-char hex prefix (any case) finds exactly its row', $byPrefix['total'] === 1 && count($byPrefix['rows']) === 1
+    && $byPrefix['rows'][0]['info_hash'] === $hA && $byPrefix['rows'][0]['name'] === 'Prefix Lookup Target', json_encode($byPrefix));
+$byFull = indexSearchCatalogue($db, $cfg, ['search' => $hB, 'include_whitelist' => false]);
+check('catalogue: the full hash finds its row', $byFull['total'] === 1 && ($byFull['rows'][0]['info_hash'] ?? '') === $hB, json_encode($byFull));
+$browse = indexSearchCatalogue($db, $cfg, ['search' => '', 'include_whitelist' => false]);
+check('catalogue: the empty search still lists everything', $browse['total'] === 2, json_encode($browse));
+
 // cleanup
 foreach (['index_hashes', 'index_files', 'whitelist', 'whitelist_files', 'banned_hashes'] as $t) $db->exec("TRUNCATE TABLE `$t`");
 @unlink(indexStateFile());

@@ -205,7 +205,7 @@ function twofaBeginSetup(array $cfg): array {
     $rec = twofaMakeRecovery();
     $s = twofaState();
     $s['pending'] = ['secret' => $secret, 'recovery' => $rec['hashes'], 'at' => time()];
-    if (!twofaStateWrite($s)) return ['error' => 'Could not write ' . basename(twofaFile()) . ' — check that config/ is writable.'];
+    if (!twofaStateWrite($s)) return ['error' => __('api.twofa.state_write_failed', ['file' => basename(twofaFile())])];
     return [
         'secret' => $secret,
         'secret_grouped' => trim(chunk_split($secret, 4, ' ')),
@@ -217,15 +217,15 @@ function twofaBeginSetup(array $cfg): array {
 function twofaConfirmSetup(string $code): array {
     $s = twofaState();
     $p = is_array($s['pending'] ?? null) ? $s['pending'] : null;
-    if (!$p) return ['error' => 'Nothing is waiting to be confirmed. Start again.'];
+    if (!$p) return ['error' => __('api.twofa.nothing_pending')];
     if (time() - (int)($p['at'] ?? 0) > TWOFA_SETUP_TTL) {
         $s['pending'] = null;
         twofaStateWrite($s);
-        return ['error' => 'That setup expired. Start again so you get a fresh secret.'];
+        return ['error' => __('api.twofa.setup_expired')];
     }
     $step = twofaVerifyCode((string)$p['secret'], $code);
     if ($step === null) {
-        return ['error' => 'That code is not right. Check the clock on the device generating it — TOTP is time-based, and a phone a minute out produces codes this server will not accept.'];
+        return ['error' => __('api.twofa.confirm_code_wrong')];
     }
     $s['enabled'] = true;
     $s['secret'] = (string)$p['secret'];
@@ -233,7 +233,7 @@ function twofaConfirmSetup(string $code): array {
     $s['last_step'] = $step;                            // the confirming code is spent
     $s['confirmed_at'] = time();
     $s['pending'] = null;
-    if (!twofaStateWrite($s)) return ['error' => 'Could not save the setup.'];
+    if (!twofaStateWrite($s)) return ['error' => __('api.twofa.setup_save_failed')];
     return ['ok' => true];
 }
 
@@ -246,10 +246,10 @@ function twofaDisable(): bool {
 /** New recovery codes, replacing every old one. Shown once, like the first set. */
 function twofaRegenerateRecovery(): array {
     $s = twofaState();
-    if (empty($s['enabled'])) return ['error' => 'Two-factor authentication is not on.'];
+    if (empty($s['enabled'])) return ['error' => __('api.twofa.not_on')];
     $rec = twofaMakeRecovery();
     $s['recovery'] = $rec['hashes'];
-    if (!twofaStateWrite($s)) return ['error' => 'Could not save the new codes.'];
+    if (!twofaStateWrite($s)) return ['error' => __('api.twofa.recovery_save_failed')];
     return ['recovery' => $rec['plain']];
 }
 

@@ -1,6 +1,6 @@
 <?php
 if (($cfg['transparency_enabled'] ?? '0') !== '1') {
-    jsonResponse(['error' => 'Transparency page is disabled'], 403);
+    jsonResponse(['error' => __('api.transparency.disabled')], 403);
 }
 
 $perPage = max(10, (int)($cfg['transparency_per_page'] ?? 150));

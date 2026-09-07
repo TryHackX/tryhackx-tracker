@@ -12,7 +12,7 @@ if (!$u) jsonResponse(['error' => 'not_logged_in'], 401);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = readJsonBody();
     if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
-        jsonResponse(['error' => 'Invalid CSRF token'], 403);
+        jsonResponse(['error' => __('api.csrf.invalid')], 403);
     }
     if (!empty($input['delete_read'])) {
         $st = $db->prepare("DELETE FROM user_notifications WHERE user_id = ? AND read_at IS NOT NULL");
@@ -25,7 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         jsonResponse(['success' => true, 'marked' => $st->rowCount()]);
     }
     $ids = array_values(array_filter(array_map('intval', (array)($input['ids'] ?? [])), fn($v) => $v > 0));
-    if (!$ids) jsonResponse(['error' => 'No ids'], 400);
+    if (!$ids) jsonResponse(['error' => __('api.notifications.no_ids')], 400);
     $in = implode(',', array_fill(0, count($ids), '?'));
     $st = $db->prepare("UPDATE user_notifications SET read_at = NOW() WHERE user_id = ? AND read_at IS NULL AND id IN ($in)");
     $st->execute(array_merge([(int)$u['id']], $ids));

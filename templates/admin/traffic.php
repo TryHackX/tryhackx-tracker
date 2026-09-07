@@ -152,6 +152,9 @@
                         <form id="net-confirm-form">
                             <div class="mb-3">
                                 <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.admin_password') ?></label>
+                                <?php // For the browser's password manager: this form has a password field, so without a named
+                                      // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
+                                <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
                                 <input type="password" class="form-control bg-dark text-light border-secondary" id="net-confirm-password" autocomplete="current-password" required>
                             </div>
                             <div class="d-flex justify-content-end gap-2">
@@ -325,6 +328,9 @@
                             </div>
                             <div class="mb-3">
                                 <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.admin_password') ?></label>
+                                <?php // For the browser's password manager: this form has a password field, so without a named
+                                      // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
+                                <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
                                 <input type="password" class="form-control bg-dark text-light border-secondary" id="ot-confirm-password" autocomplete="current-password" required>
                             </div>
                             <div class="d-flex justify-content-end gap-2">
@@ -439,6 +445,9 @@
                             <div id="sy-modal-acks"></div>
                             <div class="mb-3">
                                 <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.admin_password') ?></label>
+                                <?php // For the browser's password manager: this form has a password field, so without a named
+                                      // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
+                                <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
                                 <input type="password" class="form-control bg-dark text-light border-secondary" id="sy-confirm-password" autocomplete="current-password" required>
                             </div>
                             <div class="d-flex justify-content-end gap-2">
@@ -521,6 +530,9 @@
                             <div id="cl-plan" class="mt-2"></div>
                             <div class="mb-3 mt-2">
                                 <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.admin_password') ?></label>
+                                <?php // For the browser's password manager: this form has a password field, so without a named
+                                      // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
+                                <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
                                 <input type="password" class="form-control bg-dark text-light border-secondary" id="cl-password" autocomplete="current-password" required>
                             </div>
                             <div class="d-flex justify-content-end gap-2">

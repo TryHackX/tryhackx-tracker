@@ -126,6 +126,9 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.backups.admin_password') ?> *</label>
+                            <?php // For the browser's password manager: this form has a password field, so without a named
+                                  // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
+                            <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
                             <input type="password" class="form-control bg-dark text-light border-secondary" id="bk-confirm-password" autocomplete="current-password" required>
                         </div>
                         <div class="d-flex justify-content-end gap-2">

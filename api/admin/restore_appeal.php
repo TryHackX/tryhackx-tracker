@@ -3,12 +3,12 @@ requirePost();
 
 $input = readJsonBody();
 if (!$input) {
-    jsonResponse(['error' => 'Invalid input'], 400);
+    jsonResponse(['error' => __('api.appeal.invalid_input')], 400);
 }
 
 $id = (int)($input['id'] ?? 0);
 if ($id < 1) {
-    jsonResponse(['error' => 'Invalid appeal ID'], 400);
+    jsonResponse(['error' => __('api.appeal.invalid_id')], 400);
 }
 
 // Fetch from appeal_archives
@@ -16,7 +16,7 @@ $stmt = $db->prepare("SELECT * FROM appeal_archives WHERE id = ?");
 $stmt->execute([$id]);
 $appeal = $stmt->fetch();
 if (!$appeal) {
-    jsonResponse(['error' => 'Archived appeal not found'], 404);
+    jsonResponse(['error' => __('api.appeal.archived_not_found')], 404);
 }
 
 // Move back to appeals table with pending status
@@ -33,7 +33,7 @@ try {
     $db->prepare("DELETE FROM appeal_archives WHERE id = ?")->execute([$id]);
 } catch (PDOException $e) {
     error_log('restore_appeal failed: ' . $e->getMessage());
-    jsonResponse(['error' => 'Failed to restore the appeal due to a database error.'], 500);
+    jsonResponse(['error' => __('api.appeal.restore_db_error')], 500);
 }
 
 // Send email notification
@@ -71,5 +71,5 @@ if (!isUnsubscribed($db, $appeal['email'], 'appeal')) {
 
 jsonResponse([
     'success' => true,
-    'message' => 'Appeal restored to active reviews',
+    'message' => __('api.appeal.restored'),
 ]);

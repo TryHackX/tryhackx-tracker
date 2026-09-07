@@ -2,14 +2,14 @@
 // Details for one whitelist row (details modal).
 $id = (int)($_GET['id'] ?? 0);
 if ($id < 1) {
-    jsonResponse(['error' => 'Invalid ID'], 400);
+    jsonResponse(['error' => __('api.common.invalid_id')], 400);
 }
 
 $stmt = $db->prepare("SELECT * FROM whitelist WHERE id = ?");
 $stmt->execute([$id]);
 $row = $stmt->fetch();
 if (!$row) {
-    jsonResponse(['error' => 'Not found'], 404);
+    jsonResponse(['error' => __('api.common.not_found')], 404);
 }
 
 // Live scrape (cached in the row for WL_SCRAPE_TTL seconds); never let a tracker hiccup break the modal
@@ -57,7 +57,8 @@ if ($scrape) {
 }
 
 // Files (capped)
-$filesLimit = 5000;
+// files_all=1 lifts the cap: the operator pressed "load all" on a page that is theirs to wait on.
+$filesLimit = (($_GET['files_all'] ?? '') === '1') ? 1000000 : 5000;
 $fs = $db->prepare("SELECT path, size FROM whitelist_files WHERE whitelist_id = ? ORDER BY id LIMIT ?");
 $fs->bindValue(1, $id, PDO::PARAM_INT);
 $fs->bindValue(2, $filesLimit + 1, PDO::PARAM_INT);

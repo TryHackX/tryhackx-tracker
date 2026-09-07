@@ -224,28 +224,28 @@ function homeLayoutValidate(array $order, array $hidden, array $headings, string
     foreach ($custom as $c) {
         if (!is_array($c)) continue;
         $k = (string)($c['key'] ?? '');
-        if (!preg_match('/^custom_[1-9][0-9]?$/', $k)) return ['error' => 'A custom section has a malformed key.'];
-        if (isset($cleanCustom[$k])) return ['error' => 'A custom section is listed twice.'];
+        if (!preg_match('/^custom_[1-9][0-9]?$/', $k)) return ['error' => __('api.pages.custom_key_malformed')];
+        if (isset($cleanCustom[$k])) return ['error' => __('api.pages.custom_listed_twice')];
         $label = trim((string)preg_replace('/\s+/u', ' ', (string)($c['label'] ?? '')));
-        if ($label === '') return ['error' => 'Every custom section needs a label.'];
-        if (mb_strlen($label) > HOME_HEADING_MAX) return ['error' => 'A section label is longer than ' . HOME_HEADING_MAX . ' characters.'];
+        if ($label === '') return ['error' => __('api.pages.custom_label_missing')];
+        if (mb_strlen($label) > HOME_HEADING_MAX) return ['error' => __('api.pages.custom_label_too_long', ['max' => HOME_HEADING_MAX])];
         $cleanCustom[$k] = ['key' => $k, 'label' => $label];
     }
-    if (count($cleanCustom) > HOME_CUSTOM_MAX) return ['error' => 'At most ' . HOME_CUSTOM_MAX . ' custom sections.'];
+    if (count($cleanCustom) > HOME_CUSTOM_MAX) return ['error' => __('api.pages.custom_too_many', ['max' => HOME_CUSTOM_MAX])];
     $known = $cat + $cleanCustom;
     $keys = array_keys($known);
 
     $order = array_values(array_filter($order, 'is_string'));
     if (count($order) !== count($keys) || array_diff($order, $keys) || array_diff($keys, $order)
         || count(array_unique($order)) !== count($order)) {
-        return ['error' => 'The order must list every section exactly once.'];
+        return ['error' => __('api.pages.order_not_permutation')];
     }
 
     $cleanHidden = [];
     foreach ($hidden as $k) {
         if (!is_string($k) || !isset($known[$k])) continue;
         if (!empty($cat[$k]['fixed'])) {
-            return ['error' => 'The "' . $cat[$k]['label'] . '" section cannot be hidden — a page with no title is not a page.'];
+            return ['error' => __('api.pages.section_fixed', ['label' => $cat[$k]['label']])];
         }
         $cleanHidden[] = $k;
     }
@@ -260,14 +260,14 @@ function homeLayoutValidate(array $order, array $hidden, array $headings, string
         $default = isset($cat[$k]) ? homeHeadingDefault($k) : $cleanCustom[$k]['label'];
         if ($v === '' || $v === $default) continue;
         if (mb_strlen($v) > HOME_HEADING_MAX) {
-            return ['error' => 'A heading is longer than ' . HOME_HEADING_MAX . ' characters.'];
+            return ['error' => __('api.pages.heading_too_long', ['max' => HOME_HEADING_MAX])];
         }
         $cleanHeadings[$k] = $v;
     }
 
     $tagline = trim((string)preg_replace('/\s+/u', ' ', $tagline));
     if (mb_strlen($tagline) > HOME_HEADING_MAX) {
-        return ['error' => 'The tagline is longer than ' . HOME_HEADING_MAX . ' characters.'];
+        return ['error' => __('api.pages.tagline_too_long', ['max' => HOME_HEADING_MAX])];
     }
     $store = ['order' => $order, 'hidden' => $cleanHidden, 'headings' => $cleanHeadings];
     if ($cleanCustom) $store['custom'] = array_values($cleanCustom);
