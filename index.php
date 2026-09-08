@@ -1,9 +1,7 @@
 <?php
-session_start([
-    'cookie_httponly' => true,
-    'cookie_secure'   => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
-    'cookie_samesite' => 'Lax',
-]);
+// session_start() used to be the first statement in this file. It is now further down, immediately
+// after ensureSchema(), because the Secure flag on the session cookie is a setting and a setting
+// lives in the database. See the block there.
 
 // Check if installed
 if (!file_exists(__DIR__ . '/config/installed.lock')) {
@@ -59,6 +57,10 @@ try {
     error_log('[tracker] database unavailable: ' . $e->getMessage());
     http_response_code(503);
     header('Retry-After: 60');
+    // A fixed policy, and a literal one: $cfg does not exist here (that is why this branch is being
+    // taken), so cspPolicy() cannot be called without turning a database outage into a fatal on the
+    // one page whose entire job is to still work. The template is a <style> block and no script.
+    header('Content-Security-Policy: ' . CSP_MAINTENANCE);
     include __DIR__ . '/templates/maintenance.php';
     exit;
 }
@@ -77,6 +79,27 @@ if (PHP_SAPI !== 'cli') {
 
 $cfg = getSettings($db);
 ensureSchema($db, $cfg);
+
+// THE SESSION STARTS HERE, and nothing above it may read $_SESSION.
+//
+// It used to be line 2, where its Secure flag was `!empty($_SERVER['HTTPS'])`. On this deployment
+// that was correct (measured 2026-09-08: PHP sees HTTPS='on'), but it is correct only while nothing
+// terminates TLS ahead of nginx — to that expression a Cloudflare or load-balancer deployment is a
+// plain-HTTP site. cookie_secure_mode answers the question properly, and it is a setting, so the
+// call had to come down below getSettings().
+//
+// Verified before moving it: no file under includes/ touches $_SESSION at file scope, and the
+// database-down branch above renders templates/maintenance.php, which uses neither a session nor a
+// CSRF token. The move does create a failure class that could not exist at line 2 — a byte of
+// output before this line (a deprecation with display_errors on, a BOM, a warning out of a
+// migration) makes the Set-Cookie unsendable and nobody can sign in. A log line rather than a
+// fatal: a panel that still renders is what lets the operator read the log line.
+if (headers_sent($hsFile, $hsLine)) {
+    error_log('[tracker] output began at ' . $hsFile . ':' . $hsLine . ' before session_start — the session cookie cannot be set');
+}
+session_start(sessionCookieParams($cfg));
+sendSecurityHeaders($cfg);
+
 autoArchiveOldReports($db, $cfg);
 autoArchiveOldAppeals($db, $cfg);
 pruneOldSentEmails($db, $cfg);
@@ -137,6 +160,11 @@ if (in_array($action, $adminPanelActions, true) || $action === $adminLoginAction
             header('Location: ' . $baseUrl);
             exit;
         }
+        // The panel gets its own policy: Bootstrap's bundle comes from jsDelivr on every panel page
+        // (script-src), the page-content preview frames itself (frame-src 'self'), and nothing may
+        // frame the panel (frame-ancestors 'none'). sendSecurityHeaders() already sent the public
+        // one above; header() replaces it, so the response carries exactly one.
+        cspSend($cfg, 'panel');
         if ($action === 'settings') {
             include __DIR__ . '/templates/admin/settings.php';
         } elseif ($action === 'admin-whitelist') {

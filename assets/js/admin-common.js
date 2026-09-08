@@ -675,5 +675,17 @@
         else schedule();
     })();
 
+    // The close button on a toast built with insertAdjacentHTML (assets/js/admin.js and the inline
+    // block in templates/admin/settings.php both do). It used to be
+    // onclick="this.closest('.toast').remove()", which an enforcing script-src blocks — and
+    // Bootstrap's own data-bs-dismiss="toast" is NOT the same thing: it calls Toast.hide(), which
+    // leaves the element in the DOM. admin.js happens to remove it on a timer anyway; the settings
+    // toast does not, so a dismissed toast would have stayed in the layout for ever. Removing it is
+    // what the attribute did, so removing it is what this does.
+    document.addEventListener('click', function (e) {
+        const btn = e.target.closest('[data-toast-close]');
+        if (btn) btn.closest('.toast')?.remove();
+    });
+
     window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot };
 })();

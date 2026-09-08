@@ -126,7 +126,7 @@ if ($email && $token) {
     </div>
 </div>
 
-<script>
+<script<?= nonceAttr() ?>>
 (function() {
     const masterToggle = document.getElementById('pref-all');
     const typeToggles = document.querySelectorAll('[data-pref]');

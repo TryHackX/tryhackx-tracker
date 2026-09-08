@@ -1414,6 +1414,196 @@
                 </div>
             </div>
 
+            <!-- Transport: Secure cookies & HSTS -->
+            <div class="settings-section" id="section-transport" data-group="security" data-title="<?= _h('settings.transport_title') ?>">
+                <h5><?= _h('settings.transport_title') ?></h5>
+                <?php
+                // The panel had no place that showed the operator what a REQUEST looks like to PHP,
+                // and without it "Always" is a guess: the whole failure being fixed here is a site
+                // served over HTTPS where PHP never hears about the TLS. It is printed next to the
+                // control it explains rather than on the dashboard, because a value shown where it
+                // cannot be acted on is how the tuner card came to be invisible for months.
+                $trSignal   = requestHttpsSignal($cfg);
+                $trIsHttps  = $trSignal !== 'none';
+                $trMode     = cookieSecureMode($cfg);
+                $trDropped  = trustedProxyRejected($cfg);
+                $trSiteHost = parse_url((string)($cfg['site_url'] ?? ''), PHP_URL_HOST);
+                $trSiteTls  = stripos(trim((string)($cfg['site_url'] ?? '')), 'https://') === 0;
+                $trAnnounce = trim((string)($cfg['announce_url_https'] ?? ''));
+                $trAnnHost  = $trAnnounce !== '' ? parse_url($trAnnounce, PHP_URL_HOST) : null;
+                // HSTS is per-HOST and ignores the port, so an http:// announce URL published on the
+                // panel's own hostname stops working in browsers once the pin is set. BitTorrent
+                // clients implement no HSTS and are unaffected; a person clicking the link is not.
+                $trAnnClash = $trAnnHost && $trSiteHost && strcasecmp((string)$trAnnHost, (string)$trSiteHost) === 0
+                              && stripos($trAnnounce, 'http://') === 0;
+                $trSignalKey = 'settings.transport_diag_by_' . $trSignal;
+                ?>
+                <p class="settings-hint mb-2"><?= __('settings.transport_intro') ?></p>
+                <div class="alert <?= $trIsHttps ? 'alert-secondary' : 'alert-warning' ?> py-2 px-3">
+                    <div><strong><?= _h('settings.transport_diag_label') ?></strong>
+                        <?= $trIsHttps ? _h('settings.transport_diag_https') : _h('settings.transport_diag_http') ?>
+                        <span class="text-secondary">(<?= _h($trSignalKey) ?>)</span>
+                    </div>
+                    <div class="settings-hint"><?= _h('settings.transport_diag_remote') ?>
+                        <code><?= sanitize((string)($_SERVER['REMOTE_ADDR'] ?? '')) ?></code></div>
+                    <?php if (!$trIsHttps && $trSiteTls): ?>
+                        <div class="mt-2"><?= __('settings.transport_warn_no_tls') ?></div>
+                    <?php endif; ?>
+                    <?php if ($trDropped): ?>
+                        <div class="mt-2"><?= __('settings.transport_warn_proxy_dropped', ['entries' => sanitize(implode(', ', $trDropped))]) ?></div>
+                    <?php endif; ?>
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.transport_cookie_secure') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="cookie_secure_mode">
+                            <option value="auto" <?= $trMode === 'auto' ? 'selected' : '' ?>><?= _h('settings.transport_cookie_secure_auto') ?></option>
+                            <option value="always" <?= $trMode === 'always' ? 'selected' : '' ?>><?= _h('settings.transport_cookie_secure_always') ?></option>
+                            <option value="never" <?= $trMode === 'never' ? 'selected' : '' ?>><?= _h('settings.transport_cookie_secure_never') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.transport_cookie_secure_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.transport_proto_header') ?> <small class="settings-hint"><?= _h('settings.transport_proto_header_note') ?></small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="client_proto_header" value="<?= sanitize($cfg['client_proto_header'] ?? 'X-Forwarded-Proto') ?>" placeholder="X-Forwarded-Proto" maxlength="64">
+                        <small class="settings-hint"><?= __('settings.transport_proto_header_hint') ?></small>
+                    </div>
+                    <?php if ($trAnnClash): ?>
+                    <div class="col-12">
+                        <div class="alert alert-warning py-2 px-3 mb-0"><?= __('settings.transport_hsts_warn_announce', ['host' => sanitize((string)$trSiteHost)]) ?></div>
+                    </div>
+                    <?php endif; ?>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.transport_hsts') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="hsts_enabled">
+                            <option value="1" <?= ($cfg['hsts_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['hsts_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.transport_hsts_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.transport_hsts_max_age') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="hsts_max_age" value="<?= sanitize($cfg['hsts_max_age'] ?? '86400') ?>" min="0" max="63072000">
+                        <small class="settings-hint"><?= __('settings.transport_hsts_max_age_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.transport_hsts_subdomains') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="hsts_include_subdomains">
+                            <option value="1" <?= ($cfg['hsts_include_subdomains'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['hsts_include_subdomains'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.transport_hsts_subdomains_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.transport_hsts_preload') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="hsts_preload">
+                            <option value="1" <?= ($cfg['hsts_preload'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['hsts_preload'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.transport_hsts_preload_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content-Security-Policy (includes/csp.php) -->
+            <div class="settings-section" id="section-csp" data-group="security" data-title="<?= _h('settings.csp_title') ?>">
+                <h5><?= _h('settings.csp_title') ?></h5>
+                <?php
+                // The policy THIS request would send, printed byte for byte, next to the controls
+                // that produced it. A CSP is the one setting whose effect is invisible until
+                // something on a page quietly stops working, and four dropdowns do not tell an
+                // operator which hosts the CAPTCHA provider dragged in or what the nonce looks
+                // like. Same reason the transport diagnostic above exists: a value shown where it
+                // cannot be acted on is how the tuner card stayed invisible for months.
+                $cspModeNow   = cspMode($cfg);
+                $cspNameNow   = cspHeaderName($cfg);
+                $cspPublicPol = cspPolicy($cfg, 'public');
+                $cspPanelPol  = cspPolicy($cfg, 'panel');
+                $cspBadHosts  = cspExtraHostsRejected($cfg);
+                // Apache STILL ships the old enforcing policy in .htaccess, as `Header setifempty`,
+                // which is the fallback for csp_mode='off' and the reason an Apache install loses
+                // no protection during the report-only phase. nginx never reads that file, so on
+                // production this page is the only policy there is. Naming the server is the
+                // difference between "there is a second policy on this response" and "there is none".
+                $cspApache    = stripos((string)($_SERVER['SERVER_SOFTWARE'] ?? ''), 'apache') !== false;
+                ?>
+                <p class="settings-hint mb-2"><?= __('settings.csp_intro') ?></p>
+                <div class="alert <?= $cspModeNow === 'off' ? 'alert-warning' : 'alert-secondary' ?> py-2 px-3">
+                    <?php // sanitize(), not _h(): these three are RUNTIME values, and _h() looks its
+                          // argument up as a dictionary key first — an operator-installed language file
+                          // with a key equal to a header name would replace what this diagnostic shows.
+                          // The nonce is masked: browsers hide the nonce attribute from the DOM and
+                          // from CSS selectors precisely so a dangling-markup bug cannot read it, and
+                          // printing it as page text on the panel's own page would undo that. ?>
+                    <div><strong><?= _h('settings.csp_diag_label') ?></strong>
+                        <code><?= $cspNameNow !== '' ? sanitize($cspNameNow) : _h('settings.csp_diag_nothing') ?></code></div>
+                    <?php if ($cspPublicPol !== ''): ?>
+                        <div class="settings-hint mt-2"><?= _h('settings.csp_diag_public') ?></div>
+                        <div><code class="small text-break"><?= sanitize(cspMaskNonce($cspPublicPol)) ?></code></div>
+                        <div class="settings-hint mt-2"><?= _h('settings.csp_diag_panel') ?></div>
+                        <div><code class="small text-break"><?= sanitize(cspMaskNonce($cspPanelPol)) ?></code></div>
+                    <?php endif; ?>
+                    <?php if ($cspApache): ?>
+                        <div class="mt-2"><?= __('settings.csp_diag_apache') ?></div>
+                    <?php endif; ?>
+                    <?php if ($cspBadHosts): ?>
+                        <div class="mt-2"><?= __('settings.csp_warn_hosts_dropped', ['entries' => sanitize(implode(', ', $cspBadHosts))]) ?></div>
+                    <?php endif; ?>
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.csp_mode') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="csp_mode">
+                            <option value="report" <?= $cspModeNow === 'report' ? 'selected' : '' ?>><?= _h('settings.csp_mode_report') ?></option>
+                            <option value="enforce" <?= $cspModeNow === 'enforce' ? 'selected' : '' ?>><?= _h('settings.csp_mode_enforce') ?></option>
+                            <option value="off" <?= $cspModeNow === 'off' ? 'selected' : '' ?>><?= _h('settings.csp_mode_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.csp_mode_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.csp_extra_hosts') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="csp_extra_hosts" value="<?= sanitize($cfg['csp_extra_hosts'] ?? '') ?>" placeholder="<?= _h('settings.csp_extra_hosts_ph') ?>" maxlength="1024">
+                        <small class="settings-hint"><?= __('settings.csp_extra_hosts_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.csp_report_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="csp_report_enabled">
+                            <option value="1" <?= ($cfg['csp_report_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['csp_report_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.csp_report_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.csp_report_keep_rows') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="csp_report_keep_rows" value="<?= sanitize($cfg['csp_report_keep_rows'] ?? '500') ?>" min="0" max="<?= CSP_ROWS_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.csp_report_keep_rows_hint') ?></small>
+                    </div>
+                </div>
+                <hr class="border-secondary my-3">
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                    <strong><?= _h('settings.csp_reports_title') ?></strong>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="csp-reload"><?= _h('settings.csp_reports_refresh') ?></button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="csp-clear"><?= _h('settings.csp_reports_clear') ?></button>
+                </div>
+                <small class="settings-hint d-block mb-2"><?= __('settings.csp_reports_hint') ?></small>
+                <div id="csp-alert"></div>
+                <div class="table-responsive">
+                    <table class="table table-dark table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th><?= _h('settings.csp_col_scope') ?></th>
+                                <th><?= _h('settings.csp_col_directive') ?></th>
+                                <th><?= _h('settings.csp_col_blocked') ?></th>
+                                <th><?= _h('settings.csp_col_page') ?></th>
+                                <th><?= _h('settings.csp_col_hits') ?></th>
+                                <th><?= _h('settings.csp_col_last') ?></th>
+                            </tr>
+                        </thead>
+                        <tbody id="csp-reports-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- Donation Fields -->
             <div class="settings-section" id="section-donations" data-group="general" data-title="<?= _h('settings.donations_title') ?>">
                 <h5><?= _h('settings.donations_title') ?></h5>
@@ -2846,7 +3036,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     <script src="<?= $baseUrl ?>assets/js/admin-languages.js<?= assetVer('assets/js/admin-languages.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-homelayout.js<?= assetVer('assets/js/admin-homelayout.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-pagecontent.js<?= assetVer('assets/js/admin-pagecontent.js') ?>"></script>
-    <script>
+    <script<?= nonceAttr() ?>>
     const API_BASE = document.body.dataset.apiBase;
     const CSRF = document.body.dataset.csrf || '';
     // the credentials block compares against these before deciding which endpoint to call
@@ -2884,6 +3074,62 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         local.addEventListener('change', sync);
         domain.addEventListener('change', sync);
         document.getElementById('settings-form').addEventListener('submit', sync, true);   // belt and braces
+    })();
+
+    // ── Content-Security-Policy violations (Settings → Security) ──
+    // EVERY cell is textContent, without exception. `blocked` and `directive` are strings an
+    // anonymous client chose and POSTed to a public endpoint (csp-report.php); the server keeps
+    // only an origin and a directive name, but the one place they are ever drawn is inside the
+    // panel, and innerHTML here would turn "somebody sent us a report" into stored XSS against the
+    // owner's own session.
+    (function () {
+        const body = document.getElementById('csp-reports-body');
+        if (!body) return;
+        const alertBox = document.getElementById('csp-alert');
+        const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined && text !== null) n.textContent = text; if (cls) n.className = cls; return n; };
+        const note = (msg, cls) => { alertBox.innerHTML = ''; if (!msg) return; alertBox.appendChild(el('div', msg, 'alert py-2 px-3 ' + (cls || 'alert-info'))); };
+        const wide = (msg, cls) => { body.innerHTML = ''; const td = el('td', msg, cls || 'text-muted'); td.colSpan = 6; body.appendChild(el('tr')).appendChild(td); };
+
+        async function load() {
+            wide(t('js.common.loading'));
+            let json;
+            try {
+                const res = await fetch(API_BASE + 'admin/csp_reports', { headers: { 'Accept': 'application/json' } });
+                json = await res.json();
+            } catch { json = { error: t('js.settings.network_error') }; }
+            if (json.error) { wide(json.error, 'text-danger'); return; }
+            note(json.reporting ? '' : t('js.settings.csp_reporting_off'), 'alert-warning');
+            body.innerHTML = '';
+            if (!json.rows || !json.rows.length) { wide(t('js.settings.csp_no_reports')); return; }
+            json.rows.forEach(r => {
+                const tr = el('tr');
+                tr.appendChild(el('td', r.scope));
+                tr.appendChild(el('td', r.directive));
+                tr.appendChild(el('td', r.blocked, 'text-break'));
+                tr.appendChild(el('td', r.sample_doc));
+                tr.appendChild(el('td', String(r.hits)));
+                tr.appendChild(el('td', r.last_seen, 'text-nowrap'));
+                body.appendChild(tr);
+            });
+        }
+
+        document.getElementById('csp-reload').addEventListener('click', load);
+        document.getElementById('csp-clear').addEventListener('click', async () => {
+            if (!confirm(t('js.settings.csp_clear_confirm'))) return;
+            let json;
+            try {
+                const res = await fetch(API_BASE + 'admin/csp_reports', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+                    body: JSON.stringify({ op: 'clear' }),
+                });
+                json = await res.json();
+            } catch { json = { error: t('js.settings.network_error') }; }
+            if (json.error) { note(json.error, 'alert-danger'); return; }
+            await load();
+            note(json.deleted === 1 ? t('js.settings.csp_cleared_one') : t('js.settings.csp_cleared', { n: json.deleted }), 'alert-success');
+        });
+        load();
     })();
 
     // ── Federation peers (Settings → Federation / Cluster). All rendering via textContent —
@@ -3722,7 +3968,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             <div id="${id}" class="toast align-items-center border-0 show toast-dark" role="alert">
                 <div class="d-flex">
                     <div class="toast-body text-light"><i class="bi ${icon}"></i> ${esc(msg)}</div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" onclick="this.closest('.toast').remove()"></button>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-toast-close></button>
                 </div>
             </div>
         `);

@@ -45,7 +45,7 @@ $_SESSION['admin_login_form_at'] = time();
     <p class="user-links"><a href="<?= $baseUrl ?>"><?= _h('adminlogin.back_tracker') ?></a></p>
 </div>
 
-<script>
+<script<?= nonceAttr() ?>>
 (function () {
     // Rendered by the server, because the page cannot otherwise know whether to mint a token before
     // posting or to post plainly. Getting this wrong in either direction is visible: ask when the

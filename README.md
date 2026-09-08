@@ -88,8 +88,10 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Generic Error Responses** — raw database/exception messages are logged server-side, never returned to clients
 - **Directory Protection** — `.htaccess` deny rules on `config/`, `includes/`, `templates/`, `api/`, `sql/`, `tests/`; `assets/` blocks server-side script execution and directory listing (see [Reverse proxy / Nginx](#reverse-proxy--nginx-notes) for non-Apache servers)
 - **Security Headers** — `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`
+- **Content-Security-Policy with a per-request nonce** — built in PHP (so it works on nginx, which never reads `.htaccess`, and so a nonce can exist at all), sent report-only until you switch it to enforce, `script-src` with no `'unsafe-inline'` and no `'unsafe-eval'`, a narrower policy for the panel than for public pages, only the CAPTCHA provider you actually configured, and an optional bounded store of what browsers reported
 - **Subresource Integrity** — pinned CDN assets (Bootstrap, Bootstrap Icons) loaded with `integrity` hashes
-- **Reverse-Proxy Aware** — optional trusted-proxy allow-list + configurable client-IP header so per-IP limits work correctly behind Cloudflare / nginx without opening a spoofing hole
+- **Reverse-Proxy Aware** — optional trusted-proxy allow-list (single addresses **or CIDR ranges**, so a CDN's published ranges can be pasted in) + configurable client-IP header so per-IP limits work correctly behind Cloudflare / nginx without opening a spoofing hole; a block wider than /8 (v4) or /16 (v6) is refused and ignored
+- **Transport security** — `Secure` on the session, language and remember-me cookies, decided once for all of them (automatic detection, or forced on/off), plus optional HSTS with its own `max-age`, `includeSubDomains` and `preload` switches, off by default and never sent over plain HTTP
 - **Information Leak Prevention** — generic responses for not-found queries, email always required for status checks
 
 ### Donations
@@ -1775,10 +1777,28 @@ location ~* \.(orig|bak|sql|log|lock|marker)$ { deny all; return 404; }
 # 2. Front-controller routing
 location /api/ { rewrite ^/api/(.*)$ /api.php?endpoint=$1 last; }
 location / { try_files $uri $uri/ /index.php?action=$request_uri; }
+
+# 3. TELL PHP THE REQUEST WAS ENCRYPTED. Without these two lines $_SERVER['HTTPS'] is unset in
+#    php-fpm even though nginx terminated TLS, and the panel then sets its session, language and
+#    remember-me cookies WITHOUT the Secure flag on a site served entirely over HTTPS. Goes in the
+#    same `location ~ \.php$` block as the other fastcgi_param lines.
+fastcgi_param HTTPS $https if_not_empty;
+fastcgi_param REQUEST_SCHEME $scheme;
 ```
 
 Also port the security headers from `.htaccess` into an `add_header` block, and **delete
-`install.php`** after setup.
+`install.php`** after setup. Two of them are exceptions and must **not** be added there:
+
+* **`Strict-Transport-Security`** — manage HSTS from the panel (below), or the two would both fire.
+* **`Content-Security-Policy`** — the app sends this itself now, with a per-request nonce a static
+  `add_header` cannot mint. A second copy is not an override: a browser **intersects** every policy
+  on a response and applies the strictest of each directive, so an `add_header` here would silently
+  narrow (or, with `always`, duplicate) what the panel sends. If you already have one in your vhost,
+  delete it, and use *Settings → Security → Content-Security-Policy* instead.
+
+*Settings → Security → Transport security* prints, for the request rendering that page, whether PHP
+sees it as HTTPS and **which** signal said so. If it says plain HTTP while your site address is
+`https://`, the two `fastcgi_param` lines above are what is missing.
 
 **Behind Cloudflare / a reverse proxy:** by default the app uses the raw connection IP
 (`REMOTE_ADDR`), which will be the proxy — so all visitors would share one IP for rate limiting. Set
@@ -1790,9 +1810,118 @@ entry is whatever the client sent. Prefer a header the proxy *overwrites* (`CF-C
 `X-Real-IP`) when you have one; the API bans / exempt list and the registration limits are keyed by
 this IP.
 
-> **Note on CSP:** the Content-Security-Policy in `.htaccess` intentionally allows `'unsafe-inline'`
-> / `'unsafe-eval'` because the pages use inline `onclick` handlers and Google reCAPTCHA. If you
-> refactor those out (or self-host reCAPTCHA), tighten the policy with nonces/hashes.
+Trusted proxy IPs accepts **CIDR ranges** as well as single addresses, separated by commas, spaces
+or new lines — which is the only way to configure a CDN, since Cloudflare publishes about thirty
+ranges and no single addresses (`173.245.48.0/20, 103.21.244.0/22, …, 2400:cb00::/32`). Two rules
+are enforced on every request, not only when you press Save: a malformed entry is ignored, and so is
+a block wider than **/8** (IPv4) or **/16** (IPv6) — `0.0.0.0/0` there would let anybody set their
+own address in a header and defeat every rate limit, lockout and ban in the panel. The Settings page
+names any entry it is ignoring.
+
+#### Secure cookies
+
+**Settings → Security → Transport security → Secure cookies** adds `Secure` to the session, language
+and remember-me cookies.
+
+| Value | What it does |
+|---|---|
+| `Automatic` (default) | Asks each request: TLS to this server, `REQUEST_SCHEME`, or a trusted proxy saying `X-Forwarded-Proto: https` (also `X-Forwarded-SSL`, RFC 7239 `Forwarded`). A proxy header can only ever *add* HTTPS, never take it away from a connection that really is encrypted. |
+| `Always` | For a proxy setup that cannot be detected. **On a panel really served over plain HTTP this locks everybody out**, you included: the browser refuses the session cookie, so every sign-in succeeds and the next click returns to the form, because the CSRF token minted at sign-in is never the one checked at submit. |
+| `Never` | Escape hatch for a plain-HTTP install on a LAN. |
+
+`Always` can only be saved from a request that already is HTTPS, and it asks for the owner password.
+If you get locked out anyway (someone edited the row, or TLS broke afterwards), the way back is one
+statement on the tracker's own database:
+
+```sql
+UPDATE settings SET value = 'auto' WHERE `key` = 'cookie_secure_mode';
+```
+
+Turning this on logs **nobody** out. `Secure` is a rule about sending a cookie, not about keeping
+one, and PHP only re-emits the session cookie when it creates or regenerates an id — existing
+sessions keep working and take the flag at their next sign-in. Anyone reaching the site over plain
+HTTP after the flag flips silently loses auto-login and has to sign in again; the sign-in page still
+works.
+
+#### HSTS
+
+**Settings → Security → Transport security → HSTS** sends `Strict-Transport-Security`, telling every
+browser that has once seen this site to refuse plain HTTP to this hostname. It is **off by default**,
+it is never sent over a plain-HTTP request (RFC 6797 §7.2), and it cannot be switched on from a
+request that is not itself HTTPS.
+
+* **`max-age` starts at 86400 (one day)**, not the year every guide recommends, because that is what
+  you get the moment you flip the switch and a mistake then costs a day. Raise it to `31536000` once
+  a week has passed with nothing broken.
+* **`max-age=0` is not "off" — it is the retraction.** Switching HSTS off merely stops sending the
+  header; browsers that already hold the pin run to the age they were given. To release them, set
+  the age to 0 and leave the switch **on** until they have all come back.
+* **The pin covers the hostname and ignores the port.** If you publish an `http://` announce URL on
+  the panel's own hostname, that link stops working in browsers for the length of `max-age`.
+  BitTorrent clients implement no HSTS and are unaffected. The settings page warns before the switch
+  when it detects this configuration.
+* **includeSubDomains** pins every name under this host, including ones that do not exist yet. Safe
+  on a dedicated subdomain; on an apex it also pins your mail, forum and file hosts.
+* **preload** is effectively irreversible — once the host is accepted onto the browser preload list
+  it is compiled into releases and removal takes months. It is refused unless *includeSubDomains* is
+  on and `max-age` is at least a year (the list's own requirement), it asks for the owner password,
+  and setting it does nothing by itself: you still have to submit the host at hstspreload.org.
+
+#### Content-Security-Policy
+
+**Settings → Security → Content-Security-Policy.** The policy is built per request in
+`includes/csp.php` and sent by PHP. That is not where it used to live, and the move fixed something
+real: the old policy was a line in `.htaccess`, **which nginx never reads** — so unless the operator
+had hand-copied it into the server block, production was serving no policy at all. It is also the
+only place a **nonce** can come from, because a nonce has to change on every response and a static
+`add_header` cannot mint one.
+
+Every inline `<script>` this application emits carries that request's nonce, and `script-src` has
+**no `'unsafe-inline'` and no `'unsafe-eval'`**. An injected `<script>` — in a description, in a
+whitelist submission, in anything a visitor can write — is then inert text: it has no nonce, so the
+browser refuses to run it.
+
+* **Mode: report-only, enforce, off.** New and upgraded installs ship **report only**, which sends
+  `Content-Security-Policy-Report-Only` and blocks *nothing*: it cannot break a page. Leave it for a
+  few days, read the violations list, then switch to **Enforce**.
+* **What enforcing actually changes.** An inline `<script>` without the nonce stops running, and so
+  does any `onclick="…"` attribute — **a nonce does not rescue an attribute handler**, which is why
+  the shipped pages contain none.
+* **What this does NOT protect.** `style-src` keeps `'unsafe-inline'`, and will until descriptions
+  stop building `style="…"` out of author BBCode (`includes/richtext.php`) and the ~100 `style=""`
+  attributes in the templates move into stylesheets. This is a defence against injected *scripts*,
+  not against injected styling. `img-src` likewise keeps `https:` so images in descriptions load.
+* **The panel and the public site get different policies.** The panel adds jsDelivr to `script-src`
+  (Bootstrap's bundle, with SRI) and `frame-ancestors 'none'`; a public page gets neither — it loads
+  only icons and fonts from that CDN, so telling every anonymous visitor's browser that a CDN may
+  run scripts would be paying the whole price of a third-party script origin for nothing. A JSON
+  response from `api.php` gets `default-src 'none'`.
+* **Only the CAPTCHA provider you configured.** The `.htaccess` list allowed all four providers on
+  every install, because a static file cannot read a setting. `captchaCspHosts()` adds the hosts of
+  the one that is actually switched on.
+* **Extra allowed hosts** is for an analytics script or a CDN of your own. A host there may run
+  scripts on every page of this site, in every visitor's session, so it asks for the owner password;
+  the value goes into a response header verbatim, so anything that is not a plain host name (with an
+  optional `https://` and one leading `*.`) is refused both on save and on read.
+* **On Apache**, `.htaccess` still ships the old permissive policy as `Header setifempty` — it fills
+  in only when the app sends nothing (mode *Off*), and during the report-only phase it keeps
+  enforcing under its own header name. No Apache install loses protection on the upgrade.
+
+**Violation reports.** *Collect violation reports* adds `report-uri` to the policy, and browsers then
+POST every violation to `csp-report.php`. It is **off by default and that is deliberate**: report-only
+still reports, that endpoint is a public unauthenticated write into the database, and browser
+extensions injecting their own scripts are the largest source of CSP reports on any site — none of it
+about you. Switch it on for a day when you want evidence, then off again.
+
+What is stored is bounded and dull on purpose: one row per **kind** of violation (scope + directive +
+blocked origin) with a counter, so the table grows with the number of real problems and not with page
+views; only the **origin** of a blocked URL (never its path or query, which routinely carries a
+token); only the `?action=` of the page it happened on; nothing at all for extension URLs or for a
+report whose document belongs to another site. Once the table holds *Violation kinds to keep* rows a
+new kind is **refused rather than inserted**, so nobody can grow it by inventing origins, and the
+janitor trims it to that ceiling once a minute. *Clear the list* empties it and is recorded in the
+audit log as `csp.clear`.
+
 
 ---
 

@@ -26,31 +26,30 @@ const API_BAN_INSERTS_PER_MIN = 30;        // global throttle on new ban rows (s
 /** The per-minute budget is a fixed window: cheap to count, and its end is what Retry-After names. */
 const API_RATE_WINDOW = 60;
 
+/** The one list parser (includes/functions.php), kept under its old name for the call sites. */
 function apiParseIpList(string $list): array {
-    return array_values(array_filter(array_map('trim', preg_split('/[\s,;]+/', $list) ?: []), fn($v) => $v !== ''));
+    return ipParseList($list);
 }
 
-/** Is the IP (or its bucket) in the exempt list? Accepts exact IPs and IPv4/IPv6 CIDRs. */
+/**
+ * Is the IP (or its bucket) in the exempt list? Accepts exact IPs and IPv4/IPv6 CIDRs.
+ *
+ * This used to carry its own packed-byte matcher, and that copy had no range check on the prefix:
+ * `$bits = (int)$bits` on an entry of "10.0.0.0/999" walked straight into ord($bin[124]) on a
+ * four-byte string. It goes through ipMatchesCidr() now — one matcher for the whole panel, and an
+ * out-of-range prefix is refused during parsing rather than indexed past the end.
+ *
+ * The empty-list early return STAYS. Dropping it looked harmless — only SERVER_ADDR is left to
+ * match — until you picture the deployment where it matters: a second front end (a tunnel, HAProxy,
+ * an Apache in front) connecting to nginx over loopback makes REMOTE_ADDR and SERVER_ADDR the same
+ * address for every visitor, so without this line an operator who deliberately EMPTIED the never-ban
+ * box would have exempted the entire internet from API bans and the API rate limit.
+ */
 function apiIpExempt(string $ip, array $cfg): bool {
     $list = apiParseIpList((string)($cfg['api_ban_exempt_ips'] ?? ''));
     if (!$list) return false;
-    $bin = @inet_pton($ip);
-    foreach ($list as $entry) {
-        if ($entry === $ip) return true;
-        if (str_contains($entry, '/')) {
-            [$net, $bits] = explode('/', $entry, 2);
-            $nb = @inet_pton(trim($net)); $bits = (int)$bits;
-            if ($bin === false || $nb === false || strlen($bin) !== strlen($nb)) continue;
-            $bytes = intdiv($bits, 8); $rem = $bits % 8;
-            if ($bytes > 0 && substr($bin, 0, $bytes) !== substr($nb, 0, $bytes)) continue;
-            if ($rem > 0) {
-                $mask = (0xFF << (8 - $rem)) & 0xFF;
-                if ((ord($bin[$bytes]) & $mask) !== (ord($nb[$bytes]) & $mask)) continue;
-            }
-            return true;
-        }
-    }
-    // the server's own address is always exempt even if the setting was edited
+    if (ipInCidrList($ip, $list)) return true;
+    // the server's own address is exempt too — but only while the operator keeps a list at all
     $self = $_SERVER['SERVER_ADDR'] ?? '';
     return $self !== '' && $self === $ip;
 }

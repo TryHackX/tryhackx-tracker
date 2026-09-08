@@ -3,11 +3,14 @@
  * TryHackX Tracker - Installation Wizard
  * Delete this file after installation!
  */
-session_start([
-    'cookie_httponly' => true,
-    'cookie_secure'   => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
-    'cookie_samesite' => 'Lax',
-]);
+// The installer had no access to the shared helpers at all — its only include was
+// includes/schema.php, several hundred lines down, inside the branch that seeds the settings. It
+// gets functions.php here so the Secure flag on its own session cookie is decided by the same
+// function the rest of the site uses. There is no database yet by definition, so sessionCookieParams([])
+// is `auto` with no proxy knowledge: this request's own transport, and nothing else. That is the
+// right answer for an installer, and it is what the old inline expression was trying to be.
+require_once __DIR__ . '/includes/functions.php';
+session_start(sessionCookieParams([]));
 
 // Whether installation has already completed. Gates the installer's AJAX + wizard steps
 // so that, if install.php is left on the server, it can't be used as an open endpoint.
@@ -652,6 +655,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
         </form>
     <?php endif; ?>
 </div>
+<!--
+  NO NONCE HERE, on purpose. The installer never sends a Content-Security-Policy: cspSend() needs
+  $cfg, and $cfg needs the database this page is still being asked to configure. So this block and
+  the onclick= on the cleanup button above both run, exactly as they always have.
+  If a policy is ever added to this file, a nonce on this <script> is NOT enough — the onclick has
+  to become a listener first, because script-src without 'unsafe-inline' blocks an attribute handler
+  whatever nonce the page carries. install.php is also excluded from deploy/deploy.py, so it is the
+  one entry point that never reaches a server with a policy in front of it.
+-->
 <script>
 async function testBlacklist() {
     const el = document.getElementById('bl-result');

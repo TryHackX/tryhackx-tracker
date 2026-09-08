@@ -152,6 +152,11 @@ $REVIEWED = [
     'api/admin/api_client_update.php:$sets'    => 'literal "col = ?" fragments, values in execute()',
     'includes/federation.php:$sets'            => 'literal "col = ?" fragments, values in execute()',
     'includes/bulkmail.php:$values'            => 'a run of literal "(?, ?, ?, ?)" groups',
+    // cspPrune(): MariaDB refuses OFFSET in DELETE and refuses a LIMIT inside a DELETE ... WHERE IN
+    // (SELECT …), so the doomed signatures are selected first and deleted by key. What is
+    // concatenated is the "?" run; every sig is bound. (The OFFSET beside it is cspReportKeepRows(),
+    // which returns an int clamped to 0..CSP_ROWS_MAX.)
+    'includes/csp.php:$doomed'                 => 'a run of "?" placeholders, one per signature — the sigs go through execute()',
 
     // Integers by the time they arrive. LIMIT/OFFSET cannot be bound in every driver mode.
     'includes/index.php:$remaining'            => 'cast with (int) at the concatenation',

@@ -488,6 +488,18 @@ check('control: a warm cached total reads no rows at all', $warm < $noise, "read
 $cfgTick = $cfg;
 $cfgTick['index_enabled'] = '1';
 $cfgTick['index_meta_daily_budget'] = '0';
+// Pin EVERY branch of the tick that can walk this table, not just the budget. Inheriting
+// index_meta_auto_queue from whatever the database happens to hold made this measurement depend on
+// the suite that ran before it: after the smokes it was on, indexQueueMetaAuto() walked the
+// catalogue, and the count under test was blamed for 9 698 rows it never read.
+$cfgTick['index_meta_auto_queue'] = '0';
+$cfgTick['index_search_enabled'] = '0';
+$cfgTick['index_keep_files'] = '0';
+// And the poll interval, which is the one that actually bit: with a shorter interval inherited from
+// whatever ran before, "no poll since the last tick" became a tick that POLLS, and the poll's own
+// reads were charged to the count under test. Measured with a probe rather than reasoned about:
+// indexPollDue() answered DUE and indexTick() came back having pruned 132 rows.
+$cfgTick['index_poll_minutes'] = '1440';
 $T = 2000000;
 
 // (a) the stand-down: indexPrune() sets force_idle_until for a whole hour precisely because the last

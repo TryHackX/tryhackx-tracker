@@ -127,7 +127,7 @@ function homeBlocks(PDO $db, array $cfg, string $baseUrl): array {
     foreach ($extraUrls as $eu) $copyParts[] = $eu;
 ?>
 <div class="code-block pos-relative">
-    <button class="copy-btn" onclick="copyText(this, 'announce-copy')" title="<?= _h('home.announce_copy') ?>"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    <button class="copy-btn" data-copy="announce-copy" title="<?= _h('home.announce_copy') ?>"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
     <?php if (!empty($httpUrl)): ?>
     <div class="label"><?= $httpLabel ?></div><code><?= sanitize($httpUrl) ?></code>
     <?php endif; ?>
@@ -233,7 +233,7 @@ $homePublicReg = ($homeWhitelist || $homeSched) && ($cfg['whitelist_public_enabl
 </div>
 <?php else: ?>
 <div class="card pos-relative">
-    <button class="copy-btn" onclick="copyText(this, 'copy-df-<?= $i ?>')" title="<?= _h('home.donate_copy', ['label' => $dfLabel]) ?>"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    <button class="copy-btn" data-copy="copy-df-<?= $i ?>" title="<?= _h('home.donate_copy', ['label' => $dfLabel]) ?>"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
     <p><strong><?= $dfLabel ?>:</strong></p><span class="donate-addr" id="copy-df-<?= $i ?>"><?= sanitize($dfValue) ?></span>
 </div>
 <?php endif; ?>
@@ -247,7 +247,7 @@ $homePublicReg = ($homeWhitelist || $homeSched) && ($cfg['whitelist_public_enabl
 <div class="contact-report-cta">
     <?= __('home.contact_cta', ['url' => sanitize($baseUrl . '?action=report')]) ?>
 </div>
-<p class="contact-disclaimer"><?= _h('home.contact_note_a') ?><?php if (!empty($cfg['site_email'])): ?><?php if (($cfg['contact_obfuscate'] ?? '0') === '1'): ?><a href="#" class="obf-email" onclick="revealEmail(this);return false;"><?= _h('home.contact_reveal') ?></a><?php else: ?><a href="mailto:<?= sanitize($cfg['site_email']) ?>"><?= sanitize($cfg['site_email']) ?></a><?php endif; ?><?php endif; ?></p>
+<p class="contact-disclaimer"><?= _h('home.contact_note_a') ?><?php if (!empty($cfg['site_email'])): ?><?php if (($cfg['contact_obfuscate'] ?? '0') === '1'): ?><a href="#" class="obf-email" data-reveal-email><?= _h('home.contact_reveal') ?></a><?php else: ?><a href="mailto:<?= sanitize($cfg['site_email']) ?>"><?= sanitize($cfg['site_email']) ?></a><?php endif; ?><?php endif; ?></p>
 <?php endif; ?>
 <?php $homeBlocks['contact'] = ob_get_clean(); ?>
 <?php

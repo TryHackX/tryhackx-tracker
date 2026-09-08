@@ -6,6 +6,13 @@
 // __() returns English until langInit() picks a language (see langEnsure()).
 require_once __DIR__ . '/lang.php';
 
+// The Content-Security-Policy and, more to the point, nonceAttr(). It is required HERE rather than
+// from index.php/api.php because two functions in THIS file emit an inline <script> — pageRedirect()
+// below and captchaHeadTags() — and tests/admin_access_test.php requires only functions.php and
+// calls captchaHeadTags() directly. A nonce helper that is not loaded wherever a <script> is written
+// is a helper somebody will forget; loading it here means they cannot.
+require_once __DIR__ . '/csp.php';
+
 /**
  * Redirect from inside a page template.
  *
@@ -18,7 +25,11 @@ require_once __DIR__ . '/lang.php';
 function pageRedirect(string $url): void {
     if (!headers_sent()) { header('Location: ' . $url); exit; }
     $u = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
-    echo '<meta http-equiv="refresh" content="0;url=' . $u . '"><script>location.replace(' . json_encode($url) . ');</script>';
+    // The <meta> refresh is what actually moves the browser under an enforcing CSP; the script is
+    // the faster path and carries the nonce so it runs too. Both, because neither alone covers
+    // every case: a meta refresh is ignored inside some embedded views, and the script is blocked
+    // if this ever renders on a page that did not send a policy.
+    echo '<meta http-equiv="refresh" content="0;url=' . $u . '"><script' . nonceAttr() . '>location.replace(' . json_encode($url) . ');</script>';
 }
 
 function sanitize(string $input): string {
@@ -320,7 +331,10 @@ function isRecaptchaEnabled(array $cfg, string $context = 'report'): bool {
  * <head> tags for the active provider: an inline script exposing CAPTCHA_PROVIDER / CAPTCHA_SITEKEY
  * (and RECAPTCHA_SITEKEY for backwards compatibility) plus the loader callback to
  * assets/js/captcha.js, followed by the widget script itself. Emits nothing when CAPTCHA is not
- * configured. Remember: every host used here must also be allowed by the CSP in .htaccess.
+ * configured. Every host used here must also be allowed by the policy — captchaCspHosts() directly
+ * below is that list, and it is directly below FOR THIS REASON: the two used to live in different
+ * files (this one and .htaccess) and a provider added to one and forgotten in the other loads no
+ * script at all, which reads as "CAPTCHA unavailable" on every protected form.
  *
  * The onCaptchaApiLoad callback is defined in the inline script ABOVE the async loader on purpose —
  * defining it in captcha.js (which loads at the end of <body>) would race the vendor script and the
@@ -348,7 +362,7 @@ function captchaHeadTags(array $cfg): string {
             $src = 'https://www.google.com/recaptcha/api.js?onload=onCaptchaApiLoad&render=explicit';
     }
     $keyJs = json_encode($siteKey, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-    $html  = "<script>\n";
+    $html  = '<script' . nonceAttr() . ">\n";
     $html .= "    const CAPTCHA_PROVIDER = '" . $provider . "';\n";
     $html .= "    const CAPTCHA_SITEKEY = " . $keyJs . ";\n";
     $html .= "    const RECAPTCHA_SITEKEY = CAPTCHA_SITEKEY;\n";
@@ -362,6 +376,44 @@ function captchaHeadTags(array $cfg): string {
     $html .= "    </script>\n";
     $html .= '    <script src="' . $src . '" async defer></script>' . "\n";
     return $html;
+}
+
+/**
+ * The CSP host lists the ACTIVE CAPTCHA provider needs, keyed script/style/connect/frame.
+ *
+ * One provider, not four. The old `.htaccess` policy allowed every provider's hosts on every
+ * request whatever was configured, because a static file cannot ask a setting — so a site using
+ * Turnstile was also telling every visitor's browser that Google and hCaptcha may run scripts on
+ * it. Building the policy in PHP is what makes narrowing possible, and this is where the narrowing
+ * happens. Empty arrays when CAPTCHA is not configured: no widget, no hosts.
+ *
+ * NO 'strict-dynamic'. It would make every host expression here be IGNORED, and all three widget
+ * vendors load further scripts from these hosts once their loader runs. The plain allow-list is
+ * what works today and what keeps working.
+ */
+function captchaCspHosts(array $cfg): array {
+    $empty = ['script' => [], 'style' => [], 'connect' => [], 'frame' => []];
+    if (!captchaConfigured($cfg)) return $empty;
+    switch (captchaProvider($cfg)) {
+        case 'turnstile':
+            $h = ['https://challenges.cloudflare.com'];
+            return ['script' => $h, 'style' => [], 'connect' => $h, 'frame' => $h];
+        case 'hcaptcha':
+            // The apex is listed next to the wildcard because a CSP wildcard does not match the
+            // bare domain — hcaptcha.com and *.hcaptcha.com are two different source expressions.
+            $h = ['https://hcaptcha.com', 'https://*.hcaptcha.com'];
+            return ['script' => array_merge(['https://js.hcaptcha.com'], $h), 'style' => $h,
+                    'connect' => $h, 'frame' => $h];
+        case 'recaptcha_v3':
+            // v3 renders no widget and needs no frame — but api.js still pulls its worker code from
+            // www.gstatic.com, which is the host people forget and then cannot explain the failure.
+            return ['script' => ['https://www.google.com', 'https://www.gstatic.com', 'https://www.recaptcha.net'],
+                    'style' => [], 'connect' => ['https://www.google.com', 'https://www.recaptcha.net'], 'frame' => []];
+        default:   // recaptcha v2 checkbox
+            return ['script' => ['https://www.google.com', 'https://www.gstatic.com', 'https://www.recaptcha.net'],
+                    'style' => [], 'connect' => ['https://www.google.com', 'https://www.recaptcha.net'],
+                    'frame' => ['https://www.google.com', 'https://www.recaptcha.net']];
+    }
 }
 
 /**
@@ -422,9 +474,10 @@ function resetCaptchaGrace(array $cfg): void {
  * reverse proxy / CDN (Cloudflare, nginx) every request's REMOTE_ADDR is the proxy, so IP rate
  * limiting and login lockout would treat all visitors as one host. To fix that WITHOUT opening
  * a spoofing hole, an admin must explicitly:
- *   - list the proxy addresses in `trusted_proxy_ips` (comma separated), and
+ *   - list the proxy addresses OR CIDR RANGES in `trusted_proxy_ips` (any of space, comma or
+ *     semicolon separates them), and
  *   - name the header the proxy sets in `client_ip_header` (e.g. CF-Connecting-IP or X-Forwarded-For).
- * The forwarded header is only trusted when REMOTE_ADDR is one of the configured proxies.
+ * The forwarded header is only trusted when REMOTE_ADDR is inside one of the configured entries.
  */
 /** "::ffff:1.2.3.4" (IPv4-mapped, seen behind v4v6 sockets) → "1.2.3.4"; anything else unchanged. */
 function unmapIpv4(string $ip): string {
@@ -439,14 +492,349 @@ function unmapIpv4(string $ip): string {
     return $ip;
 }
 
+/* ── Addresses, ranges, and what the transport really was ────────────────────
+ *
+ * ONE matcher and ONE list parser, here in functions.php because it is the only include every
+ * entry point already loads (index.php, api.php, tools/janitor.php and every tests/*.php; and
+ * install.php, which did NOT load it, now does).
+ *
+ * There were three near-identical CIDR matchers in the tree and NONE of them was reachable from
+ * this file, so `trusted_proxy_ips` compared with in_array() and a CIDR typed into that box
+ * matched nothing at all: the entry sat there looking configured while every visitor kept being
+ * counted as the proxy. Cloudflare publishes ~22 IPv4 and ~7 IPv6 RANGES and no single addresses,
+ * so the feature could not be configured for the one deployment it exists for.
+ *
+ * includes/api_auth.php's copy was also wrong rather than merely duplicated: it did
+ * `$bits = (int)$bits` with no range check, so an entry of "10.0.0.0/999" reached ord($bin[124])
+ * on a four-byte string. Here an out-of-range prefix is refused while the entry is still being
+ * parsed, so "10.0.0.0/33" matches NOTHING and never reads past the end of the packed address —
+ * and apiIpExempt() routes through this matcher instead of keeping its own loop.
+ */
+
+/** How many entries one address box may hold. The XFF walk multiplies by the number of hops. */
+const IP_PARSE_MAX_ENTRIES = 256;
+/**
+ * The widest block `trusted_proxy_ips` will honour. `0.0.0.0/0` there means "believe the client-IP
+ * header from anybody", which turns every rate limit, every login lockout, every API ban and the
+ * reputation bucket into a request header — the exact hole the doc comment above exists to keep
+ * shut, and CIDR support is what makes it typeable in one keystroke. Cloudflare's widest published
+ * blocks are a /12 (v4) and a /32 (v6), so nothing legitimate is refused.
+ */
+const TRUSTED_PROXY_MIN_BITS4 = 8;
+const TRUSTED_PROXY_MIN_BITS6 = 16;
+
+/**
+ * One entry — a bare address or a CIDR — as [packed address, prefix bits], or null when malformed.
+ *
+ * inet_pton gives raw bytes, the only representation that works for IPv6 without arbitrary-precision
+ * arithmetic: the comparison is then bytes and one masked bit rather than a number PHP cannot hold.
+ */
+function ipCidrPack(string $entry): ?array {
+    $entry = trim($entry);
+    if ($entry === '') return null;
+    $addr = $entry;
+    $bits = null;
+    if (str_contains($entry, '/')) {
+        [$addr, $b] = explode('/', $entry, 2);
+        $addr = trim($addr);
+        $b = trim($b);
+        if ($b === '' || !ctype_digit($b)) return null;
+        $bits = (int)$b;
+        // A CIDR's network address is deliberately NOT unmapped: `::ffff:10.0.0.0/104` unmapped to
+        // `10.0.0.0` would carry a prefix of 104, which means nothing in four bytes.
+    } else {
+        // A bare entry IS unmapped, so `::ffff:1.2.3.4` written by hand is the same host as
+        // `1.2.3.4` — the same normalisation getClientIp() applies to REMOTE_ADDR and to each hop.
+        $addr = unmapIpv4($addr);
+    }
+    $bin = @inet_pton($addr);
+    if ($bin === false) return null;
+    $max = strlen($bin) * 8;                        // 32 for IPv4, 128 for IPv6
+    if ($bits === null) $bits = $max;               // a bare address is a single host
+    if ($bits < 0 || $bits > $max) return null;     // "/33" on a v4 entry: matches nothing, reads nothing
+    return [$bin, $bits];
+}
+
+/** Is this one entry a syntactically valid address or CIDR? What save-time validation asks. */
+function ipCidrValid(string $entry): bool {
+    return ipCidrPack($entry) !== null;
+}
+
+/**
+ * Does $ip fall inside $entry? Families never cross — a v4 address can never match a v6 range and
+ * the reverse — and a malformed entry matches nothing rather than throwing.
+ */
+function ipMatchesCidr(string $ip, string $entry): bool {
+    $net = ipCidrPack($entry);
+    if ($net === null) return false;
+    $bin = @inet_pton(unmapIpv4(trim($ip)));
+    if ($bin === false) return false;
+    [$nb, $bits] = $net;
+    if (strlen($bin) !== strlen($nb)) return false;          // v4 never meets v6
+    if ($bits === 0) return true;                            // /0 contains its whole family
+    $whole = intdiv($bits, 8);
+    $rest  = $bits % 8;
+    // strncmp, not substr()!==: binary-safe on bytes that may contain NUL.
+    if ($whole > 0 && strncmp($bin, $nb, $whole) !== 0) return false;
+    if ($rest === 0) return true;
+    $mask = (0xFF << (8 - $rest)) & 0xFF;
+    return (ord($bin[$whole]) & $mask) === (ord($nb[$whole]) & $mask);
+}
+
+/** First match wins. An EMPTY list matches nothing — "trust nobody" is what no entries means. */
+function ipInCidrList(string $ip, array $entries): bool {
+    foreach ($entries as $entry) {
+        if (ipMatchesCidr($ip, (string)$entry)) return true;
+    }
+    return false;
+}
+
+/**
+ * One list parser for every address box. Splits on any run of whitespace, comma or semicolon, so a
+ * value arriving with newlines in it — from the JSON endpoint, a restored backup, or a row edited by
+ * hand in the shared MariaDB — parses the same way the field's own commas do. `explode(',')` alone
+ * left an entry with an embedded newline that matched nothing while looking perfectly correct.
+ * (The Settings control is a single-line input, so a browser paste never produces newlines there;
+ * it concatenates the lines instead, and the validity rule below is what reports that.)
+ */
+function ipParseList(string $raw, int $max = IP_PARSE_MAX_ENTRIES): array {
+    $out = [];
+    foreach (preg_split('/[\s,;]+/', $raw) ?: [] as $entry) {
+        $entry = trim($entry);
+        if ($entry === '') continue;
+        if (!in_array($entry, $out, true)) $out[] = $entry;
+        if (count($out) >= $max) break;
+    }
+    return $out;
+}
+
+/** Is one `trusted_proxy_ips` entry both well-formed AND narrow enough to be honoured? */
+function trustedProxyEntryOk(string $entry): bool {
+    $p = ipCidrPack($entry);
+    if ($p === null) return false;
+    return $p[1] >= (strlen($p[0]) === 4 ? TRUSTED_PROXY_MIN_BITS4 : TRUSTED_PROXY_MIN_BITS6);
+}
+
+/**
+ * The proxies whose forwarded headers this request may believe.
+ *
+ * The width rule is enforced HERE and not only at save time, and that is the whole answer to what
+ * happens to an installation that upgrades into CIDR support. `trusted_proxy_ips` had no validation
+ * whatsoever, and a CIDR in it was inert — so a box can already be holding `0.0.0.0/0`, typed once,
+ * saved happily and never honoured. The moment the matcher above starts reading that string it
+ * would mean "believe the client-IP header from anybody", on the FIRST request after the file copy,
+ * long before anybody opens Settings and therefore long before a save-time refusal could run. So
+ * the runtime drops what it will not honour; the 400 in save_settings is the MESSAGE, not the
+ * boundary. Everything narrower is honoured exactly as typed, which is the fix being shipped.
+ */
+function trustedProxyList(array $cfg): array {
+    $out = [];
+    foreach (ipParseList((string)($cfg['trusted_proxy_ips'] ?? '')) as $entry) {
+        if (trustedProxyEntryOk($entry)) $out[] = $entry;
+    }
+    return $out;
+}
+
+/** What the runtime is ignoring, so the panel can SAY so instead of dropping it in silence. */
+function trustedProxyRejected(array $cfg): array {
+    $raw = (string)($cfg['trusted_proxy_ips'] ?? '');
+    $out = [];
+    foreach (ipParseList($raw) as $entry) {
+        if (!trustedProxyEntryOk($entry)) $out[] = $entry;
+    }
+    // The parser stops at IP_PARSE_MAX_ENTRIES. Whatever it stopped short of is honoured by nothing
+    // and named by nothing, which is exactly the silent drop this function exists to prevent — so
+    // count the entries the raw value really holds and say how many never made it in.
+    $all = 0;
+    foreach (preg_split('/[\s,;]+/', $raw) ?: [] as $e) { if (trim($e) !== '') $all++; }
+    if ($all > IP_PARSE_MAX_ENTRIES) {
+        $out[] = '… +' . ($all - IP_PARSE_MAX_ENTRIES) . ' (over the ' . IP_PARSE_MAX_ENTRIES . '-entry limit)';
+    }
+    return $out;
+}
+
+/* ── Was THIS request's own connection HTTPS? ────────────────────────────────
+ *
+ * Five copies of `!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'` decided the Secure flag
+ * on every cookie the site sets (index.php:4, api.php:11, install.php:8, includes/lang.php:170,
+ * includes/users.php:325).
+ *
+ * MEASURED on the production host, 2026-09-08, before this function was written: PHP there sees
+ * HTTPS='on' and REQUEST_SCHEME='https' — nginx's stock fastcgi_params passes both — and the live
+ * response already carried `Set-Cookie: PHPSESSID=...; secure`. The five copies were RIGHT on this
+ * deployment. They were right because of what a distribution's include file happens to contain,
+ * which is not a property anybody chose, and they stop being right the moment TLS is terminated one
+ * hop earlier: to that expression a Cloudflare or load-balancer deployment is a plain-HTTP site, and
+ * every cookie silently loses its Secure flag. This function is the one place that answers the
+ * question now, it can be told about a proxy, and the panel can show which signal answered.
+ *
+ * A SERVER_PORT === '443' heuristic was considered and deliberately left out. It is the one signal
+ * that could claim HTTPS for a plain-HTTP request, and the cost of a false positive here is an
+ * operator locked out of their own panel.
+ */
+
+/** Which signal said HTTPS: 'https' | 'request_scheme' | 'proxy_header' | 'none'. */
+function requestHttpsSignal(?array $cfg = null): string {
+    $cfg = $cfg ?? ($GLOBALS['cfg'] ?? []);
+    if (!is_array($cfg)) $cfg = [];
+
+    // 1. TLS terminated by this server: Apache mod_ssl, or nginx passing HTTPS to php-fpm.
+    $h = strtolower(trim((string)($_SERVER['HTTPS'] ?? '')));
+    if ($h !== '' && $h !== 'off' && $h !== '0') return 'https';
+    // 2. What the web server itself says the scheme was (nginx: fastcgi_param REQUEST_SCHEME).
+    if (strtolower(trim((string)($_SERVER['REQUEST_SCHEME'] ?? ''))) === 'https') return 'request_scheme';
+
+    // 3. A HEADER — and only from a peer inside trusted_proxy_ips, the same rule getClientIp()
+    // applies to the client-IP header. Reached only after 1 and 2 have said nothing, so this can
+    // ONLY EVER UPGRADE: a proxy sending `X-Forwarded-Proto: http` can never strip Secure from a
+    // connection that really is TLS.
+    $name = array_key_exists('client_proto_header', $cfg)
+        ? trim((string)$cfg['client_proto_header'])
+        : 'X-Forwarded-Proto';
+    if ($name === '') return 'none';              // empty is a real answer: no header path at all
+    $trusted = trustedProxyList($cfg);
+    if (!$trusted) return 'none';
+    $remote = unmapIpv4((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+    if ($remote === '' || !ipInCidrList($remote, $trusted)) return 'none';
+
+    $v = strtolower(trim((string)($_SERVER['HTTP_' . strtoupper(str_replace('-', '_', $name))] ?? '')));
+    if ($v !== '') {
+        // A proto list ("https, http") is read LEFT-most first: unlike X-Forwarded-For, the first
+        // entry is the hop nearest the visitor, which is the connection this question is about.
+        if (str_contains($v, ',')) $v = trim(explode(',', $v, 2)[0]);
+        if ($v === 'https' || $v === 'on') return 'proxy_header';
+    }
+    // What some proxies (and older mod_proxy setups) send instead of a proto header.
+    $ssl = strtolower(trim((string)($_SERVER['HTTP_X_FORWARDED_SSL'] ?? '')));
+    if ($ssl === 'on' || $ssl === '1') return 'proxy_header';
+    // RFC 7239, the standard one: `Forwarded: for=1.2.3.4;proto=https`. Only its FIRST element,
+    // for the same reason the proto list above is read left-most.
+    $fwd = (string)($_SERVER['HTTP_FORWARDED'] ?? '');
+    if ($fwd !== '' && preg_match('/(?:^|;)\s*proto\s*=\s*"?https"?\s*(?:;|$)/i', trim(explode(',', $fwd, 2)[0]))) {
+        return 'proxy_header';
+    }
+    return 'none';
+}
+
+function requestIsHttps(?array $cfg = null): bool {
+    return requestHttpsSignal($cfg) !== 'none';
+}
+
+/* ── One Secure policy, four cookies ─────────────────────────────────────────
+ *
+ * `always` is the only value here that can lock everybody out, including the owner: on a panel
+ * actually reached over plain HTTP the browser REFUSES to store PHPSESSID, so api/admin/login
+ * answers success and the next request arrives with no session — and because the CSRF token is
+ * minted into the session at sign-in, the one checked at submit can never match it. Recovery is one
+ * statement on the tracker's own schema:
+ *     UPDATE settings SET value = 'auto' WHERE `key` = 'cookie_secure_mode';
+ * Which is why save_settings refuses to STORE 'always' unless the saving request itself proves it
+ * is HTTPS, and why the key sits in $reauthKeys.
+ */
+const COOKIE_SECURE_MODES = ['auto', 'always', 'never'];
+
+function cookieSecureMode(?array $cfg = null): string {
+    $cfg = $cfg ?? ($GLOBALS['cfg'] ?? []);
+    if (!is_array($cfg)) $cfg = [];
+    $m = strtolower(trim((string)($cfg['cookie_secure_mode'] ?? 'auto')));
+    return in_array($m, COOKIE_SECURE_MODES, true) ? $m : 'auto';
+}
+
+function cookieSecureFlag(?array $cfg = null): bool {
+    // The $GLOBALS fallback is the pattern getClientIp() already uses, and it is here on purpose:
+    // threading a $cfg parameter through userRememberIssue() would have changed a call site that
+    // tests/audit_fixes_test.php pins by its exact source text, for no behavioural gain.
+    $cfg = $cfg ?? ($GLOBALS['cfg'] ?? []);
+    if (!is_array($cfg)) $cfg = [];
+    return match (cookieSecureMode($cfg)) {
+        'always' => true,
+        'never'  => false,
+        default  => requestIsHttps($cfg),
+    };
+}
+
+/**
+ * setcookie()'s array form with this site's policy filled in. $overrides wins (PHP `+` semantics),
+ * so a caller can turn httponly off or add an expiry without restating the rest.
+ */
+function cookieBaseParams(?array $cfg = null, array $overrides = []): array {
+    return $overrides + [
+        'path'     => '/',
+        'httponly' => true,
+        'samesite' => 'Lax',
+        'secure'   => cookieSecureFlag($cfg),
+    ];
+}
+
+/**
+ * Exactly the three keys session_start() was passed before and no more — no cookie_path, so a
+ * php.ini that sets a non-'/' session.cookie_path keeps behaving the way it does today.
+ */
+function sessionCookieParams(?array $cfg = null): array {
+    return [
+        'cookie_httponly' => true,
+        'cookie_samesite' => 'Lax',
+        'cookie_secure'   => cookieSecureFlag($cfg),
+    ];
+}
+
+/* ── HSTS ────────────────────────────────────────────────────────────────────
+ *
+ * Off by default, and it never leaves over a plain-HTTP request. The pin lives in other people's
+ * browsers, runs to its own expiry, and switching the setting back off does NOT release a browser
+ * that already holds it — `max-age=0` WITH the switch still on is the retraction. That is why the
+ * shipped max-age is one day and not the year every guide recommends: a mistake costs a day.
+ */
+const HSTS_MAX_AGE_DEFAULT = 86400;
+const HSTS_MAX_AGE_CEILING = 63072000;   // two years
+/** hstspreload.org's own minimum; the token is a lie below it, so it is not printed. */
+const HSTS_PRELOAD_MIN_AGE = 31536000;
+
+function hstsHeaderValue(array $cfg): string {
+    if ((string)($cfg['hsts_enabled'] ?? '0') !== '1') return '';
+    // RFC 6797 §7.2: a host MUST NOT send this over a non-secure transport. Re-checked here rather
+    // than trusted from the save path, so a row edited by hand in the shared MariaDB cannot pin a
+    // hostname for a browser that reached it over plain HTTP.
+    if (!requestIsHttps($cfg)) return '';
+    // is_numeric first: (int)'abc' is 0, and 0 is not an absurd age here, it is the RETRACTION —
+    // a corrupted row would have published "forget this host is HTTPS" instead of the default.
+    $rawAge = $cfg['hsts_max_age'] ?? HSTS_MAX_AGE_DEFAULT;
+    $age = is_numeric($rawAge) ? (int)$rawAge : HSTS_MAX_AGE_DEFAULT;
+    if ($age < 0 || $age > HSTS_MAX_AGE_CEILING) $age = HSTS_MAX_AGE_DEFAULT;
+    $v = 'max-age=' . $age;
+    $sub = (string)($cfg['hsts_include_subdomains'] ?? '0') === '1';
+    if ($sub) $v .= '; includeSubDomains';
+    // Both preconditions re-checked at print time for the same reason: a preload claim the site does
+    // not satisfy is a claim submitted to a list that takes months to leave.
+    if ((string)($cfg['hsts_preload'] ?? '0') === '1' && $sub && $age >= HSTS_PRELOAD_MIN_AGE) $v .= '; preload';
+    return $v;
+}
+
+/**
+ * The response headers the PANEL owns. Production is nginx, which never reads .htaccess, so the
+ * headers shipped there do nothing on this deployment; HSTS is managed from Settings instead
+ * precisely so it can be switched off from the same place it was switched on.
+ *
+ * $scope is the CSP scope: 'public' for a page, 'api' for a JSON response, 'panel' for the panel.
+ * index.php calls this before it knows which page it is about to render and sends 'public'; the
+ * panel branch calls cspSend($cfg, 'panel') afterwards and header() replaces the earlier one, so
+ * the response still carries exactly one policy.
+ */
+function sendSecurityHeaders(array $cfg, string $scope = 'public'): void {
+    if (headers_sent()) return;
+    $hsts = hstsHeaderValue($cfg);
+    if ($hsts !== '') header('Strict-Transport-Security: ' . $hsts);
+    cspSend($cfg, $scope);
+}
+
 function getClientIp(?array $cfg = null): string {
     $remote = unmapIpv4($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
     $cfg = $cfg ?? ($GLOBALS['cfg'] ?? null);
     if (!is_array($cfg)) return $remote;
 
-    $trusted = array_filter(array_map('trim', explode(',', $cfg['trusted_proxy_ips'] ?? '')));
+    $trusted = trustedProxyList($cfg);
     $header  = trim($cfg['client_ip_header'] ?? '');
-    if (empty($trusted) || $header === '' || !in_array($remote, $trusted, true)) {
+    if (empty($trusted) || $header === '' || !ipInCidrList($remote, $trusted)) {
         return $remote;
     }
 
@@ -462,7 +850,7 @@ function getClientIp(?array $cfg = null): string {
     foreach ($hops as $hop) {
         if ($hop === '' || !filter_var($hop, FILTER_VALIDATE_IP)) return $remote;   // garbage → don't guess
         $hop = unmapIpv4($hop);
-        if (in_array($hop, $trusted, true)) continue;
+        if (ipInCidrList($hop, $trusted)) continue;   // a trusted RANGE skips the hop, not only an exact match
         return $hop;
     }
     return $remote;

@@ -4,6 +4,187 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.39.0] — 2026-09-08
+
+### Fixed — two tests that could not fail, and a suite that had been dying unnoticed
+
+`deploy/smoke_admin.py` had been **crashing part way through for two releases** and reading as a
+pass. The battery ran the smoke suites *after* the PHP suites, and those truncate the catalogue
+tables the smoke opens against, so it died on an `IndexError` before printing its result line — and
+because the runner grepped for a `FAILS: n` line that a crash never prints, the *next* suite's line
+slid up into its column. Behind that, two of its saves had been failing since the re-auth work in
+1.36.0: `tracker_mode_switch_cmd` is a re-auth key, and clearing it is a change, so those saves had
+been answering 403 and nobody saw it. The suites now run before the stateful tests, a crash is
+reported as a crash with its exit code, and the two saves carry the owner password.
+
+`tests/index_test.php`'s cost checks — the ones that guard the counting fix in 1.38.0 — **inherited
+three settings from whatever ran before them**. With a shorter poll interval left in the database,
+"an ordinary minute with no poll" became a tick that polled, and the poll's own reads were charged
+to the count under test. Found with a probe rather than by reading: `indexPollDue()` answered DUE and
+the tick came back having pruned 132 rows. The scenario now pins every branch of the tick that can
+walk the table, and the suite passes both immediately after a bootstrap and after the smokes.
+
+
+
+### Added — a Content-Security-Policy with a per-request nonce, sent by the application
+
+The policy lived in one line of `.htaccess`, **and production is nginx, which never reads that
+file.** Unless the operator had hand-copied it into the server block — the README said to; nothing
+reminded anyone — the live site was serving no policy at all. It is built per request in
+`includes/csp.php` now and sent by PHP, which fixes that on every web server at once and is also the
+only place a **nonce** can come from: a nonce must change on every response, and a static
+`add_header` cannot mint one.
+
+Every inline `<script>` the application emits carries that request's nonce — `nonceAttr()` returns
+the whole attribute, so `<script<?= nonceAttr() ?>>` is one token to add and impossible to half-do —
+and `script-src` has **no `'unsafe-inline'` and no `'unsafe-eval'`**. An injected `<script>` has no
+nonce, so it is inert text.
+
+Four settings under *Settings → Security → Content-Security-Policy*: the mode
+(**report-only by default**, enforce, off), whether to collect violation reports (**off by
+default**), how many kinds of violation to keep, and extra allowed hosts. The section prints the
+policy this very request would send, for both scopes, byte for byte — four dropdowns do not tell
+anybody which hosts the CAPTCHA provider dragged in.
+
+What is deliberately NOT claimed: `style-src` keeps `'unsafe-inline'` and will until
+`includes/richtext.php` stops building `style="…"` out of author BBCode and the ~100 `style=""`
+attributes in the templates move into stylesheets, and `img-src` keeps `https:` so images in
+descriptions still load. This blocks injected *scripts*, not injected styling, and the settings page
+says so where the switch is.
+
+The panel and the public site get **different** policies. The panel adds jsDelivr to `script-src`
+(Bootstrap's bundle) and `frame-ancestors 'none'`; a public page gets neither, because it loads only
+icons and fonts from that CDN — allowing a third-party origin to run scripts for every anonymous
+visitor when nothing there needs it is a cost with no purchase. A JSON response gets
+`default-src 'none'`. And the CAPTCHA hosts are now **only the provider that is configured**: the
+static list allowed all four on every install, because a file cannot read a setting.
+
+**On upgrade, nothing changes for a visitor.** The shipped mode is report-only, whose header name is
+different from the enforcing one, so an Apache install keeps its old enforcing policy throughout —
+`.htaccess` says `Header setifempty` now rather than `Header set`, which is what stops mod_headers
+from *replacing* the header PHP just sent and quietly making this whole feature decorative. nginx had
+nothing to lose and now has a policy.
+
+### Added — a bounded, public violation-report sink, and a panel view of it
+
+*Collect violation reports* adds `report-uri` to the policy; `csp-report.php` stores what browsers
+send. It is **off by default**, because report-only still reports, and the day a policy is switched
+on every browser extension that injects a script starts POSTing about it into a MariaDB shared with
+a mail server, a forum and a file host.
+
+The endpoint is a top-level file rather than an api.php endpoint, on purpose: `api.php` starts a
+session, loads thirty includes and runs four janitors, and none of that is needed to store six short
+strings. `deploy/deploy.py`'s top-level include list names it in the same commit — that manifest is
+an allow-list, and a `report-uri` pointing at a path with no file behind it is worse than no
+reporting at all, because the rewrite then falls through to `index.php`, which renders the whole
+front page for every violation POST from every visitor.
+
+Method, content type and length are checked before the database is touched. Firefox's
+`{"csp-report":…}` and Chrome's `[{"type":"csp-violation","body":…}]` normalise to the same row, so
+one problem seen in two browsers is one problem. Only the **origin** of a blocked URL is kept (a
+blocked-uri routinely carries a token in its query) and only the `?action=` of the page it happened
+on. Extension schemes and reports about other people's sites are dropped before storage.
+
+The row count is bounded **against a hostile client**, not merely against an honest browser: the
+blocked origin comes out of the POST body, so aggregation alone would let anyone create rows at
+will. The counter of an existing row always moves; a *new* kind is refused once the table holds
+`csp_report_keep_rows` rows. The janitor trims to the same ceiling once a minute. Clearing the list
+is `csp.clear` in the audit log.
+
+**Schema 46** adds `csp_reports` and the four settings.
+
+### Changed — one answer to "was this request HTTPS", instead of five copies of a guess
+
+`session_start()` was the first statement in `index.php`, `api.php` and `install.php`, and each
+computed its own copy of `!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'` — five copies of
+one expression, in five files, none of them aware of a proxy.
+
+**On this deployment they were producing the right answer, and that was checked before any of this
+was written.** Measured on the production host on 2026-09-08: PHP sees `HTTPS='on'` and
+`REQUEST_SCHEME='https'` (nginx's stock `fastcgi_params` passes both), and the live response already
+carried `Set-Cookie: PHPSESSID=…; secure; HttpOnly; SameSite=Lax`. So this is not a fix for an
+outage that happened; it is the removal of a condition that was true here by luck of a stock include
+file and false the moment anything sits in front of the web server. The expression sees only the
+connection nginx made, so on any deployment where TLS is terminated a hop earlier — Cloudflare, a
+load balancer, a tunnel — the same five copies quietly compute `false` for a site that is entirely
+HTTPS, and every cookie loses its `Secure` flag with nothing to show for it in the panel.
+
+There is now **one** function that answers "was this request HTTPS", and one that decides the flag
+for all four cookies. It reads, in order: TLS to this server, `REQUEST_SCHEME`, and then —
+**only when the request arrived from an address inside Trusted proxy IPs** — `X-Forwarded-Proto`,
+`X-Forwarded-SSL` and RFC 7239 `Forwarded`. The local connection is asked first, so a proxy header
+can only ever *add* HTTPS and never strip it from a connection that really is encrypted. A
+`SERVER_PORT === '443'` heuristic was considered and deliberately left out: it is the one signal
+that could claim HTTPS for a plain-HTTP request, and a false positive here locks the operator out.
+
+`session_start()` therefore moved **down** in both entry points, to immediately after
+`ensureSchema()`, because the new `cookie_secure_mode` setting lives in the database. Verified before
+moving it: nothing under `includes/` touches `$_SESSION` at file scope, and both database-down
+branches (the maintenance page, the API's 503) use neither a session nor a CSRF token. Nothing
+inserted above that line may read `$_SESSION`, and a `headers_sent()` check beside it logs the one
+new failure this creates — a byte of output before the session starts.
+
+Two smaller disagreements went with it: the remember-me **delete** cookie carried no `secure` key
+while the issue set one, and `logout()` used the seven-argument `setcookie()`, whose signature has
+no SameSite parameter, so the deletion cookie silently lost the `SameSite=Lax` the session was
+issued with.
+
+### Added — CIDR ranges in Trusted proxy IPs
+
+`trusted_proxy_ips` was compared with `in_array()`, so a CIDR typed into that box **matched nothing**
+and every visitor kept being counted as the proxy. Cloudflare publishes about thirty ranges and no
+single addresses, so the feature could not be configured for the deployment it exists for. There is
+now one matcher and one list parser in `includes/functions.php` — IPv4 and IPv6, families that never
+cross, `::ffff:` addresses unmapped on both sides, and an out-of-range prefix (`10.0.0.0/33`)
+matching nothing rather than reading past the end of a four-byte address. Commas, spaces and new
+lines all separate entries; a list pasted one per line used to produce entries with embedded
+newlines that matched nothing while looking correct in the field.
+
+`includes/api_auth.php`'s never-ban list now goes through the same matcher, which fixes a real bug
+rather than merely removing a duplicate: its inline copy did `$bits = (int)$bits` with no range
+check, so an entry of `10.0.0.0/999` reached `ord($bin[124])` on four bytes.
+
+**On upgrade:** an installation that already holds a CIDR in that box has been running with it
+inert. Two rules are now applied on **every request**, not only when Settings is saved, because a
+save-time check would arrive after the first request of the deploy: a malformed entry is ignored,
+and so is a block wider than `/8` (IPv4) or `/16` (IPv6) — `0.0.0.0/0` there would make every rate
+limit, login lockout, API ban and reputation bucket spoofable with one request header. Settings
+names the entries it is ignoring. A *narrow* stored range starts being honoured, which is the fix:
+that installation stops treating all visitors as one host, so rate-limit and lockout counters
+change shape once, from shared to per-visitor.
+
+### Added — Secure cookie policy and HSTS, in Settings (schema 44 → 45)
+
+Six settings, all in *Security → Transport security*:
+
+* **`cookie_secure_mode`** — `auto` (the shipped default and what every upgrade gets), `always`,
+  `never`. `always` is a total lockout on a panel really served over plain HTTP: the browser refuses
+  the session cookie, so every sign-in succeeds and the next click returns to the form, because the
+  CSRF token minted at sign-in is never the one checked at submit. It can only be saved from a
+  request that already is HTTPS, it is on the owner-password list, and the recovery — a single
+  `UPDATE settings SET value = 'auto' WHERE \`key\` = 'cookie_secure_mode';` — is printed in the
+  field's own help text, because whoever needs it cannot open the panel to go looking for it.
+* **`client_proto_header`** — which header a remote proxy uses (default `X-Forwarded-Proto`), read
+  only from a trusted peer. Empty switches the header path off entirely.
+* **`hsts_enabled` / `hsts_max_age` / `hsts_include_subdomains` / `hsts_preload`** — off, and never
+  sent over a plain-HTTP request. `max-age` ships at **one day**, not the recommended year, because
+  that is what an operator gets the moment they flip the switch. `max-age=0` with the switch still
+  on is the **retraction**; switching the setting off only stops sending the header and leaves
+  existing pins running to their own expiry. `preload` is refused unless *includeSubDomains* is on
+  and the age is at least a year, and it is on the owner-password list.
+
+The section prints, live for the request rendering it, whether PHP sees this request as HTTPS and
+**which** signal said so — and, when detection says plain HTTP while the site address is `https://`,
+the two `fastcgi_param` lines that are missing from the vhost. Every refusal added here fires on an
+actual **change** and is judged against `$data + $cfg`: the page posts every control on every save,
+so a guard written against the value alone would make one bad state block the whole Settings page,
+and one written against `$cfg` would refuse the very save that fixes detection.
+
+**Nobody is logged out by any of this.** `Secure` is a rule about sending a cookie, not about
+keeping one, and PHP only re-emits the session cookie when it creates or regenerates an id. The
+cookies were deliberately **not** renamed to `__Secure-`/`__Host-`: that is the one change here that
+really would end every session on deploy, and it buys nothing.
+
 ## [1.38.0] — 2026-09-08
 
 ### Changed — the catalogue is no longer counted twice a minute

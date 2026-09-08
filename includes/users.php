@@ -322,11 +322,11 @@ function userRememberIssue(PDO $db, int $userId, ?int $expiresAt = null): void {
     $token = bin2hex(random_bytes(32));
     $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'remember', ?, FROM_UNIXTIME(?))")
        ->execute([$userId, hash('sha256', $token), $expiresAt]);
-    setcookie(USER_REMEMBER_COOKIE, $userId . '.' . $token, [
-        'expires' => $expiresAt,
-        'path' => '/', 'httponly' => true, 'samesite' => 'Lax',
-        'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
-    ]);
+    // cookieBaseParams() reads $GLOBALS['cfg'] when it is not handed one — the pattern getClientIp()
+    // already uses. Deliberately NOT a new parameter on this function: its call site in
+    // userTryRememberLogin() is pinned by exact source text in tests/audit_fixes_test.php, and a
+    // fourth argument would have bought nothing but a broken suite and an edit to api/user_login.php.
+    setcookie(USER_REMEMBER_COOKIE, $userId . '.' . $token, cookieBaseParams(null, ['expires' => $expiresAt]));
 }
 
 function userRememberClear(PDO $db): void {
@@ -336,7 +336,12 @@ function userRememberClear(PDO $db): void {
            ->execute([(int)$m[1], hash('sha256', $m[2])]);
     }
     if ($raw !== '') {
-        setcookie(USER_REMEMBER_COOKIE, '', ['expires' => time() - 3600, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax']);
+        // The delete had NO `secure` key while the issue above set one, so the two disagreed about
+        // the cookie's attributes. Same params now, differing only in the expiry. A browser drops a
+        // Set-Cookie carrying Secure over a plain-HTTP request, so on such a request the deletion
+        // may not land — harmless, because the token row is deleted just above and what is left in
+        // the browser is a dead string.
+        setcookie(USER_REMEMBER_COOKIE, '', cookieBaseParams(null, ['expires' => time() - 3600]));
         unset($_COOKIE[USER_REMEMBER_COOKIE]);
     }
 }

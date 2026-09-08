@@ -75,6 +75,35 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('appeal-accept').addEventListener('click', () => handleResolveAppeal('accepted'));
     document.getElementById('appeal-reject').addEventListener('click', () => handleResolveAppeal('rejected'));
     document.getElementById('appeal-restore').addEventListener('click', handleRestoreAppeal);
+
+    // ── Delegated handlers for the rows this file BUILDS ─────────────────────
+    //
+    // These were thirteen onclick=""/ondblclick="" attributes written into innerHTML. A nonce does
+    // NOT rescue an inline event handler: script-src blocks every on*= attribute unless the policy
+    // says 'unsafe-inline', which is exactly the escape hatch the whole Content-Security-Policy
+    // change exists to remove. Two listeners on `document` instead — the rows are replaced on every
+    // page of results, so binding per-row would mean re-binding on every render anyway, and this is
+    // already the house pattern (app.js's [data-md] toolbar, admin-users.js, admin-whitelist.js).
+    document.addEventListener('click', (e) => {
+        const hash = e.target.closest('[data-copy-hash]');
+        if (hash) { copyHash(hash, hash.dataset.copyHash); return; }
+        const magnet = e.target.closest('[data-copy-magnet]');
+        if (magnet) { copyMagnet(magnet); return; }
+        const rep = e.target.closest('[data-report-id]');
+        if (rep) { openModal(parseInt(rep.dataset.reportId, 10)); return; }
+        const app = e.target.closest('[data-appeal-id]');
+        if (app) { openAppealModal(parseInt(app.dataset.appealId, 10)); return; }
+        const cross = e.target.closest('[data-appeal-report]');
+        // preventDefault() takes the place of the old `return false` on an href="#" link.
+        if (cross) { e.preventDefault(); openReportFromAppeal(parseInt(cross.dataset.appealReport, 10), cross.dataset.appealHash || ''); return; }
+        const pager = e.target.closest('[data-page]');
+        if (pager && !pager.disabled) { goPage(parseInt(pager.dataset.page, 10)); }
+    });
+    document.addEventListener('dblclick', (e) => {
+        const cell = e.target.closest('[data-edit-id][data-edit-field]');
+        if (cell) inlineEdit(cell, parseInt(cell.dataset.editId, 10), cell.dataset.editField);
+    });
+
     loadAppealsBadge();
     initTrackerService();
 
@@ -215,14 +244,14 @@ async function loadReports() {
             <td class="dash-id">${r.id}</td>
             <td title="${escAttr(r.name)}">${esc(r.name)}</td>
             <td title="${escAttr(r.email)}"><small>${esc(r.email)}</small></td>
-            <td class="editable-cell" title="${escAttr(r.company)}" ondblclick="inlineEdit(this, ${r.id}, 'company')">${esc(r.company)}</td>
-            <td class="editable-cell" title="${escAttr(r.representative)}" ondblclick="inlineEdit(this, ${r.id}, 'representative')">${esc(r.representative)}</td>
+            <td class="editable-cell" title="${escAttr(r.company)}" data-edit-id="${r.id}" data-edit-field="company">${esc(r.company)}</td>
+            <td class="editable-cell" title="${escAttr(r.representative)}" data-edit-id="${r.id}" data-edit-field="representative">${esc(r.representative)}</td>
             <td title="${escAttr(r.objectTitle)}">${esc(r.objectTitle)}</td>
-            <td class="hash-cell hash-copy" title="${escAttr(t('js.reports.click_to_copy', {hash: r.infoHash}))}" onclick="copyHash(this, '${r.infoHash}')">${r.infoHash}</td>
+            <td class="hash-cell hash-copy" title="${escAttr(t('js.reports.click_to_copy', {hash: r.infoHash}))}" data-copy-hash="${r.infoHash}">${r.infoHash}</td>
             <td title="${escAttr(r.ip)}"><small>${esc(r.ip)}</small></td>
             <td class="col-badge">${statusBadge}</td>
             <td class="dash-date"><small>${r.timestamp}</small></td>
-            <td class="td-actions"><button class="btn btn-sm btn-outline-info" onclick="openModal(${r.id})"><i class="bi bi-three-dots"></i></button></td>
+            <td class="td-actions"><button class="btn btn-sm btn-outline-info" data-report-id="${r.id}"><i class="bi bi-three-dots"></i></button></td>
         </tr>`;
     }).join('');
 
@@ -238,9 +267,9 @@ function renderPagination(total, page, pages) {
     }
     if (pages <= 1) { el.innerHTML = ''; return; }
     el.innerHTML = `
-        <button ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})"><i class="bi bi-chevron-left"></i> ${esc(t('js.reports.prev'))}</button>
+        <button ${page <= 1 ? 'disabled' : ''} data-page="${page - 1}"><i class="bi bi-chevron-left"></i> ${esc(t('js.reports.prev'))}</button>
         <span>${esc(t('js.reports.page_of', {page: page, pages: pages}))}</span>
-        <button ${page >= pages ? 'disabled' : ''} onclick="goPage(${page + 1})">${esc(t('js.reports.next'))} <i class="bi bi-chevron-right"></i></button>
+        <button ${page >= pages ? 'disabled' : ''} data-page="${page + 1}">${esc(t('js.reports.next'))} <i class="bi bi-chevron-right"></i></button>
     `;
 }
 
@@ -293,7 +322,7 @@ async function openModal(id) {
             <p><strong>${esc(t('js.reports.col_object'))}:</strong> ${esc(r.objectTitle)}</p>
             <p><strong>${esc(t('js.reports.lbl_link'))}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
             <p><strong>${esc(t('js.reports.lbl_hash'))}:</strong> <code class="text-info">${r.infoHash}</code></p>
-            ${r.magnet_link ? '<p><strong>' + esc(t('js.reports.lbl_magnet')) + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" onclick="copyMagnet(this)" class="btn btn-sm magnet-copy-btn" title="' + escAttr(t('js.reports.copy_magnet_link')) + '"><i class="bi bi-clipboard"></i></button></div>' : ''}
+            ${r.magnet_link ? '<p><strong>' + esc(t('js.reports.lbl_magnet')) + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" data-copy-magnet class="btn btn-sm magnet-copy-btn" title="' + escAttr(t('js.reports.copy_magnet_link')) + '"><i class="bi bi-clipboard"></i></button></div>' : ''}
             <p><strong>${esc(t('js.reports.col_ip'))}:</strong> ${r.ip} &nbsp; <strong>${esc(t('js.reports.col_date'))}:</strong> ${r.timestamp}</p>
         </div>
         ${messageHtml}
@@ -477,7 +506,7 @@ function showToast(type, msg) {
         <div id="${id}" class="toast align-items-center border-0 show toast-dark" role="alert">
             <div class="d-flex">
                 <div class="toast-body text-light"><i class="bi ${icon}"></i> ${esc(msg)}</div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" onclick="this.closest('.toast').remove()"></button>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-toast-close></button>
             </div>
         </div>
     `);
@@ -748,12 +777,12 @@ async function loadAppeals() {
             <td title="${escAttr(a.email)}"><small>${esc(a.email)}</small></td>
             <td class="col-desc" title="${escAttr(a.message)}"><small>${shortMsg}</small></td>
             <td class="col-badge">${typeBadge}</td>
-            <td>${a.report_id ? '<a href="#" class="text-info" onclick="openReportFromAppeal(' + a.report_id + ', \'' + esc(a.infoHash) + '\');return false;">#' + a.report_id + '</a>' : '—'}</td>
-            <td class="hash-cell hash-copy" title="${t('js.reports.click_to_copy', {hash: a.infoHash})}" onclick="copyHash(this, '${a.infoHash}')">${a.infoHash}</td>
+            <td>${a.report_id ? '<a href="#" class="text-info" data-appeal-report="' + a.report_id + '" data-appeal-hash="' + escAttr(a.infoHash) + '">#' + a.report_id + '</a>' : '—'}</td>
+            <td class="hash-cell hash-copy" title="${t('js.reports.click_to_copy', {hash: a.infoHash})}" data-copy-hash="${a.infoHash}">${a.infoHash}</td>
             <td title="${escAttr(a.ip)}"><small>${esc(a.ip)}</small></td>
             <td class="col-badge">${badge}</td>
             <td class="dash-date"><small>${a.timestamp}</small></td>
-            <td class="td-actions"><button class="btn btn-sm btn-outline-info" onclick="openAppealModal(${a.id})"><i class="bi bi-three-dots"></i></button></td>
+            <td class="td-actions"><button class="btn btn-sm btn-outline-info" data-appeal-id="${a.id}"><i class="bi bi-three-dots"></i></button></td>
         </tr>`;
     }).join('');
 
@@ -799,7 +828,7 @@ async function openReportFromAppeal(reportId, infoHash) {
             <p><strong>${t('js.reports.lbl_object')}:</strong> ${esc(r.objectTitle)}</p>
             <p><strong>${t('js.reports.lbl_link')}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
             <p><strong>${t('js.reports.lbl_hash')}:</strong> <code class="text-info">${r.infoHash}</code></p>
-            ${r.magnet_link ? '<p><strong>' + t('js.reports.lbl_magnet') + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" onclick="copyMagnet(this)" class="btn btn-sm magnet-copy-btn" title="' + escAttr(t('js.reports.copy_magnet')) + '"><i class="bi bi-clipboard"></i></button></div>' : ''}
+            ${r.magnet_link ? '<p><strong>' + t('js.reports.lbl_magnet') + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" data-copy-magnet class="btn btn-sm magnet-copy-btn" title="' + escAttr(t('js.reports.copy_magnet')) + '"><i class="bi bi-clipboard"></i></button></div>' : ''}
             <p><strong>${t('js.reports.lbl_ip')}:</strong> ${r.ip} &nbsp; <strong>${t('js.reports.lbl_date')}:</strong> ${r.timestamp}</p>
         </div>
         ${messageHtml}
@@ -844,7 +873,7 @@ async function openAppealModal(id) {
             <p><strong>${t('js.reports.lbl_appeal_id')}:</strong> ${a.id} ${typeBadge}</p>
             <p><strong>${t('js.reports.lbl_name')}:</strong> ${esc(a.name)}</p>
             <p><strong>${t('js.reports.lbl_email')}:</strong> ${esc(a.email)}</p>
-            <p><strong>${t('js.reports.lbl_report_no')}:</strong> ${a.report_id ? '<a href="#" class="text-info" onclick="openReportFromAppeal(' + a.report_id + ', \'' + esc(a.infoHash) + '\');return false;">#' + a.report_id + '</a>' : '—'}</p>
+            <p><strong>${t('js.reports.lbl_report_no')}:</strong> ${a.report_id ? '<a href="#" class="text-info" data-appeal-report="' + a.report_id + '" data-appeal-hash="' + escAttr(a.infoHash) + '">#' + a.report_id + '</a>' : '—'}</p>
             <p><strong>${t('js.reports.lbl_hash')}:</strong> <code class="text-info">${a.infoHash}</code></p>
             <p><strong>${t('js.reports.lbl_ip')}:</strong> ${a.ip} &nbsp; <strong>${t('js.reports.lbl_date')}:</strong> ${a.timestamp}</p>
             <p><strong>${t('js.reports.lbl_status')}:</strong> ${statusLabels[a.status] || a.status}</p>

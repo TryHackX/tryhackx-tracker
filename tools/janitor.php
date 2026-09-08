@@ -80,6 +80,15 @@ try {
         $pruned = auditPrune($db, $cfg);
         if ($pruned > 0 && in_array('-v', $argv ?? [], true)) echo "[audit] pruned $pruned rows\n";
     }
+    // Content-Security-Policy violations: keep the newest csp_report_keep_rows KINDS. The report
+    // endpoint already refuses to INSERT past that ceiling (so a hostile client cannot grow the
+    // table by choosing new blocked origins), which makes this the tidier of the two bounds rather
+    // than the load-bearing one — it is what shrinks the table after the operator lowers the limit
+    // or turns collection off, and what removes the oldest kinds once the ceiling is reached.
+    if (function_exists('cspPrune')) {
+        $cspGone = cspPrune($db, $cfg);
+        if ($cspGone > 0 && in_array('-v', $argv ?? [], true)) echo "[csp] pruned $cspGone violation rows\n";
+    }
     // The stability probe: start one that was asked for, and restore one whose process has died.
     // The reap is the important half — a tuner that is killed must not leave the machine on the limit
     // it happened to be testing.

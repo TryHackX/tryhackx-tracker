@@ -1588,3 +1588,45 @@ add('', {
     'api.dbmem.adv_resizing': ('The engine is still resizing the buffer pool (:status). The size shown is the target; the counters settle when it finishes.',
         'Silnik wciąż zmienia rozmiar puli buforów (:status). Pokazany rozmiar to cel; liczniki ustabilizują się, gdy skończy.'),
 })
+
+
+# ── Transport security (schema v45): trusted proxy ranges, Secure cookies, HSTS ──
+# The "needs HTTPS" messages name the fastcgi_param lines on purpose. On nginx + php-fpm on ONE box
+# nginx is not a proxy peer -- it passes the visitor's address as REMOTE_ADDR -- so no value of
+# Trusted proxy IPs can ever make the header path fire there, and an error that said "list your
+# proxy" would push the operator into typing something wide into that box, which is the hole the
+# width rule exists to close.
+add('', {
+    'api.settings.trusted_proxy_invalid': ('Trusted proxy IPs: ":entry" is not an IP address or a CIDR range.',
+        'Zaufane IP proxy: ":entry" nie jest adresem IP ani zakresem CIDR.'),
+    'api.settings.trusted_proxy_too_wide': ('Trusted proxy IPs: ":entry" is too wide. A block that big lets anyone behind it claim any address they like, which would make every rate limit, lockout and ban in the panel a request header. Use a prefix of at least /:four for IPv4 or /:six for IPv6 (Cloudflare’s widest published blocks are /12 and /32).',
+        'Zaufane IP proxy: ":entry" jest zbyt szeroki. Tak duży blok pozwala każdemu z jego wnętrza podać dowolny adres, przez co każdy limit, blokada i ban w panelu stałyby się zwykłym nagłówkiem. Użyj prefiksu co najmniej /:four dla IPv4 albo /:six dla IPv6 (najszersze publikowane bloki Cloudflare to /12 i /32).'),
+    'api.settings.cookie_secure_mode_invalid': ('Secure cookies must be Automatic, Always or Never.',
+        'Bezpieczne ciasteczka muszą być ustawione na Automatycznie, Zawsze albo Nigdy.'),
+    'api.settings.cookie_secure_needs_https': ('Refusing to set Secure cookies to Always: this very request did not reach the panel over HTTPS, and saving it would lock everybody out — the browser would refuse the session cookie, so every sign-in would succeed and the next click would come back to the form. If the site really is served over HTTPS, the web server is not telling PHP: on nginx add "fastcgi_param HTTPS $https if_not_empty;" and "fastcgi_param REQUEST_SCHEME $scheme;" to the PHP location of the vhost, reload, and try again.',
+        'Odmowa ustawienia bezpiecznych ciasteczek na Zawsze: to konkretne żądanie nie dotarło do panelu po HTTPS, a zapis zablokowałby dostęp wszystkim — przeglądarka odrzuciłaby ciasteczko sesji, więc każde logowanie kończyłoby się sukcesem, a następne kliknięcie wracało do formularza. Jeśli strona naprawdę jest serwowana po HTTPS, to serwer WWW nie mówi o tym PHP: w nginx dodaj "fastcgi_param HTTPS $https if_not_empty;" oraz "fastcgi_param REQUEST_SCHEME $scheme;" do sekcji location dla PHP, przeładuj i spróbuj ponownie.'),
+    'api.settings.proto_header_invalid': ('Client protocol header: letters, digits and hyphens only, up to 64 characters (or empty to ignore it).',
+        'Nagłówek protokołu klienta: tylko litery, cyfry i myślniki, do 64 znaków (albo puste, żeby go ignorować).'),
+    'api.settings.hsts_needs_https': ('Refusing to switch HSTS on: this very request did not reach the panel over HTTPS, so the header could not be sent anyway and the switch would only look enabled. If the site really is served over HTTPS, the web server is not telling PHP: on nginx add "fastcgi_param HTTPS $https if_not_empty;" and "fastcgi_param REQUEST_SCHEME $scheme;" to the PHP location of the vhost, reload, and try again.',
+        'Odmowa włączenia HSTS: to konkretne żądanie nie dotarło do panelu po HTTPS, więc nagłówek i tak nie mógłby zostać wysłany, a przełącznik tylko wyglądałby na włączony. Jeśli strona naprawdę jest serwowana po HTTPS, to serwer WWW nie mówi o tym PHP: w nginx dodaj "fastcgi_param HTTPS $https if_not_empty;" oraz "fastcgi_param REQUEST_SCHEME $scheme;" do sekcji location dla PHP, przeładuj i spróbuj ponownie.'),
+    'api.settings.hsts_preload_requires': ('The preload token needs "include subdomains" switched on and a max-age of at least :age seconds (one year) — that is what the browser preload list itself requires, and a claim it does not accept is worse than none. Set those two first.',
+        'Token preload wymaga włączonego "obejmij subdomeny" oraz max-age co najmniej :age sekund (rok) — tego wymaga sama lista preload przeglądarek, a deklaracja, której nie przyjmie, jest gorsza niż jej brak. Ustaw najpierw te dwie rzeczy.'),
+})
+
+
+# ── 1.38.0: Content-Security-Policy (includes/csp.php, api/admin/csp_reports.php) ──
+# csp_extra_hosts goes VERBATIM into a response header, so its refusal has to say what was rejected
+# and why the shape matters — an operator who is told only "invalid" will paste it again with a
+# slash on the end.
+add('', {
+    'api.settings.csp_host_invalid': ('":entry" is not a host this site will put into the Content-Security-Policy header. Use a host name — optionally with https:// and one leading *. wildcard — and nothing else: no path, no port-less colon, no quotes, no CSP keywords. That value goes into a header verbatim, so anything else would either break the policy or widen it silently.',
+        '„:entry” nie jest hostem, który ten serwis wstawi do nagłówka Content-Security-Policy. Podaj nazwę hosta — opcjonalnie z https:// i jedną wiodącą gwiazdką *. — i nic więcej: bez ścieżki, bez samotnego dwukropka, bez cudzysłowów, bez słów kluczowych CSP. Ta wartość trafia do nagłówka dosłownie, więc cokolwiek innego albo zepsułoby politykę, albo po cichu by ją rozszerzyło.'),
+    'api.settings.csp_hosts_too_many': ('At most :max extra hosts. Every one of them may run scripts on every page of this site; a list longer than that is not a policy any more.',
+        'Najwyżej :max dodatkowych hostów. Każdy z nich może uruchamiać skrypty na każdej stronie tego serwisu; dłuższa lista przestaje być polityką.'),
+    'api.csp.unknown_op': ('Unknown operation.',
+        'Nieznana operacja.'),
+    'api.csp.unavailable': ('The violation table is not available yet — it is created on the first request after an upgrade. Reload the page in a moment.',
+        'Tabela naruszeń jeszcze nie istnieje — powstaje przy pierwszym żądaniu po aktualizacji. Przeładuj stronę za chwilę.'),
+    'api.csp.cleared': ('Cleared :n reported violations.',
+        'Wyczyszczono zgłoszone naruszenia: :n.'),
+})

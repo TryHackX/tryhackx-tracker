@@ -98,7 +98,7 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
         </div>
     </div>
     <?php endif; ?>
-    <script>
+    <script<?= nonceAttr() ?>>
     const APP_BASE = '<?= $baseUrl ?>';
     const APP_API = '<?= $baseUrl ?>api.php?endpoint=';
     <?php if (($cfg['contact_obfuscate'] ?? '0') === '1' && !empty($cfg['site_email'])): ?>

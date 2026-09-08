@@ -4,14 +4,9 @@
 $endpoint = $_GET['endpoint'] ?? $_GET['action'] ?? '';
 $endpoint = preg_replace('/[^a-z0-9_\/\-]/', '', strtolower($endpoint));
 $isS2S = str_starts_with($endpoint, 'v1/');
-
-if (!$isS2S) {
-    session_start([
-        'cookie_httponly' => true,
-        'cookie_secure'   => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
-        'cookie_samesite' => 'Lax',
-    ]);
-}
+// The session itself starts further down, after getSettings()/ensureSchema(): the Secure flag on
+// its cookie is a setting now. The `v1/*` decision stays here because it is what that call is
+// guarded by, and because nothing below may assume a session exists for an S2S request.
 
 if (!file_exists(__DIR__ . '/config/installed.lock')) {
     http_response_code(503);
@@ -84,6 +79,21 @@ if (PHP_SAPI !== 'cli') {
 $cfg = getSettings($db);
 ensureSchema($db, $cfg);
 
+// THE SESSION STARTS HERE, and nothing above it may read $_SESSION (the CSRF check is at the
+// bottom of this file, currentUser() is the line below). Same reason as index.php: the Secure flag
+// is cookie_secure_mode and that is a database row, so the call cannot stay at the top of the file
+// where it used to compute `!empty($_SERVER['HTTPS'])` and get `false` on an HTTPS-only site.
+// header() above does not count as output — headers are buffered until the first byte — so this
+// still runs with headers unsent on a normal request.
+if (headers_sent($hsFile, $hsLine)) {
+    error_log('[tracker] output began at ' . $hsFile . ':' . $hsLine . ' before session_start — the session cookie cannot be set');
+}
+if (!$isS2S) session_start(sessionCookieParams($cfg));
+// 'api': a JSON body has no subresources, so this response gets default-src 'none' — the strictest
+// policy there is, at no cost. It also means an endpoint that ever starts answering with HTML fails
+// loudly instead of quietly becoming the one page on the site with no policy.
+sendSecurityHeaders($cfg, 'api');
+
 // The API answers in the caller's language too -- an error message that comes back in English
 // while the page around it is in Polish is worse than one that was never translated at all.
 // Resolved from the same places the page uses (the account first, then the cookie), so the two
@@ -127,6 +137,10 @@ $apiRoutes = [
     'admin/delete_all'      => 'api/admin/delete_all.php',
     'admin/save_settings'   => 'api/admin/save_settings.php',
     'admin/settings_catalog' => 'api/admin/settings_catalog.php',
+    // Reading and clearing the Content-Security-Policy violations the public endpoint collected.
+    // Deliberately NOT in adminEndpointPermission() below: unlisted means owner-only, and the whole
+    // Settings page it is drawn on is owner-only already.
+    'admin/csp_reports'     => 'api/admin/csp_reports.php',
     'admin/change_password' => 'api/admin/change_password.php',
     'admin/account_email'   => 'api/admin/account_email.php',
     'admin/check_blacklist' => 'api/admin/check_blacklist.php',

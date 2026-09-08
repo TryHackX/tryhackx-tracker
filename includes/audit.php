@@ -29,7 +29,9 @@ const AUDIT_MAX_DETAIL        = 4000;
 function auditActionGroups(): array {
     return [
         'auth'     => ['login.ok', 'login.fail', 'login.2fa_fail', 'logout', 'password.change', 'twofa.change'],
-        'settings' => ['settings.save', 'page.edit', 'page.layout', 'language.manage'],
+        // csp.clear is filed under settings, not 'other': it is a button on the Settings page and an
+        // operator filtering that group is looking for "what did somebody change in Settings".
+        'settings' => ['settings.save', 'page.edit', 'page.layout', 'language.manage', 'csp.clear'],
         'content'  => ['content.approve', 'content.reject', 'content.clear', 'content.edit_apply', 'content.edit_reject'],
         'hashes'   => ['whitelist.add', 'whitelist.delete', 'whitelist.ban', 'whitelist.unban',
                        'index.delete', 'index.promote', 'blacklist.add', 'blacklist.delete'],
@@ -281,6 +283,10 @@ function auditEndpointAction(string $endpoint): ?string {
         'admin/fed_purge'             => 'fed.purge',
         'admin/fed_peer_save'         => 'fed.peer_save',
         'admin/fed_peer_delete'       => 'fed.peer_delete',
+        // Emptying the CSP violation table. A GET of the same endpoint is a read and auditFinish()
+        // already returns early on GET, so only the deletion is named here — without the line it
+        // would be logged as the fallback 'panel.csp_reports', which reads like a page visit.
+        'admin/csp_reports'           => 'csp.clear',
     ];
     return $map[$endpoint] ?? null;
 }

@@ -4082,3 +4082,18 @@ add('js.wl', {
     'files_capped': ('The panel loads at most :n files for one list — more of them are stored.',
         'Panel wczytuje najwyżej :n plików dla jednej listy — zapisanych jest ich więcej.'),
 })
+
+
+# ── 1.38.0: the CSP violation list on the Settings page ──
+add('js.settings', {
+    'csp_no_reports': ('Nothing has been reported.',
+        'Nic nie zostało zgłoszone.'),
+    'csp_reporting_off': ('Collecting reports is switched off, so this list only shows what was gathered earlier. Switch it on above if you want browsers to report again.',
+        'Zbieranie raportów jest wyłączone, więc ta lista pokazuje tylko to, co zebrano wcześniej. Włącz je powyżej, jeśli przeglądarki mają znowu raportować.'),
+    'csp_clear_confirm': ('Delete every reported violation?\n\nThe counters start from zero and what browsers reported so far is gone. They will report again the next time somebody loads a page, as long as collecting is switched on.',
+        'Usunąć wszystkie zgłoszone naruszenia?\n\nLiczniki ruszą od zera, a to, co przeglądarki zgłosiły do tej pory, przepadnie. Zgłoszą ponownie przy następnym wczytaniu strony, o ile zbieranie jest włączone.'),
+    'csp_cleared_one': ('Cleared one row.',
+        'Wyczyszczono jeden wiersz.'),
+    'csp_cleared': ('Cleared :n rows.',
+        'Wyczyszczono wierszy: :n.'),
+})

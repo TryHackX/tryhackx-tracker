@@ -33,7 +33,26 @@ RewriteBase /tracker/
     Header set X-Frame-Options "SAMEORIGIN"
     Header set Referrer-Policy "strict-origin-when-cross-origin"
     Header set Permissions-Policy "geolocation=(), microphone=(), camera=()"
-    # Content-Security-Policy. 'unsafe-inline'/'unsafe-eval' are needed by the inline
+    # Content-Security-Policy — THE FALLBACK, not the policy this application sends.
+    #
+    # Since 1.38.0 the real policy is built per request in includes/csp.php and sent by PHP, because
+    # that is the only place a per-request NONCE can be minted and because PRODUCTION IS NGINX,
+    # which never reads this file at all. Settings → Security → Content-Security-Policy is where it
+    # is switched between report-only, enforce and off.
+    #
+    # `setifempty`, NOT `set`, and the difference is the whole point (Apache 2.4.7+, 2013 — every
+    # Apache that can run PHP 8.5 has it): `Header set` REPLACES a header PHP already sent, so this
+    # line would have quietly overwritten the nonce policy with this permissive one and the feature
+    # would have been decorative on Apache. With `setifempty` PHP's header wins whenever PHP sends
+    # one, and this line only fills in when it does not — csp_mode='off'.
+    #
+    # In REPORT-ONLY mode PHP sends a DIFFERENT header name (Content-Security-Policy-Report-Only),
+    # so both are present and each does its own job: this one keeps enforcing exactly what it always
+    # enforced, and the new one only reports. That is deliberate — an Apache install loses no
+    # protection during the report-only phase. Two ENFORCING policies would be intersected by the
+    # browser (the strictest of each directive wins), which is why the modes never overlap.
+    #
+    # 'unsafe-inline'/'unsafe-eval' are needed by the inline
     # scripts / onclick handlers and the CAPTCHA widgets. Remote hosts allowed: jsDelivr
     # (Bootstrap + icons) and one host set per CAPTCHA provider — Google/Gstatic/reCAPTCHA.net
     # (reCAPTCHA v2 + v3), challenges.cloudflare.com (Turnstile) and hcaptcha.com (hCaptcha).
@@ -51,7 +70,7 @@ RewriteBase /tracker/
     # limit is per description. If you would rather not pay that at all, delete `https:` from
     # img-src below and set "Images per description" to 0 in Settings, so the panel stops offering
     # something the server forbids.
-    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com https://www.recaptcha.net https://challenges.cloudflare.com https://js.hcaptcha.com https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://hcaptcha.com https://*.hcaptcha.com; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https: https://www.google.com https://www.gstatic.com https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://cdn.jsdelivr.net https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; frame-src https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+    Header setifempty Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com https://www.recaptcha.net https://challenges.cloudflare.com https://js.hcaptcha.com https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://hcaptcha.com https://*.hcaptcha.com; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https: https://www.google.com https://www.gstatic.com https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://cdn.jsdelivr.net https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; frame-src https://www.google.com https://www.recaptcha.net https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
 </IfModule>
 
 # Prevent directory listings

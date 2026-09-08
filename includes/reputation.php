@@ -24,7 +24,7 @@
  * `REMOTE_ADDR` comes from the TCP connection: forging it means completing a handshake from the
  * forged address, which over the internet means it is not forged. PHP is not "broken" here. What IS
  * forgeable is a header, and getClientIp() already refuses to read one unless the request genuinely
- * arrived from an address listed in `trusted_proxy_ips`.
+ * arrived from an address or range listed in `trusted_proxy_ips`.
  *
  * What no amount of care fixes: one person with a VPN, a phone, and a /64 of IPv6 has as many
  * "addresses" as they care to use. So IPv6 is bucketed to /64 (a single customer allocation), the

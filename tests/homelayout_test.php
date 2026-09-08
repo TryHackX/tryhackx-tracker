@@ -11,6 +11,9 @@
  */
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 $root = dirname(__DIR__);
+// functions.php first: langInit() builds the language cookie with cookieBaseParams(),
+// which lives there. functions.php requires lang.php itself, so this is the whole dependency.
+require_once $root . '/includes/functions.php';
 require_once $root . '/includes/lang.php';
 require_once $root . '/includes/homelayout.php';
 // The built-in headings are translation KEYS, so this needs a language loaded to render them.

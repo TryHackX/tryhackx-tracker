@@ -121,10 +121,29 @@ sudo systemctl reload apache2
 Then open `https://tracker.example.org/install.php`, work through the four steps, and **delete
 `install.php`** at the end — the last step offers to do it for you.
 
-⚠ **The `.htaccess` ships a Content-Security-Policy.** It is deliberately tight. Two things you may
-want to change are called out in comments inside it: `img-src` carries `https:` so that images in
-descriptions work at all (delete it if you would rather not allow remote images, and set the image
-limit to 0 in Settings), and each CAPTCHA provider needs its own host listed.
+⚠ **The Content-Security-Policy is sent by the application, not by the web server.** It is built per
+request in `includes/csp.php` so that it works on nginx (which never reads `.htaccess`) and so that
+every inline `<script>` can carry a per-request nonce — `script-src` has no `'unsafe-inline'`. It
+ships **report-only**, which blocks nothing; *Settings → Security → Content-Security-Policy* is where
+you read the violations and then switch it to enforce. `img-src` keeps `https:` so images in
+descriptions work at all, and `style-src` keeps `'unsafe-inline'` because descriptions build
+`style="…"` from author text — read the README section before enforcing.
+
+The policy in `.htaccess` is now `Header setifempty` and is only a fallback for mode *Off*; on nginx
+do **not** add a `Content-Security-Policy` of your own to the vhost, because a browser intersects
+multiple policies and yours would silently narrow the one with the nonce in it.
+
+**HSTS is deliberately NOT in `.htaccess`.** `Strict-Transport-Security` pins a hostname inside
+other people's browsers for as long as its `max-age`, and a header set in a file the panel cannot
+read is one the panel cannot switch off again — nor is `.htaccess` read at all on nginx, which is
+the usual deployment. It lives in *Settings → Security → Transport security*, it is **off** until
+you switch it on, and it is never sent over a plain-HTTP request. Read the README section before
+enabling it: turning it back off does not release browsers that already hold the pin.
+
+That same section decides the `Secure` flag on the session, language and remember-me cookies. On
+nginx, make sure the vhost passes `fastcgi_param HTTPS $https if_not_empty;` and
+`fastcgi_param REQUEST_SCHEME $scheme;` to php-fpm — without them PHP never learns the request was
+encrypted, and the panel says so on that settings page.
 
 ---
 

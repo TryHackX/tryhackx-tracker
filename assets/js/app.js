@@ -238,6 +238,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize tracker stats page or homepage widget
     initTrackerStats();
+
+    // ── Delegated handlers ───────────────────────────────────────────────────
+    //
+    // The three things below used to be onclick="" attributes: the announce/donation copy buttons
+    // (includes/homeblocks.php, templates/pages/whitelist.php), the "show e-mail" link, and the
+    // transparency pager this file builds. An on*= attribute is blocked by script-src unless the
+    // policy says 'unsafe-inline', and the per-request nonce does NOT cover it — the nonce
+    // whitelists <script> ELEMENTS, nothing else. Delegation on `document` because the pager is
+    // re-rendered on every page of results.
+    document.addEventListener('click', (e) => {
+        const copy = e.target.closest('[data-copy]');
+        if (copy) { copyText(copy, copy.dataset.copy); return; }
+        const mail = e.target.closest('[data-reveal-email]');
+        if (mail) { e.preventDefault(); revealEmail(mail); return; }
+        const page = e.target.closest('[data-trans-page]');
+        if (page && !page.disabled) loadTransparency(parseInt(page.dataset.transPage, 10));
+    });
 });
 
 // Copy text helper
@@ -339,7 +356,10 @@ function revealEmail(el) {
     const email = OBF_EMAIL.map(c => String.fromCharCode(c)).join('');
     el.textContent = email;
     el.href = 'mailto:' + email;
-    el.onclick = null;
+    // Take the marker off rather than clearing el.onclick: the click is handled by the delegate on
+    // `document` now, and without this the delegate would keep preventDefault()ing the mailto:
+    // link it has just written — the address would be revealed and then refuse to open.
+    el.removeAttribute('data-reveal-email');
 }
 
 async function handleReportSubmit(e) {
@@ -812,9 +832,9 @@ async function loadTransparency(page) {
             pagEl.innerHTML = '';
         } else {
             pagEl.innerHTML = `
-                <button ${json.page <= 1 ? 'disabled' : ''} onclick="loadTransparency(${json.page - 1})">${t('js.app.prev')}</button>
+                <button ${json.page <= 1 ? 'disabled' : ''} data-trans-page="${json.page - 1}">${t('js.app.prev')}</button>
                 <span>${t('js.app.page_of', {page: json.page, pages: json.pages})}</span>
-                <button ${json.page >= json.pages ? 'disabled' : ''} onclick="loadTransparency(${json.page + 1})">${t('js.app.next')}</button>
+                <button ${json.page >= json.pages ? 'disabled' : ''} data-trans-page="${json.page + 1}">${t('js.app.next')}</button>
             `;
         }
     } catch {

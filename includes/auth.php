@@ -373,8 +373,18 @@ function requireAdminReauth(string $password, array $cfg): void {
 function logout(): void {
     $_SESSION = [];
     if (ini_get('session.use_cookies')) {
+        // The array form, not the seven-argument one: that signature has no SameSite parameter, so
+        // the deletion cookie silently lost the SameSite=Lax the session cookie was issued with —
+        // and a Set-Cookie whose attributes do not match is a Set-Cookie a browser may keep.
         $p = session_get_cookie_params();
-        setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
+        setcookie(session_name(), '', [
+            'expires'  => time() - 42000,
+            'path'     => $p['path'],
+            'domain'   => $p['domain'],
+            'secure'   => $p['secure'],
+            'httponly' => $p['httponly'],
+            'samesite' => $p['samesite'] ?: 'Lax',
+        ]);
     }
     session_destroy();
 }

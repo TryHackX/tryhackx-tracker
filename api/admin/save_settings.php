@@ -24,6 +24,11 @@ $allowed = [
     // where the panel lives (includes/auth.php)
     'admin_login_path', 'admin_hidden_behavior',
     'trusted_proxy_ips', 'client_ip_header',
+    // schema v45: transport security (includes/functions.php)
+    'cookie_secure_mode', 'client_proto_header',
+    'hsts_enabled', 'hsts_max_age', 'hsts_include_subdomains', 'hsts_preload',
+    // schema v46: Content-Security-Policy (includes/csp.php)
+    'csp_mode', 'csp_report_enabled', 'csp_report_keep_rows', 'csp_extra_hosts',
     'items_per_page', 'admin_near_pages', 'blacklist_path',
     'max_magnet_link_length',
     'donations_enabled', 'wallet_btc', 'wallet_eth', 'wallet_xmr', 'donation_fields',
@@ -142,6 +147,17 @@ $reauthKeys = [
     'trusted_proxy_ips'            => '',                     // getClientIp()
     'client_ip_header'             => '',
     'hmac_secret'                  => '',                     // generateUnsubscribeToken()
+    // The two transport settings whose consequence is not undoable from this page. 'always' on a
+    // panel really served over plain HTTP means nobody can sign in again — the browser refuses the
+    // session cookie, so the CSRF token minted at login is never the one checked at submit — and
+    // the way back is a SQL statement, not a click. `preload` is worse in kind: once the host is
+    // accepted onto the browser preload list it is compiled into releases and removal takes months,
+    // and nothing in this panel can accelerate it.
+    'cookie_secure_mode'           => 'auto',                 // cookieSecureFlag(), functions.php
+    'hsts_preload'                 => '0',                    // hstsHeaderValue()
+    // A host in this box may RUN SCRIPTS on every page of this site, in every visitor's session.
+    // That is a change to whom the site trusts, which is the one thing this array is for.
+    'csp_extra_hosts'              => '',                     // cspPolicy(), includes/csp.php
 ];
 
 $data = [];
@@ -181,6 +197,32 @@ if (isset($data['admin_login_path'])) {
 }
 if (isset($data['admin_hidden_behavior']) && !in_array($data['admin_hidden_behavior'], ['home', 'login', '404'], true)) {
     $data['admin_hidden_behavior'] = 'home';
+}
+// ── Content-Security-Policy ──
+// Coerced rather than refused, and coerced to 'report': an unknown value is a bug in the form, and
+// the answer to a bug in the form is the setting that cannot break a page for a visitor.
+if (isset($data['csp_mode']) && !in_array($data['csp_mode'], CSP_MODES, true)) {
+    $data['csp_mode'] = 'report';
+}
+if (isset($data['csp_extra_hosts'])) {
+    // This value is written VERBATIM into a response header, so the validation is the whole security
+    // boundary of the feature — and it lives in includes/csp.php, called from here AND from
+    // cspPolicy(), because the settings table sits in a MariaDB three other applications can reach
+    // and this endpoint is not the only way a row can be written.
+    // The ceiling is checked INSIDE the loop. Checked after it, a body carrying a hundred thousand
+    // syntactically valid hostnames is an O(n^2) walk (in_array over a list that keeps growing)
+    // before anything refuses it, and readJsonBody() caps nothing but post_max_size.
+    $keep = [];
+    foreach (preg_split('/[\s,;]+/', (string)$data['csp_extra_hosts']) ?: [] as $h) {
+        $h = trim($h);
+        if ($h === '') continue;
+        if (count($keep) >= CSP_EXTRA_HOSTS_MAX) {
+            jsonResponse(['error' => __('api.settings.csp_hosts_too_many', ['max' => CSP_EXTRA_HOSTS_MAX])], 400);
+        }
+        if (!cspHostOk($h)) jsonResponse(['error' => __('api.settings.csp_host_invalid', ['entry' => $h])], 400);
+        if (!in_array($h, $keep, true)) $keep[] = $h;
+    }
+    $data['csp_extra_hosts'] = implode(' ', $keep);
 }
 // ── How a file list loads: the two modes ──
 // Each falls back to what its own audience did before 1.38.0, which is not the same value — the
@@ -229,6 +271,14 @@ $intClamp = [
     'index_files_admin_batch' => [IDX_FILES_BATCH_MIN, IDX_FILES_ADMIN_BATCH_MAX, 5000],
     'index_files_admin_max' => [IDX_FILES_BATCH_MIN, IDX_FILES_ADMIN_MAX_HARD, IDX_FILES_ADMIN_MAX_HARD],
     'admin_near_pages' => [1, 20, 2],
+    // Clamped, never rejected, and 0 must survive the clamp: `max-age=0` with the switch still ON is
+    // the documented way to WITHDRAW the pin from browsers that already hold it. Turning the switch
+    // off only stops sending the header and leaves every existing pin running to its own expiry.
+    'hsts_max_age' => [0, HSTS_MAX_AGE_CEILING, HSTS_MAX_AGE_DEFAULT],
+    // Rows are already aggregated (one per KIND of violation), so this bounds how many DISTINCT
+    // problems the panel will remember, not how many were seen. 0 means keep none, and the report
+    // endpoint then refuses every write rather than merely letting the janitor undo it a minute later.
+    'csp_report_keep_rows' => [0, CSP_ROWS_MAX, CSP_ROWS_DEFAULT],
     'users_notify_expiry_days' => [0, 30, 3], 'users_email_change_cooldown_days' => [0, 365, 30],
     'bulk_mail_per_minute' => [1, 500, 20], 'bulk_mail_max_attempts' => [1, 10, 3],
     'desc_max_chars' => [200, 20000, 4000], 'desc_max_images' => [0, 50, 3],
@@ -300,6 +350,7 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist',
           'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled', 'ot_cluster_enabled',
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
+          'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
@@ -472,6 +523,86 @@ if (isset($data['api_ban_exempt_ips'])) {
         if (filter_var($ipPart, FILTER_VALIDATE_IP)) $clean[] = $e;
     }
     $data['api_ban_exempt_ips'] = implode(', ', $clean);
+}
+
+/* ── Transport security: whose header we believe, Secure on the cookies, HSTS ──
+ *
+ * EVERY refusal below fires on a CHANGE, never on a value. The settings page posts every named
+ * control in #settings-form on every save, so `$data` always carries all six of these keys — and a
+ * guard shaped "if the value is X and this request is not HTTPS, refuse" would refuse saves of
+ * completely unrelated fields for as long as the condition held. Set Secure to `always` while TLS
+ * detection works, have it break later (a vhost edit, a proxy moved), and the entire Settings page
+ * would become unsavable with an error about cookies. So the comparison is the same one the
+ * $reauthKeys loop makes further down: is this key arriving with a different value than the stored one.
+ *
+ * And the HTTPS questions are asked of `$data + $cfg`, never of $cfg alone. $cfg is not refreshed
+ * until setSettings() at the bottom of this file, so judging by $cfg would judge the save that FIXES
+ * detection by the configuration it is replacing: listing the proxy and switching Secure on in one
+ * click is exactly the save that would be refused.
+ */
+if (array_key_exists('trusted_proxy_ips', $data)) {
+    // The box had no validation whatsoever, which is how a CIDR came to sit in it doing nothing at
+    // all. Normalising and checking only when the value actually CHANGED has a second purpose
+    // besides the guard rule above: an untouched field is passed through byte-identical, so the
+    // first save after this upgrade cannot open the password modal for a field nobody touched, and
+    // an installation already holding an over-wide entry can still save everything else on the page.
+    // The runtime ignores such an entry regardless — see trustedProxyList() in includes/functions.php.
+    if ($data['trusted_proxy_ips'] !== (string)($cfg['trusted_proxy_ips'] ?? '')) {
+        $clean = [];
+        foreach (ipParseList((string)$data['trusted_proxy_ips']) as $entry) {
+            // Named, not merely counted: an error that says only "invalid" makes an operator retype
+            // the whole list instead of fixing the one entry that is wrong.
+            if (!ipCidrValid($entry)) {
+                jsonResponse(['error' => __('api.settings.trusted_proxy_invalid', ['entry' => $entry])], 400);
+            }
+            if (!trustedProxyEntryOk($entry)) {
+                // ':four' / ':six' and not ':v4' / ':v6': the dictionary's placeholder syntax is
+                // `:name` and tests/lang_test.php extracts them with /:[a-z_]+/, so a digit ends the
+                // name — ':v4' would be read as the placeholder ':v' and never substituted.
+                jsonResponse(['error' => __('api.settings.trusted_proxy_too_wide', ['entry' => $entry,
+                              'four' => TRUSTED_PROXY_MIN_BITS4, 'six' => TRUSTED_PROXY_MIN_BITS6])], 400);
+            }
+            $clean[] = $entry;
+        }
+        $data['trusted_proxy_ips'] = implode(', ', $clean);
+    }
+}
+if (isset($data['cookie_secure_mode'])) {
+    $mode = strtolower(trim((string)$data['cookie_secure_mode']));
+    if (!in_array($mode, COOKIE_SECURE_MODES, true)) {
+        jsonResponse(['error' => __('api.settings.cookie_secure_mode_invalid')], 400);
+    }
+    $data['cookie_secure_mode'] = $mode;
+}
+if (isset($data['client_proto_header'])) {
+    // Empty is a real answer: it switches the proxy-header path off completely.
+    $ph = trim((string)$data['client_proto_header']);
+    if ($ph !== '' && !preg_match('/^[A-Za-z0-9-]{1,64}$/', $ph)) {
+        jsonResponse(['error' => __('api.settings.proto_header_invalid')], 400);
+    }
+    $data['client_proto_header'] = $ph;
+}
+
+$transportChanged = function (string $k, string $default) use ($data, $cfg): bool {
+    return array_key_exists($k, $data) && $data[$k] !== (string)($cfg[$k] ?? $default);
+};
+$effCfg   = $data + $cfg;                 // what the site looks like AFTER this save
+$effHttps = requestIsHttps($effCfg);
+
+if ($transportChanged('cookie_secure_mode', 'auto') && $data['cookie_secure_mode'] === 'always' && !$effHttps) {
+    jsonResponse(['error' => __('api.settings.cookie_secure_needs_https')], 400);
+}
+if ($transportChanged('hsts_enabled', '0') && $data['hsts_enabled'] === '1' && !$effHttps) {
+    jsonResponse(['error' => __('api.settings.hsts_needs_https')], 400);
+}
+// preload is the one setting here nothing on this server can undo, so its two preconditions — the
+// preload list's OWN requirements — are checked against the values this save would leave behind,
+// not against the field alone. hstsHeaderValue() checks them a second time before printing the
+// token, so a row edited by hand cannot publish a claim the site does not satisfy either.
+if ($transportChanged('hsts_preload', '0') && $data['hsts_preload'] === '1'
+    && ((string)($effCfg['hsts_include_subdomains'] ?? '0') !== '1'
+        || (int)($effCfg['hsts_max_age'] ?? HSTS_MAX_AGE_DEFAULT) < HSTS_PRELOAD_MIN_AGE)) {
+    jsonResponse(['error' => __('api.settings.hsts_preload_requires', ['age' => HSTS_PRELOAD_MIN_AGE])], 400);
 }
 
 // Validate and sanitize donation_fields JSON

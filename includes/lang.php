@@ -165,12 +165,14 @@ function langInit(array $cfg, ?string $userLanguage = null): void {
             // A SESSION cookie, on purpose: the switcher is a temporary choice for this visit. It
             // dies with the browser, and the account's saved language (or the site default) is
             // what comes back. No `expires` is what makes it a session cookie.
-            setcookie(LANG_COOKIE, $lang, [
-                'path'     => '/',
-                'secure'   => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+            // One Secure policy for every cookie the site sets — cookieBaseParams() lives in
+            // includes/functions.php, which requires THIS file, so anything that calls langInit()
+            // must load functions.php (every entry point does; the two suites that exercise
+            // langInit() were given the require when this landed). No `expires` key is what keeps
+            // this a session cookie.
+            setcookie(LANG_COOKIE, $lang, cookieBaseParams($cfg, [
                 'httponly' => false,   // no secret in it, and the switcher reads it client-side
-                'samesite' => 'Lax',
-            ]);
+            ]));
         }
         $_COOKIE[LANG_COOKIE] = $lang;
     }
@@ -345,7 +347,7 @@ const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.'];
 function langJsBridge(string $baseUrl, ?array $prefixes = null): string {
     $json = json_encode(langJsBundle($prefixes ?? ['js.']), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     $ver = function_exists('assetVer') ? assetVer('assets/js/i18n.js') : '';
-    return '<script id="i18n-data" type="application/json">' . $json . '</script>' . "
+    return '<script' . nonceAttr() . ' id="i18n-data" type="application/json">' . $json . '</script>' . "
 "
          . '    <script src="' . htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8') . 'assets/js/i18n.js' . $ver . '"></script>';
 }

@@ -131,7 +131,20 @@ saved = json.loads(php(
 # The page exactly as it stands right now, before this test touches anything. The final check
 # compares against THIS -- not against the forced-off baseline below, which is a state the tracker
 # may never have been in.
-home_at_start = get_anon("/")
+def stable(html):
+    """The page with the per-request bits removed, so two renders can be compared.
+
+    Since 1.39.0 every inline <script> carries a Content-Security-Policy nonce, which is fresh on
+    every single request by design. A byte comparison of two renders is therefore always unequal,
+    and this check — which exists to prove the test restored the settings it changed — would fail
+    for a reason that has nothing to do with settings. CSRF tokens have the same property."""
+    import re as _re
+    html = _re.sub(r'nonce="[^"]*"', 'nonce="_"', html)
+    html = _re.sub(r'(name="csrf_token"[^>]*value=")[^"]*"', r'_"', html)
+    return html
+
+
+home_at_start = stable(get_anon("/"))
 
 # ── with the cluster off, nothing public may change ─────────────────────────
 php("setSetting($db, 'ot_cluster_enabled', '0'); setSetting($db, 'ot_cluster_cmd', ''); "
@@ -220,7 +233,7 @@ finally:
         restore += "@unlink(netlimitStateFile());"
     php(restore + "echo 'restored';")
 
-check("the test put the tracker back exactly as it found it", get_anon("/") == home_at_start,
+check("the test put the tracker back exactly as it found it", stable(get_anon("/")) == home_at_start,
       "the public home page differs after the run")
 
 print("\n%d checks, %d failed" % (n, fails))

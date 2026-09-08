@@ -11,7 +11,9 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 44;  // 44 = settings only (index_files_*: how a file list loads — mode, batch, total, once for the search page and once for the panel)
+const TRACKER_SCHEMA_VERSION = 46;  // 46 = csp_reports (one row per KIND of violation, hits counts occurrences) + the four csp_* settings — the policy moved out of .htaccess and into PHP, where a nonce can exist
+// 45 = settings only (transport: cookie_secure_mode, client_proto_header, hsts_*) — every reader carries its own `?? default`, so the rows only make them visible in Settings
+// 44 = settings only (index_files_*: how a file list loads — mode, batch, total, once for the search page and once for the panel)
 // 43 = settings only (meta_max_files: the worker's stored-files-per-torrent cap, live from the panel)
 // 42 = settings only (dbmem_cmd, dbmem_enabled: the database-memory helper). 41 = page_content.lang — Terms and Info are written per language
 // 40 = users.language — the interface language follows the account
@@ -261,6 +263,29 @@ function trackerSchemaStatements(): array {
             `index_rows` INT UNSIGNED DEFAULT NULL,
             `error` VARCHAR(190) DEFAULT NULL,
             KEY `idx_ipoll_ts` (`ts`)
+        ) $engine",
+
+        // Content-Security-Policy violations (includes/csp.php, csp-report.php).
+        //
+        // THE PRIMARY KEY IS THE AGGREGATION KEY: sha1(scope|directive|blocked_origin). One row per
+        // KIND of violation and a counter, which is the difference between a table that grows with
+        // page views and one that grows with the number of real problems — this is written by a
+        // PUBLIC unauthenticated endpoint that every browser on the site can reach, into a MariaDB
+        // shared with a mail server, a forum and a file host.
+        //
+        // `blocked` holds the ORIGIN of a blocked URL and never its path or query (a blocked-uri
+        // routinely carries a token), and `sample_doc` holds the `?action=` of the page and nothing
+        // else from that URL. Everything a backup dumps from here is meant to be dumpable.
+        "CREATE TABLE IF NOT EXISTS `csp_reports` (
+            `sig`        CHAR(40) NOT NULL PRIMARY KEY,
+            `scope`      VARCHAR(8)   NOT NULL DEFAULT 'public',
+            `directive`  VARCHAR(48)  NOT NULL DEFAULT '',
+            `blocked`    VARCHAR(255) NOT NULL DEFAULT '',
+            `sample_doc` VARCHAR(64)  NOT NULL DEFAULT '',
+            `hits`       INT UNSIGNED NOT NULL DEFAULT 0,
+            `first_seen` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `last_seen`  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY `k_csp_last` (`last_seen`)
         ) $engine",
 
         "CREATE TABLE IF NOT EXISTS `net_samples` (
@@ -1364,6 +1389,44 @@ function trackerSchemaDefaultSettings(): array {
         'backup_cmd'                  => 'sudo -n /usr/local/sbin/tracker-backup.sh',
         'backup_script_path'          => '/usr/local/sbin/Backup-serwera.sh',
         'backup_db_name'              => 'tracker',
+        // schema v45: transport security (includes/functions.php).
+        //
+        // `auto` is what every existing installation gets on upgrade and it changes nothing an
+        // operator has to react to: it asks THIS request whether it was HTTPS, so a plain-HTTP LAN
+        // panel keeps setting cookies without Secure and an HTTPS one starts setting it. Nobody is
+        // logged out either way — Secure is a rule about SENDING a cookie, not about storing one,
+        // and PHP only re-emits the session cookie when it creates or regenerates an id.
+        // `always` is the one value that can lock the owner out, so save_settings refuses to store
+        // it unless the saving request itself proves it is HTTPS.
+        'cookie_secure_mode'          => 'auto',
+        'client_proto_header'         => 'X-Forwarded-Proto',
+        // HSTS is off, and stays off until somebody reads what it does. The pin lives in other
+        // people's browsers and outlives any switch here; max-age starts at ONE DAY rather than the
+        // year every guide recommends, because the default is what an operator gets the moment they
+        // first flip the switch, and a mistake at one day costs one day.
+        'hsts_enabled'                => '0',
+        'hsts_max_age'                => '86400',
+        'hsts_include_subdomains'     => '0',
+        'hsts_preload'                => '0',
+        // schema v46: Content-Security-Policy (includes/csp.php).
+        //
+        // 'report' on every installation, new and upgraded. A Content-Security-Policy-Report-Only
+        // header cannot break a page on any browser: it is a different header name from the
+        // enforcing one, so an Apache install whose .htaccess still ships the old policy keeps that
+        // protection untouched while this one only observes. Enforcing is the operator's own move,
+        // after they have looked at the violations list and cleared their server config.
+        'csp_mode'                    => 'report',
+        // Collection is OFF. Report-only still REPORTS, and browser extensions are the largest
+        // source of CSP noise on the web — switching this on on upgrade day would point a firehose
+        // of unauthenticated POSTs at a database three other applications share. The operator turns
+        // it on for a day when they want evidence.
+        // On, because the shipped mode is report-only and the two together are the whole point:
+        // report-only blocks nothing, so with collection off it would be a header that does not
+        // protect and does not tell anyone what it would have blocked. The store is capped at
+        // csp_report_keep_rows and pruned by the janitor, so switching it on costs a bounded table.
+        'csp_report_enabled'          => '1',
+        'csp_report_keep_rows'        => '500',
+        'csp_extra_hosts'             => '',
     ];
 }
 
