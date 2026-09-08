@@ -776,6 +776,10 @@
 
     // ── "This page" / "Near pages" helpers (near radius comes from the admin_near_pages setting) ──
     const nearRadius = () => Math.max(1, parseInt(bodyDs.nearPages || '2', 10) || 2);
+    // index_files_admin_mode, exactly as on the Index page: 'button' (the panel's own long-standing
+    // behaviour), 'scroll' fetches the rest when the operator reaches the end of the tree, 'all'
+    // asks for the whole list on the modal's first request. The sizes are the endpoint's business.
+    const filesMode = () => (['scroll', 'button', 'all'].includes(bodyDs.filesMode) ? bodyDs.filesMode : 'button');
     let collectingNear = false;   // shared guard: a click during collection must not start/stop a scrape
     /**
      * Rows of the current page plus the pages around it (same search/filters/sort), deduped by id.
@@ -975,7 +979,7 @@
             modalEl.addEventListener('hidden.bs.modal', stopDetailPoll, { once: true });
         }
         let r;
-        try { r = await apiCall('admin/whitelist_item&id=' + encodeURIComponent(id)); } catch { r = { error: t('js.wl.network_error') }; }
+        try { r = await apiCall('admin/whitelist_item' + (filesMode() === 'all' ? '&files_all=1' : '') + '&id=' + encodeURIComponent(id)); } catch { r = { error: t('js.wl.network_error') }; }
         if (r.error) { body.textContent = ''; body.appendChild(el('div', { className: 'alert alert-danger', text: r.error })); return; }
         renderDetails(r);
         const ms = r.item.meta_status;
@@ -1170,21 +1174,51 @@
 
         // files tree
         const filesBox = el('div', { className: 'wl-files' });
-        filesBox.appendChild(el('div', { className: 'wl-label mb-1', text: r.files && r.files.length ? t('js.wl.files_n', { n: r.files.length, more: r.files_truncated ? t('js.wl.files_truncated') : '' }) : t('js.wl.files') }));
-        if (r.files && r.files.length) filesBox.appendChild(buildFileTree(r.files));
+        // The same honesty as the Index modal: the label prints the stored list against the row's own
+        // files_count whenever the worker stopped short of it, and the missing-list sentence hangs on
+        // whether there are files — not on whether the reply was truncated, which put "single file or
+        // no list stored" underneath a perfectly complete tree.
+        const fillFiles = (files, truncated, short, capped) => {
+            const nodes = [el('div', { className: 'wl-label mb-1', text: !files.length ? t('js.wl.files')
+                : (short && it.files_count
+                    ? t('js.wl.files_n_of', { n: files.length.toLocaleString(), total: Number(it.files_count).toLocaleString() })
+                    : t('js.wl.files_n', { n: files.length, more: (truncated || capped) ? t('js.wl.files_truncated') : '' })) })];
+            if (files.length) nodes.push(buildFileTree(files));
+            if (files.length && short) nodes.push(el('div', { className: 'text-muted wl-small', text: t('js.wl.files_stored_cap', { n: files.length.toLocaleString() }) }));
+            // Rows are waiting and no button will fetch them: this list is already as long as the
+            // panel is allowed to load (index_files_admin_max).
+            if (files.length && capped) nodes.push(el('div', { className: 'text-muted wl-small', text: t('js.wl.files_capped', { n: files.length.toLocaleString() }) }));
+            if (!files.length) nodes.push(el('div', { className: 'text-muted wl-small', text: it.meta_status === 'done' ? t('js.wl.single_file_or_no_list') : t('js.wl.no_file_list_yet') }));
+            filesBox.replaceChildren(...nodes);
+        };
+        fillFiles(r.files || [], !!r.files_truncated, !!r.files_short, !!r.files_capped);
         if (r.files_truncated) {
-            // Capped for a fast modal; the operator can ask for the whole list.
+            // Capped for a fast modal; the operator can ask for the whole list. Offered only when
+            // rows are actually waiting in the table — a list the worker wrote short has none, and
+            // neither has one that already reached the panel's total.
             const all = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary mt-2', text: t('js.wl.files_load_all') });
-            all.addEventListener('click', async () => {
-                all.disabled = true; all.textContent = t('js.common.loading');
+            let asked = false;
+            const loadAll = async () => {
+                if (asked) return;
+                asked = true; all.disabled = true; all.textContent = t('js.common.loading');
                 try {
                     const full = await apiCall('admin/whitelist_item&files_all=1&id=' + encodeURIComponent(id));
-                    if (full && full.files) { filesBox.replaceChildren(el('div', { className: 'wl-label mb-1', text: t('js.wl.files_n', { n: full.files.length, more: '' }) }), buildFileTree(full.files)); }
-                } catch (e) { all.disabled = false; all.textContent = t('js.wl.files_load_all'); }
-            });
+                    if (full && full.files) { fillFiles(full.files, false, !!full.files_short, !!full.files_capped); return; }
+                } catch (e) { /* put the button back below */ }
+                asked = false; all.disabled = false; all.textContent = t('js.wl.files_load_all');
+            };
+            all.addEventListener('click', loadAll);
             filesBox.appendChild(all);
+            if (filesMode() === 'scroll' && 'IntersectionObserver' in window) {
+                // The same sentinel as the Index modal: reach the end of the tree and the rest is
+                // fetched once, then the observer is disconnected so it cannot ask again.
+                const sentinel = el('div');
+                filesBox.appendChild(sentinel);
+                new IntersectionObserver((entries, obs) => {
+                    if (entries.some(e => e.isIntersecting)) { obs.disconnect(); loadAll(); }
+                }, { root: null, rootMargin: '200px' }).observe(sentinel);
+            }
         }
-        else filesBox.appendChild(el('div', { className: 'text-muted wl-small', text: it.meta_status === 'done' ? t('js.wl.single_file_or_no_list') : t('js.wl.no_file_list_yet') }));
         body.appendChild(filesBox);
 
         // actions

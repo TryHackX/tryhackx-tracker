@@ -33,6 +33,20 @@ log = logging.getLogger("tracker-federation")
 HASH_RE = re.compile(r"^[a-f0-9]{40}$")
 BEARER_RE = re.compile(r"^[a-f0-9]{16}\.[a-f0-9]{64}$")
 DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+# A peer's file list is bounded HERE, at validation, and everything downstream (merge_batch, the
+# non-batched fallback, the fed_review package) inherits it. Deliberately NOT the panel's
+# `meta_max_files` (1.38.0), even though both end up in index_files:
+#
+#   * that setting means "stop asking the DHT for more of this torrent". Applying it to an import
+#     could only ever make a peer's list SHORTER — the export is already bounded by the peer's own
+#     fed_export_max_files and by the wire budgets — and merge_batch's rule is that a partial list
+#     is worse than none, because search would then answer from half a torrent;
+#   * one name with two meanings is exactly the index_keep_files divergence (a panel setting
+#     federation.py honours and worker.py ignores), and re-creating it on day one would be worse
+#     than a second constant that is honest about being a different limit.
+#
+# The panel's field says this in as many words, so an operator who raises the cap is not left
+# wondering why imported rows did not get longer.
 MAX_FILES_PER_ROW = 5000
 MAX_PAGES_PER_RUN = 200          # bound one run; the cursor continues next time
 HTTP_TIMEOUT = 60

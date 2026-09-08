@@ -8,6 +8,14 @@
 
     const state = { page: 1, pages: 1, search: '', searchFiles: false, meta: '', life: '', sort: [{ col: 'last', dir: 'desc' }], selected: new Set(), rows: [] };
     const nearRadius = () => Math.max(1, parseInt(document.body.dataset.nearPages || '2', 10) || 2);
+    // index_files_admin_mode. 'button' is what the panel has always done — one slice, then "Load the
+    // whole file list"; 'scroll' fires that same second request when the operator reaches the end of
+    // the tree; 'all' puts files_all=1 on the modal's FIRST request, so there is no second request
+    // at all. Deliberately no paging endpoint behind any of this: both item endpoints scrape the
+    // tracker live before they return files, so one request per slice would be one scrape per slice.
+    // How big a slice is and how much "all" may mean are index_files_admin_batch / _max, applied by
+    // the endpoint — the panel never sends a limit of its own.
+    const filesMode = () => (['scroll', 'button', 'all'].includes(document.body.dataset.filesMode) ? document.body.dataset.filesMode : 'button');
     let modal = null;
     // magnet built client-side from the announce URLs on <body> (same as the public search page)
     const announces = [document.body.dataset.announce, document.body.dataset.announceHttps].filter(Boolean);
@@ -100,6 +108,32 @@
                         : t('js.index.pass_rate_none'),
                 }),
             ]));
+        }
+        // How long a stored file list may be, as the WORKER reports it — not as this page's own
+        // settings would predict. The equivalent check for parallel fetches and fetch order lives in
+        // whitelistStatus(), inside its whitelist-mode branch, so it never renders on an open
+        // tracker; this is the page where index_files is actually a thing, so it says it here.
+        const wk = s.worker || {};
+        if (wk.max_files || wk.max_files_asked) {
+            const parts = [el('span', {
+                text: wk.max_files ? t('js.index.worker_files_running', { n: num(wk.max_files) })
+                                   : t('js.index.worker_files_unknown'),
+            })];
+            const ws = wk.max_files_state || 'ok';
+            if (ws === 'unsupported') {
+                parts.push(el('div', { className: 'wl-small text-warning',
+                    text: t('js.index.worker_files_unsupported', { asked: num(wk.max_files_asked) }) }));
+            } else if (ws === 'over_max') {
+                parts.push(el('div', { className: 'wl-small text-warning',
+                    text: t('js.index.worker_files_over_max', { running: num(wk.max_files), asked: num(wk.max_files_asked), max: num(wk.max_files_max) }) }));
+            } else if (ws === 'mismatch') {
+                parts.push(el('div', { className: 'wl-small text-warning',
+                    text: t('js.index.worker_files_mismatch', { running: num(wk.max_files), asked: num(wk.max_files_asked) }) }));
+            } else if (!wk.max_files_asked) {
+                parts.push(el('div', { className: 'wl-small text-muted',
+                    text: t('js.index.worker_files_config', { n: num(wk.max_files_config || wk.max_files) }) }));
+            }
+            grid.appendChild(kv(t('js.index.worker_files'), parts));
         }
         const lp = st.last_poll;
         grid.appendChild(kv(t('js.index.poll'), [
@@ -279,7 +313,7 @@
         body.textContent = ''; body.appendChild(el('div', { className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' ' + t('js.common.loading')]));
         modal.show();
         let d;
-        try { d = await apiCall('admin/index_item&hash=' + encodeURIComponent(hash)); }
+        try { d = await apiCall('admin/index_item' + (filesMode() === 'all' ? '&files_all=1' : '') + '&hash=' + encodeURIComponent(hash)); }
         catch (e) { body.textContent = ''; body.appendChild(el('div', { className: 'text-danger', text: t('js.index.failed_error', { error: e.message }) })); return; }
         const it = d.item || {};
         body.textContent = '';
@@ -329,19 +363,50 @@
         actions.querySelector('#m-delete').addEventListener('click', async () => { if (await confirmAction(t('js.index.delete_entry_title'), t('js.index.delete_entry_body'), { danger: true, okLabel: t('js.index.delete') })) { try { const r = await apiCall('admin/index_delete', 'POST', { hashes: [hash] }); if (!r.success || r.error) { showToast(r.error || t('js.index.delete_failed'), 'error'); return; } showToast(t('js.index.deleted')); modal.hide(); state.selected.delete(hash); load(); loadStatus(); } catch (e) { showToast(e.message, 'error'); } } });
         // files
         if (d.files && d.files.length) {
-            const list = el('div', { className: 'idx-files mt-2' }, [el('h6', { className: 'text-muted', text: t('js.index.files_n', { n: d.files.length + (d.files_truncated ? '+' : '') }) })]);
-            list.appendChild(buildFileTree(d.files));
+            const list = el('div', { className: 'idx-files mt-2' });
+            // Two numbers, two lines apart, that nobody was comparing: the Size row above prints the
+            // row's files_count (27 260) and this heading printed the stored list's length (5 000).
+            // The worker only ever writes its first max_files paths, so for a big torrent those are
+            // different numbers and the modal read as if the list were complete. Say both.
+            const fill = (files, truncated, short, capped) => {
+                const nodes = [el('h6', { className: 'text-muted', text: short && it.files_count
+                    ? t('js.index.files_n_of', { n: files.length.toLocaleString(), total: Number(it.files_count).toLocaleString() })
+                    : t('js.index.files_n', { n: files.length + (truncated || capped ? '+' : '') }) })];
+                nodes.push(buildFileTree(files));
+                if (short) nodes.push(el('div', { className: 'text-muted small mt-1', text: t('js.index.files_stored_cap', { n: files.length.toLocaleString() }) }));
+                // A third sentence for a third state: rows are waiting and no button will bring
+                // them, because this list already stands on the panel's own total.
+                if (capped) nodes.push(el('div', { className: 'text-muted small mt-1', text: t('js.index.files_capped', { n: files.length.toLocaleString() }) }));
+                list.replaceChildren(...nodes);
+            };
+            fill(d.files, d.files_truncated, d.files_short, d.files_capped);
             if (d.files_truncated) {
                 // The reply is capped so the modal opens fast; the operator can ask for the rest.
+                // Only offered when rows really are waiting AND a bigger request exists — a short
+                // list is not one of those, and neither is one already at index_files_admin_max.
                 const all = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary mt-2', text: t('js.index.files_load_all') });
-                all.addEventListener('click', async () => {
-                    all.disabled = true; all.textContent = t('js.common.loading');
+                let asked = false;
+                const loadAll = async () => {
+                    if (asked) return;
+                    asked = true; all.disabled = true; all.textContent = t('js.common.loading');
                     try {
                         const full = await apiCall('admin/index_item&files_all=1&hash=' + encodeURIComponent(hash));
-                        if (full && full.files) { list.replaceChildren(el('h6', { className: 'text-muted', text: t('js.index.files_n', { n: full.files.length }) }), buildFileTree(full.files)); }
-                    } catch (e) { all.disabled = false; all.textContent = t('js.index.files_load_all'); }
-                });
+                        if (full && full.files) { fill(full.files, false, !!full.files_short, !!full.files_capped); return; }
+                    } catch (e) { /* put the button back below */ }
+                    asked = false; all.disabled = false; all.textContent = t('js.index.files_load_all');
+                };
+                all.addEventListener('click', loadAll);
                 list.appendChild(all);
+                if (filesMode() === 'scroll' && 'IntersectionObserver' in window) {
+                    // The public page's "keep loading while scrolling", expressed with the one extra
+                    // request the panel has: a sentinel under the tree, fetched once when it is
+                    // reached and then disconnected, so a modal left open cannot ask twice.
+                    const sentinel = el('div');
+                    list.appendChild(sentinel);
+                    new IntersectionObserver((entries, obs) => {
+                        if (entries.some(e => e.isIntersecting)) { obs.disconnect(); loadAll(); }
+                    }, { root: null, rootMargin: '200px' }).observe(sentinel);
+                }
             }
             body.appendChild(list);
         }

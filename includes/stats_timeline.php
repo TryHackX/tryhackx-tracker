@@ -40,6 +40,23 @@ const ST_API_CACHE_TTL  = 30;          // seconds the stats_timeline JSON is cac
 const ST_MAX_RAW_POINTS = 3000;        // above this the API switches raw → 5m
 const ST_MAX_5M_POINTS  = 4500;        // above this the API switches 5m → 1h
 
+/**
+ * How long a sample may reuse the catalogue's row count (see statsTimelineRowFromParsed()).
+ *
+ * Five minutes rather than the thirty-second default of indexTotalCached(), and the number is the
+ * whole fix: the sample interval is 30–600 s with a default of 60, so any TTL at or below the
+ * interval expires before every single sample and saves nothing at all. At 300 the count runs about
+ * twelve times an hour instead of sixty, and every sample that records a CHANGE still records it
+ * exactly — the cache is dropped by the poll, the prune and the delete, which are the only things on
+ * this side that move the number.
+ *
+ * The bound this buys, stated so nobody has to guess: a row written straight into index_hashes by
+ * the Python side (worker/federation.py cannot call a PHP cache-drop) can be up to five minutes late
+ * on the chart. On a line that moves in half-hourly batches of tens of thousands, five minutes of
+ * lag is not visible; 939 ms of a shared database every sixty seconds was.
+ */
+const ST_INDEX_ROWS_TTL = 300;
+
 /** Named ranges accepted by the API (aliases included) → seconds. 'all' = the whole recorded history. */
 function statsTimelineRanges(): array {
     return ['24h' => 86400, '7d' => 7 * 86400, '14d' => 14 * 86400, '2w' => 14 * 86400,
@@ -279,12 +296,38 @@ function statsTimelineRowFromParsed(PDO $db, array $cfg, array $p, int $now): ar
     $tcp = $p['connections']['tcp'] ?? [];
     $wl = 0;
     try { $wl = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 0")->fetchColumn(); } catch (\Throwable $e) {}
+    // The catalogue size, from the cache in includes/index.php rather than a fresh COUNT(*).
+    //
+    // MEASURED on production 2026-09-08: that count is an index scan over 3 368 887 entries of
+    // idx_index_seeders, 939 ms, and it ran here once per stored sample — once a minute, all day,
+    // inside the janitor AND inside a php-fpm child whenever the public stats endpoint was the one
+    // that took the sample (api/tracker_stats.php ingests too).
+    //
+    // A number that goes on a CHART is allowed the cache that a number sizing a DELETE is not, and
+    // the reason is not "charts may be wrong". It is that this count is CONSTANT between polls —
+    // rows arrive in half-hourly batches and leave in the hourly prune, and every one of those sites
+    // drops the cache — so a repeated cached value is the same true reading twice, and the first
+    // sample after a change counts afresh and records the change exactly. See ST_INDEX_ROWS_TTL for
+    // why the TTL is well above the sample interval and what the Python-side writers cost in lag.
+    //
+    // The function_exists guard and the swallow are load-bearing, not decoration: api/stats_timeline.php,
+    // api/tracker_stats.php and tests/stats_timeline_test.php all reach this file on paths that do not
+    // necessarily carry includes/index.php, and a sample that fails to build is a sample not stored.
     $idx = 0;
-    if (function_exists('indexRowsCount')) { try { $idx = (int)indexRowsCount($db); } catch (\Throwable $e) {} }
+    if (function_exists('indexTotalCached')) { try { $idx = (int)indexTotalCached($db, ST_INDEX_ROWS_TTL); } catch (\Throwable $e) {} }
     // How many of those have a name and a file list. Drawn beside the total so the gap between the
     // two lines IS the backlog — which is the question people actually ask of this chart, and which
     // the queue depth alone cannot answer once the queue has been drained and refilled.
     // meta_status is indexed; this is a counted lookup, not a scan of the 2.5 M rows.
+    //
+    // THAT SENTENCE HAS NEVER BEEN MEASURED, and after 2026-09-08 it is the last unfiltered-ish
+    // aggregate on this path that still runs once per sample. It is a range scan over every 'done'
+    // row, which on a catalogue whose metadata has largely resolved is most of the table — so the
+    // claim is a guess about a fraction nobody has read. Settle it on production before caching it:
+    // SET PROFILING=1; SELECT COUNT(*) FROM index_hashes WHERE meta_status='done'; SHOW PROFILES;
+    // beside SELECT meta_status, COUNT(*) FROM index_hashes GROUP BY meta_status — and then write
+    // the number here instead of this paragraph. Caching it on a hunch is the mistake this file has
+    // just finished not making.
     $idxFetched = 0;
     try {
         $idxFetched = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status = 'done'")->fetchColumn();

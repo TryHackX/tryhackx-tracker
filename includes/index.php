@@ -34,18 +34,31 @@ const IDX_FETCH_MAX_BYTES  = 268435456; // 256 MB hard cap on the downloaded scr
 function indexEnabled(array $cfg): bool { return (($cfg['index_enabled'] ?? '0') === '1'); }
 function indexSourceUrl(array $cfg): string { return trim((string)($cfg['index_source_url'] ?? 'http://127.0.0.1:6969/scrape')); }
 /**
- * COUNT(*) over the whole catalogue, remembered for thirty seconds.
+ * COUNT(*) over the whole catalogue, remembered for thirty seconds — or for as long as the caller
+ * asks, which one caller does: the statistics timeline passes ST_INDEX_ROWS_TTL (five minutes),
+ * because its samples are a minute apart and a TTL under the interval expires before every one of
+ * them. The stored entry carries its own timestamp and not a TTL, so a long-lived write cannot make
+ * a short-lived reader stale: each caller judges the age it is willing to accept.
  *
  * This is the ONE query on the Index page worth caching, and it took measuring to know that. The
  * listing itself ran at 1 747 ms until v19 added the composite index; it is 0.8 ms now, and a cache
  * in front of THAT would have been pure liability — staleness bought with nothing. The count is a
- * different animal: InnoDB keeps no row counter, so an unfiltered COUNT(*) walks an index over 2.7
- * million rows every time, 557 ms measured, and no index changes that.
+ * different animal: InnoDB keeps no row counter, so an unfiltered COUNT(*) walks an index over the
+ * whole table every time, and no index changes that. MEASURED on production 2026-09-08: EXPLAIN
+ * says `index` over idx_index_seeders, 3 368 887 entries, "Using index", 939 ms per execution. The
+ * 557 ms this comment used to quote was the same query on a 2.7 M-row table — the query did not get
+ * slower, the catalogue got bigger, and it will keep doing that.
  *
  * What it draws is a pager. A pager does not need an exact number, it needs one that is right to the
  * page — and thirty seconds of drift on a table that gains rows in half-hourly batches cannot be
  * seen. Filtered counts deliberately do NOT come through here: the filters are indexed and cheap,
  * and there are enough distinct ones that a cache would miss more often than it hit.
+ *
+ * WHAT MUST NOT COME THROUGH HERE, and tests/index_test.php section 14 fails if it ever does: the
+ * prune's own count (it sizes a DELETE), indexTick()'s over-the-cap gate (it stands one call away
+ * from that DELETE, and it is cheap for a different reason — see there), and the `index_rows`
+ * written into index_polls (that column is defined as the total AFTER the poll, and this cache is
+ * warm from before it).
  */
 function indexTotalCacheFile(): string { return __DIR__ . '/../config/index_count.json'; }
 
@@ -130,6 +143,99 @@ function indexKeepFiles(array $cfg): bool { return (($cfg['index_keep_files'] ??
 function indexPollBudget(array $cfg): int { return max(5, min(120, (int)($cfg['index_poll_budget'] ?? 45) ?: 45)); }
 
 /**
+ * The stored-files-per-torrent ceiling, for everything on the PHP side: the save clamp, the field's
+ * max=, the status card. It is written twice in this repository and cannot be written once — the
+ * enforcing half is Python (MAX_FILES_MAX in worker/worker.py) and neither language can read the
+ * other's constant. So: exactly two, both named, and tests/worker_settings_test.py fails if they
+ * ever disagree. What must not happen again is the CONCURRENCY_MAX story, where the same number was
+ * typed as a literal in four files and a panel offering 64 met a worker enforcing 16.
+ */
+const META_MAX_FILES_MAX = 50000;
+
+/**
+ * The panel's stored-files-per-torrent override, or null for "use the worker's own config file".
+ *
+ * Null is a real answer, not a missing one: empty is the default and means the worker keeps the
+ * `max_files` in /etc/tracker-metadata.conf. Anything non-numeric reads as empty here for the same
+ * reason the worker ignores it — a typo must not silently become a cap of 1.
+ */
+function indexMetaMaxFiles(array $cfg): ?int {
+    $v = trim((string)($cfg['meta_max_files'] ?? ''));
+    if ($v === '' || !ctype_digit($v)) return null;
+    return max(1, min(META_MAX_FILES_MAX, (int)$v));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// How a file list LOADS — the ceilings, then the six settings that live under them
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Three questions, asked twice. How does the browser ask for the next slice (mode), how much does
+// one slice carry (batch), how much may one page ever accumulate (max). Twice, because the public
+// reader and the operator are not the same visitor: the reader arrives over the internet, anonymous
+// or a member, and every page they ask for spends a token from the per-IP `idxsearch` bucket that
+// api/index_search.php shares — a bucket whose accounting rewrites the whole of
+// config/rate_limits.json under an exclusive lock on every call. The operator is past
+// panel.whitelist.view on a page that is theirs to wait on and is not rate-limited at all. One
+// number for both would mean an operator raising the panel's batch also raising it for every
+// stranger at the same moment.
+//
+// The MODE is a client behaviour; the SIZE is a server rule. Mode only decides WHEN the browser
+// asks again. A reply is bounded by the batch whatever the mode says, and the running total is
+// enforced by the endpoint refusing to serve past the ceiling — never by the browser stopping
+// politely.
+
+/** The whole vocabulary, in one place: the two helpers, the save coercion and the two <select>s. */
+const IDX_FILES_MODES = ['scroll', 'button', 'all'];
+
+// A floor rather than a minimum worth having: below ~100 the per-request overhead (a session-less
+// GET, a rate-limit token, a JSON envelope) costs more than the rows do.
+const IDX_FILES_BATCH_MIN = 100;
+// Unchanged from what api/index_files.php accepted as a hand-typed ?limit= before 1.38.0. 5 000
+// paths and sizes is already close to a megabyte of JSON out of a database shared with the mail
+// server, the forum and the file host.
+const IDX_FILES_BATCH_MAX = 5000;
+// The public total, and deliberately equal to its own default: this ceiling can be LOWERED from the
+// panel and not raised. Paging is LIMIT/OFFSET, and it stays that way because both permission gates
+// in api/index_files.php are expressed as tests on $offset — a keyset cursor would walk straight
+// past index.files_all. That makes the last page of the deepest allowed list ~20 000 primary-key
+// lookups for path/size (index_files carries idx_if_hash, which InnoDB extends with the PK, so the
+// walk is an index scan and not a filesort — but it is still 20 000 rows fetched to answer one
+// request). Raising it is a code change on purpose, so that the cost is measured and not typed.
+const IDX_FILES_MAX_HARD = 20000;
+// The panel's batch may be four times the public one: the operator is the person paying for the
+// wait, and nobody else is queued behind them.
+const IDX_FILES_ADMIN_BATCH_MAX = 20000;
+// Unchanged from the literal at api/admin/index_item.php:30 before 1.38.0, and kept only because
+// lowering a default silently shrinks what an operator's existing "Load the whole file list" button
+// does. It is a fetchAll of up to a million rows followed by a json_encode, in php-fpm, on the same
+// box as MariaDB — the field's hint says so and recommends lowering it.
+const IDX_FILES_ADMIN_MAX_HARD = 1000000;
+
+// Clamp-on-read, the same shape as indexPollMinutes() above and for the same reason, only more so:
+// these six rows can also arrive from install.php, a restored backup, or somebody with a MySQL
+// client on a database that three other applications also use. This is the clamp that actually
+// holds — the one in save_settings.php only governs what the form is allowed to write.
+function indexFilesMode(array $cfg): string {
+    $m = (string)($cfg['index_files_mode'] ?? 'scroll');
+    return in_array($m, IDX_FILES_MODES, true) ? $m : 'scroll';
+}
+function indexFilesBatch(array $cfg): int { return max(IDX_FILES_BATCH_MIN, min(IDX_FILES_BATCH_MAX, (int)($cfg['index_files_batch'] ?? 2000) ?: 2000)); }
+function indexFilesAdminMode(array $cfg): string {
+    // Falls back to 'button', not to 'scroll': 'button' is what the panel has always done, and a
+    // garbage value must not flip the modals into fetching whole file lists unasked.
+    $m = (string)($cfg['index_files_admin_mode'] ?? 'button');
+    return in_array($m, IDX_FILES_MODES, true) ? $m : 'button';
+}
+function indexFilesAdminBatch(array $cfg): int { return max(IDX_FILES_BATCH_MIN, min(IDX_FILES_ADMIN_BATCH_MAX, (int)($cfg['index_files_admin_batch'] ?? 5000) ?: 5000)); }
+
+// Floored at one batch, so the first page can never already be over the ceiling — a max below a
+// batch would otherwise answer the very first request with "capped, nothing here". The repair is
+// silent and on read rather than a refusal on save, because the panel prints the helper's output
+// as the field's value: what the operator sees in the box is what is in force.
+function indexFilesMax(array $cfg): int { return max(indexFilesBatch($cfg), min(IDX_FILES_MAX_HARD, (int)($cfg['index_files_max'] ?? 20000) ?: 20000)); }
+function indexFilesAdminMax(array $cfg): int { return max(indexFilesAdminBatch($cfg), min(IDX_FILES_ADMIN_MAX_HARD, (int)($cfg['index_files_admin_max'] ?? 1000000) ?: 1000000)); }
+
+/**
  * The exact number of catalogue rows.
  *
  * Deliberately NOT indexTotalCached(): the caller at the prune site uses this to decide whether to
@@ -156,6 +262,9 @@ function indexStateDefaults(): array {
         'last_partial' => null,
         'meta_budget_day' => '', 'meta_budget_used' => 0, 'poll_skip' => 0,
         'last_prune_at' => 0, 'last_prune' => null, 'last_tick_at' => 0,
+        // The cap as the last tick saw it. Zero on a fresh state file, which differs from any legal
+        // index_max_rows and therefore makes the first tick count once — the safe direction.
+        'max_rows_seen' => 0,
     ];
 }
 
@@ -506,9 +615,18 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
                // the stored one made the first two live rows read "delivered 0" beside "kept
                // 189 434" — a poll that plainly delivered something, reported as having delivered
                // nothing, and a coverage of 0 % on the chart to go with it.
+               // index_rows is the EXACT count, deliberately, and the only exact one on this path.
+               //
+               // The column is defined as what the catalogue held AFTERWARDS (includes/schema.php,
+               // index_polls) and the coverage page divides by it. The 30 s cache is warm here
+               // almost by construction: the statistics timeline fills it a second or two earlier in
+               // the same janitor tick (tools/janitor.php samples before it polls), so a cached read
+               // would record the PRE-poll total as the post-poll figure — every poll, for ever,
+               // with nothing in the history to show it was wrong. One 939 ms count per poll (every
+               // 30 minutes by default) buys a number that is true.
                ->execute([$now, $out['entries'], $skip, $out['kept'], $out['bytes'], $out['ms'],
                           $out['truncated'] ? 1 : 0, $out['partial'] !== null ? mb_substr((string)$out['partial'], 0, 64) : null,
-                          $out['removed_wl'], $out['removed_ban'], $rowsTotal, indexTotalCached($db),
+                          $out['removed_wl'], $out['removed_ban'], $rowsTotal, indexRowsCount($db),
                           $out['error'] !== null ? mb_substr((string)$out['error'], 0, 190) : null]);
             // Pruned here rather than on a timer: this is the only thing that writes the table, so it
             // is the only place that can leave it too big.
@@ -702,10 +820,43 @@ function indexTick(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
         // prune, trim right away when we're more than 5 % over
         // … unless the last forced prune found nothing it could trim, in which case forcing again
         // every minute only repeats the scan (see indexPrune()).
-        $force = indexRowsCount($db) > (int)(indexMaxRows($cfg) * 1.05)
-              && $now >= (int)(indexStateRead()['force_idle_until'] ?? 0);
+        //
+        // THE CHEAP TESTS COME FIRST, AND THAT IS THE WHOLE POINT. PHP's && runs left to right, and
+        // the count on the right is an index scan of the entire catalogue: 939 ms over 3 368 887
+        // rows, measured on production 2026-09-08. The old shape paid it on every tick before
+        // anything had asked whether the answer could matter — including for the whole hour of the
+        // stand-down this very comment describes, where the answer is thrown away by construction.
+        // information_schema.INDEX_STATISTICS measured 6 737 774 rows read on idx_index_seeders in a
+        // clean 60 s window: exactly two full scans a minute, all day, on a database shared with the
+        // mail, the forum and the file service.
+        //
+        // Only two things can put this table over its cap, and both leave a mark that costs one
+        // already-open file to read: a poll (the only inserter on this side) and an operator lowering
+        // index_max_rows in Settings. So the count runs on the tick after one of those and not
+        // otherwise — roughly twice an hour instead of sixty times.
+        //
+        // It stays the EXACT count. The cached total is a pager's number and this one decides whether
+        // to start a prune; the rule that keeps includes/index.php honest is that nothing near a
+        // DELETE reads a cache, and it is cheaper to skip the count than to approximate it.
+        //
+        // Federation writes rows from Python (worker/federation.py) and cannot leave a mark here. It
+        // bounds its own batches, and the hourly prune enforces the cap regardless of this gate —
+        // what is lost in that case is the early trim, not the trim.
+        // Re-read, deliberately: $state above predates the poll that may just have run, and its
+        // last_poll_at is exactly the mark being tested here.
+        $post = indexStateRead();
+        $maxRows = indexMaxRows($cfg);
+        $mayHaveGrown = (int)$post['last_poll_at'] >= (int)$post['last_tick_at']
+                     || (int)($post['max_rows_seen'] ?? 0) !== $maxRows;
+        $force = $now >= (int)($post['force_idle_until'] ?? 0)
+              && $mayHaveGrown
+              && indexRowsCount($db) > (int)($maxRows * 1.05);
         $out['prune'] = indexPrune($db, $cfg, $now, $force);
-        indexStateUpdate(function (array &$s) use ($now) { $s['last_tick_at'] = $now; return true; });
+        // max_rows_seen is remembered here and nowhere else: the tick is the only reader of the cap
+        // that runs on a timer, so this is the only place that can notice it moved.
+        indexStateUpdate(function (array &$s) use ($now, $maxRows) {
+            $s['last_tick_at'] = $now; $s['max_rows_seen'] = $maxRows; return true;
+        });
     } catch (\Throwable $e) {
         $out['error'] = $e->getMessage();
         error_log('[index tick] ' . $e->getMessage());
@@ -885,6 +1036,65 @@ function indexScrapeOne(PDO $db, array $cfg, string $hash): ?array {
     $db->prepare("UPDATE index_hashes SET scrape_seeders = ?, scrape_leechers = ?, scrape_completed = ?, scraped_at = NOW() WHERE info_hash = ?")
        ->execute([$f['seeders'], $f['leechers'], $f['completed'], $hash]);
     return ['seeders' => $f['seeders'], 'leechers' => $f['leechers'], 'completed' => $f['completed'], 'scraped_at' => date('Y-m-d H:i:s')];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// File lists — what a reply is allowed to claim about one
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the three file-list endpoints (api/index_files.php and the two admin item endpoints) may
+ * tell a reader about the slice they are handing over.
+ *
+ * $fetched is the raw row count of a `LIMIT $limit + 1` query, $before how many rows of the same
+ * list the caller already holds (the public list is paged, so it is the offset; the admin modals
+ * ask once, so it is 0), and $filesCount the torrent's OWN file count as the worker recorded it.
+ *
+ * Two different shortfalls come back separately because they need different words and different
+ * buttons:
+ *   'truncated' — the probe row came back, so more rows are waiting in the table and asking again
+ *                 gets them.
+ *   'short'     — the stored list ENDS here and is shorter than what the torrent itself claims.
+ *                 The metadata worker only ever writes the first max_files paths (worker.py:645,
+ *                 5 000 on this install) while files_count keeps libtorrent's real count
+ *                 (worker.py:669). Asking again changes nothing; the rest was never written.
+ *
+ * 'short' is precisely the case the +1 probe cannot see, and it is the reported bug: at exactly
+ * max_files stored rows a `LIMIT max_files + 1` comes back full but not over, which read as
+ * "nothing more to fetch", so the panel printed "Files (5000)" two lines under a heading saying
+ * 27 260 files and said nothing about the difference. 620 catalogue rows on production are in that
+ * state, every one of them with exactly 5 000 stored paths.
+ */
+function indexFilesShortfall(?int $filesCount, int $fetched, int $limit, int $before = 0): array {
+    $truncated = $fetched > $limit;
+    // `$before` is the caller's offset, and nothing bounds what a caller may ask for: a hand-made
+    // offset past the end of a 5 000-row list would otherwise report a stored total of 6 000 for
+    // rows that do not exist. The torrent's own count is the only honest ceiling on a number that
+    // claims to say how much was stored.
+    $stored = $before + min($fetched, $limit);
+    if ($filesCount !== null && $stored > $filesCount) $stored = $filesCount;
+    return [
+        'truncated' => $truncated,
+        'stored'    => $stored,
+        'short'     => !$truncated && $filesCount !== null && $filesCount > $stored,
+    ];
+}
+
+/**
+ * Whether a reply must say that THIS SITE ended the list — as opposed to the reader's permission
+ * (`truncated` without `can_more`) or the worker never having stored more (`short`). Called by all
+ * three file-list endpoints on the page they are about to answer with, `$rows` being the page as
+ * it will be sent and `$offset` how far in it starts (0 for the one-shot admin replies).
+ *
+ * The rule the callers must not lose is that this and `truncated` are never both true. The public
+ * page's loop condition is `truncated && can_more` and its IntersectionObserver re-fires whenever
+ * the sentinel is on screen, so a reply claiming both leaves an open tab asking for the same empty
+ * page for ever — against a rate-limit bucket keyed by IP address, whose accounting rewrites the
+ * whole of config/rate_limits.json under an exclusive lock on every single call. In the panel the
+ * same pair puts a Load-all button on a list that no request can extend.
+ */
+function indexFilesCapped(bool $truncated, int $offset, int $rows, int $max): bool {
+    return $truncated && ($offset + $rows) >= $max;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1426,8 +1636,44 @@ function indexStatus(PDO $db, array $cfg): array {
       return $flow;
     });
 
+    // WHAT THE WORKER IS RUNNING, which is a different fact from what Settings was told to ask for.
+    //
+    // The panel already learned this once, for the parallel-fetch setting: without asking the
+    // worker, a page can only read the operator's own number back at them, which is how "set 32,
+    // gets 4" survived for a day. The concurrency and fetch-order versions of that check live in
+    // whitelistStatus() — INSIDE its `if ($mode === 'whitelist')` branch, so on an open-mode
+    // tracker, the only mode where index_files exists at all, none of them render. So the file cap
+    // answers for itself on the page it belongs to.
+    //
+    // A heartbeat that carries no max_files key is a worker started from a worker.py older than
+    // 1.38.0: it ignores this setting completely and nothing else anywhere would say so.
+    $askFiles = indexMetaMaxFiles($cfg);
+    $worker = ['heartbeat_age' => null, 'max_files' => null, 'max_files_config' => null,
+               'max_files_max' => null, 'max_files_asked' => $askFiles, 'max_files_state' => 'ok'];
+    if (function_exists('whitelistWorkerHeartbeat')) {
+        $hbw = whitelistWorkerHeartbeat($cfg);
+        $worker['heartbeat_age'] = $hbw['age'];
+        $wi = is_array($hbw['info']) ? $hbw['info'] : null;
+        if ($wi !== null) {
+            foreach (['max_files', 'max_files_config', 'max_files_max'] as $k) {
+                if (isset($wi[$k]) && is_numeric($wi[$k])) $worker[$k] = (int)$wi[$k];
+            }
+            if ($askFiles !== null) {
+                if ($worker['max_files'] === null) {
+                    $worker['max_files_state'] = 'unsupported';
+                } elseif ($worker['max_files'] !== $askFiles) {
+                    // Over this build's ceiling is a different sentence from plain disagreement: the
+                    // worker clamped on purpose and the operator is owed the reason, not a warning
+                    // that reads as a fault.
+                    $worker['max_files_state'] = ($worker['max_files_max'] !== null && $askFiles > $worker['max_files_max'])
+                        ? 'over_max' : 'mismatch';
+                }
+            }
+        }
+    }
+
     return [
-        'flow' => $flow,
+        'flow' => $flow, 'worker' => $worker,
         'enabled' => indexEnabled($cfg), 'source_url' => indexSourceUrl($cfg), 'poll_minutes' => indexPollMinutes($cfg),
         'min_seeders' => indexMinSeeders($cfg), 'max_rows' => indexMaxRows($cfg), 'grace_days' => indexGraceDays($cfg),
         'protect_days' => indexProtectDays($cfg), 'meta_daily_budget' => indexMetaDailyBudget($cfg), 'meta_auto_queue' => indexMetaAutoQueue($cfg), 'poll_budget' => indexPollBudget($cfg),

@@ -458,14 +458,16 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
   (highest seeders first), with `meta_requested_at` spread across the next 24 h so the metadata worker's
   **second queue** (drained only after the whitelist queue is empty) doesn't flood the DHT. Set the
   budget to **0** to catalogue without any DHT metadata fetching. **Worker parallel fetches**
-  (`meta_worker_concurrency`, 1.7.0): how many hashes the worker resolves at once (1–16, both
+  (`meta_worker_concurrency`, 1.7.0): how many hashes the worker resolves at once (1–64, both
   queues); the worker re-reads the setting every ~60 s — no restart — when its DB user has
   `SELECT` on `settings` (see [worker/README.md](worker/README.md)); empty keeps the worker's own
   config-file value.
 - **Lifecycle** — a new row lives until `grace_until` (`index_grace_days`) unless its metadata resolves;
   a resolved row lives until `protected_until` (`index_protect_days`), extended on every poll where it
-  still has ≥ 1 seeder. The hourly pruner (also forced right after a poll that overshoots the cap by
-  > 5 %) drops expired rows and caps the table at `index_max_rows` (oldest unprotected `last_seen` first);
+  still has ≥ 1 seeder. The hourly pruner (also forced on the tick after a poll that overshoots the cap
+  by > 5 %, or after `index_max_rows` itself is lowered — those are the only two things that can put the
+  table over the cap from this side, and asking the state file is free where counting the catalogue is
+  939 ms) drops expired rows and caps the table at `index_max_rows` (oldest unprotected `last_seen` first);
   it first backfills the protection window for rows whose metadata resolved since the last poll, and runs
   under a lock so two prunes can never over-delete. A 200 000-row cap is ~100–150 MB on disk.
 - **Worker** — set `index_table = index_hashes` in `tracker-metadata.conf` and grant the `tracker_meta`
@@ -480,12 +482,60 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
   forces a poll / runs one janitor tick.
 
 **The file list (1.36.0, permission in 1.37.0).** On the public search page the list is paged —
-2 000 files per answer, the next slice loaded when the reader reaches the end of the list or presses
-*Load more files* — so a torrent with tens of thousands of files is readable without one
+2 000 files per answer by default, the next slice loaded when the reader reaches the end of the list
+or presses *Load more files* — so a torrent with tens of thousands of files is readable without one
 multi-megabyte reply. Whether a member may load past that first page is `index.files_all`: without
 it the list stops where it stopped before and says so, the button is not shown, and a request for
-the next page is refused by the endpoint, not only hidden by the page. The admin modals cap at
-5 000 and offer *Load the whole file list*.
+the next page is refused by the endpoint, not only hidden by the page. The admin modals show 5 000
+by default and offer *Load the whole file list*.
+
+**How it loads is a setting (`index_files_*`, 1.38.0).** Settings → **File list loading**: three
+questions — how the browser asks for more (*while scrolling* / *only after a click* / *everything at
+once*), how many files one answer carries, and how many one page may add up to — asked twice, once
+for the public search page and once for the panel's detail windows, because a stranger sharing a
+per-IP rate limit with everyone behind their connection and the operator in the panel are not the
+same visitor. The defaults are what 1.37.0 did (scroll + 2 000 on the search page, button + 5 000 in
+the panel), so nothing changes until the operator asks. The **mode** only decides *when* the browser
+asks; the two numbers are server rules, clamped on save, again on read (a settings row can also come
+from a restored backup) and once more at the endpoint, so a hand-typed `?limit=` cannot outrank
+them. One new rule is visible on upgrade: **`index_files_max` (20 000 by default and by ceiling)
+ends a public list where before there was no end at all** — a member with `index.files_all` could
+page a 500 000-file torrent to its last row. The reply says `capped` and the page prints why the
+list stopped; `capped` and `truncated` are never both true, because *keep asking* and *the site
+stopped you* together are a loop. Paging stays `LIMIT`/`OFFSET` on purpose: the permission gate is a
+test on that offset, so a keyset cursor would have walked past it. The panel's own total
+(`index_files_admin_max`, 1 000 000 as shipped, matching what the modal already did) is worth
+lowering — it is one `fetchAll` and one `json_encode` in php-fpm on the same machine as the
+database — and *Load the whole file list* is now hidden rather than dead when a list already stands
+on it. The public file tree also stops drawing leaves past 5 000 (the panel's tree has always had
+such a cap); the files are loaded, they are simply not all painted, and one line says how many.
+
+**How long the list is at all is a different number (1.38.0).** The metadata worker stores only the
+first `max_files` paths of a torrent (`[worker] max_files` in `/etc/tracker-metadata.conf`, 5 000 as
+shipped) while recording the torrent's real file count beside them, so a big torrent has a 5 000-row
+list under an 18 000-file heading — 620 catalogue entries on this production database are in that
+state, each with exactly 5 000 stored paths, the largest claiming 27 260 files. Nothing is truncated
+on the way out. Every file-list reply now carries the entry's own `files_count`: `api/index_files.php`
+adds `stored_total` (filled in only on the page that ends the stored list) and `stored_short`, and the
+two admin item endpoints add `files_short` beside `files_truncated` — separate fields, because
+*Load the whole file list* should appear only where rows are genuinely waiting. The surfaces say
+*Files (5 000 of 18 000)* and one line explaining that the catalogue keeps at most that many paths per
+torrent.
+
+**Raising the cap (`meta_max_files`, 1.38.0).** Settings → *Index file lists* → **Stored files per
+torrent**. Empty — the default — keeps the worker's own `max_files`; a number from 1 to 50 000
+overrides it and reaches the worker within ~60 s, no restart and no root, on the same settings read
+the fetch order rides (it needs the same optional `GRANT SELECT ON tracker.settings`). One number
+governs **both** queues, because `finish()` is shared; the torrent's real `files_count` is stored
+unclipped either way. Out of range is clamped rather than discarded, empty means the config file,
+and a database blip leaves the last known cap standing. It does nothing for index rows while *Keep
+File Lists* is No, and it does **not** govern lists imported from a federation peer — those keep
+federation's own limits (5 000 per row, 2 000 in the review queue), because shortening a list a peer
+already sent whole helps nobody. The **Index** status card shows what the worker is actually storing
+per torrent and warns when that differs from the setting, including the case of a worker still
+running a pre-1.38.0 `worker.py` that ignores it entirely. Raising it applies only to torrents
+fetched afterwards: stored lists keep the length they were written with (there is no backfill — see
+the changelog for why), and the file-name search can only match a path that was stored.
 
 **What a poll writes (1.35.0).** A row whose seeders, leechers and completed count did not move since
 the last poll is not written at all, and `last_seen` / `seen_count` advance at most once per six
@@ -617,7 +667,8 @@ default — with it off, everything behaves exactly like the classic single-admi
   is protected — it cannot be deleted, banned or stripped of the admin group.
 - **Groups with permissions** (Admin → **Users** → *Groups*): each group carries a set of
   permissions — `index.view` / `index.files` / `index.files_all` / `index.magnet` (the member search;
-  `files_all` loads a file list past its first 2 000 rows, 1.37.0),
+  `files_all` loads a file list past its first batch — `index_files_batch`, 2 000 rows as shipped —
+  up to `index_files_max`, 1.37.0),
   `whitelist.view` (the public whitelist page + whitelisted rows in search), `whitelist.add`
   (registering hashes when `whitelist_submit_mode=users`), `stats.view` / `stats.timeline` /
   `home.stats` (the statistics surfaces). **Semantics (changed in 1.7.0 / schema v8):** the seeded

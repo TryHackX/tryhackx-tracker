@@ -4,6 +4,199 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.38.0] — 2026-09-08
+
+### Changed — the catalogue is no longer counted twice a minute
+
+Measured on production on **2026-09-08**, not estimated. `EXPLAIN SELECT COUNT(*) FROM index_hashes`
+is an index scan over `idx_index_seeders`, **3 368 887 entries**, *Using index*; one execution takes
+**939 ms** (the comment in `includes/index.php` still quoted 557 ms, which was the same query on a
+2.7 M-row table — the query did not get slower, the catalogue got bigger). And
+`information_schema.INDEX_STATISTICS` showed **6 737 774 rows read on that index in a clean 60 s
+window**: exactly two full scans a minute, all day, or about **1.9 s of every minute — 46 minutes a
+day** — on a database shared with the mail server, the forum and the file host.
+
+Two call sites were paying it, and neither was deciding anything with the answer most of the time.
+
+The **statistics timeline** counted the catalogue once per stored sample — every 60 s from the
+janitor, and inside a php-fpm child whenever the public stats endpoint happened to take the sample
+first. It now reads the count cache that `includes/index.php` has had all along, with a five-minute
+TTL, so the count runs about twelve times an hour instead of sixty. A cached number is admissible on
+a chart here for a specific reason rather than a general one: the total is **constant between
+polls** — rows arrive in half-hourly batches and leave in the hourly prune, and every one of those
+sites drops the cache — so a repeated value is the same true reading twice, and the first sample
+after a change counts afresh and records the change exactly. A TTL at or *below* the sample interval
+would have expired before every single sample and saved nothing at all; the suite now asserts that
+it is above it.
+
+The **janitor's over-the-cap gate** ran the 939 ms count first and unconditionally, because PHP's
+`&&` is left to right and the count sat on the left of the cheap test. It ran during the whole hour
+of the stand-down that the prune sets *precisely* to stop repeating fruitless work, and threw the
+answer away. The cheap tests come first now, and one more was added: only a **poll** (the only
+inserter on this side) or an **operator lowering `index_max_rows`** can put the table over its cap,
+and both are visible in the state file for the price of a file read, so the count runs on the tick
+after one of those and not otherwise — roughly twice an hour instead of sixty times. It stays the
+**exact** count, deliberately: nothing that stands next to a `DELETE` in this file reads a cache.
+
+Three numbers are exact and stay exact, and the suite fails if a future edit routes any of them
+through the cache — twice over, once behaviourally (a cache poisoned with an absurd total cannot
+inflate a delete or reach the poll history) and once structurally (`indexPoll`, `indexPrune` and
+`indexTick` must not so much as name the cached reader, checked through the tokenizer with a
+positive control proving the check can still see one where it belongs):
+
+* the prune's own count, which sizes a `DELETE` — a pager may be approximate, a delete may not;
+* the tick's gate, one call away from that delete;
+* `index_polls.index_rows`, which is *defined* as what the catalogue held **after** the poll. That
+  one was cached before this change and is now exact, because the timeline warms the very same cache
+  a second or two earlier in the same janitor tick: a cached read there would have written the
+  pre-poll total into the poll history and the coverage chart for ever.
+
+**What this costs, stated rather than buried.** Rows written straight into `index_hashes` by the
+Python side (`worker/federation.py` cannot call a PHP cache-drop) can be up to five minutes late on
+the chart's catalogue line, and they no longer buy an early trim — the hourly prune still enforces
+the cap, so what is lost is the promptness of the trim, not the trim. Federation bounds its own
+batches, which is why that is acceptable.
+
+No settings, no schema change, no user-visible strings. **No database index was dropped**: whether
+`idx_index_seed_seen` still has a consumer is a separate question that needs `userstat` evidence over
+a longer window than one reading, and accounting has been turned on for it. One thing was measured
+and *not* acted on: the sampler's `WHERE meta_status = 'done'` count is now the last aggregate on
+that path that still runs once a sample, and the comment above it claiming it is "a counted lookup,
+not a scan" has never been measured. The comment now says so, and says which two queries settle it.
+
+### Added — how a file list loads is now six settings
+
+*"Is there a setting for whether it keeps loading in batches of, say, 2 000, or waits for a button —
+and for how big a batch is and how many files at most?"* There is now, in Settings → **File list
+loading**: three questions asked twice, once for the public search page and once for the panel's
+detail windows. `index_files_mode` / `index_files_batch` / `index_files_max` and
+`index_files_admin_mode` / `index_files_admin_batch` / `index_files_admin_max`. Schema 43 → 44
+(settings only).
+
+Two audiences and not one, because they are not the same visitor. A reader arrives over the internet
+and every page they ask for spends a token from the `idxsearch` bucket the search box uses — a
+bucket keyed by **IP address**, so everyone behind one connection shares it, and one whose
+accounting rewrites the whole of `config/rate_limits.json` under an exclusive lock on every call.
+The operator is past `panel.whitelist.view` on a page that is theirs to wait on and is not
+rate-limited at all. One shared number would mean an operator raising the panel's batch raising it
+for every stranger at the same moment.
+
+The **mode** is a client behaviour and the **sizes** are server rules. Mode decides only *when* the
+browser asks again: keep loading while scrolling (what the search page has always done), wait for a
+click, or chain requests up to the maximum. A reply is bounded by the batch whatever the mode says.
+The numbers are clamped three times — in `save_settings.php`, again on read in `includes/index.php`
+(the clamp that actually holds: a settings row can also arrive from `install.php`, a restored backup
+or a MySQL client on a database shared with three other applications), and once more at the
+endpoint, which now clamps a caller's own `?limit=` against the operator's batch instead of against
+a literal. The defaults reproduce 1.37.0 exactly, so an existing install changes nothing until it is
+asked to.
+
+**One rule is new and visible on upgrade:** `index_files_max` ends a public list where nothing ended
+it before — a member with `index.files_all` could page a 500 000-file torrent to its last row. The
+default and the ceiling are both 20 000, so this box can be lowered and not raised. That is
+deliberate: paging stays `LIMIT`/`OFFSET`, because **both** gates on `api/index_files.php` are tests
+on `$offset` (the `index.files_all` 403 and the ceiling itself), and a keyset cursor that made the
+offset irrelevant would have walked past the permission as well — `after=<id>&offset=0` reads the
+whole table. The price of keeping the offset is that the deepest allowed page fetches ~20 000 rows
+to answer one request, which is where 20 000 comes from; raising it is a code change, after a
+measurement rather than a number typed into a box.
+
+A capped reply says `capped: true` and **`truncated: false`**. The two must never travel together:
+the page's loop condition is `truncated && can_more` and its `IntersectionObserver` re-fires
+whenever the sentinel is on screen, so a reply claiming both would leave an open tab asking for the
+same empty page for ever — against that per-IP bucket and its exclusive lock. The predicate lives in
+one place (`indexFilesCapped()`) and all three file-list endpoints call it. In the panel the same
+pair had a quieter failure: *Load the whole file list* would have appeared on a list no request can
+extend, returning exactly what was already on screen. It is hidden there now and replaced by a line
+saying the panel stops at that many.
+
+Two more things this change had to fix rather than merely avoid. The **public file tree had no leaf
+cap**: `buildTreePub` created one DOM node per file and the tree was rebuilt from scratch on every
+page that arrived, which was survivable only while a stored list could not be longer than a few
+thousand paths. It now draws at most 5 000 leaves — the per-torrent storage cap the worker ships
+with, so every list that drew in full still does — and says how many were loaded but not painted.
+And a **failed page no longer leaves the button stuck on "Loading…"**: the reader can press it
+again, while the automatic asking (the scroll observer, and the *everything at once* chain) stops on
+the first failure instead of answering a 429 with another request.
+
+Nothing here spends more of the rate limit than before at the defaults: the same batch, the same
+number of requests. *Everything at once* is the mode that can, which is why it is not the default and
+why its hint says so in both languages.
+
+### Added — how many files a torrent stores is now a panel setting
+
+`meta_max_files` (Settings → **Index file lists**) sets how many file paths the metadata worker
+writes for one torrent. Empty — the default, and what every existing install keeps — means "use the
+worker's own `max_files`", exactly the contract `meta_worker_concurrency` has had since 1.7.0; a
+number between 1 and 50 000 overrides it and reaches the worker within about a minute, no restart
+and no root. It rides in the settings query `effective_order()` already runs on a timer, so it costs
+no extra round trip. Out of range is **clamped**, never discarded — asking for more must not
+silently produce less than the config file was already giving; a non-numeric value is logged and
+ignored; an unreadable settings table leaves the last known cap standing, because a database blip is
+not an instruction to start truncating file lists.
+
+One number, both queues: `finish()` is shared, so it governs `whitelist_files` and `index_files`
+alike, and the torrent's real `files_count` is stored unclipped whatever it says — which is what
+lets the pages keep saying *5 000 of 18 000*. It does nothing for index rows while *Keep File Lists*
+is No.
+
+**It does not reach lists imported from a federation peer**, and the field says so rather than
+leaving it to be discovered. Those keep federation's own limits (5 000 per row at validation in
+`worker/federation.py`, 2 000 for a `fed_review` package): honouring the cap there could only ever
+make a peer's list *shorter* — their export is already bounded by `fed_export_max_files` and the
+wire budgets — and a partial list is worse than none, because search would then answer from half a
+torrent.
+
+The worker reports `max_files`, `max_files_config` and `max_files_max` in its heartbeat, and the
+**Index** status card shows what it is really storing per torrent. That card, not the Whitelist one:
+the equivalent warnings for parallel fetches and fetch order live inside `whitelistStatus()`'s
+`if ($mode === 'whitelist')` branch and therefore never render on an open-mode tracker, which is the
+only mode where `index_files` exists at all. A heartbeat carrying no `max_files` key is a worker
+still running a pre-1.38.0 `worker.py`; it ignores the setting completely and the card says so.
+
+Raising the cap changes nothing about torrents already stored — no backfill, deliberately: flipping
+resolved rows back to *pending* would hand the hourly pruner rows whose `grace_until` is already in
+the past, and it would delete them. Schema 42 → 43 (settings only). The 50 000 ceiling is written
+twice and cannot be written once, because one half enforces it in Python (`MAX_FILES_MAX` in
+`worker/worker.py`) and the other offers it in a PHP form (`META_MAX_FILES_MAX` in
+`includes/index.php`, which the save clamp and the field's `max=` both read);
+`tests/worker_settings_test.py` fails if they stop agreeing. That suite is new and drives the whole
+bridge — both settings — against fake objects: the panel value winning over the config file,
+clamping rather than discarding, empty meaning the config file, the read-error contracts (which
+differ between the two, on purpose), and `finish()` writing exactly the capped number of rows while
+recording the uncapped count.
+
+### Fixed — a file list now says how much of it was ever stored
+
+*"Why does an 18 000-file torrent load only 5 000?"* Because 5 000 is all there has ever been. The
+metadata worker writes the first `max_files` paths of a torrent (`[worker] max_files`, set to 5 000
+in `/etc/tracker-metadata.conf`) and records libtorrent's real count beside them, so the catalogue
+holds a 5 000-row list under an 18 000-file number. 620 entries on the production database are in
+that state and every one of them has exactly 5 000 rows; the largest claims 27 260 files. Nothing
+was being truncated on the way out — the panel was showing everything it had, under a heading
+printing something else.
+
+Every surface now prints both numbers and one calm line under the tree: **Files (5 000 of 18 000)**
+and *"The catalogue stores at most 5 000 paths per torrent — the rest were never recorded."* That is
+the public info overlay and the file modal — which, with `index.files_all` granted (the *Site member*
+preset has it), simply stopped paging at 5 000 and said nothing whatsoever — and the Index and
+Whitelist detail modals, where the Size row printed 18 000 three lines above a heading that said
+5 000. `api/index_files.php` returns the entry's own `files_count` for both arms plus `stored_total`
+(filled in only on the page that ends the stored list) and `stored_short`; the two admin item
+endpoints return `files_short` next to the existing `files_truncated`. Those two are deliberately
+separate: *Load the whole file list* is offered only when rows really are waiting in the table,
+because on a list the worker wrote short it would fetch the same 5 000 again.
+
+Two smaller things fell out of the same reading. The info overlay's *list truncated* note was
+appended to the panel one line before the panel was emptied to make room for the tree, so the single
+message a reader without `index.files_all` needed never survived to the screen. And the Whitelist
+modal printed *"Single file or no file list stored"* underneath complete file trees, because that
+sentence hung on the reply not being truncated instead of on there being no files.
+
+Storage is untouched. Raising the cap is still a worker config edit and a service restart, and it
+applies only to torrents fetched afterwards: already-stored lists keep the length they were written
+with, and the file-name search can only ever match a path that was stored.
+
 ## [1.37.0] — 2026-09-08
 
 ### Added — the database engine's memory, from the panel (MariaDB and MySQL)

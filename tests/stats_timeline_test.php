@@ -15,6 +15,12 @@ require_once $root . '/includes/functions.php';
 require_once $root . '/includes/schema.php';
 require_once $root . '/includes/whitelist.php';
 require_once $root . '/includes/stats_timeline.php';
+// The catalogue, loaded ON PURPOSE and after the timeline. Every sample carries index_rows, and
+// until this line the suite ran without includes/index.php: the sampler's function_exists guard
+// silently wrote a zero and the whole column was untested. The guard itself is still real — the two
+// api/* entry points can reach the timeline without the catalogue — and it is tested below in a
+// subprocess that deliberately does NOT load this file, which is the only honest way to check it.
+require_once $root . '/includes/index.php';
 
 $fails = 0; $n = 0;
 function check(string $name, bool $ok, string $info = ''): void {
@@ -324,6 +330,76 @@ check('and it is the same length as every other series',
 $js = (string)file_get_contents($root . '/assets/js/stats-timeline.js');
 check('the chart declares the series and leaves it off by default',
       preg_match("/key: 'index_fetched'.*?on: false/s", $js) === 1);
+
+/* == what one sample costs, and what it is still allowed to claim == */
+//
+// MEASURED on production 2026-09-08: SELECT COUNT(*) FROM index_hashes is an index scan over
+// 3 368 887 entries, 939 ms, and this sampler ran it once per stored sample — once a minute, all
+// day, on a database shared with the mail server, the forum and the file host. It now reads the
+// thirty-second cache in includes/index.php with a five-minute TTL. These checks say what that is
+// allowed to cost the chart: the number must still be TRUE, and a change must reach the very next
+// sample.
+$db->exec("TRUNCATE TABLE `" . ST_RAW_TABLE . "`");
+$tlCfg = ['stats_timeline_enabled' => '1', 'stats_timeline_interval' => '60', 'tracker_mode' => 'blacklist'];
+$rowsRead = function () use ($db): int {
+    $r = $db->query("SHOW SESSION STATUS LIKE 'Handler_read_next'")->fetch(PDO::FETCH_NUM);
+    return (int)($r[1] ?? 0);
+};
+// A TTL at or below the sample interval expires before every single sample and saves exactly
+// nothing — the shape this change was nearly written in.
+check('the TTL is above the sample interval, or it buys nothing',
+      ST_INDEX_ROWS_TTL > statsTimelineInterval([]), ST_INDEX_ROWS_TTL . ' vs ' . statsTimelineInterval([]));
+
+$K = 2000;
+$hx = function (int $i): string { return substr(sprintf('%040x', $i * 0x9E3779B1 + 7), -40); };
+$mine = [];
+$vals = [];
+for ($i = 1; $i <= $K; $i++) { $mine[] = $hx(70000 + $i); $vals[] = "('" . $hx(70000 + $i) . "', NOW(), NOW() + INTERVAL 3 DAY, 'none')"; }
+foreach (array_chunk($vals, 1000) as $chunk) {
+    $db->exec("INSERT INTO index_hashes (info_hash, last_seen, grace_until, meta_status) VALUES " . implode(',', $chunk));
+}
+$live = indexRowsCount($db);
+$tsA = 1900000000;
+indexTotalCacheDrop();
+$b = $rowsRead();
+statsTimelineIngest($db, $tlCfg, $p, $tsA, 'test', true);
+$dA = $rowsRead() - $b;
+$storedA = (int)$db->query("SELECT index_rows FROM `" . ST_RAW_TABLE . "` WHERE ts = $tsA")->fetchColumn();
+check('the stored sample is the catalogue\'s true size', $storedA === $live && $live >= $K, "$storedA vs $live");
+check('control: that first sample really did walk the table', $dA >= $K, "read=$dA of $K");
+
+$b = $rowsRead();
+statsTimelineIngest($db, $tlCfg, $p, $tsA + 60, 'test', true);
+$dB = $rowsRead() - $b;
+$storedB = (int)$db->query("SELECT index_rows FROM `" . ST_RAW_TABLE . "` WHERE ts = " . ($tsA + 60))->fetchColumn();
+check('a second sample inside the TTL records the same true number for free', $storedB === $live && $dB < intdiv($K, 10), "read=$dB, stored=$storedB");
+
+// The property that makes the cache admissible on a chart at all: it is dropped wherever the number
+// moves, so the sample after a change records the change exactly rather than a TTL late.
+$gone = indexDelete($db, array_slice($mine, 0, 500));
+$live2 = indexRowsCount($db);
+statsTimelineIngest($db, $tlCfg, $p, $tsA + 120, 'test', true);
+$storedC = (int)$db->query("SELECT index_rows FROM `" . ST_RAW_TABLE . "` WHERE ts = " . ($tsA + 120))->fetchColumn();
+check('a change reaches the VERY NEXT sample, not the next TTL', $gone === 500 && $storedC === $live2 && $storedC < $storedA, "$storedA -> $storedC (live $live2)");
+
+// The guard around that call is not decoration: api/stats_timeline.php and api/tracker_stats.php
+// both reach this file on paths that need not carry includes/index.php, and a sampler that fatals
+// is a sample not stored. Checked where it actually matters — in a process that never loads the
+// catalogue — because this suite now loads it deliberately and cannot see the difference.
+$probe = $root . '/config/_tl_guard_probe.php';
+@file_put_contents($probe, "<?php\n\$root = " . var_export($root, true) . ";\n"
+    . "require \$root . '/config/database.php';\nrequire \$root . '/includes/settings.php';\n"
+    . "require \$root . '/includes/functions.php';\nrequire \$root . '/includes/schema.php';\n"
+    . "require \$root . '/includes/whitelist.php';\nrequire \$root . '/includes/stats_timeline.php';\n"
+    . "\$r = statsTimelineRowFromParsed(getDb(), ['tracker_mode' => 'blacklist'], ['torrents' => 1], 1);\n"
+    . "echo 'OK:' . \$r['index_rows'];\n");
+$out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($probe) . ' 2>&1');
+@unlink($probe);
+check('a sampler without includes/index.php still builds a row (index_rows 0, no fatal)', trim($out) === 'OK:0', $out);
+
+indexDelete($db, $mine);
+$db->exec("TRUNCATE TABLE `" . ST_RAW_TABLE . "`");
+indexTotalCacheDrop();
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

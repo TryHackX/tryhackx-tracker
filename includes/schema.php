@@ -11,7 +11,9 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 42;  // 42 = settings only (dbmem_cmd, dbmem_enabled: the database-memory helper). 41 = page_content.lang — Terms and Info are written per language
+const TRACKER_SCHEMA_VERSION = 44;  // 44 = settings only (index_files_*: how a file list loads — mode, batch, total, once for the search page and once for the panel)
+// 43 = settings only (meta_max_files: the worker's stored-files-per-torrent cap, live from the panel)
+// 42 = settings only (dbmem_cmd, dbmem_enabled: the database-memory helper). 41 = page_content.lang — Terms and Info are written per language
 // 40 = users.language — the interface language follows the account
 // 39 = page_content — Terms and Info editable through the panel's own editor
 // 38 = net_limit_blocked — hand-typed addresses that beat an allow list
@@ -1118,6 +1120,18 @@ function trackerSchemaDefaultSettings(): array {
         // rows — small enough that there is no roll-up and never will be.
         'index_poll_keep_days'        => '90',
         'index_poll_budget'           => '45',
+        // schema v44: how a file list LOADS, once for the public search page and once for the panel
+        // modals. Mode is scroll|button|all and decides only WHEN the browser asks again; the two
+        // numbers are server rules (includes/index.php clamps them again on read). The defaults are
+        // what 1.37.0 did: the search page scrolls and takes 2 000 a request, the modals show 5 000
+        // and offer a button for the rest. index_files_max is the one new rule — before it, a member
+        // with index.files_all could page a 500 000-file torrent to its end one OFFSET at a time.
+        'index_files_mode'            => 'scroll',
+        'index_files_batch'           => '2000',
+        'index_files_max'             => '20000',
+        'index_files_admin_mode'      => 'button',
+        'index_files_admin_batch'     => '5000',
+        'index_files_admin_max'       => '1000000',
         // schema v7: index metadata auto-queue + admin near-pages radius
         'index_meta_auto_queue'       => '0',
         'admin_near_pages'            => '2',
@@ -1136,6 +1150,12 @@ function trackerSchemaDefaultSettings(): array {
         // schema v8: metadata worker parallel fetches (empty = keep the worker's own config file
         // value; 1-16 overrides it live — the worker re-reads this setting every ~60 s)
         'meta_worker_concurrency'     => '',
+        // schema v43: how many file paths the worker stores for ONE torrent, in both queues
+        // (finish() is shared). Empty = keep the worker's own `max_files`; 1-META_MAX_FILES_MAX
+        // overrides it live on the same ~60 s re-read. Empty is the default and must stay a real
+        // value: an upgrade may not silently rewrite the length of the lists a running worker
+        // produces. Imported peer lists keep federation's own limits — see effective_max_files().
+        'meta_max_files'              => '',
         // schema v30: which pending hash the metadata worker takes next. The index queue is
         // millions of rows deep, so this decides what the tracker knows anything about for months.
         // 'oldest' is the order it has always used, and stays the default: an upgrade must not

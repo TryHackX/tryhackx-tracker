@@ -17,7 +17,13 @@ import configparser, json, logging, os, re, secrets, signal, sys, time
 # The parallel-fetch ceiling, in ONE place. It used to be written as a literal in two of them, which
 # is how a build enforcing 16 and a panel offering 64 ended up in the same install.
 CONCURRENCY_MAX = 64
-WORKER_VERSION = 4
+# The stored-files-per-torrent ceiling. Same lesson, and it can only get HALF of it here: the panel
+# is PHP, so the number is written twice by construction — here and as META_MAX_FILES_MAX in
+# includes/index.php, which is the single place the PHP side reads it from. Do not add a third.
+# tests/worker_settings_test.py extracts both and fails when they stop being equal, because a panel
+# offering 50 000 against a build enforcing 20 000 is exactly how "set 32, gets 4" happened before.
+MAX_FILES_MAX = 50000
+WORKER_VERSION = 5
 
 # ── which pending hash goes next ─────────────────────────────────────────────
 #
@@ -192,7 +198,8 @@ class Config:
         self.heartbeat = w.get("heartbeat_file", "/home/tracker/metadata_worker/heartbeat")
         self.listen_port = int(w.get("listen_port", 6881))
         self.trackers = [t.strip() for t in w.get("trackers", "").split(",") if t.strip()]
-        self.max_files = max(1, min(50000, int(w.get("max_files", 5000))))
+        # Fallback only: the panel setting `meta_max_files` overrides this live (effective_max_files).
+        self.max_files = max(1, min(MAX_FILES_MAX, int(w.get("max_files", 5000))))
         self.tmp_dir = w.get("tmp_dir", "/home/tracker/metadata_worker/tmp")
         self.log_level = w.get("log_level", "INFO").upper()
         self.dht_routers = [r.strip() for r in w.get("dht_routers", "router.bittorrent.com:6881,router.utorrent.com:6881,dht.transmissionbt.com:6881,dht.aelitis.com:6881,dht.libtorrent.org:25401").split(",") if r.strip()]
@@ -276,6 +283,7 @@ class Worker:
         self.active = {}  # claim token -> dict(row, handle, deadline)
         self._conc_override = None   # live override from the settings table (panel), None = use config
         self._conc_checked_at = 0.0
+        self._max_files_override = None  # same contract for meta_max_files; read in effective_order()
         self._order_mode = "oldest"  # live from the settings table, same 60 s refresh
         self._order_shares = dict(ORDER_MIX_DEFAULT)
         self._order_plan = ["oldest"] * ORDER_ROTATION
@@ -358,6 +366,57 @@ class Worker:
                 self._conc_override = val
         return self._conc_override or self.cfg.concurrency
 
+    def adopt_max_files(self, raw):
+        """Take the panel's `meta_max_files`. Returns True when the effective value changed.
+
+        Split out of effective_order() so the parse is testable without a database and so a change
+        gets exactly one log line, the same shape the concurrency override writes.
+        """
+        raw = str(raw or "").strip()
+        if raw == "":
+            val, why = None, "empty (use the config file)"
+        elif raw.isdigit():
+            asked = int(raw)
+            val = max(1, min(MAX_FILES_MAX, asked))
+            why = ("as asked" if val == asked
+                   else "asked %d, this build tops out at %d" % (asked, MAX_FILES_MAX))
+        else:
+            val, why = None, "not a number: %r" % raw[:20]
+        if val == self._max_files_override:
+            return False
+        log.info("stored files per torrent from settings: %s (%s; config %d)",
+                 val if val is not None else "none", why, self.cfg.max_files)
+        self._max_files_override = val
+        return True
+
+    def effective_max_files(self):
+        """How many file paths one torrent may store: config `max_files`, or the panel's override.
+
+        Same three rules as effective_concurrency(), for the same reasons, so an operator learns one
+        contract and not two: empty means "use the config file"; a non-numeric value is ignored with
+        a log line; and a number outside this build's range is CLAMPED, never discarded — discarding
+        is what once turned "I asked for 32" into "the worker runs the config's 4", and asking for
+        more must not silently produce less than before.
+
+        The READ is not here: it rides in effective_order()'s batched query (see there). This is a
+        pure accessor, so finish() can call it once per stored torrent without a settings round trip.
+
+        WHAT THIS NUMBER DOES NOT GOVERN: file lists that arrive from a federation peer. Those are
+        written by worker/federation.py (merge_batch and its fallback) and by fedReviewApply() in
+        includes/federation.php, and all three keep their own limits — MAX_FILES_PER_ROW = 5000 at
+        validation and FED_REVIEW_FILES_MAX = 2000 for the review queue. Deliberate, and the panel
+        hint says so out loud rather than leaving it to be discovered:
+
+          * honouring it there could only ever make an imported list SHORTER, never longer — the
+            peer's export is already bounded by its own fed_export_max_files and by the wire budgets
+            — and merge_batch's own rule is that a partial list is worse than none, because search
+            would then answer from half a torrent;
+          * this cap means "stop asking the DHT for more of this torrent". Reusing it to throw away
+            rows a peer already paid to send would give one number two different jobs, which is the
+            index_keep_files divergence all over again.
+        """
+        return self._max_files_override or self.cfg.max_files
+
     # ── queue ──────────────────────────────────────────────────────────────
     def usable_selectors(self):
         """Which orderings this database can serve right now, checked rather than assumed.
@@ -408,10 +467,15 @@ class Worker:
                 keys = ",".join("'meta_order_mix_" + n + "'" for n in ORDER_MIX_KEYS)
                 rows = self.db.query(
                     "SELECT `key`, `value` FROM settings WHERE `key` IN "
-                    "('meta_order_mode','db_time_zone'," + keys + ")", fetch=True)
+                    "('meta_order_mode','db_time_zone','meta_max_files'," + keys + ")", fetch=True)
                 got = {str(r["key"]): str(r["value"] or "") for r in (rows or [])}
-                # Read here rather than in its own query: this is the one place that already asks the
-                # settings table on a timer, and the clock is exactly as live a setting as the order.
+                # FIRST, before anything else in this block. Everything below can throw — usable_selectors()
+                # runs its own information_schema query, and the whole body shares one `except` — and a
+                # failure up there must not quietly leave the file cap at yesterday's value while the
+                # panel shows today's. Reading it here also costs nothing: this is the one place that
+                # already asks the settings table on a timer.
+                self.adopt_max_files(got.get("meta_max_files", ""))
+                # The clock, for the same reason: it is exactly as live a setting as the order.
                 self.db.adopt_time_zone(got.get("db_time_zone", ""))
                 mode, shares = order_normalise(
                     got.get("meta_order_mode", ""),
@@ -525,6 +589,14 @@ class Worker:
                 "concurrency": self.effective_concurrency(),
                 "concurrency_config": self.cfg.concurrency,
                 "concurrency_max": CONCURRENCY_MAX,
+                # Same three fields for the file cap, and the panel needs all three: what is RUNNING,
+                # what the config file would give without the setting, and what this build accepts —
+                # so "you asked for 90 000, this worker tops out at 50 000" can be said as a fact
+                # instead of the panel reading the operator's own number back at them. A heartbeat
+                # with no max_files key at all is an older worker.py that ignores the setting.
+                "max_files": self.effective_max_files(),
+                "max_files_config": self.cfg.max_files,
+                "max_files_max": MAX_FILES_MAX,
                 "active": len(self.active),
                 # Reported for the same reason the effective concurrency is: the panel must be able
                 # to show what the worker is DOING, not read a setting back to the operator.
@@ -642,7 +714,9 @@ class Worker:
                 fs = ti.files()
                 count = int(fs.num_files())
                 files = []
-                for i in range(min(count, self.cfg.max_files)):
+                # `count` is the torrent's REAL file count and is stored unclipped below — the cap
+                # decides how much of the list is written, never what the row claims to contain.
+                for i in range(min(count, self.effective_max_files())):
                     p = fs.file_path(i)
                     if isinstance(p, bytes):
                         p = p.decode("utf-8", "replace")

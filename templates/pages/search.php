@@ -24,6 +24,11 @@ $meUser = currentUser($db);
 <input type="hidden" id="search-csrf" value="<?= $csrfToken ?>">
 <form id="search-form" class="search-panel" novalidate
       data-can-files="<?= $canFiles ? '1' : '0' ?>" data-can-magnet="<?= $canMagnet ? '1' : '0' ?>"
+      <?php /* Only the mode travels. The batch and the total are server rules — api/index_files.php
+               applies them and reports `capped` — and a number the browser never sees is a number
+               the browser can never be talked into ignoring. Both overlays live in this file and
+               read this attribute inside initSearch()'s closure, so they cannot drift apart. */ ?>
+      data-files-mode="<?= sanitize(indexFilesMode($cfg)) ?>"
       data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
       <?php $sExtra = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
                                               array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')]))); ?>

@@ -1954,6 +1954,12 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                         <small class="settings-hint"><?= __('settings.index_files_keep_hint') ?></small>
                     </div>
                     <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.index_max_files') ?> <small class="settings-hint"><?= _h('settings.index_max_files_note') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="meta_max_files" value="<?= sanitize($cfg['meta_max_files'] ?? '') ?>" min="1" max="<?= META_MAX_FILES_MAX ?>" placeholder="<?= _h('settings.index_max_files_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.index_max_files_hint', ['max' => number_format(META_MAX_FILES_MAX, 0, '.', '&nbsp;')]) ?>
+                            <details class="settings-more"><summary><?= _h('settings.index_max_files_more') ?></summary><?= __('settings.index_max_files_more_body') ?></details></small>
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.index_files_poll_keep') ?> <small class="settings-hint"><?= _h('settings.index_files_days') ?></small></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="index_poll_keep_days"
                                value="<?= (int)($cfg['index_poll_keep_days'] ?? 90) ?>" min="1" max="3650">
@@ -1961,6 +1967,69 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                             <?= __('settings.index_files_poll_keep_hint_1') ?>
                             <a href="<?= $baseUrl ?>?action=admin-index"><?= _h('settings.index_files_poll_keep_link') ?></a><?= __('settings.index_files_poll_keep_hint_2') ?>
                         </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- How a file list loads: the same three questions for the search page and for the panel.
+                 Both selects are fed from IDX_FILES_MODES (includes/index.php), which is also what the
+                 save coercion and the two clamp-on-read helpers use, so the vocabulary exists once.
+                 The numbers are printed through the helpers rather than raw from $cfg: what the box
+                 shows is then what is in force, including a max that was repaired up to one batch. -->
+            <?php
+            $fileModeLabel = [
+                'scroll' => _h('settings.filelist_mode_scroll'),
+                'button' => _h('settings.filelist_mode_button'),
+                'all'    => _h('settings.filelist_mode_all'),
+            ];
+            $fileModePub   = indexFilesMode($cfg);
+            $fileModeAdmin = indexFilesAdminMode($cfg);
+            $nbsp = fn(int $n) => number_format($n, 0, '.', '&nbsp;');
+            ?>
+            <div class="settings-section" id="section-filelist" data-group="index" data-title="<?= _h('settings.filelist_title') ?>">
+                <h5><?= _h('settings.filelist_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.filelist_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.filelist_pub_mode') ?> <small class="settings-hint"><?= _h('settings.filelist_pub_note') ?></small></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="index_files_mode">
+                            <?php foreach (IDX_FILES_MODES as $mv): ?>
+                            <option value="<?= $mv ?>" <?= $fileModePub === $mv ? 'selected' : '' ?>><?= $fileModeLabel[$mv] ?? $mv ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.filelist_pub_mode_hint') ?></small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.filelist_pub_batch') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_files_batch" value="<?= indexFilesBatch($cfg) ?>" min="<?= IDX_FILES_BATCH_MIN ?>" max="<?= IDX_FILES_BATCH_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.filelist_pub_batch_hint', ['max' => $nbsp(IDX_FILES_BATCH_MAX)]) ?></small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.filelist_pub_max') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_files_max" value="<?= indexFilesMax($cfg) ?>" min="<?= IDX_FILES_BATCH_MIN ?>" max="<?= IDX_FILES_MAX_HARD ?>">
+                        <small class="settings-hint"><?= __('settings.filelist_pub_max_hint', ['max' => $nbsp(IDX_FILES_MAX_HARD)]) ?>
+                            <details class="settings-more"><summary><?= _h('settings.filelist_pub_max_more') ?></summary><?= __('settings.filelist_pub_max_more_body', ['max' => $nbsp(IDX_FILES_MAX_HARD)]) ?></details></small>
+                    </div>
+                </div>
+                <div class="row g-3 mt-1">
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.filelist_admin_mode') ?> <small class="settings-hint"><?= _h('settings.filelist_admin_note') ?></small></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="index_files_admin_mode">
+                            <?php foreach (IDX_FILES_MODES as $mv): ?>
+                            <option value="<?= $mv ?>" <?= $fileModeAdmin === $mv ? 'selected' : '' ?>><?= $fileModeLabel[$mv] ?? $mv ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.filelist_admin_mode_hint') ?></small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.filelist_admin_batch') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_files_admin_batch" value="<?= indexFilesAdminBatch($cfg) ?>" min="<?= IDX_FILES_BATCH_MIN ?>" max="<?= IDX_FILES_ADMIN_BATCH_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.filelist_admin_batch_hint', ['max' => $nbsp(IDX_FILES_ADMIN_BATCH_MAX)]) ?></small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.filelist_admin_max') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_files_admin_max" value="<?= indexFilesAdminMax($cfg) ?>" min="<?= IDX_FILES_BATCH_MIN ?>" max="<?= IDX_FILES_ADMIN_MAX_HARD ?>">
+                        <small class="settings-hint"><?= __('settings.filelist_admin_max_hint', ['max' => $nbsp(IDX_FILES_ADMIN_MAX_HARD)]) ?></small>
                     </div>
                 </div>
             </div>

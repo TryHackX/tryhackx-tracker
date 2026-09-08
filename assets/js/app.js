@@ -2286,6 +2286,12 @@ const getJson = async (endpoint) => {
         if (!form) return;
         const canMagnet = form.dataset.canMagnet === '1';
         const canFiles = form.dataset.canFiles === '1';
+        // How the file list fills up (index_files_mode): 'scroll' keeps asking as the reader reaches
+        // the end, 'button' never asks unprompted, 'all' chains pages until the server says stop.
+        // Only the mode comes from the page — how big a page is and how many of them are allowed are
+        // the server's business, and api/index_files.php answers `capped` when the total is reached.
+        // Both file overlays are inside this closure, so one read serves them both.
+        const filesMode = ['scroll', 'button', 'all'].includes(form.dataset.filesMode) ? form.dataset.filesMode : 'scroll';
         // Every port, not just the first. Extra opentracker instances listen on their own ports and
         // share nothing between them, so a magnet that names one port is only ever answered by one
         // process. The attribute is empty without the cluster, which leaves this unchanged.
@@ -2559,6 +2565,16 @@ const getJson = async (endpoint) => {
         const overlay = $id('files-overlay');
         function closeFiles() { if (overlay) { overlay.hidden = true; document.removeEventListener('keydown', escFiles); } }
         function escFiles(e) { if (e.key === 'Escape') closeFiles(); }
+        // One DOM node per file, and this tree is rebuilt from scratch on every page that arrives —
+        // so ten pages of 2 000 is ten rebuilds of a tree growing to 20 000 lines. The panel's tree
+        // has had a cap since it was written (AdminCommon.buildFileTree); this one had none, which
+        // was survivable only while a stored list could not be longer than a few thousand paths.
+        // 5 000 is that number: the per-torrent storage cap the worker ships with, so every list
+        // that draws in full today still draws in full. Past it the leaves are not created at all
+        // (the panel's version creates them and only hides them — not a model to copy at this size)
+        // and one line says how many are missing. Folder counts stay true; they are counted, not
+        // drawn.
+        const PUB_TREE_LEAVES = 5000;
         function buildTreePub(files, tokens) {
             const root = { dirs: new Map(), files: [] };
             files.forEach(f => {
@@ -2572,6 +2588,7 @@ const getJson = async (endpoint) => {
             });
             const container = document.createElement('div');
             container.className = 'ftree';
+            let drawn = 0, skipped = 0;
             const countFiles = (n) => { let c = n.files.length; n.dirs.forEach(d => { c += countFiles(d); }); return c; };
             const nameEl = (cls, text) => {
                 const sp = document.createElement('span');
@@ -2600,6 +2617,8 @@ const getJson = async (endpoint) => {
                     parent.appendChild(det);
                 });
                 node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
+                    if (drawn >= PUB_TREE_LEAVES) { skipped++; return; }
+                    drawn++;
                     const line = document.createElement('div');
                     line.className = 'ftree-file';
                     line.appendChild(nameEl('ftree-name', f.name));
@@ -2610,6 +2629,12 @@ const getJson = async (endpoint) => {
                     parent.appendChild(line);
                 });
             })(root, container, 0);
+            if (skipped) {
+                const cut = document.createElement('p');
+                cut.className = 'text-muted';
+                cut.textContent = t('js.app.files_tree_cap', {n: drawn.toLocaleString(), rest: skipped.toLocaleString()});
+                container.appendChild(cut);
+            }
             return container;
         }
 
@@ -3013,20 +3038,37 @@ const getJson = async (endpoint) => {
                 det.className = 'rt-collapse info-section';
                 det.open = true;
                 const sum = document.createElement('summary');
-                sum.textContent = t('js.app.files_count', {n: Number(st.files_count).toLocaleString()});
+                // The torrent's OWN file count, which is not the length of the list below it: the
+                // catalogue stores only the first few thousand paths of a huge torrent, so an
+                // 18 000-file torrent has 5 000 rows here. The heading is rewritten with both
+                // numbers as pages arrive rather than promising a count nothing can deliver.
+                const totalFiles = Number(st.files_count) || 0;
+                sum.textContent = t('js.app.files_count', {n: totalFiles.toLocaleString()});
                 det.appendChild(sum);
                 const holder = document.createElement('div');
                 holder.className = 'rt-body';
                 holder.textContent = t('js.common.loading');
                 det.appendChild(holder);
                 body.appendChild(det);
-                // Paged: the first slice now, the next one whenever the reader reaches the end of the
-                // list (an IntersectionObserver on a sentinel) or presses the button. The tree is
-                // rebuilt from everything loaded so far — cheap next to the fetch, and it keeps one
-                // code path for the folder structure.
+                // Paged: the first slice now, and the next one when the mode says so — on reaching
+                // the end of the list (an IntersectionObserver on a sentinel), on the button, or
+                // straight away until the server stops answering with more. The tree is rebuilt from
+                // everything loaded so far — cheap next to the fetch, and it keeps one code path for
+                // the folder structure — with a leaf cap so the rebuild stays cheap at a high total.
                 const allFiles = [];
-                let next = 0, more = false, loading = false;
+                // `stalled` is set by a failed page and stops the AUTOMATIC asking only — the button
+                // stays live. Without it a 429 from the shared search bucket met an observer that
+                // re-fires whenever the sentinel is on screen, and the answer to being rate-limited
+                // was another request.
+                let next = 0, more = false, loading = false, stalled = false;
                 const tree = document.createElement('div');
+                const notes = document.createElement('div');
+                const note = (text) => {
+                    const p = document.createElement('p');
+                    p.className = 'text-muted';
+                    p.textContent = text;
+                    notes.appendChild(p);
+                };
                 const foot = document.createElement('div');
                 foot.className = 'files-more';
                 const btn = document.createElement('button');
@@ -3036,33 +3078,59 @@ const getJson = async (endpoint) => {
                 foot.appendChild(btn); foot.appendChild(sentinel);
                 const render = () => {
                     tree.replaceChildren(buildTreePub(allFiles, []));
+                    sum.textContent = (totalFiles && allFiles.length < totalFiles)
+                        ? t('js.app.files_count_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
+                        : t('js.app.files_count', {n: (totalFiles || allFiles.length).toLocaleString()});
                     btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
                     btn.disabled = loading;
                     foot.hidden = !more;
                 };
                 const loadMore = async () => {
-                    if (loading || (!more && next > 0)) return;
+                    if (loading || (!more && next > 0)) return false;
                     loading = true; if (next > 0) render();
                     const fj = await getJson('index_files&hash=' + encodeURIComponent(hash) + '&offset=' + next);
                     loading = false;
-                    if (infoOverlay.hidden || infoHash !== hash) return;
-                    if (!fj || !fj.success) { if (next === 0) holder.textContent = t('js.app.no_file_list'); return; }
+                    if (infoOverlay.hidden || infoHash !== hash) return false;
+                    if (!fj || !fj.success) {
+                        if (next === 0) { holder.textContent = t('js.app.no_file_list'); return false; }
+                        // Leave `more` alone: the reader may still press the button. It is the
+                        // unattended asking that stops, and render() puts the button back to
+                        // "Load more" instead of leaving it stuck on "Loading…" for ever.
+                        stalled = true; render();
+                        return false;
+                    }
+                    stalled = false;
                     (fj.files || []).forEach(f => allFiles.push(f));
                     next = typeof fj.next === 'number' ? fj.next : allFiles.length;
                     // More pages exist AND this visitor may ask for them (index.files_all); without
-                    // the grant the list stops here and says so.
+                    // the grant the list stops here and says so. A capped reply never claims
+                    // truncation, so this is already false when the site's own total ended the list.
                     more = !!fj.truncated && !!fj.can_more;
-                    if (fj.truncated && !fj.can_more) { const p = document.createElement('p'); p.className = 'text-muted'; p.textContent = t('js.app.files_truncated'); holder.appendChild(p); }
-                    if (next === 0 || !allFiles.length) { holder.textContent = t('js.app.no_file_list'); return; }
-                    if (!tree.parentNode) { holder.textContent = ''; holder.appendChild(tree); holder.appendChild(foot); }
+                    if (next === 0 || !allFiles.length) { holder.textContent = t('js.app.no_file_list'); return false; }
+                    // The notes hang below the tree and are written AFTER the holder is emptied of
+                    // its "Loading…". They used to be appended before that line, so the one message
+                    // the reader needed was wiped by the same call that attached the list.
+                    if (!tree.parentNode) { holder.textContent = ''; holder.appendChild(tree); holder.appendChild(foot); holder.appendChild(notes); }
+                    if (fj.truncated && !fj.can_more) note(t('js.app.files_truncated'));
+                    // Not an error and not a permission: the list simply ends short of the count in
+                    // the heading, because that is all the catalogue ever stored for this torrent.
+                    if (fj.stored_short) note(t('js.app.files_stored_cap', {n: Number(fj.stored_total || allFiles.length).toLocaleString()}));
+                    // The site's own ceiling, not a permission and not the worker's storage cap:
+                    // there are more rows and this page is not going to fetch them.
+                    if (fj.capped) note(t('js.app.files_cap_reached', {n: Number(fj.max || allFiles.length).toLocaleString()}));
                     render();
+                    return true;
                 };
+                // One request at a time, and a failure ends the chain rather than retrying it: every
+                // page spends a token from the per-IP bucket this endpoint shares with the search box.
+                const loadAll = async () => { while (more && !stalled) { if (!await loadMore()) break; } };
                 btn.addEventListener('click', loadMore);
-                if ('IntersectionObserver' in window) {
-                    new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more) loadMore(); },
+                if (filesMode === 'scroll' && 'IntersectionObserver' in window) {
+                    new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore(); },
                                              { root: null, rootMargin: '200px' }).observe(sentinel);
                 }
                 await loadMore();
+                if (filesMode === 'all') await loadAll();
             }
         }
 
@@ -3091,37 +3159,60 @@ const getJson = async (endpoint) => {
             // reaches the end of the list or presses the button — only with index.files_all.
             const allFiles = json.files.slice();
             let next = typeof json.next === 'number' ? json.next : allFiles.length;
-            let more = !!json.truncated && !!json.can_more, loading = false;
+            let more = !!json.truncated && !!json.can_more, loading = false, stalled = false;
+            // What the torrent says it holds, against what the catalogue actually stored. The two
+            // differ for every torrent bigger than the worker's per-torrent cap, and the title said
+            // only the second number while the search row said the first.
+            const totalFiles = Number(json.files_count) || 0;
             const tree = document.createElement('div');
+            const notes = document.createElement('div');
+            const note = (text) => { const p = document.createElement('p'); p.className = 'text-muted'; p.textContent = text; notes.appendChild(p); };
             const foot = document.createElement('div'); foot.className = 'files-more';
             const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-secondary btn-small';
             const sentinel = document.createElement('div'); sentinel.className = 'files-sentinel';
             foot.appendChild(btn); foot.appendChild(sentinel);
             const render = () => {
-                title.textContent = (json.name || name || t('js.app.files')) + ' — ' + t('js.app.files_n', {n: allFiles.length.toLocaleString() + (more || (json.truncated && !json.can_more) ? '+' : '')});
+                const head = (totalFiles && allFiles.length < totalFiles)
+                    ? t('js.app.files_n_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
+                    : t('js.app.files_n', {n: allFiles.length.toLocaleString() + (more || (json.truncated && !json.can_more) ? '+' : '')});
+                title.textContent = (json.name || name || t('js.app.files')) + ' — ' + head;
                 tree.replaceChildren(buildTreePub(allFiles, lastFilesSearch ? lastTokens : []));
                 btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
                 btn.disabled = loading; foot.hidden = !more;
             };
             const loadMore = async () => {
-                if (loading || !more) return;
+                if (loading || !more) return false;
                 loading = true; render();
                 const fj = await getJson('index_files&hash=' + encodeURIComponent(hash) + '&offset=' + next);
                 loading = false;
-                if (overlay.hidden) return;
-                if (fj && fj.success) { (fj.files || []).forEach(f => allFiles.push(f)); next = typeof fj.next === 'number' ? fj.next : allFiles.length; more = !!fj.truncated && !!fj.can_more; }
-                else more = false;
+                if (overlay.hidden) return false;
+                if (!fj || !fj.success) {
+                    // The button stays live; only the observer and the 'all' chain give up. This
+                    // used to set more=false, which removed the reader's only way to try again.
+                    stalled = true; render();
+                    return false;
+                }
+                stalled = false;
+                (fj.files || []).forEach(f => allFiles.push(f)); next = typeof fj.next === 'number' ? fj.next : allFiles.length; more = !!fj.truncated && !!fj.can_more;
+                if (fj.stored_short) note(t('js.app.files_stored_cap', {n: Number(fj.stored_total || allFiles.length).toLocaleString()}));
+                if (fj.capped) note(t('js.app.files_cap_reached', {n: Number(fj.max || allFiles.length).toLocaleString()}));
                 render();
+                return true;
             };
+            const loadAll = async () => { while (more && !stalled) { if (!await loadMore()) break; } };
             btn.addEventListener('click', loadMore);
-            if ('IntersectionObserver' in window) {
-                new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more) loadMore(); }, { root: null, rootMargin: '200px' }).observe(sentinel);
+            if (filesMode === 'scroll' && 'IntersectionObserver' in window) {
+                new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore(); }, { root: null, rootMargin: '200px' }).observe(sentinel);
             }
-            body.appendChild(tree); body.appendChild(foot);
-            if (json.truncated && !json.can_more) {
-                const p = document.createElement('p'); p.className = 'text-muted'; p.textContent = t('js.app.files_truncated'); body.appendChild(p);
-            }
+            body.appendChild(tree); body.appendChild(foot); body.appendChild(notes);
+            if (json.truncated && !json.can_more) note(t('js.app.files_truncated'));
+            // The list ends here and ends short: the rest was never written, so there is nothing to
+            // load and nothing wrong — say it once, quietly, under the tree.
+            if (json.stored_short) note(t('js.app.files_stored_cap', {n: Number(json.stored_total || allFiles.length).toLocaleString()}));
+            // The first page can already stand on the site's total when the two numbers are equal.
+            if (json.capped) note(t('js.app.files_cap_reached', {n: Number(json.max || allFiles.length).toLocaleString()}));
             render();
+            if (filesMode === 'all') await loadAll();
         }
         if (overlay) {
             overlay.addEventListener('click', (e) => { if (e.target === overlay) closeFiles(); });

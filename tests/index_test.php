@@ -29,6 +29,10 @@ $cfg = getSettings($db, true);
 check('schema version >= 6', (int)($cfg['schema_version'] ?? 0) >= 6, (string)($cfg['schema_version'] ?? 'none'));
 foreach (['index_hashes', 'index_files', 'whitelist', 'whitelist_files', 'banned_hashes'] as $t) $db->exec("TRUNCATE TABLE `$t`");
 @unlink(indexStateFile());
+// The count caches are checkout state, not database state, and TRUNCATE cannot clear them: a
+// config/index_count.json left behind by a page view (or by this suite's previous run) would answer
+// for a table that no longer holds those rows.
+indexTotalCacheDrop(); indexStatusCacheDrop();
 $tmp = sys_get_temp_dir();
 
 /** Build a gz (or plain) full-scrape file. $entries = [[hash_hex, complete, incomplete, downloaded], ...]. */
@@ -329,6 +333,264 @@ $byFull = indexSearchCatalogue($db, $cfg, ['search' => $hB, 'include_whitelist' 
 check('catalogue: the full hash finds its row', $byFull['total'] === 1 && ($byFull['rows'][0]['info_hash'] ?? '') === $hB, json_encode($byFull));
 $browse = indexSearchCatalogue($db, $cfg, ['search' => '', 'include_whitelist' => false]);
 check('catalogue: the empty search still lists everything', $browse['total'] === 2, json_encode($browse));
+
+// ── 12. the file list says how much of it was ever stored ─────────────────────
+// The metadata worker writes only the first max_files paths of a torrent (worker.py:645) but
+// records libtorrent's REAL count (worker.py:669), so a big entry has a short list under a big
+// number — 620 rows on production, every one with exactly 5 000 paths against counts up to 27 260.
+// The three file-list endpoints are router fragments that exit through jsonResponse() and cannot be
+// included here, so what is driven is the predicate they all call, fed by the rows and the same
+// LIMIT+1 query they actually run. Five stored paths against a count of 18 000 stand in for 5 000
+// against 18 000: what matters is that the list ENDS on the limit.
+$db->exec("TRUNCATE TABLE index_hashes"); $db->exec("TRUNCATE TABLE index_files");
+$db->exec("TRUNCATE TABLE whitelist"); $db->exec("TRUNCATE TABLE whitelist_files");
+$hShort = h(7001); $hWhole = h(7002);
+$db->exec("INSERT INTO index_hashes (info_hash, name, last_seen, grace_until, meta_status, files_count) VALUES ('$hShort', 'Big Torrent', NOW(), NOW() + INTERVAL 3 DAY, 'done', 18000)");
+$db->exec("INSERT INTO index_hashes (info_hash, name, last_seen, grace_until, meta_status, files_count) VALUES ('$hWhole', 'Small Torrent', NOW(), NOW() + INTERVAL 3 DAY, 'done', 4)");
+for ($i = 1; $i <= 5; $i++) $db->exec("INSERT INTO index_files (info_hash, path, size) VALUES ('$hShort', 'big/$i.bin', 100)");
+for ($i = 1; $i <= 4; $i++) $db->exec("INSERT INTO index_files (info_hash, path, size) VALUES ('$hWhole', 'small/$i.bin', 100)");
+
+/** One reply of api/index_files.php / api/admin/index_item.php: the row, the page, the shortfall. */
+$filesReply = function (string $hash, int $limit, int $offset = 0) use ($db) {
+    $st = $db->prepare("SELECT files_count FROM index_hashes WHERE info_hash = ?");
+    $st->execute([$hash]);
+    $fc = $st->fetchColumn();
+    $fs = $db->prepare("SELECT path, size FROM index_files WHERE info_hash = ? ORDER BY id LIMIT ? OFFSET ?");
+    $fs->bindValue(1, $hash, PDO::PARAM_STR);
+    $fs->bindValue(2, $limit + 1, PDO::PARAM_INT);
+    $fs->bindValue(3, $offset, PDO::PARAM_INT);
+    $fs->execute();
+    $rows = $fs->fetchAll(PDO::FETCH_ASSOC);
+    return indexFilesShortfall($fc === false || $fc === null ? null : (int)$fc, count($rows), $limit, $offset);
+};
+
+// The reported bug. The stored list ends exactly ON the limit, so the +1 probe comes back full but
+// not over and used to read as "complete" — a 5 000-row list under an 18 000-file heading, silently.
+$atCap = $filesReply($hShort, 5);
+check('list ending on the limit: not truncated, but SHORT of the torrent count', $atCap['truncated'] === false && $atCap['short'] === true && $atCap['stored'] === 5, json_encode($atCap));
+$whole = $filesReply($hWhole, 5);
+check('a complete list is neither truncated nor short', $whole['truncated'] === false && $whole['short'] === false && $whole['stored'] === 4, json_encode($whole));
+// Truncated and short are different answers and must not be merged: truncated means asking again
+// gets the rest, short means there is no rest to get. Only the first may offer a "load all" button.
+$more = $filesReply($hShort, 3);
+check('rows still waiting → truncated, and NOT short (asking again gets them)', $more['truncated'] === true && $more['short'] === false, json_encode($more));
+$last = $filesReply($hShort, 3, 3);
+check('the last page of a paged list reports the shortfall, counted from the offset', $last['truncated'] === false && $last['short'] === true && $last['stored'] === 5, json_encode($last));
+check('a row whose metadata was never fetched is never called short', indexFilesShortfall(null, 0, 5)['short'] === false);
+// The whitelist arm of the same endpoints reads its own table and its own files_count.
+$db->exec("INSERT INTO whitelist (info_hash, name, source, meta_status, files_count) VALUES ('" . h(7003) . "', 'Big Whitelisted', 'admin', 'done', 27260)");
+$wlId = (int)$db->lastInsertId();
+for ($i = 1; $i <= 5; $i++) $db->exec("INSERT INTO whitelist_files (whitelist_id, path, size) VALUES ($wlId, 'wl/$i.bin', 100)");
+$wf = $db->prepare("SELECT path FROM whitelist_files WHERE whitelist_id = ? ORDER BY id LIMIT ?");
+$wf->bindValue(1, $wlId, PDO::PARAM_INT); $wf->bindValue(2, 6, PDO::PARAM_INT); $wf->execute();
+$wlShort = indexFilesShortfall(27260, count($wf->fetchAll(PDO::FETCH_ASSOC)), 5);
+check('whitelist arm reports the same shortfall', $wlShort['truncated'] === false && $wlShort['short'] === true && $wlShort['stored'] === 5, json_encode($wlShort));
+
+// ── 13. how a file list loads: the clamps, and the ceiling the endpoints enforce ──────
+// The clamp that actually holds is the one on READ: a settings row can arrive from install.php, a
+// restored backup or a MySQL client on a database three other applications also use, and none of
+// those went through save_settings.php. So every one of these feeds a hand-built $cfg — the shape
+// of a row that never met the form.
+check('defaults reproduce 1.37.0: 2 000 a page, scrolling', indexFilesBatch(trackerSchemaDefaultSettings()) === 2000 && indexFilesMode(trackerSchemaDefaultSettings()) === 'scroll');
+check('defaults reproduce 1.37.0: the panel shows 5 000 and waits for the button', indexFilesAdminBatch(trackerSchemaDefaultSettings()) === 5000 && indexFilesAdminMax(trackerSchemaDefaultSettings()) === 1000000 && indexFilesAdminMode(trackerSchemaDefaultSettings()) === 'button');
+check('public batch: above the ceiling clamps down', indexFilesBatch(['index_files_batch' => '50000']) === IDX_FILES_BATCH_MAX);
+check('public batch: below the floor clamps up', indexFilesBatch(['index_files_batch' => '10']) === IDX_FILES_BATCH_MIN);
+check('public batch: empty and missing both mean the default', indexFilesBatch(['index_files_batch' => '']) === 2000 && indexFilesBatch([]) === 2000);
+check('public total: above the ceiling clamps down', indexFilesMax(['index_files_max' => '99999999']) === IDX_FILES_MAX_HARD);
+// A max under one batch would answer the very first request with "capped, nothing here". Repaired
+// on read rather than refused on save, so one bad number cannot reject a save of every other field.
+check('public total below one batch is raised to one batch', indexFilesMax(['index_files_batch' => '5000', 'index_files_max' => '1000']) === 5000);
+check('panel batch: above the ceiling clamps down', indexFilesAdminBatch(['index_files_admin_batch' => '999999']) === IDX_FILES_ADMIN_BATCH_MAX);
+check('panel total: above the ceiling clamps down', indexFilesAdminMax(['index_files_admin_max' => '99999999']) === IDX_FILES_ADMIN_MAX_HARD);
+// The two modes fall back to DIFFERENT values, because their audiences behaved differently before
+// 1.38.0: a garbage row must not flip the panel into fetching whole file lists unasked.
+check('mode: a value that is not a mode falls back per audience', indexFilesMode(['index_files_mode' => '; DROP']) === 'scroll' && indexFilesAdminMode(['index_files_admin_mode' => '; DROP']) === 'button');
+check('mode: a real mode survives on both sides', indexFilesMode(['index_files_mode' => 'all']) === 'all' && indexFilesAdminMode(['index_files_admin_mode' => 'scroll']) === 'scroll');
+
+// The ceiling itself, driven through the endpoint's own query and its own predicates: 12 stored
+// paths, a batch of 5, a total of 10. What is asserted is that the reply never says "there is more,
+// keep asking" AND "the site stopped you" at once — the pair that turns an open tab into a request
+// loop against a per-IP bucket, since the page's loop condition is truncated && can_more.
+$db->exec("TRUNCATE TABLE index_hashes"); $db->exec("TRUNCATE TABLE index_files");
+$hCap = h(7004);
+$db->exec("INSERT INTO index_hashes (info_hash, name, last_seen, grace_until, meta_status, files_count) VALUES ('$hCap', 'Capped Torrent', NOW(), NOW() + INTERVAL 3 DAY, 'done', 12)");
+for ($i = 1; $i <= 12; $i++) $db->exec("INSERT INTO index_files (info_hash, path, size) VALUES ('$hCap', 'cap/$i.bin', 100)");
+/** One page of api/index_files.php: its limit arithmetic, its LIMIT+1 query, its two predicates. */
+$pageOf = function (int $offset, int $batch, int $max) use ($db, $hCap) {
+    if ($offset >= $max) return ['files' => 0, 'truncated' => false, 'capped' => true];
+    $limit = min($batch, $max - $offset);
+    $fs = $db->prepare("SELECT path FROM index_files WHERE info_hash = ? ORDER BY id LIMIT ? OFFSET ?");
+    $fs->bindValue(1, $hCap, PDO::PARAM_STR); $fs->bindValue(2, $limit + 1, PDO::PARAM_INT); $fs->bindValue(3, $offset, PDO::PARAM_INT);
+    $fs->execute();
+    $rows = $fs->fetchAll(PDO::FETCH_ASSOC);
+    $sf = indexFilesShortfall(12, count($rows), $limit, $offset);
+    $n = min(count($rows), $limit);
+    $capped = indexFilesCapped($sf['truncated'], $offset, $n, $max);
+    return ['files' => $n, 'truncated' => $capped ? false : $sf['truncated'], 'capped' => $capped];
+};
+$p0 = $pageOf(0, 5, 10);
+check('first page under the total: 5 files, another page waiting, not capped', $p0 === ['files' => 5, 'truncated' => true, 'capped' => false], json_encode($p0));
+$p1 = $pageOf(5, 5, 10);
+check('the page that reaches the total is capped and NOT truncated', $p1 === ['files' => 5, 'truncated' => false, 'capped' => true], json_encode($p1));
+$p2 = $pageOf(10, 5, 10);
+check('an offset at or past the total answers empty, capped, not truncated', $p2 === ['files' => 0, 'truncated' => false, 'capped' => true], json_encode($p2));
+check('a list shorter than the total is never capped', $pageOf(0, 20, 10000)['capped'] === false && $pageOf(0, 20, 10000)['files'] === 12);
+// The admin one-shot replies are the same predicate at offset 0: the Load-all button is offered
+// only while a bigger request exists, so it can never return exactly the list already on screen.
+check('panel: a first slice below the panel total leaves the Load-all button', indexFilesCapped(true, 0, 5000, 1000000) === false);
+check('panel: a list already at the panel total takes the button away', indexFilesCapped(true, 0, 5000, 5000) === true);
+check('a complete list is never capped, whatever the total', indexFilesCapped(false, 0, 12, 10) === false);
+
+// ── 14. counting the catalogue is a decision, not a habit ─────────────────────
+//
+// MEASURED on production 2026-09-08: `SELECT COUNT(*) FROM index_hashes` is an index scan over
+// 3 368 887 entries of idx_index_seeders ("Using index"), 939 ms per execution, and
+// information_schema.INDEX_STATISTICS showed 6 737 774 rows read on that index in a clean 60 s
+// window — exactly two full scans a minute, all day, on a database shared with the mail server, the
+// forum and the file host.
+//
+// These checks are about WHO PAYS FOR IT, and they are written in rows the storage engine actually
+// read rather than in the text of the source: an InnoDB COUNT(*) moves Handler_read_next by one per
+// row it walks, and SHOW SESSION STATUS needs no privilege (FLUSH STATUS would need RELOAD, which
+// the test user does not have — read the counter twice and subtract instead). The first two checks
+// are the control that gives every check below it its meaning: without them a build that counted
+// nothing because the table happened to be empty would pass the lot.
+$db->exec("TRUNCATE TABLE index_hashes"); $db->exec("TRUNCATE TABLE index_files"); $db->exec("TRUNCATE TABLE index_polls");
+@unlink(indexStateFile()); indexTotalCacheDrop(); indexStatusCacheDrop();
+
+/** Rows read through an index on THIS connection. Nothing else in a tick moves it by thousands. */
+$rowsRead = function () use ($db): int {
+    $r = $db->query("SHOW SESSION STATUS LIKE 'Handler_read_next'")->fetch(PDO::FETCH_NUM);
+    return (int)($r[1] ?? 0);
+};
+$setState = function (array $kv): void {
+    indexStateUpdate(function (array &$s) use ($kv) { foreach ($kv as $k => $v) $s[$k] = $v; return true; });
+};
+$seed = function (int $from, int $count) use ($db): void {
+    $vals = [];
+    for ($i = 1; $i <= $count; $i++) $vals[] = "('" . h($from + $i) . "', NOW(), NOW() + INTERVAL 3 DAY, 'none', $i)";
+    foreach (array_chunk($vals, 1000) as $chunk) {
+        $db->exec("INSERT INTO index_hashes (info_hash, last_seen, grace_until, meta_status, last_seeders) VALUES " . implode(',', $chunk));
+    }
+};
+$N = 3000;
+$seed(20000, $N);
+$noise = intdiv($N, 4);   // "a handful of rows" for a tick that did not count; a count costs $N
+
+indexTotalCacheDrop();
+$b = $rowsRead(); $coldTotal = indexTotalCached($db); $cold = $rowsRead() - $b;
+check('control: a cold count really walks the whole table', $coldTotal === $N && $cold >= $N, "total=$coldTotal read=$cold of $N");
+$b = $rowsRead(); indexTotalCached($db); $warm = $rowsRead() - $b;
+check('control: a warm cached total reads no rows at all', $warm < $noise, "read=$warm");
+
+// The tick's gate. index_meta_daily_budget stays at 0 so the only thing that could walk the table
+// on these ticks is the count under test.
+$cfgTick = $cfg;
+$cfgTick['index_enabled'] = '1';
+$cfgTick['index_meta_daily_budget'] = '0';
+$T = 2000000;
+
+// (a) the stand-down: indexPrune() sets force_idle_until for a whole hour precisely because the last
+// forced prune found nothing it could trim. The old condition ran the 939 ms count first and threw
+// the answer away sixty times an hour.
+$cfgTick['index_max_rows'] = '100';
+$setState(['last_poll_at' => $T, 'last_tick_at' => $T - 60, 'last_prune_at' => $T, 'force_idle_until' => $T + 600, 'max_rows_seen' => 100, 'poll_skip' => 0]);
+$b = $rowsRead(); $tkA = indexTick($db, $cfgTick, null, $T); $dA = $rowsRead() - $b;
+check('the hour-long stand-down skips the count entirely', $tkA['prune'] === null && $dA < $noise, "read=$dA of $N, prune=" . json_encode($tkA['prune']));
+
+// (b) an ordinary minute: no poll since the last tick, the cap where it was. Nothing on this side
+// can have made the table bigger, so there is nothing to count.
+$setState(['last_poll_at' => $T - 600, 'last_tick_at' => $T + 60, 'last_prune_at' => $T + 60, 'force_idle_until' => 0, 'max_rows_seen' => 100]);
+$b = $rowsRead(); $tkB = indexTick($db, $cfgTick, null, $T + 60); $dB = $rowsRead() - $b;
+check('an ordinary minute — no poll, cap unmoved — does not count', $tkB['prune'] === null && $dB < $noise, "read=$dB of $N");
+
+// (c) a poll ran since the last tick: that is what buys the count. The table is under the cap here,
+// and the prune is throttled, so the rows read are the count and nothing else.
+// Reseeded, so that a build that failed (a) or (b) by trimming the table fails (c) and (d) on their
+// own terms rather than on an empty table left behind by the check before them.
+$db->exec("TRUNCATE TABLE index_hashes"); $seed(20000, $N);
+$cfgTick['index_max_rows'] = '200000';
+$setState(['last_poll_at' => $T + 180, 'last_tick_at' => $T + 120, 'last_prune_at' => $T + 180, 'force_idle_until' => 0, 'max_rows_seen' => 200000]);
+$b = $rowsRead(); $tkC = indexTick($db, $cfgTick, null, $T + 180); $dC = $rowsRead() - $b;
+check('a poll since the last tick is what pays for a count', $tkC['prune'] === null && $dC >= $N, "read=$dC of $N");
+
+// (d) …and the behaviour the gate exists for is intact: an overshoot is trimmed on the same tick
+// rather than at the top of the hour. Throttled prune, forced through by the gate.
+$cfgTick['index_max_rows'] = '100';
+$setState(['last_poll_at' => $T + 240, 'last_tick_at' => $T + 200, 'last_prune_at' => $T + 200, 'force_idle_until' => 0, 'max_rows_seen' => 100]);
+$tkD = indexTick($db, $cfgTick, null, $T + 240);
+check('an overshoot after a poll is still trimmed on the spot', $tkD['prune'] !== null && $tkD['prune']['capped'] === $N - 100 && indexRowsCount($db) === 100,
+      json_encode([$tkD['prune'], indexRowsCount($db)]));
+
+// (e) the one cost of the gate, paid back: an operator LOWERING index_max_rows in Settings is not a
+// poll, so the state file remembers the cap the last tick ran under and a change is noticed on the
+// next tick — a minute, not an hour.
+$db->exec("TRUNCATE TABLE index_hashes"); $seed(30000, $N);
+$cfgTick['index_max_rows'] = '100';
+$setState(['last_poll_at' => $T + 300, 'last_tick_at' => $T + 360, 'last_prune_at' => $T + 300, 'force_idle_until' => 0, 'max_rows_seen' => 200000]);
+$tkE = indexTick($db, $cfgTick, null, $T + 360);
+check('lowering the cap is noticed on the next tick, with no poll in sight', $tkE['prune'] !== null && $tkE['prune']['capped'] === $N - 100, "capped=" . json_encode($tkE['prune']));
+check('…and the tick remembers the new cap, so it is not re-noticed every minute', (int)indexStateRead()['max_rows_seen'] === 100, json_encode(indexStateRead()['max_rows_seen']));
+
+// (f) the deliberate hole, asserted so nobody closes it by accident: rows that appear without a
+// poll and without a cap change (worker/federation.py writes from Python and cannot mark the state
+// file) do NOT buy an early trim. The hourly prune catches them, which is why the tick may skip.
+$db->exec("TRUNCATE TABLE index_hashes");
+$seed(40000, $N);
+$setState(['last_poll_at' => $T + 400, 'last_tick_at' => $T + 460, 'last_prune_at' => $T + 400, 'force_idle_until' => 0, 'max_rows_seen' => 100]);
+$b = $rowsRead(); $tkF = indexTick($db, $cfgTick, null, $T + 460); $dF = $rowsRead() - $b;
+check('rows that arrived from outside PHP do not buy a count on every tick', $tkF['prune'] === null && $dF < $noise, "read=$dF of $N");
+$prF = indexPrune($db, $cfgTick, $T + 400 + IDX_PRUNE_EVERY + 1);
+check('…and the hourly prune still trims them, which is what makes skipping safe', $prF !== null && $prF['capped'] === $N - 100, json_encode($prF));
+
+// (g) THE REGRESSION GUARD WITH TEETH. A cache poisoned with an absurd total must not be able to
+// size a DELETE: the prune re-reads the exact count at its own line, and this asserts a NUMBER, so
+// a future edit that "tidies" that call into indexTotalCached() fails here loudly.
+$db->exec("TRUNCATE TABLE index_hashes");
+$seed(50000, 50);
+@file_put_contents(indexTotalCacheFile(), json_encode(['at' => time(), 'total' => 9999999]));
+$cfgPoison = $cfgTick; $cfgPoison['index_max_rows'] = '40';
+$setState(['last_prune_at' => 0, 'poll_skip' => 0, 'force_idle_until' => 0]);
+$prG = indexPrune($db, $cfgPoison, time(), true);
+check('a poisoned cache cannot inflate a delete: 10 capped, 40 left', $prG !== null && $prG['capped'] === 10 && indexRowsCount($db) === 40, json_encode([$prG['capped'] ?? null, indexRowsCount($db)]));
+
+// (h) …nor reach the poll history. index_polls.index_rows is defined as what the catalogue held
+// AFTER the poll, and the statistics timeline warms this very cache a second or two earlier in the
+// same janitor tick — so a cached read here would write the PRE-poll total into the history and the
+// coverage chart for ever, with nothing on screen to show it was wrong.
+$db->exec("TRUNCATE TABLE index_hashes"); $db->exec("TRUNCATE TABLE index_polls"); @unlink(indexStateFile());
+@file_put_contents(indexTotalCacheFile(), json_encode(['at' => time(), 'total' => 9999999]));
+$entH = []; for ($i = 1; $i <= 10; $i++) $entH[] = [h(60000 + $i), 3, 1, 0];
+$fileH = $tmp . '/idx_hist.gz'; makeScrape($entH, true, $fileH);
+$tsH = 1500000;
+$pH = indexPoll($db, $cfg, function () use ($fileH) { return ['file' => $fileH, 'gzip' => true]; }, $tsH);
+$histRows = $db->query("SELECT index_rows FROM index_polls WHERE ts = $tsH")->fetchColumn();
+check('the poll history records the total AFTER the poll, not a cache warmed before it',
+      $pH['kept'] === 10 && (int)$histRows === 10, json_encode([$pH['kept'], $histRows]));
+
+// (i) And the structural half, because two of the three sites above can regress in a way a passing
+// suite would not notice for months: the deciding call sites must not even MENTION the cached
+// total. Read through the tokenizer off the real function boundaries, so a comment that names it
+// (this file is full of them) is not a false alarm, and with a positive control below proving the
+// same check can still see a cached read where one belongs.
+$callsCached = function (string $fn): bool {
+    $r = new ReflectionFunction($fn);
+    $src = implode('', array_slice(file($r->getFileName()), $r->getStartLine() - 1, $r->getEndLine() - $r->getStartLine() + 1));
+    foreach (token_get_all('<?php ' . $src) as $t) {
+        if (is_array($t) && $t[0] === T_STRING && $t[1] === 'indexTotalCached') return true;
+    }
+    return false;
+};
+foreach (['indexPoll' => 'the poll history is the total AFTER the poll',
+          'indexPrune' => 'this number sizes a DELETE',
+          'indexTick' => 'this number stands one call away from that DELETE'] as $fn => $why) {
+    check("$fn() reads the exact count, never the cache", !$callsCached($fn), $why);
+}
+check('control: the same check does see a cached read where one belongs (indexStatus)', $callsCached('indexStatus'));
+
+$db->exec("TRUNCATE TABLE index_polls");
+@unlink($fileH);
+indexTotalCacheDrop(); indexStatusCacheDrop();
 
 // cleanup
 foreach (['index_hashes', 'index_files', 'whitelist', 'whitelist_files', 'banned_hashes'] as $t) $db->exec("TRUNCATE TABLE `$t`");

@@ -57,8 +57,12 @@ if ($scrape) {
 }
 
 // Files (capped)
-// files_all=1 lifts the cap: the operator pressed "load all" on a page that is theirs to wait on.
-$filesLimit = (($_GET['files_all'] ?? '') === '1') ? 1000000 : 5000;
+// files_all=1 lifts the cap: the operator pressed "load all" on a page that is theirs to wait on —
+// or the panel is in 'all' mode and the modal's first request already carries it. Both numbers are
+// settings since 1.38.0, clamped on read; the substitution is the same as api/admin/index_item.php.
+$filesAll   = (($_GET['files_all'] ?? '') === '1');
+$filesMax   = indexFilesAdminMax($cfg);
+$filesLimit = $filesAll ? $filesMax : indexFilesAdminBatch($cfg);
 $fs = $db->prepare("SELECT path, size FROM whitelist_files WHERE whitelist_id = ? ORDER BY id LIMIT ?");
 $fs->bindValue(1, $id, PDO::PARAM_INT);
 $fs->bindValue(2, $filesLimit + 1, PDO::PARAM_INT);
@@ -67,8 +71,16 @@ $files = [];
 foreach ($fs->fetchAll() as $f) {
     $files[] = ['path' => (string)$f['path'], 'size' => (int)$f['size']];
 }
-$filesTruncated = count($files) > $filesLimit;
+// Two separate facts, as in api/admin/index_item.php: `files_truncated` means more rows are in the
+// table (that is the Load-all button), `files_short` means the stored list ended below the row's
+// own files_count because the worker never wrote the rest.
+$sf = indexFilesShortfall($item['files_count'] ?? null, count($files), $filesLimit);
+$filesTruncated = $sf['truncated'];
 if ($filesTruncated) $files = array_slice($files, 0, $filesLimit);
+// And a third, as in api/admin/index_item.php: rows are waiting but the panel's own total ends the
+// list here, so there is no request left to make and the Load-all button must not be offered.
+$filesCapped = indexFilesCapped($filesTruncated, 0, count($files), $filesMax);
+if ($filesCapped) $filesTruncated = false;
 
 // Ban reason (if any)
 $bs = $db->prepare("SELECT info_hash, reason, source, source_id, created_at FROM banned_hashes WHERE info_hash = ? LIMIT 1");
@@ -90,6 +102,8 @@ jsonResponse([
     'magnet' => buildMagnet($row['info_hash'], $row['name'], $cfg),
     'files' => $files,
     'files_truncated' => $filesTruncated,
+    'files_capped' => $filesCapped,
+    'files_short' => $sf['short'],
     'scrape' => $scrape,
     'banned_reason' => $bannedReason,
     'api_client' => $apiClient,

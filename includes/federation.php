@@ -423,6 +423,12 @@ function fedReviewAccept(PDO $db, array $ids = [], string $peer = '', int $max =
                 meta_error = NULL, meta_claim = NULL, meta_priority = -1
           WHERE info_hash = ? AND meta_status NOT IN ('done', 'fetching')");
     $delFiles = $db->prepare("DELETE FROM index_files WHERE info_hash = ?");
+    // Approving a review package writes its whole stored list, and `meta_max_files` (1.38.0) is NOT
+    // applied to it. The bound is already there and it is a different one: files_json was truncated
+    // to FED_REVIEW_FILES_MAX (2 000) by worker/federation.py before the row reached fed_review, and
+    // nothing else writes that table. Reusing the DHT cap here could only shorten a list a peer
+    // already paid to send, which is the one direction that helps nobody — see the note beside
+    // effective_max_files() in worker/worker.py for the whole decision.
     $insFile  = $db->prepare("INSERT INTO index_files (info_hash, path, size) VALUES (?, ?, ?)");
     $done     = $db->prepare("DELETE FROM fed_review WHERE id = ?");
 

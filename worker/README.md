@@ -28,9 +28,11 @@ GRANT SELECT (id, info_hash, magnet_link, meta_status, meta_claim, meta_claimed_
       UPDATE (name, total_size, files_count, piece_length, meta_status, meta_claim, meta_claimed_at, meta_fetched_at, meta_error)
       ON tracker.whitelist TO 'tracker_meta'@'localhost';
 GRANT SELECT, INSERT, DELETE ON tracker.whitelist_files TO 'tracker_meta'@'localhost';
--- optional but recommended (1.7.0): lets the panel setting `meta_worker_concurrency`
--- (Settings → Index) override the conf `concurrency` live, re-read every ~60 s.
--- Without it the worker silently keeps the config-file value.
+-- optional but recommended (1.7.0): lets the panel settings `meta_worker_concurrency`
+-- and `meta_max_files` (1.38.0) override the conf `concurrency` / `max_files` live,
+-- re-read every ~60 s. The grant is on the whole table, so a new key needs no new grant.
+-- Without it the worker silently keeps the config-file values, and the Index page's
+-- status card shows what the worker is really running so the difference is visible.
 GRANT SELECT ON tracker.settings TO 'tracker_meta'@'localhost';
 FLUSH PRIVILEGES;
 ```
@@ -56,6 +58,12 @@ builds the magnet from the hash), so the grant above lists exactly the columns i
 `GRANT` naming a non-existent column is rejected by MariaDB, so do not add `magnet_link` here.
 `meta_source` exists from schema v7 (1.6.0) — on an older DB let the web app migrate first (any page
 view runs `ensureSchema`), then apply the grant.
+
+**How long a stored file list may be** is one number for both queues — `finish()` is shared, so
+`max_files` (conf) / `meta_max_files` (panel, 1.38.0) governs `whitelist_files` and `index_files`
+alike. `index_keep_files = 0` skips file rows for **index** rows entirely and the cap then has
+nothing to do; whitelist rows always keep their list. The torrent's real `files_count` is stored
+unclipped either way, which is what lets the panel and the public pages say *5 000 of 18 000*.
 
 ### Optional — federation importer (1.6.0)
 

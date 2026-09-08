@@ -6,7 +6,7 @@ user = tracker_meta
 password = CHANGE_ME
 
 [worker]
-# parallel metadata fetches (1-16). The panel setting `meta_worker_concurrency`
+# parallel metadata fetches (1-64). The panel setting `meta_worker_concurrency`
 # (Settings → Index) overrides this live when the tracker_meta user has
 # SELECT on the settings table — the worker re-reads it every ~60 s.
 concurrency = 4
@@ -17,6 +17,10 @@ heartbeat_file = /home/tracker/metadata_worker/heartbeat
 listen_port = 6881
 # own tracker first, then a few public trackers to speed up metadata discovery
 trackers = udp://tryhackx.org:6969/announce,udp://tracker.opentrackr.org:1337/announce,udp://open.stealth.si:80/announce,udp://tracker.torrent.eu.org:451/announce
+# file paths stored per torrent, in BOTH queues (1-50000). The panel setting `meta_max_files`
+# (Settings → Index file lists) overrides this live, same as `concurrency` above and under the same
+# condition — the worker re-reads it every ~60 s. The torrent's real file count is stored whatever
+# this says, so a torrent past the cap keeps its true count beside a shorter list.
 max_files = 5000
 # Observed-hash index second queue (includes/index.php). Leave index_table empty to keep whitelist-only
 # behaviour. When set, the worker drains index_hashes AFTER the whitelist queue is empty (needs the

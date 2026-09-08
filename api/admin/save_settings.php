@@ -36,6 +36,9 @@ $allowed = [
     'index_enabled', 'index_source_url', 'index_poll_minutes', 'index_min_seeders', 'index_max_rows',
     'index_grace_days', 'index_protect_days', 'index_meta_daily_budget', 'index_keep_files', 'index_poll_budget',
     'index_meta_auto_queue',
+    // schema v44: how a file list loads — the public search page, then the panel modals
+    'index_files_mode', 'index_files_batch', 'index_files_max',
+    'index_files_admin_mode', 'index_files_admin_batch', 'index_files_admin_max',
     'opentracker_service_name', 'opentracker_restart_use_sudo', 'opentracker_auto_reload',
     'tracker_uptime_warn_days', 'tracker_uptime_danger_days',
     'tracker_blacklist_warn_count', 'tracker_blacklist_danger_count',
@@ -86,6 +89,8 @@ $allowed = [
     'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
     // whitelist registration audience + metadata worker concurrency (schema v8)
     'whitelist_submit_mode', 'meta_worker_concurrency',
+    // schema v43: stored file paths per torrent, the second live worker override
+    'meta_max_files',
     'meta_order_mode', 'meta_order_mix_oldest', 'meta_order_mix_newest',
     'meta_order_mix_seeders', 'meta_order_mix_random', 'meta_order_mix_whitelist',
     'meta_order_mix_seen', 'meta_order_mix_completed', 'net_limit_trusted', 'net_limit_blocked', 'tuner_load_headroom', 'tuner_load_hard',
@@ -177,6 +182,14 @@ if (isset($data['admin_login_path'])) {
 if (isset($data['admin_hidden_behavior']) && !in_array($data['admin_hidden_behavior'], ['home', 'login', '404'], true)) {
     $data['admin_hidden_behavior'] = 'home';
 }
+// ── How a file list loads: the two modes ──
+// Each falls back to what its own audience did before 1.38.0, which is not the same value — the
+// search page has always scrolled, the modals have always waited for a button. Falling back to one
+// shared 'scroll' would have taken the panel out of its behaviour-preserving mode on a typo, and
+// left the coercion here disagreeing with indexFilesAdminMode() in includes/index.php.
+foreach (['index_files_mode' => 'scroll', 'index_files_admin_mode' => 'button'] as $k => $def) {
+    if (isset($data[$k]) && !in_array($data[$k], IDX_FILES_MODES, true)) $data[$k] = $def;
+}
 // ── Timeline range buttons ──
 if (isset($data['stats_timeline_ranges'])) {
     $known = array_keys(statsTimelineRangeButtons());
@@ -207,6 +220,14 @@ $intClamp = [
     'index_poll_minutes' => [5, 1440, 30], 'index_min_seeders' => [0, 100000, 1], 'index_max_rows' => [1000, 5000000, 200000],
     'index_grace_days' => [1, 90, 3], 'index_protect_days' => [1, 365, 10], 'index_meta_daily_budget' => [0, 1000000, 500],
     'index_poll_budget' => [5, 120, 45],
+    // The ceilings are read from includes/index.php, never retyped: the same numbers bound the
+    // endpoint, the clamp-on-read helpers and the fields' max= attributes. A max BELOW its own batch
+    // is legal here and repaired on read (indexFilesMax() floors it at one batch) rather than
+    // refused — one bad number must not reject a save of every other setting on the page.
+    'index_files_batch' => [IDX_FILES_BATCH_MIN, IDX_FILES_BATCH_MAX, 2000],
+    'index_files_max' => [IDX_FILES_BATCH_MIN, IDX_FILES_MAX_HARD, 20000],
+    'index_files_admin_batch' => [IDX_FILES_BATCH_MIN, IDX_FILES_ADMIN_BATCH_MAX, 5000],
+    'index_files_admin_max' => [IDX_FILES_BATCH_MIN, IDX_FILES_ADMIN_MAX_HARD, IDX_FILES_ADMIN_MAX_HARD],
     'admin_near_pages' => [1, 20, 2],
     'users_notify_expiry_days' => [0, 30, 3], 'users_email_change_cooldown_days' => [0, 365, 30],
     'bulk_mail_per_minute' => [1, 500, 20], 'bulk_mail_max_attempts' => [1, 10, 3],
@@ -376,6 +397,23 @@ if (isset($data['meta_worker_concurrency']) && $data['meta_worker_concurrency'] 
     // worker's default. Below one is now clamped to one, which is what asking for 0 can only mean.
     $n = is_numeric($data['meta_worker_concurrency']) ? (int)$data['meta_worker_concurrency'] : 1;
     $data['meta_worker_concurrency'] = (string)max(1, min(64, $n));
+}
+if (isset($data['meta_max_files']) && $data['meta_max_files'] !== '') {
+    // Same contract as the concurrency field above, deliberately: empty stays empty and means "use
+    // the worker's own config file", a number is clamped rather than rejected. Kept OUT of the
+    // $intClamp loop for the one reason that loop cannot serve here — it rewrites a non-numeric
+    // entry to the DEFAULT, and the default is '', so a typo would silently become "worker config"
+    // while the operator believes they set a cap. Clamping below one to one is what asking for
+    // "store 0 files" can only mean, and it never has to write the ceiling as a literal.
+    // A typo is NOT "store one path per torrent". Both readers of this value — indexMetaMaxFiles()
+    // here and effective_max_files() in the worker — treat anything non-numeric as "use the
+    // worker's own config file", so the save has to mean the same thing or the panel would show a
+    // cap of 1 that the worker never applies.
+    if (!ctype_digit(trim((string)$data['meta_max_files']))) {
+        $data['meta_max_files'] = '';
+    } else {
+        $data['meta_max_files'] = (string)max(1, min(META_MAX_FILES_MAX, (int)trim((string)$data['meta_max_files'])));
+    }
 }
 if (isset($data['ot_perf_cmd']) && $data['ot_perf_cmd'] !== '' && !otValidCommand($data['ot_perf_cmd'])) {
     jsonResponse(['error' => __('api.settings.ot_perf_cmd_invalid')], 400);

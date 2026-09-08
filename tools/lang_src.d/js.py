@@ -4012,3 +4012,73 @@ add('js.dbmem', {
     'h_table_open_cache': ('Open table handles kept ready for reuse; each costs a little memory and a file descriptor.',
         'Uchwyty otwartych tabel trzymane do ponownego użycia; każdy kosztuje trochę pamięci i deskryptor pliku.'),
 })
+# ── 1.38.0: a file list says how much of it was ever stored ─────────────────
+# The worker writes only the first max_files paths of a torrent (5 000 here) but records the
+# torrent's real file count, so a big torrent shows a 5 000-entry list under an 18 000 heading.
+# These are the words for the difference — plain and unalarmed: nothing failed, the rest was
+# simply never written down. The sentence says what happened to THIS torrent and never names a
+# cap: the worker's max_files is one reason a list is short, and federation review (which keeps
+# a quarantined peer's full count beside 2 000 stored paths) is another. A sentence naming a
+# number as the install's limit would be false on the second one.
+add('js.app', {
+    'files_count_of': ('Files (:n of :total)',
+        'Pliki (:n z :total)'),
+    'files_n_of': (':n of :total files',
+        ':n z :total plików'),
+    'files_stored_cap': ('Only :n paths were stored for this torrent — the rest were never recorded.',
+        'Dla tego torrenta zapisano tylko :n ścieżek — reszty nigdy nie zapisano.'),
+})
+add('js.index', {
+    'files_n_of': ('Files (:n of :total)',
+        'Pliki (:n z :total)'),
+    'files_stored_cap': ('Only :n paths were stored for this torrent — the rest were never recorded.',
+        'Dla tego torrenta zapisano tylko :n ścieżek — reszty nigdy nie zapisano.'),
+})
+add('js.wl', {
+    'files_n_of': ('Files (:n of :total)',
+        'Pliki (:n z :total)'),
+    'files_stored_cap': ('Only :n paths were stored for this torrent — the rest were never recorded.',
+        'Dla tego torrenta zapisano tylko :n ścieżek — reszty nigdy nie zapisano.'),
+})
+# ── 1.38.0: the stored-files cap is a panel setting, so the page has to say what the worker RUNS ──
+# meta_max_files overrides the worker's own max_files live (~60 s, no restart). A worker started
+# from an older worker.py ignores it and reports no max_files in its heartbeat — and the equivalent
+# warnings for concurrency and fetch order sit inside whitelistStatus()'s whitelist-mode branch,
+# which never executes on an open tracker. So this pair of facts is stated on the Index page.
+add('js.index', {
+    'worker_files': ('Stored files / torrent',
+        'Zapisywanych plików / torrent'),
+    'worker_files_config': ('worker config (:n) — no panel override set',
+        'konfiguracja workera (:n) — brak nadpisania z panelu'),
+    'worker_files_mismatch': ('The worker is storing :running per torrent, Settings asks for :asked. It re-reads the setting about once a minute; if this stays, the worker cannot read the settings table.',
+        'Worker zapisuje :running na torrent, a Ustawienia proszą o :asked. Odczytuje ustawienie mniej więcej raz na minutę; jeśli to nie zniknie, worker nie może czytać tabeli ustawień.'),
+    'worker_files_over_max': ('Settings ask for :asked; this worker build tops out at :max, so it stores :running.',
+        'Ustawienia proszą o :asked; ta wersja workera ma sufit :max, więc zapisuje :running.'),
+    'worker_files_running': (':n per torrent',
+        ':n na torrent'),
+    'worker_files_unknown': ('the worker has not said yet',
+        'worker jeszcze tego nie podał'),
+    'worker_files_unsupported': ('Settings ask for :asked, but this worker does not report a file cap at all — it is running a worker.py older than 1.38.0 and ignores the setting. Restart it after updating the file.',
+        'Ustawienia proszą o :asked, ale ten worker w ogóle nie raportuje limitu plików — działa na worker.py starszym niż 1.38.0 i ignoruje to ustawienie. Zrestartuj go po aktualizacji pliku.'),
+})
+
+# ── 1.38.0: how a file list loads (index_files_*) — what the page says when it stops ──
+# Three different reasons a list can end and three different sentences, because merging them is
+# exactly the bug 1.38.0 opened with: files_truncated is "you may not" (a permission),
+# files_stored_cap is "there was never any more" (the worker's storage cap), and these are "this
+# site does not load more than that" (index_files_max / index_files_admin_max). The tree cap is a
+# fourth thing again: the files ARE loaded, they are simply not all drawn.
+add('js.app', {
+    'files_cap_reached': ('The list stops at :n files — that is as much as this page loads.',
+        'Lista kończy się na :n plikach — tyle najwyżej wczytuje ta strona.'),
+    'files_tree_cap': ('Only the first :n files are drawn — :rest more were loaded, but drawing them would bring the page to a crawl.',
+        'Narysowano tylko pierwsze :n plików — kolejne :rest wczytano, ale ich rysowanie zdławiłoby stronę.'),
+})
+add('js.index', {
+    'files_capped': ('The panel loads at most :n files for one list — more of them are stored.',
+        'Panel wczytuje najwyżej :n plików dla jednej listy — zapisanych jest ich więcej.'),
+})
+add('js.wl', {
+    'files_capped': ('The panel loads at most :n files for one list — more of them are stored.',
+        'Panel wczytuje najwyżej :n plików dla jednej listy — zapisanych jest ich więcej.'),
+})

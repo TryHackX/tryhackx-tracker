@@ -47,9 +47,12 @@ function userPermissionList(): array {
     return [
         'index.view'     => 'Search the observed-hash index (the public search page)',
         'index.files'    => 'See file lists in index search results',
-        // The first 2 000 files come with index.files; loading the rest of a long list — page after
-        // page, as far as the torrent goes — is its own grant, so a group can be shown a list
-        // without being handed 40 000 rows of it.
+        // The first batch comes with index.files; loading the rest of a long list — page after page
+        // — is its own grant, so a group can be shown a list without being handed 40 000 rows of it.
+        // How big a batch is and how far "the rest" goes are index_files_batch / index_files_max
+        // (2 000 and 20 000 as shipped, Settings → File list loading, 1.38.0); the grant decides
+        // WHO may page at all and is checked before any of those numbers. Both halves are tests on
+        // the ?offset= of api/index_files.php — which is why that endpoint has no keyset cursor.
         'index.files_all' => 'Load the whole file list in index search results (beyond the first page)',
         'index.magnet'   => 'See info hashes / copy magnet links in index search results',
         'whitelist.view' => 'Browse the public whitelist page (whitelisted torrents also show up in search)',
