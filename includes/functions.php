@@ -660,7 +660,7 @@ function trustedProxyRejected(array $cfg): array {
  * includes/users.php:325).
  *
  * MEASURED on the production host, 2026-09-08, before this function was written: PHP there sees
- * HTTPS='on' and REQUEST_SCHEME='https' — nginx's stock fastcgi_params passes both — and the live
+ * HTTPS='on' and REQUEST_SCHEME='https' — Apache's mod_ssl sets both natively — and the live
  * response already carried `Set-Cookie: PHPSESSID=...; secure`. The five copies were RIGHT on this
  * deployment. They were right because of what a distribution's include file happens to contain,
  * which is not a property anybody chose, and they stop being right the moment TLS is terminated one
@@ -811,9 +811,13 @@ function hstsHeaderValue(array $cfg): string {
 }
 
 /**
- * The response headers the PANEL owns. Production is nginx, which never reads .htaccess, so the
- * headers shipped there do nothing on this deployment; HSTS is managed from Settings instead
- * precisely so it can be switched off from the same place it was switched on.
+ * The response headers the PANEL owns.
+ *
+ * .htaccess ships a set of these too, and on this deployment it is READ: production is Apache
+ * 2.4.68 with mod_headers and AllowOverride All (measured 2026-09-08). The two do not fight —
+ * .htaccess uses `Header setifempty`, so anything PHP sends wins and the file only fills in the
+ * gap — but HSTS is managed from Settings regardless, precisely so it can be switched off from the
+ * same place it was switched on, without shell access to a file the panel cannot edit.
  *
  * $scope is the CSP scope: 'public' for a page, 'api' for a JSON response, 'panel' for the panel.
  * index.php calls this before it knows which page it is about to render and sends 'public'; the

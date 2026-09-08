@@ -36,9 +36,14 @@ RewriteBase /tracker/
     # Content-Security-Policy — THE FALLBACK, not the policy this application sends.
     #
     # Since 1.38.0 the real policy is built per request in includes/csp.php and sent by PHP, because
-    # that is the only place a per-request NONCE can be minted and because PRODUCTION IS NGINX,
-    # which never reads this file at all. Settings → Security → Content-Security-Policy is where it
-    # is switched between report-only, enforce and off.
+    # that is the only place a per-request NONCE can be minted. Settings → Security →
+    # Content-Security-Policy is where it is switched between report-only, enforce and off.
+    #
+    # THIS FILE IS READ. An earlier version of this comment said production was nginx and that this
+    # file did nothing; it is Apache 2.4.68 with mod_headers and AllowOverride All, measured on the
+    # host on 2026-09-08 (`Server: Apache/2.4.68 (Debian)`, apache2 owning :443, nginx inactive) —
+    # and the fallback header below was visible on the live response. Everything the rest of this
+    # block reasons about therefore APPLIES here rather than being theory for somebody else.
     #
     # `setifempty`, NOT `set`, and the difference is the whole point (Apache 2.4.7+, 2013 — every
     # Apache that can run PHP 8.5 has it): `Header set` REPLACES a header PHP already sent, so this

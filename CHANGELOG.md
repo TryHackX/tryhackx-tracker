@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format is loosely b
 
 ## [1.39.0] — 2026-09-08
 
+### Fixed — this deployment is Apache, and three comments said nginx
+
+Found by checking the live response instead of trusting the tree: `Server: Apache/2.4.68 (Debian)`,
+`apache2` owning port 443, `nginx` **inactive**, `mod_headers` loaded and `AllowOverride All` on the
+vhost. So `.htaccess` **is read here** — and the security headers it ships, which two comments in
+this repository described as doing nothing on this deployment, have been in force all along.
+
+Nothing behaves differently as a result; the reasoning in `.htaccess` was right even though its
+premise was wrong, and `Header setifempty` does exactly what it says. What changes is what the code
+claims: the comments now say Apache, the diagnostic on the Settings page asks `SERVER_SOFTWARE`
+rather than assuming, and the "the server is not telling PHP about the TLS" warning no longer offers
+nginx-only advice for a symptom that on Apache means something else entirely — `mod_ssl` sets
+`HTTPS=on` itself, so seeing that warning on Apache means TLS is being terminated somewhere in front.
+
+On the live site the two policy headers this produces are the documented pair and not a mistake: the
+enforcing fallback from `.htaccess`, and PHP's report-only policy carrying the per-request nonce.
+They have different names and different jobs, and switching `csp_mode` to *enforce* replaces the
+fallback rather than adding to it.
+
+
 ### Fixed — two tests that could not fail, and a suite that had been dying unnoticed
 
 `deploy/smoke_admin.py` had been **crashing part way through for two releases** and reading as a

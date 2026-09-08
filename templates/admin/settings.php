@@ -1521,10 +1521,12 @@
                 $cspPanelPol  = cspPolicy($cfg, 'panel');
                 $cspBadHosts  = cspExtraHostsRejected($cfg);
                 // Apache STILL ships the old enforcing policy in .htaccess, as `Header setifempty`,
-                // which is the fallback for csp_mode='off' and the reason an Apache install loses
-                // no protection during the report-only phase. nginx never reads that file, so on
-                // production this page is the only policy there is. Naming the server is the
-                // difference between "there is a second policy on this response" and "there is none".
+                // which is the fallback for csp_mode='off' and the reason an Apache install loses no
+                // protection during the report-only phase. On a server that does not read .htaccess
+                // this page is the only policy there is. Asking SERVER_SOFTWARE rather than assuming
+                // is the difference between "there is a second policy on this response" and "there
+                // is none" — and the assumption was wrong here: this deployment turned out to be
+                // Apache 2.4.68, not the nginx three comments in this tree claimed (2026-09-08).
                 $cspApache    = stripos((string)($_SERVER['SERVER_SOFTWARE'] ?? ''), 'apache') !== false;
                 ?>
                 <p class="settings-hint mb-2"><?= __('settings.csp_intro') ?></p>
