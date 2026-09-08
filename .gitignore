@@ -98,3 +98,6 @@ lang/*.php
 
 # Hand-made backups on the server (config/database.php.bak-20260907 and the like)
 *.bak-*
+
+# Local scratch harnesses (battery, screenshots) — never part of the release
+scratchpad/

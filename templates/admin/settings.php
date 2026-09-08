@@ -1830,6 +1830,17 @@
                     </div>
                 </div>
 
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.languages_swap') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="lang_swap_enabled">
+                            <option value="1" <?= ($cfg['lang_swap_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.stats_opt_yes') ?></option>
+                            <option value="0" <?= ($cfg['lang_swap_enabled'] ?? '0') === '1' ? '' : 'selected' ?>><?= _h('settings.stats_opt_no') ?></option>
+                        </select>
+                        <div class="settings-hint"><?= __('settings.languages_swap_hint') ?></div>
+                    </div>
+                </div>
+
                 <div class="alert alert-warning py-2 wl-small d-none" id="lang-writable"><?= __('settings.languages_not_writable') ?></div>
 
                 <div class="lang-table-wrap">

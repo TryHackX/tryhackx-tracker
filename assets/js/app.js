@@ -3265,23 +3265,10 @@ const getJson = async (endpoint) => {
     });
 })();
 
-/* ── switching the language keeps the scroll position ─────────────────────────
- * The header switcher reloads the page; the reader was halfway down Info or Terms comparing the two
- * languages. Store the position for a few seconds, restore it on the next load of the same page. */
-(function () {
-    const KEY = 'thx_lang_place_pub';
-    document.addEventListener('click', (e) => {
-        const a = e.target.closest('a.lang-opt');
-        if (!a) return;
-        try { sessionStorage.setItem(KEY, JSON.stringify({ path: location.pathname + location.search.replace(/([?&])lang=[^&]*&?/, '$1').replace(/[?&]$/, ''), y: window.scrollY, at: Date.now() })); } catch (err) {}
-    }, true);
-    let place = null;
-    try { place = JSON.parse(sessionStorage.getItem(KEY) || 'null'); sessionStorage.removeItem(KEY); } catch (err) { place = null; }
-    if (!place || Date.now() - (place.at || 0) > 15000) return;
-    const here = location.pathname + location.search.replace(/([?&])lang=[^&]*&?/, '$1').replace(/[?&]$/, '');
-    if (place.path !== here) return;
-    document.addEventListener('DOMContentLoaded', () => { window.scrollTo(0, place.y || 0); setTimeout(() => window.scrollTo(0, place.y || 0), 400); });
-})();
+/* Keeping the reader's place across a language switch used to live here as well, with its own
+ * storage key, and it restored by scroll pixel at DOMContentLoaded. Both copies now live in
+ * assets/js/lang-swap.js, which the i18n bridge loads on every page: two of them listening for the
+ * same click meant two restores fighting, and the pixel one always won because it ran last. */
 
 /* ── leaving the site ───────────────────────────────────────────────────────
  *

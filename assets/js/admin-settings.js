@@ -500,6 +500,31 @@
     }
     window.addEventListener('hashchange', openHash);
     openHash();
+
+    // REINDEXING, NOT RESTARTING, AFTER AN IN-PLACE LANGUAGE SWITCH.
+    //
+    // makeItem() copies each setting's label and hint into STRINGS when the page starts. After
+    // lang-swap.js rewrites the document those copies still hold the old language, so searching
+    // for a Polish word would find nothing while the Polish words are on the screen. Restarting
+    // this module instead would be worse: `sections` holds comment anchors placed in the document
+    // and a second set of them would leave the first behind, and every listener would be bound
+    // twice. So: re-read the text of the elements we already know about, re-fetch the catalogue
+    // (its keywords are translated too), and re-run whatever search is on screen.
+    document.addEventListener('langswap', () => {
+        sections.forEach(sec => {
+            sec.title = norm(sec.el.dataset.title || textOf(sec.el.querySelector('h5')));
+            sec.label = (sec.el.dataset.title || textOf(sec.el.querySelector('h5')) || '').trim();
+            sec.items.forEach(item => {
+                item.label = textOf(item.el.querySelector('label, .form-label, h6'));
+                item.hint = textOf(item.el).slice(0, 600);
+            });
+        });
+        fetch(apiBase + 'admin/settings_catalog', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+            .then(r => r.json())
+            .then(j => { if (j && j.success) applyCatalogue(j); })
+            .catch(() => { /* labels + hints only — still useful */ })
+            .finally(() => { if (norm(input.value)) runSearch(); else applyGroup(); });
+    });
 })();
 
 /* ── the metadata fetch-order mix ────────────────────────────────────────────

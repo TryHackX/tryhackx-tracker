@@ -1427,6 +1427,10 @@ function trackerSchemaDefaultSettings(): array {
         'csp_report_enabled'          => '1',
         'csp_report_keep_rows'        => '500',
         'csp_extra_hosts'             => '',
+        // The language switcher rewrites the page instead of reloading it (assets/js/lang-swap.js).
+        // Off for one release: it is a new way of doing something that already works, and the thing
+        // it replaces — a plain navigation — is what every failure falls back to anyway.
+        'lang_swap_enabled'           => '0',
     ];
 }
 

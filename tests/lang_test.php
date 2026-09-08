@@ -332,5 +332,55 @@ foreach (glob($root . '/templates/*.php') + glob($root . '/templates/admin/*.php
 }
 check('every template takes <html lang> from langCurrent()', $badLang === [], implode(', ', $badLang));
 
+
+/* ── the in-place language switch (assets/js/lang-swap.js) ───────────────────
+   The browser half is driven by a real browser in scratchpad/shots/langswap_check.js. What is
+   pinned HERE is the wiring it depends on: the page has to tell the script whether the operator
+   turned the feature on, and it has to load the script whether they did or not — because the same
+   file is what keeps the reader's place across the ordinary reload the feature falls back to. */
+relang(['lang_swap_enabled' => '1']);
+$bundleOn = langJsBundle(['js.common.']);
+check('the bundle carries the swap flag when it is on', ($bundleOn['swap'] ?? null) === true, var_export($bundleOn['swap'] ?? null, true));
+relang(['lang_swap_enabled' => '0']);
+$bundleOff = langJsBundle(['js.common.']);
+check('… and false when it is off', ($bundleOff['swap'] ?? null) === false, var_export($bundleOff['swap'] ?? null, true));
+relang([]);
+check('… and false when the setting has never been written', (langJsBundle(['js.common.'])['swap'] ?? null) === false);
+check('the flag is a real boolean, so JSON.parse hands the script a boolean',
+    json_decode(json_encode(langJsBundle(['js.common.'])), true)['swap'] === false);
+
+// The script has to be on the page with the swap OFF as well: it is the only thing that keeps the
+// reader's place across the full reload the switcher still does in that case.
+$bridgeOff = langJsBridge('/');
+check('the bridge loads lang-swap.js with the swap off', str_contains($bridgeOff, 'assets/js/lang-swap.js'), $bridgeOff);
+relang(['lang_swap_enabled' => '1']);
+check('… and with it on', str_contains(langJsBridge('/'), 'assets/js/lang-swap.js'));
+check('lang-swap.js comes after i18n.js, which defines the t() it calls',
+    strpos($bridgeOff, 'i18n.js') < strpos($bridgeOff, 'lang-swap.js'));
+check('the file it names exists', is_file($root . '/assets/js/lang-swap.js'));
+// The old copy lived in admin-common.js, which public pages never load — and a second copy
+// listening for the same click would store the place twice and restore it twice.
+// There were TWO of them — one in admin-common.js keyed 'thx_lang_place' and one at the end of
+// app.js keyed 'thx_lang_place_pub'. Both listened for the same click and both restored on load, and
+// the app.js one restored by scroll pixel, so on a public page it ran last and undid the other.
+foreach (['admin-common.js', 'app.js'] as $jsFile) {
+    $js = (string)@file_get_contents($root . '/assets/js/' . $jsFile);
+    check("the place-keeper is not still duplicated in $jsFile", !str_contains($js, 'thx_lang_place'));
+}
+
+// Four places or it is not a setting: default, catalogue keywords, save allow-list, a named control.
+$schemaSrc  = (string)@file_get_contents($root . '/includes/schema.php');
+$catalogSrc = (string)@file_get_contents($root . '/includes/settings_catalog.php');
+$saveSrc    = (string)@file_get_contents($root . '/api/admin/save_settings.php');
+$setTpl     = (string)@file_get_contents($root . '/templates/admin/settings.php');
+check('lang_swap_enabled has a schema default', str_contains($schemaSrc, "'lang_swap_enabled'"));
+check('lang_swap_enabled is in the search catalogue', str_contains($catalogSrc, "'lang_swap_enabled'"));
+check('lang_swap_enabled is in the save allow-list', str_contains($saveSrc, "'lang_swap_enabled'"));
+check('lang_swap_enabled has a control on the Settings page', str_contains($setTpl, 'name="lang_swap_enabled"'));
+// It ships OFF for one release: the thing it replaces — a plain navigation — is what every failure
+// path falls back to anyway, so there is nothing to lose by letting operators opt in.
+require_once $root . '/includes/schema.php';
+check('… and it ships off', (trackerSchemaDefaultSettings()['lang_swap_enabled'] ?? null) === '0', var_export(trackerSchemaDefaultSettings()['lang_swap_enabled'] ?? null, true));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

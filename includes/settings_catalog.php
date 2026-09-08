@@ -78,6 +78,7 @@ function settingsCatalogKeywords(): array {
         'home_layout'              => 'home page layout front page order sections arrange rearrange drag drop reorder hide headings titles tagline',
         'default_language'         => 'language default site locale automatic browser accept-language',
         'language_auto'            => 'language automatic browser accept-language detect detection',
+        'lang_swap_enabled'        => 'language switcher instant in place no reload jump scroll position swap live',
         'donation_fields'          => 'donate wallet address crypto bitcoin monero paypal label value list',
         'footer_start_year'        => 'copyright year footer since',
         'footer_brand_name'        => 'footer brand owner name copyright',

@@ -4,6 +4,74 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.40.0] — 2026-09-08
+
+### Added — the language switcher rewrites the page instead of reloading it
+
+Clicking EN/PL fetched the same address again and the browser threw the page away and built it back,
+which is why the switch felt like a jolt: a white flash, a scroll position that landed somewhere near
+where you had been, and every open panel, filter and half-typed field gone. The switcher now fetches
+the same page in the other language and rewrites the text where it stands. Nothing is thrown away,
+so nothing has to be rebuilt.
+
+One request buys all three things the swap needs: the language cookie `langInit()` sets, the new
+`js.*` bundle `t()` reads, and a render that a reload would have cost anyway.
+
+The rules it works by are each a bug that happened or would have:
+
+* **The whole plan is built before a single node is touched.** A plan that could not be built is a
+  plan that was not applied — the click falls back to a plain navigation, which always works.
+* **Children are matched by `id` first, and only then by position.** The Settings search physically
+  moves sections with `insertBefore`, so while a query is active the live order is a permutation of
+  the render's; position means nothing there and `id` means everything.
+* **The positional pass is a longest-common-subsequence alignment, not "the next free node of the
+  same tag".** The first version was the latter and it was wrong in a way that mattered: the search's
+  breadcrumb `<div>`, which only exists in the live page, claimed the first `<div>` of the render and
+  every cell after it took its neighbour's text. A field ended up labelled with the label of the field
+  below it. Wrong text under the right control is worse than no swap at all, so the alignment has to
+  be able to say "this live node has no counterpart" — and a subsequence match is what says it.
+* **Nothing the reader typed is touched.** No `<textarea>` contents, no `<input>` value except the
+  label on a button. `<option>` labels are translated while the `<select>`'s choice is left alone.
+* **Attributes count as text**: `title`, `placeholder`, `aria-label`, `alt` and the `data-title` the
+  Settings search reads.
+
+The Settings search is **re-indexed, not restarted**, afterwards. `makeItem()` copies every label and
+hint into strings when the page starts, so after a swap those copies held the old language and a
+Polish word found nothing while the Polish words were on the screen. Restarting the module instead
+would leave a second set of its document anchors behind and bind every listener twice.
+
+Known and deliberate: the ~54 messages that `templates/admin/settings.php`, `adminlogin.php` and
+`unsubscribe.php` freeze into an inline `<script>` with `json_encode(__(...))` are not in the `js.*`
+bundle and are not swapped. They stay in the language they were rendered in until the next full load.
+
+New setting **`lang_swap_enabled`** (Settings → Interface languages), shipping **off** for one
+release. Off, the switcher does exactly what it did before — which is also what happens with
+JavaScript disabled, on a network error, and when the panel session has expired.
+
+### Fixed — keeping your place across a language switch, by anchor instead of by pixel
+
+The place-keeper added in 1.37.0 stored `window.scrollY` and put it back at `DOMContentLoaded`, then
+again after 350 ms and 900 ms. The page is still growing at those moments — the Settings search has
+not filtered yet, the panel's tables are still empty — so the pixel it restored was no longer the
+pixel you had been looking at. That was the "shift" left over from the last release.
+
+It now remembers the **element** nearest the top of the window and how far below the top edge it sat,
+and keeps nudging the scroll until that element is back there and the page has stopped changing
+height (a `ResizeObserver` on `<body>`, with a 2.5 s deadline).
+
+The bug that made the first attempt look like it did nothing at all: **a sticky element can never say
+where you were.** The Settings toolbar is `position: sticky` at the very top, so it was the "nearest
+the top" candidate on every single capture — and putting a pinned element back where it already is
+scrolls nowhere. Candidates whose own position, or any ancestor's, is `sticky` or `fixed` are now
+skipped.
+
+This half is **not** conditional on the new setting: a full reload is still what happens on every
+fallback path, so the floor has to hold on its own.
+
+The code moved from `assets/js/admin-common.js` — which public pages never load, though they have a
+switcher too — into the new `assets/js/lang-swap.js`, loaded by `langJsBridge()` on every page that
+carries the i18n bundle.
+
 ## [1.39.0] — 2026-09-08
 
 ### Fixed — this deployment is Apache, and three comments said nginx

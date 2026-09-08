@@ -201,6 +201,10 @@ function langInit(array $cfg, ?string $userLanguage = null): void {
     $GLOBALS['__lang']['strings']  = langLoad($current);
     $GLOBALS['__lang']['fallback'] = $current === LANG_FALLBACK
         ? $GLOBALS['__lang']['strings'] : langLoad(LANG_FALLBACK);
+    // Recorded here, and nowhere else, because this is the one function every entry point calls
+    // with $cfg in hand before it renders. langJsBridge() has no $cfg of its own, and threading one
+    // through nine call sites to carry a single boolean would be nine chances to forget.
+    $GLOBALS['__lang']['swap'] = ($cfg['lang_swap_enabled'] ?? '0') === '1';
 }
 
 /** The active code. Falls back to English before langInit() has run. */
@@ -331,7 +335,9 @@ function langJsBundle(array $prefixes = ['js.']): array {
     foreach (langAll() as $k => $v) {
         foreach ($prefixes as $p) { if (str_starts_with($k, $p)) { $out[$k] = (string)$v; break; } }
     }
-    return ['lang' => langCurrent(), 'strings' => $out];
+    // `swap` travels with the bundle rather than on <body>, so the page ALREADY answers "which
+    // language is this and may it be swapped" in one place that lang-swap.js re-reads after a swap.
+    return ['lang' => langCurrent(), 'strings' => $out, 'swap' => (bool)($GLOBALS['__lang']['swap'] ?? false)];
 }
 
 /** The prefixes the PUBLIC scripts use (app.js, captcha.js, stats-timeline.js) — see langJsBridge(). */
@@ -347,9 +353,17 @@ const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.'];
 function langJsBridge(string $baseUrl, ?array $prefixes = null): string {
     $json = json_encode(langJsBundle($prefixes ?? ['js.']), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     $ver = function_exists('assetVer') ? assetVer('assets/js/i18n.js') : '';
+    $swapVer = function_exists('assetVer') ? assetVer('assets/js/lang-swap.js') : '';
+    $base = htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8');
+    // lang-swap.js rides along with the bridge because it needs exactly what the bridge provides —
+    // the bundle node and t() — and because every page that has a switcher has a bridge. It keeps
+    // the reader's place on a full reload even when the in-place swap is off, so it is not
+    // conditional on the setting.
     return '<script' . nonceAttr() . ' id="i18n-data" type="application/json">' . $json . '</script>' . "
 "
-         . '    <script src="' . htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8') . 'assets/js/i18n.js' . $ver . '"></script>';
+         . '    <script src="' . $base . 'assets/js/i18n.js' . $ver . '"></script>' . "
+"
+         . '    <script src="' . $base . 'assets/js/lang-swap.js' . $swapVer . '"></script>';
 }
 
 /**
