@@ -987,6 +987,14 @@
                         <small class="settings-hint"><?= __('settings.users_search_hint') ?></small>
                     </div>
                     <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_share') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="search_share_enabled">
+                            <option value="1" <?= ($cfg['search_share_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['search_share_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.users_share_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.users_search_whitelist') ?></label>
                         <select class="form-select bg-dark text-light border-secondary" name="index_search_include_whitelist">
                             <option value="1" <?= ($cfg['index_search_include_whitelist'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.users_search_whitelist_yes') ?></option>

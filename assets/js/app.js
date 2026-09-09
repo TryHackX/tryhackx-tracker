@@ -2377,6 +2377,146 @@ const getJson = async (endpoint) => {
         try { const saved = localStorage.getItem('thx_search_perpage'); if (saved && perPageSel && [...perPageSel.options].some(o => o.value === saved)) perPageSel.value = saved; } catch (e) {}
         if (perPageSel) perPageSel.addEventListener('change', () => { try { localStorage.setItem('thx_search_perpage', perPageSel.value); } catch (e) {} run(1); });
         let curPage = 1, seq = 0;
+        // ── the address bar holds the view ──────────────────────────────────
+        //
+        // Until now the whole state of this page lived in this closure: the query, the sort stack,
+        // the page number, whether the Info panel was open. Reloading lost all of it, and there was
+        // no way to send anyone what you were looking at.
+        //
+        // The parameter names are the API's own (api/index_search.php), so an address from here can
+        // be pasted straight onto api.php when something needs debugging. A parameter equal to its
+        // default is left out — that is what keeps an ordinary search short enough to read.
+        //
+        // `per_page` is the one exception to that rule: whenever `page` is written, `per_page` is
+        // written with it. Without that, a link to "page 3" shows a different set of rows to a
+        // reader whose page size is not the sender's, which is the same address meaning two things.
+        // A `per_page` that ARRIVES in the address governs this load only and never overwrites the
+        // reader's saved preference.
+        const contentSel = $id('search-content');
+        const contentDefault = contentSel ? contentSel.value : '';
+        const SORT_COLS = headers.map(th => th.dataset.sort);
+        const DEFAULT_SORT = 'relevance:desc';
+        const OWNED = ['search', 'search_files', 'content', 'sort', 'page', 'per_page', 'hash'];
+        let urlHeld = 0;        // > 0 while we are applying an address, so nothing writes one back
+
+        function viewState(page) {
+            const st = {};
+            const q = input.value.trim();
+            if (q) st.search = q;
+            if (filesBox && filesBox.checked) st.search_files = '1';
+            if (contentSel && contentSel.value !== contentDefault) st.content = contentSel.value;
+            const sort = serializeSort();
+            if (sort !== DEFAULT_SORT) st.sort = sort;
+            if (page > 1) {
+                st.page = String(page);
+                if (perPageSel) st.per_page = perPageSel.value;
+            }
+            if (infoHash) st.hash = infoHash;
+            return st;
+        }
+
+        // Rebuilt from the CURRENT address rather than from scratch: `action` has to survive, and so
+        // does a `lang=` somebody arrived with.
+        function writeUrl(page, mode) {
+            if (urlHeld > 0) return;
+            let u;
+            try { u = new URL(location.href); } catch (e) { return; }
+            OWNED.forEach(k => u.searchParams.delete(k));
+            const st = viewState(page);
+            Object.keys(st).forEach(k => u.searchParams.set(k, st[k]));
+            const qs = u.searchParams.toString();
+            const next = u.pathname + (qs ? '?' + qs : '') + u.hash;
+            if (next === location.pathname + location.search + location.hash) return;
+            // The address has moved, so any revealed link box is now describing somewhere the reader
+            // has left. On plain HTTP that box is the only way this feature works, and it stays
+            // pre-selected until something takes it away — inviting a Ctrl+C that copies the wrong
+            // page, or a different torrent entirely.
+            dropAllShareBoxes();
+            try {
+                if (mode === 'push') history.pushState(null, '', next);
+                else history.replaceState(null, '', next);
+            } catch (e) { /* opaque origin: the view is simply not addressable here */ }
+        }
+
+        /**
+         * A sort we do not recognise is not half-applied.
+         *
+         * An address typed by hand, or written by an older version of this page, either means
+         * exactly what it says or it means nothing — applying the part we understood would leave the
+         * table sorted one way while the address claims another.
+         */
+        function parseSort(raw) {
+            if (!raw) return null;
+            const parts = String(raw).split(',').filter(Boolean);
+            if (!parts.length || parts.length > SORT_COLS.length + 1) return null;
+            const out = { best: false, stack: [] };
+            for (let i = 0; i < parts.length; i++) {
+                const bits = parts[i].split(':');
+                if (bits.length !== 2 || (bits[1] !== 'asc' && bits[1] !== 'desc')) return null;
+                if (bits[0] === 'relevance') {
+                    if (i !== 0 || bits[1] !== 'desc') return null;
+                    out.best = true;
+                    continue;
+                }
+                if (!SORT_COLS.includes(bits[0])) return null;
+                if (out.stack.some(x => x.col === bits[0])) return null;
+                out.stack.push({ col: bits[0], dir: bits[1] });
+            }
+            return out;
+        }
+
+        function readUrl() {
+            let p;
+            try { p = new URL(location.href).searchParams; } catch (e) { p = new URLSearchParams(); }
+            const per = p.get('per_page');
+            const pg = parseInt(p.get('page') || '1', 10);
+            const h = String(p.get('hash') || '').toLowerCase();
+            const c = p.get('content');
+            return {
+                search: String(p.get('search') || '').slice(0, 200),
+                files: p.get('search_files') === '1',
+                content: (contentSel && c && [...contentSel.options].some(o => o.value === c)) ? c : contentDefault,
+                sort: parseSort(p.get('sort')),
+                perPage: (perPageSel && per && [...perPageSel.options].some(o => o.value === per)) ? per : null,
+                page: (isFinite(pg) && pg >= 1) ? Math.min(pg, 1000000) : 1,
+                hash: /^[0-9a-f]{40}$/.test(h) ? h : null,
+            };
+        }
+
+        function applyUrlState(st) {
+            urlHeld++;
+            try {
+                input.value = st.search;
+                if (filesBox) filesBox.checked = st.files;
+                if (contentSel) contentSel.value = st.content;
+                // This load only. The `change` listener is what saves the preference, and setting
+                // .value from script does not fire it — which is exactly the behaviour wanted here.
+                if (perPageSel && st.perPage) perPageSel.value = st.perPage;
+                sortStack.length = 0;
+                if (st.sort) {
+                    if (bestBox) bestBox.checked = st.sort.best;
+                    st.sort.stack.forEach(x => sortStack.push({ col: x.col, dir: x.dir }));
+                } else if (bestBox) {
+                    bestBox.checked = true;
+                }
+                updateSortIcons();
+            } finally { urlHeld--; }
+        }
+
+        // Back and Forward move between views, because pushState was used for the moves that are
+        // worth going back from: turning a page, changing the sort, opening and closing Info.
+        window.addEventListener('popstate', () => {
+            const st = readUrl();
+            urlHeld++;
+            try {
+                applyUrlState(st);
+                if (st.hash !== infoHash) {
+                    if (st.hash) openInfo(st.hash, null);
+                    else closeInfo();
+                }
+            } finally { urlHeld--; }
+            run(st.page, 'none');
+        });
         let lastTokens = [], lastFilesSearch = false;
         function setLoading(on) {
             const table = $id('search-table');
@@ -2384,10 +2524,16 @@ const getJson = async (endpoint) => {
             const tot = $id('search-total');
             if (on) { tot.dataset.prev = tot.textContent; tot.textContent = t('js.app.searching'); }
         }
-        async function run(page) {
+        async function run(page, urlMode) {
             curPage = page;
+            // The address is written from the state the run STARTS with, not from the reply: a
+            // request that fails still leaves an address that describes what was asked for.
+            if (urlMode !== 'none') writeUrl(page, urlMode || 'replace');
             const my = ++seq;   // stale responses (fast typing) must not overwrite newer ones
             const alert = $id('search-alert'), table = $id('search-table'), body = $id('search-body'), note = $id('search-note');
+            // "There is a result set worth pointing at" is what the Share button claims, so it goes
+            // away on every path that leaves no result set — not only on the one that draws rows.
+            const shareBtn = $id('search-share');
             alert.className = 'alert';
             const q = input.value.trim();
             if (tooShort(q)) {
@@ -2396,6 +2542,7 @@ const getJson = async (endpoint) => {
                 setLoading(false);
                 table.hidden = true;
                 note.hidden = true;
+                if (shareBtn) shareBtn.hidden = true;
                 $id('search-total').textContent = '';
                 renderPager(1, 1, 0);
                 showHint(t('js.app.search_too_short'));
@@ -2408,7 +2555,6 @@ const getJson = async (endpoint) => {
             if (q) qs.set('search', q);
             const filesOn = !!(filesBox && filesBox.checked);
             if (filesOn) qs.set('search_files', '1');
-            const contentSel = $id('search-content');
             if (contentSel && contentSel.value) qs.set('content', contentSel.value);
             const json = await getJson('index_search&' + qs.toString());
             if (my !== seq) return;
@@ -2416,6 +2562,7 @@ const getJson = async (endpoint) => {
             if (!json || !json.success) {
                 table.hidden = true;
                 note.hidden = true;
+                if (shareBtn) shareBtn.hidden = true;
                 $id('search-total').textContent = '';
                 renderPager(1, 1, 0);
                 // The server applying the same rule (a stale page, or a hex floor that moved on one
@@ -2537,6 +2684,7 @@ const getJson = async (endpoint) => {
                 body.appendChild(tr);
             });
             table.hidden = json.rows.length === 0;
+            if (shareBtn) shareBtn.hidden = json.rows.length === 0;
             $id('search-total').textContent = json.total === 0 ? '' : (json.total === 1 ? t('js.app.results_one') : t('js.app.results_many', {n: json.total.toLocaleString()}));
             note.hidden = json.total !== 0;
             note.textContent = json.total === 0 ? t('js.app.nothing_found') : '';
@@ -2547,7 +2695,7 @@ const getJson = async (endpoint) => {
             const box = $id('search-pagination');
             box.textContent = '';
             if (pages <= 1) return;
-            const go = (p) => { p = Math.min(pages, Math.max(1, Math.round(p))); if (p !== page) run(p); };
+            const go = (p) => { p = Math.min(pages, Math.max(1, Math.round(p))); if (p !== page) run(p, 'push'); };
             const mk = (label, target, disabled, cls) => {
                 const b = document.createElement('button');
                 b.type = 'button';
@@ -2672,6 +2820,7 @@ const getJson = async (endpoint) => {
             if (!infoOverlay) return;
             infoOverlay.hidden = true;
             infoHash = null;
+            writeUrl(curPage, 'push');
             document.removeEventListener('keydown', escInfo);
         }
         function escInfo(e) { if (e.key === 'Escape') closeInfo(); }
@@ -2840,6 +2989,7 @@ const getJson = async (endpoint) => {
             if (!infoOverlay) return;
             const body = $id('info-body'), title = $id('info-title');
             infoHash = hash;
+            writeUrl(curPage, 'push');
             title.textContent = name || t('js.app.details');
             body.textContent = t('js.common.loading');
             infoOverlay.hidden = false;
@@ -3160,6 +3310,86 @@ const getJson = async (endpoint) => {
             if (ic) ic.addEventListener('click', closeInfo);
         }
 
+        // ── Share ───────────────────────────────────────────────────────────
+        //
+        // Two buttons, one job: hand over the address of what is on the screen. The one on the
+        // toolbar shares the list as it stands (query, filter, sort, page); the one in the Info
+        // panel's head shares that one torrent, which is `?action=search&hash=…` and opens the same
+        // panel for whoever follows it.
+        //
+        // navigator.clipboard DOES NOT EXIST on plain HTTP — it is a secure-context API, and this
+        // panel has to work on an installation that has not got a certificate yet. A button that
+        // does nothing and says nothing is worse than no button, so the fallback is a read-only box
+        // with the link already selected: one Ctrl+C away, and visible proof of what would have been
+        // copied. The panel's copyToClipboard() lives in admin-common.js, which no public page
+        // loads, so this is its own small thing rather than a shared one.
+        // The fallback box is per BUTTON and is rebuilt from the label the caller passes, because the
+        // two buttons hand over different things: one a view, one a torrent. Announcing the panel's
+        // link as "Link to this view" would leave a screen-reader user with no way to tell them apart
+        // — and the whole point of the panel button is that it deliberately does NOT carry the view.
+        function shareFallbackFor(btn, label) {
+            let box = btn.nextElementSibling;
+            if (!box || !box.classList.contains('share-url')) {
+                box = document.createElement('input');
+                box.type = 'text';
+                box.className = 'share-url';
+                box.readOnly = true;
+                btn.after(box);
+            }
+            box.setAttribute('aria-label', label);
+            return box;
+        }
+        /** Take the visible link away — it describes a view the reader has since left. */
+        function dropShareBox(btn) {
+            const box = btn && btn.nextElementSibling;
+            if (box && box.classList.contains('share-url')) { box.hidden = true; box.value = ''; }
+        }
+        function dropAllShareBoxes() {
+            document.querySelectorAll('.share-url').forEach(box => { box.hidden = true; box.value = ''; });
+        }
+        // Read the label off the button EVERY time rather than caching it: the in-place language
+        // switch rewrites that text node, and a cached "Share" written back 1.5 s later would put an
+        // English word on an otherwise Polish page for the rest of the visit.
+        function flashShared(btn) {
+            if (btn.dataset.flashing === '1') return;
+            const orig = btn.textContent;
+            btn.dataset.flashing = '1';
+            btn.textContent = t('js.app.copied');
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = orig;
+                btn.classList.remove('copied');
+                delete btn.dataset.flashing;
+            }, 1500);
+        }
+        function share(btn, url, label) {
+            const reveal = () => {
+                const box = shareFallbackFor(btn, label);
+                box.value = url;
+                box.hidden = false;
+                box.focus();
+                box.select();
+            };
+            if (!navigator.clipboard || !window.isSecureContext) { reveal(); return; }
+            navigator.clipboard.writeText(url).then(() => {
+                dropShareBox(btn);
+                flashShared(btn);
+            }).catch(reveal);
+        }
+        const shareViewBtn = $id('search-share');
+        if (shareViewBtn) shareViewBtn.addEventListener('click', () => share(shareViewBtn, location.href, t('js.app.share_link')));
+        const shareOneBtn = $id('info-share');
+        if (shareOneBtn) shareOneBtn.addEventListener('click', () => {
+            // Built from the hash, not from location.href: the panel is a link to ONE torrent, and
+            // carrying the sender's query and page number into it would share their search as well.
+            let u;
+            try { u = new URL(location.href); } catch (e) { return; }
+            OWNED.forEach(k => u.searchParams.delete(k));
+            if (infoHash) u.searchParams.set('hash', infoHash);
+            u.hash = '';
+            share(shareOneBtn, u.href, t('js.app.share_link_one'));
+        });
+
         async function openFiles(hash, name) {
             if (!overlay) return;
             const body = $id('files-body'), title = $id('files-title');
@@ -3243,17 +3473,24 @@ const getJson = async (endpoint) => {
         // public site does not load): a sort click redraws the arrows at once and fetches when the
         // decision is made; typing waits the shorter one.
         const runDebounced = debounce(() => run(1), 400);
-        const runSortDebounced = debounce(() => run(1), 1200);
+        const runSortDebounced = debounce(() => run(1, 'push'), 1200);
         const syncClear = () => { if (clearBtn) clearBtn.hidden = input.value === ''; };
         input.addEventListener('input', () => { syncClear(); runDebounced(); });
         if (clearBtn) clearBtn.addEventListener('click', () => animatedClearPub(input, () => { syncClear(); input.focus(); run(1); }));
         form.addEventListener('submit', (e) => { e.preventDefault(); run(1); });
         if (filesBox) filesBox.addEventListener('change', () => run(1));
-        const contentFilter = $id('search-content');
-        if (contentFilter) contentFilter.addEventListener('change', () => run(1));
+        if (contentSel) contentSel.addEventListener('change', () => run(1));
         updateSortIcons();
+        // Whatever the address says, before the first request — so a link into a sorted page 3 of a
+        // filtered search asks for that, rather than asking for page 1 and then correcting itself.
+        const startState = readUrl();
+        applyUrlState(startState);
         syncClear();
-        run(1);
+        run(startState.page, 'none');
+        // A link to one torrent opens the panel on top of the results it belongs to. If the hash is
+        // not in the catalogue, or the reader may not see it, openInfo() says so in the panel — the
+        // one thing it must not do is show an empty box and no reason.
+        if (startState.hash) openInfo(startState.hash, null);
     }
 
     document.addEventListener('DOMContentLoaded', () => {

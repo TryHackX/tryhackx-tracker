@@ -541,6 +541,90 @@
         }).catch(() => flashTip(target, t('js.common.clipboard_unavailable'), { variant: 'warning', duration: 2000 }));
     }
 
+    /** The 40-hex `hash` in the address, or null. Anything else is not an address we wrote. */
+    function hashFromUrl() {
+        try {
+            const h = String(new URL(location.href).searchParams.get('hash') || '').toLowerCase();
+            return /^[0-9a-f]{40}$/.test(h) ? h : null;
+        } catch (e) { return null; }
+    }
+
+    /**
+     * Make a details modal addressable: `?hash=<40 hex>` on the page opens that row, opening the
+     * modal writes the hash into the address, closing it takes it away, and a button in the modal's
+     * header copies the address back out.
+     *
+     * replaceState, NOT pushState. The panel is a workplace with polls and forms; stacking a history
+     * entry for every row somebody glances at would turn Back into a tour of the last thirty rows
+     * instead of the way out of the page. The public search page pushes because moving between
+     * views is what a reader does there; here the modal is a look at one row of the page you are on.
+     *
+     * The button is hidden until there is a hash to copy — a Copy link that copies the page you are
+     * already on is a button that lies.
+     */
+    function bindHashModal(modalEl, action) {
+        const noop = { show() {}, clear() {} };
+        if (!modalEl) return noop;
+        const head = modalEl.querySelector('.modal-header');
+        let current = null;
+
+        const linkFor = (h) => location.origin + location.pathname + '?action=' + encodeURIComponent(action) + '&hash=' + h;
+        const setUrl = (h) => {
+            try {
+                const u = new URL(location.href);
+                if (h) u.searchParams.set('hash', h); else u.searchParams.delete('hash');
+                const qs = u.searchParams.toString();
+                history.replaceState(history.state, '', u.pathname + (qs ? '?' + qs : '') + u.hash);
+            } catch (e) { /* opaque origin: the modal simply is not addressable */ }
+        };
+
+        let btn = null;
+        if (head) {
+            btn = el('button', {
+                type: 'button', className: 'btn btn-sm btn-outline-secondary ms-auto me-2',
+                title: t('js.common.copy_link_title'),
+            }, [el('i', { className: 'bi bi-link-45deg' }), ' ' + t('js.common.copy_link')]);
+            btn.hidden = true;
+            btn.addEventListener('click', () => { if (current) copyToClipboard(linkFor(current), btn); });
+            const close = head.querySelector('.btn-close');
+            if (close) {
+                // Bootstrap's own `.modal-header .btn-close` carries margin-left:auto. A second auto
+                // margin on the same flex line does not queue behind the first — the two split the
+                // free space between them, which parked this button in the middle of the header
+                // instead of beside the X, and made its `me-2` do nothing. Cancel the close button's
+                // margin so exactly one auto margin is left on the line.
+                close.classList.add('ms-0');
+                head.insertBefore(btn, close);
+            } else {
+                head.appendChild(btn);
+            }
+            // The button is built once per page and never appears in the document lang-swap.js
+            // fetches, so the in-place language switch skips it the way it skips every script-made
+            // node. Unlike a toast, this one is permanent, so it has to re-read its own strings.
+            document.addEventListener('langswap', () => {
+                btn.title = t('js.common.copy_link_title');
+                btn.textContent = '';
+                btn.appendChild(el('i', { className: 'bi bi-link-45deg' }));
+                btn.appendChild(document.createTextNode(' ' + t('js.common.copy_link')));
+            });
+        }
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            current = null;
+            if (btn) btn.hidden = true;
+            setUrl(null);
+        });
+        return {
+            show(hash) {
+                const h = String(hash || '').toLowerCase();
+                current = /^[0-9a-f]{40}$/.test(h) ? h : null;
+                if (btn) btn.hidden = !current;
+                setUrl(current);
+            },
+            clear() { current = null; if (btn) btn.hidden = true; setUrl(null); },
+            linkFor,
+        };
+    }
+
     /**
      * Ask for the admin password.
      *
@@ -645,5 +729,5 @@
         if (btn) btn.closest('.toast')?.remove();
     });
 
-    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot };
+    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot };
 })();

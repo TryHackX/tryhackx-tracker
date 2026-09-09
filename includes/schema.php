@@ -1427,6 +1427,10 @@ function trackerSchemaDefaultSettings(): array {
         'csp_report_enabled'          => '1',
         'csp_report_keep_rows'        => '500',
         'csp_extra_hosts'             => '',
+        // The Share buttons on the search page. The VIEW is addressable either way — the state is
+        // in the address whether or not anybody is offered a button for it — so this switch is
+        // about whether the site hands out links, not about what may be reached.
+        'search_share_enabled'        => '1',
         // The language switcher rewrites the page instead of reloading it (assets/js/lang-swap.js).
         // Off for one release: it is a new way of doing something that already works, and the thing
         // it replaces — a plain navigation — is what every failure falls back to anyway.

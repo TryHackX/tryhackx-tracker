@@ -31,6 +31,8 @@ $allowed = [
     'csp_mode', 'csp_report_enabled', 'csp_report_keep_rows', 'csp_extra_hosts',
     // the in-place language switch (assets/js/lang-swap.js, read through langJsBundle())
     'lang_swap_enabled',
+    // the Share buttons on the search page (templates/pages/search.php)
+    'search_share_enabled',
     'items_per_page', 'admin_near_pages', 'blacklist_path',
     'max_magnet_link_length',
     'donations_enabled', 'wallet_btc', 'wallet_eth', 'wallet_xmr', 'donation_fields',

@@ -1,12 +1,22 @@
 <?php
 // Details for one whitelist row (details modal).
+//
+// Addressed by `id` from the table, or by `hash` from a link: a shared address names the torrent,
+// not the row number it happens to have in this installation's table. Both find the same row and
+// answer the same way; `id` wins when somebody sends both.
 $id = (int)($_GET['id'] ?? 0);
-if ($id < 1) {
+$hash = strtolower(trim((string)($_GET['hash'] ?? '')));
+if ($id < 1 && !preg_match('/^[0-9a-f]{40}$/', $hash)) {
     jsonResponse(['error' => __('api.common.invalid_id')], 400);
 }
 
-$stmt = $db->prepare("SELECT * FROM whitelist WHERE id = ?");
-$stmt->execute([$id]);
+if ($id >= 1) {
+    $stmt = $db->prepare("SELECT * FROM whitelist WHERE id = ?");
+    $stmt->execute([$id]);
+} else {
+    $stmt = $db->prepare("SELECT * FROM whitelist WHERE info_hash = ? LIMIT 1");
+    $stmt->execute([$hash]);
+}
 $row = $stmt->fetch();
 if (!$row) {
     jsonResponse(['error' => __('api.common.not_found')], 404);
@@ -64,7 +74,12 @@ $filesAll   = (($_GET['files_all'] ?? '') === '1');
 $filesMax   = indexFilesAdminMax($cfg);
 $filesLimit = $filesAll ? $filesMax : indexFilesAdminBatch($cfg);
 $fs = $db->prepare("SELECT path, size FROM whitelist_files WHERE whitelist_id = ? ORDER BY id LIMIT ?");
-$fs->bindValue(1, $id, PDO::PARAM_INT);
+// The id of the row that was FOUND, never the one that was asked for. On the hash path $id is the
+// 0 that (int)($_GET['id'] ?? 0) produced — that branch is entered precisely when $id < 1 — so
+// binding it here meant `whitelist_id = 0`, which matches nothing: every hash-addressed modal
+// showed an empty list and then said "Single-file torrent or no file list stored" under a stat
+// strip reading "27 files". Everything else in this file already reads $row.
+$fs->bindValue(1, (int)$row['id'], PDO::PARAM_INT);
 $fs->bindValue(2, $filesLimit + 1, PDO::PARAM_INT);
 $fs->execute();
 $files = [];

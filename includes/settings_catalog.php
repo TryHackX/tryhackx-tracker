@@ -209,6 +209,7 @@ function settingsCatalogKeywords(): array {
         'rate_limit_user_register' => 'registrations per hour ip throttle spam accounts',
         'rate_limit_index_search'  => 'search queries per hour throttle members index',
         'index_search_enabled'     => 'member search page kill switch disable searching catalogue',
+        'search_share_enabled'     => 'share link copy url permalink address search results torrent bookmark',
         'index_search_include_whitelist' => 'search whitelist rows included results registered torrents',
 
         // ── Tracker & whitelist ──

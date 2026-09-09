@@ -26,6 +26,9 @@ add('js.common', {
     'nothing_rejected': ('Nothing has been rejected.', 'Nic nie zostało odrzucone.'),
     'no_results':      ('No results.', 'Brak wyników.'),
     'loading':         ('Loading…', 'Wczytywanie…'),
+    'copy_link':       ('Copy link', 'Kopiuj link'),
+    'copy_link_title': ('Copy a link that opens this panel on this row',
+                        'Kopiuj link, który otwiera ten panel na tym wierszu'),
 })
 
 
@@ -71,6 +74,10 @@ add('js.app', {
         'Skopiowano'),
     'copy': ('Copy',
         'Kopiuj'),
+    'share_link': ('Link to this view',
+        'Link do tego widoku'),
+    'share_link_one': ('Link to this torrent',
+        'Link do tego torrenta'),
     'copy_magnet': ('Copy magnet link',
         'Kopiuj link magnet'),
     'copy_magnet_title': ('Copy the magnet link',

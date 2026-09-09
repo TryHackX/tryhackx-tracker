@@ -1753,6 +1753,26 @@ body.page-search .container { max-width: 86em; }
 }
 .search-check input:checked ~ * { color: var(--text); }
 .search-total { margin-left: auto; font-size: 0.82rem; white-space: nowrap; }
+
+/* Share: a quiet button beside the result count, and one in the Info panel's head. The fallback box
+   below it is what appears when navigator.clipboard is missing — it is a secure-context API, so on
+   plain HTTP there is nothing to copy WITH and the link has to be shown instead of silently lost. */
+.search-share { background: none; border: 1px solid var(--border); color: var(--text-muted);
+    font: inherit; font-size: 0.78rem; padding: 0.15rem 0.5rem; border-radius: 4px; cursor: pointer;
+    white-space: nowrap; }
+.search-share:hover { color: var(--accent); border-color: var(--accent); }
+.search-share.copied { color: var(--success, #4caf50); border-color: var(--success, #4caf50); }
+.info-share { margin-left: auto; }
+.share-url { display: block; width: 100%; margin-top: 0.35rem; font-size: 0.78rem;
+    font-family: var(--mono, monospace); padding: 0.25rem 0.4rem; border: 1px solid var(--accent);
+    border-radius: 4px; background: var(--bg-input, #111); color: var(--text); }
+/* Spelled out, for the reason the .search-hint comment below gives at length: this class has a
+   display of its own, and an author-origin display beats the user agent's [hidden] { display:none }.
+   Without this line `box.hidden = true` in app.js is a statement that does nothing, and the box —
+   pre-selected, holding a link to whatever the reader was looking at BEFORE — stays on screen. */
+.share-url[hidden] { display: none; }
+.files-head { position: relative; }
+.files-head .share-url { position: absolute; left: 1rem; right: 1rem; top: 100%; width: auto; z-index: 2; }
 /* The "type at least 3 characters" line. A full-width flex item so it wraps onto its own row under
    the box instead of squeezing in beside the selects. [hidden] spelled out the way the overlays do
    it: the moment somebody gives this class a display of its own, the attribute alone stops working. */

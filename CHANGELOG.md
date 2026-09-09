@@ -4,7 +4,103 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [1.40.0] — 2026-09-08
+## [1.40.0] — 2026-09-09
+
+### Added — the search view has an address, and a button that hands it to you
+
+The whole state of the search page lived in one JavaScript closure: the query, the sort stack, the
+page number, whether the Info panel was open. Reloading lost all of it, and there was no way to send
+anybody what you were looking at. It now lives in the address — `search`, `search_files`, `content`,
+`sort`, `page`, `per_page`, `hash` — under the API's own parameter names, so an address from the
+page can be pasted straight onto `api.php` when something needs debugging.
+
+A parameter equal to its default is left out, which is what keeps an ordinary search short enough to
+read. **`per_page` is the one exception: whenever `page` is written, `per_page` goes with it.**
+Without that, a link to "page 3" shows a different set of rows to a reader whose page size is not the
+sender's — one address meaning two things. A `per_page` that arrives in the address governs that
+load only and never overwrites the reader's saved preference.
+
+Turning a page, changing the sort, and opening or closing the Info panel are `pushState`, so Back
+walks the views you actually moved between; typing is `replaceState`, so it does not fill the history
+with every keystroke. A sort the page does not recognise is refused **whole** rather than
+half-applied: an address typed by hand, or written by an older version of this page, either means
+what it says or falls back to the default.
+
+`?action=search&hash=<40 hex>` opens the Info panel for one torrent on a cold load, over the results
+it belongs to. A hash that is not in the catalogue — or that the reader may not see — gets a reason
+in the panel rather than an empty box.
+
+Two **Share** buttons (setting `search_share_enabled`, on by default): one on the toolbar for the
+view as it stands, one in the Info panel's head for that single torrent. The panel's link
+deliberately does **not** carry the sender's query and page number. `navigator.clipboard` does not
+exist on plain HTTP — it is a secure-context API — so where there is nothing to copy with, the link
+appears in a read-only box, already selected, rather than the button doing nothing and saying
+nothing.
+
+In the panel, the Index and Whitelist detail modals answer to `?action=…&hash=<40 hex>` too, with a
+**Copy link** button in the modal header. Those use `replaceState`, not `pushState`: the panel is a
+workplace with polls and forms, and a history entry per row glanced at would turn Back into a tour of
+the last thirty rows. `api/admin/whitelist_item.php` takes `hash=` beside `id=`, because a link should
+name the torrent and not the row number it happens to have in one installation's table.
+
+### Fixed — the Info panel described whitelist rows to readers who could not see them
+
+`api/index_info.php` gated only the `whitelisted` flag and then served the row's name, size, file
+count, swarm counts, source link and description to anybody who could type the hash. A whitelisted
+hash is removed from `index_hashes`, so for such a hash that row is the whole answer — while
+`indexSearchCatalogue()` leaves those rows out of the results and `api/index_files.php` refuses the
+file list. Three endpoints reaching the same row, and one of them disagreeing.
+
+Two more holes in the same file came out of the review that followed:
+
+* **The refresh arm never asked the question at all.** `POST {op:"refresh"}` sat above the row lookup,
+  so it answered 200 with live seeders and leechers for a hash whose `GET` answered 404 — and ran
+  `UPDATE whitelist SET scrape_* …` against a row the caller was not allowed to read. A write with no
+  read permission, on columns that are load-bearing for the readers who do have it: `scrape_seeders`
+  is the whitelist arm's sort key and `scraped_at` is its `last_seen`. The gate now sits above both
+  methods, and the refresh writes nothing into a row it would not have shown.
+* **Banned rows were served.** The whitelist lookup had no `banned = 0`, which every other reader of
+  that table applies. A banned hash is deleted out of `index_hashes` on the next poll, so the banned
+  row was, again, the whole answer — a full description of a torrent this tracker refuses to serve.
+
+Proven where it has to be proven: `deploy/smoke_users.py` exercises all of it over HTTP with a real
+signed-in member, because `userCan()` returns true for any panel session, so the same request made as
+the owner would have passed whatever the code said. The test also puts the permission back and
+repeats the request, so a green line means the gate works rather than that the fixture was broken.
+
+### Fixed — findings from the review of the two features above
+
+An adversarial pass over this release's own diff raised eighty findings; fifteen survived
+verification. Beyond the three above:
+
+* `api/admin/whitelist_item.php` grew a `hash=` branch, but the file-list query one screen below
+  still bound the **request's** `id` — which on that path is the `0` that `(int)($_GET['id'] ?? 0)`
+  produced, because the branch is entered precisely when `id < 1`. `WHERE whitelist_id = 0` matches
+  nothing, so every hash-addressed modal showed an empty list and the sentence "Single-file torrent
+  or no file list stored" under a stat strip reading "3 files". It binds the id of the row that was
+  **found** now. Reached without anyone using Share: the modal writes `?hash=` into the address on
+  every open, so a plain refresh went through that path.
+* The language switcher's `href` is rendered from `$_GET` — the address as it was when the page was
+  **built**. Once the search page started keeping its state there, clicking EN/PL threw the view
+  away: a reader who had typed a query, sorted it and turned to page three landed on a blank search.
+  `lang-swap.js` now rebuilds that link at click time, which fixes both the in-place swap and the
+  plain navigation it falls back to.
+* `.share-url` carried its own `display`, and an author-origin `display` beats the user agent's
+  `[hidden] { display: none }` — so `box.hidden = true` was a statement that did nothing, and a
+  pre-selected link to a page the reader had left stayed on screen, in the Info panel over a
+  different torrent. The stylesheet already warns about exactly this six lines further down.
+* The revealed link box is now dropped whenever the address moves, the Share button is hidden on
+  every path that leaves no results (not only the one that draws rows), and the button's label is
+  read fresh on each flash instead of being cached — a cached "Share" written back a second and a
+  half later put an English word on an otherwise Polish page.
+* `openDetails()` wrote `?hash=` back into the address **after** its request returned, with no check
+  that the modal was still open. Closing it during the live scrape left a hash nothing would ever
+  remove, so the next refresh reopened a modal nobody asked for. The guard is an explicit flag and
+  not `classList.contains('show')`: Bootstrap adds that class a backdrop transition after
+  `modal.show()` returns, so a fast reply would have found it absent and concluded the modal was gone.
+* The Copy-link button's `ms-auto` fought the close button's own auto margin — two auto margins on a
+  flex line split the free space between them, parking it mid-header — and it kept its old label
+  after an in-place language switch, being a script-made node the swap deliberately skips.
 
 ### Added — the language switcher rewrites the page instead of reloading it
 

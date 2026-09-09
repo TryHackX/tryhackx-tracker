@@ -186,9 +186,32 @@
         }
     }
 
+    /**
+     * The address this switcher link should really point at, worked out AT CLICK TIME.
+     *
+     * Both switchers are rendered from $_GET (templates/nav.php, templates/admin/_header_actions.php)
+     * — which is the address as it was when the page was BUILT. Since the search page started
+     * keeping its state in the address, and the panel started putting ?hash= there, that is no
+     * longer the address the reader is on: somebody who typed a query, sorted it and turned to page
+     * three would click PL and land on a bare, empty search. The link is rewritten in the capture
+     * phase, so the browser follows the new value on a plain navigation and the swap below reads it
+     * too.
+     */
+    function currentHrefFor(a) {
+        var code = (a.getAttribute('hreflang') || '').toLowerCase();
+        if (!code) return a.href;
+        try {
+            var u = new URL(location.href);
+            u.searchParams.set('lang', code);
+            return u.href;
+        } catch (e) { return a.href; }
+    }
+
     document.addEventListener('click', function (e) {
         var a = e.target.closest ? e.target.closest(LINKS) : null;
         if (!a) return;
+        var href = currentHrefFor(a);
+        if (href !== a.href) a.href = href;
         try { sessionStorage.setItem(PLACE_KEY, JSON.stringify(capturePlace())); }
         catch (err) { /* storage unavailable: there is nothing to keep and nothing to clean up */ }
     }, true);
@@ -360,7 +383,7 @@
         if (code === (window.t && window.t.lang) || busy) return;
         busy = true;
 
-        var href = a.href;
+        var href = currentHrefFor(a);   // the capture listener above has already written it back
         var place = capturePlace();
         document.documentElement.setAttribute('data-lang-swapping', '');
 

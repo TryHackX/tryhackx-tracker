@@ -3,7 +3,7 @@
     'use strict';
     const A = window.AdminCommon;
     if (!A) return;
-    const { apiCall, el, esc, showToast, confirmAction, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot } = A;
+    const { apiCall, el, esc, showToast, confirmAction, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot } = A;
     const $ = (id) => document.getElementById(id);
 
     const state = { page: 1, pages: 1, search: '', searchFiles: false, meta: '', life: '', sort: [{ col: 'last', dir: 'desc' }], selected: new Set(), rows: [] };
@@ -307,8 +307,13 @@
         return wrap;
     }
 
+    // One row of the catalogue, addressable: ?action=admin-index&hash=<40 hex> opens this modal, and
+    // the button it puts in the header copies that address back.
+    let hashView = null;
     async function openModal(hash) {
         modal = modal || bootstrap.Modal.getOrCreateInstance($('idxModal'));
+        hashView = hashView || bindHashModal($('idxModal'), 'admin-index');
+        hashView.show(hash);
         const body = $('idx-modal-body');
         body.textContent = ''; body.appendChild(el('div', { className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' ' + t('js.common.loading')]));
         modal.show();
@@ -625,6 +630,10 @@
         const logout = $('btn-logout');
         if (logout) logout.addEventListener('click', async () => { try { await apiCall('admin/logout', 'POST', {}); } catch (e) {} location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin'); });
         load(); loadStatus();
+        // A link straight to one row. It opens on top of the list rather than instead of it, so the
+        // page behind is the page the sender was on.
+        const linked = hashFromUrl();
+        if (linked) openModal(linked);
         setInterval(loadStatus, 30000);
         // live view while metadata resolves: silently refresh the current page every 5 s when the
         // meta filter is pending/fetching or any visible row still is — sort/filters/selection survive

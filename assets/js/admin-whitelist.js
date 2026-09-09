@@ -6,7 +6,7 @@
     'use strict';
     // Quick feedback (copies) goes through copyToClipboard → flashTip (tooltip on the clicked element);
     // showToast is reserved for real outcomes (added / banned / deleted / errors).
-    const { apiCall, el, showToast, confirmAction, promptModal, promptPassword, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, animatedClear, bindSearchClear, buildFileTree, busyDot } = window.AdminCommon;
+    const { apiCall, el, showToast, confirmAction, promptModal, promptPassword, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot } = window.AdminCommon;
 
     const $ = (id) => document.getElementById(id);
     const bodyDs = document.body.dataset;
@@ -965,25 +965,54 @@
     // ───────────────────────── details modal ─────────────────────────
     function stopDetailPoll() { if (detailPollTimer) { clearTimeout(detailPollTimer); detailPollTimer = null; } }
 
+    // One whitelist row, addressable: ?action=admin-whitelist&hash=<40 hex> opens this modal.
+    // A LINK NAMES THE TORRENT, NOT THE ROW NUMBER — `id` is this installation's own counter and
+    // means nothing anywhere else, so the address carries the hash and api/admin/whitelist_item.php
+    // takes either. Inside the page the table still passes ids, which are what it has.
+    let wlHashView = null;
+    const isHash = (v) => /^[0-9a-f]{40}$/i.test(String(v));
+    // Whether the details modal is still the thing the operator is looking at. NOT
+    // `classList.contains('show')`: Bootstrap adds that class a backdrop transition after
+    // modal.show() returns, so a reply that arrives quickly would find it absent and conclude the
+    // modal had been closed. Set where we open it, cleared where the browser tells us it is gone.
+    let detailShowing = false;
+
     async function openDetails(id, isPoll = false) {
         const modalEl = $('wlDetailsModal');
         const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         const body = $('wd-body');
+        const byHash = isHash(id);
         if (!isPoll) {
             stopDetailPoll();
             detailPollStart = Date.now();
             body.textContent = '';
             body.appendChild(el('div', { className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' ' + t('js.common.loading')]));
-            $('wd-title-id').textContent = '#' + id;
+            $('wd-title-id').textContent = byHash ? String(id).toLowerCase().slice(0, 10) + '…' : '#' + id;
+            wlHashView = wlHashView || bindHashModal(modalEl, 'admin-whitelist');
+            if (byHash) wlHashView.show(id);
+            detailShowing = true;
             modal.show();
-            modalEl.addEventListener('hidden.bs.modal', stopDetailPoll, { once: true });
+            modalEl.addEventListener('hidden.bs.modal', () => { detailShowing = false; stopDetailPoll(); }, { once: true });
         }
         let r;
-        try { r = await apiCall('admin/whitelist_item' + (filesMode() === 'all' ? '&files_all=1' : '') + '&id=' + encodeURIComponent(id)); } catch { r = { error: t('js.wl.network_error') }; }
+        const key = byHash ? '&hash=' + encodeURIComponent(String(id).toLowerCase()) : '&id=' + encodeURIComponent(id);
+        try { r = await apiCall('admin/whitelist_item' + (filesMode() === 'all' ? '&files_all=1' : '') + key); } catch { r = { error: t('js.wl.network_error') }; }
         if (r.error) { body.textContent = ''; body.appendChild(el('div', { className: 'alert alert-danger', text: r.error })); return; }
         renderDetails(r);
+        // The hash is only known once the row has arrived, which is why this is here and not above:
+        // a modal opened by id can still be shared, because by now we know what it is showing.
+        //
+        // Guarded on the modal still being open, exactly like the poll scheduler below. This request
+        // does a live scrapeOpenTracker() on every call, so Escape within the second it takes is an
+        // ordinary thing to do — and hidden.bs.modal has then already cleared the address, so a late
+        // write here would put ?hash= back with nothing left to take it away again. The next F5
+        // would reopen a modal nobody asked for.
+        if (!isPoll && r.item && r.item.info_hash && detailShowing) {
+            if (wlHashView) wlHashView.show(r.item.info_hash);
+            if (byHash) $('wd-title-id').textContent = '#' + r.item.id;
+        }
         const ms = r.item.meta_status;
-        if ((ms === 'pending' || ms === 'fetching') && Date.now() - detailPollStart < 120000 && modalEl.classList.contains('show')) {
+        if ((ms === 'pending' || ms === 'fetching') && Date.now() - detailPollStart < 120000 && detailShowing) {
             detailPollTimer = setTimeout(() => openDetails(id, true), 3000);
         }
     }
@@ -1587,5 +1616,7 @@
         loadStatus();
         statusTimer = setInterval(loadStatus, 30000);
         loadWhitelist();
+        const linked = hashFromUrl();
+        if (linked) openDetails(linked);
     });
 })();

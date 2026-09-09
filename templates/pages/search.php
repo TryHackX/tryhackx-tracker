@@ -5,6 +5,10 @@ $canSearch = $searchOn && userCan($db, $cfg, 'index.view');
 $canFiles = $canSearch && userCan($db, $cfg, 'index.files');
 $canMagnet = $canSearch && userCan($db, $cfg, 'index.magnet');
 $canWl = $canSearch && userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
+// The Share buttons. Nothing about the view is secret — the address is built from controls the
+// reader can see — so this switch is about whether the operator wants the site handing out links,
+// not about access. The state is written into the address either way; only the buttons go.
+$canShare = $canSearch && ($cfg['search_share_enabled'] ?? '1') === '1';
 $meUser = currentUser($db);
 ?>
 <h1><?= _h('search.h1') ?></h1>
@@ -59,6 +63,10 @@ $meUser = currentUser($db);
             <?php endforeach; ?>
         </select>
         <span class="search-total text-muted" id="search-total"></span>
+<?php if ($canShare): ?>
+        <button type="button" class="search-share" id="search-share" hidden
+                title="<?= _h('search.share_view_title') ?>"><?= _h('search.share') ?></button>
+<?php endif; ?>
         <p class="search-hint text-muted" id="search-hint" hidden></p>
     </div>
 </form>
@@ -89,6 +97,10 @@ $meUser = currentUser($db);
     <div class="files-box info-box" role="dialog" aria-modal="true" aria-labelledby="info-title">
         <div class="files-head">
             <h3 id="info-title"><?= _h('search.details') ?></h3>
+<?php if ($canShare): ?>
+            <button type="button" class="search-share info-share" id="info-share"
+                    title="<?= _h('search.share_one_title') ?>"><?= _h('search.share') ?></button>
+<?php endif; ?>
             <button type="button" class="files-close" id="info-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
         </div>
         <div class="files-body" id="info-body"></div>

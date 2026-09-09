@@ -67,5 +67,10 @@ add('search', {
                          'jednego głosu od czterystu.'),
     'col_last':    ('Last seen', 'Ostatnio widziany'),
     'details':     ('Details', 'Szczegóły'),
+    'share':       ('Share', 'Udostępnij'),
+    'share_view_title': ('Copy a link to exactly this view — the query, the filters, the sort and the page',
+                         'Kopiuj link dokładnie do tego widoku — zapytanie, filtry, sortowanie i strona'),
+    'share_one_title':  ('Copy a link to this torrent — it opens this panel for whoever follows it',
+                         'Kopiuj link do tego torrenta — otworzy ten panel temu, kto w niego kliknie'),
     'files_head':  ('Files', 'Pliki'),
 })

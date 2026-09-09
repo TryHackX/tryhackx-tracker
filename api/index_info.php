@@ -38,15 +38,44 @@ $loadRow = function () use ($db, $hash): array {
     $st->execute([$hash]);
     $out['index'] = $st->fetch() ?: null;
 
+    // AND banned = 0, the same filter api/index_files.php:80 uses. A banned hash is deleted out of
+    // index_hashes on the next poll (includes/index.php), so for such a hash the banned whitelist
+    // row is the ONLY row there is — and without this filter it was the whole answer: name, size,
+    // file count and swarm counts for a torrent this tracker refuses to serve and the search will
+    // not list. The two `!(int)$wl['banned']` guards further down are now belt as well as braces —
+    // they are kept, and `banned` with them, so that gate does not depend on a WHERE clause fifty
+    // lines away that a later edit could relax.
     $st = $db->prepare(
         "SELECT info_hash, name, created_at, total_size, files_count, scrape_seeders, scrape_leechers,
                 scrape_completed, scraped_at, source_url, description, description_format,
                 content_status, banned, source, source_ref
-           FROM whitelist WHERE info_hash = ? LIMIT 1");
+           FROM whitelist WHERE info_hash = ? AND banned = 0 LIMIT 1");
     $st->execute([$hash]);
     $out['whitelist'] = $st->fetch() ?: null;
     return $out;
 };
+
+// WHICH ROWS EXIST FOR THIS CALLER — DECIDED ONCE, ABOVE BOTH METHODS.
+//
+// This used to live below the POST branch, so the refresh arm never asked the question at all: it
+// answered 200 with live seeders and leechers for a hash whose GET answered 404, and it ran
+// `UPDATE whitelist SET scrape_* …` against a row the caller was not allowed to read. A write with
+// no read permission, on columns that ARE load-bearing for the readers who do have it —
+// scrape_seeders is the whitelist arm's sort key and scraped_at is its last_seen
+// (includes/index.php:1442-1443).
+//
+// A whitelisted hash is removed from index_hashes, so for such a hash $idx is null and $wl is the
+// only row there is. `whitelist.view` (with index_search_include_whitelist) is what decides whether
+// a reader may see those rows at all: indexSearchCatalogue() leaves them out of the results and
+// api/index_files.php refuses the file list. Gating only the `whitelisted` flag, as this endpoint
+// did, served the row's name, size, file count, swarm counts, source link and description to
+// anybody who could type the hash. Dropping the row makes every answer agree: not in the results,
+// no file list, no refresh, and the same 404 as a hash nobody has ever seen.
+$canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
+$row = $loadRow();
+$idx = $row['index'];
+$wl  = $canWl ? $row['whitelist'] : null;
+if (!$idx && !$wl) jsonResponse(['error' => __('api.index.not_found_dot')], 404);
 
 // ── the live refresh ────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -74,20 +103,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $db->prepare("UPDATE index_hashes SET last_seeders = ?, last_leechers = ?, last_completed = ?,
                          peak_seeders = GREATEST(peak_seeders, ?) WHERE info_hash = ?")
        ->execute([(int)$sl['seeders'], (int)$sl['leechers'], (int)$sl['completed'], (int)$sl['seeders'], $hash]);
-    $db->prepare("UPDATE whitelist SET scrape_seeders = ?, scrape_leechers = ?, scrape_completed = ?,
-                         scraped_at = NOW() WHERE info_hash = ?")
-       ->execute([(int)$sl['seeders'], (int)$sl['leechers'], (int)$sl['completed'], $hash]);
+    // Only the row this caller may see. $wl is null when they lack whitelist.view, when the search
+    // is configured not to include whitelist rows, and when the row is banned — in all three cases
+    // the numbers they just fetched have no business being written into it.
+    if ($wl) {
+        $db->prepare("UPDATE whitelist SET scrape_seeders = ?, scrape_leechers = ?, scrape_completed = ?,
+                             scraped_at = NOW() WHERE info_hash = ?")
+           ->execute([(int)$sl['seeders'], (int)$sl['leechers'], (int)$sl['completed'], $hash]);
+    }
     jsonResponse(['success' => true, 'seeders' => (int)$sl['seeders'],
                   'leechers' => (int)$sl['leechers'], 'completed' => (int)$sl['completed'],
                   'message' => __('api.index.refreshed')]);
 }
 
-$row = $loadRow();
-$idx = $row['index'];
-$wl  = $row['whitelist'];
-if (!$idx && !$wl) jsonResponse(['error' => __('api.index.not_found_dot')], 404);
-
-$canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
 
 // The link and the description belong to the whitelist row, and only once approved. A pending one is
 // text nobody has looked at yet; a rejected one is text somebody decided against. Neither is public.
