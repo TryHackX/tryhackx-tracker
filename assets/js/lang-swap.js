@@ -142,9 +142,39 @@
      * changing height. One shot at DOMContentLoaded is what made the old version land beside the
      * mark: at that moment the settings search has not filtered yet and the panel's tables are empty.
      */
-    function restorePlace(place) {
-        var deadline = Date.now() + SETTLE_MS;
+    function restorePlace(place, settleMs) {
+        var settle = settleMs || SETTLE_MS;
+        var deadline = Date.now() + settle;
+        var done = false;
+        var ro = null;
+        var timers = [];
+
+        // THE READER WINS, IMMEDIATELY AND FOR GOOD.
+        //
+        // The settle loop keeps correcting while the page is still growing, which is the whole point
+        // of it — but somebody who reaches for the wheel a second after switching language is no
+        // longer being helped by it, they are being fought by it: they scroll, and a moment later
+        // something drags them back to where they were standing when they clicked. So the first
+        // sign of a person moving the page themselves ends the loop.
+        //
+        // Listening for `scroll` would not do: our own scrollBy fires one, and telling the two apart
+        // by a flag is a race against how the browser batches them. These four events only ever come
+        // from a person.
+        var stop = function () {
+            if (done) return;
+            done = true;
+            if (ro) { ro.disconnect(); ro = null; }
+            timers.forEach(clearTimeout);
+            ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(function (ev) {
+                window.removeEventListener(ev, stop, true);
+            });
+        };
+        ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(function (ev) {
+            window.addEventListener(ev, stop, true);
+        });
+
         var apply = function () {
+            if (done) return;
             if (place.anchor) {
                 var el = resolve(place.anchor);
                 if (el) {
@@ -156,8 +186,6 @@
             window.scrollTo(0, place.y || 0);   // the element is gone: the pixel is all we have left
         };
         apply();
-        var ro = null;
-        var stop = function () { if (ro) { ro.disconnect(); ro = null; } };
         if (window.ResizeObserver) {
             ro = new ResizeObserver(function () {
                 if (Date.now() > deadline) { stop(); return; }
@@ -167,9 +195,10 @@
         }
         // Belt as well as braces: images and webfonts move things without resizing <body>.
         [60, 200, 500, 900, 1600, 2400].forEach(function (ms) {
-            setTimeout(function () { if (Date.now() <= deadline + 200) apply(); }, ms);
+            if (ms > settle) return;
+            timers.push(setTimeout(function () { if (Date.now() <= deadline + 200) apply(); }, ms));
         });
-        setTimeout(stop, SETTLE_MS + 300);
+        timers.push(setTimeout(stop, settle + 300));
     }
 
     /** Re-apply the settings page's own view state (filter text, active group) before correcting. */
@@ -456,7 +485,10 @@
             // indexes every label and hint); this is where they rebuild them.
             document.dispatchEvent(new CustomEvent('langswap', { detail: { lang: code, changed: out.length } }));
             document.dispatchEvent(new CustomEvent('langswap:end', { detail: { lang: code, ok: true } }));
-            restorePlace(place);
+            // A short settle: nothing was reloaded, so the only movement is the new text being a
+            // little taller or shorter. The long one belongs to the reload path, where the page is
+            // still filling in from the API for a second or more.
+            restorePlace(place, 700);
         }).catch(function () {
             busy = false;
             giveUp();

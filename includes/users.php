@@ -66,6 +66,14 @@ function userPermissionList(): array {
         'rating.vote'     => 'Rate torrents up or down (needs ratings switched on in Settings)',
         'content.submit'  => 'Attach a source link and a description when registering a torrent',
         'content.propose' => 'Propose a rewrite of a description somebody else wrote',
+        // ── favourites, profiles and uploads (v47) ──
+        // Four ids for four separate decisions, because "may they keep a list" and "may that list be
+        // read by a stranger" are not the same question and an operator will want to answer them
+        // differently.
+        'favourites.use'         => 'Keep a list of favourite torrents',
+        'favourites.public'      => 'Let their favourites list be shown on their public profile',
+        'favourites.view_others' => "See other people's profiles and favourite lists",
+        'uploads.public'         => 'Let their registered torrents be shown on their public profile',
 
         // ── the admin panel ──
         //
@@ -149,7 +157,8 @@ function userGroupPresets(): array {
             'label' => 'Site member',
             'about' => 'The public-site features, no panel at all.',
             'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'whitelist.view', 'whitelist.add',
-                        'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose'],
+                        'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose',
+                        'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public'],
         ],
     ];
 }
@@ -174,6 +183,11 @@ function userLegacyDefault(string $perm): bool {
     // the whole world the moment one was registered.
     if (userIsPanelPermission($perm)) return false;
     if (str_starts_with($perm, 'rating.') || str_starts_with($perm, 'content.')) return true;
+    // The other way round from rating.* and content.*, and for the reason that decides both: those
+    // two work without accounts, so answering false would switch them off for every install that
+    // does not use the user system. Favourites and profiles do not exist without an account at all —
+    // there is nothing to be permissive about.
+    if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.')) return false;
     return !str_starts_with($perm, 'index.');
 }
 
@@ -481,6 +495,42 @@ function userIsEmailTrusted(PDO $db, int $userId): bool {
     return $u !== null && trim((string)($u['email'] ?? '')) !== '' && (int)$u['email_verified'] === 1;
 }
 
+/**
+ * Everything that belongs to one account, removed with it.
+ *
+ * api/admin/user_delete.php used to list the tables inline, which meant every new table that holds a
+ * user_id had to be remembered THERE. It was not: `hash_votes` keeps its voter as
+ * (voter_type='user', voter_key=<id>), so a deleted account's votes stayed in the table and went on
+ * counting towards every score they had touched — a live bug, not a hypothesis, and one no test
+ * could have caught because nothing named the invariant.
+ *
+ * One function, one place to add the next table. Returns what it removed, so the caller can say.
+ */
+function userDeleteCascade(PDO $db, int $userId): array {
+    $gone = [];
+    $del = function (string $sql, array $args, string $label) use ($db, &$gone) {
+        try {
+            $st = $db->prepare($sql);
+            $st->execute($args);
+            $n = $st->rowCount();
+            if ($n > 0) $gone[$label] = $n;
+        } catch (\Throwable $e) { /* a table this install does not have yet is not a failure */ }
+    };
+    $del("DELETE FROM user_group_members WHERE user_id = ?", [$userId], 'groups');
+    $del("DELETE FROM user_notifications WHERE user_id = ?", [$userId], 'notifications');
+    $del("DELETE FROM user_tokens WHERE user_id = ?", [$userId], 'tokens');
+    $del("DELETE FROM user_favourites WHERE user_id = ?", [$userId], 'favourites');
+    // The pair, not an id column: hash_votes identifies a voter as a type plus a key, because an
+    // anonymous vote is keyed by an IP bucket instead.
+    $del("DELETE FROM hash_votes WHERE voter_type = 'user' AND voter_key = ?", [(string)$userId], 'votes');
+    // Submissions are NOT deleted — a whitelist row is a torrent the tracker serves, and deleting an
+    // account is not a reason to stop serving it. The attribution goes, so it stops appearing on a
+    // profile that no longer exists.
+    $del("UPDATE whitelist SET submitter_id = NULL, submitter_public = 0 WHERE submitter_id = ?", [$userId], 'submissions_unlinked');
+    $del("DELETE FROM users WHERE id = ?", [$userId], 'user');
+    return $gone;
+}
+
 /** Is this user an ACTIVE member of the system `admin` group? */
 function userIsAdminGroup(PDO $db, int $userId): bool {
     foreach (userGroups($db, $userId) as $g) if ($g['slug'] === 'admin') return true;
@@ -507,6 +557,21 @@ function userCan(PDO $db, array $cfg, string $perm): bool {
     if (!usersEnabled($cfg)) return userLegacyDefault($perm);
     $u = currentUser($db);
     $perms = userEffectivePermissions($db, $u ? (int)$u['id'] : null, $cfg);
+    return !empty($perms[$perm]);
+}
+
+/**
+ * Does a NAMED user hold a permission — not the caller.
+ *
+ * userCan() answers about whoever is asking, which is the wrong question when a page has to decide
+ * what somebody ELSE's profile may show. A stale checkbox on a row must not outlive the group that
+ * allowed it: an operator who takes `favourites.public` away from a group means it, and a list that
+ * kept showing because a `fav_public` column still said 1 would be the checkbox overruling them.
+ */
+function userIdHasPermission(PDO $db, array $cfg, int $userId, string $perm): bool {
+    if (!usersEnabled($cfg)) return userLegacyDefault($perm);
+    if ($userId <= 0) return false;
+    $perms = userEffectivePermissions($db, $userId, $cfg);
     return !empty($perms[$perm]);
 }
 

@@ -143,7 +143,20 @@ if ($wlSched) {
     $wlDescOn = ($cfg['wl_allow_description'] ?? '0') === '1';
     $wlFormats = function_exists('richtextFormats') ? richtextFormats($cfg) : ['bbcode'];
     $wlReview = ($cfg['wl_content_review'] ?? '1') === '1';
+    // The per-torrent visibility choice, offered only where all three gates agree: the site allows
+    // attribution to be shown, this reader's group holds `uploads.public`, and they are signed in.
+    // It applies to the rows THIS submission creates — a hash somebody already registered belongs to
+    // whoever registered it first, and the reply says so.
+    $wlMe = usersEnabled($cfg) ? currentUser($db) : null;
+    $wlPubOn = $wlMe !== null && uploadsPublicEnabled($cfg) && userCan($db, $cfg, 'uploads.public');
 ?>
+<?php if ($wlPubOn): ?>
+    <div class="form-group wl-visibility">
+        <label class="acc-check"><input type="checkbox" id="wl-public" name="submitter_public">
+            <span><?= _h('whitelist.public_label') ?></span></label>
+        <div class="form-hint"><?= __('whitelist.public_hint', ['name' => sanitize($wlMe['username'])]) ?></div>
+    </div>
+<?php endif; ?>
 <?php if ($wlSrcOn || $wlDescOn): ?>
     <div class="wl-extra">
         <p class="wl-extra-head"><?= __('whitelist.extra_head') ?></p>

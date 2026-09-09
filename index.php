@@ -26,6 +26,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/twofa.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
+require_once __DIR__ . '/includes/favourites.php';
 require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/federation.php';
 require_once __DIR__ . '/includes/pagecontent.php';
@@ -133,6 +134,11 @@ $routes = [
     'verify'       => 'templates/pages/verify.php',
     'emailchange'  => 'templates/pages/emailchange.php',
     'search'       => 'templates/pages/search.php',
+    // A PROFILE'S ADDRESS PUTS THE NAME IN ITS OWN PARAMETER, and the reason is two lines above:
+    // $action is lower-cased and stripped of everything but [a-z0-9_-], while userValidUsername()
+    // allows a dot and both cases. A name can never be an action, so the collision problem does not
+    // arise — 'Bob.Smith' would have become 'bobsmith', a different person or nobody.
+    'u'            => 'templates/pages/profile.php',
 ];
 
 $baseUrl = getBaseUrl();
@@ -203,7 +209,7 @@ if (in_array($action, $adminPanelActions, true) || $action === $adminLoginAction
 }
 
 // user pages exist only while the account system is on (and the account page needs a session)
-if (in_array($action, ['login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search'], true) && !usersEnabled($cfg)) {
+if (in_array($action, ['login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search', 'u'], true) && !usersEnabled($cfg)) {
     $action = 'home';
 }
 

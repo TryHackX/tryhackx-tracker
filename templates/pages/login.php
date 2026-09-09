@@ -7,7 +7,13 @@
 <?php else: ?>
 <div class="user-card">
     <div id="login-alert" class="alert"></div>
-    <form id="login-form" class="user-form" novalidate>
+    <?php /* Solve the CAPTCHA BEFORE the first POST when the server already knows it will ask.
+             The handshake — post, get 400 with captcha_required, solve, post again — still exists
+             and still covers the case where the requirement appears between this render and the
+             submit. What it should not do is happen on every ordinary sign-in: the wasted request
+             is rejected, so the browser prints a red "400 (Bad Request)" in the console of a login
+             that worked perfectly. */ ?>
+    <form id="login-form" class="user-form" novalidate data-captcha-first="<?= isCaptchaRequired($cfg, 'login') ? '1' : '0' ?>">
         <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
         <div class="form-group">
             <label for="login-login"><?= _h('login.login_label') ?></label>

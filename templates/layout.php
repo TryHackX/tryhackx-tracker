@@ -62,6 +62,13 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
     </script>
     <script src="<?= $baseUrl ?>assets/js/captcha.js<?= assetVer('assets/js/captcha.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/app.js<?= assetVer('assets/js/app.js') ?>"></script>
+    <?php /* The star, the profile lists and the "who has this" overlay. Loaded on every public page
+             for the same reason app.js is: the star is delegated from `document` and has to be there
+             before the first row is drawn. Every entry point inside it asks whether its own markup
+             exists first, so a page without any of this costs one querySelector. */ ?>
+    <?php if (favEnabled($cfg) || profilesEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/js/favourites.js<?= assetVer('assets/js/favourites.js') ?>"></script>
+    <?php endif; ?>
     <?php if ($timelineNeeded): ?>
     <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/stats-timeline.js<?= assetVer('assets/js/stats-timeline.js') ?>"></script>

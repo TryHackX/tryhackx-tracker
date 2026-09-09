@@ -145,6 +145,10 @@ jsonResponse([
     'info_hash' => $hash,
     'name'      => $idx['name'] ?? ($wl['name'] ?? null),
     'whitelisted' => $canWl ? (bool)$wl : null,
+    // The panel always has the hash, so the star is available here even where the row could not
+    // carry one (api/index_search.php sends info_hash only with index.magnet).
+    'fav'         => (favEnabled($cfg) && ($meFav = currentUser($db)) && userCan($db, $cfg, 'favourites.use'))
+                     ? favHas($db, (int)$meFav['id'], $hash) : null,
     'source_url'  => $sourceUrl,
     'source_trusted' => $sourceUrl ? richtextIsTrusted($sourceUrl, $cfg) : false,
     'source_auto'    => $sourceAuto,

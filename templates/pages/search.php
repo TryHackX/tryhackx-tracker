@@ -10,6 +10,11 @@ $canWl = $canSearch && userCan($db, $cfg, 'whitelist.view') && ($cfg['index_sear
 // not about access. The state is written into the address either way; only the buttons go.
 $canShare = $canSearch && ($cfg['search_share_enabled'] ?? '1') === '1';
 $meUser = currentUser($db);
+// Favourites: three separate answers the page hands to the script, because the star, the public list
+// and the "who has this" overlay are three switches an operator sets independently. AFTER $meUser,
+// which it reads — the first version of this line sat above it and every gate answered "not signed
+// in" for everybody.
+$favCtx = favContext($db, $cfg, $meUser);
 ?>
 <h1><?= _h('search.h1') ?></h1>
 
@@ -33,6 +38,7 @@ $meUser = currentUser($db);
                the browser can never be talked into ignoring. Both overlays live in this file and
                read this attribute inside initSearch()'s closure, so they cannot drift apart. */ ?>
       data-files-mode="<?= sanitize(indexFilesMode($cfg)) ?>"
+      data-fav="<?= $favCtx['may_use'] ? '1' : '0' ?>" data-fav-who="<?= ($favCtx['who_ok'] && $favCtx['may_view']) ? '1' : '0' ?>"
       data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
       <?php $sExtra = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
                                               array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')]))); ?>
@@ -119,6 +125,7 @@ $meUser = currentUser($db);
     <div class="files-box info-box" role="dialog" aria-modal="true" aria-labelledby="info-title">
         <div class="files-head">
             <h3 id="info-title"><?= _h('search.details') ?></h3>
+            <span class="info-acts" id="info-acts"></span>
 <?php if ($canShare): ?>
             <button type="button" class="search-share info-share" id="info-share"
                     title="<?= _h('search.share_one_title') ?>"><?= _h('search.share') ?></button>
@@ -128,6 +135,25 @@ $meUser = currentUser($db);
         <div class="files-body" id="info-body"></div>
     </div>
 </div>
+
+<?php if ($favCtx['who_ok'] && $favCtx['may_view']): ?>
+<?php /* The fourth instance of this shell (search results, the file list, the Info panel, this).
+         Its pager and its search box are its own; the list inside is usernames, and every one of
+         them is somebody who said yes to being here — see api/hash_favourites.php. */ ?>
+<div class="files-overlay" id="who-overlay" hidden>
+    <div class="files-box" role="dialog" aria-modal="true" aria-labelledby="who-title">
+        <div class="files-head">
+            <h3 id="who-title"><?= _h('js.fav.who') ?> <span class="text-muted" id="who-total"></span></h3>
+            <button type="button" class="files-close" id="who-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
+        </div>
+        <div class="files-body">
+            <input type="text" class="profile-search" id="who-search" maxlength="60" placeholder="<?= _h('profile.search_ph') ?>" autocomplete="off">
+            <div id="who-body"></div>
+            <div class="trans-pagination" id="who-pager"></div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if ($canFiles): ?>
 <div class="files-overlay" id="files-overlay" hidden>

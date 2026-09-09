@@ -83,6 +83,15 @@ $repInResults = repEnabled($cfg) && repShowInResults($cfg);
 $repMin = repMinVotes($cfg);
 $repMode = repMode($cfg);
 
+// Which of THIS page's hashes the reader has already favourited — one query for the page, never one
+// per row. A page of 200 results would otherwise be 200 round trips against a table this database
+// shares with the mail and the forum.
+$favMark = [];
+if (favEnabled($cfg) && $canMagnet && userCan($db, $cfg, 'favourites.use')) {
+    $meFav = currentUser($db);
+    if ($meFav) $favMark = favMarkFor($db, (int)$meFav['id'], array_column($res['rows'], 'info_hash'));
+}
+
 $rows = [];
 foreach ($res['rows'] as $r) {
     $row = [
@@ -94,7 +103,12 @@ foreach ($res['rows'] as $r) {
         'src'      => $r['src'],
     ];
     if ($canFiles) $row['files_count'] = $r['files_count'];
-    if ($canMagnet) $row['info_hash'] = $r['info_hash'];
+    if ($canMagnet) {
+        $row['info_hash'] = $r['info_hash'];
+        // Only sent when there is a star to paint: `fav` on a row the page cannot show a star for
+        // would be a fact about the reader travelling for no reason.
+        if ($favMark !== [] || (favEnabled($cfg) && $canMagnet)) $row['fav'] = isset($favMark[$r['info_hash']]);
+    }
     // Only when the operator asked for it, and only above the threshold: a column showing "100%"
     // next to a single vote would be worse than no column.
     if ($repInResults) {

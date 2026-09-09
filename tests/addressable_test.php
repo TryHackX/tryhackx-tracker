@@ -130,7 +130,7 @@ $schemaSrc  = (string)@file_get_contents($root . '/includes/schema.php');
 $catalogSrc = (string)@file_get_contents($root . '/includes/settings_catalog.php');
 $saveSrc    = (string)@file_get_contents($root . '/api/admin/save_settings.php');
 $setTpl     = (string)@file_get_contents($root . '/templates/admin/settings.php');
-foreach (['search_share_enabled' => '1', 'lang_swap_enabled' => '0'] as $key => $default) {
+foreach (['search_share_enabled' => '1', 'lang_swap_enabled' => '1'] as $key => $default) {
     check("$key has a schema default", str_contains($schemaSrc, "'$key'"));
     check("$key ships as '$default'", (trackerSchemaDefaultSettings()[$key] ?? null) === $default,
         var_export(trackerSchemaDefaultSettings()[$key] ?? null, true));

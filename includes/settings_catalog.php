@@ -211,6 +211,12 @@ function settingsCatalogKeywords(): array {
         'rate_limit_index_search'  => 'search queries per hour throttle members index',
         'index_search_enabled'     => 'member search page kill switch disable searching catalogue',
         'search_share_enabled'     => 'share link copy url permalink address search results torrent bookmark',
+        'fav_enabled'              => 'favourites favorites bookmarks starred saved list star member',
+        'fav_max_per_user'         => 'favourites limit maximum per user cap how many starred',
+        'fav_public_enabled'       => 'favourites public profile share list visible privacy',
+        'fav_who_enabled'          => 'who has this favourites list people names watchers privacy',
+        'profiles_enabled'         => 'profile public page user page member page ?action=u',
+        'wl_submitter_public'      => 'submitter uploader attribution my torrents uploads credit profile who registered',
         'search_time_budget'       => 'search timeout time limit budget seconds slow query 500 execution',
         'index_search_include_whitelist' => 'search whitelist rows included results registered torrents',
 

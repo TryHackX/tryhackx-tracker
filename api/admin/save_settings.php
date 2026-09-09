@@ -35,6 +35,9 @@ $allowed = [
     'search_share_enabled',
     // where the version line appears (templates/footer.php) and how long a search may run
     'version_display', 'search_time_budget',
+    // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
+    'fav_enabled', 'fav_max_per_user', 'fav_public_enabled', 'fav_who_enabled', 'profiles_enabled',
+    'wl_submitter_public',
     'items_per_page', 'admin_near_pages', 'blacklist_path',
     'max_magnet_link_length',
     'donations_enabled', 'wallet_btc', 'wallet_eth', 'wallet_xmr', 'donation_fields',

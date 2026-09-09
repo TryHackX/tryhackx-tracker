@@ -34,6 +34,7 @@ require_once __DIR__ . '/includes/wlmaint.php';
 require_once __DIR__ . '/includes/wlprobe.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
+require_once __DIR__ . '/includes/favourites.php';
 require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/tuner.php';
 require_once __DIR__ . '/includes/federation.php';
@@ -246,6 +247,11 @@ $apiRoutes = [
     'index_info'                 => 'api/index_info.php',
     'richtext_preview'           => 'api/richtext_preview.php',
     'rate_hash'                  => 'api/rate_hash.php',
+    // ── Favourites, profiles and uploads (includes/favourites.php) ──
+    'user_favourites'            => 'api/user_favourites.php',
+    'hash_favourites'            => 'api/hash_favourites.php',
+    'user_uploads'               => 'api/user_uploads.php',
+    'user_privacy'               => 'api/user_privacy.php',
     'whitelist_probe'            => 'api/whitelist_probe.php',
     // ── User accounts (admin) ──
     'admin/fetch_users'          => 'api/admin/fetch_users.php',

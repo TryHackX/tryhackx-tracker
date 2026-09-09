@@ -85,7 +85,7 @@
         // the engine, the machine
         const head = el('div', { className: 'dm-facts' });
         const fact = (label, value, cls) => head.appendChild(el('div', { className: 'dm-fact' + (cls ? ' ' + cls : '') }, [
-            el('span', { className: 'dm-fact-k', text: label }), el('span', { className: 'dm-fact-v', text: value })]));
+            el('span', { className: 'dm-fact-k', text: label }), el('span', { className: 'dm-fact-v', text: value })]));   // returns the row, so a caller can add a title
         fact(t('js.dbmem.engine'), (st.engine === 'mariadb' ? 'MariaDB' : 'MySQL') + ' ' + (st.server_version || '').split('-')[0] + (st.unit ? ' · ' + st.unit : ''));
         fact(t('js.dbmem.ram'), fmtBytes((st.mem_total_kb || 0) * 1024) + ' · ' + t('js.dbmem.available', { v: fmtBytes((st.mem_available_kb || 0) * 1024) }));
         const total = Number(s.Innodb_buffer_pool_pages_total) || 0, free = Number(s.Innodb_buffer_pool_pages_free) || 0;
@@ -95,6 +95,22 @@
         const tmpAll = Number(s.Created_tmp_tables) || 0, tmpDisk = Number(s.Created_tmp_disk_tables) || 0;
         if (tmpAll) fact(t('js.dbmem.tmp_disk'), Math.round(100 * tmpDisk / tmpAll) + ' %');
         fact(t('js.dbmem.connections'), t('js.dbmem.of_limit', { used: num(s.Threads_connected), peak: num(s.Max_used_connections), limit: num(vars.max_connections) }));
+        // WHAT THE POOL IS FOR. Every other number here describes the pool; without these three,
+        // "is the pool big enough?" cannot be answered from this screen at all — and on this
+        // deployment the catalogue is several times the pool, which is the single most useful thing
+        // the card can say. `title` carries the data/index split and the row estimate, because a
+        // table that is mostly index is a different problem from one that is mostly rows.
+        const sz = d.sizes || {};
+        if (sz.db != null) fact(t('js.dbmem.db_size'), fmtBytes(sz.db));
+        ['index_hashes', 'index_files'].forEach(name => {
+            const tsz = (sz.tables || {})[name];
+            if (!tsz) return;
+            const f = fact(t('js.dbmem.table_size', { table: name }), fmtBytes(tsz.total));
+            f.title = t('js.dbmem.table_size_title', {
+                data: fmtBytes(tsz.data), index: fmtBytes(tsz.index),
+                rows: tsz.rows == null ? '—' : Number(tsz.rows).toLocaleString(),
+            });
+        });
         g.appendChild(head);
 
         // the table

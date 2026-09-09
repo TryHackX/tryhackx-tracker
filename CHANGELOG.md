@@ -4,6 +4,61 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.42.0] — 2026-09-09
+
+### Added — favourites, public profiles and "my torrents" (schema 47)
+
+A member can keep a list of favourite torrents, show it on a public profile at
+`?action=u&name=…`, and — where the tracker takes submissions — show the torrents they registered
+there too. Everything ships **off**: a list of what somebody likes is a list about them.
+
+**The privacy rule, once.** Somebody appears on a list about themselves only when every gate above
+them says yes: the site allows public favourites, the site allows the "who has this" list, their
+group holds `favourites.public`, their own list is public, and they have not asked to be left off
+other people's lists. Any single no removes them from the rows **and from the count** — never
+"14 people have this, 3 shown". That difference is stable and cumulative, so anyone polling the
+counter would learn the exact moment a hidden person favourited something. A count that can be
+differenced is a list of hidden names, written slowly.
+
+**Two flags, not one.** `fav_public` answers "may a stranger read my list on my profile"; `fav_listed`
+answers "may my name appear on somebody else's torrent page". Saying yes to one has never been
+saying yes to the other.
+
+**One shape of 404 for every no** — a wrong name, no such account, a suspended one, a hidden list,
+the feature off, the permission missing. Registration already tells anybody that a name is taken, so
+this is not about keeping that secret; it is about not handing out a cheap, scriptable way to tell
+*hidden* from *nonexistent*.
+
+Deliberately absent: no denormalised counter on catalogue rows (a vote carries no privacy and a
+favourite does, so an honest count would have to be recomputed on every checkbox and every group
+edit — a counter that lags is a leak that lags), no background job, and nothing new in the
+per-request janitor, which already runs four.
+
+The queries are the small-side-first pattern this file has been burned by ignoring: the user's own
+hashes first, bounded by `fav_max_per_user`, then one literal `IN()` per chunk for the metadata.
+Never `FROM index_hashes JOIN user_favourites` with a `MATCH()` on it — that is the plan behind the
+twenty-four-minute outage.
+
+A favourite **outlives** the catalogue row. The janitor prunes `index_hashes`; deleting favourites
+with it would quietly empty people's lists, and a hash alone still builds a working magnet. A row
+with no catalogue entry renders as "no longer in the catalogue", with its hash and a way to remove
+it. A banned hash renders without a magnet.
+
+Six settings (`fav_enabled`, `fav_max_per_user`, `fav_public_enabled`, `fav_who_enabled`,
+`profiles_enabled`, `wl_submitter_public`) and four permissions (`favourites.use`,
+`favourites.public`, `favourites.view_others`, `uploads.public`). **Guest gets none of them**:
+profiles are for signed-in readers, so an anonymous visitor sees what they see with the account
+system switched off.
+
+### Fixed — a deleted account's votes went on counting
+
+`api/admin/user_delete.php` listed its tables inline, so every new table holding a `user_id` had to
+be remembered *there*. It was not: `hash_votes` keys its voter as `(voter_type='user',
+voter_key=<id>)`, and a deleted account's votes stayed in the table and kept counting towards every
+score they had touched. One `userDeleteCascade()` now, with one place to add the next table — and a
+test that fails on the code that shipped before it. Submissions are **not** deleted (a whitelist row
+is a torrent the tracker serves) but they stop being attributed.
+
 ## [1.41.0] — 2026-09-09
 
 ### Added — the panel has a footer, and the build has a name

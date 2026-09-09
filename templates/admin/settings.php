@@ -1821,6 +1821,59 @@
                 </div>
             </div>
 
+            <!-- Favourites, public profiles and "my torrents" — includes/favourites.php -->
+            <div class="settings-section" id="section-favourites" data-group="users" data-title="<?= _h('settings.fav_heading') ?>">
+                <h5><?= _h('settings.fav_heading') ?></h5>
+                <p class="settings-hint mb-3"><?= __('settings.fav_intro') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.fav_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fav_enabled">
+                            <option value="1" <?= ($cfg['fav_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['fav_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.fav_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.fav_max') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fav_max_per_user" value="<?= sanitize($cfg['fav_max_per_user'] ?? '500') ?>" min="10" max="5000">
+                        <small class="settings-hint"><?= _h('settings.fav_max_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.fav_public') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fav_public_enabled">
+                            <option value="1" <?= ($cfg['fav_public_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['fav_public_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.fav_public_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.fav_who') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fav_who_enabled">
+                            <option value="1" <?= ($cfg['fav_who_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['fav_who_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.fav_who_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.profiles') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="profiles_enabled">
+                            <option value="1" <?= ($cfg['profiles_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['profiles_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profiles_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.wl_submitter') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_submitter_public">
+                            <option value="1" <?= ($cfg['wl_submitter_public'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['wl_submitter_public'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.wl_submitter_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
             <!-- Interface languages — includes/lang.php -->
             <div class="settings-section" id="section-languages" data-group="languages" data-title="<?= _h('settings.languages_title') ?>">
                 <h5><?= _h('settings.languages_title') ?></h5>

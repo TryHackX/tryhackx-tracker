@@ -18,7 +18,7 @@ function adminReservedActions(): array {
     return ['home', 'info', 'tos', 'report', 'status', 'transparency', 'unsubscribe', 'stats',
             'whitelist', 'login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search',
             'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-backups',
-            'admin-traffic', 'admin-audit', 'notfound'];
+            'admin-traffic', 'admin-audit', 'notfound', 'u'];   // 'u' = a public profile (v47)
 }
 
 /** The panel actions that exist regardless of where the sign-in form lives. */

@@ -169,6 +169,11 @@ $REVIEWED = [
     // are built here from $where — literal fragments chosen by key — plus one clause the same
     // function wrote ('name LIKE ?', a MATCH(), or 'info_hash IN (?,?,…)' whose length is the count
     // of the bound array). Nothing from the request reaches the text; the hashes are bound.
+    // Both are built from a fixed vocabulary in the same file: $sets holds literal `fav_public = ?` /
+    // `fav_listed = ?` fragments chosen by an allow-list of two names, and $order is a column looked
+    // up in $sortCols plus one of two literal directions. Nothing from the request reaches either.
+    'api/user_privacy.php:$sets'               => 'literal column fragments chosen from a two-name allow-list; values bound',
+    'api/user_uploads.php:$order'              => 'column looked up in $sortCols, direction one of two literals',
     'includes/index.php:$clA'                  => 'literal conditions from $where plus one clause built with placeholders; values bound',
     'includes/index.php:$clB'                  => 'literal conditions from $where plus one clause built with placeholders; values bound',
     'includes/schema.php:$one'                 => 'one of this file\'s own CREATE/ALTER statements',

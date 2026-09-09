@@ -652,6 +652,16 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
     $ref = isset($ctx['ref']) && is_array($ctx['ref']) ? json_encode($ctx['ref'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) : null;
     if ($ref !== null && strlen($ref) > 512) $ref = mb_strcut($ref, 0, 512);
     $autoMeta = $ctx['auto_meta'] ?? in_array($source, WL_META_AUTO_SOURCES, true);
+    // v47: who registered it, and whether they want it on their profile.
+    //
+    // Through $ctx with a NULL default, because this function is shared by the public form, the S2S
+    // API and the panel — a new required argument would break the two that never have a submitter.
+    // NULL means nobody's, and it stays that way: an anonymous submission has no owner and there is
+    // no "claim this as mine" anywhere. The only artefact that could support such a claim is the ip
+    // bucket, which is not evidence, and comparing it against a signed-in reader's address would be
+    // the privacy problem, not the answer to one.
+    $submitterId = isset($ctx['submitter_id']) && (int)$ctx['submitter_id'] > 0 ? (int)$ctx['submitter_id'] : null;
+    $submitterPublic = ($submitterId !== null && !empty($ctx['submitter_public'])) ? 1 : 0;
 
     $results = []; $summary = ['added' => 0, 'exists' => 0, 'banned' => 0, 'invalid' => 0];
     $valid = [];
@@ -678,8 +688,8 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
             foreach ($st->fetchAll() as $row) $existing[$row['info_hash']] = (int)$row['banned'];
         }
 
-        $ins = $db->prepare("INSERT IGNORE INTO whitelist (info_hash, name, magnet_link, source, source_ref, api_client_id, ip, ip_bucket, meta_status, meta_requested_at)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $ins = $db->prepare("INSERT IGNORE INTO whitelist (info_hash, name, magnet_link, source, source_ref, api_client_id, ip, ip_bucket, meta_status, meta_requested_at, submitter_id, submitter_public)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         foreach ($valid as $i => $it) {
             $h = $it['hash'];
             if (isset($banned[$h]) || (isset($existing[$h]) && $existing[$h] === 1)) {
@@ -692,8 +702,14 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
                 $summary['exists']++;
                 continue;
             }
+            // THE FIRST SUBMITTER OWNS IT. INSERT IGNORE writes nothing for a hash somebody has
+            // already registered, so a second person submitting the same torrent does not take it
+            // over — and does not get it on their profile either. api/whitelist_submit.php already
+            // distinguishes `added` from `exists`, so the form says so in one sentence rather than
+            // leaving somebody to wonder why their torrent never appeared.
             $ins->execute([$h, $it['name'] ?? null, $it['magnet'] ?? null, $source, $ref, $apiClientId, $ip, $bucket,
-                           $autoMeta ? 'pending' : 'none', $autoMeta ? date('Y-m-d H:i:s') : null]);
+                           $autoMeta ? 'pending' : 'none', $autoMeta ? date('Y-m-d H:i:s') : null,
+                           $submitterId, $submitterPublic]);
             if ($ins->rowCount() > 0) {
                 $results[$i] = ['index' => $i, 'input' => $it['input'], 'hash' => $h, 'status' => 'added', 'error' => null];
                 $summary['added']++;

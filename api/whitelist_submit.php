@@ -139,7 +139,19 @@ if ($descText !== '') {
 }
 
 $addCtx = ['source' => 'web', 'ip' => $ip, 'auto_meta' => false];
-if ($submitUser !== null) $addCtx['ref'] = ['user' => $submitUser['username'], 'id' => (int)$submitUser['id']];
+if ($submitUser !== null) {
+    $addCtx['ref'] = ['user' => $submitUser['username'], 'id' => (int)$submitUser['id']];
+    // v47: the attribution proper, in a column with an index, not only in the source_ref blob.
+    // source_ref is a provenance record api/index_info.php already reads a URL out of; a profile
+    // needs something the database can filter and order by.
+    $addCtx['submitter_id'] = (int)$submitUser['id'];
+    // The per-row visibility choice, and only where all three gates agree. It applies to the rows
+    // this submission CREATES — a hash that already existed belongs to whoever registered it first,
+    // and the reply says `exists` so the form can tell the submitter that.
+    $addCtx['submitter_public'] = uploadsPublicEnabled($cfg)
+        && userCan($db, $cfg, 'uploads.public')
+        && !empty($input['submitter_public']);
+}
 $r = whitelistAddHashes($db, $cfg, $items, $addCtx);
 
 // Attach them to the row — or, if the row already has words on it, PROPOSE replacing them.

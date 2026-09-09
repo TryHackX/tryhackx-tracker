@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 46;  // 46 = csp_reports (one row per KIND of violation, hits counts occurrences) + the four csp_* settings — the policy moved out of .htaccess and into PHP, where a nonce can exist
+const TRACKER_SCHEMA_VERSION = 47;  // 47 = user_favourites + users.fav_public/fav_listed + whitelist.submitter_id/submitter_public — favourites, public profiles and "my uploads"
+                                    // 46 = csp_reports (one row per KIND of violation, hits counts occurrences) + the four csp_* settings — the policy moved out of .htaccess and into PHP, where a nonce can exist
 // 45 = settings only (transport: cookie_secure_mode, client_proto_header, hsts_*) — every reader carries its own `?? default`, so the rows only make them visible in Settings
 // 44 = settings only (index_files_*: how a file list loads — mode, batch, total, once for the search page and once for the panel)
 // 43 = settings only (meta_max_files: the worker's stored-files-per-torrent cap, live from the panel)
@@ -101,7 +102,14 @@ function trackerSchemaStatements(): array {
             `scraped_at` DATETIME DEFAULT NULL,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            -- v47: who registered it while signed in (NULL = nobody's: anonymous, the API, the
+            -- panel, or a row older than this column), and whether they want it on their profile.
+            -- `submitter_public` decides whose PROFILE a row appears on and nothing else — never
+            -- what the tracker serves and never what the search finds.
+            `submitter_id` INT UNSIGNED DEFAULT NULL,
+            `submitter_public` TINYINT(1) NOT NULL DEFAULT 0,
             UNIQUE KEY `uq_whitelist_hash` (`info_hash`),
+            KEY `idx_wl_submitter` (`submitter_id`, `created_at`),
             KEY `idx_whitelist_ip_bucket` (`ip_bucket`, `created_at`),
             KEY `idx_whitelist_created` (`created_at`),
             KEY `idx_whitelist_source` (`source`, `created_at`),
@@ -390,6 +398,13 @@ function trackerSchemaStatements(): array {
             `pending_email` VARCHAR(190) DEFAULT NULL,
             `email_changed_at` DATETIME DEFAULT NULL,
             `language` VARCHAR(3) DEFAULT NULL,
+            -- v47. Two flags, not one, because they answer two different questions and a reader who
+            -- says yes to one has not said yes to the other:
+            --   fav_public — may a stranger read MY list of favourites on my profile?
+            --   fav_listed — may my name appear on somebody else's list of who favourited a hash?
+            -- Both default to 0. A privacy flag that ships on is not a choice anybody made.
+            `fav_public` TINYINT(1) NOT NULL DEFAULT 0,
+            `fav_listed` TINYINT(1) NOT NULL DEFAULT 0,
             UNIQUE KEY `uq_users_username` (`username`),
             UNIQUE KEY `uq_users_email` (`email`),
             KEY `idx_users_status` (`status`),
@@ -536,6 +551,32 @@ function trackerSchemaStatements(): array {
         // The UNIQUE key is the point. One vote per identity is enforced HERE, where two requests
         // arriving together actually collide — a check-then-insert in PHP is a race with a
         // comfortable window, and a voting button is the most automated thing on any public site.
+        // ── Favourites (v47) ─────────────────────────────────────────────
+        //
+        // A REAL user_id, not the (type, key) pair hash_votes uses. That pair exists because a vote's
+        // identity is not uniform — an account OR a bucket of IP addresses. A favourite is only ever
+        // an account's: an anonymous one has nowhere to live (a household shares one IP bucket and it
+        // rotates), nowhere to be shown (there is no anonymous profile) and no way to honour a
+        // privacy choice. The gain is concrete: joining `users` is an eq_ref on the primary key
+        // instead of a string-to-int comparison, and the unique key is 44 bytes instead of 105 —
+        // which matters because it is copied into both of the other indexes.
+        //
+        // No FOREIGN KEY: this schema has never had one, and the first would change what
+        // includes/backup.php has to know about restore order. userDeleteCascade() is what keeps
+        // this table honest when an account goes.
+        "CREATE TABLE IF NOT EXISTS `user_favourites` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `info_hash` CHAR(40) NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            -- the toggle is idempotent without a read-modify-write, so two taps cannot race
+            UNIQUE KEY `uq_fav_once` (`user_id`, `info_hash`),
+            -- the profile's own list, newest first, with no filesort
+            KEY `idx_fav_user` (`user_id`, `created_at`),
+            -- the list of who favourited one hash, and the count that goes with it
+            KEY `idx_fav_hash` (`info_hash`, `user_id`)
+        ) $engine",
+
         "CREATE TABLE IF NOT EXISTS `hash_votes` (
             `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             `info_hash` CHAR(40) NOT NULL,
@@ -756,7 +797,26 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // which is not the same as any particular language -- change the site default and these accounts
     // follow it, while an account that picked English stays English.
     if (!schemaColumnExists($db, 'users', 'language')) $uparts[] = "ADD COLUMN `language` VARCHAR(3) DEFAULT NULL";
+    // v47: the two favourites privacy flags. In BOTH places on purpose — `bulk_optout` above is only
+    // in this list and not in the CREATE, so a fresh install and an upgraded one disagree about the
+    // shape of `users`. One such split is a bug waiting; two would be a habit.
+    if (!schemaColumnExists($db, 'users', 'fav_public')) $uparts[] = "ADD COLUMN `fav_public` TINYINT(1) NOT NULL DEFAULT 0";
+    if (!schemaColumnExists($db, 'users', 'fav_listed')) $uparts[] = "ADD COLUMN `fav_listed` TINYINT(1) NOT NULL DEFAULT 0";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
+
+    // v47: who registered a whitelist row, and whether they want it shown on their profile.
+    //
+    // `submitter_public` is deliberately NOT called `public` or `visible`: somebody reading the
+    // accesslist generator must not be able to mistake it for "served". It decides ONE thing —
+    // whose profile a row appears on. The generator, indexSearchCatalogue() and api/index_info.php
+    // never read it, and tests/sql_safety_test.php fails if the generator's SQL ever mentions it.
+    $wparts = [];
+    if (!schemaColumnExists($db, 'whitelist', 'submitter_id')) $wparts[] = "ADD COLUMN `submitter_id` INT UNSIGNED DEFAULT NULL";
+    if (!schemaColumnExists($db, 'whitelist', 'submitter_public')) $wparts[] = "ADD COLUMN `submitter_public` TINYINT(1) NOT NULL DEFAULT 0";
+    if ($wparts) $out[] = "ALTER TABLE `whitelist` " . implode(', ', $wparts);
+    if (!schemaIndexExists($db, 'whitelist', 'idx_wl_submitter')) {
+        $out[] = "ALTER TABLE `whitelist` ADD KEY `idx_wl_submitter` (`submitter_id`, `created_at`)";
+    }
 
     // v19: a source link and a description on a whitelist row. The table is small (hundreds of rows),
     // so this is an ordinary ALTER — nothing here needs the deferral machinery below.
@@ -1026,7 +1086,7 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // is_default is 0. Nobody becomes a moderator by signing up.
     $db->exec("INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `color`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
         ('moderator', 'Moderator', 'Works the queues: reports, appeals, the whitelist and submitted descriptions. Settings, backups, the machine controls and anything needing the owner password stay out of reach.', '#4a9eff', 500, 0, 1,
-         '{\"panel.access\":true,\"panel.reports.view\":true,\"panel.reports.status\":true,\"panel.reports.block\":true,\"panel.reports.email\":true,\"panel.reports.archive\":true,\"panel.appeals.resolve\":true,\"panel.whitelist.view\":true,\"panel.whitelist.add\":true,\"panel.whitelist.ban\":true,\"panel.whitelist.meta\":true,\"panel.whitelist.content\":true,\"panel.users.view\":true,\"panel.users.notify\":true,\"index.view\":true,\"index.files\":true,\"index.files_all\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true,\"rating.vote\":true,\"content.submit\":true,\"content.propose\":true}')");
+         '{\"panel.access\":true,\"panel.reports.view\":true,\"panel.reports.status\":true,\"panel.reports.block\":true,\"panel.reports.email\":true,\"panel.reports.archive\":true,\"panel.appeals.resolve\":true,\"panel.whitelist.view\":true,\"panel.whitelist.add\":true,\"panel.whitelist.ban\":true,\"panel.whitelist.meta\":true,\"panel.whitelist.content\":true,\"panel.users.view\":true,\"panel.users.notify\":true,\"index.view\":true,\"index.files\":true,\"index.files_all\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true,\"rating.vote\":true,\"content.submit\":true,\"content.propose\":true,\"favourites.use\":true,\"favourites.public\":true,\"favourites.view_others\":true,\"uploads.public\":true}')");
     $db->exec("UPDATE `user_groups` SET is_system = 1 WHERE slug = 'moderator'");
 
     // v24: the permissions v1.19.0 registered and never granted.
@@ -1047,6 +1107,17 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // point of having it.
     schemaGrantOnce($db, 'v42_index_files_all', [
         'member' => ['index.files_all'],
+    ]);
+
+    // v47: the favourites and uploads permissions.
+    //
+    // GUEST GETS NOTHING. That is the operator's decision recorded in code: profiles and favourite
+    // lists are for signed-in readers, so an anonymous visitor sees exactly what they see when the
+    // account system is switched off. It is also why userLegacyDefault() answers false for both
+    // prefixes — unlike rating.* and content.*, which work without accounts and would be switched
+    // OFF by a false there.
+    schemaGrantOnce($db, 'v47_favourites', [
+        'member' => ['favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public'],
     ]);
 
     schemaGrantOnce($db, 'v24_content_rating', [
@@ -1427,6 +1498,16 @@ function trackerSchemaDefaultSettings(): array {
         'csp_report_enabled'          => '1',
         'csp_report_keep_rows'        => '500',
         'csp_extra_hosts'             => '',
+        // ── Favourites, public profiles and "my uploads" (v47) ──────────────────────────────
+        // Every one of these ships OFF except the per-user limit. A feature that appears on an
+        // operator's site without them switching it on is a decision taken on their behalf, and
+        // these carry privacy: a list of what somebody likes is a list about them.
+        'fav_enabled'                 => '0',   // the master switch; off, everything below answers 404/400
+        'fav_max_per_user'            => '500', // what makes the query strategy safe; clamped [10, 5000]
+        'fav_public_enabled'          => '0',   // may a list be public at all
+        'fav_who_enabled'             => '0',   // does "who has this in favourites" exist
+        'profiles_enabled'            => '0',   // is ?action=u reachable (uploads use it too, hence separate)
+        'wl_submitter_public'         => '0',   // does the per-row visibility flag apply anywhere
         // Where the version line may appear: none | public | panel | both. The panel, by default:
         // an operator needs to know which build is answering, and a version number on a public page
         // mostly tells a visitor which published bugs to try.
@@ -1440,9 +1521,10 @@ function trackerSchemaDefaultSettings(): array {
         // about whether the site hands out links, not about what may be reached.
         'search_share_enabled'        => '1',
         // The language switcher rewrites the page instead of reloading it (assets/js/lang-swap.js).
-        // Off for one release: it is a new way of doing something that already works, and the thing
-        // it replaces — a plain navigation — is what every failure falls back to anyway.
-        'lang_swap_enabled'           => '0',
+        // Shipped off in 1.40.0 and on from 1.41.0: it had a release to be wrong in, every failure
+        // path still falls back to the plain navigation it replaces, and the reload it replaces is
+        // the thing people actually complained about.
+        'lang_swap_enabled'           => '1',
     ];
 }
 

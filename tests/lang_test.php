@@ -381,7 +381,7 @@ check('lang_swap_enabled has a control on the Settings page', str_contains($setT
 // It ships OFF for one release: the thing it replaces — a plain navigation — is what every failure
 // path falls back to anyway, so there is nothing to lose by letting operators opt in.
 require_once $root . '/includes/schema.php';
-check('… and it ships off', (trackerSchemaDefaultSettings()['lang_swap_enabled'] ?? null) === '0', var_export(trackerSchemaDefaultSettings()['lang_swap_enabled'] ?? null, true));
+check('… and it ships on from 1.41.0', (trackerSchemaDefaultSettings()['lang_swap_enabled'] ?? null) === '1', var_export(trackerSchemaDefaultSettings()['lang_swap_enabled'] ?? null, true));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

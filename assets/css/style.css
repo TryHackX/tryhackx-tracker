@@ -2109,3 +2109,53 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 /* A custom home section: the page's own type scale, not a comment's. */
 .rt-home { line-height: 1.6; }
 .rt-home > :first-child { margin-top: 0; }
+
+/* === Favourites, profiles and "my torrents" (1.41.0) ======================== */
+/* The star. A button, not a link: it changes something. Sized to sit in a table cell without
+   pushing the row taller, which is why it is a glyph and not an icon font. */
+.fav-star { background: none; border: 0; color: var(--text-muted); font-size: 1.05rem; line-height: 1;
+    cursor: pointer; padding: 0 0.2rem; }
+.fav-star:hover { color: var(--accent); }
+.fav-star.fav-on { color: #f5c451; }
+.fav-star[disabled] { opacity: 0.5; cursor: default; }
+.info-acts { display: inline-flex; gap: 0.4rem; align-items: center; margin-left: auto; }
+
+.profile-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem; margin-bottom: 1rem; }
+.profile-name { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
+.profile-since, .profile-you { color: var(--text-muted); font-size: 0.82rem; }
+.profile-section { margin-bottom: 2rem; }
+.profile-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
+.profile-search { flex: 1 1 14rem; min-width: 10rem; }
+.profile-total { margin-left: auto; color: var(--text-muted); font-size: 0.82rem; white-space: nowrap; }
+
+/* One row per torrent, three columns that collapse to one on a narrow screen. Deliberately not a
+   <table>: these lists are read on phones and a four-column table there is a horizontal scrollbar. */
+.profile-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.pf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+    padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 5px; }
+.pf-main { flex: 1 1 18rem; min-width: 0; display: flex; align-items: center; gap: 0.4rem; }
+.pf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-gone { color: var(--text-muted); font-style: italic; }
+.pf-meta { display: flex; gap: 0.8rem; color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
+.pf-hash { font-family: var(--mono, monospace); }
+.pf-acts { display: flex; gap: 0.35rem; align-items: center; margin-left: auto; }
+.pf-badge { font-size: 0.7rem; padding: 0.05rem 0.35rem; border-radius: 3px; border: 1px solid var(--border);
+    color: var(--text-muted); white-space: nowrap; }
+.pf-badge-bad { color: #ff6b6b; border-color: #6b2a2a; }
+.pf-badge-muted { opacity: 0.8; }
+.pf-st-live { color: #4caf50; border-color: #2e5c30; }
+.pf-st-waiting { color: #e0b15a; border-color: #6b4f1a; }
+.pf-st-refused, .pf-st-blocked { color: #ff6b6b; border-color: #6b2a2a; }
+.pf-vis { background: none; border: 1px solid var(--border); color: var(--text-muted); font: inherit;
+    font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.pf-vis-on { color: #4caf50; border-color: #2e5c30; }
+.pf-empty, .pf-loading { color: var(--text-muted); padding: 0.6rem 0; }
+
+.who-names { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0; }
+.who-name { padding: 0.15rem 0.5rem; border: 1px solid var(--border); border-radius: 12px;
+    font-size: 0.82rem; text-decoration: none; }
+.who-name:hover { border-color: var(--accent); }
+
+.acc-tabs { margin-bottom: 1rem; }
+.acc-check { display: flex; align-items: flex-start; gap: 0.45rem; margin: 0.4rem 0; cursor: pointer; }
+.acc-privacy-block { margin-top: 1rem; }

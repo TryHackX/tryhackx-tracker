@@ -13,7 +13,22 @@ function captchaUnavailable() {
     return typeof window.captchaWasUnavailable === 'function' && window.captchaWasUnavailable();
 }
 
-async function fetchWithCaptcha(endpoint, data) {
+/**
+ * POST to an endpoint that may demand a CAPTCHA.
+ *
+ * The handshake is: post, and if the reply says `captcha_required`, solve one and post again. That
+ * has to stay — the requirement can appear between a page render and its submit (the smart CAPTCHA
+ * counts failures) and only the server knows. But when the page ALREADY knows the server will ask,
+ * the first post is a request that exists only to be rejected, and the browser writes the rejection
+ * into the console as an error on a sign-in that then works. `solveFirst` skips it.
+ */
+async function fetchWithCaptcha(endpoint, data, solveFirst) {
+    if (solveFirst && !data['captcha_token']) {
+        const pre = await requestCaptchaToken(endpoint);
+        if (!pre) return { error: captchaUnavailable() ? t('js.app.captcha_unavailable') : t('js.app.captcha_cancelled') };
+        data['captcha_token'] = pre;
+        data['g-recaptcha-response'] = pre;
+    }
     const body = JSON.stringify(data);
     let res, json;
     try {
@@ -959,6 +974,8 @@ async function handleWhitelistSubmit(e) {
             payload.description = descEl.value;
             payload.description_format = fmtEl ? fmtEl.value : 'bbcode';
         }
+        const pubEl = document.getElementById('wl-public');
+        if (pubEl && pubEl.checked) payload.submitter_public = 1;
         const json = await fetchWithCaptcha('whitelist_submit', payload);
         if (json.success) {
             alert.className = 'alert alert-success show';
@@ -966,6 +983,9 @@ async function handleWhitelistSubmit(e) {
             const parts = [];
             if (s.added) parts.push(t('js.app.wl_sum_added', {n: s.added}));
             if (s.exists) parts.push(t('js.app.wl_sum_exists', {n: s.exists}));
+            // The one sentence that settles the fairness question: the first person to register a
+            // hash owns it, so a duplicate does not move it onto the second person's profile.
+            if (s.exists && pubEl && pubEl.checked) parts.push(t('js.app.wl_exists_not_yours'));
             if (s.banned) parts.push(t('js.app.wl_sum_banned', {n: s.banned}));
             if (s.invalid) parts.push(t('js.app.wl_sum_invalid', {n: s.invalid}));
             let msg = parts.join(', ') + '.';
@@ -1968,7 +1988,7 @@ const getJson = async (endpoint) => {
                 login: login.value.trim(),
                 password: pass.value,
                 session: ($id('login-session') || { value: 'forever' }).value,
-            });
+            }, form.dataset.captchaFirst === '1');
             if (json && json.success) {
                 showAlert(alert, t('js.app.signed_in_loading'), true);
                 window.location.href = APP_BASE + '?action=account';
@@ -2312,6 +2332,12 @@ const getJson = async (endpoint) => {
         // the server's business, and api/index_files.php answers `capped` when the total is reached.
         // Both file overlays are inside this closure, so one read serves them both.
         const filesMode = ['scroll', 'button', 'all'].includes(form.dataset.filesMode) ? form.dataset.filesMode : 'scroll';
+        // The star appears where the row carries a hash — api/index_search.php sends info_hash only
+        // with index.magnet, so on a page without it there is nothing to favourite BY. That is a
+        // real limitation and it is written down rather than worked around: the Info panel always
+        // has the hash, so the star is always available there.
+        const canFav = form.dataset.fav === '1';
+        const canFavWho = form.dataset.favWho === '1';
         // Every port, not just the first. Extra opentracker instances listen on their own ports and
         // share nothing between them, so a magnet that names one port is only ever answered by one
         // process. The attribute is empty without the cluster, which leaves this unchanged.
@@ -2686,6 +2712,7 @@ const getJson = async (endpoint) => {
                         info.textContent = t('js.app.info');
                         info.addEventListener('click', () => openInfo(r.info_hash, r.name));
                         actWrap.appendChild(info);
+                        if (canFav && window.Favourites) actWrap.appendChild(window.Favourites.makeStar(r.info_hash, !!r.fav));
                     }
                     magTd.appendChild(actWrap);
                     tr.appendChild(magTd);
@@ -3015,6 +3042,23 @@ const getJson = async (endpoint) => {
                 return;
             }
             title.textContent = json.name || name || t('js.app.details');
+
+            // The panel always has the hash, so the star is always available here even when the row
+            // could not carry one.
+            const infoActs = $id('info-acts');
+            if (infoActs) {
+                infoActs.textContent = '';
+                if (canFav && window.Favourites) infoActs.appendChild(window.Favourites.makeStar(hash, !!json.fav));
+                if (canFavWho && typeof window.openWhoFavourited === 'function') {
+                    const w = document.createElement('button');
+                    w.type = 'button';
+                    w.className = 'search-share';
+                    w.title = t('js.fav.who_title');
+                    w.textContent = t('js.fav.who');
+                    w.addEventListener('click', () => window.openWhoFavourited(hash));
+                    infoActs.appendChild(w);
+                }
+            }
 
             const st = json.stats || {};
 

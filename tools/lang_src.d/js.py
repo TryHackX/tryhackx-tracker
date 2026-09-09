@@ -3914,6 +3914,9 @@ add('js.app', {
 
 # ── database memory card (1.37.0) ─────────────────────────────
 add('js.dbmem', {
+    'db_size': ('Database', 'Baza danych'),
+    'table_size': (':table', ':table'),
+    'table_size_title': ('Rows :rows · data :data · indexes :index', 'Wierszy :rows · dane :data · indeksy :index'),
     'helper_off': ('Switched off — set the helper command and enable it in Settings → Database memory.',
         'Wyłączone — ustaw polecenie pomocnika i włącz funkcję w Ustawienia → Pamięć bazy danych.'),
     'network_error': ('Network error.',
