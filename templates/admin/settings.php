@@ -986,6 +986,11 @@
                         </select>
                         <small class="settings-hint"><?= __('settings.users_search_hint') ?></small>
                     </div>
+                    <div class="col-md-3" data-setting="search_time_budget">
+                        <label class="form-label"><?= _h('settings.users_search_budget') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="search_time_budget" value="<?= sanitize($cfg['search_time_budget'] ?? '60') ?>" min="10" max="300">
+                        <small class="settings-hint"><?= __('settings.users_search_budget_hint') ?></small>
+                    </div>
                     <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.users_share') ?></label>
                         <select class="form-select bg-dark text-light border-secondary" name="search_share_enabled">
@@ -2666,6 +2671,16 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                         <label class="form-label"><?= _h('settings.footer_start_year') ?></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="footer_start_year" value="<?= sanitize($cfg['footer_start_year'] ?? date('Y')) ?>" min="2020" max="2099">
                     </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.version_where') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="version_display">
+                            <?php foreach (['panel' => 'settings.version_panel', 'public' => 'settings.version_public',
+                                            'both' => 'settings.version_both', 'none' => 'settings.version_none'] as $vOpt => $vKey): ?>
+                            <option value="<?= $vOpt ?>" <?= ($cfg['version_display'] ?? 'panel') === $vOpt ? 'selected' : '' ?>><?= _h($vKey) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.version_where_hint', ['v' => sanitize(TRACKER_VERSION)]) ?></small>
+                    </div>
                 </div>
 
                 <div class="row g-3 mt-2">
@@ -3045,6 +3060,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             </div>
         </div>
     </div>
+    <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>
 
     <script src="<?= $baseUrl ?>assets/js/admin-settings.js<?= assetVer('assets/js/admin-settings.js') ?>"></script>
     <!-- admin-common.js only defines window.AdminCommon (apiCall / el / showToast) and adds no globals

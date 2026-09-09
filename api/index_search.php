@@ -48,6 +48,17 @@ $canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whi
 // who is asking.
 if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 
+// The catalogue can be bigger than php-fpm's own patience.
+//
+// On the live deployment `max_execution_time` is 30 s. A search that crossed it was killed mid-query
+// and the reader got a bare 500 — nothing in the Apache error log, nothing in the fpm log, because
+// `error_log` is unset there and `catch_workers_output` is off. It took reading `$9 == 500` out of
+// the ACCESS log to find it at all. So the limit for THIS endpoint is a number the operator can see
+// and change, and it is asked for here rather than assumed: a catalogue of three million rows is a
+// different machine from one of three thousand.
+$budget = max(10, min(300, (int)($cfg['search_time_budget'] ?? 60) ?: 60));
+if (function_exists('set_time_limit')) @set_time_limit($budget);
+
 
 // comma-separated multi-sort stack; unknown keys are dropped by indexSearchCatalogue
 $sort = (string)($_GET['sort'] ?? 'relevance:desc');

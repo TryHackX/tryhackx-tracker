@@ -2341,3 +2341,24 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .dm-badge-restart { color: #e0b15a; border-color: #6b4f1a; }
 .dm-row-dirty td { background: rgba(74, 158, 255, 0.06); }
 .dm-row-pending .dm-key::after { content: ' •'; color: #e0b15a; }
+
+/* === Footer, shared with the public pages (templates/footer.php) ===
+   The panel had none at all until 1.41.0. It carries the same lines the front page does, so an
+   operator can read what the site says about itself without leaving the panel — and, when
+   `version_display` allows it, which build is answering. Muted and small: it is a signature, not a
+   control, and it must not compete with the page it sits under. */
+.admin-footer {
+    margin: 2.5rem auto 1.25rem;
+    padding: 1rem 1rem 0;
+    max-width: 1400px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: center;
+    color: #8a93a6;
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+.admin-footer p { margin: 0.2rem 0; }
+.admin-footer a { color: #8a93a6; text-decoration: none; }
+.admin-footer a:hover { color: #4a9eff; text-decoration: underline; }
+.admin-footer svg { vertical-align: -2px; }
+.footer-version { opacity: 0.75; font-variant-numeric: tabular-nums; }

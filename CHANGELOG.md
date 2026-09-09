@@ -4,6 +4,56 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.41.0] — 2026-09-09
+
+### Added — the panel has a footer, and the build has a name
+
+Until now the version of a running tracker existed in exactly two places, neither of which the
+running code could see: a heading in `CHANGELOG.md` and a git tag. "Which build is this server on?"
+had no answer from the server. There is a `TRACKER_VERSION` constant now, and
+`tests/version_test.php` fails if it and the changelog heading ever disagree — a constant that
+drifts from the changelog is worse than no constant at all.
+
+The footer was written inline in `templates/layout.php`, which no panel page includes, so the panel
+had none at all. It moved to `templates/footer.php` and both sides include it: the public layout
+inside `.container`, every panel page after `.admin-container` closes. Same lines, panel spacing.
+
+New setting **`version_display`** (Settings → Footer): *in the panel only* (the default), *on the
+public pages only*, *everywhere*, or *nowhere*. The panel by default because that is who needs it —
+a version number on a public page mostly tells a visitor which published bugs to try. An
+unrecognised value falls back to the default rather than to "everywhere", which is the direction a
+row restored from a backup should fail in.
+
+### Added — the catalogue search has a time limit somebody can see
+
+php-fpm's `max_execution_time` is 30 s on the live deployment. A search that crossed it was killed
+mid-query and came back as a bare 500 — nothing in the Apache error log, nothing in the fpm log,
+because `error_log` is unset there and `catch_workers_output` is off. Finding it at all meant
+reading `$9 == 500` out of the **access** log.
+
+`api/index_search.php` now asks for its own limit — **`search_time_budget`**, 60 s by default,
+clamped to 10–300 — set after `session_write_close()` so a long search never holds the session lock
+while it runs. It is a setting rather than a constant because a catalogue of three million rows is
+a different machine from one of three thousand.
+
+### Fixed — the same OR, in the panel's own listing
+
+1.40.0 split `MATCH(name) AGAINST(…) OR info_hash IN (…)` into two UNIONed branches for the public
+search, measured 32.6 s → 4.3 s, and left the identical clause in `indexListSelect()` — the Index
+page's own "search inside file lists". Same trap, same rewrite, and now its own tests: four sort
+orders, a row that matches by name, one by file, one by both and one by neither, each returned
+exactly once.
+
+### Fixed — the description filter appeared where its own workflow was shut
+
+Narrower than 1.40.0 made it. Every state `#search-content` offers is `content_status`, which lives
+only on the whitelist table — and `api/whitelist_submit.php` refuses every submission outside
+whitelist mode and the schedule, so on a blacklist-mode tracker that column can never leave `none`
+and the control is decoration in front of a filter that can only empty the page. Measured on the
+live site while fixing it: 159 whitelist rows, all `none`, zero descriptions, zero source links. It
+now needs all three — whitelist rows in this reader's results, descriptions or source links allowed,
+and the submission path actually open.
+
 ## [1.40.0] — 2026-09-09
 
 ### Fixed — "search inside file lists" without "best match first" returned a 500

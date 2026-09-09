@@ -1181,11 +1181,24 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
                     $fs->closeCursor();
                 } catch (\Throwable $e) { $fileHashes = []; }
             }
+            // `split` is the OR taken apart. It stays alongside `sql` rather than replacing it
+            // because $runQuery still needs a single clause for the cached-count path; when the
+            // split is there, the query is run as a UNION of two branches instead — see the note in
+            // $runQuery, and the same rewrite in indexSearchCatalogue() below, which is where it was
+            // measured (32.6 s -> 4.3 s on the live catalogue).
             $inFiles = $fileHashes ? ('info_hash IN (' . implode(',', array_fill(0, count($fileHashes), '?')) . ')') : '';
-            if ($inFiles) $likeClause = ['sql' => "(name LIKE ? OR $inFiles)", 'params' => array_merge(['%' . $search . '%'], $fileHashes)];
+            if ($inFiles) {
+                $likeClause = ['sql' => "(name LIKE ? OR $inFiles)", 'params' => array_merge(['%' . $search . '%'], $fileHashes),
+                               'split' => [['sql' => 'name LIKE ?', 'params' => ['%' . $search . '%']],
+                                           ['sql' => $inFiles, 'params' => $fileHashes]]];
+            }
             if ($ft !== '') {
                 $fulltextClause = ['sql' => "MATCH(name) AGAINST(? IN BOOLEAN MODE)", 'params' => [$ft]];
-                if ($inFiles) $fulltextClause = ['sql' => "(MATCH(name) AGAINST(? IN BOOLEAN MODE) OR $inFiles)", 'params' => array_merge([$ft], $fileHashes)];
+                if ($inFiles) {
+                    $fulltextClause = ['sql' => "(MATCH(name) AGAINST(? IN BOOLEAN MODE) OR $inFiles)", 'params' => array_merge([$ft], $fileHashes),
+                                       'split' => [['sql' => 'MATCH(name) AGAINST(? IN BOOLEAN MODE)', 'params' => [$ft]],
+                                                   ['sql' => $inFiles, 'params' => $fileHashes]]];
+                }
             }
         }
     }
@@ -1207,6 +1220,32 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         $w = $where; $p = $params;
         if ($extra) { $w[] = $extra['sql']; $p = array_merge($p, $extra['params']); }
         $whereClause = $w ? 'WHERE ' . implode(' AND ', $w) : '';
+
+        // THE SAME OR, THE SAME SPLIT. `MATCH(name) … OR info_hash IN (…)` is a disjunction over two
+        // different indexes, which MariaDB serves from neither — and with an ORDER BY on an indexed
+        // column it walks that index instead and filters as it goes. Two branches UNIONed, each
+        // served from exactly one index, and the sort applied to what they returned.
+        if ($extra && isset($extra['split'])) {
+            $wA = array_merge($where, [$extra['split'][0]['sql']]);
+            $wB = array_merge($where, [$extra['split'][1]['sql']]);
+            $pA = array_merge($params, $extra['split'][0]['params']);
+            $pB = array_merge($params, $extra['split'][1]['params']);
+            $clA = 'WHERE ' . implode(' AND ', $wA);
+            $clB = 'WHERE ' . implode(' AND ', $wB);
+            $cnt = $db->prepare("SELECT COUNT(*) FROM ((SELECT info_hash FROM index_hashes $clA)"
+                              . " UNION (SELECT info_hash FROM index_hashes $clB)) c");
+            $cnt->execute(array_merge($pA, $pB));
+            $total = (int)$cnt->fetchColumn();
+            $stmt = $db->prepare("SELECT * FROM ((SELECT $columns FROM index_hashes $clA)"
+                               . " UNION (SELECT $columns FROM index_hashes $clB)) lst"   // not `rows`: reserved word
+                               . " ORDER BY $orderClause LIMIT ? OFFSET ?");
+            $i = 1;
+            foreach (array_merge($pA, $pB) as $v) $stmt->bindValue($i++, $v, PDO::PARAM_STR);
+            $stmt->bindValue($i++, $perPage, PDO::PARAM_INT);
+            $stmt->bindValue($i, $offset, PDO::PARAM_INT);
+            $stmt->execute();
+            return [$total, $stmt->fetchAll()];
+        }
         // A filtered count. The life and meta filters are a fixed vocabulary (three and five
         // values), so their counts are cached per combination for 20 s — the page re-polls every
         // 5 s while anything is pending and each of those counts is measured at over a second.

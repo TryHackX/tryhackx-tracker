@@ -81,6 +81,7 @@
         </div>
         <div class="admin-pagination" id="pagination"></div>
     </div>
+    <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>
 
     <!-- Action Modal -->
     <div class="modal fade" id="actionModal" tabindex="-1">

@@ -18,6 +18,7 @@ def add(prefix, pairs):
 
 # ── layout: footer and the CAPTCHA overlay ─────────────────────────────────
 add('footer', {
+    'version':     ('Version :v', 'Wersja :v'),
     'powered_by':  ('Powered by', 'Napędzane przez'),
     'by_author':   ('by', 'autorstwa'),
     'since':       ('since', 'od'),

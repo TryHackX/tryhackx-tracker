@@ -14,6 +14,32 @@ require_once __DIR__ . '/lang.php';
 require_once __DIR__ . '/csp.php';
 
 /**
+ * What this build calls itself.
+ *
+ * It used to exist in exactly two places, neither of which the running code could see: the heading
+ * of CHANGELOG.md and a git tag. So "which version is this server on?" had no answer from the
+ * server, and telling a deployed panel apart from a checkout meant reading file timestamps.
+ * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
+ * keeps those two honest with each other.
+ */
+const TRACKER_VERSION = '1.41.0';
+
+/**
+ * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.
+ *
+ * An operator wants it in the panel and usually not on the front page — a version number tells a
+ * visitor which published bugs to try. So the default is the panel, and showing it publicly is a
+ * deliberate choice rather than something that arrives switched on.
+ */
+function versionShown(array $cfg, bool $inPanel): bool {
+    $mode = (string)($cfg['version_display'] ?? 'panel');
+    if (!in_array($mode, ['none', 'public', 'panel', 'both'], true)) $mode = 'panel';
+    if ($mode === 'none') return false;
+    if ($mode === 'both') return true;
+    return $mode === ($inPanel ? 'panel' : 'public');
+}
+
+/**
  * Redirect from inside a page template.
  *
  * The templates are included by the layout AFTER it has started writing the page, so a plain

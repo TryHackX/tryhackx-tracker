@@ -48,12 +48,23 @@ $meUser = currentUser($db);
         <label class="search-check" title="<?= _h('search.files_title') ?>"><input type="checkbox" id="search-files"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.files') ?></label>
         <?php endif; ?>
         <?php
-        // The description filter only ever describes WHITELIST rows: content_status lives on that
-        // table and nowhere else, so with no whitelist arm in the results the control is not merely
-        // decorative — picking "Reviewed and published" makes indexSearchCatalogue() add `1 = 0` to
-        // the index arm and the page goes empty. It needs BOTH: somewhere for a description to live
-        // (the operator allows one), and whitelist rows in this reader's results at all.
-        if ($canWl && (($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1')): ?>
+        // WHEN THIS FILTER IS WORTH SHOWING, WHICH IS NARROWER THAN IT LOOKS.
+        //
+        // Every state it offers — reviewed and published, waiting, turned down — is `content_status`,
+        // a column on the WHITELIST table and nowhere else. So it needs three things at once, and it
+        // used to ask for one:
+        //   · whitelist rows are in this reader's results at all ($canWl) — without that, choosing
+        //     "Reviewed and published" makes indexSearchCatalogue() add `1 = 0` to the index arm and
+        //     the page goes blank, which is not a filter, it is a trap;
+        //   · the operator allows a description or a source link, or there is nothing to review;
+        //   · and the path that submits them is OPEN — api/whitelist_submit.php refuses every
+        //     submission outside whitelist mode and the schedule, so on a blacklist-mode tracker
+        //     content_status can never leave 'none' and the whole control is decoration. (Measured on
+        //     the live site: 159 whitelist rows, all 'none', zero descriptions, zero source links.)
+        $wlSubmitOpen = trackerMode($cfg) === 'whitelist'
+            || (function_exists('scheduleEnabled') && scheduleEnabled($cfg));
+        if ($canWl && $wlSubmitOpen
+            && (($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1')): ?>
         <select id="search-content" title="<?= _h('search.content_title') ?>">
             <option value="not_rejected"><?= _h('search.c_not_rejected') ?></option>
             <option value="approved"><?= _h('search.c_approved') ?></option>

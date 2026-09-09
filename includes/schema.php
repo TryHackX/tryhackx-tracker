@@ -1427,6 +1427,14 @@ function trackerSchemaDefaultSettings(): array {
         'csp_report_enabled'          => '1',
         'csp_report_keep_rows'        => '500',
         'csp_extra_hosts'             => '',
+        // Where the version line may appear: none | public | panel | both. The panel, by default:
+        // an operator needs to know which build is answering, and a version number on a public page
+        // mostly tells a visitor which published bugs to try.
+        'version_display'             => 'panel',
+        // How long the catalogue search may run before PHP stops it, in seconds. The point is that
+        // it be a number somebody can see and change: php-fpm's own max_execution_time is 30 on this
+        // deployment, and a search that crossed it came back as a bare 500 with nothing in any log.
+        'search_time_budget'          => '60',
         // The Share buttons on the search page. The VIEW is addressable either way — the state is
         // in the address whether or not anybody is offered a button for it — so this switch is
         // about whether the site hands out links, not about what may be reached.

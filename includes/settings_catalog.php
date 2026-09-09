@@ -93,6 +93,7 @@ function settingsCatalogKeywords(): array {
         'footer_os_url'            => 'footer operating system link debian linux',
         'footer_os_enabled'        => 'footer operating system show hide',
         'footer_os_since_year'     => 'footer operating system year since',
+        'version_display'          => 'version number build release footer show where panel public visible',
 
         // ── Contact & email ──
         'site_email'               => 'contact address support abuse reply-to public email',
@@ -210,6 +211,7 @@ function settingsCatalogKeywords(): array {
         'rate_limit_index_search'  => 'search queries per hour throttle members index',
         'index_search_enabled'     => 'member search page kill switch disable searching catalogue',
         'search_share_enabled'     => 'share link copy url permalink address search results torrent bookmark',
+        'search_time_budget'       => 'search timeout time limit budget seconds slow query 500 execution',
         'index_search_include_whitelist' => 'search whitelist rows included results registered torrents',
 
         // ── Tracker & whitelist ──

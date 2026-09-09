@@ -613,6 +613,7 @@
         </div>
 
     </div>
+    <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>
 
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
 

@@ -698,6 +698,34 @@ foreach (['relevance:desc', 'seeders:desc'] as $sort) {
 
 $db->exec("TRUNCATE TABLE index_hashes"); $db->exec("TRUNCATE TABLE index_files");
 
+
+/* The panel's own listing (indexListSelect) had the same OR, and now has the same split. Different function, same
+ * trap, so it gets its own check rather than being assumed to travel with the public one. */
+foreach (['index_hashes', 'index_files'] as $t) $db->exec("TRUNCATE TABLE `$t`");
+$mk($H['name'], 'wombat documentary', 7);
+$mk($H['file'], 'unrelated release',  9);
+$mk($H['both'], 'wombat extras',      3);
+$mk($H['none'], 'nothing to see',     5);
+$file($H['name'], 'readme.txt');
+$file($H['file'], 'wombat/episode1.mkv');
+$file($H['both'], 'wombat/episode2.mkv');
+$file($H['none'], 'other.bin');
+foreach (['last:desc', 'seeders:desc', 'name:asc', 'size:desc'] as $sort) {
+    $r = indexListSelect($db, $cfg, ['search' => 'wombat', 'search_files' => 1, 'sort' => $sort, 'page' => 1, 'per_page' => 50]);
+    $got = array_column($r['rows'], 'info_hash');
+    sort($got);
+    $want = [$H['name'], $H['both'], $H['file']];
+    sort($want);
+    check("panel listing, sort=$sort: name, file and both — each exactly once",
+        $got === $want && (int)$r['total'] === 3, implode(',', $got) . ' total=' . $r['total']);
+}
+$noFiles = indexListSelect($db, $cfg, ['search' => 'wombat', 'sort' => 'last:desc', 'page' => 1, 'per_page' => 50]);
+check('panel listing without the file search: only the names match',
+    count($noFiles['rows']) === 2 && (int)$noFiles['total'] === 2, (string)$noFiles['total']);
+$shortP = indexListSelect($db, $cfg, ['search' => 'womb', 'search_files' => 1, 'sort' => 'last:desc', 'page' => 1, 'per_page' => 50]);
+check('panel listing: the LIKE fallback searches file names too', count($shortP['rows']) === 3, (string)count($shortP['rows']));
+$db->exec("TRUNCATE TABLE index_hashes"); $db->exec("TRUNCATE TABLE index_files");
+
 @unlink(indexStateFile());
 foreach (glob($tmp . '/idx*.gz') ?: [] as $f) @unlink($f);
 @unlink($tmp . '/idx_plain.bin');

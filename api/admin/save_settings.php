@@ -33,6 +33,8 @@ $allowed = [
     'lang_swap_enabled',
     // the Share buttons on the search page (templates/pages/search.php)
     'search_share_enabled',
+    // where the version line appears (templates/footer.php) and how long a search may run
+    'version_display', 'search_time_budget',
     'items_per_page', 'admin_near_pages', 'blacklist_path',
     'max_magnet_link_length',
     'donations_enabled', 'wallet_btc', 'wallet_eth', 'wallet_xmr', 'donation_fields',
