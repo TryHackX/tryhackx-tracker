@@ -37,6 +37,11 @@ $allowed = [
     'version_display', 'search_time_budget',
     // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
     'fav_enabled', 'fav_max_per_user', 'fav_public_enabled', 'fav_who_enabled', 'profiles_enabled',
+    // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
+    // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
+    // same screen they turned it on from.
+    'auth_bridge_enabled', 'auth_bridge_create', 'auth_bridge_merge', 'auth_bridge_ttl',
+    'auth_bridge_return_url', 'auth_bridge_login_url', 'auth_bridge_logout',
     'wl_submitter_public',
     'items_per_page', 'admin_near_pages', 'blacklist_path',
     'max_magnet_link_length',

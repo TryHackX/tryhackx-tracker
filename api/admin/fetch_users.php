@@ -60,10 +60,30 @@ if ($ids) {
             'granted_at' => $g['granted_at'], 'expires_at' => $g['expires_at'], 'active' => (bool)$g['active']];
     }
 }
+// WHERE EACH ACCOUNT CAN SIGN IN FROM. One query for the page, like the groups above — an
+// operator looking at a list of members needs to know which of them a partner can sign in as, and
+// asking per row would be a query per row.
+$bridgeBy = [];
+if ($ids) {
+    try {
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $bs = $db->prepare("SELECT user_id, provider, external_id, external_name, last_login_at, logout_at
+                              FROM user_identities WHERE user_id IN ($in) ORDER BY created_at ASC");
+        $bs->execute($ids);
+        foreach ($bs->fetchAll(PDO::FETCH_ASSOC) as $b) {
+            $bridgeBy[(int)$b['user_id']][] = [
+                'provider' => (string)$b['provider'], 'external_id' => (string)$b['external_id'],
+                'external_name' => $b['external_name'], 'last_login_at' => $b['last_login_at'],
+                'signed_out_there' => $b['logout_at'] !== null,
+            ];
+        }
+    } catch (\Throwable $e) { $bridgeBy = []; }   // a database that predates v49 is not a failure
+}
 foreach ($rows as &$r) {
     $r['id'] = (int)$r['id'];
     $r['email_verified'] = (int)$r['email_verified'];
     $r['groups'] = $byUser[$r['id']] ?? [];
+    $r['identities'] = $bridgeBy[$r['id']] ?? [];
     // the mirrored panel admin — the UI greys out delete/ban/revoke-admin for this row
     $r['root_admin'] = userIsRootAdmin($r, $cfg);
 }

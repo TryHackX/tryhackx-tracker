@@ -27,6 +27,11 @@ require_once __DIR__ . '/includes/twofa.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/favourites.php';
+// The partner guide (?action=apidocs) cleans its own query string through the SAME function
+// the endpoint uses, so an operator cannot be shown a page describing fields the API would
+// not actually require. Without this the page silently fell back to 'nothing beyond the hash'.
+require_once __DIR__ . '/includes/api_auth.php';
+require_once __DIR__ . '/includes/authbridge.php';
 require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/federation.php';
 require_once __DIR__ . '/includes/pagecontent.php';
@@ -139,9 +144,20 @@ $routes = [
     // allows a dot and both cases. A name can never be an action, so the collision problem does not
     // arise — 'Bob.Smith' would have become 'bobsmith', a different person or nobody.
     'u'            => 'templates/pages/profile.php',
+    // The partner integration guide. Unlisted rather than locked: nothing on it is secret — it is
+    // the shape of a public API — and the key it documents travels separately, from a person. It
+    // reads its own configuration out of the query string, so the operator hands a partner an
+    // address that describes THEIR key rather than one page covering every combination.
+    'apidocs'      => 'templates/pages/apidocs.php',
 ];
 
 $baseUrl = getBaseUrl();
+
+// ── The sign-in bridge ──
+// Before the router, because neither of its two addresses renders anything: one spends a one-time
+// ticket and sets a session cookie, the other mints one and leaves. Both end in a redirect, and a
+// redirect after the first byte of a page is a redirect that never happens.
+authBridgeHandleRoute($db, $cfg, $action, $baseUrl);
 
 // ── Admin panel ──
 // The sign-in form lives at ?action=<admin_login_path> ('admin' by default, movable to an

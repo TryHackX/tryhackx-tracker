@@ -2362,3 +2362,25 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .admin-footer a:hover { color: #4a9eff; text-decoration: underline; }
 .admin-footer svg { vertical-align: -2px; }
 .footer-version { opacity: 0.75; font-variant-numeric: tabular-nums; }
+
+/* The partner a submission came through, beside the source badge. Muted: it answers "who", and the
+   badge next to it answers the more urgent "does this still need me". */
+.wl-via { margin-left: 0.25rem; white-space: nowrap; }
+#clOptsModal .wl-copybox-code { word-break: break-all; }
+#clOptsModal .form-check-label code { font-size: 0.8em; }
+#tokenModal .wl-copybox-code { word-break: break-all; }
+
+/* Where an account can sign in from, beside the name in the user list. Quiet by default, and
+   quieter still when the far side says the person signed out over there — the link is real but
+   dormant, which is a different thing from not existing. */
+.us-bridge {
+    display: inline-block;
+    font-size: 0.72rem;
+    padding: 0.05rem 0.35rem;
+    border: 1px solid #3a4a5f;
+    border-radius: 3px;
+    color: #9aa4b2;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+.us-bridge-out { opacity: 0.55; }

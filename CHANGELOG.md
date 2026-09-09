@@ -4,7 +4,102 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [1.42.0] — 2026-09-09
+## [1.42.0] — 2026-09-10
+
+### Added — partner submissions a person approves (schema 48)
+
+A key that registers hashes used to be all or nothing: whatever the partner sent, the tracker
+served, the moment it arrived. Two things per key now say otherwise.
+
+**Approval.** `api_clients.auto_approve` — on, the partner publishes straight to the tracker, which
+is what every key that exists today does and why the column defaults to `1`; off, everything they
+send lands in the whitelist as `review_status = 'pending'` and **the accesslist generator does not
+write it**. That last clause is the feature: "hold this partner's submissions for review" means
+nothing at all if the tracker is already serving them while somebody decides. `tests/partner_api_test.php`
+proves it against the real generator and a real file on disk rather than by grepping the query.
+
+The column defaults to `'none'`, not `'approved'`. Every row that existed before this release was
+published directly, and calling that "approved" would claim a person looked at 159 rows nobody ever
+looked at. The generator's filter is `review_status IN ('none','approved')`, so switching the
+feature on unpublishes nothing.
+
+**Required fields.** `api_clients.required_fields` — a comma list drawn from a fixed vocabulary
+(`name`, `url`, `source_id`). An item missing one is refused **on its own**, as `invalid` with
+`missing_<field>`; the rest of the batch still goes through. A feed that arrives without a title
+becomes a row nobody can identify, and refusing it at the door is cheaper than deleting it later.
+
+**The queue.** The Whitelist page gained a review filter (waiting / approved / turned down / not
+reviewed), Approve and Turn-down buttons over a selection, and — the thing the queue is useless
+without — **the partner's name against every row they sent**, resolved in one query for the page.
+Approving regenerates the accesslist; turning something down never deletes it, because a decision
+worth recording is worth being able to see later. Behind `panel.whitelist.content`, the same
+permission as approving a description.
+
+**The guide is the configuration.** `?action=apidocs` renders from its query string: scope, approval
+mode, required fields. The panel builds that address when the key is made, beside the key itself, and
+the address changes as the choices change so an operator can watch what they are about to send. It
+carries no secret — only which answers were chosen — so it travels in the same mail as the key
+without being the key. It is unlisted (`noindex`) rather than locked: a partner cannot read how to
+use the thing until they have already worked out how to use it.
+
+The key editor replaced a chain of one-question prompts. Four answers about one key belong on one
+screen, and the live guide link at the bottom only means anything if you can watch it change while
+you decide.
+
+### Added — the sign-in bridge: one community, two sites, one account (schema 49)
+
+A tracker usually sits next to a forum, and the forum is where the community already is. Five
+endpoints on the `users` scope let the two sides share their people, **both ways**:
+
+| | |
+|---|---|
+| `v1/auth/login` | find, link or create the account behind one of their users, and mint the ticket that signs them in |
+| `v1/auth/logout` | they signed out over there — end the bridged session here |
+| `v1/auth/verify` | redeem a ticket **this** tracker minted, and learn whose it is |
+| `v1/auth/merge` | attach one of their users to an account that already exists here, or detach them |
+| `v1/auth/status` | linked or not, when they last came through, whether they signed out here |
+
+**Why a ticket and not a session.** Nothing about a session can be done from a server-to-server
+call: the cookie belongs to the browser, and the browser has to visit us to receive one. So
+`v1/auth/login` returns a one-time `handoff.url`; the partner redirects the browser to it, and
+`?action=bridge` spends the ticket and sets a real cookie. Only the SHA-256 of a ticket is stored,
+for the same reason as a password, and redemption is a single `UPDATE … WHERE used_at IS NULL`, so
+two browsers racing the same ticket cannot both win. It lives 120 seconds by default.
+
+The outbound half is the mirror image: `?action=bridge_out` mints a ticket for somebody already
+signed in here and sends them to `auth_bridge_return_url` with `?thx_token=…`, which the partner's
+**server** posts to `v1/auth/verify`. A ticket minted for one key is not another key's to spend.
+
+**It does not match people by email address.** A key that can assert an address can assert the
+administrator's, and "sign me in as whoever owns this mailbox" is account takeover with a helpful
+face. `auth_bridge_merge` ships `none`; `email_verified` is offered for the install that actually
+has that shape — one community, two logins, every address already confirmed *here* — and even then a
+second identity reaching for an account somebody already holds is refused as `merge_ambiguous`
+rather than resolved by guessing.
+
+**It does not open the admin panel.** The ordinary login form opens a panel session for an
+admin-group member because it has just checked their password; this has checked a partner's key. A
+forum that can say "this browser is user 7" would otherwise be a forum that can open the
+administrator's panel, and the operator who handed out that key was agreeing to let it sign members
+in. An admin arriving through the bridge is signed in to the site and signs in to the panel the
+usual way.
+
+**Two-way sign-out without an outbound call.** A webhook to an address out of a settings field is
+this server fetching whatever that field points at. Instead the far side's sign-out marks the link,
+and `currentUser()` reads that — only for sessions that were opened through the bridge, so nobody
+else's request grows a query. Signing out here marks it the other way, and the partner sees it on
+their next `v1/auth/status`.
+
+**It shows the source.** The account page tells the person themselves where their account signs in
+from, and says plainly that an account with its own password signs in here only. The panel's user
+list carries the same answer beside each name, dimmed when the link is dormant. The label is copied
+at link time, so a profile still says where an account came from after the key is deleted.
+
+The bridge never accepts or hands out a password. An account it creates keeps an unusable hash until
+the person sets one through the ordinary reset flow — which is why they can still sign in here if
+the forum disappears. Seven settings, all under Settings → Sign-in bridge, and the master switch
+ships **off**: it lets a key holder say who a visitor is, which is the strongest sentence any
+credential on this site can utter.
 
 ### Added — favourites, public profiles and "my torrents" (schema 47)
 

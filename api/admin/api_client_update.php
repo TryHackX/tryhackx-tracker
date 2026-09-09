@@ -18,6 +18,14 @@ if (isset($input['label'])) {
     $sets[] = 'label = ?';
     $params[] = $label;
 }
+if (array_key_exists('auto_approve', $input)) {
+    $sets[] = 'auto_approve = ?';
+    $params[] = (!empty($input['auto_approve']) && $input['auto_approve'] !== '0' && $input['auto_approve'] !== 'false') ? 1 : 0;
+}
+if (array_key_exists('required_fields', $input)) {
+    $sets[] = 'required_fields = ?';
+    $params[] = implode(',', apiClientCleanFields($input['required_fields']));
+}
 if (!$sets) {
     jsonResponse(['error' => __('api.federation.nothing_to_update')], 400);
 }

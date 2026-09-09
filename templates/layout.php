@@ -18,6 +18,12 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <?php if ($action === 'apidocs'): ?>
+    <?php /* Unlisted, not secret: it is handed to one partner in a mail, and a search engine
+             indexing it would put an integration guide for this tracker in front of everybody who
+             was not sent it. Nothing here is protected by that — the key is. */ ?>
+    <meta name="robots" content="noindex, nofollow">
+    <?php endif; ?>
     <title><?= sanitize($pageTitle) ?> &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">

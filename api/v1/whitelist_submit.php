@@ -32,6 +32,19 @@ if (count($items) > API_MAX_ITEMS) {
 }
 $source = (isset($payload['source']) && $payload['source'] === 'forum') ? 'forum' : 'api';
 
+// ── what THIS key is allowed to do, and what it must send ──────────────────────────────────────
+//
+// Two settings live on the key rather than on the site, because a partner is not a policy: one feed
+// is trusted enough to publish straight to the tracker and another is not, and the operator decides
+// that per partner when they hand out the key. Both are on the row api_authenticate() already read,
+// so this costs nothing.
+//
+// auto_approve = 0 puts every row this key creates into the review queue on the Whitelist page. The
+// accesslist generator withholds `pending`, so nothing is served until a person says so — and the
+// reply says `pending` rather than `added`, so the partner's own system can show the right thing.
+$autoApprove = (int)($client['auto_approve'] ?? 1) === 1;
+$requiredFields = array_values(array_filter(array_map('trim', explode(',', (string)($client['required_fields'] ?? '')))));
+
 $parsed = [];
 foreach ($items as $i => $it) {
     $token = '';
@@ -51,13 +64,28 @@ foreach ($items as $i => $it) {
     $p = parseMagnetOrHash(trim($token));
     if ($p['name'] === null && $name !== null) $p['name'] = $name;
     $p['ref'] = $ref;
+    // A missing required field is refused HERE, as `invalid`, with the field named. Refusing at the
+    // door beats accepting a row nobody can identify: the operator asked for a title because a
+    // review queue of unnamed hashes cannot be reviewed.
+    if ($p['hash'] !== null && $requiredFields) {
+        $have = [
+            'name'      => $p['name'] !== null && trim((string)$p['name']) !== '',
+            'url'       => is_array($ref) && !empty($ref['url']),
+            'source_id' => is_array($ref) && (!empty($ref['post_id']) || !empty($ref['discussion_id'])),
+        ];
+        $missing = array_values(array_filter($requiredFields, static fn($f) => empty($have[$f])));
+        if ($missing) {
+            $p['hash'] = null;
+            $p['error'] = 'missing_' . $missing[0];
+        }
+    }
     $parsed[$i] = $p;
 }
 
 // whitelistAddHashes works on a flat item list; refs differ per item so we run it in groups by ref
 // (a forum batch usually has one ref per post — still cheap). Keep result indexes stable.
 $results = array_fill(0, count($parsed), null);
-$summary = ['added' => 0, 'exists' => 0, 'banned' => 0, 'invalid' => 0];
+$summary = ['added' => 0, 'exists' => 0, 'banned' => 0, 'invalid' => 0, 'pending' => 0];
 $groups = [];
 foreach ($parsed as $i => $p) {
     $gk = $p['ref'] ? json_encode($p['ref']) : '';
@@ -70,12 +98,19 @@ foreach ($groups as $gk => $idxs) {
     $r = whitelistAddHashes($db, $cfg, $chunk, [
         'source' => $source, 'ip' => getClientIp($cfg), 'api_client_id' => (int)$client['id'],
         'ref' => $gk !== '' ? json_decode($gk, true) : null,
+        'review' => $autoApprove ? 'none' : 'pending',
     ]);
     foreach ($r['results'] as $j => $res) {
         $i = $idxs[$j];
-        $results[$i] = ['index' => $i, 'input' => mb_substr((string)$res['input'], 0, 200), 'hash' => $res['hash'], 'status' => $res['status'], 'error' => $res['error']];
+        // A key that does not publish directly gets `pending` back rather than `added`. The row was
+        // created either way; what differs is whether the tracker is serving it, and a partner whose
+        // dashboard says "added" for something nobody has looked at yet has been misled.
+        $status = ($res['status'] === 'added' && !$autoApprove) ? 'pending' : $res['status'];
+        $results[$i] = ['index' => $i, 'input' => mb_substr((string)$res['input'], 0, 200), 'hash' => $res['hash'], 'status' => $status, 'error' => $res['error']];
     }
-    foreach ($summary as $k => $v) $summary[$k] += (int)($r['summary'][$k] ?? 0);
+    foreach (['exists', 'banned', 'invalid'] as $k) $summary[$k] += (int)($r['summary'][$k] ?? 0);
+    // The row was created either way; the column it lands in says whether the tracker is serving it.
+    $summary[$autoApprove ? 'added' : 'pending'] += (int)($r['summary']['added'] ?? 0);
     $activeIn = max($activeIn, (int)($r['active_in_seconds'] ?? 0));
 }
 
@@ -85,5 +120,9 @@ jsonResponse([
     'summary' => $summary,
     'active_in_seconds' => $activeIn,
     'mode' => trackerMode($cfg),
+    // Said in the reply rather than left to be inferred: a partner integrating against this needs to
+    // know whether "accepted" means "being served" or "queued for a person".
+    'auto_approve' => $autoApprove,
+    'required_fields' => $requiredFields,
     'server_time' => time(),
 ]);

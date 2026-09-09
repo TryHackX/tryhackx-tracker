@@ -14,7 +14,7 @@
     // ───────────────────────── state ─────────────────────────
     const state = {
         view: 'whitelist',
-        wl: { page: 1, pages: 1, search: '', searchFiles: false, source: '', meta: '', banned: 'active', ip: '', group: false, rows: new Map(), selected: new Set(), ipCounts: {} },
+        wl: { page: 1, pages: 1, search: '', searchFiles: false, source: '', meta: '', review: '', banned: 'active', ip: '', group: false, rows: new Map(), selected: new Set(), ipCounts: {} },
         bn: { page: 1, search: '', rows: new Map() },
         ab: { page: 1, search: '', status: 'active', rows: new Map() },
         cl: { rows: new Map() },
@@ -27,6 +27,24 @@
 
     // ───────────────────────── helpers ─────────────────────────
     function badge(text, cls) { return el('span', { className: 'wl-badge ' + (cls || ''), text }); }
+    // Who sent it and whether a person has looked at it yet. Both answers hang off the same row and
+    // both are about the SUBMISSION rather than the torrent, so they are drawn together — a queue that
+    // says "waiting" without saying who is waiting cannot be worked through.
+    //
+    // 'approved' and 'none' draw nothing on purpose: they are the resting state of every row in the
+    // table, and a badge that is on every row is a badge nobody reads.
+    function reviewNodes(row) {
+        const out = [];
+        const st = row.review_status || 'none';
+        if (st === 'pending' || st === 'rejected') {
+            out.push(badge(t(st === 'pending' ? 'js.wl.review_pending' : 'js.wl.review_rejected'),
+                           st === 'pending' ? 'wl-b-pending' : 'wl-b-bad'));
+        }
+        const who = row.api_client_label || (row.api_client && row.api_client.label) || '';
+        if (who) out.push(el('span', { className: 'text-muted wl-small wl-via', text: t('js.wl.partner', { name: who }) }));
+        return out;
+    }
+
     function sourceBadge(src) {
         const map = { web: 'wl-b-web', api: 'wl-b-api', admin: 'wl-b-admin', forum: 'wl-b-forum' };
         return badge(src || '?', map[src] || '');
@@ -584,6 +602,7 @@
         if (w.searchFiles) p.set('search_files', '1');
         if (w.source) p.set('source', w.source);
         if (w.meta) p.set('meta', w.meta);
+        if (w.review) p.set('review', w.review);
         p.set('banned', w.banned);
         if (w.ip) p.set('ip', w.ip);
         if (w.group) p.set('group', 'ip');
@@ -642,6 +661,7 @@
                 srcTd.appendChild(document.createTextNode(' '));
                 srcTd.appendChild(el('a', { href: row.source_ref.url, target: '_blank', rel: 'noopener noreferrer', title: t('js.wl.open_source_post'), className: 'wl-ref-link' }, el('i', { className: 'bi bi-box-arrow-up-right' })));
             }
+            reviewNodes(row).forEach(n => { srcTd.appendChild(document.createTextNode(' ')); srcTd.appendChild(n); });
             tr.appendChild(srcTd);
             const ipTd = el('td', { className: 'wl-ip', title: row.ip || '' });
             if (row.ip) {
@@ -1157,6 +1177,17 @@
             if (isHttpUrl(ref.url)) srcNodes.push(' ', el('a', { href: ref.url, target: '_blank', rel: 'noopener noreferrer', className: 'wl-ref-link' }, [el('i', { className: 'bi bi-box-arrow-up-right' }), ' ' + t('js.wl.open')]));
         }
         row(t('js.wl.lbl_source'), srcNodes);
+        // The review state gets a row of its own rather than a badge tucked into Source: on a row that
+        // is waiting this is the reason the panel is open, and the note explaining a refusal has to
+        // land somewhere a person will read it.
+        if (it.review_status && it.review_status !== 'none') {
+            const cls = { approved: 'wl-b-ok', rejected: 'wl-b-bad', pending: 'wl-b-pending' }[it.review_status] || 'wl-b-muted';
+            const rvNodes = [badge(t('js.wl.review_' + it.review_status), cls)];
+            if (r.api_client) rvNodes.push(' ', el('span', { className: 'text-muted wl-small', text: t('js.wl.partner', { name: r.api_client.label }) }));
+            if (it.reviewed_at) rvNodes.push(' ', el('span', { className: 'text-muted wl-small', text: '· ' + fmtDate(it.reviewed_at) }));
+            if (it.review_note) rvNodes.push(' ', el('span', { className: 'text-warning wl-small', text: '— ' + it.review_note }));
+            row(t('js.wl.lbl_review'), rvNodes);
+        }
         if (it.banned || r.banned_reason) {
             const b = r.banned_reason || {};
             row(t('js.wl.lbl_ban'), [badge(t('js.wl.badge_banned'), 'wl-b-bad'), ' ', el('span', { text: (b.reason || '') + (b.source ? ` (${b.source}${b.source_id ? ' #' + b.source_id : ''})` : '') }), b.created_at ? el('span', { className: 'text-muted wl-small', text: ' · ' + fmtDate(b.created_at) }) : null]);
@@ -1358,7 +1389,16 @@
         r.clients.forEach(c => {
             const tr = el('tr');
             tr.appendChild(el('td', { className: 'wl-cl-label', text: c.label, title: c.label }));
-            tr.appendChild(el('td', {}, badge(c.scope || 'whitelist', c.scope === 'all' ? 'wl-b-warn' : '')));
+            const scopeTd = el('td', {}, badge(c.scope || 'whitelist', c.scope === 'all' ? 'wl-b-warn' : ''));
+            if (c.auto_approve === false) {
+                scopeTd.appendChild(document.createTextNode(' '));
+                scopeTd.appendChild(badge(t('js.wl.cl_approve_rev'), 'wl-b-pending'));
+            }
+            if (c.required_fields && c.required_fields.length) {
+                scopeTd.appendChild(document.createTextNode(' '));
+                scopeTd.appendChild(el('span', { className: 'text-muted wl-small', text: c.required_fields.join(', ') }));
+            }
+            tr.appendChild(scopeTd);
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { text: c.key_id })));
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { className: 'text-muted', text: '····' + (c.secret_hint || '') })));
             const sw = el('input', { type: 'checkbox', className: 'form-check-input', role: 'switch', title: c.enabled ? t('js.wl.enabled_click_disable') : t('js.wl.disabled_click_enable') });
@@ -1373,12 +1413,17 @@
             tr.appendChild(el('td', { className: 'wl-ip', text: c.last_used_ip || '—', title: c.last_used_ip || '' }));
             tr.appendChild(el('td', { className: 'wl-num', text: String(c.requests_count) }));
             const act = el('td', { className: 'wl-actions' });
-            act.appendChild(iconBtn('bi-pencil', t('js.wl.rename'), 'btn-outline-secondary', async () => {
-                const label = await promptModal({ title: t('js.wl.rename_api_client'), label: t('js.wl.label'), value: c.label, okLabel: t('js.wl.rename'), maxlength: 100 });
-                if (label === null || !label.trim()) return;
-                const rr = await apiCall('admin/api_client_update', 'POST', { id: c.id, label: label.trim() });
-                if (rr.success) { showToast(t('js.wl.renamed'), 'success'); loadClients(); } else showToast(rr.error || t('js.wl.rename_failed'), 'danger');
+            // Renaming used to live here on its own. It is one of four things about a key that an
+            // operator changes, and the other three had nowhere to be changed at all.
+            act.appendChild(iconBtn('bi-sliders', t('js.wl.cl_settings'), 'btn-outline-secondary', async () => {
+                const v = await clientOpts({ title: t('js.wl.cl_opts_edit'), client: c, okLabel: t('js.wl.cl_save') });
+                if (!v) return;
+                const rr = await apiCall('admin/api_client_update', 'POST', {
+                    id: c.id, label: v.label, auto_approve: v.auto_approve, required_fields: v.required_fields,
+                });
+                if (rr.success) { showToast(t('js.wl.cl_saved'), 'success'); loadClients(); } else showToast(rr.error || t('js.wl.rename_failed'), 'danger');
             }));
+            act.appendChild(iconBtn('bi-book', t('js.wl.cl_docs_copy'), 'btn-outline-secondary', (e) => copyToClipboard(c.docs_url || '', e.currentTarget)));
             act.appendChild(iconBtn('bi-trash', t('js.wl.delete_client'), 'btn-outline-danger', async () => {
                 if (!await confirmAction(t('js.wl.delete_api_client'), t('js.wl.delete_client_confirm', { name: c.label }), { okLabel: t('js.wl.delete') })) return;
                 const rr = await apiCall('admin/api_client_delete', 'POST', { id: c.id });
@@ -1389,27 +1434,96 @@
         });
     }
 
+    // The key editor. Resolves to the four answers, or null if the operator backed out — one place,
+    // so "make a key" and "change a key" cannot drift into describing the same settings differently.
+    //
+    // The guide address under the controls is redrawn on every change. It is the thing the operator
+    // will actually send to the partner, and being able to watch it change while choosing is what
+    // makes the choices legible: you can see that holding for review and requiring a title produce a
+    // different page before you commit to either.
+    function clientOpts({ title, client, okLabel }) {
+        const modalEl = $('clOptsModal');
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        const label = $('cl-opts-label'), scope = $('cl-opts-scope'), approve = $('cl-opts-approve');
+        const boxes = [...modalEl.querySelectorAll('.cl-opts-field')];
+        const docs = $('cl-opts-docs'), openLink = $('cl-opts-docs-open');
+        $('cl-opts-title').textContent = title;
+        $('cl-opts-save').textContent = okLabel;
+        label.value = client ? client.label : '';
+        scope.value = client ? (client.scope || 'whitelist') : 'whitelist';
+        // The scope is what the key is allowed to touch. Widening it later would silently change what
+        // a credential somebody else already holds can do, so an existing key shows it and does not
+        // offer it.
+        scope.disabled = !!client;
+        $('cl-opts-scope-hint').textContent = client ? t('js.wl.cl_scope_locked') : t('js.wl.cl_scope_hint');
+        approve.value = client && client.auto_approve === false ? 'review' : 'auto';
+        const have = new Set((client && client.required_fields) || []);
+        boxes.forEach(b => { b.checked = have.has(b.value); });
+
+        const read = () => ({
+            label: label.value.trim(),
+            scope: scope.value,
+            auto_approve: approve.value !== 'review' ? 1 : 0,
+            required_fields: boxes.filter(b => b.checked).map(b => b.value),
+        });
+        const paint = () => {
+            const v = read();
+            const url = docsUrlFor(v.scope, v.auto_approve === 1, v.required_fields);
+            docs.textContent = url;
+            openLink.href = url;
+        };
+        paint();
+        const watched = [label, scope, approve, ...boxes];
+        watched.forEach(c => c.addEventListener('change', paint));
+
+        return new Promise(resolve => {
+            let done = null;
+            const save = () => { const v = read(); if (!v.label) { label.focus(); return; } done = v; modal.hide(); };
+            const onHide = () => {
+                $('cl-opts-save').removeEventListener('click', save);
+                modalEl.removeEventListener('hidden.bs.modal', onHide);
+                watched.forEach(c => c.removeEventListener('change', paint));
+                resolve(done);
+            };
+            $('cl-opts-save').addEventListener('click', save);
+            modalEl.addEventListener('hidden.bs.modal', onHide);
+            modal.show();
+            setTimeout(() => label.focus(), 250);
+        });
+    }
+
+    // Mirrors apiClientDocsUrl() in includes/api_auth.php — this one is only for the live preview
+    // while the operator is still deciding, before there is a row on the server to ask about. Every
+    // address the panel actually HANDS OVER (the row button, the token modal) is the server's own.
+    function docsUrlFor(scope, autoApprove, fields) {
+        const u = new URL((document.body.dataset.apiBase || '/').replace(/api\.php\?endpoint=$/, ''), location.href);
+        u.searchParams.set('action', 'apidocs');
+        u.searchParams.set('scope', scope || 'whitelist');
+        u.searchParams.set('approve', autoApprove ? 'auto' : 'review');
+        if (fields && fields.length) u.searchParams.set('fields', fields.join(','));
+        return u.toString();
+    }
+
     function initClientCreate() {
         const tokenModal = bootstrap.Modal.getOrCreateInstance($('tokenModal'));
         $('btn-cl-create').addEventListener('click', async () => {
-            const label = await promptModal({ title: t('js.wl.create_api_client'), label: t('js.wl.client_label'), placeholder: t('js.wl.client_label_placeholder'), hint: t('js.wl.token_shown_once'), okLabel: t('js.wl.create'), maxlength: 100 });
-            if (label === null || !label.trim()) return;
-            const scope = await promptModal({ title: t('js.wl.client_scope'), label: t('js.wl.scope'), value: 'whitelist', hint: t('js.wl.scope_hint'), okLabel: t('js.wl.create'), maxlength: 16 });
-            if (scope === null) return;
-            const scopeVal = scope.trim().toLowerCase() || 'whitelist';
-            if (!['whitelist', 'users', 'federation', 'all'].includes(scopeVal)) { showToast(t('js.wl.scope_invalid'), 'warning'); return; }
+            const v = await clientOpts({ title: t('js.wl.cl_opts_create'), client: null, okLabel: t('js.wl.create') });
+            if (!v) return;
             try {
-                const r = await apiCall('admin/api_client_create', 'POST', { label: label.trim(), scope: scopeVal });
+                const r = await apiCall('admin/api_client_create', 'POST', v);
                 if (r.success) {
                     $('token-label').textContent = r.label;
                     $('token-keyid').textContent = r.key_id;
                     $('token-value').textContent = r.bearer;
+                    $('token-docs').textContent = r.docs_url || '';
+                    $('token-docs-open').href = r.docs_url || '#';
                     tokenModal.show();
                     loadClients();
                 } else showToast(r.error || t('js.wl.create_failed'), 'danger');
             } catch { showToast(t('js.wl.network_error'), 'danger'); }
         });
         $('token-copy').addEventListener('click', (e) => copyToClipboard($('token-value').textContent, e.currentTarget));
+        $('token-docs-copy').addEventListener('click', (e) => copyToClipboard($('token-docs').textContent, e.currentTarget));
     }
 
     // ───────────────────────── API bans view ─────────────────────────
@@ -1544,6 +1658,24 @@
             wlPp.addEventListener('change', () => { try { localStorage.setItem('thx_wl_perpage', wlPp.value); } catch (e) {} state.wl.page = 1; loadWhitelist(); });
         }
         $('wl-filter-banned').addEventListener('change', (e) => { state.wl.banned = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        const revSel = $('wl-filter-review');
+        if (revSel) revSel.addEventListener('change', (e) => { state.wl.review = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        // Approve / turn down whatever is selected. Behind panel.whitelist.content, the same
+        // permission as approving a description — both are "a person decided whether this belongs".
+        const partnerReviewAct = async (op) => {
+            const ids = [...state.wl.selected];
+            if (!ids.length) return;
+            const r = await apiCall('admin/whitelist_review', 'POST', { op, ids });
+            if (r.error) { showToast(r.error, 'error'); return; }
+            showToast(t(op === 'approve' ? 'js.wl.approved_n' : 'js.wl.rejected_n', { n: r.changed }));
+            state.wl.selected.clear();
+            loadWhitelist();
+            loadStatus();
+        };
+        const apBtn = $('wl-approve');
+        if (apBtn) apBtn.addEventListener('click', () => partnerReviewAct('approve'));
+        const rjBtn = $('wl-reject');
+        if (rjBtn) rjBtn.addEventListener('click', () => partnerReviewAct('reject'));
         $('wl-group-ip').addEventListener('change', (e) => {
             state.wl.group = e.target.checked; state.wl.page = 1;
             if (state.wl.group) wlSort.set([{ col: 'ip', dir: 'asc' }, { col: 'date', dir: 'desc' }]); else wlSort.reset();

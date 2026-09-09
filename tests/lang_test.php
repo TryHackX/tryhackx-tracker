@@ -383,5 +383,31 @@ check('lang_swap_enabled has a control on the Settings page', str_contains($setT
 require_once $root . '/includes/schema.php';
 check('… and it ships on from 1.41.0', (trackerSchemaDefaultSettings()['lang_swap_enabled'] ?? null) === '1', var_export(trackerSchemaDefaultSettings()['lang_swap_enabled'] ?? null, true));
 
+/* -- EVERY KEY A SCRIPT ASKS FOR MUST BE IN THE BUNDLE ---------------------
+ * langJsBundle() ships `js.` and nothing else, so t('a.wl.something') in a script renders the
+ * literal string "a.wl.something" on the page: no error, no warning, just a dictionary key where a
+ * sentence should be. It happened to eight keys at once in 1.42.0 (the API key editor), and the
+ * only thing that catches it is looking at what the scripts actually ask for.
+ */
+$enAll = langLoad('en');
+foreach (glob($root . '/assets/js/*.js') as $jsPath) {
+    $src = (string)@file_get_contents($jsPath);
+    $jsName = basename($jsPath);
+    preg_match_all("/\bt\(\s*'([A-Za-z0-9_.]+)'/", $src, $mk);
+    $bad = [];
+    $missing = [];
+    foreach (array_unique($mk[1]) as $key) {
+        // A key built at runtime ('js.wl.review_' . status) is not a literal and cannot be checked
+        // here; those end with the separator and are skipped rather than reported as broken.
+        if (str_ends_with($key, '.') || str_ends_with($key, '_')) continue;
+        if (!str_starts_with($key, 'js.')) { $bad[] = $key; continue; }
+        if (!isset($enAll[$key])) $missing[] = $key;
+    }
+    check("$jsName asks only for js.* keys, the only ones in the bundle",
+          $bad === [], implode(', ', array_slice($bad, 0, 6)));
+    check("... and every one of them is in the dictionary",
+          $missing === [], implode(', ', array_slice($missing, 0, 6)));
+}
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

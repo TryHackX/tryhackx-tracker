@@ -297,7 +297,17 @@ function userSessionStart(PDO $db, array $user, string $ip = '', ?int $ttlSecond
 
 function userSessionLogout(PDO $db): void {
     userRememberClear($db);
-    unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']);
+    // The other half of two-way sign-out. The tracker makes no outbound call — it marks the link,
+    // and the partner sees it on their next v1/auth/status. A webhook to an address out of a
+    // settings field would be this server fetching whatever that field points at.
+    if (!empty($_SESSION['bridge_identity']) && function_exists('authIdentityMarkLogout')) {
+        $bcfg = $GLOBALS['cfg'] ?? [];
+        if (!function_exists('authBridgeLogoutBoth') || authBridgeLogoutBoth(is_array($bcfg) ? $bcfg : [])) {
+            try { authIdentityMarkLogout($db, (int)$_SESSION['bridge_identity']); } catch (\Throwable $e) { /* signing out must not fail */ }
+        }
+    }
+    unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at'],
+          $_SESSION['bridge_identity'], $_SESSION['bridge_login_at']);
     // a panel session opened via the admin-group sign-in dies with the user session
     if (!empty($_SESSION['admin_via_user'])) {
         unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
@@ -401,6 +411,20 @@ function currentUser(PDO $db): ?array {
     if (!empty($_SESSION['user_id'])) {
         $u = userFindById($db, (int)$_SESSION['user_id']);
         if ($u && $u['status'] !== 'active') { unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']); $u = null; }
+        // A session OPENED THROUGH THE BRIDGE ends when the far side says the person signed out
+        // over there. Only those: an ordinary sign-in on this site is not the forum's to end, and
+        // the flag is on the session, so nobody else's request grows a query for this.
+        //
+        // The remember-me fallback below is left alone deliberately. A bridged sign-in never issues
+        // a remember cookie, so for a purely bridged visitor there is nothing to fall back to; if
+        // one exists it is because this person also signed in here with their own password, and
+        // that credential is theirs, not the forum's to revoke.
+        if ($u && !empty($_SESSION['bridge_identity']) && function_exists('authBridgeSessionEnded')
+            && authBridgeSessionEnded($db)) {
+            unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at'],
+                  $_SESSION['bridge_identity'], $_SESSION['bridge_login_at']);
+            $u = null;
+        }
     }
     if ($u === null) $u = userTryRememberLogin($db);
     $GLOBALS['__current_user_cache'] = $u;
@@ -523,6 +547,12 @@ function userDeleteCascade(PDO $db, int $userId): array {
     // The pair, not an id column: hash_votes identifies a voter as a type plus a key, because an
     // anonymous vote is keyed by an IP bucket instead.
     $del("DELETE FROM hash_votes WHERE voter_type = 'user' AND voter_key = ?", [(string)$userId], 'votes');
+    // The bridge links and any ticket still outstanding. Leaving an identity behind would leave a
+    // partner able to open a session for an account that no longer exists — the row would point at
+    // a gap, and the next bridged sign-in for that external id would find it and fail confusingly
+    // rather than making the person a new account.
+    $del("DELETE FROM user_identities WHERE user_id = ?", [$userId], 'bridge_links');
+    $del("DELETE FROM auth_handoffs WHERE user_id = ?", [$userId], 'bridge_tickets');
     // Submissions are NOT deleted — a whitelist row is a torrent the tracker serves, and deleting an
     // account is not a reason to stop serving it. The attribution goes, so it stops appearing on a
     // profile that no longer exists.

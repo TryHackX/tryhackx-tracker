@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 47;  // 47 = user_favourites + users.fav_public/fav_listed + whitelist.submitter_id/submitter_public — favourites, public profiles and "my uploads"
+const TRACKER_SCHEMA_VERSION = 49;  // 49 = user_identities + auth_handoffs — the two-way sign-in bridge for a forum
+                                    // 47 = user_favourites  // 47 = user_favourites + users.fav_public/fav_listed + whitelist.submitter_id/submitter_public — favourites, public profiles and "my uploads"
                                     // 46 = csp_reports (one row per KIND of violation, hits counts occurrences) + the four csp_* settings — the policy moved out of .htaccess and into PHP, where a nonce can exist
 // 45 = settings only (transport: cookie_secure_mode, client_proto_header, hsts_*) — every reader carries its own `?? default`, so the rows only make them visible in Settings
 // 44 = settings only (index_files_*: how a file list loads — mode, batch, total, once for the search page and once for the panel)
@@ -108,8 +109,17 @@ function trackerSchemaStatements(): array {
             -- what the tracker serves and never what the search finds.
             `submitter_id` INT UNSIGNED DEFAULT NULL,
             `submitter_public` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v48: THE ONE COLUMN THAT GATES WHAT THE TRACKER SERVES.
+            -- 'none' is every row that predates this and every row from a partner allowed to publish
+            -- directly, so switching the feature on never retroactively unpublishes anything. Only
+            -- 'pending' and 'rejected' are withheld, and the accesslist generator is the only place
+            -- that reads it that way — tests/sql_safety_test.php pins that query.
+            `review_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
+            `review_note` VARCHAR(255) DEFAULT NULL,
+            `reviewed_at` DATETIME DEFAULT NULL,
             UNIQUE KEY `uq_whitelist_hash` (`info_hash`),
             KEY `idx_wl_submitter` (`submitter_id`, `created_at`),
+            KEY `idx_wl_review` (`review_status`, `created_at`),
             KEY `idx_whitelist_ip_bucket` (`ip_bucket`, `created_at`),
             KEY `idx_whitelist_created` (`created_at`),
             KEY `idx_whitelist_source` (`source`, `created_at`),
@@ -147,6 +157,13 @@ function trackerSchemaStatements(): array {
             `secret_hint` CHAR(4) NOT NULL DEFAULT '',
             `scope` VARCHAR(32) NOT NULL DEFAULT 'whitelist',
             `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            -- v48. auto_approve = 1 means this partner publishes straight to the tracker; 0 puts
+            -- everything they send into the review queue on the Whitelist page. required_fields is a
+            -- comma list of names this partner's items must carry ('name', 'url', 'source_id'), so a
+            -- feed that arrives without a title is refused at the door rather than becoming a row
+            -- nobody can identify.
+            `auto_approve` TINYINT(1) NOT NULL DEFAULT 1,
+            `required_fields` VARCHAR(255) NOT NULL DEFAULT '',
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `last_used_at` DATETIME DEFAULT NULL,
             `last_used_ip` VARCHAR(45) DEFAULT NULL,
@@ -693,6 +710,58 @@ function trackerSchemaStatements(): array {
             UNIQUE KEY `uq_ipl_name` (`name`)
         ) $engine",
 
+        // ── The sign-in bridge (v49) ────────────────────────────────────────────────────────────
+        //
+        // One row per (partner key, their user id). The tracker account is ours and stays ours: the
+        // bridge says "the person behind forum user 412 is tracker user 7", and everything else about
+        // user 7 — their group, their favourites, their uploads — belongs to the tracker and survives
+        // the partner going away.
+        //
+        // client_id is part of the identity, not a note beside it. Two forums both numbering their
+        // users from 1 are two different people, and a UNIQUE on external_id alone would quietly hand
+        // the second forum's user 1 the first forum's account.
+        "CREATE TABLE IF NOT EXISTS `user_identities` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `client_id` INT UNSIGNED NOT NULL,
+            -- What to SHOW the person: 'the forum', 'Flarum', whatever the operator called the key.
+            -- Copied from api_clients.label when the link is made rather than joined at read time,
+            -- so a profile still says where an account came from after the key is deleted.
+            `provider` VARCHAR(64) NOT NULL DEFAULT '',
+            `external_id` VARCHAR(191) NOT NULL,
+            `external_name` VARCHAR(191) DEFAULT NULL,
+            `external_email` VARCHAR(191) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `last_login_at` DATETIME DEFAULT NULL,
+            -- Set when the partner says the person signed out over there. The tracker reads it in
+            -- currentUser(): a session opened through the bridge dies when the far side ends it,
+            -- which is the half of two-way sign-out that cannot be done by deleting a session file.
+            `logout_at` DATETIME DEFAULT NULL,
+            UNIQUE KEY `uq_ident_ext` (`client_id`, `external_id`),
+            UNIQUE KEY `uq_ident_user` (`user_id`, `client_id`),
+            KEY `idx_ident_user` (`user_id`)
+        ) $engine",
+
+        // The one-time ticket that carries a sign-in across the redirect between the two sites.
+        //
+        // Only the HASH is stored, for the same reason as a password: this row is enough to become
+        // somebody if the plain token is in it. It is single-use (used_at), short-lived (expires_at),
+        // and bound to the key that minted it.
+        "CREATE TABLE IF NOT EXISTS `auth_handoffs` (
+            `token_hash` CHAR(64) NOT NULL PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `client_id` INT UNSIGNED NOT NULL,
+            -- 'in'  — minted by the partner's API call, redeemed by the browser at ?action=bridge
+            -- 'out' — minted for a signed-in tracker user, redeemed by the partner at v1/auth/verify
+            `direction` ENUM('in','out') NOT NULL DEFAULT 'in',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `expires_at` DATETIME NOT NULL,
+            `used_at` DATETIME DEFAULT NULL,
+            `created_ip` VARCHAR(45) DEFAULT NULL,
+            KEY `idx_handoff_expiry` (`expires_at`),
+            KEY `idx_handoff_user` (`user_id`)
+        ) $engine",
+
         "CREATE TABLE IF NOT EXISTS `ip_list_entries` (
             `list_id` INT UNSIGNED NOT NULL,
             `cidr` VARCHAR(64) NOT NULL,
@@ -710,6 +779,10 @@ function trackerSchemaStatements(): array {
  */
 function trackerSchemaGuardedStatements(PDO $db): array {
     $out = [];
+    // The same clause trackerSchemaStatements() uses. Two CREATE TABLEs live down here as well —
+    // a table that has to appear on an EXISTING install is a migration, and a migration that left
+    // this off would create it with the server's default charset instead of the site's.
+    $engine = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
     if (!schemaColumnExists($db, 'api_clients', 'scope')) {
         $out[] = "ALTER TABLE `api_clients` ADD COLUMN `scope` VARCHAR(32) NOT NULL DEFAULT 'whitelist'";
     }
@@ -813,10 +886,61 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     $wparts = [];
     if (!schemaColumnExists($db, 'whitelist', 'submitter_id')) $wparts[] = "ADD COLUMN `submitter_id` INT UNSIGNED DEFAULT NULL";
     if (!schemaColumnExists($db, 'whitelist', 'submitter_public')) $wparts[] = "ADD COLUMN `submitter_public` TINYINT(1) NOT NULL DEFAULT 0";
+    if (!schemaColumnExists($db, 'whitelist', 'review_status')) {
+        $wparts[] = "ADD COLUMN `review_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none'";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'review_note')) $wparts[] = "ADD COLUMN `review_note` VARCHAR(255) DEFAULT NULL";
+    if (!schemaColumnExists($db, 'whitelist', 'reviewed_at')) $wparts[] = "ADD COLUMN `reviewed_at` DATETIME DEFAULT NULL";
     if ($wparts) $out[] = "ALTER TABLE `whitelist` " . implode(', ', $wparts);
     if (!schemaIndexExists($db, 'whitelist', 'idx_wl_submitter')) {
         $out[] = "ALTER TABLE `whitelist` ADD KEY `idx_wl_submitter` (`submitter_id`, `created_at`)";
     }
+    if (!schemaIndexExists($db, 'whitelist', 'idx_wl_review')) {
+        $out[] = "ALTER TABLE `whitelist` ADD KEY `idx_wl_review` (`review_status`, `created_at`)";
+    }
+
+    // v48: what a partner's key is allowed to do on its own.
+    $aparts = [];
+    if (!schemaColumnExists($db, 'api_clients', 'auto_approve')) {
+        // 1, not 0: every key that exists today publishes directly, and a migration that silently
+        // put every partner's traffic into a review queue nobody is watching would take the tracker
+        // off the air for those hashes.
+        $aparts[] = "ADD COLUMN `auto_approve` TINYINT(1) NOT NULL DEFAULT 1";
+    }
+    if (!schemaColumnExists($db, 'api_clients', 'required_fields')) {
+        $aparts[] = "ADD COLUMN `required_fields` VARCHAR(255) NOT NULL DEFAULT ''";
+    }
+    if ($aparts) $out[] = "ALTER TABLE `api_clients` " . implode(', ', $aparts);
+
+    // v49: the sign-in bridge. Two new tables, so CREATE TABLE IF NOT EXISTS carries the whole
+    // migration — the definitions are the ones above, kept identical on purpose.
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_identities` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `client_id` INT UNSIGNED NOT NULL,
+        `provider` VARCHAR(64) NOT NULL DEFAULT '',
+        `external_id` VARCHAR(191) NOT NULL,
+        `external_name` VARCHAR(191) DEFAULT NULL,
+        `external_email` VARCHAR(191) DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `last_login_at` DATETIME DEFAULT NULL,
+        `logout_at` DATETIME DEFAULT NULL,
+        UNIQUE KEY `uq_ident_ext` (`client_id`, `external_id`),
+        UNIQUE KEY `uq_ident_user` (`user_id`, `client_id`),
+        KEY `idx_ident_user` (`user_id`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `auth_handoffs` (
+        `token_hash` CHAR(64) NOT NULL PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `client_id` INT UNSIGNED NOT NULL,
+        `direction` ENUM('in','out') NOT NULL DEFAULT 'in',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `expires_at` DATETIME NOT NULL,
+        `used_at` DATETIME DEFAULT NULL,
+        `created_ip` VARCHAR(45) DEFAULT NULL,
+        KEY `idx_handoff_expiry` (`expires_at`),
+        KEY `idx_handoff_user` (`user_id`)
+    ) $engine";
 
     // v19: a source link and a description on a whitelist row. The table is small (hundreds of rows),
     // so this is an ordinary ALTER — nothing here needs the deferral machinery below.
@@ -1525,6 +1649,33 @@ function trackerSchemaDefaultSettings(): array {
         // path still falls back to the plain navigation it replaces, and the reload it replaces is
         // the thing people actually complained about.
         'lang_swap_enabled'           => '1',
+        // ── The sign-in bridge (v49) ────────────────────────────────────────────────────────
+        // Off. It lets somebody holding a key say "this is user 412 and I vouch for them", which is
+        // the strongest thing any credential on this site can say — it must be a switch an operator
+        // deliberately threw, never a default.
+        'auth_bridge_enabled'         => '0',
+        // May the bridge CREATE accounts, or only sign in ones that already exist and are linked?
+        // On: a forum that is already the front door of the community should not need a second
+        // registration step. Off is for an operator who wants to hand out accounts themselves.
+        'auth_bridge_create'          => '1',
+        // Whether an unlinked forum identity may take over an existing local account that shares its
+        // address: 'none' (the default) or 'email_verified'.
+        //
+        // 'none' because email matching is account takeover wearing a helpful face: a partner who can
+        // assert any address can assert an administrator's. 'email_verified' is still only "the
+        // TRACKER verified this address", so it is offered for the case an operator actually has —
+        // one community, two logins, everyone's address already confirmed here.
+        'auth_bridge_merge'           => 'none',
+        // How long the one-time handoff ticket lives, in seconds. Clamped [30, 900]. It only has to
+        // survive one redirect.
+        'auth_bridge_ttl'             => '120',
+        // Where "continue to the forum" sends a signed-in tracker user. Must be an absolute http(s)
+        // address; empty switches the outbound half off.
+        'auth_bridge_return_url'      => '',
+        // The forum's own sign-in page, offered on the tracker's login form as "sign in with …".
+        'auth_bridge_login_url'       => '',
+        // Does a sign-out on one side end the session on the other.
+        'auth_bridge_logout'          => '1',
     ];
 }
 

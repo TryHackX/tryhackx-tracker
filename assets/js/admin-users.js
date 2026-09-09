@@ -91,7 +91,19 @@
             tr.appendChild(el('td', { className: 'us-c-pick' },
                 el('label', { className: 'search-check' }, [pick, el('span', { className: 'search-check-box' })])));
             tr.appendChild(el('td', { className: 'wl-id', text: String(u.id) }));
-            tr.appendChild(el('td', {}, [el('strong', { text: u.username }), u.root_admin ? el('i', { className: 'bi bi-shield-lock-fill text-warning ms-1', title: t('js.users.owner_protected') }) : null]));
+            const nameTd = el('td', {}, [el('strong', { text: u.username }), u.root_admin ? el('i', { className: 'bi bi-shield-lock-fill text-warning ms-1', title: t('js.users.owner_protected') }) : null]);
+            // WHERE THIS ACCOUNT CAN SIGN IN FROM. Beside the name because that is the question it
+            // qualifies: this row is not only a member here, somebody else can also sign in as them.
+            (u.identities || []).forEach(idt => {
+                nameTd.appendChild(document.createTextNode(' '));
+                nameTd.appendChild(el('span', {
+                    className: 'us-bridge' + (idt.signed_out_there ? ' us-bridge-out' : ''),
+                    title: t('js.users.bridge_title') + ': ' + (idt.provider || '?') + ' #' + idt.external_id
+                         + (idt.external_name ? ' (' + idt.external_name + ')' : ''),
+                    text: t('js.users.bridge_via', { name: idt.provider || '?' }),
+                }));
+            });
+            tr.appendChild(nameTd);
             tr.appendChild(el('td', { className: 'wl-small', title: u.email ? (u.email_verified ? t('js.users.email_verified') : t('js.users.email_not_verified')) : '' },
                 [u.email || '—', u.email && u.email_verified ? el('i', { className: 'bi bi-patch-check-fill text-success ms-1', title: t('js.users.verified') }) : null]));
             tr.appendChild(el('td', {}, badge(u.status, u.status === 'active' ? 'wl-b-ok' : 'wl-b-bad')));

@@ -128,6 +128,16 @@
                             <option value="100"><?= _h('a.wl.per_page', ['n' => 100]) ?></option>
                             <option value="200"><?= _h('a.wl.per_page', ['n' => 200]) ?></option>
                         </select>
+                        <?php /* The partner review queue. 'none' is a real answer rather than the
+                                 absence of one: it means the row was published directly, which is a
+                                 different thing from one nobody has looked at yet. */ ?>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="wl-filter-review" title="<?= _h('a.wl.review_filter') ?>">
+                            <option value=""><?= _h('a.wl.review_any') ?></option>
+                            <option value="pending"><?= _h('a.wl.review_pending') ?></option>
+                            <option value="approved"><?= _h('a.wl.review_approved') ?></option>
+                            <option value="rejected"><?= _h('a.wl.review_rejected') ?></option>
+                            <option value="none"><?= _h('a.wl.review_none') ?></option>
+                        </select>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="wl-filter-banned" title="<?= _h('a.wl.f_banned_title') ?>">
                             <option value="active"><?= _h('a.wl.st_active') ?></option>
                             <option value="banned"><?= _h('a.wl.st_banned') ?></option>
@@ -199,6 +209,10 @@
                 <button type="button" class="btn btn-sm btn-outline-danger" id="btn-bulk-delete"><i class="bi bi-trash"></i> <?= _h('common.delete') ?></button>
                 <button type="button" class="btn btn-sm btn-outline-warning" id="btn-bulk-ban"><i class="bi bi-slash-circle"></i> <?= _h('a.wl.ban') ?></button>
                 <button type="button" class="btn btn-sm btn-outline-info" id="btn-bulk-meta" title="<?= _h('a.wl.bulk_meta_title') ?>"><i class="bi bi-cloud-download"></i> <?= _h('a.wl.fetch_meta') ?></button>
+                <?php /* Only rows that are WAITING move; the endpoint filters on review_status =
+                         'pending', so these two are safe to press over a mixed selection. */ ?>
+                <button type="button" class="btn btn-sm btn-outline-success" id="wl-approve"><i class="bi bi-check-lg"></i> <?= _h('a.wl.approve') ?></button>
+                <button type="button" class="btn btn-sm btn-outline-danger" id="wl-reject"><i class="bi bi-x-lg"></i> <?= _h('a.wl.reject') ?></button>
                 <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-bulk-clear"><i class="bi bi-x-lg"></i> <?= _h('a.wl.clear') ?></button>
             </div>
 
@@ -443,8 +457,73 @@
                         <code id="token-value" class="wl-copybox-code"></code>
                         <button type="button" class="btn btn-sm wl-copybox-btn" id="token-copy" title="<?= _h('a.wl.copy_token') ?>" aria-label="<?= _h('a.wl.copy_token') ?>"><i class="bi bi-clipboard"></i></button>
                     </div>
+                    <div class="wl-hint mt-3"><?= _h('a.wl.cl_docs') ?></div>
+                    <div class="wl-copybox">
+                        <code id="token-docs" class="wl-copybox-code"></code>
+                        <button type="button" class="btn btn-sm wl-copybox-btn" id="token-docs-copy" title="<?= _h('a.wl.cl_docs_copy') ?>" aria-label="<?= _h('a.wl.cl_docs_copy') ?>"><i class="bi bi-clipboard"></i></button>
+                        <a class="btn btn-sm wl-copybox-btn" id="token-docs-open" href="#" target="_blank" rel="noopener noreferrer" title="<?= _h('a.wl.cl_docs_open') ?>" aria-label="<?= _h('a.wl.cl_docs_open') ?>"><i class="bi bi-box-arrow-up-right"></i></a>
+                    </div>
                     <div class="d-flex justify-content-end gap-2 mt-3">
                         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('a.wl.token_done') ?></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <?php /* One editor for a key, used both when it is made and afterwards. Making a key used to be
+             a chain of one-question prompts, which is a fine way to ask a question and a poor way to
+             ask four — you cannot see the answers together, and the guide link at the bottom only
+             means anything if you can watch it change while you decide. */ ?>
+    <div class="modal fade" id="clOptsModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-key text-warning"></i> <span id="cl-opts-title"></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label wl-hint" for="cl-opts-label"><?= _h('a.wl.cl_label') ?></label>
+                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="cl-opts-label" maxlength="100" placeholder="<?= _h('a.wl.cl_label_ph') ?>">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label wl-hint" for="cl-opts-scope"><?= _h('a.wl.col_scope') ?></label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="cl-opts-scope">
+                            <option value="whitelist">whitelist</option>
+                            <option value="users">users</option>
+                            <option value="federation">federation</option>
+                            <option value="all">all</option>
+                        </select>
+                        <div class="form-text wl-hint" id="cl-opts-scope-hint"><?= __('a.wl.cl_scope_hint') ?></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label wl-hint" for="cl-opts-approve"><?= _h('a.wl.cl_approve') ?></label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="cl-opts-approve">
+                            <option value="auto"><?= _h('a.wl.cl_approve_auto') ?></option>
+                            <option value="review"><?= _h('a.wl.cl_approve_rev') ?></option>
+                        </select>
+                        <div class="form-text wl-hint"><?= __('a.wl.cl_approve_hint') ?></div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-label wl-hint"><?= _h('a.wl.cl_fields') ?></div>
+                        <div class="form-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-name" value="name"><label class="form-check-label" for="cl-opts-f-name"><?= _h('a.wl.cl_f_name') ?> <code>name</code></label></div>
+                        <div class="form-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-url" value="url"><label class="form-check-label" for="cl-opts-f-url"><?= _h('a.wl.cl_f_url') ?> <code>ref.url</code></label></div>
+                        <div class="form-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-source_id" value="source_id"><label class="form-check-label" for="cl-opts-f-source_id"><?= _h('a.wl.cl_f_source_id') ?> <code>ref.post_id</code></label></div>
+                        <div class="form-text wl-hint"><?= __('a.wl.cl_fields_hint') ?></div>
+                    </div>
+                    <div class="mb-2">
+                        <div class="form-label wl-hint"><?= _h('a.wl.cl_docs') ?></div>
+                        <div class="wl-copybox">
+                            <code id="cl-opts-docs" class="wl-copybox-code"></code>
+                            <button type="button" class="btn btn-sm wl-copybox-btn" id="cl-opts-docs-copy" title="<?= _h('a.wl.cl_docs_copy') ?>" aria-label="<?= _h('a.wl.cl_docs_copy') ?>"><i class="bi bi-clipboard"></i></button>
+                            <a class="btn btn-sm wl-copybox-btn" id="cl-opts-docs-open" href="#" target="_blank" rel="noopener noreferrer" title="<?= _h('a.wl.cl_docs_open') ?>" aria-label="<?= _h('a.wl.cl_docs_open') ?>"><i class="bi bi-box-arrow-up-right"></i></a>
+                        </div>
+                        <div class="form-text wl-hint"><?= __('a.wl.cl_docs_hint') ?></div>
+                    </div>
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                        <button type="button" class="btn btn-primary btn-sm" id="cl-opts-save"><?= _h('a.wl.cl_save') ?></button>
                     </div>
                 </div>
             </div>

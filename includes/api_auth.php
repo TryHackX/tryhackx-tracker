@@ -327,6 +327,61 @@ function apiRequireScope(array $client, string $scope): void {
 }
 
 /** Create a client; returns ['id','key_id','secret'] — the secret is never retrievable again. */
+/**
+ * The field names a key may be told to demand, and nothing else.
+ *
+ * An allow-list rather than free text: this string ends up driving a check on every submitted item,
+ * and a typo in the panel would become a partner whose feed is refused for a reason nobody can
+ * spell. Three names, each of which the endpoint knows how to look for.
+ */
+const API_REQUIRED_FIELDS = ['name', 'url', 'source_id'];
+
+function apiClientCleanFields($raw): array {
+    if (is_string($raw)) $raw = explode(',', $raw);
+    if (!is_array($raw)) return [];
+    $out = [];
+    foreach ($raw as $f) {
+        $f = strtolower(trim((string)$f));
+        if (in_array($f, API_REQUIRED_FIELDS, true) && !in_array($f, $out, true)) $out[] = $f;
+    }
+    return $out;
+}
+
+/**
+ * The site's absolute address, for a link that leaves this server.
+ *
+ * getBaseUrl() knows the request PATH and nothing else — it returns "/" on most installs, which is
+ * exactly right inside a page and useless in a mail, in a partner's redirect, or anywhere the
+ * reader is not already on this host. Same reasoning as mailAbsoluteUrl(); the configured site_url
+ * is the operator's own statement of where this site lives, and the request is the fallback.
+ */
+function apiAbsoluteBase(array $cfg): string {
+    $base = rtrim(trim((string)($cfg['site_url'] ?? '')), '/');
+    if ($base !== '') return $base;
+    $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+    if ($host !== '' && preg_match('/^[A-Za-z0-9._:\[\]-]{1,255}$/', $host)) {
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+              || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443');
+        return ($https ? 'https://' : 'http://') . $host . rtrim(getBaseUrl(), '/');
+    }
+    return rtrim(getBaseUrl(), '/');
+}
+
+/**
+ * The address of the integration guide for one key.
+ *
+ * It carries the three answers the guide has to vary on and nothing else — no key, no secret, no
+ * identifier of the client row. That is what makes it safe to put in the same mail as the key
+ * without it BEING the key: somebody who finds the link learns how the public API is shaped, which
+ * is the one thing about it that was never a secret.
+ */
+function apiClientDocsUrl(string $scope, bool $autoApprove, array $fields): string {
+    // Absolute: this address is sent to somebody who is not on this site — that is its whole job.
+    return apiAbsoluteBase($GLOBALS['cfg'] ?? []) . '/?action=apidocs&scope=' . urlencode($scope)
+         . '&approve=' . ($autoApprove ? 'auto' : 'review')
+         . ($fields ? '&fields=' . urlencode(implode(',', $fields)) : '');
+}
+
 function apiClientCreate(PDO $db, string $label, string $scope = 'whitelist'): array {
     $label = mb_substr(trim($label), 0, 100) ?: 'client';
     if (!in_array($scope, apiClientScopes(), true)) $scope = 'whitelist';

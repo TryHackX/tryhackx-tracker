@@ -268,8 +268,17 @@ function whitelistRegenerate(PDO $db, array $cfg): array {
         // probe_status: a submission that has not proved itself yet is not served. 'none' covers
         // every row registered before the feature existed, and every row when it is switched off —
         // so turning it on never retroactively unpublishes anything.
+        // review_status: a partner submission waiting for a person, or one a person turned down, is
+        // not served. 'none' covers every row registered before this column existed and every row
+        // from a key allowed to publish directly — so switching the feature on never retroactively
+        // unpublishes anything, which is the same promise probe_status makes on the line above.
+        //
+        // THIS IS THE MOST DANGEROUS QUERY IN THE FILE. It decides what the tracker answers for.
+        // The guard against a zero-row result further down is why: a WHERE that accidentally matches
+        // nothing must not be written out as an empty accesslist.
         $stmt = $db->prepare("SELECT info_hash FROM whitelist
-                               WHERE banned = 0 AND probe_status IN ('none','passed') AND info_hash > ?
+                               WHERE banned = 0 AND probe_status IN ('none','passed')
+                                 AND review_status IN ('none','approved') AND info_hash > ?
                                ORDER BY info_hash LIMIT 50000");
         while (!$writeFailed) {
             $stmt->execute([$last]);
@@ -662,6 +671,9 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
     // the privacy problem, not the answer to one.
     $submitterId = isset($ctx['submitter_id']) && (int)$ctx['submitter_id'] > 0 ? (int)$ctx['submitter_id'] : null;
     $submitterPublic = ($submitterId !== null && !empty($ctx['submitter_public'])) ? 1 : 0;
+    // v48: 'pending' holds the row out of the accesslist until a person says otherwise. Default
+    // 'none' — the caller has to ask for a review, so every existing path keeps publishing directly.
+    $review = ($ctx['review'] ?? '') === 'pending' ? 'pending' : 'none';
 
     $results = []; $summary = ['added' => 0, 'exists' => 0, 'banned' => 0, 'invalid' => 0];
     $valid = [];
@@ -688,8 +700,8 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
             foreach ($st->fetchAll() as $row) $existing[$row['info_hash']] = (int)$row['banned'];
         }
 
-        $ins = $db->prepare("INSERT IGNORE INTO whitelist (info_hash, name, magnet_link, source, source_ref, api_client_id, ip, ip_bucket, meta_status, meta_requested_at, submitter_id, submitter_public)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $ins = $db->prepare("INSERT IGNORE INTO whitelist (info_hash, name, magnet_link, source, source_ref, api_client_id, ip, ip_bucket, meta_status, meta_requested_at, submitter_id, submitter_public, review_status)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         foreach ($valid as $i => $it) {
             $h = $it['hash'];
             if (isset($banned[$h]) || (isset($existing[$h]) && $existing[$h] === 1)) {
@@ -709,7 +721,7 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
             // leaving somebody to wonder why their torrent never appeared.
             $ins->execute([$h, $it['name'] ?? null, $it['magnet'] ?? null, $source, $ref, $apiClientId, $ip, $bucket,
                            $autoMeta ? 'pending' : 'none', $autoMeta ? date('Y-m-d H:i:s') : null,
-                           $submitterId, $submitterPublic]);
+                           $submitterId, $submitterPublic, $review]);
             if ($ins->rowCount() > 0) {
                 $results[$i] = ['index' => $i, 'input' => $it['input'], 'hash' => $h, 'status' => 'added', 'error' => null];
                 $summary['added']++;

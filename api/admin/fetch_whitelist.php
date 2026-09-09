@@ -111,6 +111,14 @@ switch ($bannedFilter) {
         $where[] = "banned = 0";
         break;
 }
+// v48: the partner review queue. A literal fragment chosen by key — nothing from the request
+// reaches the SQL — and 'none' is a real answer, not the absence of one: it means the row was
+// published directly, which is a different thing from one nobody has looked at yet.
+$reviewFilter = (string)($_GET['review'] ?? '');
+if (in_array($reviewFilter, ['none', 'pending', 'approved', 'rejected'], true)) {
+    $where[] = "review_status = ?";
+    $params[] = $reviewFilter;
+}
 $ipFilter = trim($_GET['ip'] ?? '');
 if ($ipFilter !== '') {
     $where[] = "(ip = ? OR ip_bucket = ?)";
@@ -120,7 +128,8 @@ if ($ipFilter !== '') {
 
 $columns = "id, info_hash, name, source, source_ref, api_client_id, ip, ip_bucket, banned, meta_status, meta_error,
             total_size, files_count, scrape_seeders, scrape_leechers, scrape_completed, scraped_at, created_at, updated_at,
-            source_url, description, description_format, content_status, content_rejected_note";
+            source_url, description, description_format, content_status, content_rejected_note,
+            review_status, review_note, reviewed_at, submitter_id, submitter_public";
 $orderClause = implode(', ', $orderParts);
 
 /** Run count + page query for a given extra search clause (null = none). Throws on SQL error. */
@@ -164,6 +173,7 @@ $pages = max(1, (int)ceil($total / $perPage));
 
 // Normalise row types + decode source_ref
 $ipsOnPage = [];
+$clientsOnPage = [];
 foreach ($rows as &$row) {
     $row['id'] = (int)$row['id'];
     $row['banned'] = (int)$row['banned'];
@@ -177,9 +187,27 @@ foreach ($rows as &$row) {
         if (is_array($decoded)) $ref = $decoded;
     }
     $row['source_ref'] = $ref;
+    $row['submitter_id'] = $row['submitter_id'] !== null ? (int)$row['submitter_id'] : null;
+    $row['submitter_public'] = (int)$row['submitter_public'] === 1;
     if ($row['ip'] !== '') $ipsOnPage[$row['ip']] = true;
+    if ($row['api_client_id'] !== null) $clientsOnPage[$row['api_client_id']] = true;
 }
 unset($row);
+
+// WHO SENT IT, BY NAME. A review queue that says "api_client_id 4" cannot be reviewed: the whole
+// point of holding a partner's submissions is that a person decides, and a person decides about a
+// partner, not about a number. One query for the page, not one per row.
+if ($clientsOnPage) {
+    $ph = implode(',', array_fill(0, count($clientsOnPage), '?'));
+    $st = $db->prepare("SELECT id, label FROM api_clients WHERE id IN ($ph)");
+    $st->execute(array_keys($clientsOnPage));
+    $labels = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $labels[(int)$r['id']] = (string)$r['label'];
+    foreach ($rows as &$row) {
+        $row['api_client_label'] = $row['api_client_id'] !== null ? ($labels[$row['api_client_id']] ?? null) : null;
+    }
+    unset($row);
+}
 
 // Per-IP totals for the IPs present on this page (one GROUP BY query)
 $ipCounts = [];

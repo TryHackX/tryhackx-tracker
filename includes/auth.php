@@ -18,7 +18,10 @@ function adminReservedActions(): array {
     return ['home', 'info', 'tos', 'report', 'status', 'transparency', 'unsubscribe', 'stats',
             'whitelist', 'login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search',
             'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-backups',
-            'admin-traffic', 'admin-audit', 'notfound', 'u'];   // 'u' = a public profile (v47)
+            'admin-traffic', 'admin-audit', 'notfound', 'u', 'apidocs',
+            // Both are handled BEFORE the router (authBridgeHandleRoute), so an admin login
+            // path set to one of them would be unreachable rather than merely odd.
+            'bridge', 'bridge_out'];   // 'u' = a public profile (v47), 'apidocs' = the partner guide (v48)
 }
 
 /** The panel actions that exist regardless of where the sign-in form lives. */

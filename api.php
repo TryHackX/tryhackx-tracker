@@ -35,6 +35,7 @@ require_once __DIR__ . '/includes/wlprobe.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/favourites.php';
+require_once __DIR__ . '/includes/authbridge.php';
 require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/tuner.php';
 require_once __DIR__ . '/includes/federation.php';
@@ -230,6 +231,7 @@ $apiRoutes = [
     'admin/fetch_api_bans'       => 'api/admin/fetch_api_bans.php',
     'admin/api_ban_lift'         => 'api/admin/api_ban_lift.php',
     'admin/api_ban_add'          => 'api/admin/api_ban_add.php',
+    'admin/whitelist_review'     => 'api/admin/whitelist_review.php',
     // ── User accounts (public; includes/users.php) ──
     'user_register'              => 'api/user_register.php',
     'user_login'                 => 'api/user_login.php',
@@ -284,6 +286,13 @@ $apiRoutes = [
     'v1/users/provision'         => 'api/v1/users_provision.php',
     'v1/federation/ping'         => 'api/v1/federation_ping.php',
     'v1/federation/export'       => 'api/v1/federation_export.php',
+    // ── The sign-in bridge (includes/authbridge.php). All five take the 'users' scope: each one
+    //    amounts to deciding who exists here or who is signed in as them. ──
+    'v1/auth/login'              => 'api/v1/auth_login.php',
+    'v1/auth/logout'             => 'api/v1/auth_logout.php',
+    'v1/auth/verify'             => 'api/v1/auth_verify.php',
+    'v1/auth/merge'              => 'api/v1/auth_merge.php',
+    'v1/auth/status'             => 'api/v1/auth_status.php',
 ];
 
 if (!isset($apiRoutes[$endpoint])) {
@@ -351,6 +360,9 @@ function adminEndpointPermission(string $endpoint): ?string {
         'admin/index_scrape_bulk'  => 'panel.whitelist.meta',
         'admin/index_scrape'       => 'panel.whitelist.meta',
         'admin/wl_content'         => 'panel.whitelist.content',
+        // Approving a partner's submission and approving their description are the same act
+        // by the same person: somebody decided whether this belongs on the site.
+        'admin/whitelist_review'   => 'panel.whitelist.content',
         // Users
         'admin/fetch_users'        => 'panel.users.view',
         'admin/fetch_groups'       => 'panel.users.view',

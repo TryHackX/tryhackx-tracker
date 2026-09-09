@@ -50,6 +50,14 @@ Provides a public-facing website for tracker information, abuse report submissio
 ### Whitelist mode (1.2.0)
 - **Registration page** (`?action=whitelist`) — anyone can register magnet links / info hashes for free (CAPTCHA always required, per-IP hourly + daily caps, global daily cap, duplicate / banned checks, registrant IP stored for abuse detection); shows a generated magnet with the tracker's announce URLs and a "check status" form
 - **Whitelist file service** — DB is the source of truth; the accesslist file is appended for additions and **regenerated atomically** (temp file + rename) for removals; the tracker is reloaded via SIGHUP with debounce (adds ≥ 45 s apart, removals/bans promptly, capped per 5 min); refuses to write an empty file (OpenTracker whitelist mode is fail-closed); a systemd timer runs the janitor so pending reloads fire even without web traffic
+- **Partner submissions a person approves** (1.42.0) — per key: publish straight to the tracker or
+  hold everything for review, and which fields every item must carry. A held submission is **not in
+  the accesslist** until somebody approves it; the review queue names the partner who sent each row.
+  The integration guide is generated per key (`?action=apidocs&…`) and carries no secret.
+- **Sign-in bridge** (1.42.0, off by default) — a forum holding a `users` key can sign its members in
+  here (making the account the first time) and a member signed in here can be sent to the forum
+  signed in. One-time tickets, two-way sign-out, no password crosses, and never account-matching by
+  email. Where an account signs in from is shown to the person and to the operator.
 - **Server-to-server API** (`v1/whitelist/submit`, `v1/whitelist/ping`) — `Authorization: Bearer key_id.secret` (only the secret's SHA-256 is stored), additive-only, idempotent; **any failed authentication attempt bans the source IP (v4 exact / v6 /64) for 30 days**, storing the whole offending request for review; exempt-IP list (seeded with the server's own addresses); admin panel to create/disable/delete clients and to view/lift bans
 - **Admin Whitelist page** — status card (mode, file health, DB counts, pending reload, last reload, worker heartbeat, warnings), table with multi-column sort, hash-prefix / IP / name / file-name search (FULLTEXT), source & metadata filters, **Group by IP**, bulk delete/ban/fetch-metadata, details modal (magnet generator, name/size/file tree, seeders/leechers via live scrape, source & forum reference), Banned hashes, API clients, API bans (pretty-printed request snapshot)
 - **Metadata worker** — optional `python3-libtorrent` daemon (systemd, unprivileged, column-level MySQL grants) that resolves name / size / file list through DHT + trackers in upload mode; the panel queues rows and polls
@@ -1489,7 +1497,82 @@ Rules (deliberately strict — "very restrictive"):
   [flarum-homepage-blocks](https://github.com/TryHackX/flarum-homepage-blocks) ≥ 2.6.0 uses this API
   to register every magnet posted on the forum (live + "scan whole forum").
 
-#### 5b. Scheduled mode — whitelist hours (optional, 1.4.0)
+#### 5a. Per-key approval and required fields (1.42.0)
+
+Two settings live on the **key**, not on the site, because a partner is not a policy: one feed is
+trusted enough to publish straight to the tracker and another is not, and the operator decides that
+when they hand out the key. Both are on **Whitelist → API clients → ⚙**.
+
+- **Approval** — *Publish immediately* (the default, and what every key made before 1.42.0 does), or
+  *Hold for review*. A held submission is created with `review_status = 'pending'` and **the
+  accesslist generator does not write it**: the tracker serves nothing until somebody approves it on
+  the Whitelist page. The reply says `pending` instead of `added`, so the partner's own dashboard can
+  show the truth. Approving regenerates the accesslist; turning a submission down never deletes it.
+- **Required with every item** — any of `name`, `ref.url`, `ref.post_id`. An item missing one is
+  refused **on its own**, as `invalid` with `missing_<field>`; the rest of the batch still goes
+  through. A review queue of unnamed hashes cannot be reviewed.
+
+The review queue is the ordinary whitelist table with a **Review** filter (waiting / approved /
+turned down / not reviewed), Approve and Turn-down over a selection, and the **partner's name against
+every row they sent**. It is behind `panel.whitelist.content` — the same permission as approving a
+description, because it is the same act by the same person.
+
+**The integration guide is the configuration.** `?action=apidocs&scope=…&approve=…&fields=…` renders
+from its query string, and the panel builds that address beside the key when the key is made — the
+link redraws as you change the answers, so you can see what you are about to send. It carries no
+secret, only which choices were made, so it travels in the same mail as the key. It is unlisted
+(`noindex`) rather than locked: a partner cannot read how to use the thing until they have already
+worked out how to use it.
+
+#### 5b. The sign-in bridge — one community, two sites, one account (1.42.0)
+
+A tracker usually sits next to a forum, and the forum is where the community already is. With
+**Settings → Sign-in bridge** on, a key with the `users` scope can sign its people in here — and
+somebody signed in here can be sent to the forum already signed in.
+
+| | |
+|---|---|
+| `v1/auth/login` | find, link or create the account behind one of their users; returns a one-time `handoff.url` |
+| `v1/auth/logout` | they signed out over there — end the bridged session here |
+| `v1/auth/verify` | redeem a ticket **this** tracker minted, and learn whose it is |
+| `v1/auth/merge` | attach one of their users to an account that already exists here, or detach them |
+| `v1/auth/status` | linked or not, when they last came through, whether they signed out here |
+
+```
+POST /api.php?endpoint=v1/auth/login
+{"external_id":"412","username":"kasia","email":"kasia@example.org"}
+→ 200 {"ok":true,"created":true,"user":{"id":7,"username":"kasia"},
+       "handoff":{"url":"https://tracker.example/?action=bridge&token=…","expires_in":120}}
+```
+
+Redirect the browser to `handoff.url`. That is the whole integration — a session cookie belongs to
+the browser, so the browser has to visit us to receive one. Only the SHA-256 of a ticket is stored,
+redemption is a single `UPDATE … WHERE used_at IS NULL` (two browsers racing the same ticket cannot
+both win), and it lives `auth_bridge_ttl` seconds (120). The other direction is the mirror image:
+`?action=bridge_out` sends a signed-in visitor to `auth_bridge_return_url` with `?thx_token=…`, which
+the partner's **server** posts to `v1/auth/verify`.
+
+Things it deliberately will not do:
+
+- **Match people by email address.** A key that can assert an address can assert the administrator's.
+  `auth_bridge_merge` ships `none`; `email_verified` is for the install that really has that shape,
+  and even then a second identity reaching for an account somebody already holds is refused as
+  `merge_ambiguous` rather than resolved by guessing.
+- **Open the admin panel.** The login form opens it for an admin-group member because it has just
+  checked their password; the bridge has checked a partner's key. An admin arriving through the
+  bridge is signed in to the site and signs in to the panel the usual way.
+- **Call out to the forum.** Two-way sign-out works by marking the link — a webhook to an address out
+  of a settings field is this server fetching whatever that field points at. The far side sees it on
+  its next `v1/auth/status`; a bridged session here ends on the next page the person opens.
+- **Handle a password, in either direction.** An account the bridge creates keeps an unusable hash
+  until the person sets one through the ordinary reset flow — which is why they can still sign in
+  here if the forum disappears.
+
+Where an account signs in from is **shown**: on the person's own account page, and beside their name
+in the panel's user list. The provider label is copied when the link is made, so a profile still says
+where an account came from after the key is deleted.
+
+#### 5d. Scheduled mode — whitelist hours (optional, 1.4.0)
 
 Run whitelist mode only during configured hours (per weekday, in a timezone) and the open blacklist
 mode the rest of the time — e.g. whitelist Mon–Fri 10:00 → 02:30 next day and all weekend, open
@@ -2229,10 +2312,10 @@ The installer creates the following tables:
 | `sent_emails` | Log of all sent email notifications |
 | `unsubscribed_emails` | Legacy full-unsubscribe list |
 | `email_preferences` | Per-email, per-type notification preferences |
-| `whitelist` | Whitelisted info hashes (source, IP, metadata, scrape cache, ban flag) — schema v2 |
+| `whitelist` | Whitelisted info hashes (source, IP, metadata, scrape cache, ban flag, partner review state) — schema v2/v48 |
 | `whitelist_files` | File lists resolved by the metadata worker (FULLTEXT searchable) |
 | `banned_hashes` | Hashes that must never be served / re-registered (whitelist mode "block") |
-| `api_clients` | Server-to-server API clients (bearer key id + secret hash) |
+| `api_clients` | Server-to-server API clients (bearer key id + secret hash; per-key approval and required fields — schema v48) |
 | `api_bans` | IP bans issued by the API auth layer (with request snapshot) or manually |
 | `stats_samples` | Statistics timeline: raw samples (UNIX `ts`, gauges + cumulative counters + mode) — schema v5 |
 | `stats_samples_5m` / `stats_samples_1h` | 5-minute / hourly roll-ups (avg/min/max, last counter value, whitelist share) |
@@ -2243,6 +2326,9 @@ The installer creates the following tables:
 | `user_group_members` | Timed memberships (`granted_at`/`expires_at`, expiry warnings) |
 | `user_notifications` | In-app notifications (grants, expiry warnings, admin messages) |
 | `user_tokens` | Remember-me + password-reset tokens (sha256 only) |
+| `user_favourites` | A member's favourite hashes — schema v47 |
+| `user_identities` | Sign-in bridge: which partner key vouches for which account, and the name it knows them by — schema v49 |
+| `auth_handoffs` | Sign-in bridge: one-time tickets (sha256 only), in either direction — schema v49 |
 | `fed_peers` | Federation peers (base URL, outbound bearer, inbound API client, pull cursor/status) |
 | `fed_review` | Quarantine for `fed_import_mode = review`: what a peer offered, waiting for an admin to accept or reject it — schema v15 |
 | `net_samples` | UDP traffic: one sample per interval — nftables counters plus the packets/second derived from them, and the limit in force — schema v11 |
@@ -2305,6 +2391,7 @@ All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` w
 | `v1/whitelist/ping` | GET | Server-to-server health check (scope `whitelist`) |
 | `v1/users/lookup` / `grant` / `revoke` / `provision` | POST | Sales/shop integration (scope `users`): look up a user, grant/extend or revoke a timed group, create an account |
 | `v1/federation/ping` / `export` | GET / POST | Federation peers (scope `federation`): health check / cursor-paged metadata export |
+| `v1/auth/login` / `logout` / `verify` / `merge` / `status` | POST | The sign-in bridge (scope `users`): sign a partner's member in here, end that session, redeem a ticket this tracker minted, link or detach an account, ask what we currently think |
 
 ### Admin Endpoints
 

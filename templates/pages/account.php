@@ -135,6 +135,38 @@ if (count($accLangs) > 1):
             <?php endif; ?>
         </div>
 <?php endif; ?>
+<?php
+// WHERE THIS ACCOUNT SIGNS IN FROM. Shown to the person holding it, not only to the operator: an
+// account that a forum created on somebody's behalf should say so to them, and the sentence about
+// "your own password" is the answer to "what happens if the forum goes away".
+$accBridgeOn = function_exists('authBridgeEnabled') && authBridgeEnabled($cfg);
+$accIdents = $accBridgeOn ? authIdentitiesForUser($db, (int)$meUser['id']) : [];
+$accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
+?>
+<?php if ($accBridgeOn): ?>
+        <div class="acc-mail-prefs acc-bridge-block" id="acc-bridge">
+            <h3 class="acc-sub"><?= _h('bridge.linked_heading') ?></h3>
+            <?php if ($accIdents): ?>
+            <?php foreach ($accIdents as $accId): ?>
+            <p class="acc-bridge-line">
+                <?= _h('bridge.linked_via', ['name' => (string)($accId['provider'] ?? '')]) ?>
+                <?php if (!empty($accId['external_name'])): ?>
+                <span class="text-muted"><?= _h('bridge.linked_as', ['name' => (string)$accId['external_name']]) ?></span>
+                <?php endif; ?>
+                <span class="text-muted"><?= _h('bridge.linked_since', ['date' => (string)($accId['created_at'] ?? '')]) ?></span>
+            </p>
+            <?php endforeach; ?>
+            <?php if ($accBridgeOut !== ''): ?>
+            <p class="acc-bridge-go">
+                <a class="btn btn-secondary btn-small" href="<?= $baseUrl ?>?action=bridge_out" rel="nofollow"><?= _h('bridge.continue_to', ['name' => authBridgeProviderName($db, $cfg)]) ?></a>
+                <span class="text-muted acc-verify-note"><?= _h('bridge.continue_hint') ?></span>
+            </p>
+            <?php endif; ?>
+            <?php else: ?>
+            <p class="text-muted acc-verify-note"><?= _h('bridge.not_linked') ?></p>
+            <?php endif; ?>
+        </div>
+<?php endif; ?>
     </div>
 </div>
 

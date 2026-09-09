@@ -1874,6 +1874,65 @@
                 </div>
             </div>
 
+            <!-- The sign-in bridge — includes/authbridge.php -->
+            <div class="settings-section" id="section-authbridge" data-group="users" data-title="<?= _h('settings.bridge_heading') ?>">
+                <h5><?= _h('settings.bridge_heading') ?></h5>
+                <p class="settings-hint mb-3"><?= __('settings.bridge_intro') ?></p>
+                <?php /* The warning is not decoration. Everything else on this page changes what the
+                         site DOES; this one changes who it believes. */ ?>
+                <div class="alert alert-warning py-2 settings-hint mb-3"><?= __('settings.bridge_warning') ?></div>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.bridge_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_enabled">
+                            <option value="1" <?= ($cfg['auth_bridge_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['auth_bridge_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.bridge_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.bridge_create') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_create">
+                            <option value="1" <?= ($cfg['auth_bridge_create'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['auth_bridge_create'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.bridge_create_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.bridge_merge') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_merge">
+                            <option value="none" <?= ($cfg['auth_bridge_merge'] ?? 'none') !== 'email_verified' ? 'selected' : '' ?>><?= _h('settings.bridge_merge_none') ?></option>
+                            <option value="email_verified" <?= ($cfg['auth_bridge_merge'] ?? 'none') === 'email_verified' ? 'selected' : '' ?>><?= _h('settings.bridge_merge_email') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.bridge_merge_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.bridge_ttl') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="auth_bridge_ttl" value="<?= sanitize($cfg['auth_bridge_ttl'] ?? '120') ?>" min="30" max="900">
+                        <small class="settings-hint"><?= _h('settings.bridge_ttl_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.bridge_login_url') ?></label>
+                        <input type="url" class="form-control bg-dark text-light border-secondary" name="auth_bridge_login_url" value="<?= sanitize($cfg['auth_bridge_login_url'] ?? '') ?>" maxlength="500" placeholder="https://forum.example.org/login">
+                        <small class="settings-hint"><?= _h('settings.bridge_login_url_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.bridge_return_url') ?></label>
+                        <input type="url" class="form-control bg-dark text-light border-secondary" name="auth_bridge_return_url" value="<?= sanitize($cfg['auth_bridge_return_url'] ?? '') ?>" maxlength="500" placeholder="https://forum.example.org/auth/tracker">
+                        <small class="settings-hint"><?= __('settings.bridge_return_url_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.bridge_logout') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_logout">
+                            <option value="1" <?= ($cfg['auth_bridge_logout'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['auth_bridge_logout'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.bridge_logout_hint') ?></small>
+                    </div>
+                </div>
+                <p class="settings-hint mt-3 mb-0"><?= __('settings.bridge_endpoints') ?></p>
+            </div>
+
             <!-- Interface languages — includes/lang.php -->
             <div class="settings-section" id="section-languages" data-group="languages" data-title="<?= _h('settings.languages_title') ?>">
                 <h5><?= _h('settings.languages_title') ?></h5>

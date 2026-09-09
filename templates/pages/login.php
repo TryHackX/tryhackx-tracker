@@ -5,8 +5,25 @@
 <p><?= __('login.already', ['user' => sanitize($meUser['username'])]) ?></p>
 <p><a class="btn" href="<?= $baseUrl ?>?action=account"><?= _h('common.go_account') ?></a></p>
 <?php else: ?>
+<?php
+// The forum's own sign-in page, when the operator configured one. It is a plain link, not a form:
+// everything that follows happens over there and comes back as a one-time ticket.
+$bridgeLogin = function_exists('authBridgeEnabled') && authBridgeEnabled($cfg) ? authBridgeLoginUrl($cfg) : '';
+$bridgeName = $bridgeLogin !== '' ? authBridgeProviderName($db, $cfg) : '';
+?>
 <div class="user-card">
+    <?php /* A ticket that expired or was spent lands here. "Try again" is not useful advice — the
+             person cannot mint a new one from this side — so the sentence says who can. */ ?>
+    <?php if (($_GET['bridge'] ?? '') === 'failed'): ?>
+    <div class="alert alert-warning show"><?= _h('bridge.failed') ?></div>
+    <?php endif; ?>
     <div id="login-alert" class="alert"></div>
+    <?php if ($bridgeLogin !== ''): ?>
+    <div class="bridge-signin">
+        <a class="btn bridge-btn" href="<?= sanitize($bridgeLogin) ?>" rel="nofollow noopener"><?= _h('bridge.sign_in_with', ['name' => $bridgeName]) ?></a>
+        <div class="bridge-or"><?= _h('bridge.or') ?></div>
+    </div>
+    <?php endif; ?>
     <?php /* Solve the CAPTCHA BEFORE the first POST when the server already knows it will ask.
              The handshake — post, get 400 with captcha_required, solve, post again — still exists
              and still covers the case where the requirement appears between this render and the
