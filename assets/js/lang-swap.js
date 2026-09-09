@@ -207,11 +207,23 @@
         } catch (e) { return a.href; }
     }
 
-    document.addEventListener('click', function (e) {
-        var a = e.target.closest ? e.target.closest(LINKS) : null;
+    function refreshSwitcherHref(a) {
         if (!a) return;
         var href = currentHrefFor(a);
         if (href !== a.href) a.href = href;
+    }
+    // Not only `click`: a middle click, "Open link in a new tab" from the context menu, and Enter on
+    // a focused link all follow the href without ever firing one. Each of those is preceded by one of
+    // these, and all four are cheap — the work is one URL parse on a link the pointer is already on.
+    ['pointerdown', 'auxclick', 'contextmenu', 'keydown'].forEach(function (ev) {
+        document.addEventListener(ev, function (e) {
+            refreshSwitcherHref(e.target && e.target.closest ? e.target.closest(LINKS) : null);
+        }, true);
+    });
+    document.addEventListener('click', function (e) {
+        var a = e.target.closest ? e.target.closest(LINKS) : null;
+        if (!a) return;
+        refreshSwitcherHref(a);
         try { sessionStorage.setItem(PLACE_KEY, JSON.stringify(capturePlace())); }
         catch (err) { /* storage unavailable: there is nothing to keep and nothing to clean up */ }
     }, true);
@@ -432,6 +444,11 @@
             if (doc.title) document.title = doc.title;
             markActive(code);
             try { history.replaceState(history.state, '', href); } catch (err) { /* opaque origin */ }
+            // The place was stored by the capture listener in case this turned into a navigation. It
+            // did not, and restorePlace() below handles it in-process — so drop it, or an unrelated
+            // reload within the next fifteen seconds would restore a scroll position and a settings
+            // filter from before the swap.
+            try { sessionStorage.removeItem(PLACE_KEY); } catch (err) { /* nothing stored */ }
 
             busy = false;
             document.documentElement.removeAttribute('data-lang-swapping');

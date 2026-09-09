@@ -62,7 +62,7 @@ $loadRow = function () use ($db, $hash): array {
 // `UPDATE whitelist SET scrape_* …` against a row the caller was not allowed to read. A write with
 // no read permission, on columns that ARE load-bearing for the readers who do have it —
 // scrape_seeders is the whitelist arm's sort key and scraped_at is its last_seen
-// (includes/index.php:1442-1443).
+// (the whitelist arm's column list in includes/index.php).
 //
 // A whitelisted hash is removed from index_hashes, so for such a hash $idx is null and $wl is the
 // only row there is. `whitelist.view` (with index_search_include_whitelist) is what decides whether

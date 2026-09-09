@@ -47,7 +47,13 @@ $meUser = currentUser($db);
         <?php if ($canFiles): ?>
         <label class="search-check" title="<?= _h('search.files_title') ?>"><input type="checkbox" id="search-files"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.files') ?></label>
         <?php endif; ?>
-        <?php if (($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1'): ?>
+        <?php
+        // The description filter only ever describes WHITELIST rows: content_status lives on that
+        // table and nowhere else, so with no whitelist arm in the results the control is not merely
+        // decorative — picking "Reviewed and published" makes indexSearchCatalogue() add `1 = 0` to
+        // the index arm and the page goes empty. It needs BOTH: somewhere for a description to live
+        // (the operator allows one), and whitelist rows in this reader's results at all.
+        if ($canWl && (($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1')): ?>
         <select id="search-content" title="<?= _h('search.content_title') ?>">
             <option value="not_rejected"><?= _h('search.c_not_rejected') ?></option>
             <option value="approved"><?= _h('search.c_approved') ?></option>
@@ -90,7 +96,12 @@ $meUser = currentUser($db);
 </div>
 <div class="trans-pagination search-pagination" id="search-pagination"></div>
 <p class="text-muted search-note" id="search-note" hidden></p>
-<?php if ($canFiles): ?>
+<?php /* The Info panel needs what api/index_info.php needs — index.view, which $canSearch already
+         is — and NOT index.files. It used to be rendered only for readers who had the file
+         permission, which made ?action=search&hash=… a silent no-op for everybody else: the element
+         is missing, so openInfo() returns on its first line and the link does nothing at all. The
+         file list inside the panel is a separate request with its own server-side gate, and the
+         "N files" chip is only drawn where the row carries a hash. */ ?>
 <!-- Info panel: what this torrent is, where it came from, and how the swarm looks. The file list
      lives at the bottom of it; the "N files" chip beside a result still opens the tree on its own. -->
 <div class="files-overlay" id="info-overlay" hidden>
@@ -107,6 +118,7 @@ $meUser = currentUser($db);
     </div>
 </div>
 
+<?php if ($canFiles): ?>
 <div class="files-overlay" id="files-overlay" hidden>
     <div class="files-box" role="dialog" aria-modal="true" aria-labelledby="files-title">
         <div class="files-head">

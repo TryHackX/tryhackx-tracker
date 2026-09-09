@@ -360,9 +360,10 @@ check('lang-swap.js comes after i18n.js, which defines the t() it calls',
 check('the file it names exists', is_file($root . '/assets/js/lang-swap.js'));
 // The old copy lived in admin-common.js, which public pages never load — and a second copy
 // listening for the same click would store the place twice and restore it twice.
-// There were TWO of them — one in admin-common.js keyed 'thx_lang_place' and one at the end of
-// app.js keyed 'thx_lang_place_pub'. Both listened for the same click and both restored on load, and
-// the app.js one restored by scroll pixel, so on a public page it ran last and undid the other.
+// There were TWO of them — one in admin-common.js keyed 'thx_lang_place', one at the end of app.js
+// keyed 'thx_lang_place_pub'. Different keys and different audiences (no public page loads
+// admin-common.js), so they never actually fought; what they were was two implementations of one
+// rule, and the second one restored by scroll pixel. Neither may survive.
 foreach (['admin-common.js', 'app.js'] as $jsFile) {
     $js = (string)@file_get_contents($root . '/assets/js/' . $jsFile);
     check("the place-keeper is not still duplicated in $jsFile", !str_contains($js, 'thx_lang_place'));

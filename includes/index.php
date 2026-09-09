@@ -1358,14 +1358,18 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
      * documents: InnoDB carries the primary key inside every secondary index, so a tie-break the
      * other way round turns an index walk back into a filesort over the whole catalogue.
      */
-    $orderFor = static function (bool $wl, bool $scored) use ($orderParts): string {
+    $orderFor = static function (bool $wl, bool $scored, bool $union = false) use ($orderParts): string {
         $parts = [];
         foreach ($orderParts as $key => $frag) {
             if ($key === 'score') { if ($scored) $parts[] = $frag; continue; }
-            if ($key === 'seeders' && !$wl) $frag = 'eff_' . $frag;      // eff_seeders, the indexed one
+            // eff_seeders is the indexed generated column, and it is what makes an ordered index walk
+            // possible — but only on the base table. A union arm is a derived table whose output has
+            // no such column, and the sort there is a filesort over a handful of rows either way;
+            // `seeders` is the same value (eff_seeders IS COALESCE(scrape_seeders, last_seeders)).
+            if ($key === 'seeders' && !$wl && !$union) $frag = 'eff_' . $frag;
             $parts[] = $frag;
         }
-        if (!$parts) $parts[] = $wl ? 'seeders DESC' : 'eff_seeders DESC';
+        if (!$parts) $parts[] = ($wl || $union) ? 'seeders DESC' : 'eff_seeders DESC';
         return implode(', ', $parts) . ', info_hash '
              . (str_ends_with((string)end($parts), 'DESC') ? 'DESC' : 'ASC');
     };
@@ -1431,8 +1435,8 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         $q['__files_capped'] = $capped;
     }
 
-    // one arm = [select SQL, params, count SQL, params]; built for fulltext first, LIKE fallback
-    $buildArm = function (bool $wl, bool $useFt) use ($search, $isHash, $ft, $searchFiles, $fileHashes, $fileIds, $contentFilter): array {
+    // one arm = [select SQL, params, count SQL, count params, is-it-a-union]; fulltext first, LIKE fallback
+    $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false) use ($search, $isHash, $ft, $searchFiles, $fileHashes, $fileIds, $contentFilter): array {
         $tbl = $wl ? 'whitelist' : 'index_hashes';
         // votes_up/votes_down/score_x100 are kept ON the row by repRecount(). Aggregating them per
         // result would be fifty extra queries for one page, which is the shape of mistake this file
@@ -1471,59 +1475,85 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         $params = [];
         $scoreSql = '0';
         $scoreParams = [];
+        // The "name matches OR one of its files matches" half, kept apart from the rest of the WHERE
+        // because it is the one clause that cannot be ANDed into an indexed plan.
+        //
+        // OR IS STILL POISON EVEN WITH A LITERAL LIST. Resolving the file half into a bounded IN list
+        // (above) fixed the 24-minute subquery, but `MATCH(name) AGAINST(…) OR info_hash IN (…)` is
+        // still a disjunction over two different indexes, and MariaDB serves it by scanning. Worse,
+        // with `ORDER BY eff_seeders` the optimiser then chooses to walk idx_index_eff_seed in order
+        // and filter as it goes: EXPLAIN said `type=index key=idx_index_eff_seed`, and the query took
+        // 32.6 s on the live catalogue for eighty-eight matching rows. php-fpm's max_execution_time
+        // is 30 s, so the reader got a 500 — intermittently, because the same search with "best match
+        // first" ticked orders by score instead and came in at 16 s.
+        //
+        // Split into two branches and UNION them. Each branch is served from one index: the fulltext
+        // one, or the primary key. Measured on the same live data, same rows out: 32.6 s -> 4.6 s.
+        // The arm is returned already wrapped in a derived table so its caller can go on appending
+        // one ORDER BY and one LIMIT to it, whichever shape it turned out to be.
+        $split = null;      // [nameClause, nameParams, filesClause, filesParams] when the OR applies
         if ($search !== '') {
             if ($isHash) {
                 $where[] = "info_hash LIKE ?";
                 $params[] = strtolower($search) . '%';
-            } elseif ($useFt && $ft !== '') {
-                $scoreSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
-                $scoreParams = [$ft];
-                $match = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
-                // The file half was already resolved to a bounded list of keys above, so this is a
-                // primary-key lookup rather than a correlated subquery the optimiser cannot index.
-                $keys = $wl ? $fileIds : $fileHashes;
-                if ($searchFiles && $keys) {
-                    $in = implode(',', array_fill(0, count($keys), '?'));
-                    $col = $wl ? 'id' : 'info_hash';
-                    $where[] = "($match OR $col IN ($in))";
-                    $params[] = $ft;
-                    foreach ($keys as $k) $params[] = $k;
-                } else {
-                    $where[] = $match;
-                    $params[] = $ft;
-                }
             } else {
-                $like = "name LIKE ?";
                 $keys = $wl ? $fileIds : $fileHashes;
-                if ($searchFiles && $keys) {
-                    $in = implode(',', array_fill(0, count($keys), '?'));
-                    $col = $wl ? 'id' : 'info_hash';
-                    $where[] = "($like OR $col IN ($in))";
-                    $params[] = '%' . $search . '%';
-                    foreach ($keys as $k) $params[] = $k;
+                $col  = $wl ? 'id' : 'info_hash';
+                if ($useFt && $ft !== '') {
+                    $scoreSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
+                    $scoreParams = [$ft];
+                    $nameSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
+                    $nameParams = [$ft];
                 } else {
-                    $where[] = $like;
-                    $params[] = '%' . $search . '%';
+                    $nameSql = "name LIKE ?";
+                    $nameParams = ['%' . $search . '%'];
+                }
+                if ($searchFiles && $keys) {
+                    $split = [$nameSql, $nameParams,
+                              $col . ' IN (' . implode(',', array_fill(0, count($keys), '?')) . ')', array_values($keys)];
+                } else {
+                    $where[] = $nameSql;
+                    foreach ($nameParams as $p) $params[] = $p;
                 }
             }
         }
-        $w = 'WHERE ' . implode(' AND ', $where);
-        return [
-            "SELECT $cols, $scoreSql AS score FROM `$tbl` $w", array_merge($scoreParams, $params),
-            "SELECT COUNT(*) FROM `$tbl` $w", $params,
-        ];
+        // The non-whitelist arm must not repeat a hash the whitelist arm will also return. This lives
+        // inside the arm rather than being concatenated onto its SQL afterwards, because an arm is no
+        // longer always a single SELECT — appending to a UNION would attach the condition to its last
+        // branch only.
+        if ($excludeWl) $where[] = "info_hash NOT IN (SELECT info_hash FROM whitelist WHERE banned = 0)";
+
+        $key = $wl ? 'id' : 'info_hash';
+        if ($split === null) {
+            $w = 'WHERE ' . implode(' AND ', $where);
+            return [
+                "SELECT $cols, $scoreSql AS score FROM `$tbl` $w", array_merge($scoreParams, $params),
+                "SELECT COUNT(*) FROM `$tbl` $w", $params,
+                false,
+            ];
+        }
+        [$nameSql, $nameParams, $filesSql, $filesParams] = $split;
+        $wA = 'WHERE ' . implode(' AND ', array_merge($where, [$nameSql]));
+        $wB = 'WHERE ' . implode(' AND ', array_merge($where, [$filesSql]));
+        // UNION, not UNION ALL: a row whose name matches AND whose files match is one row, which is
+        // what the OR said. The branches select identical expressions, so the de-duplication compares
+        // like with like.
+        $sel = "SELECT * FROM ((SELECT $cols, $scoreSql AS score FROM `$tbl` $wA)"
+             . " UNION (SELECT $cols, $scoreSql AS score FROM `$tbl` $wB)) arm";
+        $selParams = array_merge($scoreParams, $params, $nameParams, $scoreParams, $params, $filesParams);
+        $cnt = "SELECT COUNT(*) FROM ((SELECT $key FROM `$tbl` $wA) UNION (SELECT $key FROM `$tbl` $wB)) c";
+        $cntParams = array_merge($params, $nameParams, $params, $filesParams);
+        return [$sel, $selParams, $cnt, $cntParams, true];
     };
 
     $run = function (bool $useFt) use ($db, $buildArm, $withWl, $orderFor, $orderMerged, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter): array {
         // Whether the relevance column is a real score or the literal 0 — see $orderFor.
         $scored = $search !== '' && !$isHash && ($useFt && $ft !== '');
-        $arms = [$buildArm(false, $useFt)];
-        if ($withWl) {
-            // a hash can sit in BOTH tables between polls — prefer the whitelist row
-            $arms[0][0] .= " AND info_hash NOT IN (SELECT info_hash FROM whitelist WHERE banned = 0)";
-            $arms[0][2] .= " AND info_hash NOT IN (SELECT info_hash FROM whitelist WHERE banned = 0)";
-            $arms[] = $buildArm(true, $useFt);
-        }
+        // a hash can sit in BOTH tables between polls — prefer the whitelist row. The exclusion is
+        // passed IN rather than appended to the finished SQL, which stopped being safe when an arm
+        // became a UNION.
+        $arms = [$buildArm(false, $useFt, $withWl)];
+        if ($withWl) $arms[] = $buildArm(true, $useFt);
         $countArms = static function () use ($db, $arms, $withWl, $search, $searchFiles, $contentFilter): int {
         $total = 0;
         foreach ($arms as $k => $a) {
@@ -1550,16 +1580,16 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             // ONE arm: no derived table. Wrapping a single SELECT in `SELECT * FROM (…) cat` forces
             // the whole result into a temporary table before the ORDER BY can look at it, which on
             // the empty search meant materialising 184 000 rows to return 25 of them.
-            $sql = $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored) . ' LIMIT ? OFFSET ?';
+            $sql = $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored, !empty($arms[0][4])) . ' LIMIT ? OFFSET ?';
             $params = $arms[0][1];
         } else {
             // TWO arms: the merge needs a derived table, but each arm can be ordered and cut short
             // FIRST — no arm can contribute a row past position offset+perPage to the merged page,
             // so nothing beyond that has to be materialised or sorted.
             $cut = $offset + $perPage;
-            $sql = '(' . $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored) . ' LIMIT ' . (int)$cut . ')'
+            $sql = '(' . $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored, !empty($arms[0][4])) . ' LIMIT ' . (int)$cut . ')'
                  . ' UNION ALL '
-                 . '(' . $arms[1][0] . ' ORDER BY ' . $orderFor(true, $scored) . ' LIMIT ' . (int)$cut . ')';
+                 . '(' . $arms[1][0] . ' ORDER BY ' . $orderFor(true, $scored, !empty($arms[1][4])) . ' LIMIT ' . (int)$cut . ')';
             $sql = "SELECT * FROM ($sql) cat ORDER BY " . $orderMerged($scored) . ' LIMIT ? OFFSET ?';
             $params = array_merge($arms[0][1], $arms[1][1]);
         }

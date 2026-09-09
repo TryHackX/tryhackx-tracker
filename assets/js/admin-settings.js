@@ -511,6 +511,9 @@
     // twice. So: re-read the text of the elements we already know about, re-fetch the catalogue
     // (its keywords are translated too), and re-run whatever search is on screen.
     document.addEventListener('langswap', () => {
+        // The breadcrumb and its "show me where" button are built by this file, so the swap skips
+        // them; showWhere() rewrites the path line but never the button's own label.
+        document.querySelectorAll('.settings-where-jump').forEach(b => { b.textContent = t('js.settings.show_me_where'); });
         sections.forEach(sec => {
             sec.title = norm(sec.el.dataset.title || textOf(sec.el.querySelector('h5')));
             sec.label = (sec.el.dataset.title || textOf(sec.el.querySelector('h5')) || '').trim();

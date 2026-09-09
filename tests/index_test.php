@@ -606,6 +606,98 @@ indexTotalCacheDrop(); indexStatusCacheDrop();
 
 // cleanup
 foreach (['index_hashes', 'index_files', 'whitelist', 'whitelist_files', 'banned_hashes'] as $t) $db->exec("TRUNCATE TABLE `$t`");
+
+/* ── "search inside file lists" is a UNION of two indexed branches, not an OR ─────────────────
+ *
+ * THE BUG THIS EXISTS FOR: the clause was `MATCH(name) AGAINST(…) OR info_hash IN (…)`. A
+ * disjunction over two different indexes cannot be served from either, so MariaDB scanned — and
+ * with `ORDER BY eff_seeders` it chose to walk idx_index_eff_seed in order and filter as it went.
+ * Measured on the live catalogue: 32.6 s for eighty-eight matching rows, against php-fpm's 30 s
+ * max_execution_time, so the reader got an intermittent 500. The same search with "best match
+ * first" ticked ordered by score instead and came in at 16 s, which is why it looked random.
+ * Split into two branches and UNIONed: 4.6 s, same rows.
+ *
+ * What a small table can still prove is the part a rewrite like that gets wrong: that the two
+ * branches together return exactly what the OR returned, ONCE each, under every sort — a row whose
+ * name matches AND whose files match is one row, not two, and that is what UNION (not UNION ALL)
+ * is doing there. */
+foreach (['index_hashes', 'index_files', 'whitelist', 'whitelist_files'] as $t) $db->exec("TRUNCATE TABLE `$t`");
+$mk = function (string $hash, string $name, int $seeders) use ($db) {
+    $db->prepare("INSERT INTO index_hashes (info_hash, name, last_seeders, last_leechers, meta_status, total_size, files_count)
+                  VALUES (?, ?, ?, 0, 'done', 1000, 1)")->execute([$hash, $name, $seeders]);
+};
+$file = function (string $hash, string $path) use ($db) {
+    $db->prepare("INSERT INTO index_files (info_hash, path, size) VALUES (?, ?, 10)")->execute([$hash, $path]);
+};
+$H = ['name' => str_repeat('a1', 20), 'file' => str_repeat('b2', 20), 'both' => str_repeat('c3', 20), 'none' => str_repeat('d4', 20)];
+$mk($H['name'], 'quokka documentary', 7);
+$mk($H['file'], 'unrelated release',  9);
+$mk($H['both'], 'quokka extras',      3);
+$mk($H['none'], 'nothing to see',     5);
+$file($H['name'], 'readme.txt');
+$file($H['file'], 'quokka/episode1.mkv');
+$file($H['both'], 'quokka/episode2.mkv');
+$file($H['none'], 'other.bin');
+
+$ask = function (array $extra) use ($db, $cfg): array {
+    $r = indexSearchCatalogue($db, $cfg, $extra + ['search' => 'quokka', 'page' => 1, 'per_page' => 50]);
+    return $r;
+};
+$namesOf = static fn(array $r): array => array_column($r['rows'], 'info_hash');
+
+$plain = $ask(['sort' => 'relevance:desc']);
+check('files off: only the names match', count($plain['rows']) === 2 && $plain['total'] === 2,
+    implode(',', $namesOf($plain)));
+
+foreach (['relevance:desc', 'seeders:desc', 'seeders:asc', 'name:asc', 'last:desc'] as $sort) {
+    $r = $ask(['sort' => $sort, 'search_files' => 1]);
+    $got = $namesOf($r);
+    sort($got);
+    $want = [$H['name'], $H['both'], $H['file']];
+    sort($want);
+    check("files on, sort=$sort: name-match, file-match and both — each exactly once",
+        $got === $want && count($got) === 3, implode(',', $got));
+    check("files on, sort=$sort: total agrees with the rows", (int)$r['total'] === 3, (string)$r['total']);
+}
+
+// The sort still has to sort. If the union arm were ordered by a column the derived table does not
+// expose, MariaDB would refuse the query outright — this is the check that would catch that.
+$asc = $ask(['sort' => 'seeders:asc', 'search_files' => 1]);
+$desc = $ask(['sort' => 'seeders:desc', 'search_files' => 1]);
+check('files on: ascending and descending are reverses of one another',
+    $namesOf($asc) === array_reverse($namesOf($desc)),
+    implode(',', $namesOf($asc)) . ' | ' . implode(',', $namesOf($desc)));
+
+// A short term skips fulltext and falls back to LIKE — the same OR lived on that branch too.
+$short = indexSearchCatalogue($db, $cfg, ['search' => 'quok', 'search_files' => 1, 'sort' => 'seeders:desc', 'page' => 1, 'per_page' => 50]);
+check('the LIKE fallback branch searches file names too', count($short['rows']) === 3, (string)count($short['rows']));
+
+// TWO ARMS. The exclusion that keeps a hash from being returned by both tables used to be
+// concatenated onto the finished arm SQL; with a UNION arm that would have attached it to the last
+// branch only, so the duplicate would come back through the first one.
+$wlHash = str_repeat('e5', 20);
+$db->prepare("INSERT INTO whitelist (info_hash, name, total_size, files_count, source, created_at, banned, content_status)
+              VALUES (?, 'quokka on the whitelist', 500, 1, 'admin', NOW(), 0, 'none')")->execute([$wlHash]);
+$wlRowId = (int)$db->lastInsertId();
+$db->prepare("INSERT INTO whitelist_files (whitelist_id, path, size) VALUES (?, 'quokka/wl.mkv', 10)")->execute([$wlRowId]);
+$mk($wlHash, 'quokka on the whitelist', 11);          // the same hash in BOTH tables, as between polls
+$file($wlHash, 'quokka/wl.mkv');
+foreach (['relevance:desc', 'seeders:desc'] as $sort) {
+    $r = indexSearchCatalogue($db, $cfg, ['search' => 'quokka', 'search_files' => 1, 'include_whitelist' => true,
+                                          'sort' => $sort, 'page' => 1, 'per_page' => 50]);
+    $hashes = array_column($r['rows'], 'info_hash');
+    $at = array_search($wlHash, $hashes, true);
+    check("two arms, sort=$sort: a hash in both tables is returned once",
+        count(array_keys($hashes, $wlHash, true)) === 1, implode(',', $hashes));
+    check("two arms, sort=$sort: and it is the whitelist row that wins",
+        $at !== false && ($r['rows'][$at]['src'] ?? '') === 'whitelist', json_encode($at === false ? null : $r['rows'][$at]));
+    check("two arms, sort=$sort: four distinct rows in total",
+        count($hashes) === 4 && count(array_unique($hashes)) === 4 && (int)$r['total'] === 4,
+        implode(',', $hashes) . ' total=' . $r['total']);
+}
+
+$db->exec("TRUNCATE TABLE index_hashes"); $db->exec("TRUNCATE TABLE index_files");
+
 @unlink(indexStateFile());
 foreach (glob($tmp . '/idx*.gz') ?: [] as $f) @unlink($f);
 @unlink($tmp . '/idx_plain.bin');

@@ -58,6 +58,21 @@ $byHash->execute([$HASH]);
 $rowByHash = $byHash->fetch();
 check('the same row is reachable by id and by hash', $rowById && $rowByHash && (int)$rowById['id'] === (int)$rowByHash['id']);
 
+// And the FILES have to follow the row, which is the half that was actually broken: a lookup that
+// finds the right row and then reads files for a different id is exactly what shipped. Both lists
+// are read the way the endpoint reads them, and both must be the same two paths.
+$filesOf = function ($id) use ($db): array {
+    $st = $db->prepare('SELECT path FROM whitelist_files WHERE whitelist_id = ? ORDER BY id');
+    $st->execute([(int)$id]);
+    return $st->fetchAll(PDO::FETCH_COLUMN);
+};
+$viaId   = $filesOf($rowById['id'] ?? 0);
+$viaHash = $filesOf($rowByHash['id'] ?? 0);
+check('… and the file list follows the row, whichever way it was found',
+    count($viaId) === 2 && $viaId === $viaHash, implode(',', $viaId) . ' | ' . implode(',', $viaHash));
+check('… while the id the request did NOT send finds nothing, which is what the bug bound',
+    $filesOf(0) === [], implode(',', $filesOf(0)));
+
 // The endpoint's own source, read for ONE property: the files query is keyed off the row that was
 // found, never off the request. Anchored to the query it is about, so it cannot go green by
 // accident once that query is deleted.

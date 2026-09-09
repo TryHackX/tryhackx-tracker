@@ -6,6 +6,82 @@ All notable changes to this project are documented here. The format is loosely b
 
 ## [1.40.0] — 2026-09-09
 
+### Fixed — "search inside file lists" without "best match first" returned a 500
+
+Reported from the live site: search `shrek`, untick **Best match first**, tick **also search file
+names** — and the request often failed. Measured on the live catalogue rather than guessed at:
+
+| shape | time |
+|---|---|
+| name only, best match first | 7.7 s |
+| name only, sorted by seeders | 2.3 s |
+| **+ file names, best match first** | **16.0 s** |
+| **+ file names, sorted by seeders** | **32.6 s** |
+
+php-fpm's `max_execution_time` on that machine is **30 s**. That is the whole story of the
+intermittency: with relevance the query came in under the limit, without it, it did not.
+
+The cause was a clause this file had already been burned by once. Resolving the file half into a
+bounded `IN` list fixed the twenty-four-minute correlated subquery, but what was left —
+`MATCH(name) AGAINST(…) OR info_hash IN (…)` — is still a disjunction across two different indexes,
+and MariaDB cannot serve one from either. With `ORDER BY eff_seeders` it then chose to walk
+`idx_index_eff_seed` in order and filter as it went: `EXPLAIN` said `type=index
+key=idx_index_eff_seed`, i.e. an ordered scan of three and a half million rows to return
+eighty-eight.
+
+So the OR is split into two branches and `UNION`ed. Each branch is served from exactly one index —
+the fulltext one, or the primary key — and the sort happens over what they returned. Same rows,
+same order, same totals; **32.6 s → 4.3 s** on the same live data. `UNION` and not `UNION ALL`,
+because a torrent whose name matches *and* whose files match is one result, which is what the OR
+said. The arm comes back already wrapped in a derived table, so its caller can go on appending one
+`ORDER BY` and one `LIMIT` whichever shape it turned out to be — and the "prefer the whitelist row"
+exclusion moved inside the arm builder, because appending it to finished SQL would have attached it
+to the last branch of a union only.
+
+`tests/index_test.php` now seeds a row that matches by name, one that matches by file, one that
+matches both and one that matches neither, and asserts across five sort orders that exactly three
+come back, once each, with the total agreeing — and, with both arms in play, that a hash sitting in
+both tables is still returned once and still as the whitelist row.
+
+The same `OR` shape remains in the panel's own index listing (`indexListRows`). It is not a
+regression and it is behind the admin login, but it is the same trap and it is written down.
+
+### Fixed — the description filter appeared where it could only empty the page
+
+`#search-content` was rendered whenever the operator allowed descriptions or source links, without
+asking whether this reader sees whitelist rows at all. `content_status` exists only on the whitelist
+table, so with no whitelist arm the control was not merely decorative: picking "Reviewed and
+published" makes `indexSearchCatalogue()` add `1 = 0` to the index arm and the results go blank. It
+now needs both — somewhere for a description to live, and whitelist rows in this reader's results.
+
+### Fixed — a second review pass over 1.40.0's own changes
+
+Eighteen more findings, all from the same adversarial method applied to the fixes themselves:
+
+* **The Info panel was rendered only for readers with `index.files`**, which made
+  `?action=search&hash=…` a silent no-op for everybody else — the element is missing, so the link
+  did nothing at all. It needs what `api/index_info.php` needs, which is `index.view`.
+* **A `?page=` past the end** rendered an empty table under a result count, with no message and an
+  address that never corrected itself. It now lands on the last page that exists.
+* **The public search page never listened for `langswap`**, so after an in-place language switch the
+  result count, the file chips, the pager and an open Info panel all stayed in the old language —
+  every one of them a node this page drew itself, which the swap skips by design. Same for the
+  settings breadcrumb's own button.
+* **Back and Forward move the address too**, and the revealed link box is cleared on those as well —
+  it was only cleared by the code that writes an address, which history navigation never goes
+  through.
+* **The switcher link is refreshed on more than `click`** — a middle click, "Open link in a new tab"
+  and Enter on a focused link all follow the `href` without ever firing one.
+* **`?sort=` now round-trips exactly.** "Best match first" off with no column sort wrote
+  `seeders:desc`, the request-level fallback, which read back as an explicit Seeders sort with an
+  arrow on the column. The address has its own word for that state now.
+* Toggling "Best match first" pushes a history entry like the column sorts it belongs with; a
+  successful swap no longer leaves a stale scroll position in `sessionStorage` for the next reload to
+  restore; the Share button's flash no longer writes back a label captured before a language switch.
+* The smoke test for the whitelist visibility gate **took the permission from the wrong group** — it
+  edited `guest` while the account under test holds `member` and `vip`, so it was passing on whatever
+  a previous run had left behind. It now strips and restores the groups the user actually holds.
+
 ### Added — the search view has an address, and a button that hands it to you
 
 The whole state of the search page lived in one JavaScript closure: the query, the sort stack, the
@@ -63,6 +139,12 @@ Two more holes in the same file came out of the review that followed:
   that table applies. A banned hash is deleted out of `index_hashes` on the next poll, so the banned
   row was, again, the whole answer — a full description of a torrent this tracker refuses to serve.
 
+On the live install it was **latent rather than exploited**: reaching it needs `index.view` without
+`whitelist.view`, and no group there has that pair — `guest` holds neither and `member` holds both,
+so anonymous callers were refused at the first gate and members were entitled to what they saw. One
+group edit, or turning `index_search_include_whitelist` off, would have opened it for everyone.
+(`search_allow_sl_refresh` is `0` there, so the refresh arm was unreachable too.)
+
 Proven where it has to be proven: `deploy/smoke_users.py` exercises all of it over HTTP with a real
 signed-in member, because `userCan()` returns true for any panel session, so the same request made as
 the owner would have passed whatever the code said. The test also puts the permission back and
@@ -89,7 +171,8 @@ verification. Beyond the three above:
   `[hidden] { display: none }` — so `box.hidden = true` was a statement that did nothing, and a
   pre-selected link to a page the reader had left stayed on screen, in the Info panel over a
   different torrent. The stylesheet already warns about exactly this six lines further down.
-* The revealed link box is now dropped whenever the address moves, the Share button is hidden on
+* The revealed link box is now dropped whenever the address moves — including Back and Forward,
+  which do not go through the code that writes one — the Share button is hidden on
   every path that leaves no results (not only the one that draws rows), and the button's label is
   read fresh on each flash instead of being cached — a cached "Share" written back a second and a
   half later put an English word on an otherwise Polish page.

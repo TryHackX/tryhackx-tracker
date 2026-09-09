@@ -2372,7 +2372,7 @@ const getJson = async (endpoint) => {
             updateSortIcons();
             runSortDebounced();
         }));
-        if (bestBox) bestBox.addEventListener('change', () => run(1));
+        if (bestBox) bestBox.addEventListener('change', () => run(1, 'push'));   // a sort change, like the column headers
         const perPageSel = $id('search-perpage');
         try { const saved = localStorage.getItem('thx_search_perpage'); if (saved && perPageSel && [...perPageSel.options].some(o => o.value === saved)) perPageSel.value = saved; } catch (e) {}
         if (perPageSel) perPageSel.addEventListener('change', () => { try { localStorage.setItem('thx_search_perpage', perPageSel.value); } catch (e) {} run(1); });
@@ -2405,7 +2405,11 @@ const getJson = async (endpoint) => {
             if (q) st.search = q;
             if (filesBox && filesBox.checked) st.search_files = '1';
             if (contentSel && contentSel.value !== contentDefault) st.content = contentSel.value;
-            const sort = serializeSort();
+            // serializeSort() answers the API, and for "no relevance, no column" its answer is the
+            // request-level fallback `seeders:desc`. Writing that into the address would read back as
+            // an explicit Seeders sort, arrow and all — a different UI state from the one that wrote
+            // it. `none` is the address's own word for that state and nothing else uses it.
+            const sort = (!sortStack.length && bestBox && !bestBox.checked) ? 'none' : serializeSort();
             if (sort !== DEFAULT_SORT) st.sort = sort;
             if (page > 1) {
                 st.page = String(page);
@@ -2447,6 +2451,7 @@ const getJson = async (endpoint) => {
          */
         function parseSort(raw) {
             if (!raw) return null;
+            if (raw === 'none') return { best: false, stack: [] };
             const parts = String(raw).split(',').filter(Boolean);
             if (!parts.length || parts.length > SORT_COLS.length + 1) return null;
             const out = { best: false, stack: [] };
@@ -2507,6 +2512,10 @@ const getJson = async (endpoint) => {
         // worth going back from: turning a page, changing the sort, opening and closing Info.
         window.addEventListener('popstate', () => {
             const st = readUrl();
+            // Back and Forward move the address without going through writeUrl(), so the box that
+            // writeUrl() would have cleared has to be cleared here as well. Its lifetime is tied to
+            // the address, not to who changed it.
+            dropAllShareBoxes();
             urlHeld++;
             try {
                 applyUrlState(st);
@@ -2683,6 +2692,10 @@ const getJson = async (endpoint) => {
                 }
                 body.appendChild(tr);
             });
+            // A ?page= past the end — a stale link, or a link written when the catalogue was bigger —
+            // used to render an empty table under a result count, with no message and an address that
+            // never corrected itself. Land on the last page that exists and say so in the address.
+            if (json.rows.length === 0 && json.total > 0 && json.page > json.pages) { run(json.pages, 'replace'); return; }
             table.hidden = json.rows.length === 0;
             if (shareBtn) shareBtn.hidden = json.rows.length === 0;
             $id('search-total').textContent = json.total === 0 ? '' : (json.total === 1 ? t('js.app.results_one') : t('js.app.results_many', {n: json.total.toLocaleString()}));
@@ -3347,20 +3360,26 @@ const getJson = async (endpoint) => {
         function dropAllShareBoxes() {
             document.querySelectorAll('.share-url').forEach(box => { box.hidden = true; box.value = ''; });
         }
-        // Read the label off the button EVERY time rather than caching it: the in-place language
-        // switch rewrites that text node, and a cached "Share" written back 1.5 s later would put an
-        // English word on an otherwise Polish page for the rest of the visit.
+        // The label is read off the button at click time — but a language swap can land inside the
+        // 1.5 s flash, and writing the captured English word back onto a page that is now Polish is
+        // the very bug this was supposed to avoid. So the restore is cancelled by `langswap`: the
+        // swap has already put the right text in that node, and there is nothing left to put back.
+        let flashTimer = 0;
         function flashShared(btn) {
             if (btn.dataset.flashing === '1') return;
             const orig = btn.textContent;
             btn.dataset.flashing = '1';
             btn.textContent = t('js.app.copied');
             btn.classList.add('copied');
-            setTimeout(() => {
-                btn.textContent = orig;
+            const done = () => {
+                clearTimeout(flashTimer);
+                document.removeEventListener('langswap', cancel);
                 btn.classList.remove('copied');
                 delete btn.dataset.flashing;
-            }, 1500);
+            };
+            const cancel = () => done();                       // the swap wrote the label already
+            document.addEventListener('langswap', cancel, { once: true });
+            flashTimer = setTimeout(() => { btn.textContent = orig; done(); }, 1500);
         }
         function share(btn, url, label) {
             const reveal = () => {
@@ -3491,6 +3510,18 @@ const getJson = async (endpoint) => {
         // not in the catalogue, or the reader may not see it, openInfo() says so in the panel — the
         // one thing it must not do is show an empty box and no reason.
         if (startState.hash) openInfo(startState.hash, null);
+
+        // EVERYTHING ON THIS PAGE THAT A SCRIPT DREW STAYS IN THE OLD LANGUAGE OTHERWISE.
+        //
+        // lang-swap.js skips live nodes with no counterpart in the fetched document, and the
+        // containers PHP renders for the results, the total, the pager and the Info panel are all
+        // EMPTY, so the alignment has nothing to pair them with. t() itself is already reloaded by
+        // then, so redrawing is all it takes. The panel does the same thing in admin-settings.js and
+        // admin-common.js; this is the public page's share of it.
+        document.addEventListener('langswap', () => {
+            run(curPage, 'none');
+            if (infoHash) openInfo(infoHash, null);
+        });
     }
 
     document.addEventListener('DOMContentLoaded', () => {
