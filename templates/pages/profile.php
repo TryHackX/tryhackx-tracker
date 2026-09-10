@@ -60,6 +60,11 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
     <?php if ($isSelf): ?>
     <span class="profile-you"><?= _h('profile.this_is_you') ?></span>
     <?php endif; ?>
+    <?php /* No switch of its own: a profile IS the page somebody hands to somebody else, and this
+             button only writes down the address the reader is already at. The fallback box below it
+             is what appears on plain HTTP, where the clipboard API does not exist. */ ?>
+    <button type="button" class="search-share profile-share" id="profile-share"
+            title="<?= _h('profile.share_title') ?>"><?= _h('search.share') ?></button>
 </div>
 
 <?php if (!$showFav && !$showUploads): ?>

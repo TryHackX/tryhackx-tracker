@@ -194,12 +194,33 @@ function favRowsFor(PDO $db, array $hashes): array {
 function userGroupIdsWithPermission(PDO $db, string $perm): array {
     $ids = [];
     try {
-        foreach ($db->query("SELECT id, permissions FROM user_groups")->fetchAll(PDO::FETCH_ASSOC) as $g) {
+        foreach ($db->query("SELECT id, slug, permissions FROM user_groups")->fetchAll(PDO::FETCH_ASSOC) as $g) {
+            // The system `admin` group answers yes to everything, whatever its JSON happens to list.
+            // userEffectivePermissions() has said so since accounts existed — "membership in the
+            // system admin group grants every registered permission" — and its stored permissions are
+            // a much shorter list, written when the group was seeded and never extended since. A
+            // helper that read only the JSON therefore disagreed with the function it exists to
+            // mirror, in SQL, where nothing could notice: an administrator who had ticked both
+            // privacy boxes was missing from "who has this in favourites" AND from its count, on
+            // their own tracker, with no way to tell that from the feature being broken.
+            if ((string)($g['slug'] ?? '') === 'admin') { $ids[] = (int)$g['id']; continue; }
             $p = json_decode((string)$g['permissions'], true);
             if (is_array($p) && !empty($p[$perm])) $ids[] = (int)$g['id'];
         }
     } catch (\Throwable $e) { return []; }
     return $ids;
+}
+
+/**
+ * The `admin` group ids — the ones whose members pass every check in PHP.
+ *
+ * Needed wherever a decision is made in SQL and has to agree with userEffectivePermissions(),
+ * including its last clause: an administrator is exempt from the e-mail verification gate too.
+ */
+function userAdminGroupIds(PDO $db): array {
+    try {
+        return array_map('intval', $db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchAll(PDO::FETCH_COLUMN));
+    } catch (\Throwable $e) { return []; }
 }
 
 /**

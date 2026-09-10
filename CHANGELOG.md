@@ -4,6 +4,43 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.42.3] — 2026-09-10
+
+### Fixed — an administrator was invisible to "who has this in favourites"
+
+The overlay decides `favourites.public` **in SQL**, deliberately: filtering in PHP after the LIMIT
+would make the total a lie, and paginating a lie is a leak. That decision reads the permission JSON
+on each group row — and the system `admin` group's JSON does not list most permissions.
+`userEffectivePermissions()` grants them in code instead: *"membership in the system admin group
+grants every registered permission"*, a sentence that has been in `includes/users.php` since accounts
+existed.
+
+So the two halves of one rule disagreed, in the direction nobody checks. An administrator who had
+ticked both privacy boxes and starred a torrent was absent from the list **and** from its count — on
+their own tracker, looking exactly like a feature that does not work. `userGroupIdsWithPermission()`
+now answers for the admin group whatever its JSON says, and the e-mail-verification clause beside it
+carries the same exception the PHP does ("verification gate included").
+
+`tests/favourites_test.php` pins it from both ends: the admin group's stored JSON really does not
+list `favourites.public` (so the special case is load-bearing rather than decorative), the helper
+answers yes for **every** registered permission, and a group that holds nothing is still left out.
+The browser check drives the whole thing through a real overlay with an account whose only group is
+`admin`.
+
+### Added — a Share button on a public profile
+
+A profile is the page people hand to each other and it was the one such page without the button. It
+copies `?action=u&name=…` built from the name rather than from the address bar, for the same reason
+the Info panel's Share does: an address carries a tab, an anchor and whatever else the reader arrived
+with, and none of that is part of "here is somebody's profile". The clipboard fallback for plain HTTP
+comes with it — those helpers moved out of `initSearch()`, which returns on its first line anywhere
+but the search page.
+
+### Fixed — the fifth password rule stood on an axis of its own
+
+Five rules in a two-column grid: the last one spanned both columns and centred itself, which reads as
+a different *kind* of rule rather than as the fifth of five. It is the first item of a third row now.
+
 ## [1.42.2] — 2026-09-10
 
 ### Fixed — the star had been on a line of its own since the day it was added

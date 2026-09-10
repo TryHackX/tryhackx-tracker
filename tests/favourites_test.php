@@ -144,6 +144,41 @@ check('uploads need an open submission path', uploadsPossible(['tracker_mode' =>
 check('… which the schedule also opens', uploadsPossible(['tracker_mode' => 'blacklist', 'tracker_schedule_enabled' => '1']));
 check('… and blacklist with no schedule closes', !uploadsPossible(['tracker_mode' => 'blacklist']));
 
+/* ── 7b. the SQL half of a permission has to agree with the PHP half ──────── */
+//
+// "Who has this in favourites" decides the permission in SQL, because filtering in PHP after the
+// LIMIT would make the total a lie. That decision reads the group rows' JSON — and the system
+// `admin` group's JSON has never listed most permissions: userEffectivePermissions() hands its
+// members everything instead, in code, and has said so in a comment since accounts existed.
+//
+// So the two disagreed, silently, in the direction nobody checks: an administrator who had ticked
+// both privacy boxes and starred a torrent was absent from "who has this" AND from its count — on
+// their own tracker, looking exactly like a broken feature.
+$adminGrp = userGroupBySlug($db, 'admin');
+check('the admin group exists', is_array($adminGrp));
+$adminPerms = json_decode((string)($adminGrp['permissions'] ?? '[]'), true);
+check('… and its stored JSON really does NOT list favourites.public — the special case is load-bearing',
+    is_array($adminPerms) && empty($adminPerms['favourites.public']),
+    implode(',', array_keys(is_array($adminPerms) ? $adminPerms : [])));
+$pubIds = userGroupIdsWithPermission($db, 'favourites.public');
+check('the group list for favourites.public includes the admin group anyway',
+    in_array((int)$adminGrp['id'], array_map('intval', $pubIds), true), implode(',', $pubIds));
+check('userAdminGroupIds() names it too', in_array((int)$adminGrp['id'], userAdminGroupIds($db), true));
+// The general invariant, not just this one permission: an administrator passes every check in PHP,
+// so the SQL-side helper must answer yes for every permission the site knows about.
+$missing = [];
+foreach (array_keys(userPermissionList()) as $perm) {
+    if (!in_array((int)$adminGrp['id'], array_map('intval', userGroupIdsWithPermission($db, $perm)), true)) $missing[] = $perm;
+}
+check('… and for every registered permission, not only that one', $missing === [], implode(',', array_slice($missing, 0, 5)));
+// A group that holds nothing must still be excluded, or the helper has stopped deciding anything.
+$guestGrp = userGroupBySlug($db, 'guest');
+$guestPerms = json_decode((string)($guestGrp['permissions'] ?? '[]'), true);
+if (is_array($guestPerms) && empty($guestPerms['favourites.public'])) {
+    check('a group without the permission is still left out',
+        !in_array((int)$guestGrp['id'], array_map('intval', $pubIds), true));
+}
+
 /* ── 8. the display status, in the order it must resolve ──────────────────── */
 check('banned wins over everything', whitelistDisplayStatus(['banned' => 1, 'probe_status' => 'probing'], $cfg) === 'blocked');
 check('a failed probe is refused', whitelistDisplayStatus(['banned' => 0, 'probe_status' => 'failed'], $cfg) === 'refused');

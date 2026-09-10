@@ -1928,15 +1928,15 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
     margin: 0.4rem 0 0.1rem;
     font-size: 0.78rem;
     line-height: 1.6;
-    /* two-column grid; the odd fifth item spans both columns, centred */
+    /* A two-column grid, and the odd fifth item is simply the first item of a third row. It used to
+       span both columns and centre itself, which put one lonely rule on its own axis under four that
+       shared one — the eye reads that as a different KIND of rule rather than as the fifth of five. */
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 0.3rem 0.8rem;
 }
-.pw-checklist .pw-req:last-child { grid-column: 1 / -1; justify-self: center; }
 @media (max-width: 480px) {
     .pw-checklist { grid-template-columns: 1fr; }
-    .pw-checklist .pw-req:last-child { grid-column: auto; justify-self: start; }
 }
 .pw-req { color: var(--text-muted); }
 .pw-req.ok { color: var(--success); }
@@ -2145,6 +2145,11 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .profile-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem; margin-bottom: 1rem; }
 .profile-name { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
 .profile-since, .profile-you { color: var(--text-muted); font-size: 0.82rem; }
+/* Right of the name and whatever sits beside it, the way the Info panel's own Share does. The
+   fallback box that appears on plain HTTP is a flex item here, so it is given the whole next line
+   rather than being squeezed in beside the name. */
+.profile-share { margin-left: auto; align-self: center; }
+.profile-head .share-url { flex: 1 0 100%; margin-top: 0; }
 .profile-section { margin-bottom: 2rem; }
 .profile-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
 /* This box used to carry a width and nothing else, and a bare <input> on this site is a WHITE box:

@@ -2321,6 +2321,72 @@ const getJson = async (endpoint) => {
     }
 
     // ── index search ──
+    // navigator.clipboard DOES NOT EXIST on plain HTTP — it is a secure-context API, and this
+    // panel has to work on an installation that has not got a certificate yet. A button that
+    // does nothing and says nothing is worse than no button, so the fallback is a read-only box
+    // with the link already selected: one Ctrl+C away, and visible proof of what would have been
+    // copied. The panel's copyToClipboard() lives in admin-common.js, which no public page
+    // loads, so this is its own small thing rather than a shared one.
+    // The fallback box is per BUTTON and is rebuilt from the label the caller passes, because the
+    // two buttons hand over different things: one a view, one a torrent. Announcing the panel's
+    // link as "Link to this view" would leave a screen-reader user with no way to tell them apart
+    // — and the whole point of the panel button is that it deliberately does NOT carry the view.
+    function shareFallbackFor(btn, label) {
+        let box = btn.nextElementSibling;
+        if (!box || !box.classList.contains('share-url')) {
+            box = document.createElement('input');
+            box.type = 'text';
+            box.className = 'share-url';
+            box.readOnly = true;
+            btn.after(box);
+        }
+        box.setAttribute('aria-label', label);
+        return box;
+    }
+    /** Take the visible link away — it describes a view the reader has since left. */
+    function dropShareBox(btn) {
+        const box = btn && btn.nextElementSibling;
+        if (box && box.classList.contains('share-url')) { box.hidden = true; box.value = ''; }
+    }
+    function dropAllShareBoxes() {
+        document.querySelectorAll('.share-url').forEach(box => { box.hidden = true; box.value = ''; });
+    }
+    // The label is read off the button at click time — but a language swap can land inside the
+    // 1.5 s flash, and writing the captured English word back onto a page that is now Polish is
+    // the very bug this was supposed to avoid. So the restore is cancelled by `langswap`: the
+    // swap has already put the right text in that node, and there is nothing left to put back.
+    let flashTimer = 0;
+    function flashShared(btn) {
+        if (btn.dataset.flashing === '1') return;
+        const orig = btn.textContent;
+        btn.dataset.flashing = '1';
+        btn.textContent = t('js.app.copied');
+        btn.classList.add('copied');
+        const done = () => {
+            clearTimeout(flashTimer);
+            document.removeEventListener('langswap', cancel);
+            btn.classList.remove('copied');
+            delete btn.dataset.flashing;
+        };
+        const cancel = () => done();                       // the swap wrote the label already
+        document.addEventListener('langswap', cancel, { once: true });
+        flashTimer = setTimeout(() => { btn.textContent = orig; done(); }, 1500);
+    }
+    function share(btn, url, label) {
+        const reveal = () => {
+            const box = shareFallbackFor(btn, label);
+            box.value = url;
+            box.hidden = false;
+            box.focus();
+            box.select();
+        };
+        if (!navigator.clipboard || !window.isSecureContext) { reveal(); return; }
+        navigator.clipboard.writeText(url).then(() => {
+            dropShareBox(btn);
+            flashShared(btn);
+        }).catch(reveal);
+    }
+
     function initSearch() {
         const form = $id('search-form');
         if (!form) return;
@@ -3374,71 +3440,9 @@ const getJson = async (endpoint) => {
         // panel's head shares that one torrent, which is `?action=search&hash=…` and opens the same
         // panel for whoever follows it.
         //
-        // navigator.clipboard DOES NOT EXIST on plain HTTP — it is a secure-context API, and this
-        // panel has to work on an installation that has not got a certificate yet. A button that
-        // does nothing and says nothing is worse than no button, so the fallback is a read-only box
-        // with the link already selected: one Ctrl+C away, and visible proof of what would have been
-        // copied. The panel's copyToClipboard() lives in admin-common.js, which no public page
-        // loads, so this is its own small thing rather than a shared one.
-        // The fallback box is per BUTTON and is rebuilt from the label the caller passes, because the
-        // two buttons hand over different things: one a view, one a torrent. Announcing the panel's
-        // link as "Link to this view" would leave a screen-reader user with no way to tell them apart
-        // — and the whole point of the panel button is that it deliberately does NOT carry the view.
-        function shareFallbackFor(btn, label) {
-            let box = btn.nextElementSibling;
-            if (!box || !box.classList.contains('share-url')) {
-                box = document.createElement('input');
-                box.type = 'text';
-                box.className = 'share-url';
-                box.readOnly = true;
-                btn.after(box);
-            }
-            box.setAttribute('aria-label', label);
-            return box;
-        }
-        /** Take the visible link away — it describes a view the reader has since left. */
-        function dropShareBox(btn) {
-            const box = btn && btn.nextElementSibling;
-            if (box && box.classList.contains('share-url')) { box.hidden = true; box.value = ''; }
-        }
-        function dropAllShareBoxes() {
-            document.querySelectorAll('.share-url').forEach(box => { box.hidden = true; box.value = ''; });
-        }
-        // The label is read off the button at click time — but a language swap can land inside the
-        // 1.5 s flash, and writing the captured English word back onto a page that is now Polish is
-        // the very bug this was supposed to avoid. So the restore is cancelled by `langswap`: the
-        // swap has already put the right text in that node, and there is nothing left to put back.
-        let flashTimer = 0;
-        function flashShared(btn) {
-            if (btn.dataset.flashing === '1') return;
-            const orig = btn.textContent;
-            btn.dataset.flashing = '1';
-            btn.textContent = t('js.app.copied');
-            btn.classList.add('copied');
-            const done = () => {
-                clearTimeout(flashTimer);
-                document.removeEventListener('langswap', cancel);
-                btn.classList.remove('copied');
-                delete btn.dataset.flashing;
-            };
-            const cancel = () => done();                       // the swap wrote the label already
-            document.addEventListener('langswap', cancel, { once: true });
-            flashTimer = setTimeout(() => { btn.textContent = orig; done(); }, 1500);
-        }
-        function share(btn, url, label) {
-            const reveal = () => {
-                const box = shareFallbackFor(btn, label);
-                box.value = url;
-                box.hidden = false;
-                box.focus();
-                box.select();
-            };
-            if (!navigator.clipboard || !window.isSecureContext) { reveal(); return; }
-            navigator.clipboard.writeText(url).then(() => {
-                dropShareBox(btn);
-                flashShared(btn);
-            }).catch(reveal);
-        }
+        // Share: the address bar already holds the whole view, so the button hands over what the
+        // reader is looking at. The helpers themselves live at the top of this file — the profile
+        // page has a Share button too, and initSearch() returns before its first line.
         const shareViewBtn = $id('search-share');
         if (shareViewBtn) shareViewBtn.addEventListener('click', () => share(shareViewBtn, location.href, t('js.app.share_link')));
         const shareOneBtn = $id('info-share');
@@ -3568,12 +3572,35 @@ const getJson = async (endpoint) => {
         });
     }
 
+    /**
+     * The Share button on a public profile.
+     *
+     * Built from the NAME rather than from location.href, for the reason the Info panel's button
+     * gives: an address can carry a tab, an anchor and whatever else the reader arrived with, and
+     * none of that is part of "here is somebody's profile".
+     */
+    function initProfileShare() {
+        const btn = $id('profile-share');
+        const body = $id('profile-body');
+        if (!btn || !body) return;
+        btn.addEventListener('click', () => {
+            let u;
+            try { u = new URL(location.href); } catch (e) { return; }
+            u.search = '';
+            u.hash = '';
+            u.searchParams.set('action', 'u');
+            u.searchParams.set('name', body.dataset.user || '');
+            share(btn, u.href, t('js.app.share_link_profile'));
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         initLogin();
         initRegister();
         initAccount();
         initReset();
         initSearch();
+        initProfileShare();
     });
 })();
 
