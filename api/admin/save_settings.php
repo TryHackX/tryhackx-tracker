@@ -418,8 +418,15 @@ if (isset($data['backup_db_name']) && $data['backup_db_name'] !== ''
     jsonResponse(['error' => __('api.settings.backup_db_name_invalid')], 400);
 }
 if (isset($data['users_default_group'])) {
-    $data['users_default_group'] = strtolower($data['users_default_group']);
+    $data['users_default_group'] = strtolower(trim((string)$data['users_default_group']));
     if (!preg_match('/^[a-z0-9_-]{2,64}$/', $data['users_default_group'])) $data['users_default_group'] = 'member';
+    // A group that does not exist is not a default, it is a typo with a settings row. The page now
+    // offers a select of the groups that exist, so anything else arrived from a stale form or from
+    // somebody's script — and the honest answer to both is to refuse rather than to save a setting
+    // that will quietly grant nothing to every account made afterwards.
+    $sgChk = $db->prepare("SELECT 1 FROM user_groups WHERE slug = ? LIMIT 1");
+    $sgChk->execute([$data['users_default_group']]);
+    if (!$sgChk->fetchColumn()) jsonResponse(['error' => __('api.settings.default_group_missing')], 400);
 }
 if (isset($data['whitelist_submit_mode']) && !in_array($data['whitelist_submit_mode'], ['public', 'users'], true)) {
     jsonResponse(['error' => __('api.settings.whitelist_submit_mode_invalid')], 400);

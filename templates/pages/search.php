@@ -123,42 +123,10 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
          permission, which made ?action=search&hash=… a silent no-op for everybody else: the element
          is missing, so openInfo() returns on its first line and the link does nothing at all. The
          file list inside the panel is a separate request with its own server-side gate, and the
-         "N files" chip is only drawn where the row carries a hash. */ ?>
-<!-- Info panel: what this torrent is, where it came from, and how the swarm looks. The file list
-     lives at the bottom of it; the "N files" chip beside a result still opens the tree on its own. -->
-<div class="files-overlay" id="info-overlay" hidden>
-    <div class="files-box info-box" role="dialog" aria-modal="true" aria-labelledby="info-title">
-        <div class="files-head">
-            <h3 id="info-title"><?= _h('search.details') ?></h3>
-            <span class="info-acts" id="info-acts"></span>
-<?php if ($canShare): ?>
-            <button type="button" class="search-share info-share" id="info-share"
-                    title="<?= _h('search.share_one_title') ?>"><?= _h('search.share') ?></button>
-<?php endif; ?>
-            <button type="button" class="files-close" id="info-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
-        </div>
-        <div class="files-body" id="info-body"></div>
-    </div>
-</div>
-
-<?php if ($favCtx['who_ok'] && $favCtx['may_view']): ?>
-<?php /* The fourth instance of this shell (search results, the file list, the Info panel, this).
-         Its pager and its search box are its own; the list inside is usernames, and every one of
-         them is somebody who said yes to being here — see api/hash_favourites.php. */ ?>
-<div class="files-overlay" id="who-overlay" hidden>
-    <div class="files-box" role="dialog" aria-modal="true" aria-labelledby="who-title">
-        <div class="files-head">
-            <h3 id="who-title"><?= _h('js.fav.who') ?> <span class="text-muted" id="who-total"></span></h3>
-            <button type="button" class="files-close" id="who-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
-        </div>
-        <div class="files-body">
-            <input type="text" class="profile-search" id="who-search" maxlength="60" placeholder="<?= _h('profile.search_ph') ?>" autocomplete="off">
-            <div id="who-body"></div>
-            <div class="trans-pagination" id="who-pager"></div>
-        </div>
-    </div>
-</div>
-<?php endif; ?>
+         "N files" chip is only drawn where the row carries a hash.
+         The markup itself lives in a partial now — the account page and public profiles open the
+         same panel from their own lists. */ ?>
+<?php include __DIR__ . '/../partials/info_overlay.php'; ?>
 
 <?php if ($canFiles): ?>
 <div class="files-overlay" id="files-overlay" hidden>

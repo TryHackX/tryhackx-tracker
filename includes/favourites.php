@@ -194,16 +194,7 @@ function favRowsFor(PDO $db, array $hashes): array {
 function userGroupIdsWithPermission(PDO $db, string $perm): array {
     $ids = [];
     try {
-        foreach ($db->query("SELECT id, slug, permissions FROM user_groups")->fetchAll(PDO::FETCH_ASSOC) as $g) {
-            // The system `admin` group answers yes to everything, whatever its JSON happens to list.
-            // userEffectivePermissions() has said so since accounts existed — "membership in the
-            // system admin group grants every registered permission" — and its stored permissions are
-            // a much shorter list, written when the group was seeded and never extended since. A
-            // helper that read only the JSON therefore disagreed with the function it exists to
-            // mirror, in SQL, where nothing could notice: an administrator who had ticked both
-            // privacy boxes was missing from "who has this in favourites" AND from its count, on
-            // their own tracker, with no way to tell that from the feature being broken.
-            if ((string)($g['slug'] ?? '') === 'admin') { $ids[] = (int)$g['id']; continue; }
+        foreach ($db->query("SELECT id, permissions FROM user_groups")->fetchAll(PDO::FETCH_ASSOC) as $g) {
             $p = json_decode((string)$g['permissions'], true);
             if (is_array($p) && !empty($p[$perm])) $ids[] = (int)$g['id'];
         }
@@ -212,15 +203,34 @@ function userGroupIdsWithPermission(PDO $db, string $perm): array {
 }
 
 /**
- * The `admin` group ids — the ones whose members pass every check in PHP.
+ * The grant itself, for a NAMED user — no blanket, no special cases.
  *
- * Needed wherever a decision is made in SQL and has to agree with userEffectivePermissions(),
- * including its last clause: an administrator is exempt from the e-mail verification gate too.
+ * ── why this exists next to userIdHasPermission() ─────────────────────────────────────────────
+ *
+ * userEffectivePermissions() hands every registered permission to a member of the system `admin`
+ * group. That is a rule about POWER: an administrator has to be able to work every part of the site,
+ * including parts added after their group row was written.
+ *
+ * `favourites.public` and `uploads.public` are not power. They do not say what somebody may do; they
+ * say what other people may see of them. Reading the administrator's blanket as consent would put
+ * their favourites on strangers' screens because of a rule about what they are allowed to fix — and
+ * it would do it without the operator ever ticking the box that appears to control it.
+ *
+ * So a visibility decision asks TWO questions and needs both: does this account pass the ordinary
+ * check (the account system is on, the groups are active, the e-mail gate is satisfied), and does
+ * one of its groups actually GRANT the permission. An administrator who wants to appear on a public
+ * list grants it to their group, exactly like anybody else — and then every view agrees, because
+ * this function and userGroupIdsWithPermission() above are reading the same stored JSON.
  */
-function userAdminGroupIds(PDO $db): array {
-    try {
-        return array_map('intval', $db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchAll(PDO::FETCH_COLUMN));
-    } catch (\Throwable $e) { return []; }
+function userIdHasGrantedPermission(PDO $db, array $cfg, int $userId, string $perm): bool {
+    if (!usersEnabled($cfg)) return userLegacyDefault($perm);
+    if ($userId <= 0) return false;
+    if (!userIdHasPermission($db, $cfg, $userId, $perm)) return false;
+    foreach (userGroups($db, $userId) as $g) {
+        $p = userGroupPermissions($g['permissions'] ?? '');
+        if (!empty($p[$perm])) return true;
+    }
+    return false;
 }
 
 /**

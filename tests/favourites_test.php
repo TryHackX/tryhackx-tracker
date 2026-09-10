@@ -144,40 +144,66 @@ check('uploads need an open submission path', uploadsPossible(['tracker_mode' =>
 check('… which the schedule also opens', uploadsPossible(['tracker_mode' => 'blacklist', 'tracker_schedule_enabled' => '1']));
 check('… and blacklist with no schedule closes', !uploadsPossible(['tracker_mode' => 'blacklist']));
 
-/* ── 7b. the SQL half of a permission has to agree with the PHP half ──────── */
+/* ── 7b. a public list is CONSENT, so the grant is what counts ─────────────── */
 //
-// "Who has this in favourites" decides the permission in SQL, because filtering in PHP after the
-// LIMIT would make the total a lie. That decision reads the group rows' JSON — and the system
-// `admin` group's JSON has never listed most permissions: userEffectivePermissions() hands its
-// members everything instead, in code, and has said so in a comment since accounts existed.
+// userEffectivePermissions() hands every registered permission to the system `admin` group. That is
+// a rule about power: an administrator has to be able to work the site. It is NOT a statement that
+// their favourites may be shown to strangers, and reading it as one would publish an administrator's
+// list because of a rule about what they are allowed to fix.
 //
-// So the two disagreed, silently, in the direction nobody checks: an administrator who had ticked
-// both privacy boxes and starred a torrent was absent from "who has this" AND from its count — on
-// their own tracker, looking exactly like a broken feature.
+// So both halves of the decision — the SQL one behind "who has this in favourites" and the PHP one
+// behind a public profile — read the GRANT on the group row, and an administrator who wants to
+// appear grants it to their group like anybody else. These checks pin exactly that, because the two
+// halves disagreeing is invisible from either side on its own.
 $adminGrp = userGroupBySlug($db, 'admin');
 check('the admin group exists', is_array($adminGrp));
-$adminPerms = json_decode((string)($adminGrp['permissions'] ?? '[]'), true);
-check('… and its stored JSON really does NOT list favourites.public — the special case is load-bearing',
-    is_array($adminPerms) && empty($adminPerms['favourites.public']),
-    implode(',', array_keys(is_array($adminPerms) ? $adminPerms : [])));
-$pubIds = userGroupIdsWithPermission($db, 'favourites.public');
-check('the group list for favourites.public includes the admin group anyway',
-    in_array((int)$adminGrp['id'], array_map('intval', $pubIds), true), implode(',', $pubIds));
-check('userAdminGroupIds() names it too', in_array((int)$adminGrp['id'], userAdminGroupIds($db), true));
-// The general invariant, not just this one permission: an administrator passes every check in PHP,
-// so the SQL-side helper must answer yes for every permission the site knows about.
-$missing = [];
-foreach (array_keys(userPermissionList()) as $perm) {
-    if (!in_array((int)$adminGrp['id'], array_map('intval', userGroupIdsWithPermission($db, $perm)), true)) $missing[] = $perm;
-}
-check('… and for every registered permission, not only that one', $missing === [], implode(',', array_slice($missing, 0, 5)));
+$adminId = (int)($adminGrp['id'] ?? 0);
+$savedPerms = (string)($adminGrp['permissions'] ?? '{}');
+$setPerms = function (array $perms) use ($db, $adminId) {
+    $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")->execute([json_encode($perms), $adminId]);
+};
+
+$setPerms(['panel.access' => true]);   // an admin group WITHOUT the visibility grant
+check('without the grant the admin group is not in the SQL list',
+    !in_array($adminId, array_map('intval', userGroupIdsWithPermission($db, 'favourites.public')), true));
+
+// A real account whose only group is that one. userCan() would say yes to everything for them.
+$db->prepare("DELETE FROM users WHERE username = 'favperm'")->execute();
+$mk = userCreate($db, $cfg, 'favperm', 'favperm@example.org', 'FavPerm123!', '127.0.0.1');
+$favUid = (int)($mk['user']['id'] ?? $mk['id'] ?? 0);
+check('a test account was made for this', $favUid > 0, json_encode($mk));
+$db->prepare("DELETE FROM user_group_members WHERE user_id = ?")->execute([$favUid]);
+// granted_at spelled out: the column defaults to the SERVER clock and this connection may be on
+// another one, which would hold the membership in the future and give the account no groups at all.
+$db->prepare("INSERT INTO user_group_members (user_id, group_id, granted_at) VALUES (?, ?, '2000-01-01 00:00:00')")
+   ->execute([$favUid, $adminId]);
+$db->prepare("UPDATE users SET status = 'active', email_verified = 1, fav_public = 1, fav_listed = 1 WHERE id = ?")
+   ->execute([$favUid]);
+
+// With the account system switched off both helpers answer from userLegacyDefault() and this
+// section is about groups, so it asks with the switch on. The battery runs the user smoke first,
+// and that suite deliberately leaves `users_enabled` at 0 on its way out.
+$cfgU = array_merge($cfg, ['users_enabled' => '1']);
+check('the ordinary check says yes to an administrator, as it always has',
+    userIdHasPermission($db, $cfgU, $favUid, 'favourites.public'));
+check('… and the visibility check says no, because nobody granted it',
+    !userIdHasGrantedPermission($db, $cfgU, $favUid, 'favourites.public'));
+
+$setPerms(['panel.access' => true, 'favourites.public' => true]);
+check('granting it to the group is what changes the answer',
+    userIdHasGrantedPermission($db, $cfgU, $favUid, 'favourites.public'));
+check('… and the SQL list agrees, from the same stored JSON',
+    in_array($adminId, array_map('intval', userGroupIdsWithPermission($db, 'favourites.public')), true));
+
 // A group that holds nothing must still be excluded, or the helper has stopped deciding anything.
 $guestGrp = userGroupBySlug($db, 'guest');
 $guestPerms = json_decode((string)($guestGrp['permissions'] ?? '[]'), true);
 if (is_array($guestPerms) && empty($guestPerms['favourites.public'])) {
     check('a group without the permission is still left out',
-        !in_array((int)$guestGrp['id'], array_map('intval', $pubIds), true));
+        !in_array((int)$guestGrp['id'], array_map('intval', userGroupIdsWithPermission($db, 'favourites.public')), true));
 }
+$db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")->execute([$savedPerms, $adminId]);
+$db->prepare("DELETE FROM users WHERE id = ?")->execute([$favUid]);
 
 /* ── 8. the display status, in the order it must resolve ──────────────────── */
 check('banned wins over everything', whitelistDisplayStatus(['banned' => 1, 'probe_status' => 'probing'], $cfg) === 'blocked');

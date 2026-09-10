@@ -55,15 +55,9 @@ $where = ["f.info_hash = ?", "u.status = 'active'", "u.fav_public = 1", "u.fav_l
                      AND (m.expires_at IS NULL OR m.expires_at > NOW()))"];
 $params = [$hash];
 // An unverified account runs at guest level (v9), so its membership cannot count towards a list its
-// group would otherwise allow. Administrators are the documented exception in
-// userEffectivePermissions() — "verification gate included" — and this line is the SQL half of the
-// same sentence, so it has to carry the same exception.
-if (userEmailVerifyRequired($cfg)) {
-    $adminIds = userAdminGroupIds($db);
-    $adminIn = $adminIds ? implode(',', array_map('intval', $adminIds)) : '0';
-    $where[] = "(u.email_verified = 1 OR EXISTS (SELECT 1 FROM user_group_members ma WHERE ma.user_id = u.id
-                    AND ma.group_id IN ($adminIn) AND (ma.expires_at IS NULL OR ma.expires_at > NOW())))";
-}
+// group would otherwise allow. No exception for administrators: appearing on this list is consent,
+// not authority — see userIdHasGrantedPermission() in includes/favourites.php.
+if (userEmailVerifyRequired($cfg)) $where[] = "u.email_verified = 1";
 if ($search !== '') {
     // A LIKE with a leading wildcard, ACCEPTABLE HERE AND ONLY HERE: the driving set is the people
     // who favourited ONE hash, reached through idx_fav_hash — never a table scan. Do not copy this

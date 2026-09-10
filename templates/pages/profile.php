@@ -43,11 +43,15 @@ $isSelf = (int)$profile['id'] === (int)$viewer['id'];
 // What this profile may SHOW is decided here, once, and handed to the page as data attributes.
 // Each half asks the same three things: does the site allow it, does their group allow it, did they
 // say yes. A stale checkbox must not outlive the group that permitted it.
+// userIdHasGrantedPermission(), not userIdHasPermission(): what a stranger may see of somebody is
+// decided by the grant their group actually carries, and never by the blanket that lets an
+// administrator work the site. The "who has this" overlay reads the same stored JSON in SQL, so the
+// two views of one setting cannot disagree.
 $showFav = favPublicEnabled($cfg)
     && ($isSelf || ((int)($profile['fav_public'] ?? 0) === 1
-                    && userIdHasPermission($db, $cfg, (int)$profile['id'], 'favourites.public')));
+                    && userIdHasGrantedPermission($db, $cfg, (int)$profile['id'], 'favourites.public')));
 $showUploads = uploadsPossible($cfg) && uploadsPublicEnabled($cfg)
-    && ($isSelf || userIdHasPermission($db, $cfg, (int)$profile['id'], 'uploads.public'));
+    && ($isSelf || userIdHasGrantedPermission($db, $cfg, (int)$profile['id'], 'uploads.public'));
 $canMagnet = userCan($db, $cfg, 'index.magnet');
 ?>
 <h1><?= _h('profile.h1') ?></h1>
@@ -60,11 +64,15 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
     <?php if ($isSelf): ?>
     <span class="profile-you"><?= _h('profile.this_is_you') ?></span>
     <?php endif; ?>
-    <?php /* No switch of its own: a profile IS the page somebody hands to somebody else, and this
-             button only writes down the address the reader is already at. The fallback box below it
-             is what appears on plain HTTP, where the clipboard API does not exist. */ ?>
-    <button type="button" class="search-share profile-share" id="profile-share"
+    <?php /* Behind the same switch as every other Share on the site: nothing here is secret — the
+             address is built from the name — so the setting is about whether the operator wants the
+             site handing out links at all, and a profile is not an exception to that. The fallback
+             box below it is what appears on plain HTTP, where the clipboard API does not exist. */ ?>
+    <?php if (($cfg['search_share_enabled'] ?? '1') === '1'): ?>
+    <button type="button" class="search-share profile-share js-profile-share" id="profile-share"
+            data-user="<?= sanitize($profile['username']) ?>"
             title="<?= _h('profile.share_title') ?>"><?= _h('search.share') ?></button>
+    <?php endif; ?>
 </div>
 
 <?php if (!$showFav && !$showUploads): ?>
@@ -122,3 +130,7 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
     </section>
     <?php endif; ?>
 </div>
+
+<?php /* The Info panel, so a row on these lists can answer "what IS this?" without sending the
+         reader back to the search page. Same markup, same script, same overlay — see the partial. */ ?>
+<?php include __DIR__ . '/../partials/info_overlay.php'; ?>

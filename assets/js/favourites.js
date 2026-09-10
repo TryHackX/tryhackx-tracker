@@ -176,6 +176,15 @@
         if (r.info_hash && !r.banned && opts.trackers) {
             acts.appendChild(el('a', { className: 'btn btn-small', href: magnetFor(r.info_hash, r.name, opts.trackers), text: 'Magnet' }));
         }
+        // The same Info the search results have, opening the same panel — the markup for it is a
+        // partial these pages include now. A row that names a torrent and cannot say what it IS
+        // sends the reader back to the search page to type the name in again.
+        if (r.info_hash && window.TorrentInfo && document.getElementById('info-overlay')) {
+            var inf = el('button', { type: 'button', className: 'btn btn-secondary btn-small pf-info',
+                                     title: t('js.app.info_title'), text: t('js.app.info') });
+            inf.addEventListener('click', function () { window.TorrentInfo.open(r.info_hash, r.name || null); });
+            acts.appendChild(inf);
+        }
         if (opts.star && r.info_hash) acts.appendChild(makeStar(r.info_hash, true));
         if (opts.visibility && r.info_hash) {
             var v = el('button', { type: 'button', className: 'pf-vis' + (r.public ? ' pf-vis-on' : ''),

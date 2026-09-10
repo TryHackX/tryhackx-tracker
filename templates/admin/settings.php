@@ -917,7 +917,27 @@
                     </div>
                     <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.users_default_group') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="users_default_group" value="<?= sanitize($cfg['users_default_group'] ?? 'member') ?>" pattern="[a-z0-9_\-]{2,64}">
+                        <?php
+                        /* THE GROUPS THAT EXIST, not a slug to type from memory. A free-text field
+                           here accepts any well-formed word, including one nobody ever created — and
+                           a default group that does not exist is a setting that looks saved and
+                           quietly grants nothing to every account made afterwards. The current value
+                           is kept in the list even if its group is gone, so opening this page cannot
+                           silently rewrite a setting the operator has not touched. */
+                        $sgDefault = (string)($cfg['users_default_group'] ?? 'member');
+                        $sgGroups = [];
+                        try {
+                            foreach ($db->query("SELECT slug, name FROM user_groups ORDER BY priority DESC, name")->fetchAll(PDO::FETCH_ASSOC) as $g) {
+                                $sgGroups[(string)$g['slug']] = (string)$g['name'];
+                            }
+                        } catch (\Throwable $e) { $sgGroups = []; }
+                        if (!isset($sgGroups[$sgDefault])) $sgGroups[$sgDefault] = $sgDefault;
+                        ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="users_default_group">
+                            <?php foreach ($sgGroups as $slug => $name): ?>
+                            <option value="<?= sanitize($slug) ?>"<?= $slug === $sgDefault ? ' selected' : '' ?>><?= sanitize($name) ?> (<?= sanitize($slug) ?>)</option>
+                            <?php endforeach; ?>
+                        </select>
                         <small class="settings-hint"><?= _h('settings.users_default_group_hint') ?></small>
                     </div>
                     <div class="col-md-3">

@@ -4,6 +4,61 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.43.1] — 2026-09-10
+
+### Changed — appearing on a public list is consent, and consent is the grant
+
+1.42.3 made `userGroupIdsWithPermission()` answer yes for the system `admin` group whatever its JSON
+said, so the SQL half of "who has this in favourites" would agree with the PHP half. That was the
+wrong half to move.
+
+`userEffectivePermissions()` hands an administrator every registered permission because they have to
+be able to work the site. That is a rule about **power**. `favourites.public` and `uploads.public`
+are not power: they do not say what somebody may do, they say what other people may see of them.
+Reading the administrator's blanket as consent puts their favourites on strangers' screens because of
+a rule about what they are allowed to fix — without the box that appears to control it ever being
+ticked by anybody.
+
+So the grant is what counts, on both sides, for everybody. `userIdHasGrantedPermission()` asks the
+ordinary question first (accounts on, groups active, the e-mail gate satisfied) and then asks whether
+a group actually **grants** it; the public profile uses it, and the overlay's SQL reads the same
+stored JSON. An administrator who wants to appear grants it to their group, exactly like anybody
+else — and the group editor's *Site member* preset has carried all four favourites permissions since
+they existed, so a group made from it already has them.
+
+### Added — Info on a favourites row, the same panel the search results open
+
+A row on the account page's Favourites tab, or on either list on a public profile, could hand over a
+magnet and nothing else: to ask what a torrent actually **is**, the reader had to go back to the
+search page and type the name in again. The panel's markup is a partial now
+(`templates/partials/info_overlay.php`), included by all three pages, and its script moved out of
+`initSearch()` — which returns on its first line anywhere but the search page — into an
+`initInfoPanel()` that wires up wherever the markup is. The panel reads its own answers (the star,
+"who has this", how the file list fills up) off its own markup, because it now runs on pages that
+have no search form to read them from. `window.TorrentInfo.open(hash, name)` is what a list calls;
+the search page keeps its address in step through a hook it sets itself.
+
+### Fixed — the Share button on a profile was a thousand pixels from the profile
+
+`margin-left: auto` put it hard against the right edge of a full-width row, quiet grey on near-black.
+It sits beside the name now. The account page grew the pair that belongs there too: the Privacy
+section said "your profile is at `?action=u&name=…`" as plain text, and now offers **Open my
+profile** and the same Share beside it — that page is where somebody is standing when they wonder
+where their profile is.
+
+### Changed — the settings page offers the groups that exist
+
+*Default group* was a free-text field with a slug pattern. It accepted any well-formed word,
+including one nobody ever created — and a default group that does not exist is a setting that looks
+saved and grants nothing to every account made afterwards. It is a select of the real groups now, and
+the save endpoint refuses a slug with no group behind it.
+
+### Changed — the fifth password rule is centred again
+
+Tried as the first item of a third row, put back: in a block that narrow the centred line closes the
+shape and a left-aligned one leaves the corner hanging. The browser check pins the centring so a
+later tidy-up cannot quietly undo the decision.
+
 ## [1.43.0] — 2026-09-10
 
 Schema **50**.

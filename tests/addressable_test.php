@@ -142,8 +142,20 @@ foreach (['search_share_enabled' => '1', 'lang_swap_enabled' => '1'] as $key => 
 // The Share buttons are the only thing search_share_enabled turns off. The state is in the address
 // whichever way it is set — say so out loud, because "off" reading as "not addressable" is exactly
 // the misunderstanding that would make somebody remove the URL writing along with the buttons.
+// The panel's own Share moved into templates/partials/info_overlay.php when the account page and
+// public profiles started opening the same panel, so the rule is counted across every file that
+// draws one of these buttons rather than in the one that used to draw them all.
+$shareTpls = '';
+foreach (['/templates/pages/search.php', '/templates/partials/info_overlay.php',
+          '/templates/pages/profile.php', '/templates/pages/account.php'] as $f) {
+    $shareTpls .= (string)@file_get_contents($root . $f);
+}
 $searchTpl = (string)@file_get_contents($root . '/templates/pages/search.php');
-check('the Share buttons are behind search_share_enabled', substr_count($searchTpl, '$canShare') >= 3, (string)substr_count($searchTpl, '$canShare'));
+$shareGates = substr_count($shareTpls, '$canShare') + substr_count($shareTpls, '$ioShare')
+            + substr_count($shareTpls, "search_share_enabled");
+check('the Share buttons are behind search_share_enabled', $shareGates >= 5, (string)$shareGates);
+check('… including the one in the Info panel, wherever that panel is included',
+      str_contains((string)@file_get_contents($root . '/templates/partials/info_overlay.php'), 'search_share_enabled'));
 // Every `if ($canShare)` block, and nothing but the buttons inside them: the switch must not be
 // able to take the search itself away.
 preg_match_all('/<\?php if \(\$canShare\): \?>(.*?)<\?php endif; \?>/s', $searchTpl, $blocks);

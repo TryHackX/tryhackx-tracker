@@ -2387,6 +2387,626 @@ const getJson = async (endpoint) => {
         }).catch(reveal);
     }
 
+    let infoOverlay = null, infoHash = null;
+    // Read off the overlay's own markup, because the panel now opens on pages that have no
+    // search form to read them from — the account page's favourites and both lists on a profile.
+    let infoFilesMode = 'scroll', infoCanFav = false, infoCanFavWho = false;
+    // The search page rewrites its address when the panel opens and closes, so a link to a
+    // torrent is a link to the panel. Nowhere else has an address that means anything here.
+    let infoOnOpen = null;
+
+    function closeInfo() {
+        if (!infoOverlay) return;
+        infoOverlay.hidden = true;
+        infoHash = null;
+        if (infoOnOpen) infoOnOpen();
+        document.removeEventListener('keydown', escInfo);
+    }
+    function escInfo(e) { if (e.key === 'Escape') closeInfo(); }
+
+    function infoRow(label, value) {
+        const d = document.createElement('div');
+        d.className = 'info-kv';
+        const l = document.createElement('span');
+        l.className = 'info-kv-label';
+        l.textContent = label;
+        const v = document.createElement('span');
+        v.className = 'info-kv-value';
+        if (value instanceof Node) v.appendChild(value); else v.textContent = value == null ? '—' : String(value);
+        d.appendChild(l); d.appendChild(v);
+        return d;
+    }
+
+    /**
+     * Five stars, half a star at a time.
+     *
+     * Ten clickable halves rather than five stars: the storage is in halves and the pointer has
+     * to be able to reach one, or "3.5" would be a value nobody can actually cast. Hovering
+     * previews what a click would set, which is the whole reason a star widget feels different
+     * from a number field — and leaving restores what is really stored, so a hover never lies
+     * about the current state.
+     */
+    function buildStars(r, json, hash) {
+        const wrap = document.createElement('div');
+        wrap.className = 'stars-wrap';
+
+        const row = document.createElement('div');
+        row.className = 'stars' + (json.can_vote ? ' stars-live' : '');
+        row.setAttribute('role', json.can_vote ? 'group' : 'img');
+
+        const shown = r.stars === null ? 0 : r.stars;
+        const mine = json.my_vote > 0 ? json.my_vote / 2 : 0;
+
+        // Paint to a value in stars (0..5), filling halves.
+        const paint = (value) => {
+            [...row.querySelectorAll('.star')].forEach((st, i) => {
+                const full = value >= i + 1;
+                const half = !full && value >= i + 0.5;
+                st.classList.toggle('star-full', full);
+                st.classList.toggle('star-half', half);
+            });
+        };
+
+        for (let i = 0; i < 5; i++) {
+            const st = document.createElement('span');
+            st.className = 'star';
+            st.setAttribute('aria-hidden', 'true');
+            // Two hit areas per star: left half and right half.
+            if (json.can_vote) {
+                [0.5, 1].forEach(part => {
+                    const hit = document.createElement('button');
+                    hit.type = 'button';
+                    hit.className = 'star-hit star-hit-' + (part === 0.5 ? 'l' : 'r');
+                    const value = i + part;
+                    hit.title = value === 1 ? t('js.app.stars_one') : t('js.app.stars_many', {n: value});
+                    hit.setAttribute('aria-label', t('js.app.rate_aria', {n: value}));
+                    hit.addEventListener('mouseenter', () => paint(value));
+                    hit.addEventListener('focus', () => paint(value));
+                    hit.addEventListener('click', () => castVote(hash, Math.round(value * 2), wrap));
+                    st.appendChild(hit);
+                });
+            }
+            row.appendChild(st);
+        }
+        // Leaving puts back what is actually stored — the visitor's own rating if they have one,
+        // otherwise the average. A widget that keeps the last hovered value is telling them
+        // something they never did.
+        row.addEventListener('mouseleave', () => paint(mine || shown));
+        paint(mine || shown);
+        wrap.appendChild(row);
+
+        const label = document.createElement('div');
+        label.className = 'rep-label';
+        if (r.stars === null) {
+            label.classList.add('text-muted');
+            label.textContent = r.total === 0
+                ? t('js.app.stars_nobody_yet')
+                : t('js.app.stars_needed', {n: r.total, min: r.min_votes});
+        } else {
+            label.textContent = r.stars.toFixed(1) + ' / 5 · '
+                + (r.total === 1 ? t('js.app.ratings_one') : t('js.app.ratings_many', {n: r.total}))
+                + (mine ? ' · ' + t('js.app.stars_yours', {n: mine}) : '');
+        }
+        wrap.appendChild(label);
+        row.title = r.stars === null
+            ? t('js.app.stars_so_far', {n: r.total, min: r.min_votes})
+            : (r.total === 1 ? t('js.app.rep_stars_title_one', {stars: r.stars.toFixed(1)}) : t('js.app.rep_stars_title_many', {stars: r.stars.toFixed(1), n: r.total}));
+        if (!json.can_vote && json.vote_refusal) row.title += ' — ' + json.vote_refusal;
+        return wrap;
+    }
+
+    async function castVote(hash, dir, holder) {
+        const csrf = ($id('search-csrf') || {}).value || '';
+        const r = await postJson('rate_hash', { hash, vote: dir, csrf_token: csrf });
+        if (!r) return;
+        if (r.captcha) {
+            // The points scheme decided this visitor needs a challenge. Reopening the panel is
+            // the honest way to get one: the CAPTCHA belongs to the page, not to this button.
+            holder.textContent = t('js.app.vote_captcha');
+            return;
+        }
+        if (!r.success) {
+            const why = document.createElement('div');
+            why.className = 'rep-label text-muted';
+            why.textContent = r.error || t('js.app.vote_failed');
+            holder.appendChild(why);
+            return;
+        }
+        // Redraw from the server's answer, never from an optimistic guess: the whole value of a
+        // score is that it is the server's count and not the browser's.
+        openInfo(hash, null);
+    }
+
+    /**
+     * The review state of a description, as an icon beside the name.
+     *
+     * Inline SVG rather than an icon font. The shapes are the familiar ones — a clock, a tick in
+     * a circle, a cross in a circle — but pulling in a whole font (and another CDN host, past a
+     * CSP that currently allows none for fonts) to draw three 14-pixel glyphs is a lot of
+     * machinery for very little. This renders identically, costs nothing, inherits its colour
+     * from the class, and cannot fail to load.
+     *
+     * Colour alone is never the message: each icon carries a title, and the shapes differ, so it
+     * still reads for somebody who cannot tell the three colours apart.
+     */
+    function contentStatusIcon(status) {
+        const PATHS = {
+            // clock — waiting
+            pending: 'M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z',
+            // check
+            approved: 'M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.235.235 0 0 1 .02-.022z',
+            // cross
+            rejected: 'M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z',
+        };
+        const TITLES = {
+            pending:  t('js.app.cs_pending'),
+            approved: t('js.app.cs_approved'),
+            rejected: t('js.app.cs_rejected'),
+        };
+        const NS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(NS, 'svg');
+        svg.setAttribute('viewBox', '0 0 16 16');
+        svg.setAttribute('width', '13');
+        svg.setAttribute('height', '13');
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', TITLES[status]);
+        const ring = document.createElementNS(NS, 'circle');
+        ring.setAttribute('cx', '8'); ring.setAttribute('cy', '8'); ring.setAttribute('r', '7');
+        ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', 'currentColor'); ring.setAttribute('stroke-width', '1.2');
+        const path = document.createElementNS(NS, 'path');
+        path.setAttribute('d', PATHS[status]);
+        path.setAttribute('fill', 'currentColor');
+        svg.appendChild(ring); svg.appendChild(path);
+        const wrap = document.createElement('span');
+        wrap.className = 'search-cs-icon search-cs-' + status;
+        wrap.title = TITLES[status];
+        wrap.appendChild(svg);
+        return wrap;
+    }
+
+    async function openInfo(hash, name) {
+        if (!infoOverlay) return;
+        const body = $id('info-body'), title = $id('info-title');
+        infoHash = hash;
+        if (infoOnOpen) infoOnOpen();
+        title.textContent = name || t('js.app.details');
+        body.textContent = t('js.common.loading');
+        infoOverlay.hidden = false;
+        document.addEventListener('keydown', escInfo);
+        const json = await getJson('index_info&hash=' + encodeURIComponent(hash));
+        if (infoOverlay.hidden || infoHash !== hash) return;
+        body.textContent = '';
+        if (!json || !json.success) {
+            body.textContent = (json && json.error) || t('js.app.details_load_failed');
+            return;
+        }
+        title.textContent = json.name || name || t('js.app.details');
+
+        // The panel always has the hash, so the star is always available here even when the row
+        // could not carry one.
+        const infoActs = $id('info-acts');
+        if (infoActs) {
+            infoActs.textContent = '';
+            if (infoCanFav && window.Favourites) infoActs.appendChild(window.Favourites.makeStar(hash, !!json.fav));
+            if (infoCanFavWho && typeof window.openWhoFavourited === 'function') {
+                const w = document.createElement('button');
+                w.type = 'button';
+                w.className = 'search-share';
+                w.title = t('js.fav.who_title');
+                w.textContent = t('js.fav.who');
+                w.addEventListener('click', () => window.openWhoFavourited(hash));
+                infoActs.appendChild(w);
+            }
+        }
+
+        const st = json.stats || {};
+
+        // 1. the numbers people actually opened this for, before anything else.
+        //
+        // Seeders and leechers used to be one sentence three quarters of the way down a flat
+        // list, below "Times seen". Reading order is a claim about importance, and that one was
+        // wrong: whether anything is sharing it is the first question, and every other field is
+        // context for the answer.
+        const strip = document.createElement('div');
+        strip.className = 'info-strip';
+        const statCell = (value, label, cls) => {
+            const c = document.createElement('div');
+            c.className = 'info-stat' + (cls ? ' ' + cls : '');
+            const v = document.createElement('span');
+            v.className = 'info-stat-v';
+            if (value instanceof Node) v.appendChild(value); else v.textContent = value;
+            const l = document.createElement('span');
+            l.className = 'info-stat-l';
+            l.textContent = label;
+            c.appendChild(v); c.appendChild(l);
+            return c;
+        };
+        const seedV = document.createElement('span');
+        seedV.id = 'info-sl-seed';
+        seedV.textContent = st.seeders == null ? '—' : Number(st.seeders).toLocaleString();
+        const leechV = document.createElement('span');
+        leechV.id = 'info-sl-leech';
+        leechV.textContent = st.leechers == null ? '—' : Number(st.leechers).toLocaleString();
+        strip.appendChild(statCell(seedV, t('js.app.stat_seeders'), 'info-stat-seed'));
+        strip.appendChild(statCell(leechV, t('js.app.stat_leechers'), 'info-stat-leech'));
+        if (st.completed != null) strip.appendChild(statCell(Number(st.completed).toLocaleString(), t('js.app.stat_completed')));
+        if (st.total_size != null) strip.appendChild(statCell(fmtBytesPub(st.total_size), t('js.app.stat_size')));
+        if (st.files_count != null) strip.appendChild(statCell(Number(st.files_count).toLocaleString(), st.files_count === 1 ? t('js.app.stat_file') : t('js.app.stat_files')));
+        body.appendChild(strip);
+
+        // 2. the two chips that qualify those numbers, on one line with the refresh control.
+        const chips = document.createElement('div');
+        chips.className = 'info-chips';
+        if (json.whitelisted) {
+            const chip = document.createElement('span');
+            chip.className = 'info-chip info-chip-ok';
+            chip.textContent = t('js.app.chip_registered');
+            chip.title = t('js.app.chip_registered_title');
+            chips.appendChild(chip);
+        }
+        if (st.last_seen) {
+            const chip = document.createElement('span');
+            chip.className = 'info-chip';
+            chip.textContent = t('js.app.last_seen', {date: fmtDatePub(st.last_seen)});
+            chips.appendChild(chip);
+        }
+        if (json.can_refresh) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-secondary btn-small info-refresh';
+            btn.textContent = t('js.app.refresh');
+            btn.title = t('js.app.refresh_title');
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                const prev = btn.textContent;
+                btn.textContent = t('js.app.asking');
+                const r = await postJson('index_info&hash=' + encodeURIComponent(hash), {
+                    op: 'refresh', csrf_token: ($id('search-csrf') || {}).value || '' });
+                if (r && r.success) {
+                    seedV.textContent = Number(r.seeders).toLocaleString();
+                    leechV.textContent = Number(r.leechers).toLocaleString();
+                    btn.textContent = t('js.app.refreshed');
+                } else {
+                    btn.textContent = (r && r.error) || t('js.app.no_answer');
+                }
+                setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 4000);
+            });
+            chips.appendChild(btn);
+        }
+        if (chips.children.length) body.appendChild(chips);
+
+        // 3. where it came from
+        if (json.source_url) {
+            const row = document.createElement('div');
+            row.className = 'rt-src-row info-section';
+            const lab = document.createElement('strong');
+            lab.textContent = t('js.app.source_label');
+            const a = document.createElement('a');
+            a.className = 'rt-src-url';
+            a.href = json.source_url;
+            a.textContent = json.source_url;
+            a.rel = 'nofollow noopener noreferrer ugc';
+            a.target = '_blank';
+            // Not our link. Off-site ones get the confirmation; the operator's own trusted
+            // domains do not, because warning about your own site teaches people to click through.
+            if (!json.source_trusted) a.setAttribute('data-external', '1');
+            if (json.source_auto) {
+                // Added by the importer, not typed into the form. Saying so is the difference
+                // between "the uploader vouched for this link" and "this is where we found it".
+                const tag = document.createElement('span');
+                tag.className = 'info-chip info-chip-auto';
+                tag.textContent = t('js.app.source_auto');
+                tag.title = json.source_auto_note || t('js.app.source_auto_title');
+                row.appendChild(lab); row.appendChild(a); row.appendChild(tag);
+            } else {
+                row.appendChild(lab); row.appendChild(a);
+            }
+            body.appendChild(row);
+        }
+
+        // 2. what it is
+        if (json.description_html) {
+            const d = document.createElement('div');
+            d.className = 'rt-body info-section';
+            // Built on the server by includes/richtext.php out of fully escaped input with a
+            // fixed tag whitelist. This is the only assignment of innerHTML on the public pages.
+            d.innerHTML = json.description_html;
+            body.appendChild(d);
+        } else if (!json.source_url) {
+            const none = document.createElement('p');
+            none.className = 'text-muted info-section';
+            none.textContent = t('js.app.no_description');
+            body.appendChild(none);
+        }
+
+        // 3. what people think of it
+        //
+        // Two modes share this block. Whichever it is, the COUNT is always shown next to the
+        // score: "5 stars" and "5 stars from one vote" are different claims, and a widget that
+        // renders them identically is making the stronger one on no evidence.
+        if (json.rating) {
+            const rep = document.createElement('div');
+            rep.className = 'rep-block info-section';
+            const r = json.rating;
+
+            if (r.mode === 'stars') {
+                rep.appendChild(buildStars(r, json, hash));
+            } else if (r.percent !== null) {
+                const bar = document.createElement('div');
+                bar.className = 'rep-bar';
+                bar.setAttribute('role', 'img');
+                bar.setAttribute('aria-label', t('js.app.rating_aria', {percent: r.percent, total: r.total}));
+                const up = document.createElement('span');
+                up.className = 'rep-bar-up';
+                up.style.width = r.percent + '%';
+                bar.appendChild(up);
+                rep.appendChild(bar);
+                const label = document.createElement('div');
+                label.className = 'rep-label';
+                label.textContent = t('js.app.rating_label', {percent: r.percent, up: r.up, down: r.down});
+                rep.appendChild(label);
+            } else {
+                const label = document.createElement('div');
+                label.className = 'rep-label text-muted';
+                label.textContent = r.total === 0
+                    ? t('js.app.no_ratings')
+                    : t('js.app.ratings_needed', {total: r.total, min: r.min_votes});
+                rep.appendChild(label);
+            }
+
+            if (json.can_vote && r.mode !== 'stars') {
+                const acts = document.createElement('div');
+                acts.className = 'rep-acts';
+                const mk = (dir, glyph, title) => {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'btn btn-secondary btn-small rep-btn' + (json.my_vote === dir ? ' rep-mine' : '');
+                    b.textContent = glyph;
+                    b.title = title;
+                    b.addEventListener('click', () => castVote(hash, dir, rep));
+                    return b;
+                };
+                acts.appendChild(mk(1, '▲ ' + t('js.app.vote_good'), t('js.app.vote_good_title')));
+                acts.appendChild(mk(-1, '▼ ' + t('js.app.vote_bad'), t('js.app.vote_bad_title')));
+                rep.appendChild(acts);
+            } else if (!json.can_vote && json.vote_refusal) {
+                const why = document.createElement('div');
+                why.className = 'rep-label text-muted';
+                why.textContent = json.vote_refusal;
+                rep.appendChild(why);
+            }
+            body.appendChild(rep);
+        }
+
+        // 4. the rest: provenance and identity, under a heading so it reads as a footnote to the
+        //    strip above rather than as another list of equally important facts.
+        const grid = document.createElement('div');
+        grid.className = 'info-grid';
+        if (st.peak_seeders != null) grid.appendChild(infoRow(t('js.app.row_peak_seeders'), Number(st.peak_seeders).toLocaleString()));
+        if (st.first_seen) grid.appendChild(infoRow(t('js.app.row_first_seen'), fmtDatePub(st.first_seen)));
+        if (st.seen_count != null) grid.appendChild(infoRow(t('js.app.row_times_seen'), Number(st.seen_count).toLocaleString()));
+        const hashEl = document.createElement('code');
+        hashEl.className = 'info-hash';
+        hashEl.textContent = json.info_hash;
+        grid.appendChild(infoRow(t('js.app.row_info_hash'), hashEl));
+        const det = document.createElement('div');
+        det.className = 'info-section';
+        const detH = document.createElement('div');
+        detH.className = 'info-sub';
+        detH.textContent = t('js.app.record_heading');
+        det.appendChild(detH);
+        det.appendChild(grid);
+        body.appendChild(det);
+
+        // 5. the files, last, because the panel is about the torrent and this is the long part
+        if (json.can_files && st.files_count) {
+            const det = document.createElement('details');
+            det.className = 'rt-collapse info-section';
+            det.open = true;
+            const sum = document.createElement('summary');
+            // The torrent's OWN file count, which is not the length of the list below it: the
+            // catalogue stores only the first few thousand paths of a huge torrent, so an
+            // 18 000-file torrent has 5 000 rows here. The heading is rewritten with both
+            // numbers as pages arrive rather than promising a count nothing can deliver.
+            const totalFiles = Number(st.files_count) || 0;
+            sum.textContent = t('js.app.files_count', {n: totalFiles.toLocaleString()});
+            det.appendChild(sum);
+            const holder = document.createElement('div');
+            holder.className = 'rt-body';
+            holder.textContent = t('js.common.loading');
+            det.appendChild(holder);
+            body.appendChild(det);
+            // Paged: the first slice now, and the next one when the mode says so — on reaching
+            // the end of the list (an IntersectionObserver on a sentinel), on the button, or
+            // straight away until the server stops answering with more. The tree is rebuilt from
+            // everything loaded so far — cheap next to the fetch, and it keeps one code path for
+            // the folder structure — with a leaf cap so the rebuild stays cheap at a high total.
+            const allFiles = [];
+            // `stalled` is set by a failed page and stops the AUTOMATIC asking only — the button
+            // stays live. Without it a 429 from the shared search bucket met an observer that
+            // re-fires whenever the sentinel is on screen, and the answer to being rate-limited
+            // was another request.
+            let next = 0, more = false, loading = false, stalled = false;
+            const tree = document.createElement('div');
+            const notes = document.createElement('div');
+            const note = (text) => {
+                const p = document.createElement('p');
+                p.className = 'text-muted';
+                p.textContent = text;
+                notes.appendChild(p);
+            };
+            const foot = document.createElement('div');
+            foot.className = 'files-more';
+            const btn = document.createElement('button');
+            btn.type = 'button'; btn.className = 'btn btn-secondary btn-small';
+            const sentinel = document.createElement('div');
+            sentinel.className = 'files-sentinel';
+            foot.appendChild(btn); foot.appendChild(sentinel);
+            const render = () => {
+                tree.replaceChildren(buildTreePub(allFiles, []));
+                sum.textContent = (totalFiles && allFiles.length < totalFiles)
+                    ? t('js.app.files_count_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
+                    : t('js.app.files_count', {n: (totalFiles || allFiles.length).toLocaleString()});
+                btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
+                btn.disabled = loading;
+                foot.hidden = !more;
+            };
+            const loadMore = async () => {
+                if (loading || (!more && next > 0)) return false;
+                loading = true; if (next > 0) render();
+                const fj = await getJson('index_files&hash=' + encodeURIComponent(hash) + '&offset=' + next);
+                loading = false;
+                if (infoOverlay.hidden || infoHash !== hash) return false;
+                if (!fj || !fj.success) {
+                    if (next === 0) { holder.textContent = t('js.app.no_file_list'); return false; }
+                    // Leave `more` alone: the reader may still press the button. It is the
+                    // unattended asking that stops, and render() puts the button back to
+                    // "Load more" instead of leaving it stuck on "Loading…" for ever.
+                    stalled = true; render();
+                    return false;
+                }
+                stalled = false;
+                (fj.files || []).forEach(f => allFiles.push(f));
+                next = typeof fj.next === 'number' ? fj.next : allFiles.length;
+                // More pages exist AND this visitor may ask for them (index.files_all); without
+                // the grant the list stops here and says so. A capped reply never claims
+                // truncation, so this is already false when the site's own total ended the list.
+                more = !!fj.truncated && !!fj.can_more;
+                if (next === 0 || !allFiles.length) { holder.textContent = t('js.app.no_file_list'); return false; }
+                // The notes hang below the tree and are written AFTER the holder is emptied of
+                // its "Loading…". They used to be appended before that line, so the one message
+                // the reader needed was wiped by the same call that attached the list.
+                if (!tree.parentNode) { holder.textContent = ''; holder.appendChild(tree); holder.appendChild(foot); holder.appendChild(notes); }
+                if (fj.truncated && !fj.can_more) note(t('js.app.files_truncated'));
+                // Not an error and not a permission: the list simply ends short of the count in
+                // the heading, because that is all the catalogue ever stored for this torrent.
+                if (fj.stored_short) note(t('js.app.files_stored_cap', {n: Number(fj.stored_total || allFiles.length).toLocaleString()}));
+                // The site's own ceiling, not a permission and not the worker's storage cap:
+                // there are more rows and this page is not going to fetch them.
+                if (fj.capped) note(t('js.app.files_cap_reached', {n: Number(fj.max || allFiles.length).toLocaleString()}));
+                render();
+                return true;
+            };
+            // One request at a time, and a failure ends the chain rather than retrying it: every
+            // page spends a token from the per-IP bucket this endpoint shares with the search box.
+            const loadAll = async () => { while (more && !stalled) { if (!await loadMore()) break; } };
+            btn.addEventListener('click', loadMore);
+            if (infoFilesMode === 'scroll' && 'IntersectionObserver' in window) {
+                new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore(); },
+                                         { root: null, rootMargin: '200px' }).observe(sentinel);
+            }
+            await loadMore();
+            if (infoFilesMode === 'all') await loadAll();
+        }
+    }
+
+    if (infoOverlay) {
+        infoOverlay.addEventListener('click', (e) => { if (e.target === infoOverlay) closeInfo(); });
+        const ic = $id('info-close');
+        if (ic) ic.addEventListener('click', closeInfo);
+    }
+    function buildTreePub(files, tokens) {
+        const root = { dirs: new Map(), files: [] };
+        files.forEach(f => {
+            const parts = String(f.path).split('/').filter(Boolean);
+            let node = root;
+            for (let i = 0; i < parts.length - 1; i++) {
+                if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
+                node = node.dirs.get(parts[i]);
+            }
+            node.files.push({ name: parts[parts.length - 1] || String(f.path), size: f.size });
+        });
+        const container = document.createElement('div');
+        container.className = 'ftree';
+        let drawn = 0, skipped = 0;
+        const countFiles = (n) => { let c = n.files.length; n.dirs.forEach(d => { c += countFiles(d); }); return c; };
+        const nameEl = (cls, text) => {
+            const sp = document.createElement('span');
+            sp.className = cls;
+            sp.title = text;
+            if (tokens && tokens.length) markInto(sp, text, tokens);
+            else sp.textContent = text;
+            return sp;
+        };
+        (function render(node, parent, depth) {
+            [...node.dirs.keys()].sort().forEach(name => {
+                const subNode = node.dirs.get(name);
+                const det = document.createElement('details');
+                if (depth === 0) det.open = true;
+                const sum = document.createElement('summary');
+                sum.appendChild(nameEl('ftree-dir', name));
+                const cnt = document.createElement('span');
+                cnt.className = 'text-muted ftree-count';
+                cnt.textContent = ' (' + countFiles(subNode) + ')';
+                sum.appendChild(cnt);
+                det.appendChild(sum);
+                const inner = document.createElement('div');
+                inner.className = 'ftree-children';
+                render(subNode, inner, depth + 1);
+                det.appendChild(inner);
+                parent.appendChild(det);
+            });
+            node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
+                if (drawn >= PUB_TREE_LEAVES) { skipped++; return; }
+                drawn++;
+                const line = document.createElement('div');
+                line.className = 'ftree-file';
+                line.appendChild(nameEl('ftree-name', f.name));
+                const sz = document.createElement('span');
+                sz.className = 'ftree-size text-muted';
+                sz.textContent = fmtBytesPub(f.size);
+                line.appendChild(sz);
+                parent.appendChild(line);
+            });
+        })(root, container, 0);
+        if (skipped) {
+            const cut = document.createElement('p');
+            cut.className = 'text-muted';
+            cut.textContent = t('js.app.files_tree_cap', {n: drawn.toLocaleString(), rest: skipped.toLocaleString()});
+            container.appendChild(cut);
+        }
+        return container;
+    }
+
+    const PUB_TREE_LEAVES = 5000;
+    // The query parameters the search page owns. Named here rather than inside initSearch()
+    // because the panel's own Share button strips them: a link to ONE torrent must not carry the
+    // sender's query, filter and page number with it.
+    const OWNED = ['search', 'search_files', 'content', 'sort', 'page', 'per_page', 'hash'];
+
+    /** Wire the panel up wherever its markup is on the page, and hand it to whoever needs it. */
+    function initInfoPanel() {
+        infoOverlay = $id('info-overlay');
+        if (!infoOverlay) return;
+        const d = infoOverlay.dataset;
+        infoFilesMode = ['scroll', 'button', 'all'].includes(d.filesMode) ? d.filesMode : 'scroll';
+        infoCanFav = d.fav === '1';
+        infoCanFavWho = d.favWho === '1';
+        infoOverlay.addEventListener('click', (e) => { if (e.target === infoOverlay) closeInfo(); });
+        const ic = $id('info-close');
+        if (ic) ic.addEventListener('click', closeInfo);
+        const shareOneBtn = $id('info-share');
+        if (shareOneBtn) shareOneBtn.addEventListener('click', () => {
+            // Built from the hash, not from location.href: the panel is a link to ONE torrent, and
+            // carrying the sender's query and page number into it would share their search as well.
+            let u;
+            try { u = new URL(location.href); } catch (e) { return; }
+            OWNED.forEach(k => u.searchParams.delete(k));
+            if (infoHash) u.searchParams.set('hash', infoHash);
+            u.hash = '';
+            share(shareOneBtn, u.href, t('js.app.share_link_one'));
+        });
+        // The panel is the answer to "what IS this?", and that question is asked from the search
+        // results, from a favourites list and from a profile's lists. One implementation, one
+        // overlay, and the caller only needs a hash.
+        window.TorrentInfo = {
+            open: openInfo,
+            close: closeInfo,
+            current: () => infoHash,
+            setOnOpen: (fn) => { infoOnOpen = typeof fn === 'function' ? fn : null; },
+        };
+    }
+
     function initSearch() {
         const form = $id('search-form');
         if (!form) return;
@@ -2402,6 +3022,8 @@ const getJson = async (endpoint) => {
         // with index.magnet, so on a page without it there is nothing to favourite BY. That is a
         // real limitation and it is written down rather than worked around: the Info panel always
         // has the hash, so the star is always available there.
+        // Opening the panel is a change of view here, and the address says so — nowhere else does.
+        if (window.TorrentInfo) window.TorrentInfo.setOnOpen(() => writeUrl(curPage, 'push'));
         const canFav = form.dataset.fav === '1';
         const canFavWho = form.dataset.favWho === '1';
         // Every port, not just the first. Extra opentracker instances listen on their own ports and
@@ -2488,7 +3110,6 @@ const getJson = async (endpoint) => {
         const contentDefault = contentSel ? contentSel.value : '';
         const SORT_COLS = headers.map(th => th.dataset.sort);
         const DEFAULT_SORT = 'relevance:desc';
-        const OWNED = ['search', 'search_files', 'content', 'sort', 'page', 'per_page', 'hash'];
         let urlHeld = 0;        // > 0 while we are applying an address, so nothing writes one back
 
         function viewState(page) {
@@ -2848,69 +3469,6 @@ const getJson = async (endpoint) => {
         // (the panel's version creates them and only hides them — not a model to copy at this size)
         // and one line says how many are missing. Folder counts stay true; they are counted, not
         // drawn.
-        const PUB_TREE_LEAVES = 5000;
-        function buildTreePub(files, tokens) {
-            const root = { dirs: new Map(), files: [] };
-            files.forEach(f => {
-                const parts = String(f.path).split('/').filter(Boolean);
-                let node = root;
-                for (let i = 0; i < parts.length - 1; i++) {
-                    if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
-                    node = node.dirs.get(parts[i]);
-                }
-                node.files.push({ name: parts[parts.length - 1] || String(f.path), size: f.size });
-            });
-            const container = document.createElement('div');
-            container.className = 'ftree';
-            let drawn = 0, skipped = 0;
-            const countFiles = (n) => { let c = n.files.length; n.dirs.forEach(d => { c += countFiles(d); }); return c; };
-            const nameEl = (cls, text) => {
-                const sp = document.createElement('span');
-                sp.className = cls;
-                sp.title = text;
-                if (tokens && tokens.length) markInto(sp, text, tokens);
-                else sp.textContent = text;
-                return sp;
-            };
-            (function render(node, parent, depth) {
-                [...node.dirs.keys()].sort().forEach(name => {
-                    const subNode = node.dirs.get(name);
-                    const det = document.createElement('details');
-                    if (depth === 0) det.open = true;
-                    const sum = document.createElement('summary');
-                    sum.appendChild(nameEl('ftree-dir', name));
-                    const cnt = document.createElement('span');
-                    cnt.className = 'text-muted ftree-count';
-                    cnt.textContent = ' (' + countFiles(subNode) + ')';
-                    sum.appendChild(cnt);
-                    det.appendChild(sum);
-                    const inner = document.createElement('div');
-                    inner.className = 'ftree-children';
-                    render(subNode, inner, depth + 1);
-                    det.appendChild(inner);
-                    parent.appendChild(det);
-                });
-                node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
-                    if (drawn >= PUB_TREE_LEAVES) { skipped++; return; }
-                    drawn++;
-                    const line = document.createElement('div');
-                    line.className = 'ftree-file';
-                    line.appendChild(nameEl('ftree-name', f.name));
-                    const sz = document.createElement('span');
-                    sz.className = 'ftree-size text-muted';
-                    sz.textContent = fmtBytesPub(f.size);
-                    line.appendChild(sz);
-                    parent.appendChild(line);
-                });
-            })(root, container, 0);
-            if (skipped) {
-                const cut = document.createElement('p');
-                cut.className = 'text-muted';
-                cut.textContent = t('js.app.files_tree_cap', {n: drawn.toLocaleString(), rest: skipped.toLocaleString()});
-                container.appendChild(cut);
-            }
-            return container;
-        }
 
         // ── the Info panel ──────────────────────────────────────────────────
         //
@@ -2919,519 +3477,6 @@ const getJson = async (endpoint) => {
         // numbers, and the file list at the bottom. The "N files" chip beside a result still opens
         // the plain tree on its own — somebody who only wants the file names should not have to read
         // an essay to reach them.
-        const infoOverlay = $id('info-overlay');
-        let infoHash = null;
-
-        function closeInfo() {
-            if (!infoOverlay) return;
-            infoOverlay.hidden = true;
-            infoHash = null;
-            writeUrl(curPage, 'push');
-            document.removeEventListener('keydown', escInfo);
-        }
-        function escInfo(e) { if (e.key === 'Escape') closeInfo(); }
-
-        function infoRow(label, value) {
-            const d = document.createElement('div');
-            d.className = 'info-kv';
-            const l = document.createElement('span');
-            l.className = 'info-kv-label';
-            l.textContent = label;
-            const v = document.createElement('span');
-            v.className = 'info-kv-value';
-            if (value instanceof Node) v.appendChild(value); else v.textContent = value == null ? '—' : String(value);
-            d.appendChild(l); d.appendChild(v);
-            return d;
-        }
-
-        /**
-         * Five stars, half a star at a time.
-         *
-         * Ten clickable halves rather than five stars: the storage is in halves and the pointer has
-         * to be able to reach one, or "3.5" would be a value nobody can actually cast. Hovering
-         * previews what a click would set, which is the whole reason a star widget feels different
-         * from a number field — and leaving restores what is really stored, so a hover never lies
-         * about the current state.
-         */
-        function buildStars(r, json, hash) {
-            const wrap = document.createElement('div');
-            wrap.className = 'stars-wrap';
-
-            const row = document.createElement('div');
-            row.className = 'stars' + (json.can_vote ? ' stars-live' : '');
-            row.setAttribute('role', json.can_vote ? 'group' : 'img');
-
-            const shown = r.stars === null ? 0 : r.stars;
-            const mine = json.my_vote > 0 ? json.my_vote / 2 : 0;
-
-            // Paint to a value in stars (0..5), filling halves.
-            const paint = (value) => {
-                [...row.querySelectorAll('.star')].forEach((st, i) => {
-                    const full = value >= i + 1;
-                    const half = !full && value >= i + 0.5;
-                    st.classList.toggle('star-full', full);
-                    st.classList.toggle('star-half', half);
-                });
-            };
-
-            for (let i = 0; i < 5; i++) {
-                const st = document.createElement('span');
-                st.className = 'star';
-                st.setAttribute('aria-hidden', 'true');
-                // Two hit areas per star: left half and right half.
-                if (json.can_vote) {
-                    [0.5, 1].forEach(part => {
-                        const hit = document.createElement('button');
-                        hit.type = 'button';
-                        hit.className = 'star-hit star-hit-' + (part === 0.5 ? 'l' : 'r');
-                        const value = i + part;
-                        hit.title = value === 1 ? t('js.app.stars_one') : t('js.app.stars_many', {n: value});
-                        hit.setAttribute('aria-label', t('js.app.rate_aria', {n: value}));
-                        hit.addEventListener('mouseenter', () => paint(value));
-                        hit.addEventListener('focus', () => paint(value));
-                        hit.addEventListener('click', () => castVote(hash, Math.round(value * 2), wrap));
-                        st.appendChild(hit);
-                    });
-                }
-                row.appendChild(st);
-            }
-            // Leaving puts back what is actually stored — the visitor's own rating if they have one,
-            // otherwise the average. A widget that keeps the last hovered value is telling them
-            // something they never did.
-            row.addEventListener('mouseleave', () => paint(mine || shown));
-            paint(mine || shown);
-            wrap.appendChild(row);
-
-            const label = document.createElement('div');
-            label.className = 'rep-label';
-            if (r.stars === null) {
-                label.classList.add('text-muted');
-                label.textContent = r.total === 0
-                    ? t('js.app.stars_nobody_yet')
-                    : t('js.app.stars_needed', {n: r.total, min: r.min_votes});
-            } else {
-                label.textContent = r.stars.toFixed(1) + ' / 5 · '
-                    + (r.total === 1 ? t('js.app.ratings_one') : t('js.app.ratings_many', {n: r.total}))
-                    + (mine ? ' · ' + t('js.app.stars_yours', {n: mine}) : '');
-            }
-            wrap.appendChild(label);
-            row.title = r.stars === null
-                ? t('js.app.stars_so_far', {n: r.total, min: r.min_votes})
-                : (r.total === 1 ? t('js.app.rep_stars_title_one', {stars: r.stars.toFixed(1)}) : t('js.app.rep_stars_title_many', {stars: r.stars.toFixed(1), n: r.total}));
-            if (!json.can_vote && json.vote_refusal) row.title += ' — ' + json.vote_refusal;
-            return wrap;
-        }
-
-        async function castVote(hash, dir, holder) {
-            const csrf = ($id('search-csrf') || {}).value || '';
-            const r = await postJson('rate_hash', { hash, vote: dir, csrf_token: csrf });
-            if (!r) return;
-            if (r.captcha) {
-                // The points scheme decided this visitor needs a challenge. Reopening the panel is
-                // the honest way to get one: the CAPTCHA belongs to the page, not to this button.
-                holder.textContent = t('js.app.vote_captcha');
-                return;
-            }
-            if (!r.success) {
-                const why = document.createElement('div');
-                why.className = 'rep-label text-muted';
-                why.textContent = r.error || t('js.app.vote_failed');
-                holder.appendChild(why);
-                return;
-            }
-            // Redraw from the server's answer, never from an optimistic guess: the whole value of a
-            // score is that it is the server's count and not the browser's.
-            openInfo(hash, null);
-        }
-
-        /**
-         * The review state of a description, as an icon beside the name.
-         *
-         * Inline SVG rather than an icon font. The shapes are the familiar ones — a clock, a tick in
-         * a circle, a cross in a circle — but pulling in a whole font (and another CDN host, past a
-         * CSP that currently allows none for fonts) to draw three 14-pixel glyphs is a lot of
-         * machinery for very little. This renders identically, costs nothing, inherits its colour
-         * from the class, and cannot fail to load.
-         *
-         * Colour alone is never the message: each icon carries a title, and the shapes differ, so it
-         * still reads for somebody who cannot tell the three colours apart.
-         */
-        function contentStatusIcon(status) {
-            const PATHS = {
-                // clock — waiting
-                pending: 'M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z',
-                // check
-                approved: 'M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.235.235 0 0 1 .02-.022z',
-                // cross
-                rejected: 'M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z',
-            };
-            const TITLES = {
-                pending:  t('js.app.cs_pending'),
-                approved: t('js.app.cs_approved'),
-                rejected: t('js.app.cs_rejected'),
-            };
-            const NS = 'http://www.w3.org/2000/svg';
-            const svg = document.createElementNS(NS, 'svg');
-            svg.setAttribute('viewBox', '0 0 16 16');
-            svg.setAttribute('width', '13');
-            svg.setAttribute('height', '13');
-            svg.setAttribute('role', 'img');
-            svg.setAttribute('aria-label', TITLES[status]);
-            const ring = document.createElementNS(NS, 'circle');
-            ring.setAttribute('cx', '8'); ring.setAttribute('cy', '8'); ring.setAttribute('r', '7');
-            ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', 'currentColor'); ring.setAttribute('stroke-width', '1.2');
-            const path = document.createElementNS(NS, 'path');
-            path.setAttribute('d', PATHS[status]);
-            path.setAttribute('fill', 'currentColor');
-            svg.appendChild(ring); svg.appendChild(path);
-            const wrap = document.createElement('span');
-            wrap.className = 'search-cs-icon search-cs-' + status;
-            wrap.title = TITLES[status];
-            wrap.appendChild(svg);
-            return wrap;
-        }
-
-        async function openInfo(hash, name) {
-            if (!infoOverlay) return;
-            const body = $id('info-body'), title = $id('info-title');
-            infoHash = hash;
-            writeUrl(curPage, 'push');
-            title.textContent = name || t('js.app.details');
-            body.textContent = t('js.common.loading');
-            infoOverlay.hidden = false;
-            document.addEventListener('keydown', escInfo);
-            const json = await getJson('index_info&hash=' + encodeURIComponent(hash));
-            if (infoOverlay.hidden || infoHash !== hash) return;
-            body.textContent = '';
-            if (!json || !json.success) {
-                body.textContent = (json && json.error) || t('js.app.details_load_failed');
-                return;
-            }
-            title.textContent = json.name || name || t('js.app.details');
-
-            // The panel always has the hash, so the star is always available here even when the row
-            // could not carry one.
-            const infoActs = $id('info-acts');
-            if (infoActs) {
-                infoActs.textContent = '';
-                if (canFav && window.Favourites) infoActs.appendChild(window.Favourites.makeStar(hash, !!json.fav));
-                if (canFavWho && typeof window.openWhoFavourited === 'function') {
-                    const w = document.createElement('button');
-                    w.type = 'button';
-                    w.className = 'search-share';
-                    w.title = t('js.fav.who_title');
-                    w.textContent = t('js.fav.who');
-                    w.addEventListener('click', () => window.openWhoFavourited(hash));
-                    infoActs.appendChild(w);
-                }
-            }
-
-            const st = json.stats || {};
-
-            // 1. the numbers people actually opened this for, before anything else.
-            //
-            // Seeders and leechers used to be one sentence three quarters of the way down a flat
-            // list, below "Times seen". Reading order is a claim about importance, and that one was
-            // wrong: whether anything is sharing it is the first question, and every other field is
-            // context for the answer.
-            const strip = document.createElement('div');
-            strip.className = 'info-strip';
-            const statCell = (value, label, cls) => {
-                const c = document.createElement('div');
-                c.className = 'info-stat' + (cls ? ' ' + cls : '');
-                const v = document.createElement('span');
-                v.className = 'info-stat-v';
-                if (value instanceof Node) v.appendChild(value); else v.textContent = value;
-                const l = document.createElement('span');
-                l.className = 'info-stat-l';
-                l.textContent = label;
-                c.appendChild(v); c.appendChild(l);
-                return c;
-            };
-            const seedV = document.createElement('span');
-            seedV.id = 'info-sl-seed';
-            seedV.textContent = st.seeders == null ? '—' : Number(st.seeders).toLocaleString();
-            const leechV = document.createElement('span');
-            leechV.id = 'info-sl-leech';
-            leechV.textContent = st.leechers == null ? '—' : Number(st.leechers).toLocaleString();
-            strip.appendChild(statCell(seedV, t('js.app.stat_seeders'), 'info-stat-seed'));
-            strip.appendChild(statCell(leechV, t('js.app.stat_leechers'), 'info-stat-leech'));
-            if (st.completed != null) strip.appendChild(statCell(Number(st.completed).toLocaleString(), t('js.app.stat_completed')));
-            if (st.total_size != null) strip.appendChild(statCell(fmtBytesPub(st.total_size), t('js.app.stat_size')));
-            if (st.files_count != null) strip.appendChild(statCell(Number(st.files_count).toLocaleString(), st.files_count === 1 ? t('js.app.stat_file') : t('js.app.stat_files')));
-            body.appendChild(strip);
-
-            // 2. the two chips that qualify those numbers, on one line with the refresh control.
-            const chips = document.createElement('div');
-            chips.className = 'info-chips';
-            if (json.whitelisted) {
-                const chip = document.createElement('span');
-                chip.className = 'info-chip info-chip-ok';
-                chip.textContent = t('js.app.chip_registered');
-                chip.title = t('js.app.chip_registered_title');
-                chips.appendChild(chip);
-            }
-            if (st.last_seen) {
-                const chip = document.createElement('span');
-                chip.className = 'info-chip';
-                chip.textContent = t('js.app.last_seen', {date: fmtDatePub(st.last_seen)});
-                chips.appendChild(chip);
-            }
-            if (json.can_refresh) {
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'btn btn-secondary btn-small info-refresh';
-                btn.textContent = t('js.app.refresh');
-                btn.title = t('js.app.refresh_title');
-                btn.addEventListener('click', async () => {
-                    btn.disabled = true;
-                    const prev = btn.textContent;
-                    btn.textContent = t('js.app.asking');
-                    const r = await postJson('index_info&hash=' + encodeURIComponent(hash), {
-                        op: 'refresh', csrf_token: ($id('search-csrf') || {}).value || '' });
-                    if (r && r.success) {
-                        seedV.textContent = Number(r.seeders).toLocaleString();
-                        leechV.textContent = Number(r.leechers).toLocaleString();
-                        btn.textContent = t('js.app.refreshed');
-                    } else {
-                        btn.textContent = (r && r.error) || t('js.app.no_answer');
-                    }
-                    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 4000);
-                });
-                chips.appendChild(btn);
-            }
-            if (chips.children.length) body.appendChild(chips);
-
-            // 3. where it came from
-            if (json.source_url) {
-                const row = document.createElement('div');
-                row.className = 'rt-src-row info-section';
-                const lab = document.createElement('strong');
-                lab.textContent = t('js.app.source_label');
-                const a = document.createElement('a');
-                a.className = 'rt-src-url';
-                a.href = json.source_url;
-                a.textContent = json.source_url;
-                a.rel = 'nofollow noopener noreferrer ugc';
-                a.target = '_blank';
-                // Not our link. Off-site ones get the confirmation; the operator's own trusted
-                // domains do not, because warning about your own site teaches people to click through.
-                if (!json.source_trusted) a.setAttribute('data-external', '1');
-                if (json.source_auto) {
-                    // Added by the importer, not typed into the form. Saying so is the difference
-                    // between "the uploader vouched for this link" and "this is where we found it".
-                    const tag = document.createElement('span');
-                    tag.className = 'info-chip info-chip-auto';
-                    tag.textContent = t('js.app.source_auto');
-                    tag.title = json.source_auto_note || t('js.app.source_auto_title');
-                    row.appendChild(lab); row.appendChild(a); row.appendChild(tag);
-                } else {
-                    row.appendChild(lab); row.appendChild(a);
-                }
-                body.appendChild(row);
-            }
-
-            // 2. what it is
-            if (json.description_html) {
-                const d = document.createElement('div');
-                d.className = 'rt-body info-section';
-                // Built on the server by includes/richtext.php out of fully escaped input with a
-                // fixed tag whitelist. This is the only assignment of innerHTML on the public pages.
-                d.innerHTML = json.description_html;
-                body.appendChild(d);
-            } else if (!json.source_url) {
-                const none = document.createElement('p');
-                none.className = 'text-muted info-section';
-                none.textContent = t('js.app.no_description');
-                body.appendChild(none);
-            }
-
-            // 3. what people think of it
-            //
-            // Two modes share this block. Whichever it is, the COUNT is always shown next to the
-            // score: "5 stars" and "5 stars from one vote" are different claims, and a widget that
-            // renders them identically is making the stronger one on no evidence.
-            if (json.rating) {
-                const rep = document.createElement('div');
-                rep.className = 'rep-block info-section';
-                const r = json.rating;
-
-                if (r.mode === 'stars') {
-                    rep.appendChild(buildStars(r, json, hash));
-                } else if (r.percent !== null) {
-                    const bar = document.createElement('div');
-                    bar.className = 'rep-bar';
-                    bar.setAttribute('role', 'img');
-                    bar.setAttribute('aria-label', t('js.app.rating_aria', {percent: r.percent, total: r.total}));
-                    const up = document.createElement('span');
-                    up.className = 'rep-bar-up';
-                    up.style.width = r.percent + '%';
-                    bar.appendChild(up);
-                    rep.appendChild(bar);
-                    const label = document.createElement('div');
-                    label.className = 'rep-label';
-                    label.textContent = t('js.app.rating_label', {percent: r.percent, up: r.up, down: r.down});
-                    rep.appendChild(label);
-                } else {
-                    const label = document.createElement('div');
-                    label.className = 'rep-label text-muted';
-                    label.textContent = r.total === 0
-                        ? t('js.app.no_ratings')
-                        : t('js.app.ratings_needed', {total: r.total, min: r.min_votes});
-                    rep.appendChild(label);
-                }
-
-                if (json.can_vote && r.mode !== 'stars') {
-                    const acts = document.createElement('div');
-                    acts.className = 'rep-acts';
-                    const mk = (dir, glyph, title) => {
-                        const b = document.createElement('button');
-                        b.type = 'button';
-                        b.className = 'btn btn-secondary btn-small rep-btn' + (json.my_vote === dir ? ' rep-mine' : '');
-                        b.textContent = glyph;
-                        b.title = title;
-                        b.addEventListener('click', () => castVote(hash, dir, rep));
-                        return b;
-                    };
-                    acts.appendChild(mk(1, '▲ ' + t('js.app.vote_good'), t('js.app.vote_good_title')));
-                    acts.appendChild(mk(-1, '▼ ' + t('js.app.vote_bad'), t('js.app.vote_bad_title')));
-                    rep.appendChild(acts);
-                } else if (!json.can_vote && json.vote_refusal) {
-                    const why = document.createElement('div');
-                    why.className = 'rep-label text-muted';
-                    why.textContent = json.vote_refusal;
-                    rep.appendChild(why);
-                }
-                body.appendChild(rep);
-            }
-
-            // 4. the rest: provenance and identity, under a heading so it reads as a footnote to the
-            //    strip above rather than as another list of equally important facts.
-            const grid = document.createElement('div');
-            grid.className = 'info-grid';
-            if (st.peak_seeders != null) grid.appendChild(infoRow(t('js.app.row_peak_seeders'), Number(st.peak_seeders).toLocaleString()));
-            if (st.first_seen) grid.appendChild(infoRow(t('js.app.row_first_seen'), fmtDatePub(st.first_seen)));
-            if (st.seen_count != null) grid.appendChild(infoRow(t('js.app.row_times_seen'), Number(st.seen_count).toLocaleString()));
-            const hashEl = document.createElement('code');
-            hashEl.className = 'info-hash';
-            hashEl.textContent = json.info_hash;
-            grid.appendChild(infoRow(t('js.app.row_info_hash'), hashEl));
-            const det = document.createElement('div');
-            det.className = 'info-section';
-            const detH = document.createElement('div');
-            detH.className = 'info-sub';
-            detH.textContent = t('js.app.record_heading');
-            det.appendChild(detH);
-            det.appendChild(grid);
-            body.appendChild(det);
-
-            // 5. the files, last, because the panel is about the torrent and this is the long part
-            if (json.can_files && st.files_count) {
-                const det = document.createElement('details');
-                det.className = 'rt-collapse info-section';
-                det.open = true;
-                const sum = document.createElement('summary');
-                // The torrent's OWN file count, which is not the length of the list below it: the
-                // catalogue stores only the first few thousand paths of a huge torrent, so an
-                // 18 000-file torrent has 5 000 rows here. The heading is rewritten with both
-                // numbers as pages arrive rather than promising a count nothing can deliver.
-                const totalFiles = Number(st.files_count) || 0;
-                sum.textContent = t('js.app.files_count', {n: totalFiles.toLocaleString()});
-                det.appendChild(sum);
-                const holder = document.createElement('div');
-                holder.className = 'rt-body';
-                holder.textContent = t('js.common.loading');
-                det.appendChild(holder);
-                body.appendChild(det);
-                // Paged: the first slice now, and the next one when the mode says so — on reaching
-                // the end of the list (an IntersectionObserver on a sentinel), on the button, or
-                // straight away until the server stops answering with more. The tree is rebuilt from
-                // everything loaded so far — cheap next to the fetch, and it keeps one code path for
-                // the folder structure — with a leaf cap so the rebuild stays cheap at a high total.
-                const allFiles = [];
-                // `stalled` is set by a failed page and stops the AUTOMATIC asking only — the button
-                // stays live. Without it a 429 from the shared search bucket met an observer that
-                // re-fires whenever the sentinel is on screen, and the answer to being rate-limited
-                // was another request.
-                let next = 0, more = false, loading = false, stalled = false;
-                const tree = document.createElement('div');
-                const notes = document.createElement('div');
-                const note = (text) => {
-                    const p = document.createElement('p');
-                    p.className = 'text-muted';
-                    p.textContent = text;
-                    notes.appendChild(p);
-                };
-                const foot = document.createElement('div');
-                foot.className = 'files-more';
-                const btn = document.createElement('button');
-                btn.type = 'button'; btn.className = 'btn btn-secondary btn-small';
-                const sentinel = document.createElement('div');
-                sentinel.className = 'files-sentinel';
-                foot.appendChild(btn); foot.appendChild(sentinel);
-                const render = () => {
-                    tree.replaceChildren(buildTreePub(allFiles, []));
-                    sum.textContent = (totalFiles && allFiles.length < totalFiles)
-                        ? t('js.app.files_count_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
-                        : t('js.app.files_count', {n: (totalFiles || allFiles.length).toLocaleString()});
-                    btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
-                    btn.disabled = loading;
-                    foot.hidden = !more;
-                };
-                const loadMore = async () => {
-                    if (loading || (!more && next > 0)) return false;
-                    loading = true; if (next > 0) render();
-                    const fj = await getJson('index_files&hash=' + encodeURIComponent(hash) + '&offset=' + next);
-                    loading = false;
-                    if (infoOverlay.hidden || infoHash !== hash) return false;
-                    if (!fj || !fj.success) {
-                        if (next === 0) { holder.textContent = t('js.app.no_file_list'); return false; }
-                        // Leave `more` alone: the reader may still press the button. It is the
-                        // unattended asking that stops, and render() puts the button back to
-                        // "Load more" instead of leaving it stuck on "Loading…" for ever.
-                        stalled = true; render();
-                        return false;
-                    }
-                    stalled = false;
-                    (fj.files || []).forEach(f => allFiles.push(f));
-                    next = typeof fj.next === 'number' ? fj.next : allFiles.length;
-                    // More pages exist AND this visitor may ask for them (index.files_all); without
-                    // the grant the list stops here and says so. A capped reply never claims
-                    // truncation, so this is already false when the site's own total ended the list.
-                    more = !!fj.truncated && !!fj.can_more;
-                    if (next === 0 || !allFiles.length) { holder.textContent = t('js.app.no_file_list'); return false; }
-                    // The notes hang below the tree and are written AFTER the holder is emptied of
-                    // its "Loading…". They used to be appended before that line, so the one message
-                    // the reader needed was wiped by the same call that attached the list.
-                    if (!tree.parentNode) { holder.textContent = ''; holder.appendChild(tree); holder.appendChild(foot); holder.appendChild(notes); }
-                    if (fj.truncated && !fj.can_more) note(t('js.app.files_truncated'));
-                    // Not an error and not a permission: the list simply ends short of the count in
-                    // the heading, because that is all the catalogue ever stored for this torrent.
-                    if (fj.stored_short) note(t('js.app.files_stored_cap', {n: Number(fj.stored_total || allFiles.length).toLocaleString()}));
-                    // The site's own ceiling, not a permission and not the worker's storage cap:
-                    // there are more rows and this page is not going to fetch them.
-                    if (fj.capped) note(t('js.app.files_cap_reached', {n: Number(fj.max || allFiles.length).toLocaleString()}));
-                    render();
-                    return true;
-                };
-                // One request at a time, and a failure ends the chain rather than retrying it: every
-                // page spends a token from the per-IP bucket this endpoint shares with the search box.
-                const loadAll = async () => { while (more && !stalled) { if (!await loadMore()) break; } };
-                btn.addEventListener('click', loadMore);
-                if (filesMode === 'scroll' && 'IntersectionObserver' in window) {
-                    new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore(); },
-                                             { root: null, rootMargin: '200px' }).observe(sentinel);
-                }
-                await loadMore();
-                if (filesMode === 'all') await loadAll();
-            }
-        }
-
-        if (infoOverlay) {
-            infoOverlay.addEventListener('click', (e) => { if (e.target === infoOverlay) closeInfo(); });
-            const ic = $id('info-close');
-            if (ic) ic.addEventListener('click', closeInfo);
-        }
 
         // ── Share ───────────────────────────────────────────────────────────
         //
@@ -3445,17 +3490,6 @@ const getJson = async (endpoint) => {
         // page has a Share button too, and initSearch() returns before its first line.
         const shareViewBtn = $id('search-share');
         if (shareViewBtn) shareViewBtn.addEventListener('click', () => share(shareViewBtn, location.href, t('js.app.share_link')));
-        const shareOneBtn = $id('info-share');
-        if (shareOneBtn) shareOneBtn.addEventListener('click', () => {
-            // Built from the hash, not from location.href: the panel is a link to ONE torrent, and
-            // carrying the sender's query and page number into it would share their search as well.
-            let u;
-            try { u = new URL(location.href); } catch (e) { return; }
-            OWNED.forEach(k => u.searchParams.delete(k));
-            if (infoHash) u.searchParams.set('hash', infoHash);
-            u.hash = '';
-            share(shareOneBtn, u.href, t('js.app.share_link_one'));
-        });
 
         async function openFiles(hash, name) {
             if (!overlay) return;
@@ -3580,17 +3614,20 @@ const getJson = async (endpoint) => {
      * none of that is part of "here is somebody's profile".
      */
     function initProfileShare() {
-        const btn = $id('profile-share');
-        const body = $id('profile-body');
-        if (!btn || !body) return;
-        btn.addEventListener('click', () => {
-            let u;
-            try { u = new URL(location.href); } catch (e) { return; }
-            u.search = '';
-            u.hash = '';
-            u.searchParams.set('action', 'u');
-            u.searchParams.set('name', body.dataset.user || '');
-            share(btn, u.href, t('js.app.share_link_profile'));
+        // Every button that hands over a profile address, wherever it sits: the profile's own head
+        // and the account page, where the reader is when they think "where IS my profile".
+        document.querySelectorAll('.js-profile-share').forEach(btn => {
+            const name = btn.dataset.user || '';
+            if (!name) return;
+            btn.addEventListener('click', () => {
+                let u;
+                try { u = new URL(location.href); } catch (e) { return; }
+                u.search = '';
+                u.hash = '';
+                u.searchParams.set('action', 'u');
+                u.searchParams.set('name', name);
+                share(btn, u.href, t('js.app.share_link_profile'));
+            });
         });
     }
 
@@ -3599,6 +3636,7 @@ const getJson = async (endpoint) => {
         initRegister();
         initAccount();
         initReset();
+        initInfoPanel();   // before initSearch(): the search page hands it a hook once it is wired
         initSearch();
         initProfileShare();
     });

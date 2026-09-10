@@ -127,6 +127,16 @@ if (count($accLangs) > 1):
             <label class="search-check acc-check"><input type="checkbox" id="acc-fav-public"<?= (int)($meUser['fav_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
                 <span><?= _h('account.fav_public_label') ?></span></label>
             <p class="text-muted acc-verify-note"><?= __('account.fav_public_hint', ['name' => sanitize($meUser['username'])]) ?></p>
+            <?php /* The address the sentence above names, as the two things somebody actually wants
+                     to do with it: open it, or hand it to somebody. It was a <code> span and nothing
+                     else — the page told the reader where their profile is and left them to type it. */ ?>
+            <div class="acc-profile-links">
+                <a class="btn btn-secondary btn-small" href="<?= $baseUrl ?>?action=u&amp;name=<?= urlencode((string)$meUser['username']) ?>"><?= _h('account.open_profile') ?></a>
+                <?php if (($cfg['search_share_enabled'] ?? '1') === '1'): ?>
+                <button type="button" class="search-share js-profile-share" data-user="<?= sanitize((string)$meUser['username']) ?>"
+                        title="<?= _h('profile.share_title') ?>"><?= _h('search.share') ?></button>
+                <?php endif; ?>
+            </div>
             <?php endif; ?>
             <?php if ($accFav['who_ok']): ?>
             <label class="search-check acc-check"><input type="checkbox" id="acc-fav-listed"<?= (int)($meUser['fav_listed'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
@@ -272,3 +282,7 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
 </form>
 </div><?php /* /#acc-pane-rest */ ?>
 <?php endif; ?>
+
+<?php /* The Info panel, so a row on these lists can answer "what IS this?" without sending the
+         reader back to the search page. Same markup, same script, same overlay — see the partial. */ ?>
+<?php include __DIR__ . '/../partials/info_overlay.php'; ?>
