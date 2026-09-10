@@ -4,6 +4,85 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.42.2] — 2026-09-10
+
+### Fixed — the star had been on a line of its own since the day it was added
+
+`.search-c-actions` was 13.5 em, and its comment said what it had been measured against: three
+buttons. The star arrived later and nobody re-measured. The set needs 204 px in English and 211 px
+with the Polish "Kopiuj"; the cell spends 24 px of its own on padding, which left 192 px, so the
+star wrapped under Info on **every** screen width, not only on small ones. The column is 15 em now
+and the row is `flex-wrap: nowrap`, so a label that grows shrinks the buttons rather than dropping
+the star to a second line. Phone widths keep the wrap: there the table already scrolls sideways, and
+a second line inside the column beats a star pushed off the edge of the screen.
+
+`scratchpad/shots/fav_check.js` now asserts the geometry — same line as Info, after it, inside its
+own column — because this is exactly the class of bug that a green suite of API tests cannot see.
+
+### Fixed — the results table was one `<col>` short whenever ratings were shown
+
+The `<thead>` added a rating column under `repEnabled() && repShowInResults()`. The `<colgroup>`
+never did. Every declared width after the third column therefore landed on the column to its left —
+"last seen" got the rating's, the actions column got "last seen"'s — and the last column, which had
+no `<col>` left to claim, was sized from whatever space happened to be over. The question is asked
+once now, into `$repCol`, and both the colgroup and the header read that one answer.
+
+### Fixed — the name column could be rendered zero pixels wide on a phone
+
+With `table-layout: fixed` the unspecified column gets the leftovers, and under 768 px the specified
+ones already added up to more than the table's own `min-width`. The leftovers were nothing: the
+torrent name — the one column a reader is looking for — came out 0 px wide and invisible. The mobile
+rules now name every column, including the name, and let the wrap scroll the difference.
+
+### Fixed — the Info panel's star sat marooned in the middle of the panel head
+
+Two `margin-left: auto` in one flex row — one on `.info-acts`, one on `.info-share` — do not both
+push right; they split the free space between them, which is why the star and "who has this" sat in
+the middle of the head with a gap on either side. One auto margin now, and the star, "who has this",
+Share and the close button travel together to the right edge.
+
+### Fixed — the favourites and "my torrents" lists were ragged text, not columns
+
+Every row sized its own three facts to their own content, so the size, the swarm and the hash landed
+at a different x on every line of the list. `.pf-meta` is a three-column grid now, right-aligned with
+tabular figures, and the swarm cell is always drawn — an unknown swarm is a dash, because a missing
+cell would slide the hash into the column beside it. The action buttons get a floor of their own so
+Magnet and the star line up down the list. The same lists, on the profile page and on both account
+tabs, read like the search results they sit next to.
+
+### Fixed — the filter box on those lists was a white browser default
+
+`.profile-search` carried a width and nothing else. The dark styling on this site lives on
+`.form-group input`, and none of these three lists is a form — so the box was white on the profile
+page, white on both account tabs and white inside the "who has this" overlay. The class styles
+itself now, and so does the sort `<select>` beside it.
+
+### Fixed — a privacy tick that did not line up with the sentence it belongs to
+
+The two boxes under Account → Privacy were bare `<input type="checkbox">` while the mail preferences
+directly above them use the site's own drawn box, and the native one sat 7 px above the centre of
+the line it belongs to. They are the same control now, aligned to the **first** line of the label, so
+a two-line sentence keeps its tick beside its first word instead of beside its second. The whitelist
+page's "show this on my profile" box, the third of the three, changed with them.
+
+### Changed — an empty "who has this" says why it is empty
+
+The list only ever names people who agreed to be named, and the count deliberately does not
+differentiate — so an empty list under a non-zero count is correct and used to look like a fault.
+It now says so in as many words, and points at where the reader decides for themselves.
+
+### Fixed — `tests/install_test.php` could not reach a database server that is not on 3306
+
+It read the port from a `DB_PORT` constant, which a config written as a bare DSN never defines, and
+fell back to 3306. On a development machine whose server listens on 3307 the suite exited 2 with
+"cannot reach the database server" — a red suite that says nothing at all about `install.php`. The
+port now comes from the connection the tests are already using.
+
+### Fixed — "&middot;" printed as itself in the account page's email hint
+
+One half of that line went through the escaping helper and the other through the plain one, so the
+first separator arrived as literal text and the second as a dot.
+
 ## [1.42.1] — 2026-09-10
 
 ### Fixed — a fresh install came up missing nineteen columns and a whole group

@@ -124,12 +124,12 @@ if (count($accLangs) > 1):
         <div class="acc-mail-prefs acc-privacy-block" id="acc-privacy">
             <h3 class="acc-sub"><?= _h('account.fav_privacy') ?></h3>
             <?php if ($accFav['may_publish']): ?>
-            <label class="acc-check"><input type="checkbox" id="acc-fav-public"<?= (int)($meUser['fav_public'] ?? 0) === 1 ? ' checked' : '' ?>>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-fav-public"<?= (int)($meUser['fav_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
                 <span><?= _h('account.fav_public_label') ?></span></label>
             <p class="text-muted acc-verify-note"><?= __('account.fav_public_hint', ['name' => sanitize($meUser['username'])]) ?></p>
             <?php endif; ?>
             <?php if ($accFav['who_ok']): ?>
-            <label class="acc-check"><input type="checkbox" id="acc-fav-listed"<?= (int)($meUser['fav_listed'] ?? 0) === 1 ? ' checked' : '' ?>>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-fav-listed"<?= (int)($meUser['fav_listed'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
                 <span><?= _h('account.fav_listed_label') ?></span></label>
             <p class="text-muted acc-verify-note"><?= __('account.fav_listed_hint') ?></p>
             <?php endif; ?>
@@ -246,7 +246,7 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
         <input type="password" id="acc-cur-pass" autocomplete="current-password" maxlength="200" required>
     </div>
     <div class="form-group">
-        <label for="acc-new-email"><?= _h('account.email') ?> <small class="form-hint"><?= _h('account.email_hint') ?><?=
+        <label for="acc-new-email"><?= _h('account.email') ?> <small class="form-hint"><?= __('account.email_hint') ?><?=
         $accHasEmail ? __('account.email_hint_confirm')
             . ($accCooldownDays > 0 ? __('account.email_hint_cooldown', ['days' => $accCooldownDays]) : '') : '' ?></small></label>
         <input type="email" id="acc-new-email" maxlength="190" autocomplete="email" value="<?= sanitize((string)($meUser['email'] ?? '')) ?>">

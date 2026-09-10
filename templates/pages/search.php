@@ -15,6 +15,11 @@ $meUser = currentUser($db);
 // which it reads — the first version of this line sat above it and every gate answered "not signed
 // in" for everybody.
 $favCtx = favContext($db, $cfg, $meUser);
+// The rating column, asked once. It used to be asked only in the <thead>, and the <colgroup> below
+// knew nothing about it: with ratings on, every width after the third column landed on the column
+// to its left and the actions column — the last one — was left with whatever space happened to be
+// over. One name, two uses, so the two cannot drift apart again.
+$repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults($cfg);
 ?>
 <h1><?= _h('search.h1') ?></h1>
 
@@ -97,13 +102,13 @@ $favCtx = favContext($db, $cfg, $meUser);
 <div class="transparency-table-wrap">
     <table class="transparency-table search-table" id="search-table" hidden>
         <colgroup>
-            <col class="search-c-name"><col class="search-c-size"><col class="search-c-sl"><col class="search-c-seen"><?= $canMagnet ? '<col class="search-c-actions">' : '' ?>
+            <col class="search-c-name"><col class="search-c-size"><col class="search-c-sl"><?= $repCol ? '<col class="search-c-rep">' : '' ?><col class="search-c-seen"><?= $canMagnet ? '<col class="search-c-actions">' : '' ?>
         </colgroup>
         <thead><tr>
             <th class="search-sortable" data-sort="name"><?= _h('search.col_name') ?> <span class="search-sort-icon" aria-hidden="true"></span></th>
             <th class="search-sortable" data-sort="size"><?= _h('search.col_size') ?> <span class="search-sort-icon" aria-hidden="true"></span></th>
             <th class="search-sortable" data-sort="seeders" title="<?= _h('search.col_sl_title') ?>"><?= _h('search.col_sl') ?> <span class="search-sort-icon" aria-hidden="true"></span></th>
-            <?php if (function_exists('repEnabled') && repEnabled($cfg) && repShowInResults($cfg)): ?>
+            <?php if ($repCol): ?>
             <th title="<?= _h('search.col_rating_title') ?>"><?= _h('search.col_rating') ?></th>
             <?php endif; ?>
             <th class="search-sortable" data-sort="last"><?= _h('search.col_last') ?> <span class="search-sort-icon" aria-hidden="true"></span></th><?= $canMagnet ? '<th></th>' : '' ?>

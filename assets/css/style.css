@@ -1763,7 +1763,10 @@ body.page-search .container { max-width: 86em; }
     white-space: nowrap; }
 .search-share:hover { color: var(--accent); border-color: var(--accent); }
 .search-share.copied { color: var(--success, #4caf50); border-color: var(--success, #4caf50); }
-.info-share { margin-left: auto; }
+/* No `margin-left: auto` here. Two auto margins in one flex row — one on .info-acts, one here —
+   split the free space between them, which is why the star and "Who has this" sat marooned in the
+   middle of the head with a gap on either side. One auto margin, on .info-acts, and everything from
+   the star rightwards travels together to the right edge. */
 .share-url { display: block; width: 100%; margin-top: 0.35rem; font-size: 0.78rem;
     font-family: var(--mono, monospace); padding: 0.25rem 0.4rem; border: 1px solid var(--accent);
     border-radius: 4px; background: var(--bg-input, #111); color: var(--text); }
@@ -1784,9 +1787,13 @@ body.page-search .container { max-width: 86em; }
 .search-c-size { width: 6.5em; }
 .search-c-sl { width: 6.5em; }
 .search-c-seen { width: 10em; }
-/* Three buttons at their real rendered widths plus the cell padding. Measured against the widest
-   labels rather than eyeballed, with a little headroom so a longer label wraps instead of escaping. */
-.search-c-actions { width: 13.5em; }
+/* Only drawn when ratings are shown in results — the colgroup asks the same question the <thead>
+   does, from the same variable. */
+.search-c-rep { width: 5.5em; }
+/* Three buttons AND the star at their real rendered widths plus the cell padding. Measured, not
+   eyeballed: 204px in English, 211px with the Polish "Kopiuj", and the cell spends 24px of its own
+   on padding. 13.5em left 192px, which is why the star spent three releases on a second line. */
+.search-c-actions { width: 15em; }
 .search-name { word-break: break-word; }
 .search-name > span:first-child { margin-right: 0.15rem; }
 .search-num { white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -1812,7 +1819,10 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
    height, so as soon as a long name wrapped to a second line the buttons stayed at their own height
    and sat across the row's divider. The cell stays a cell; the div inside it does the laying out. */
 .search-c-actions-cell { vertical-align: middle; }
-.search-c-actions-inner { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+/* nowrap, because the star belongs beside Info and not under it. The column above is wide enough
+   for the whole set in both languages; wrapping comes back at phone widths, where the table scrolls
+   sideways and a second line inside the column beats a star pushed off the screen. */
+.search-c-actions-inner { display: flex; flex-wrap: nowrap; gap: 0.35rem; }
 /* Centred, not top-aligned. A wrapped name makes the row taller and the numbers beside it read
    better in the middle of that height than pinned to its first line. */
 .search-table td { vertical-align: middle; }
@@ -1846,7 +1856,7 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
 }
 .files-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
-.files-head h3 { margin: 0; font-size: 0.95rem; color: var(--accent); word-break: break-word; }
+.files-head h3 { margin: 0; min-width: 0; font-size: 0.95rem; color: var(--accent); word-break: break-word; }
 /* The Info dialog's title is the torrent's name, which is the thing being described — it earns a
    little more weight than the word "Files" does. */
 .info-box .files-head { padding: 0.9rem 1.1rem; }
@@ -1870,6 +1880,16 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
     .search-toolbar select { flex: 1 1 auto; }
     .search-total { margin-left: 0; flex-basis: 100%; text-align: right; }
     .search-table { min-width: 560px; }   /* the wrap scrolls horizontally instead of crushing columns */
+    /* Every other column is spelled out here, so the name gets a floor instead of the leftovers.
+       With table-layout: fixed the leftovers can be nothing: the sum of the numeric columns alone
+       already passed 560px, and the name — the one column a reader is actually looking for — was
+       rendered 0px wide and invisible. Narrower numbers, a named width for the name, and the wrap
+       scrolls the rest. */
+    .search-c-name { width: 15em; }
+    .search-c-size { width: 5.5em; }
+    .search-c-sl { width: 5.5em; }
+    .search-c-rep { width: 4.5em; }
+    .search-c-seen { width: 8.5em; }
     .trans-pagination { flex-wrap: wrap; row-gap: 0.4rem; }
     .trans-pagination button { padding: 0.3rem 0.6rem; }
     .trans-pagination .pg-edge { display: none; }   /* keep Prev/box/Next on small screens */
@@ -1886,8 +1906,10 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 }
 @media (max-width: 480px) {
     .search-act-btn { min-width: 3.4em; padding: 0.25rem 0.3rem; }
+    .search-c-name { width: 13em; }
     .search-c-seen { width: 7.5em; }
-    .search-c-actions { width: 8em; }
+    .search-c-actions { width: 10.5em; }
+    .search-c-actions-inner { flex-wrap: wrap; }
     .account-kv td:first-child { width: auto; }
     .home-stats-widget { margin-left: 0; margin-right: 0; }
 }
@@ -2125,7 +2147,25 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .profile-since, .profile-you { color: var(--text-muted); font-size: 0.82rem; }
 .profile-section { margin-bottom: 2rem; }
 .profile-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
-.profile-search { flex: 1 1 14rem; min-width: 10rem; }
+/* This box used to carry a width and nothing else, and a bare <input> on this site is a WHITE box:
+   the dark styling lives on `.form-group input`, and none of these three lists is a form. It was
+   white on the profile, white on both account tabs and white in the "who has this" overlay. The
+   same declarations the search toolbar uses, on the class itself, so context stops mattering. */
+.profile-search { flex: 1 1 14rem; min-width: 10rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--bg-code); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-family: inherit; font-size: 0.85rem;
+    transition: border-color 0.2s; }
+.profile-search:focus { outline: none; border-color: var(--accent); }
+.profile-search::placeholder { color: var(--text-muted); opacity: 1; }
+.profile-toolbar select {
+    padding: 0.45rem 0.6rem;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-family: inherit; font-size: 0.85rem; cursor: pointer;
+}
+.profile-toolbar select:focus { outline: none; border-color: var(--accent); }
+/* In the overlay it is the only control on its line, and flex-basis buys it nothing there. */
+.files-body > .profile-search { display: block; width: 100%; box-sizing: border-box; margin-bottom: 0.6rem; }
 .profile-total { margin-left: auto; color: var(--text-muted); font-size: 0.82rem; white-space: nowrap; }
 
 /* One row per torrent, three columns that collapse to one on a narrow screen. Deliberately not a
@@ -2136,9 +2176,20 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .pf-main { flex: 1 1 18rem; min-width: 0; display: flex; align-items: center; gap: 0.4rem; }
 .pf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-gone { color: var(--text-muted); font-style: italic; }
-.pf-meta { display: flex; gap: 0.8rem; color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
+/* Columns, not a flex run. Every row here used to size its own three facts to their own content,
+   so the sizes, the swarm and the hash landed at a different x on every line and the list read as
+   ragged text rather than as the table it is beside on the search page. Fixed columns, numbers to
+   the right, tabular figures — the same reading the search results give. The row's cell for the
+   swarm is always drawn, even when the number is unknown: a missing cell would slide the hash into
+   the column beside it. */
+.pf-meta { display: grid; grid-template-columns: 6em 7.5em 8em; gap: 0.8rem;
+    color: var(--text-muted); font-size: 0.8rem; white-space: nowrap;
+    text-align: right; font-variant-numeric: tabular-nums; }
 .pf-hash { font-family: var(--mono, monospace); }
-.pf-acts { display: flex; gap: 0.35rem; align-items: center; margin-left: auto; }
+/* min-width, not width: the favourites list carries Magnet and a star, the uploads list carries
+   Magnet and the visibility toggle, and only the first two have to line up with each other. */
+.pf-acts { display: flex; gap: 0.35rem; align-items: center; margin-left: auto;
+    min-width: 8.5em; justify-content: flex-end; }
 .pf-badge { font-size: 0.7rem; padding: 0.05rem 0.35rem; border-radius: 3px; border: 1px solid var(--border);
     color: var(--text-muted); white-space: nowrap; }
 .pf-badge-bad { color: #ff6b6b; border-color: #6b2a2a; }
@@ -2151,13 +2202,21 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .pf-vis-on { color: #4caf50; border-color: #2e5c30; }
 .pf-empty, .pf-loading { color: var(--text-muted); padding: 0.6rem 0; }
 
+.who-why { font-size: 0.8rem; line-height: 1.5; margin: 0.35rem 0 0; }
 .who-names { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0; }
 .who-name { padding: 0.15rem 0.5rem; border: 1px solid var(--border); border-radius: 12px;
     font-size: 0.82rem; text-decoration: none; }
 .who-name:hover { border-color: var(--accent); }
 
 .acc-tabs { margin-bottom: 1rem; }
-.acc-check { display: flex; align-items: flex-start; gap: 0.45rem; margin: 0.4rem 0; cursor: pointer; }
+/* The same checkbox the mail preferences above it use, for the same reason those carry the extra
+   class: .search-check is an inline-flex nowrap toolbar control, and a privacy sentence is two lines
+   of prose. The box is aligned to the FIRST line rather than to the middle of the block — with
+   align-items alone a two-line label pulled the tick down to sit beside the second line, and a
+   native checkbox sat 7px above the text it belongs to. */
+.acc-check { display: flex; align-items: flex-start; gap: 0.45rem; margin: 0.4rem 0; cursor: pointer;
+    white-space: normal; font-size: 0.9rem; line-height: 1.5; }
+.acc-check .search-check-box { margin-top: 0.18rem; }
 .acc-privacy-block { margin-top: 1rem; }
 
 /* === Partner integration guide (?action=apidocs) ===

@@ -55,7 +55,11 @@ check('… with the files those migrations need already loaded',
 // configuration of its own and cannot reach a database anybody cares about.
 $live = getDb();
 $dsnHost = defined('DB_HOST') ? DB_HOST : '127.0.0.1';
-$dsnPort = defined('DB_PORT') ? (string)DB_PORT : '3306';
+// The port comes from the connection the tests are already on, not from a constant that a config
+// written as a bare DSN — which is how the development machine's is written — never defines. The
+// fallback sent every run on a server listening anywhere but 3306 to a closed port, and the suite
+// exited 2 with "cannot reach the database server": a red suite that says nothing about install.php.
+$dsnPort = (string)($live->query('SELECT @@port')->fetchColumn() ?: (defined('DB_PORT') ? DB_PORT : '3306'));
 $dsnUser = defined('DB_USER') ? DB_USER : 'root';
 $dsnPass = defined('DB_PASS') ? DB_PASS : '';
 $base = "mysql:host=$dsnHost;port=$dsnPort;charset=utf8mb4";

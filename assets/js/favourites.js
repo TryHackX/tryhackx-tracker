@@ -157,11 +157,16 @@
         }
         row.appendChild(main);
 
+        // Three cells, always three: .pf-meta is a three-column grid, and a row that skipped the
+        // swarm cell used to push its hash into the swarm's column and break the alignment for the
+        // whole list. An unknown swarm is a dash, which is also what the reader is owed.
         var meta = el('div', { className: 'pf-meta' });
         meta.appendChild(el('span', { text: fmtBytes(r.total_size) }));
-        if (r.seeders !== null && r.seeders !== undefined) {
-            meta.appendChild(el('span', { text: r.seeders + ' / ' + (r.leechers === null || r.leechers === undefined ? '—' : r.leechers) }));
-        }
+        meta.appendChild(el('span', {
+            text: (r.seeders === null || r.seeders === undefined)
+                ? '—'
+                : r.seeders + ' / ' + (r.leechers === null || r.leechers === undefined ? '—' : r.leechers),
+        }));
         meta.appendChild(el('span', { className: 'pf-hash', text: (r.info_hash || '').slice(0, 12) }));
         row.appendChild(meta);
 
@@ -340,7 +345,13 @@
             if (!j || !j.success) { body.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
             var head = document.getElementById('who-total');
             if (head) head.textContent = j.total === 1 ? t('js.fav.who_one') : t('js.fav.who_count', { n: j.total.toLocaleString() });
-            if (!j.rows.length) { body.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.who_none') })); }
+            // An empty list here is a decision, not a failure, and it has to say so. The count above
+            // is the whole truth about how many people hold this; the names below are only those who
+            // agreed to be named. Without the second line the overlay reads as broken.
+            if (!j.rows.length) {
+                body.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.who_none') }));
+                body.appendChild(el('p', { className: 'text-muted who-why', text: t('js.fav.who_why') }));
+            }
             var ul = el('div', { className: 'who-names' });
             j.rows.forEach(function (r) {
                 ul.appendChild(el('a', { className: 'who-name', href: BASE + '?action=u&name=' + encodeURIComponent(r.username), text: r.username }));

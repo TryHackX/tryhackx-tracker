@@ -2227,6 +2227,7 @@ return [
     'js.fav.who' => 'Who has this',
     'js.fav.who_count' => ':n people',
     'js.fav.who_none' => 'Nobody who shows their name has this.',
+    'js.fav.who_why' => 'This list only ever names people who chose to appear on it, so it can be empty while the count above is not — nobody is missing from it by accident. You choose for yourself on your account page, under Privacy.',
     'js.fav.who_one' => '1 person',
     'js.fav.who_title' => 'People who have this in their favourites and let their name be shown',
     'js.homelayout.add' => 'Add',

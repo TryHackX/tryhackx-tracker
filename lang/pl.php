@@ -2227,6 +2227,7 @@ return [
     'js.fav.who' => 'Kto ma to u siebie',
     'js.fav.who_count' => ':n osób',
     'js.fav.who_none' => 'Nikt, kto pokazuje swoją nazwę, nie ma tego u siebie.',
+    'js.fav.who_why' => 'Ta lista wymienia wyłącznie osoby, które zgodziły się na niej być, więc może być pusta mimo licznika powyżej — nikogo nie brakuje na niej przez przypadek. O sobie decydujesz na stronie konta, w sekcji Prywatność.',
     'js.fav.who_one' => '1 osoba',
     'js.fav.who_title' => 'Osoby, które mają to w ulubionych i zgodziły się pokazywać nazwę',
     'js.homelayout.add' => 'Dodaj',

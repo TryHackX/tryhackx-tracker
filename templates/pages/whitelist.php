@@ -152,7 +152,7 @@ if ($wlSched) {
 ?>
 <?php if ($wlPubOn): ?>
     <div class="form-group wl-visibility">
-        <label class="acc-check"><input type="checkbox" id="wl-public" name="submitter_public">
+        <label class="search-check acc-check"><input type="checkbox" id="wl-public" name="submitter_public"><span class="search-check-box" aria-hidden="true"></span>
             <span><?= _h('whitelist.public_label') ?></span></label>
         <div class="form-hint"><?= __('whitelist.public_hint', ['name' => sanitize($wlMe['username'])]) ?></div>
     </div>
