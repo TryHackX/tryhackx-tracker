@@ -177,6 +177,11 @@ $REVIEWED = [
     // indexKeepSavedClause() returns one of three things: '', a literal EXISTS pair, or that pair
     // plus an interval whose only variable is indexKeepSavedDays() — clamped to [1, 3650] and cast
     // to int before it is spelled. The column name is the caller's own literal, never input.
+    // Both are chosen by the code, never carried in: $order is one of four literal strings from a
+    // fixed map keyed by the query string, and $deepWhere is either '' , ' AND 1 = 0', or a list of
+    // '?' placeholders whose values are bound.
+    'api/user_directory.php:$order'            => 'one of four literal ORDER BY strings from a fixed map; the key is looked up, not spliced',
+    'api/user_messages.php:$deepWhere'         => 'literal SQL: empty, an impossible condition, or a run of bound placeholders',
     'includes/index.php:$keepGrace'            => 'from indexKeepSavedClause(): literal SQL, the only number an int from a clamped helper',
     'includes/index.php:$keepProtect'          => 'from indexKeepSavedClause(): literal SQL, the only number an int from a clamped helper',
     'includes/index.php:$clA'                  => 'literal conditions from $where plus one clause built with placeholders; values bound',

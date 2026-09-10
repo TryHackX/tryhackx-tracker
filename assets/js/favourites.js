@@ -561,7 +561,15 @@
             box.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
             var qs = 'user_lists';
             if (cfg.user) qs += '&user=' + encodeURIComponent(cfg.user);
-            if (cfg.searchEl && cfg.searchEl.value.trim()) qs += '&search=' + encodeURIComponent(cfg.searchEl.value.trim());
+            if (cfg.searchEl && cfg.searchEl.value.trim()) {
+                qs += '&search=' + encodeURIComponent(cfg.searchEl.value.trim());
+                // …and, when this shelf has them, the two switches that widen what "matches" means:
+                // the torrents on a list, and the file names inside those torrents.
+                var it = document.getElementById('ul-items');
+                var fi = document.getElementById('ul-files');
+                if (it && it.checked) qs += '&items=1';
+                if (fi && fi.checked) qs += '&files=1';
+            }
             var j = await get(qs);
             if (!j || !j.success) {
                 box.textContent = '';
@@ -644,7 +652,9 @@
                 totalEl: document.getElementById('ul-total'),
             });
             var timer = 0;
+            var wider = [document.getElementById('ul-items'), document.getElementById('ul-files')];
             if (searchEl) searchEl.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(api.load, 350); });
+            wider.forEach(function (c) { if (c) c.addEventListener('change', function () { api.load(); }); });
             var mk = document.getElementById('ul-new');
             if (mk) mk.addEventListener('click', function () { newListInline(own, api); });
             api.load();
@@ -666,7 +676,12 @@
 
     function newListInline(section, api) {
         var holder = section.querySelector('.profile-toolbar');
-        if (!holder || holder.querySelector('.list-new-form')) return;
+        if (!holder) return;
+        // The form is inserted AFTER the toolbar, so looking for it inside the toolbar found nothing
+        // and every press of "New list" added another one. Pressing it again now closes the one that
+        // is open, which is what a button that opened it should do.
+        var open = section.querySelector('.list-new-form');
+        if (open) { open.remove(); return; }
         var form = el('div', { className: 'list-new-form' });
         var input = el('input', { type: 'text', className: 'profile-search', maxlength: 80, placeholder: t('js.lists.new_ph') });
         var go = el('button', { type: 'button', className: 'btn btn-small', text: t('js.lists.create') });

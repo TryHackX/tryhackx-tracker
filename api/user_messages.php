@@ -167,8 +167,41 @@ if ($with !== '') {
                   'unread' => pmUnreadCount($db, $uid)]);
 }
 
-// The inbox. One row per conversation, with the last line of it and how many are waiting — the two
-// facts somebody scans an inbox for.
+/* ── the inbox ─────────────────────────────────────────────────────────────────────────────────
+ *
+ * One row per conversation, with the last line of it and how many are waiting — the two facts
+ * somebody scans an inbox for.
+ *
+ * `search` filters by the other person's name, which the browser could do by itself. `deep=1` also
+ * looks INSIDE this reader's own conversations, which it could not: that is a LIKE over
+ * `user_messages`, so it is opt-in, needs two characters, and costs one of a small budget per
+ * address. It reads only threads this account is in — the WHERE below is the same one the listing
+ * uses, not a second opinion about who may read what.
+ */
+$search = trim((string)($_GET['search'] ?? ''));
+$deep   = (string)($_GET['deep'] ?? '') === '1' && mb_strlen($search) >= 2;
+$deepIds = null;
+if ($deep) {
+    if (!rateLimitAllow('pmsearch', ipBucket(getClientIp($cfg)), 60, 60)) {
+        jsonResponse(['error' => 'rate_limit', 'retry_after' => 60], 429);
+    }
+    $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
+    $q = $db->prepare("SELECT DISTINCT m.thread_id FROM user_messages m
+                         JOIN message_threads t ON t.id = m.thread_id
+                        WHERE (t.u_low = ? OR t.u_high = ?) AND m.body LIKE ?
+                        LIMIT 200");
+    $q->execute([$uid, $uid, $like]);
+    $deepIds = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
+}
+
+// A deep search that found nothing must return nothing, not everything: `IN ()` is not valid SQL,
+// so the impossible condition is spelled out rather than left to an empty list quietly vanishing.
+$deepWhere = '';
+$deepParams = [];
+if ($deepIds !== null) {
+    $deepWhere = $deepIds ? ' AND t.id IN (' . implode(',', array_fill(0, count($deepIds), '?')) . ')' : ' AND 1 = 0';
+    $deepParams = $deepIds;
+}
 $st = $db->prepare(
     "SELECT t.id, t.last_message_at,
             IF(t.u_low = ?, t.u_high, t.u_low) AS other_id,
@@ -179,9 +212,9 @@ $st = $db->prepare(
        FROM message_threads t
        JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
       WHERE ((t.u_low = ? AND t.u_low_hidden = 0) OR (t.u_high = ? AND t.u_high_hidden = 0))
-        AND u.status = 'active'
+        AND u.status = 'active'" . $deepWhere . "
       ORDER BY t.last_message_at DESC LIMIT 200");
-$st->execute([$uid, $uid, $uid, $uid, $uid]);
+$st->execute(array_merge([$uid, $uid, $uid, $uid, $uid], $deepParams));
 $threads = [];
 foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $t) {
     // A PREVIEW, not the message: the markup is rendered when a conversation is opened, and an
@@ -195,6 +228,6 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $t) {
         'preview' => mb_substr($preview, 0, 140),
     ];
 }
-jsonResponse(['success' => true, 'threads' => $threads, 'unread' => pmUnreadCount($db, $uid),
+jsonResponse(['success' => true, 'threads' => $threads, 'deep' => $deep, 'unread' => pmUnreadCount($db, $uid),
               'max_chars' => pmMaxChars($cfg), 'max_per_day' => pmMaxPerDay($cfg),
               'sent_today' => pmSentToday($db, $uid)]);

@@ -731,7 +731,11 @@ default — with it off, everything behaves exactly like the classic single-admi
   answer than the truth. Reporting a message puts it in a queue on the panel's Reports page behind
   its own permission (`panel.messages.view`), and that queue carries **the reported line and the one
   before it — never the conversation**. `tests/people_test.php` walks the gate one fact at a time and
-  checks that the panel query cannot widen.
+  checks that the panel query cannot widen. The directory is a **tab of the account page** since
+  1.47.1 (`?action=members` redirects there), sorted by name or by the date people joined; the inbox
+  filter searches the names of the people in it, and — with the box beside it ticked — inside the
+  messages themselves, which is a `LIKE` over this reader's own conversations and therefore opt-in,
+  debounced and rate-limited.
 - **Lists** (1.44.0, `lists_enabled`, off by default): a **collection somebody makes on purpose** —
   a name, the torrents they put in it, and their own answer to who may see it. Useful in blacklist
   mode, where there is no whitelist to group anything by: a reader can still gather a pack and hand

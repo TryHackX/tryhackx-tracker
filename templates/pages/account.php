@@ -159,6 +159,12 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
             <p class="text-muted acc-pref-note" id="acc-2fa-left"><?= __('account.twofa_left', ['n' => (int)$accTwofa['left']]) ?>
                 <button type="button" class="btn btn-secondary btn-small" id="acc-2fa-newcodes"><?= _h('account.twofa_newcodes') ?></button></p>
             <?php endif; ?>
+            <?php if (userIdHasPermission($db, $cfg, (int)$meUser['id'], 'panel.access')): ?>
+            <?php /* Somebody who can open the panel has TWO of these, and they are not the same one.
+                     Said here rather than left to be discovered when the panel asks for a code that
+                     this page never issued. */ ?>
+            <p class="text-muted acc-pref-note"><?= __('account.twofa_panel_note') ?></p>
+            <?php endif; ?>
             <div class="acc-2fa-box" id="acc-2fa-box" hidden></div>
             <?php endif; ?>
 
@@ -407,6 +413,14 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
          data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>">
         <div class="profile-toolbar">
             <input type="text" class="profile-search" id="ul-search" maxlength="80" placeholder="<?= _h('lists.search_ph') ?>" autocomplete="off">
+            <?php /* A shelf of lists is searched by the NAME of the list — until somebody is looking
+                     for the list that has a particular torrent in it, which is the other half of the
+                     question and the half a name cannot answer. Both are checkboxes rather than a
+                     mode, because the answer is usually "either". */ ?>
+            <label class="search-check" title="<?= _h('lists.find_items_title') ?>"><input type="checkbox" id="ul-items"><span class="search-check-box" aria-hidden="true"></span> <?= _h('lists.find_items') ?></label>
+            <?php if ($mayFileSearch): ?>
+            <label class="search-check" title="<?= _h('search.files_title') ?>"><input type="checkbox" id="ul-files"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.files') ?></label>
+            <?php endif; ?>
             <button type="button" class="btn btn-small" id="ul-new"><?= _h('lists.new') ?></button>
             <span class="profile-total" id="ul-total"></span>
         </div>
@@ -433,6 +447,11 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
                          telling somebody to fill it in. */ ?>
                 <button type="button" class="btn btn-small" id="pm-new"><?= _h('pm.new') ?></button>
             </div>
+            <?php /* Searching the CONVERSATIONS is free — the list is already in the browser. Looking
+                     INSIDE them is a LIKE over this reader's own messages, so it is a checkbox they
+                     turn on, it waits for them to stop typing, and the endpoint holds its own
+                     rate limit. */ ?>
+            <label class="search-check pm-search-deep" title="<?= _h('pm.search_deep_title') ?>"><input type="checkbox" id="pm-deep"><span class="search-check-box" aria-hidden="true"></span> <?= _h('pm.search_deep') ?></label>
             <div class="pm-new-row" id="pm-new-row" hidden>
                 <input type="text" class="profile-search" id="pm-new-who" maxlength="32" placeholder="<?= _h('pm.new_ph') ?>" autocomplete="off" list="pm-friends">
                 <datalist id="pm-friends"></datalist>
@@ -443,6 +462,26 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
         <div class="pm-right" id="pm-thread" hidden></div>
     </div>
     <p class="text-muted pm-note"><?= __('pm.note', ['n' => (int)$accPeople['max_per_day']]) ?></p>
+
+    <?php /* Reporting one line. A window rather than window.prompt(), because a prompt cannot say
+             what the moderator will and will not see — and that sentence is the whole reason
+             somebody is willing to press the button. */ ?>
+    <div class="files-overlay" id="pmreport-overlay" hidden>
+        <div class="files-box pmreport-box" role="dialog" aria-modal="true" aria-labelledby="pmreport-title">
+            <div class="files-head">
+                <h3 id="pmreport-title"><?= _h('pm.report_head') ?></h3>
+                <button type="button" class="files-close" id="pmreport-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
+            </div>
+            <div class="files-body">
+                <p class="text-muted pmreport-note"><?= __('pm.report_note') ?></p>
+                <textarea id="pmreport-why" class="pm-input" rows="3" maxlength="500" placeholder="<?= _h('pm.report_ph') ?>"></textarea>
+                <div class="pmreport-acts">
+                    <button type="button" class="btn btn-small" id="pmreport-go"><?= _h('pm.report_send') ?></button>
+                    <span class="text-muted" id="pmreport-msg"></span>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <?php /* THE COMPOSER, cloned into a conversation when one opens.
              It is the editor the description form uses — tabs, the formatting rail, the live
@@ -471,22 +510,34 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
                     <button type="button" data-md="color" title="<?= _h('rt.color') ?>">&#127912;</button>
                     <button type="button" data-md="size" title="<?= _h('rt.size') ?>">A&#8593;</button>
                     <button type="button" data-md="highlight" title="<?= _h('rt.highlight') ?>">&#9635;</button>
+                    <button type="button" data-md="sub" title="<?= _h('rt.sub') ?>">X&#8322;</button>
+                    <button type="button" data-md="sup" title="<?= _h('rt.sup') ?>">X&#178;</button>
                 </span>
                 <span class="rt-tool-group">
                     <button type="button" data-md="link" title="<?= _h('rt.link') ?>">&#128279;</button>
+                    <button type="button" data-md="image" title="<?= _h('rt.image') ?>">&#128444;</button>
                     <button type="button" data-md="list" title="<?= _h('rt.list') ?>">&#8226;&nbsp;<?= _h('rt.list_word') ?></button>
                     <button type="button" data-md="olist" title="<?= _h('rt.olist') ?>">1.&nbsp;<?= _h('rt.list_word') ?></button>
                 </span>
                 <span class="rt-tool-group">
                     <button type="button" data-md="quote" title="<?= _h('rt.quote') ?>">&rdquo;</button>
                     <button type="button" data-md="code" title="<?= _h('rt.code') ?>">&lt;/&gt;</button>
+                    <button type="button" data-md="table" title="<?= _h('rt.table') ?>">&#9636;</button>
                     <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>">&#128065;</button>
+                    <button type="button" data-md="center" title="<?= _h('rt.center') ?>">&#8801;</button>
+                    <button type="button" data-md="hr" title="<?= _h('rt.hr') ?>">&mdash;</button>
                 </span>
             </div>
-            <textarea id="pm-body" class="pm-input" rows="4" maxlength="<?= (int)$accPeople['max_chars'] ?>" placeholder="<?= _h('js.pm.write_ph') ?>"></textarea>
+            <textarea id="pm-body" class="pm-input" rows="6" maxlength="<?= (int)$accPeople['max_chars'] ?>" placeholder="<?= _h('js.pm.write_ph') ?>"></textarea>
             <div class="rt-preview rt-body" id="pm-body-preview" hidden></div>
         </div>
-        <div class="form-hint" id="pm-body-syntax"></div>
+        <?php /* The list of tags is a wall of brackets, and it was sitting under every conversation
+                 whether anybody wanted it or not. Folded away: open once, and the browser remembers
+                 nothing — which is right, because the person who needs it needs it once. */ ?>
+        <details class="rt-syntax-fold">
+            <summary><?= _h('rt.syntax_help') ?></summary>
+            <div class="form-hint" id="pm-body-syntax"></div>
+        </details>
         <div class="form-hint" id="pm-body-help"></div>
     </template>
 </div>
@@ -521,6 +572,12 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
         <p class="text-muted lists-intro"><?= __('people.dir_intro') ?></p>
         <div class="profile-toolbar">
             <input type="text" class="profile-search" id="dir-search" maxlength="60" placeholder="<?= _h('people.dir_search_ph') ?>" autocomplete="off">
+            <select id="dir-sort" title="<?= _h('profile.sort') ?>">
+                <option value="name:asc"><?= _h('people.dir_sort_name') ?></option>
+                <option value="name:desc"><?= _h('people.dir_sort_name_desc') ?></option>
+                <option value="since:desc"><?= _h('people.dir_sort_new') ?></option>
+                <option value="since:asc"><?= _h('people.dir_sort_old') ?></option>
+            </select>
             <span class="profile-total" id="dir-total"></span>
         </div>
         <div class="profile-list" id="dir-list"></div>

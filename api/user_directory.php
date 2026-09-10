@@ -29,6 +29,7 @@ $uid     = (int)$me['id'];
 $page    = max(1, (int)($_GET['page'] ?? 1));
 $perPage = max(1, min(100, (int)($_GET['per_page'] ?? 30)));
 $search  = trim((string)($_GET['search'] ?? ''));
+$sort    = (string)($_GET['sort'] ?? 'name:asc');
 
 $where  = ["u.status = 'active'", "u.profile_listed = 1"];
 $params = [];
@@ -54,8 +55,19 @@ $total = (int)$cnt->fetchColumn();
 $pages = max(1, (int)ceil($total / $perPage));
 $page  = min($page, $pages);
 
+// Sorting, from a fixed set — never from the query string. Two columns, two directions, and the
+// user's own name as the tie-break so a page boundary cannot show the same person twice.
+$sortKey = $sort;
+$ORDER = [
+    'name:asc'   => 'u.username ASC',
+    'name:desc'  => 'u.username DESC',
+    'since:desc' => 'u.created_at DESC, u.username ASC',
+    'since:asc'  => 'u.created_at ASC, u.username ASC',
+];
+$order = $ORDER[$sortKey] ?? $ORDER['name:asc'];
+
 $st = $db->prepare("SELECT u.id, u.username, u.created_at FROM users u $w
-                     ORDER BY u.username ASC LIMIT ? OFFSET ?");
+                     ORDER BY $order LIMIT ? OFFSET ?");
 $i = 1;
 foreach ($params as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
 $st->bindValue($i++, $perPage, PDO::PARAM_INT);
@@ -84,6 +96,10 @@ jsonResponse([
         'username' => (string)$r['username'],
         'since'    => substr((string)$r['created_at'], 0, 10),
         'state'    => $states[(int)$r['id']] ?? 'none',
+        // The reader is in their own directory — they asked to be listed, and hiding them from it
+        // would make the list disagree with the switch. What they must NOT be offered is a message
+        // to themselves or a friend request to themselves, so the row says which one is them.
+        'self'     => (int)$r['id'] === $uid,
     ], $rows),
     'total'    => $total,
     'page'     => $page,

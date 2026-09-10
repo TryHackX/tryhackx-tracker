@@ -69,6 +69,7 @@
         var list = document.getElementById('pm-threads');
         var pane = document.getElementById('pm-thread');
         var searchEl = document.getElementById('pm-search');
+        var deepEl = document.getElementById('pm-deep');
         var openWith = null, timer = 0;
 
         function badge(n) {
@@ -81,13 +82,22 @@
         async function loadInbox() {
             list.textContent = '';
             list.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
-            var j = await get('user_messages');
+            // Names are filtered here, because the list is already in the browser. Looking inside
+            // the messages is the server's job and costs a request, so it only happens when the
+            // box beside the filter is ticked and there is something to look for.
+            var q = (searchEl && searchEl.value.trim()) || '';
+            var deep = !!(deepEl && deepEl.checked) && q.length >= 2;
+            var j = await get('user_messages' + (deep ? '&deep=1&search=' + encodeURIComponent(q) : ''));
             list.textContent = '';
-            if (!j || !j.success) { list.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
+            if (!j || !j.success) {
+                list.appendChild(el('div', { className: 'pf-empty',
+                    text: t(j && j.error === 'rate_limit' ? 'js.pm.search_slow' : 'js.fav.load_failed') }));
+                return;
+            }
             badge(j.unread);
-            var q = (searchEl && searchEl.value.trim().toLowerCase()) || '';
-            var rows = (j.threads || []).filter(function (x) { return !q || x.with.toLowerCase().indexOf(q) !== -1; });
-            if (!rows.length) { list.appendChild(el('div', { className: 'pf-empty', text: t('js.pm.no_threads') })); return; }
+            var ql = q.toLowerCase();
+            var rows = (j.threads || []).filter(function (x) { return deep || !ql || x.with.toLowerCase().indexOf(ql) !== -1; });
+            if (!rows.length) { list.appendChild(el('div', { className: 'pf-empty', text: t(q ? 'js.pm.no_match' : 'js.pm.no_threads') })); return; }
             rows.forEach(function (x) {
                 var row = el('button', { type: 'button', className: 'pm-row' + (x.unread ? ' pm-row-unread' : '') });
                 row.appendChild(el('span', { className: 'pm-who', text: x.with }));
@@ -138,7 +148,8 @@
                 if (m.mine && m.read) foot.appendChild(el('span', { className: 'pm-read', text: t('js.pm.read') }));
                 if (!m.mine && j.may_report) {
                     var rep = el('button', { type: 'button', className: 'pm-report',
-                                             text: m.reported ? t('js.pm.reported') : t('js.pm.report') });
+                                             title: t('js.pm.report_title'),
+                                             text: (m.reported ? '⚑ ' : '⚐ ') + (m.reported ? t('js.pm.reported') : t('js.pm.report')) });
                     rep.disabled = !!m.reported;
                     rep.addEventListener('click', function () { reportMessage(m.id, rep); });
                     foot.appendChild(rep);
@@ -156,12 +167,41 @@
             body.scrollTop = body.scrollHeight;
         }
 
-        async function reportMessage(id, btn) {
-            var reason = prompt(t('js.pm.report_why'));
-            if (reason === null) return;
-            btn.disabled = true;
-            var r = await post('user_messages', { op: 'report', message: id, reason: reason });
-            if (r && r.success) { btn.textContent = t('js.pm.reported'); } else { btn.disabled = false; }
+        /**
+         * Reporting one line.
+         *
+         * A window rather than window.prompt(), for two reasons: a prompt is a browser dialog that
+         * cannot say what the moderator will and will not see — and that sentence is the whole
+         * reason somebody is willing to press the button — and a prompt cannot be styled, so the one
+         * moment this page asks for a sentence looked like a page from another site.
+         */
+        function reportMessage(id, btn) {
+            var box = document.getElementById('pmreport-overlay');
+            var why = document.getElementById('pmreport-why');
+            var go = document.getElementById('pmreport-go');
+            var msg = document.getElementById('pmreport-msg');
+            if (!box || !why || !go) {           // no markup on this page: nothing to open
+                return;
+            }
+            why.value = '';
+            msg.textContent = '';
+            box.hidden = false;
+            why.focus();
+            var close = function () { box.hidden = true; document.removeEventListener('keydown', esc); };
+            var esc = function (e) { if (e.key === 'Escape') close(); };
+            document.addEventListener('keydown', esc);
+            box.onclick = function (e) { if (e.target === box) close(); };
+            var x = document.getElementById('pmreport-close');
+            if (x) x.onclick = close;
+            go.onclick = async function () {
+                go.disabled = true;
+                var r = await post('user_messages', { op: 'report', message: id, reason: why.value.trim() });
+                go.disabled = false;
+                if (!r || !r.success) { msg.textContent = t('js.pm.report_failed'); return; }
+                btn.textContent = t('js.pm.reported');
+                btn.disabled = true;
+                close();
+            };
         }
 
         /**
@@ -200,7 +240,13 @@
             newWho.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); open(); } });
         }
 
-        if (searchEl) searchEl.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(loadInbox, 300); });
+        // Longer than the 300 ms the name filter uses: a deep search is a query, and waiting for
+        // somebody to stop typing is what keeps it to one.
+        if (searchEl) searchEl.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(loadInbox, deepEl && deepEl.checked ? 600 : 300);
+        });
+        if (deepEl) deepEl.addEventListener('change', loadInbox);
         // The tab bar shows this pane without reloading the page — a hash change is a same-document
         // navigation, and clicking a tab is not a navigation at all. Without a hook the inbox stayed
         // whatever it was when the page first loaded, which is exactly when somebody has come back
@@ -384,6 +430,7 @@
         var pager = document.getElementById('dir-pager');
         var totalEl = document.getElementById('dir-total');
         var searchEl = document.getElementById('dir-search');
+        var sortEl = document.getElementById('dir-sort');
         var timer = 0;
 
         async function load(page) {
@@ -391,6 +438,7 @@
             listEl.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
             var qs = 'user_directory&page=' + (page || 1) + '&per_page=30';
             if (searchEl && searchEl.value.trim()) qs += '&search=' + encodeURIComponent(searchEl.value.trim());
+            if (sortEl && sortEl.value) qs += '&sort=' + encodeURIComponent(sortEl.value);
             var j = await get(qs);
             listEl.textContent = '';
             if (!j || !j.success) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
@@ -402,14 +450,17 @@
                 main.appendChild(el('a', { className: 'pf-name', href: BASE + '?action=u&name=' + encodeURIComponent(p.username), text: p.username }));
                 main.appendChild(el('span', { className: 'text-muted pe-since', text: t('js.people.since', { date: p.since }) }));
                 if (p.state !== 'none') main.appendChild(el('span', { className: 'pf-badge', text: t('js.people.state_' + p.state) }));
+                // The reader is in their own directory — they asked to be listed. What they are not
+                // offered is a message to themselves or a friend request to themselves.
+                if (p.self) main.appendChild(el('span', { className: 'pf-badge pf-badge-you', text: t('js.people.you') }));
                 row.appendChild(main);
                 var acts = el('div', { className: 'pf-acts' });
-                if (j.may_message) {
+                if (j.may_message && !p.self) {
                     acts.appendChild(el('a', { className: 'btn btn-secondary btn-small',
                                                href: BASE + '?action=account#messages:' + encodeURIComponent(p.username),
                                                text: t('js.pm.message') }));
                 }
-                if (j.may_friend && p.state === 'none') {
+                if (j.may_friend && p.state === 'none' && !p.self) {
                     var f = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t('js.people.follow') });
                     f.addEventListener('click', async function () {
                         f.disabled = true;
@@ -438,6 +489,7 @@
             }
         }
         if (searchEl) searchEl.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 300); });
+        if (sortEl) sortEl.addEventListener('change', function () { load(1); });
         // Inside a tab, this is a page most readers of the account page never open, so it is not
         // fetched until it is looked at. The tab bar in assets/js/favourites.js says when.
         var pane = root.closest ? root.closest('.acc-pane') : null;

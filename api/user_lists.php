@@ -124,13 +124,62 @@ if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 header('Cache-Control: private, no-store');
 
 $search = trim((string)($_GET['search'] ?? ''));
+/* ── searching the shelf ───────────────────────────────────────────────────────────────────────
+ *
+ * By default this matches the NAME of a list, which is what somebody looking for "Films" means.
+ * `items=1` also matches the torrents ON a list, and `files=1` the file names inside those torrents
+ * — "which of my lists has that episode in it?", which no list name can answer.
+ *
+ * The wider two are opt-in for a reason: they read one more table each. Both are bounded by this
+ * owner's own rows (lists_max_per_user × lists_max_items, capped again below), never by the
+ * catalogue, and the file search is gated on the same `index.files` permission as everywhere else.
+ */
+$wantItems = (string)($_GET['items'] ?? '') === '1';
+$wantFiles = (string)($_GET['files'] ?? '') === '1' && userCan($db, $cfg, 'index.files');
 $where  = ['l.user_id = ?'];
 $params = [(int)$owner['id']];
 if (!$isOwn) $where[] = 'l.is_public = 1';
+$deepIds = null;
 if ($search !== '') {
-    $where[] = '(l.name LIKE ? OR l.description LIKE ?)';
     $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
-    $params[] = $like; $params[] = $like;
+    if ($wantItems || $wantFiles) {
+        // One pass over this owner's items, then the answers in PHP — the same shape
+        // api/user_list_items.php uses, and for the same reason: the driving set is small and
+        // bounded, so a LIKE per row would buy nothing over one bounded read.
+        $rowsQ = $db->prepare("SELECT i.list_id, i.info_hash, i.name FROM user_list_items i
+                                 JOIN user_lists l2 ON l2.id = i.list_id
+                                WHERE l2.user_id = ? LIMIT 20000");
+        $rowsQ->execute([(int)$owner['id']]);
+        $items = $rowsQ->fetchAll(PDO::FETCH_ASSOC);
+        $needle = mb_strtolower($search);
+        $deepIds = [];
+        $hashes = [];
+        foreach ($items as $it) {
+            if ($wantItems && $it['name'] !== null && str_contains(mb_strtolower((string)$it['name']), $needle)) {
+                $deepIds[(int)$it['list_id']] = true;
+                continue;
+            }
+            if ($wantFiles) $hashes[strtolower((string)$it['info_hash'])] = true;
+        }
+        if ($wantFiles && $hashes) {
+            $inFiles = favHashesMatchingFiles($db, array_slice(array_keys($hashes), 0, 5000), $search);
+            if ($inFiles) {
+                foreach ($items as $it) {
+                    if (isset($inFiles[strtolower((string)$it['info_hash'])])) $deepIds[(int)$it['list_id']] = true;
+                }
+            }
+        }
+    }
+    if ($deepIds) {
+        // The name match still counts: a list called "Films" answers "films" whatever is in it.
+        $ph = implode(',', array_fill(0, count($deepIds), '?'));
+        $where[] = "(l.name LIKE ? OR l.description LIKE ? OR l.id IN ($ph))";
+        $params[] = $like; $params[] = $like;
+        foreach (array_keys($deepIds) as $lid) $params[] = $lid;
+    } else {
+        $where[] = '(l.name LIKE ? OR l.description LIKE ?)';
+        $params[] = $like; $params[] = $like;
+    }
 }
 $w = 'WHERE ' . implode(' AND ', $where);
 

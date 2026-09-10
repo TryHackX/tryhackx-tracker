@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.47.1] — 2026-09-10
+
+Schema **53** (unchanged).
+
+### Changed — the round of small things that were wrong
+
+* **A control now has an edge you can see.** `#222` is right for a rule between two paragraphs and
+  wrong for the border of something you are supposed to click or type into: the password box under
+  "signed in on N devices", the select under "who may write to me" and the buttons inside a
+  notification all disappeared into the card they sat on. Dividers keep that colour; anything
+  interactive gets `--control-border` and a faint ground.
+* **Share is visible without looking pressed.** It was drawn in the accent colour, which is what the
+  pointer says when it hovers — so the button arrived already lit and had nothing left to say.
+* **"New list" opens one form**, and pressing it again closes it. The guard looked for the form
+  inside the toolbar while the form was inserted after it, so every press added another one. It also
+  stands apart from its neighbours now instead of being pressed against them.
+* **The list shelf can be searched by what is ON the lists** — the torrents, and (behind the same
+  `index.files` permission as everywhere else) the file names inside them. "Which of my lists has
+  that episode in it?" is not a question a list's name can answer.
+* **The member directory sorts** by name or by the date people joined, both ways — and it no longer
+  offers you a message to yourself or a friend request to yourself. You are in your own directory
+  because you asked to be listed; you are marked as *you* and offered nothing to do about it.
+* **The nav entry for the directory is gone.** It is a tab of the account page, and the account is
+  already in that bar; two links to one page, highlighting differently, was one too many.
+* **The message composer is the whole editor**: the formatting rail the description form has, a box
+  worth writing in, a format selector that looks like a control, and the wall of BBCode tags folded
+  behind one line instead of sitting under every conversation.
+* **Reporting a message opens a window of this site's own** rather than `window.prompt()` — which
+  could not be styled and, more to the point, could not say that a moderator sees the reported line
+  and the one before it and nothing else. That sentence is the reason somebody is willing to press
+  the button. The button itself now carries a flag and stops vanishing under the text.
+* **The inbox filter can look inside the messages**, with a checkbox beside it. Names are filtered in
+  the browser because the list is already there; the bodies are a `LIKE` over this reader's own
+  conversations, so it is opt-in, waits 600 ms for typing to stop, and holds its own rate limit.
+* **The account's second factor says what it is not.** An account that can open the panel has two of
+  these and they are not the same one: separate secrets, separate recovery codes, and turning one on
+  does not turn the other on. The setup box also stacks and centres instead of being squeezed into a
+  column corner.
+
 ## [1.47.0] — 2026-09-10
 
 Schema **53** — `user_twofa`, `users.sessions_valid_from`, `user_tokens.ip` / `.ua`.

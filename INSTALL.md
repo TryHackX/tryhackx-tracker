@@ -333,8 +333,9 @@ changes the kernel immediately and reports `deferred`, and the janitor (which ha
 writes the file a moment later. Without the timer running, those features appear to half-work.
 
 The janitor also does: scheduled mode switching, whitelist regeneration and dead-row cleanup,
-statistics sampling and roll-up, the mail queue, audit-log retention, and starting the stability
-probe. **If one thing on this page must be running, it is this timer.**
+statistics sampling and roll-up, the mail queue, audit-log retention, starting the stability probe,
+and — since 1.46.0 — the operator's digest (Settings → Operator digest: one mail saying what is
+waiting in the review queues). **If one thing on this page must be running, it is this timer.**
 
 ---
 
@@ -491,6 +492,21 @@ lets you pick a profile for that run without touching the schedule.
 full archive is 158 MB — hex hashes and repetitive names compress about twentyfold. The built-in dump
 also names every file `tracker-db-*` whatever profile made it, so the filename contradicts the choice;
 the panel shows what each archive actually contains and how far it compressed.
+
+---
+
+## 9a. Telling something else that the tracker is well (optional)
+
+An uptime monitor pointed at the home page proves that Apache answers. **Settings → Health check**
+turns on `?action=health`, which answers one JSON document — schema version, whether the panel and
+the running tracker agree about the mode, the state of the accesslist, the metadata worker's
+heartbeat and what is waiting in the queues — and **HTTP 503** when something is actually wrong.
+
+Set a token of at least 16 characters (a shorter one counts as empty, and the endpoint stays off),
+then point the monitor at the address the panel prints beside the field. Send the token as the
+`X-Health-Token` header where your monitor allows one; a query string is written to every access log
+on the way. Without the token — and with a *wrong* one — the address answers with the ordinary page,
+so a probe cannot learn there is a secret to find.
 
 ---
 

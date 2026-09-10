@@ -11,6 +11,13 @@
     --link-visited: #F6BAFF;
     --accent: #4a9eff;
     --border: #222;
+    /* A SEPARATOR and a CONTROL are not the same thing wearing the same colour. #222 on the card
+       ground is right for a rule between two paragraphs and wrong for the edge of something you are
+       supposed to click or type into: the password box under "signed in on N devices", the select
+       under "who may write to me" and the buttons inside a notification all disappeared into the
+       background. Dividers keep --border; anything interactive uses this. */
+    --control-border: #39405a;
+    --control-bg: rgba(255, 255, 255, 0.045);
     --success: #4caf50;
     --error: #f44336;
     --warning: #ff9800;
@@ -409,10 +416,11 @@ a.btn:hover, a.btn:focus-visible { opacity: 0.85; text-decoration: none; }
 a.btn.btn-secondary, a.btn.btn-secondary:visited { color: var(--text); }
 
 .btn-secondary {
-    background: transparent;
-    border: 1px solid var(--border);
+    background: var(--control-bg);
+    border: 1px solid var(--control-border);
     color: var(--text);
 }
+.btn-secondary:hover { border-color: var(--accent); background: rgba(74, 158, 255, 0.10); opacity: 1; }
 
 /* === Alerts === */
 .alert {
@@ -1766,8 +1774,11 @@ body.page-search .container { max-width: 86em; }
 /* The two buttons that actually say "Share" — not the quiet "+" and "Who has this" that borrow this
    class for their shape. Muted grey on a muted border made the one control on the toolbar somebody
    is LOOKING for the hardest one on it to find. */
-.share-btn { color: var(--text); border-color: var(--accent); }
-.share-btn:hover { background: rgba(74,158,255,0.12); }
+/* Visible, but not shouting: full-strength text on a control-strength edge, the same treatment as
+   every other button on the page. The accent belongs to the hover — a button that is already lit is
+   a button the pointer can no longer say anything about. */
+.share-btn { color: var(--text); border-color: var(--control-border); background: var(--control-bg); }
+.share-btn:hover { color: var(--accent); border-color: var(--accent); background: rgba(74,158,255,0.10); }
 .search-share.copied { color: var(--success, #4caf50); border-color: var(--success, #4caf50); }
 /* No `margin-left: auto` here. Two auto margins in one flex row — one on .info-acts, one here —
    split the free space between them, which is why the star and "Who has this" sat marooned in the
@@ -2182,14 +2193,14 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
    same declarations the search toolbar uses, on the class itself, so context stops mattering. */
 .profile-search { flex: 1 1 14rem; min-width: 10rem;
     padding: 0.45rem 0.6rem;
-    background: var(--bg-code); border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-code); border: 1px solid var(--control-border); border-radius: var(--radius);
     color: var(--text); font-family: inherit; font-size: 0.85rem;
     transition: border-color 0.2s; }
 .profile-search:focus { outline: none; border-color: var(--accent); }
 .profile-search::placeholder { color: var(--text-muted); opacity: 1; }
 .profile-toolbar select {
     padding: 0.45rem 0.6rem;
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg); border: 1px solid var(--control-border); border-radius: var(--radius);
     color: var(--text); font-family: inherit; font-size: 0.85rem; cursor: pointer;
 }
 .profile-toolbar select:focus { outline: none; border-color: var(--accent); }
@@ -2275,16 +2286,29 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
    uses; only the textarea rules have to be repeated, because those were written for a .form-group
    and a message is not in one. Shorter than a description by default — a message usually is. */
 .pm-editor textarea {
-    width: 100%; box-sizing: border-box; min-height: 6rem; margin: 0; border: 0; border-radius: 0;
-    background: var(--bg-code); resize: vertical;
+    width: 100%; box-sizing: border-box; min-height: 9rem; margin: 0; border: 0; border-radius: 0;
+    background: var(--bg-code); resize: vertical; padding: 0.6rem 0.7rem;
+    color: var(--text); font-family: inherit; font-size: 0.9rem;
 }
+/* The format select is a real control, not a hint: it decides how everything typed above it will be
+   read, and it was a grey word on a grey strip. */
+.pm-editor .rt-format { background: var(--bg); color: var(--text); border: 1px solid var(--control-border);
+    border-radius: 4px; padding: 0.1rem 0.3rem; font-family: inherit; }
+.pm-editor .rt-tabs { flex-wrap: wrap; }
 .pm-editor textarea:focus { outline: none; box-shadow: none; border-color: transparent; }
 .pm-editor .rt-preview { min-height: 6rem; max-height: 18rem; }
 /* ── Account security: the second factor, and where this account is signed in ─────────────────
    The rows reuse .acc-pref-row from the mail preferences above them — same card, same shape, so
    the block reads as one more set of answers about this account rather than as a new subject. */
 .acc-security-block { margin-top: 1.2rem; }
-.acc-2fa-box { margin: 0.6rem 0 0.4rem; padding: 0.8rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-code); }
+.acc-2fa-box { margin: 0.7rem 0 0.5rem; padding: 0.9rem 1rem; border: 1px solid var(--control-border);
+    border-radius: var(--radius); background: var(--bg-code); }
+/* The setup is a sequence — read this, scan that, type this — so it stacks, with the square and the
+   key centred on the column rather than pinned to a corner of it. */
+.acc-2fa-box .acc-2fa-qr, .acc-2fa-box .acc-2fa-secret { display: block; margin-left: auto; margin-right: auto; }
+.acc-2fa-box .acc-2fa-secret { max-width: 100%; text-align: center; }
+.acc-2fa-box .acc-2fa-row { justify-content: center; }
+.acc-2fa-box > .text-muted { text-align: center; font-size: 0.82rem; }
 .acc-2fa-box[hidden] { display: none; }
 .acc-2fa-head { margin: 0 0 0.5rem; font-size: 0.9rem; }
 .acc-2fa-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin-top: 0.5rem; }
@@ -2308,6 +2332,22 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .acc-sessions-act { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin-top: 0.6rem; }
 .acc-sessions-act[hidden] { display: none; }
 .acc-sessions-act .profile-search { flex: 0 1 14rem; }
+
+/* The report button: a flag, at message size, that stops disappearing when the eye is looking for
+   it. Still quiet — it sits under somebody else's words and is pressed once in a hundred reads. */
+.pm-report { color: var(--text-muted); border: 1px solid transparent; border-radius: 4px; padding: 0 0.3rem; }
+.pm-report:hover:not([disabled]) { color: var(--error); border-color: var(--error); }
+.pm-report[disabled] { opacity: 0.75; }
+.pmreport-box { max-width: 34em; }
+.pmreport-note { font-size: 0.85rem; margin-bottom: 0.6rem; }
+.pmreport-acts { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.6rem; }
+/* The wall of tags, folded. Open it once and it says everything; closed, it is one line. */
+.rt-syntax-fold { margin-top: 0.4rem; }
+.rt-syntax-fold > summary { cursor: pointer; font-size: 0.8rem; color: var(--text-muted); }
+.rt-syntax-fold > summary:hover { color: var(--text); }
+.rt-syntax-fold[open] > summary { margin-bottom: 0.2rem; }
+.pm-search-deep { margin-bottom: 0.5rem; font-size: 0.8rem; }
+.pf-badge-you { border-color: var(--accent); color: var(--accent); }
 
 .pm-new-row { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
 .pm-new-row[hidden] { display: none; }
@@ -2356,6 +2396,10 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .list-card-acts { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
 .list-del[data-armed="1"] { color: var(--error); border-color: var(--error); }
 .list-rename, .list-add, .list-new-form { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.4rem; }
+/* Room of its own. Pressed against the toolbar above and the intro below it, the box for a new
+   name read as part of whichever of them the eye reached first. */
+.list-new-form { margin: 0.7rem 0 0.9rem; padding: 0.6rem 0.7rem; border: 1px solid var(--control-border);
+    border-radius: var(--radius); background: var(--control-bg); }
 .list-add { margin: 0.5rem 0; }
 .list-add .profile-search, .list-new-form .profile-search { flex: 1 1 16rem; }
 .list-add-msg { font-size: 0.8rem; }
