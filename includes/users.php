@@ -74,6 +74,12 @@ function userPermissionList(): array {
         'favourites.public'      => 'Let their favourites list be shown on their public profile',
         'favourites.view_others' => "See other people's profiles and favourite lists",
         'uploads.public'         => 'Let their registered torrents be shown on their public profile',
+        // ── lists (v51) ──
+        // Two ids again, for the same reason: making a collection and publishing one are separate
+        // decisions. `lists.public` is what a group needs before any single list of theirs can be
+        // marked public — the site-wide switch and their own per-list choice are the other two.
+        'lists.use'    => 'Make lists of torrents and keep them',
+        'lists.public' => 'Let their lists be shown on their public profile',
 
         // ── the admin panel ──
         //
@@ -158,7 +164,8 @@ function userGroupPresets(): array {
             'about' => 'The public-site features, no panel at all.',
             'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'whitelist.view', 'whitelist.add',
                         'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose',
-                        'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public'],
+                        'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
+                        'lists.use', 'lists.public'],
         ],
     ];
 }
@@ -544,6 +551,11 @@ function userDeleteCascade(PDO $db, int $userId): array {
     $del("DELETE FROM user_notifications WHERE user_id = ?", [$userId], 'notifications');
     $del("DELETE FROM user_tokens WHERE user_id = ?", [$userId], 'tokens');
     $del("DELETE FROM user_favourites WHERE user_id = ?", [$userId], 'favourites');
+    // Lists, and the rows inside them. The items are keyed by list, not by user, so they have to go
+    // FIRST — deleting the lists first would leave orphans keyed to ids that no longer exist, and
+    // nothing would ever look at them again to notice.
+    $del("DELETE i FROM user_list_items i JOIN user_lists l ON l.id = i.list_id WHERE l.user_id = ?", [$userId], 'list_items');
+    $del("DELETE FROM user_lists WHERE user_id = ?", [$userId], 'lists');
     // The pair, not an id column: hash_votes identifies a voter as a type plus a key, because an
     // anonymous vote is keyed by an IP bucket instead.
     $del("DELETE FROM hash_votes WHERE voter_type = 'user' AND voter_key = ?", [(string)$userId], 'votes');

@@ -11,10 +11,11 @@ $accRestricted = userEmailVerifyRequired($cfg) && !($accHasEmail && $accVerified
 $accPending = userEmailChangeState($db, $meUser);
 $accCooldownDays = userEmailChangeCooldownDays($cfg);
 $accFav = favContext($db, $cfg, $meUser);
+$accLists = listsContext($db, $cfg, $meUser);
 // The uploads tab is hidden ENTIRELY, not shown empty, where a submission cannot happen — a tab that
 // can only ever be empty teaches people the feature is broken rather than absent.
 $accShowUploads = $accFav['uploads'] && uploadsPublicEnabled($cfg);
-$accTabs = $accFav['may_use'] || $accShowUploads;
+$accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use'];
 ?>
 <div class="account-head">
     <h1><?= __('account.h1_named', ['user' => sanitize($meUser['username'])]) ?></h1>
@@ -45,6 +46,9 @@ $accTabs = $accFav['may_use'] || $accShowUploads;
     <?php endif; ?>
     <?php if ($accShowUploads): ?>
     <button type="button" class="rt-tab" data-pane="uploads"><?= _h('account.tab_uploads') ?></button>
+    <?php endif; ?>
+    <?php if ($accLists['may_use']): ?>
+    <button type="button" class="rt-tab" data-pane="lists"><?= _h('account.tab_lists') ?></button>
     <?php endif; ?>
 </div>
 <?php endif; ?>
@@ -117,13 +121,17 @@ if (count($accLangs) > 1):
             </select>
         </div>
 <?php endif; ?>
-<?php if ($accFav['may_use'] && ($accFav['public_ok'] || $accFav['who_ok'])): ?>
+<?php /* The privacy block belongs to whichever of these features is on: favourites, lists, or both.
+         Gating it on favourites alone hid the lists switch on an install that runs lists without
+         them. */ ?>
+<?php if (($accFav['may_use'] && ($accFav['public_ok'] || $accFav['who_ok']))
+          || ($accLists['may_use'] && $accLists['public_ok'])): ?>
         <?php /* In the card that already holds the mail and language preferences, not a card of its
                  own: these are two more answers about the same account, and a separate card would
                  make them look like a separate subject. */ ?>
         <div class="acc-mail-prefs acc-privacy-block" id="acc-privacy">
             <h3 class="acc-sub"><?= _h('account.fav_privacy') ?></h3>
-            <?php if ($accFav['may_publish']): ?>
+            <?php if ($accFav['may_use'] && $accFav['may_publish']): ?>
             <label class="search-check acc-check"><input type="checkbox" id="acc-fav-public"<?= (int)($meUser['fav_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
                 <span><?= _h('account.fav_public_label') ?></span></label>
             <p class="text-muted acc-verify-note"><?= __('account.fav_public_hint', ['name' => sanitize($meUser['username'])]) ?></p>
@@ -138,7 +146,12 @@ if (count($accLangs) > 1):
                 <?php endif; ?>
             </div>
             <?php endif; ?>
-            <?php if ($accFav['who_ok']): ?>
+            <?php if ($accLists['public_ok'] && $accLists['may_use']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-lists-public"<?= (int)($meUser['lists_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.lists_public_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.lists_public_hint') ?></p>
+            <?php endif; ?>
+            <?php if ($accFav['may_use'] && $accFav['who_ok']): ?>
             <label class="search-check acc-check"><input type="checkbox" id="acc-fav-listed"<?= (int)($meUser['fav_listed'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
                 <span><?= _h('account.fav_listed_label') ?></span></label>
             <p class="text-muted acc-verify-note"><?= __('account.fav_listed_hint') ?></p>
@@ -281,6 +294,31 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
     <div class="form-center"><button type="submit" class="btn" id="account-save"><?= _h('account.save') ?></button></div>
 </form>
 </div><?php /* /#acc-pane-rest */ ?>
+<?php endif; ?>
+
+<?php if ($accLists['may_use']): ?>
+<?php /* Lists. A card each, because a list is a thing with a name and a decision attached — a row
+         in a table would be the wrong shape for something you open. The cards and everything under
+         them are drawn by assets/js/favourites.js from api/user_lists.php. */ ?>
+<div class="acc-pane" id="acc-pane-lists" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.tab_lists') ?></h2>
+    <div id="account-lists" class="profile-section"
+         data-magnet="<?= userCan($db, $cfg, 'index.magnet') ? '1' : '0' ?>"
+         data-may-publish="<?= $accLists['may_publish'] ? '1' : '0' ?>"
+         data-public-ok="<?= $accLists['public_ok'] ? '1' : '0' ?>"
+         data-max-lists="<?= (int)$accLists['max_lists'] ?>"
+         data-max-items="<?= (int)$accLists['max_items'] ?>"
+         data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>"
+         data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>">
+        <div class="profile-toolbar">
+            <input type="text" class="profile-search" id="ul-search" maxlength="80" placeholder="<?= _h('lists.search_ph') ?>" autocomplete="off">
+            <button type="button" class="btn btn-small" id="ul-new"><?= _h('lists.new') ?></button>
+            <span class="profile-total" id="ul-total"></span>
+        </div>
+        <p class="text-muted lists-intro"><?= __('lists.intro') ?></p>
+        <div class="lists-cards" id="ul-cards"></div>
+    </div>
+</div>
 <?php endif; ?>
 
 <?php /* The Info panel, so a row on these lists can answer "what IS this?" without sending the

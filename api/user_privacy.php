@@ -2,8 +2,9 @@
 /**
  * user_privacy — the two flags that decide what a reader's account says about them to other people.
  *
- *   fav_public — may a stranger read my favourites on my profile?
- *   fav_listed — may my name appear on somebody else's "who has this in favourites"?
+ *   fav_public   — may a stranger read my favourites on my profile?
+ *   fav_listed   — may my name appear on somebody else's "who has this in favourites"?
+ *   lists_public — may a stranger see that I have lists at all? (each list still carries its own)
  *
  * Two flags, not one, because they answer two different questions. Somebody may be happy to publish
  * a list on a page they chose to publish, and not happy to be enumerated from a torrent's page by
@@ -30,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $sets = [];
     $args = [];
-    foreach (['fav_public', 'fav_listed'] as $flag) {
+    foreach (['fav_public', 'fav_listed', 'lists_public'] as $flag) {
         if (!array_key_exists($flag, $input)) continue;
         $sets[] = "`$flag` = ?";
         $args[] = !empty($input[$flag]) ? 1 : 0;
@@ -45,8 +46,10 @@ jsonResponse([
     'success'     => true,
     'fav_public'  => (int)($u['fav_public'] ?? 0) === 1,
     'fav_listed'  => (int)($u['fav_listed'] ?? 0) === 1,
+    'lists_public' => (int)($u['lists_public'] ?? 0) === 1,
     // What the site currently does with them, so the page can say "this is off for everyone right
     // now" instead of showing a control that silently does nothing.
     'may_publish' => favPublicEnabled($cfg) && userCan($db, $cfg, 'favourites.public'),
     'who_enabled' => favWhoEnabled($cfg),
+    'lists_may_publish' => listsPublicEnabled($cfg) && userCan($db, $cfg, 'lists.public'),
 ]);

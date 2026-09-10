@@ -37,6 +37,7 @@ $allowed = [
     'version_display', 'search_time_budget',
     // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
     'fav_enabled', 'fav_max_per_user', 'fav_public_enabled', 'fav_who_enabled', 'profiles_enabled',
+    'lists_enabled', 'lists_public_enabled', 'lists_max_per_user', 'lists_max_items',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
     // same screen they turned it on from.
@@ -302,6 +303,9 @@ $intClamp = [
     'rate_limit_user_register' => [0, 1000, 5], 'rate_limit_index_search' => [0, 100000, 120],
     'rate_limit_preview' => [5, 300, 30],
     'rep_min_votes' => [1, 1000, 3], 'rep_anon_weight' => [0, 100, 25],
+    // Lists (v51). The same shape as fav_max_per_user: a ceiling that keeps one person's collection
+    // from becoming everybody's query cost, clamped rather than refused.
+    'lists_max_per_user' => [1, 200, 20], 'lists_max_items' => [10, 5000, 500],
     'wl_edit_max_pending' => [0, 50, 3],
     'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],
     'wl_dead_after_days' => [0, 3650, 0], 'wl_dead_every_days' => [1, 365, 30],

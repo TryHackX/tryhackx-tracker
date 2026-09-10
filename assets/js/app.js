@@ -2588,6 +2588,12 @@ const getJson = async (endpoint) => {
         if (infoActs) {
             infoActs.textContent = '';
             if (infoCanFav && window.Favourites) infoActs.appendChild(window.Favourites.makeStar(hash, !!json.fav));
+            // "Put this in a list", beside the star. app.js knows nothing about lists — it asks
+            // for a button and gets null where the feature is off or the reader may not use it.
+            if (window.Lists && typeof window.Lists.makeAddButton === "function") {
+                const lb = window.Lists.makeAddButton(hash, json.name || name || null);
+                if (lb) infoActs.appendChild(lb);
+            }
             if (infoCanFavWho && typeof window.openWhoFavourited === 'function') {
                 const w = document.createElement('button');
                 w.type = 'button';

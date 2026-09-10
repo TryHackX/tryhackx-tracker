@@ -27,6 +27,7 @@ require_once __DIR__ . '/includes/twofa.php';
 require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/favourites.php';
+require_once __DIR__ . '/includes/lists.php';
 // The partner guide (?action=apidocs) cleans its own query string through the SAME function
 // the endpoint uses, so an operator cannot be shown a page describing fields the API would
 // not actually require. Without this the page silently fell back to 'nothing beyond the hash'.

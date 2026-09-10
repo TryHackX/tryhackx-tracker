@@ -341,7 +341,7 @@ function langJsBundle(array $prefixes = ['js.']): array {
 }
 
 /** The prefixes the PUBLIC scripts use (app.js, captcha.js, stats-timeline.js) — see langJsBridge(). */
-const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.', 'js.fav.'];
+const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.', 'js.fav.', 'js.lists.'];
 
 /**
  * The `<script>` pair that puts the bundle and the t() helper on a page — before any other script.

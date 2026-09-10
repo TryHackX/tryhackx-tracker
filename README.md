@@ -43,7 +43,7 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Tracker Reload / Restart + Smart Recommendations** — automatically reload the tracker's blacklist (SIGHUP via `systemctl reload`, no downtime) after every block/unblock/restore, plus one-click **Reload** and **Restart** buttons (password-confirmed), permission **Test** buttons, and orange/red hints that surface when a restart is due after blacklist changes or a long uptime — see [OpenTracker service reload & restart](#opentracker-service-reload--restart)
 - **Email Notifications** — professional dark-themed HTML emails for all status changes, with per-type unsubscribe
 - **Auto-Archiving** — automatically archive old reviewed reports and resolved appeals after configurable days
-- **Settings** — all configuration via web UI (site info, CAPTCHA provider + tuning, whitelist, API, donations, footer, etc.)
+- **Settings** — all configuration via web UI (site info, CAPTCHA provider + tuning, whitelist, API, lists, donations, footer, etc.)
 - **Home page layout (1.31.0)** — drag the front page's seven sections into any order, hide them, and
   rename their headings. See [Home page layout](#home-page-layout)
 
@@ -713,6 +713,16 @@ default — with it off, everything behaves exactly like the classic single-admi
   `v1/users/lookup | grant | revoke | provision` from your shop after a purchase — see
   [tools/api_client_example.py](tools/api_client_example.py). Grants made through the API notify the
   user in-app (and optionally by email) and extend like admin grants.
+- **Lists** (1.44.0, `lists_enabled`, off by default): a **collection somebody makes on purpose** —
+  a name, the torrents they put in it, and their own answer to who may see it. Useful in blacklist
+  mode, where there is no whitelist to group anything by: a reader can still gather a pack and hand
+  it to somebody. Cards on the account page (make, rename, publish, delete, manage the torrents
+  inside), a section on the public profile, a **“put this in a list”** picker in the Info panel, and
+  adding straight **by info hash or magnet link** — a hash this tracker has never seen still builds a
+  working magnet, so it can still be collected. A list is visible to a stranger only when **five**
+  answers agree: `lists_enabled`, `lists_public_enabled`, the owner's group holding `lists.public`,
+  the owner's own “show my lists” flag and the list's own. `tests/lists_test.php` walks that table
+  one flag at a time against the real query.
 - **Abuse reports from a rights holder** (1.43.0): an API key with the **abuse** scope may call
   `v1/blacklist/submit` — the same claim the public *Report* page files, in batches, from their own
   system. A report lands in the Reports queue labelled with the partner that filed it, and **nothing

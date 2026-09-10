@@ -4,6 +4,50 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.44.0] — 2026-09-10
+
+Schema **51**.
+
+### Added — lists: a collection somebody makes on purpose
+
+A favourite is one bit about one hash: I like this. A **list** is a thing somebody made — a name they
+chose, the torrents they put in it, and their own answer to who may see it. Two tables of its own
+rather than a column on `user_favourites`, because starring something and putting it in a collection
+are different acts: un-starring a torrent must never silently empty somebody's pack, and a pack must
+be able to hold a hash its owner never starred.
+
+It earns its place most in **blacklist mode**, where there is no whitelist to group anything by. A
+reader can still gather their own uploads, or a set of files that belong together, and hand the
+collection to somebody.
+
+- **Cards on the account page** (`#lists`): make one, rename it, publish it, delete it (two clicks,
+  and the button says so in between — a list is somebody's work), and open it to manage what is
+  inside. A filter over the shelf, and a search, a sort and a pager inside each list.
+- **Adding by info hash or magnet link**, pasted straight in. The catalogue is asked what it knows,
+  and the answer decides the NAME, never whether the row may be added: a hash this tracker has never
+  seen still builds a working magnet, and refusing it would break the feature for exactly the case it
+  exists for. A hash the tracker **refuses** is the one thing turned down.
+- **“Put this in a list”** beside the star in the Info panel: a checkbox per list (a torrent can be in
+  several), and a name box at the bottom, so a new list can be made without leaving the torrent that
+  prompted it.
+- **A section on the public profile**, and the **“who has this”** overlay now also says which public
+  lists a hash is on — often the more useful answer, because it says what somebody keeps it *with*.
+- Each row offers **Info**, like a search result, and a name recorded when the row was added: the
+  janitor prunes hashes nobody announces, and a list that then says nothing but forty hex characters
+  is unreadable to the person who made it.
+
+**Five answers, and any single no hides a list from strangers**: `lists_enabled`,
+`lists_public_enabled`, the owner's group holding `lists.public`, the owner's own “show my lists on my
+profile”, and the list's own switch. The site-wide switch can only ever narrow — turning it off takes
+every list off the public side without editing anybody's row, and their choice comes back when it is
+turned on again. `tests/lists_test.php` walks that table one flag at a time against the real query,
+in both languages it is written in (PHP for the profile, SQL for the overlay), because the two
+disagreeing is invisible from either side alone.
+
+Everything ships **off**. Permissions `lists.use` and `lists.public` go to the seeded `member` group
+and to the *Site member* preset; guest gets nothing, as with favourites. Deleting an account takes
+its lists and their rows with it — the rows are keyed by list, not by user, so they go first.
+
 ## [1.43.1] — 2026-09-10
 
 ### Changed — appearing on a public list is consent, and consent is the grant

@@ -15,16 +15,19 @@
  *
  * Expects, from the including page: $cfg, $db, $baseUrl, and $favCtx from favContext().
  */
-$ioFav    = $favCtx ?? favContext($db, $cfg, currentUser($db));
+$ioViewer = currentUser($db);
+$ioFav    = $favCtx ?? favContext($db, $cfg, $ioViewer);
 $ioWho    = !empty($ioFav['who_ok']) && !empty($ioFav['may_view']);
 $ioShare  = ($cfg['search_share_enabled'] ?? '1') === '1';
+$ioLists  = listsContext($db, $cfg, $ioViewer);
 ?>
 <!-- Info panel: what this torrent is, where it came from, and how the swarm looks. The file list
      lives at the bottom of it; the "N files" chip beside a search result opens the tree on its own. -->
 <div class="files-overlay" id="info-overlay" hidden
      data-files-mode="<?= sanitize(indexFilesMode($cfg)) ?>"
      data-fav="<?= !empty($ioFav['may_use']) ? '1' : '0' ?>"
-     data-fav-who="<?= $ioWho ? '1' : '0' ?>">
+     data-fav-who="<?= $ioWho ? '1' : '0' ?>"
+     data-lists="<?= !empty($ioLists['may_use']) ? '1' : '0' ?>">
     <div class="files-box info-box" role="dialog" aria-modal="true" aria-labelledby="info-title">
         <div class="files-head">
             <h3 id="info-title"><?= _h('search.details') ?></h3>
@@ -38,6 +41,28 @@ $ioShare  = ($cfg['search_share_enabled'] ?? '1') === '1';
         <div class="files-body" id="info-body"></div>
     </div>
 </div>
+
+<?php if (!empty($ioLists['may_use'])): ?>
+<?php /* "Put this in a list" — the picker. A checkbox per list, because a torrent can be in
+         several, and a name box at the bottom so a new list can be made without leaving the
+         torrent that prompted it. */ ?>
+<div class="files-overlay" id="lp-overlay" hidden>
+    <div class="files-box lp-box" role="dialog" aria-modal="true" aria-labelledby="lp-title">
+        <div class="files-head">
+            <h3 id="lp-title"><?= _h('lists.pick_title') ?></h3>
+            <button type="button" class="files-close" id="lp-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
+        </div>
+        <div class="files-body">
+            <div id="lp-body"></div>
+            <div class="lp-new">
+                <input type="text" class="profile-search" id="lp-new-name" maxlength="80" placeholder="<?= _h('lists.new_ph') ?>" autocomplete="off">
+                <button type="button" class="btn btn-small" id="lp-new-go"><?= _h('lists.new') ?></button>
+            </div>
+            <div class="lp-msg text-muted" id="lp-msg"></div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if ($ioWho): ?>
 <?php /* The fourth instance of this shell (search results, the file list, the Info panel, this).

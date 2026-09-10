@@ -81,8 +81,14 @@ $st->bindValue($i++, $perPage, PDO::PARAM_INT);
 $st->bindValue($i, ($page - 1) * $perPage, PDO::PARAM_INT);
 $st->execute();
 
+// The public LISTS this hash is on, with the same gates applied in the same query — a collection
+// somebody published is another honest answer to "who has this", and the one that says why they
+// have it. Only on the first page: it is context for the overlay, not a second paginated thing.
+$lists = $page === 1 && function_exists('listsContainingHash') ? listsContainingHash($db, $cfg, $hash, 20) : [];
+
 jsonResponse([
     'success'  => true,
+    'lists'    => $lists,
     'rows'     => array_map(static fn($r) => ['username' => $r['username']], $st->fetchAll(PDO::FETCH_ASSOC)),
     'total'    => $total,
     'page'     => $page,

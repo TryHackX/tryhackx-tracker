@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 50;  // 50 = abuse reports over the partner API: reports/archives.api_client_id + api_clients.abuse_auto_block
+const TRACKER_SCHEMA_VERSION = 51;  // 51 = user_lists + user_list_items + users.lists_public — collections somebody makes on purpose
                                     // 47 = user_favourites  // 47 = user_favourites + users.fav_public/fav_listed + whitelist.submitter_id/submitter_public — favourites, public profiles and "my uploads"
                                     // 46 = csp_reports (one row per KIND of violation, hits counts occurrences) + the four csp_* settings — the policy moved out of .htaccess and into PHP, where a nonce can exist
 // 45 = settings only (transport: cookie_secure_mode, client_proto_header, hsts_*) — every reader carries its own `?? default`, so the rows only make them visible in Settings
@@ -422,6 +422,10 @@ function trackerSchemaStatements(): array {
             -- Both default to 0. A privacy flag that ships on is not a choice anybody made.
             `fav_public` TINYINT(1) NOT NULL DEFAULT 0,
             `fav_listed` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v51, and a third question again: may a stranger see that I HAVE lists at all? It is
+            -- not covered by fav_public — somebody may be happy to show what they starred and not
+            -- what they collected — and each list carries its own is_public underneath it.
+            `lists_public` TINYINT(1) NOT NULL DEFAULT 0,
             UNIQUE KEY `uq_users_username` (`username`),
             UNIQUE KEY `uq_users_email` (`email`),
             KEY `idx_users_status` (`status`),
@@ -592,6 +596,49 @@ function trackerSchemaStatements(): array {
             KEY `idx_fav_user` (`user_id`, `created_at`),
             -- the list of who favourited one hash, and the count that goes with it
             KEY `idx_fav_hash` (`info_hash`, `user_id`)
+        ) $engine",
+
+        // ── Lists (v51) ──────────────────────────────────────────────────────────────────────
+        //
+        // A favourite is one bit about one hash. A LIST is something somebody made: a name, an
+        // order they chose, and a decision about who may see it. They are separate tables and not a
+        // "list_id" on user_favourites, because starring something and putting it in a collection
+        // are different acts — un-starring a torrent must not silently empty somebody's pack.
+        //
+        // No FOREIGN KEY, for the reason user_favourites gives above; userDeleteCascade() is what
+        // keeps both tables honest when an account goes.
+        "CREATE TABLE IF NOT EXISTS `user_lists` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `name` VARCHAR(80) NOT NULL,
+            -- the address a public list is reachable at, chosen from the name and kept stable when
+            -- the name is edited: a link somebody sent must not stop working because of a rename
+            `slug` VARCHAR(90) NOT NULL,
+            `description` VARCHAR(500) NOT NULL DEFAULT '',
+            -- 0, like every other privacy flag in this schema. A list that ships public is not a
+            -- choice anybody made.
+            `is_public` TINYINT(1) NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_list_slug` (`user_id`, `slug`),
+            KEY `idx_list_user` (`user_id`, `updated_at`),
+            KEY `idx_list_public` (`is_public`, `updated_at`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `user_list_items` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `list_id` INT UNSIGNED NOT NULL,
+            `info_hash` CHAR(40) NOT NULL,
+            -- the name as it was when the row was added. The catalogue prunes hashes nobody has
+            -- announced for a while, and a list that then says nothing but forty hex characters is
+            -- a list the person who made it cannot read either.
+            `name` VARCHAR(255) DEFAULT NULL,
+            `added_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            -- adding twice is the same list, not a longer one
+            UNIQUE KEY `uq_list_item` (`list_id`, `info_hash`),
+            KEY `idx_list_added` (`list_id`, `added_at`),
+            -- which public lists is this hash on, for the Info panel
+            KEY `idx_item_hash` (`info_hash`)
         ) $engine",
 
         "CREATE TABLE IF NOT EXISTS `hash_votes` (
@@ -875,6 +922,8 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // shape of `users`. One such split is a bug waiting; two would be a habit.
     if (!schemaColumnExists($db, 'users', 'fav_public')) $uparts[] = "ADD COLUMN `fav_public` TINYINT(1) NOT NULL DEFAULT 0";
     if (!schemaColumnExists($db, 'users', 'fav_listed')) $uparts[] = "ADD COLUMN `fav_listed` TINYINT(1) NOT NULL DEFAULT 0";
+    // v51: the same rule, one flag lower — see the CREATE above.
+    if (!schemaColumnExists($db, 'users', 'lists_public')) $uparts[] = "ADD COLUMN `lists_public` TINYINT(1) NOT NULL DEFAULT 0";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
 
     // v47: who registered a whitelist row, and whether they want it shown on their profile.
@@ -911,6 +960,32 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         $aparts[] = "ADD COLUMN `required_fields` VARCHAR(255) NOT NULL DEFAULT ''";
     }
     if ($aparts) $out[] = "ALTER TABLE `api_clients` " . implode(', ', $aparts);
+
+    // v51: lists. Two new tables, so the definitions above carry the migration too — kept identical
+    // on purpose, the way the v49 tables are.
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_lists` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `name` VARCHAR(80) NOT NULL,
+        `slug` VARCHAR(90) NOT NULL,
+        `description` VARCHAR(500) NOT NULL DEFAULT '',
+        `is_public` TINYINT(1) NOT NULL DEFAULT 0,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_list_slug` (`user_id`, `slug`),
+        KEY `idx_list_user` (`user_id`, `updated_at`),
+        KEY `idx_list_public` (`is_public`, `updated_at`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_list_items` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `list_id` INT UNSIGNED NOT NULL,
+        `info_hash` CHAR(40) NOT NULL,
+        `name` VARCHAR(255) DEFAULT NULL,
+        `added_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_list_item` (`list_id`, `info_hash`),
+        KEY `idx_list_added` (`list_id`, `added_at`),
+        KEY `idx_item_hash` (`info_hash`)
+    ) $engine";
 
     // v50: a report can now arrive from a partner's key instead of from the public form, and the
     // queue has to say which. The column is NULLABLE and has no default: every report that exists
@@ -1267,6 +1342,13 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // OFF by a false there.
     schemaGrantOnce($db, 'v47_favourites', [
         'member' => ['favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public'],
+    ]);
+
+    // v51: the list permissions, to the same group and for the same reason as v47 — a member who
+    // may keep favourites may keep a collection. GUEST GETS NOTHING, again: a list belongs to an
+    // account.
+    schemaGrantOnce($db, 'v51_lists', [
+        'member' => ['lists.use', 'lists.public'],
     ]);
 
     schemaGrantOnce($db, 'v24_content_rating', [
@@ -1656,6 +1738,14 @@ function trackerSchemaDefaultSettings(): array {
         'fav_public_enabled'          => '0',   // may a list be public at all
         'fav_who_enabled'             => '0',   // does "who has this in favourites" exist
         'profiles_enabled'            => '0',   // is ?action=u reachable (uploads use it too, hence separate)
+        // ── Lists (v51) ─────────────────────────────────────────────────────────────────────
+        // Off, like everything above it. `lists_public_enabled` is the site-wide half of "may a
+        // list be public": a reader's own per-list switch cannot outrank it, and turning it off
+        // takes every list back off the public side without editing anybody's list for them.
+        'lists_enabled'               => '0',   // the master switch; off, the endpoints answer 404
+        'lists_public_enabled'        => '0',   // may any list be public at all
+        'lists_max_per_user'          => '20',  // clamped [1, 200]
+        'lists_max_items'             => '500', // rows in one list; clamped [10, 5000]
         'wl_submitter_public'         => '0',   // does the per-row visibility flag apply anywhere
         // Where the version line may appear: none | public | panel | both. The panel, by default:
         // an operator needs to know which build is answering, and a version number on a public page

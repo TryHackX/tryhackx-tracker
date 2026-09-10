@@ -53,6 +53,10 @@ $showFav = favPublicEnabled($cfg)
 $showUploads = uploadsPossible($cfg) && uploadsPublicEnabled($cfg)
     && ($isSelf || userIdHasGrantedPermission($db, $cfg, (int)$profile['id'], 'uploads.public'));
 $canMagnet = userCan($db, $cfg, 'index.magnet');
+// Lists, the same shape of decision one line lower: the site switch, their group's grant, their own
+// section flag — and then each list's own is_public, which the endpoint applies.
+$profLists = listsContext($db, $cfg, $viewer);
+$showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profLists['may_view'] && listsVisibleFor($db, $cfg, $profile)));
 ?>
 <h1><?= _h('profile.h1') ?></h1>
 
@@ -75,7 +79,7 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
     <?php endif; ?>
 </div>
 
-<?php if (!$showFav && !$showUploads): ?>
+<?php if (!$showFav && !$showUploads && !$showLists): ?>
 <p class="text-muted"><?= _h('profile.nothing_shared') ?></p>
 <?php endif; ?>
 
@@ -84,6 +88,7 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
      data-self="<?= $isSelf ? '1' : '0' ?>"
      data-fav="<?= $showFav ? '1' : '0' ?>"
      data-uploads="<?= $showUploads ? '1' : '0' ?>"
+     data-lists="<?= $showLists ? '1' : '0' ?>"
      data-magnet="<?= $canMagnet ? '1' : '0' ?>"
      data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>"
      data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>">
@@ -127,6 +132,19 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
         </div>
         <div class="profile-list" id="pf-up-list"></div>
         <div class="trans-pagination" id="pf-up-pager"></div>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($showLists): ?>
+    <?php /* Their PUBLIC lists only — the endpoint decides that, not this page. A card each, the
+             same shape the owner sees on their account page, and opening one shows what is in it. */ ?>
+    <section class="profile-section" id="profile-lists">
+        <h2><?= _h('profile.lists') ?></h2>
+        <div class="profile-toolbar">
+            <input type="text" class="profile-search" id="pl-search" maxlength="80" placeholder="<?= _h('lists.search_ph') ?>" autocomplete="off">
+            <span class="profile-total" id="pl-total"></span>
+        </div>
+        <div class="lists-cards" id="pl-cards"></div>
     </section>
     <?php endif; ?>
 </div>

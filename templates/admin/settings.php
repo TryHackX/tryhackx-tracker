@@ -1894,6 +1894,40 @@
                 </div>
             </div>
 
+            <!-- Lists — includes/lists.php -->
+            <div class="settings-section" id="section-lists" data-group="users" data-title="<?= _h('settings.lists_heading') ?>">
+                <h5><?= _h('settings.lists_heading') ?></h5>
+                <p class="settings-hint mb-3"><?= __('settings.lists_intro') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.lists_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="lists_enabled">
+                            <option value="1" <?= ($cfg['lists_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['lists_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.lists_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.lists_public') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="lists_public_enabled">
+                            <option value="1" <?= ($cfg['lists_public_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['lists_public_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.lists_public_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.lists_max') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="lists_max_per_user" value="<?= sanitize($cfg['lists_max_per_user'] ?? '20') ?>" min="1" max="200">
+                        <small class="settings-hint"><?= _h('settings.lists_max_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.lists_items') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="lists_max_items" value="<?= sanitize($cfg['lists_max_items'] ?? '500') ?>" min="10" max="5000">
+                        <small class="settings-hint"><?= _h('settings.lists_items_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
             <!-- The sign-in bridge — includes/authbridge.php -->
             <div class="settings-section" id="section-authbridge" data-group="users" data-title="<?= _h('settings.bridge_heading') ?>">
                 <h5><?= _h('settings.bridge_heading') ?></h5>

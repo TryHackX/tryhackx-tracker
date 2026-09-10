@@ -2215,6 +2215,51 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .pf-vis-on { color: #4caf50; border-color: #2e5c30; }
 .pf-empty, .pf-loading { color: var(--text-muted); padding: 0.6rem 0; }
 
+/* ── lists ──────────────────────────────────────────────────────────────────
+   A card, not a row. A row is a line in a table; a list is a thing you open, and it carries a name
+   somebody chose, a count, and a decision about who may see it. */
+.lists-intro { font-size: 0.82rem; line-height: 1.55; margin: 0 0 0.8rem; }
+.lists-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 0.7rem; }
+/* An open list spans the whole width: its rows are the same rows the search results use, and half a
+   card is not enough room for them. */
+.lists-cards .list-card:has(.list-items) { grid-column: 1 / -1; }
+.list-card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 0.7rem 0.8rem; display: flex; flex-direction: column; gap: 0.4rem;
+}
+.list-card-public { border-color: #2e5c30; }
+.list-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
+.list-name {
+    background: none; border: 0; padding: 0; cursor: pointer;
+    color: var(--accent); font-family: inherit; font-size: 1rem; font-weight: 600; text-align: left;
+}
+.list-name:hover { text-decoration: underline; }
+.list-count { font-size: 0.8rem; }
+.list-badge-public { color: #4caf50; border-color: #2e5c30; }
+.list-desc { font-size: 0.82rem; line-height: 1.5; }
+.list-card-acts { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+.list-del[data-armed="1"] { color: var(--error); border-color: var(--error); }
+.list-rename, .list-add, .list-new-form { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.4rem; }
+.list-add { margin: 0.5rem 0; }
+.list-add .profile-search, .list-new-form .profile-search { flex: 1 1 16rem; }
+.list-add-msg { font-size: 0.8rem; }
+.list-items { border-top: 1px solid var(--border); margin-top: 0.5rem; padding-top: 0.6rem; }
+.list-items-tools { margin-bottom: 0.4rem; }
+.list-remove { min-width: 2em; }
+/* the picker, opened from the Info panel */
+.lp-box { max-width: 32em; }
+.lp-open { font-size: 1rem; line-height: 1; padding: 0.05rem 0.45rem; }
+.lp-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; white-space: normal; font-size: 0.9rem; }
+.lp-row + .lp-row { border-top: 1px solid var(--border); }
+.lp-name { flex: 1 1 auto; }
+.lp-count { font-size: 0.78rem; }
+.lp-new { display: flex; gap: 0.4rem; margin-top: 0.7rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }
+.lp-new .profile-search { flex: 1 1 auto; }
+.lp-msg { font-size: 0.8rem; min-height: 1.2em; margin-top: 0.4rem; }
+.who-lists-head { font-size: 0.8rem; margin-top: 0.8rem; }
+.who-list { display: inline-flex; gap: 0.4rem; align-items: baseline; }
+.who-list-by { font-size: 0.75rem; }
+
 .who-why { font-size: 0.8rem; line-height: 1.5; margin: 0.35rem 0 0; }
 .who-names { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0; }
 .who-name { padding: 0.15rem 0.5rem; border: 1px solid var(--border); border-radius: 12px;
