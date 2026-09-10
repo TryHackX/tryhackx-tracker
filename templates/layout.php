@@ -72,8 +72,13 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
              for the same reason app.js is: the star is delegated from `document` and has to be there
              before the first row is drawn. Every entry point inside it asks whether its own markup
              exists first, so a page without any of this costs one querySelector. */ ?>
-    <?php if (favEnabled($cfg) || profilesEnabled($cfg)): ?>
+    <?php if (favEnabled($cfg) || profilesEnabled($cfg) || listsEnabled($cfg)): ?>
     <script src="<?= $baseUrl ?>assets/js/favourites.js<?= assetVer('assets/js/favourites.js') ?>"></script>
+    <?php endif; ?>
+    <?php /* People: the inbox, friends and blocks, the directory, and the buttons a public profile
+             grows. Same rule as above — every entry point asks for its own markup first. */ ?>
+    <?php if (pmEnabled($cfg) || friendsEnabled($cfg) || directoryEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/js/people.js<?= assetVer('assets/js/people.js') ?>"></script>
     <?php endif; ?>
     <?php if ($timelineNeeded): ?>
     <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>

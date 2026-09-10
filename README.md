@@ -713,6 +713,19 @@ default — with it off, everything behaves exactly like the classic single-admi
   `v1/users/lookup | grant | revoke | provision` from your shop after a purchase — see
   [tools/api_client_example.py](tools/api_client_example.py). Grants made through the API notify the
   user in-app (and optionally by email) and extend like admin grants.
+- **People** (1.45.0, `pm_enabled` / `friends_enabled` / `directory_enabled`, all off by default):
+  private **messages** between accounts (the same BBCode/Markdown the descriptions use, per-day and
+  per-message limits, an inbox with unread counts), **following and friendship** — one row, read two
+  ways: a request that has not been answered *is* a follow, accepted it is a friendship — **blocks**
+  that stop the messages and optionally hide the profile, and a **member directory**
+  (`?action=members`) listing only the people who ticked "list me". **Who may write to me** is the
+  reader's own setting, falling back to the site default (`pm_who`: all / friends / nobody) — NULL
+  means "whatever the site says", so changing the default moves everybody who never chose and
+  overrules nobody who did. A blocked sender is **told**; a message nobody will ever read is a worse
+  answer than the truth. Reporting a message puts it in a queue on the panel's Reports page behind
+  its own permission (`panel.messages.view`), and that queue carries **the reported line and the one
+  before it — never the conversation**. `tests/people_test.php` walks the gate one fact at a time and
+  checks that the panel query cannot widen.
 - **Lists** (1.44.0, `lists_enabled`, off by default): a **collection somebody makes on purpose** —
   a name, the torrents they put in it, and their own answer to who may see it. Useful in blacklist
   mode, where there is no whitelist to group anything by: a reader can still gather a pack and hand

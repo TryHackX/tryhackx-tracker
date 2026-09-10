@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 51;  // 51 = user_lists + user_list_items + users.lists_public — collections somebody makes on purpose
+const TRACKER_SCHEMA_VERSION = 52;  // 52 = message_threads/user_messages/message_reports + user_friends + user_blocks + users.pm_who/profile_listed — people reaching each other
                                     // 47 = user_favourites  // 47 = user_favourites + users.fav_public/fav_listed + whitelist.submitter_id/submitter_public — favourites, public profiles and "my uploads"
                                     // 46 = csp_reports (one row per KIND of violation, hits counts occurrences) + the four csp_* settings — the policy moved out of .htaccess and into PHP, where a nonce can exist
 // 45 = settings only (transport: cookie_secure_mode, client_proto_header, hsts_*) — every reader carries its own `?? default`, so the rows only make them visible in Settings
@@ -426,6 +426,13 @@ function trackerSchemaStatements(): array {
             -- not covered by fav_public — somebody may be happy to show what they starred and not
             -- what they collected — and each list carries its own is_public underneath it.
             `lists_public` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v52. NULL is not a fourth value: it means 'whatever the site says', so an operator who
+            -- changes the default changes it for everybody who never expressed a preference, and
+            -- nobody who did is overruled.
+            `pm_who` ENUM('all','friends','nobody') DEFAULT NULL,
+            -- 'my profile is public' and 'put me in the directory' are different sentences: one is
+            -- about a page somebody may be sent, the other about being FOUND by strangers browsing.
+            `profile_listed` TINYINT(1) NOT NULL DEFAULT 0,
             UNIQUE KEY `uq_users_username` (`username`),
             UNIQUE KEY `uq_users_email` (`email`),
             KEY `idx_users_status` (`status`),
@@ -639,6 +646,95 @@ function trackerSchemaStatements(): array {
             KEY `idx_list_added` (`list_id`, `added_at`),
             -- which public lists is this hash on, for the Info panel
             KEY `idx_item_hash` (`info_hash`)
+        ) $engine",
+
+        // ── People reaching each other (v52) ─────────────────────────────────────────────────
+        //
+        // A THREAD is a pair of accounts, not a subject line. Two people have one conversation here,
+        // the way they do in a chat window: `u_low`/`u_high` are the two ids sorted, so the unique
+        // key finds the same row whoever opens it and there can never be two threads for one pair.
+        //
+        // Hiding is per side (`u_low_hidden` / `u_high_hidden`) and is not deletion. A conversation
+        // that one person cleared out of their inbox still exists for the other, and a message that
+        // has been REPORTED must still be readable by the moderator who has to decide about it —
+        // letting either side erase evidence of what they sent is a feature nobody asked for.
+        "CREATE TABLE IF NOT EXISTS `message_threads` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `u_low` INT UNSIGNED NOT NULL,
+            `u_high` INT UNSIGNED NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `last_message_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `u_low_hidden` TINYINT(1) NOT NULL DEFAULT 0,
+            `u_high_hidden` TINYINT(1) NOT NULL DEFAULT 0,
+            UNIQUE KEY `uq_thread_pair` (`u_low`, `u_high`),
+            KEY `idx_thread_low` (`u_low`, `last_message_at`),
+            KEY `idx_thread_high` (`u_high`, `last_message_at`)
+        ) $engine",
+
+        // `read_at` belongs to the MESSAGE and not to a per-person table: a thread has exactly two
+        // people in it, so "read" can only mean "the other one read it".
+        "CREATE TABLE IF NOT EXISTS `user_messages` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `thread_id` INT UNSIGNED NOT NULL,
+            `sender_id` INT UNSIGNED NOT NULL,
+            `body` TEXT NOT NULL,
+            `body_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `read_at` DATETIME DEFAULT NULL,
+            `reported` TINYINT(1) NOT NULL DEFAULT 0,
+            KEY `idx_msg_thread` (`thread_id`, `id`),
+            KEY `idx_msg_unread` (`thread_id`, `sender_id`, `read_at`),
+            KEY `idx_msg_sender` (`sender_id`, `created_at`)
+        ) $engine",
+
+        // A report carries the reported message and the one before it, and NOTHING else. The
+        // moderator has to judge one exchange, not read a correspondence — that is a privacy
+        // decision and it lives in the schema so no query can quietly widen it later.
+        "CREATE TABLE IF NOT EXISTS `message_reports` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `message_id` BIGINT UNSIGNED NOT NULL,
+            `context_id` BIGINT UNSIGNED DEFAULT NULL,
+            `thread_id` INT UNSIGNED NOT NULL,
+            `reporter_id` INT UNSIGNED NOT NULL,
+            `reported_user_id` INT UNSIGNED NOT NULL,
+            `reason` VARCHAR(500) NOT NULL DEFAULT '',
+            `status` ENUM('open','closed') NOT NULL DEFAULT 'open',
+            `handled_by` VARCHAR(64) NOT NULL DEFAULT '',
+            `handled_at` DATETIME DEFAULT NULL,
+            `note` VARCHAR(500) NOT NULL DEFAULT '',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_report_once` (`message_id`, `reporter_id`),
+            KEY `idx_mreport_status` (`status`, `created_at`),
+            KEY `idx_mreport_user` (`reported_user_id`)
+        ) $engine",
+
+        // FOLLOWING and FRIENDSHIP are the same table read two ways, which is the operator's own
+        // decision recorded in code: one row is "A asked B", and until B answers it means A follows
+        // B. Accepted, the pair are friends — one row, two directions, so a friendship cannot exist
+        // in one place and not in the other.
+        "CREATE TABLE IF NOT EXISTS `user_friends` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `friend_id` INT UNSIGNED NOT NULL,
+            `status` ENUM('pending','accepted') NOT NULL DEFAULT 'pending',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `accepted_at` DATETIME DEFAULT NULL,
+            UNIQUE KEY `uq_friend_once` (`user_id`, `friend_id`),
+            KEY `idx_friend_of` (`friend_id`, `status`),
+            KEY `idx_friend_mine` (`user_id`, `status`)
+        ) $engine",
+
+        // A block is one-directional and says WHAT it blocks. `hide_profile` is the second half the
+        // operator asked for: some people want to stop the messages, some want to disappear.
+        "CREATE TABLE IF NOT EXISTS `user_blocks` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `blocked_id` INT UNSIGNED NOT NULL,
+            `hide_profile` TINYINT(1) NOT NULL DEFAULT 0,
+            `note` VARCHAR(200) NOT NULL DEFAULT '',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_block_once` (`user_id`, `blocked_id`),
+            KEY `idx_block_target` (`blocked_id`)
         ) $engine",
 
         "CREATE TABLE IF NOT EXISTS `hash_votes` (
@@ -924,6 +1020,9 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'users', 'fav_listed')) $uparts[] = "ADD COLUMN `fav_listed` TINYINT(1) NOT NULL DEFAULT 0";
     // v51: the same rule, one flag lower — see the CREATE above.
     if (!schemaColumnExists($db, 'users', 'lists_public')) $uparts[] = "ADD COLUMN `lists_public` TINYINT(1) NOT NULL DEFAULT 0";
+    // v52: who may write to me, and may strangers find me by browsing.
+    if (!schemaColumnExists($db, 'users', 'pm_who')) $uparts[] = "ADD COLUMN `pm_who` ENUM('all','friends','nobody') DEFAULT NULL";
+    if (!schemaColumnExists($db, 'users', 'profile_listed')) $uparts[] = "ADD COLUMN `profile_listed` TINYINT(1) NOT NULL DEFAULT 0";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
 
     // v47: who registered a whitelist row, and whether they want it shown on their profile.
@@ -960,6 +1059,72 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         $aparts[] = "ADD COLUMN `required_fields` VARCHAR(255) NOT NULL DEFAULT ''";
     }
     if ($aparts) $out[] = "ALTER TABLE `api_clients` " . implode(', ', $aparts);
+
+    // v52: people reaching each other. Five new tables, so CREATE TABLE IF NOT EXISTS carries the
+    // whole migration — the definitions are the ones above, kept identical on purpose.
+    $out[] = "CREATE TABLE IF NOT EXISTS `message_threads` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `u_low` INT UNSIGNED NOT NULL,
+        `u_high` INT UNSIGNED NOT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `last_message_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `u_low_hidden` TINYINT(1) NOT NULL DEFAULT 0,
+        `u_high_hidden` TINYINT(1) NOT NULL DEFAULT 0,
+        UNIQUE KEY `uq_thread_pair` (`u_low`, `u_high`),
+        KEY `idx_thread_low` (`u_low`, `last_message_at`),
+        KEY `idx_thread_high` (`u_high`, `last_message_at`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_messages` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `thread_id` INT UNSIGNED NOT NULL,
+        `sender_id` INT UNSIGNED NOT NULL,
+        `body` TEXT NOT NULL,
+        `body_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `read_at` DATETIME DEFAULT NULL,
+        `reported` TINYINT(1) NOT NULL DEFAULT 0,
+        KEY `idx_msg_thread` (`thread_id`, `id`),
+        KEY `idx_msg_unread` (`thread_id`, `sender_id`, `read_at`),
+        KEY `idx_msg_sender` (`sender_id`, `created_at`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `message_reports` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `message_id` BIGINT UNSIGNED NOT NULL,
+        `context_id` BIGINT UNSIGNED DEFAULT NULL,
+        `thread_id` INT UNSIGNED NOT NULL,
+        `reporter_id` INT UNSIGNED NOT NULL,
+        `reported_user_id` INT UNSIGNED NOT NULL,
+        `reason` VARCHAR(500) NOT NULL DEFAULT '',
+        `status` ENUM('open','closed') NOT NULL DEFAULT 'open',
+        `handled_by` VARCHAR(64) NOT NULL DEFAULT '',
+        `handled_at` DATETIME DEFAULT NULL,
+        `note` VARCHAR(500) NOT NULL DEFAULT '',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_report_once` (`message_id`, `reporter_id`),
+        KEY `idx_mreport_status` (`status`, `created_at`),
+        KEY `idx_mreport_user` (`reported_user_id`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_friends` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `friend_id` INT UNSIGNED NOT NULL,
+        `status` ENUM('pending','accepted') NOT NULL DEFAULT 'pending',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `accepted_at` DATETIME DEFAULT NULL,
+        UNIQUE KEY `uq_friend_once` (`user_id`, `friend_id`),
+        KEY `idx_friend_of` (`friend_id`, `status`),
+        KEY `idx_friend_mine` (`user_id`, `status`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_blocks` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `blocked_id` INT UNSIGNED NOT NULL,
+        `hide_profile` TINYINT(1) NOT NULL DEFAULT 0,
+        `note` VARCHAR(200) NOT NULL DEFAULT '',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_block_once` (`user_id`, `blocked_id`),
+        KEY `idx_block_target` (`blocked_id`)
+    ) $engine";
 
     // v51: lists. Two new tables, so the definitions above carry the migration too — kept identical
     // on purpose, the way the v49 tables are.
@@ -1349,6 +1514,12 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // account.
     schemaGrantOnce($db, 'v51_lists', [
         'member' => ['lists.use', 'lists.public'],
+    ]);
+
+    // v52: the account-to-account permissions, to the same group and for the same reason.
+    // GUEST GETS NOTHING: writing to somebody needs an account by definition.
+    schemaGrantOnce($db, 'v52_people', [
+        'member' => ['pm.send', 'pm.report', 'friends.use', 'directory.view'],
     ]);
 
     schemaGrantOnce($db, 'v24_content_rating', [
@@ -1746,6 +1917,16 @@ function trackerSchemaDefaultSettings(): array {
         'lists_public_enabled'        => '0',   // may any list be public at all
         'lists_max_per_user'          => '20',  // clamped [1, 200]
         'lists_max_items'             => '500', // rows in one list; clamped [10, 5000]
+        // ── People reaching each other (v52) ─────────────────────────────────────────────────
+        // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
+        // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a
+        // decision to make deliberately rather than one to arrive at by not thinking about it.
+        'pm_enabled'                  => '0',   // private messages exist at all
+        'pm_who'                      => 'friends', // all | friends | nobody — the site default
+        'pm_max_per_day'              => '50',  // clamped [1, 1000]
+        'pm_max_chars'                => '4000',// clamped [200, 20000]
+        'friends_enabled'             => '0',   // following and friendship
+        'directory_enabled'           => '0',   // a browsable list of the people who asked to be on it
         'wl_submitter_public'         => '0',   // does the per-row visibility flag apply anywhere
         // Where the version line may appear: none | public | panel | both. The panel, by default:
         // an operator needs to know which build is answering, and a version number on a public page

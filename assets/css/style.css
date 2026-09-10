@@ -2220,6 +2220,59 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .pf-vis-on { color: #4caf50; border-color: #2e5c30; }
 .pf-empty, .pf-loading { color: var(--text-muted); padding: 0.6rem 0; }
 
+/* ── people: the inbox, friends, blocks, the directory ───────────────────────
+   Two columns where there is room for two, one where there is not: an inbox is a list of names and
+   a conversation is a column of text, and squeezing both into a phone's width helps neither. */
+.pm-wrap { display: grid; grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.pm-left { min-width: 0; }
+.pm-right { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); padding: 0.8rem; background: var(--bg-card); }
+.pm-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.pm-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.15rem 0.5rem;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 0.5rem 0.6rem; text-align: left; cursor: pointer; font: inherit; color: var(--text);
+}
+.pm-row:hover { border-color: var(--accent); }
+.pm-row-unread { border-color: var(--accent); }
+.pm-who { font-weight: 600; color: var(--accent); }
+.pm-preview { grid-column: 1 / -1; font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-when { font-size: 0.75rem; }
+.pm-count { background: var(--accent); color: #000; border-radius: 999px; padding: 0 0.45em; font-size: 0.75rem; }
+.pm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+.pm-head-name { font-weight: 600; margin-right: auto; }
+.pm-msgs { display: flex; flex-direction: column; gap: 0.5rem; max-height: 26rem; overflow-y: auto; padding-right: 0.2rem; }
+.pm-msg { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem 0.6rem; background: var(--bg); }
+/* Mine sit to the right and carry the accent border: whose line is whose has to be readable at a
+   glance, and colour alone is not the message — the alignment says it too. */
+.pm-msg-mine { border-color: var(--accent); margin-left: 15%; }
+.pm-msg:not(.pm-msg-mine) { margin-right: 15%; }
+.pm-body { font-size: 0.9rem; line-height: 1.5; word-break: break-word; }
+.pm-msg-foot { display: flex; gap: 0.6rem; align-items: center; font-size: 0.72rem; margin-top: 0.3rem; }
+.pm-report { background: none; border: 0; color: var(--text-muted); font: inherit; font-size: 0.72rem; cursor: pointer; padding: 0; }
+.pm-report:hover:not([disabled]) { color: var(--error); }
+.pm-composer { margin-top: 0.7rem; border-top: 1px solid var(--border); padding-top: 0.7rem; }
+.pm-input {
+    width: 100%; box-sizing: border-box; padding: 0.5rem 0.6rem; resize: vertical;
+    background: var(--bg-code); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-family: inherit; font-size: 0.9rem;
+}
+.pm-input:focus { outline: none; border-color: var(--accent); }
+.pm-composer-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
+.pm-msg-note { font-size: 0.8rem; }
+.pm-closed { margin-top: 0.7rem; border-top: 1px solid var(--border); padding-top: 0.7rem; color: #e0b15a; font-size: 0.85rem; }
+.pm-note { font-size: 0.8rem; margin-top: 0.6rem; }
+.pm-unread-badge, .nav-pm-badge { background: var(--accent); color: #000; border-radius: 999px; padding: 0 0.4em; font-size: 0.7rem; margin-left: 0.3rem; }
+.pe-tabs { margin-bottom: 0.6rem; }
+.pe-count { color: var(--text-muted); font-size: 0.8rem; }
+.pe-row .pf-main { gap: 0.6rem; }
+.pe-since { font-size: 0.78rem; }
+.profile-people { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.bk-box { max-width: 34em; }
+@media (max-width: 900px) {
+    .pm-wrap { grid-template-columns: 1fr; }
+    .pm-msg-mine, .pm-msg:not(.pm-msg-mine) { margin-left: 0; margin-right: 0; }
+}
+
 /* ── lists ──────────────────────────────────────────────────────────────────
    A card, not a row. A row is a line in a table; a list is a thing you open, and it carries a name
    somebody chose, a count, and a decision about who may see it. */

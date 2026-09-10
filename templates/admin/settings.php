@@ -1928,6 +1928,57 @@
                 </div>
             </div>
 
+            <!-- People: messages, friends, the directory — includes/people.php -->
+            <div class="settings-section" id="section-people" data-group="users" data-title="<?= _h('settings.pm_heading') ?>">
+                <h5><?= _h('settings.pm_heading') ?></h5>
+                <p class="settings-hint mb-3"><?= __('settings.pm_intro') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.pm_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="pm_enabled">
+                            <option value="1" <?= ($cfg['pm_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['pm_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.pm_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.pm_who') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="pm_who">
+                            <option value="all" <?= ($cfg['pm_who'] ?? 'friends') === 'all' ? 'selected' : '' ?>><?= _h('settings.pm_who_all') ?></option>
+                            <option value="friends" <?= ($cfg['pm_who'] ?? 'friends') === 'friends' ? 'selected' : '' ?>><?= _h('settings.pm_who_friends') ?></option>
+                            <option value="nobody" <?= ($cfg['pm_who'] ?? 'friends') === 'nobody' ? 'selected' : '' ?>><?= _h('settings.pm_who_nobody') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.pm_who_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.pm_day') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_max_per_day" value="<?= sanitize($cfg['pm_max_per_day'] ?? '50') ?>" min="1" max="1000">
+                        <small class="settings-hint"><?= _h('settings.pm_day_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.pm_chars') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_max_chars" value="<?= sanitize($cfg['pm_max_chars'] ?? '4000') ?>" min="200" max="20000">
+                        <small class="settings-hint"><?= _h('settings.pm_chars_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.friends_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="friends_enabled">
+                            <option value="1" <?= ($cfg['friends_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['friends_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.friends_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.directory_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="directory_enabled">
+                            <option value="1" <?= ($cfg['directory_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['directory_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.directory_enabled_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
             <!-- The sign-in bridge — includes/authbridge.php -->
             <div class="settings-section" id="section-authbridge" data-group="users" data-title="<?= _h('settings.bridge_heading') ?>">
                 <h5><?= _h('settings.bridge_heading') ?></h5>

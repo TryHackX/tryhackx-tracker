@@ -873,8 +873,12 @@
     function initTabs() {
         var bar = document.getElementById('acc-tabs');
         if (!bar) return;
-        var panes = ['overview', 'favourites', 'uploads', 'lists'];
+        var panes = ['overview', 'favourites', 'uploads', 'lists', 'messages', 'people'];
         function show(name) {
+            // `#messages:somebody` opens the inbox AT that conversation — the part before the colon
+            // is the pane, the rest belongs to people.js. A tab bar that did not know that fell
+            // back to the overview and left the reader looking at their e-mail preferences.
+            name = String(name || '').split(':')[0];
             if (panes.indexOf(name) === -1) name = 'overview';
             panes.forEach(function (p) {
                 var el2 = document.getElementById('acc-pane-' + p);
@@ -887,6 +891,12 @@
             bar.querySelectorAll('.rt-tab').forEach(function (b) {
                 b.classList.toggle('active', b.dataset.pane === name);
             });
+            // An inbox that is being shown again is an inbox somebody came back to. assets/js/people.js
+            // owns it; this only says "you are on screen now".
+            if (name === 'messages' && window.PM && typeof window.PM.refresh === 'function') {
+                var who = String(location.hash || '').split(':')[1];
+                window.PM.refresh(who ? decodeURIComponent(who) : null);
+            }
         }
         bar.addEventListener('click', function (e) {
             var b = e.target.closest ? e.target.closest('.rt-tab') : null;
@@ -905,8 +915,19 @@
     function initPrivacy() {
         var box = document.getElementById('acc-privacy');
         if (!box) return;
+        // Who may write to me is a choice of four, not a checkbox: the empty value means "whatever
+        // the site says", which is a real answer and not the absence of one.
+        var who = document.getElementById('acc-pm-who');
+        if (who) {
+            who.addEventListener('change', async function () {
+                who.disabled = true;
+                var r = await post('user_privacy', { pm_who: who.value });
+                who.disabled = false;
+                if (!r || !r.success) return;
+            });
+        }
         [['acc-fav-public', 'fav_public'], ['acc-fav-listed', 'fav_listed'],
-         ['acc-lists-public', 'lists_public']].forEach(function (pair) {
+         ['acc-lists-public', 'lists_public'], ['acc-profile-listed', 'profile_listed']].forEach(function (pair) {
             var input = document.getElementById(pair[0]);
             if (!input) return;
             input.addEventListener('change', async function () {

@@ -178,6 +178,11 @@ $REVIEWED = [
     'includes/index.php:$clB'                  => 'literal conditions from $where plus one clause built with placeholders; values bound',
     'includes/schema.php:$one'                 => 'one of this file\'s own CREATE/ALTER statements',
     'includes/reputation.php:$t'              => "iterates the literal ['index_hashes','whitelist']",
+    // The FROM and its two joins, written once in that file and used by the count and the page —
+    // a literal string with no input anywhere near it. Keeping it in one variable is what makes the
+    // two queries provably the same shape, which is the property that matters for a queue whose
+    // whole point is that it reads exactly two message rows.
+    'api/admin/fetch_message_reports.php:$base' => 'a literal FROM/JOIN fragment defined in the same file',
 
     // The installer, reviewed with the same care and holding up: the identifier is validated
     // before it is used, and the one value interpolated goes through PDO::quote().

@@ -12,10 +12,12 @@ $accPending = userEmailChangeState($db, $meUser);
 $accCooldownDays = userEmailChangeCooldownDays($cfg);
 $accFav = favContext($db, $cfg, $meUser);
 $accLists = listsContext($db, $cfg, $meUser);
+$accPeople = peopleContext($db, $cfg, $meUser);
 // The uploads tab is hidden ENTIRELY, not shown empty, where a submission cannot happen — a tab that
 // can only ever be empty teaches people the feature is broken rather than absent.
 $accShowUploads = $accFav['uploads'] && uploadsPublicEnabled($cfg);
-$accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use'];
+$accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
+        || $accPeople['may_message'] || $accPeople['may_friend'];
 ?>
 <div class="account-head">
     <h1><?= __('account.h1_named', ['user' => sanitize($meUser['username'])]) ?></h1>
@@ -59,6 +61,13 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use'];
     <?php endif; ?>
     <?php if ($accLists['may_use']): ?>
     <button type="button" class="rt-tab" data-pane="lists"><?= _h('account.tab_lists') ?></button>
+    <?php endif; ?>
+    <?php if ($accPeople['may_message']): ?>
+    <button type="button" class="rt-tab" data-pane="messages"><?= _h('account.tab_messages') ?>
+        <span class="pm-unread-badge" id="pm-unread"<?= $accPeople['unread'] ? '' : ' hidden' ?>><?= (int)$accPeople['unread'] ?></span></button>
+    <?php endif; ?>
+    <?php if ($accPeople['may_friend']): ?>
+    <button type="button" class="rt-tab" data-pane="people"><?= _h('account.tab_people') ?></button>
     <?php endif; ?>
 </div>
 <?php endif; ?>
@@ -135,7 +144,8 @@ if (count($accLangs) > 1):
          Gating it on favourites alone hid the lists switch on an install that runs lists without
          them. */ ?>
 <?php if (($accFav['may_use'] && ($accFav['public_ok'] || $accFav['who_ok']))
-          || ($accLists['may_use'] && $accLists['public_ok'])): ?>
+          || ($accLists['may_use'] && $accLists['public_ok'])
+          || $accPeople['pm'] || $accPeople['directory']): ?>
         <?php /* In the card that already holds the mail and language preferences, not a card of its
                  own: these are two more answers about the same account, and a separate card would
                  make them look like a separate subject. */ ?>
@@ -156,6 +166,23 @@ if (count($accLangs) > 1):
             <?php if ($accLists['publish_blocked']): ?>
             <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'lists.public']) ?></p>
             <?php endif; ?>
+            <?php endif; ?>
+            <?php if ($accPeople['directory']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-profile-listed"<?= (int)($meUser['profile_listed'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.profile_listed_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.profile_listed_hint') ?></p>
+            <?php endif; ?>
+            <?php if ($accPeople['pm']): ?>
+            <div class="acc-pm-who">
+                <label class="cl-label" for="acc-pm-who"><?= _h('account.pm_who_label') ?></label>
+                <select id="acc-pm-who" class="profile-search acc-pm-select">
+                    <option value=""<?= ($meUser['pm_who'] ?? null) === null ? ' selected' : '' ?>><?= __('account.pm_who_default', ['what' => _h('account.pm_who_' . $accPeople['who_default'])]) ?></option>
+                    <option value="all"<?= ($meUser['pm_who'] ?? null) === 'all' ? ' selected' : '' ?>><?= _h('account.pm_who_all') ?></option>
+                    <option value="friends"<?= ($meUser['pm_who'] ?? null) === 'friends' ? ' selected' : '' ?>><?= _h('account.pm_who_friends') ?></option>
+                    <option value="nobody"<?= ($meUser['pm_who'] ?? null) === 'nobody' ? ' selected' : '' ?>><?= _h('account.pm_who_nobody') ?></option>
+                </select>
+                <p class="text-muted acc-verify-note"><?= __('account.pm_who_hint') ?></p>
+            </div>
             <?php endif; ?>
             <?php if ($accFav['may_use'] && $accFav['who_ok']): ?>
             <label class="search-check acc-check"><input type="checkbox" id="acc-fav-listed"<?= (int)($meUser['fav_listed'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
@@ -323,6 +350,47 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
         </div>
         <p class="text-muted lists-intro"><?= __('lists.intro') ?></p>
         <div class="lists-cards" id="ul-cards"></div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($accPeople['may_message']): ?>
+<?php /* Messages. The inbox on the left, the conversation beside it — and nothing about either is
+         rendered here: api/user_messages.php decides what this reader may see, including whether
+         they may write at all, and says why when they may not. */ ?>
+<div class="acc-pane" id="acc-pane-messages" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.tab_messages') ?></h2>
+    <div id="account-messages" class="profile-section pm-wrap"
+         data-max-chars="<?= (int)$accPeople['max_chars'] ?>"
+         data-max-day="<?= (int)$accPeople['max_per_day'] ?>">
+        <div class="pm-left">
+            <div class="profile-toolbar">
+                <input type="text" class="profile-search" id="pm-search" maxlength="60" placeholder="<?= _h('pm.search_ph') ?>" autocomplete="off">
+            </div>
+            <div class="pm-list" id="pm-threads"></div>
+        </div>
+        <div class="pm-right" id="pm-thread" hidden></div>
+    </div>
+    <p class="text-muted pm-note"><?= __('pm.note', ['n' => (int)$accPeople['max_per_day']]) ?></p>
+</div>
+<?php endif; ?>
+
+<?php if ($accPeople['may_friend']): ?>
+<?php /* Friends, requests in both directions, and the block list — four views of one table, which
+         is what the endpoint serves and what the tab bar below switches between. */ ?>
+<div class="acc-pane" id="acc-pane-people" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.tab_people') ?></h2>
+    <div id="account-people" class="profile-section">
+        <div class="rt-tabs pe-tabs" id="pe-tabs" role="tablist">
+            <button type="button" class="rt-tab active" data-view="friends"><?= _h('people.friends') ?></button>
+            <button type="button" class="rt-tab" data-view="incoming"><?= _h('people.incoming') ?></button>
+            <button type="button" class="rt-tab" data-view="pending"><?= _h('people.pending') ?></button>
+            <button type="button" class="rt-tab" data-view="blocks"><?= _h('people.blocks') ?></button>
+        </div>
+        <div class="profile-toolbar">
+            <input type="text" class="profile-search" id="pe-search" maxlength="60" placeholder="<?= _h('people.search_ph') ?>" autocomplete="off">
+        </div>
+        <div class="profile-list" id="pe-list"></div>
     </div>
 </div>
 <?php endif; ?>

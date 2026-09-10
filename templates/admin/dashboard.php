@@ -29,10 +29,40 @@
             <button class="source-tab" data-source="archives"><i class="bi bi-archive"></i> <?= _h('a.reports.tab_archives') ?> <span id="archives-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="appeals"><i class="bi bi-megaphone"></i> <?= _h('a.reports.tab_appeals') ?> <span id="appeals-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="appeal_archives"><i class="bi bi-archive"></i> <?= _h('a.reports.tab_appeal_archives') ?></button>
+            <?php /* Reported private messages. Behind its own permission, because reading one is a
+                     different kind of access from working the torrent queue — and the tab is not
+                     drawn at all for somebody who does not hold it, rather than drawn and refused. */ ?>
+            <?php if (pmEnabled($cfg) && panelCan($db, $cfg, 'panel.messages.view')): ?>
+            <button class="source-tab" data-source="messages"><i class="bi bi-chat-left-text"></i> <?= _h('a.reports.tab_messages') ?> <span id="msgrep-badge" class="appeals-count-badge d-hidden"></span></button>
+            <?php endif; ?>
             <!-- The page links that used to sit here are gone. They predate the shared header bar, which
                  now lists every page from the same adminNavItems() list; keeping both meant Reports was
                  the only page showing its navigation twice, once in each row. Every other page's tab bar
                  switches VIEWS and nothing else, and this one now matches them. -->
+        </div>
+
+        <?php /* The reported-messages view. A list of cards rather than a row in the reports table:
+                 what a moderator reads here is two lines of somebody's conversation, and that does
+                 not fit a table of names and hashes. Drawn by assets/js/admin-messages.js. */ ?>
+        <div id="msgrep-view" class="d-hidden">
+            <div class="admin-toolbar-card">
+                <div class="toolbar-row">
+                    <div class="toolbar-search">
+                        <span class="toolbar-search-icon"><i class="bi bi-search"></i></span>
+                        <div class="search-input-wrap">
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="msgrep-search" placeholder="<?= _h('a.reports.search_ph') ?>">
+                        </div>
+                    </div>
+                    <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="msgrep-status">
+                        <option value="open"><?= _h('status.b_pending') ?></option>
+                        <option value="closed"><?= _h('status.b_checked') ?></option>
+                        <option value="all"><?= _h('a.reports.f_all') ?></option>
+                    </select>
+                </div>
+            </div>
+            <div class="msgrep-note settings-hint"><?= __('js.msgrep.only_two') ?></div>
+            <div id="msgrep-list"></div>
+            <div class="trans-pagination" id="msgrep-pagination"></div>
         </div>
 
         <!-- Toolbar -->
@@ -58,7 +88,7 @@
             </div>
         </div>
 
-        <div class="table-responsive">
+        <div class="table-responsive" id="reports-table-card">
             <table class="table table-dark table-hover dash-table" id="reports-table">
                 <colgroup id="reports-colgroup">
                     <col class="dash-c-id"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">
@@ -274,5 +304,10 @@
     <!-- admin-common.js only defines window.AdminCommon (shared pagination renderer); admin.js keeps its own globals -->
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin.js<?= assetVer('assets/js/admin.js') ?>"></script>
+    <?php /* The reported-messages view. Loaded only where the permission is held, because the tab
+             that opens it is not drawn otherwise and the endpoint behind it answers 403. */ ?>
+    <?php if (pmEnabled($cfg) && panelCan($db, $cfg, 'panel.messages.view')): ?>
+    <script src="<?= $baseUrl ?>assets/js/admin-messages.js<?= assetVer('assets/js/admin-messages.js') ?>"></script>
+    <?php endif; ?>
 </body>
 </html>

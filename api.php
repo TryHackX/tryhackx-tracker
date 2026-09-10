@@ -36,6 +36,7 @@ require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/favourites.php';
 require_once __DIR__ . '/includes/lists.php';
+require_once __DIR__ . '/includes/people.php';
 require_once __DIR__ . '/includes/authbridge.php';
 require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/tuner.php';
@@ -132,6 +133,9 @@ $apiRoutes = [
     'admin/twofa'           => 'api/admin/twofa.php',
     'admin/logout'          => 'api/admin/logout.php',
     'admin/fetch_reports'   => 'api/admin/fetch_reports.php',
+    // Reported private messages — two endpoints, and their own permissions (includes/people.php).
+    'admin/fetch_message_reports' => 'api/admin/fetch_message_reports.php',
+    'admin/message_report_action' => 'api/admin/message_report_action.php',
     'admin/change_status'   => 'api/admin/change_status.php',
     'admin/block_hash'      => 'api/admin/block_hash.php',
     'admin/unblock_hash'    => 'api/admin/unblock_hash.php',
@@ -250,6 +254,10 @@ $apiRoutes = [
     'index_info'                 => 'api/index_info.php',
     'richtext_preview'           => 'api/richtext_preview.php',
     'rate_hash'                  => 'api/rate_hash.php',
+    // ── People reaching each other (includes/people.php) ──
+    'user_people'                => 'api/user_people.php',
+    'user_messages'              => 'api/user_messages.php',
+    'user_directory'             => 'api/user_directory.php',
     // ── Lists (includes/lists.php) ──
     'user_lists'                 => 'api/user_lists.php',
     'user_list_items'            => 'api/user_list_items.php',
@@ -328,6 +336,9 @@ function adminEndpointPermission(string $endpoint): ?string {
     static $map = [
         // Reports
         'admin/fetch_reports'      => 'panel.reports.view',
+        // NOT panel.reports.*: reading a reported private message is a different kind of access.
+        'admin/fetch_message_reports' => 'panel.messages.view',
+        'admin/message_report_action' => 'panel.messages.handle',
         'admin/fetch_appeals'      => 'panel.reports.view',
         'admin/change_status'      => 'panel.reports.status',
         'admin/update_field'       => 'panel.reports.status',

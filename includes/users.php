@@ -80,6 +80,14 @@ function userPermissionList(): array {
         // marked public — the site-wide switch and their own per-list choice are the other two.
         'lists.use'    => 'Make lists of torrents and keep them',
         'lists.public' => 'Let their lists be shown on their public profile',
+        // ── people reaching each other (v52) ──
+        // Sending and REPORTING are separate ids on purpose: an account that has been trusted with
+        // an inbox has not thereby been trusted to put somebody's private words in front of a
+        // moderator, and an operator may want to withdraw one without the other.
+        'pm.send'        => 'Send private messages to other members',
+        'pm.report'      => 'Report a message to the moderators',
+        'friends.use'    => 'Follow other members and accept friend requests',
+        'directory.view' => 'Browse the member directory',
 
         // ── the admin panel ──
         //
@@ -100,6 +108,13 @@ function userPermissionList(): array {
         'panel.reports.block'    => 'PANEL — block and unblock reported hashes',
         'panel.reports.email'    => 'PANEL — email a reporter and send review notifications',
         'panel.reports.archive'  => 'PANEL — archive, restore and delete reports',
+        // The panel side of the same feature. NOT granted to anybody by the migration, not even to
+        // the seeded moderator group: reading a reported private message is a different kind of
+        // access from working the torrent-report queue, and an operator has to hand it out on
+        // purpose. `panel.messages.view` shows the queue and the two messages a report carries;
+        // `panel.messages.handle` closes a report or deletes the message it names.
+        'panel.messages.view'   => 'See reported private messages (only the reported line and the one before it)',
+        'panel.messages.handle' => 'Close a message report, or delete the message it names',
         'panel.appeals.resolve'  => 'PANEL — resolve and restore appeals',
         'panel.whitelist.view'   => 'PANEL — see the Whitelist and Index pages',
         'panel.whitelist.add'    => 'PANEL — register hashes from the panel',
@@ -165,7 +180,8 @@ function userGroupPresets(): array {
             'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'whitelist.view', 'whitelist.add',
                         'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose',
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
-                        'lists.use', 'lists.public'],
+                        'lists.use', 'lists.public',
+                        'pm.send', 'pm.report', 'friends.use', 'directory.view'],
         ],
     ];
 }
@@ -556,6 +572,17 @@ function userDeleteCascade(PDO $db, int $userId): array {
     // nothing would ever look at them again to notice.
     $del("DELETE i FROM user_list_items i JOIN user_lists l ON l.id = i.list_id WHERE l.user_id = ?", [$userId], 'list_items');
     $del("DELETE FROM user_lists WHERE user_id = ?", [$userId], 'lists');
+    // Everything that was between this account and somebody else. The messages go with the threads
+    // — a conversation with a gap where one side used to be is not a conversation anybody can read
+    // — and the reports go with the messages they point at, because a queue whose rows name a
+    // message that no longer exists is a queue nobody can work.
+    $del("DELETE r FROM message_reports r JOIN message_threads t ON t.id = r.thread_id
+           WHERE t.u_low = ? OR t.u_high = ?", [$userId, $userId], 'message_reports');
+    $del("DELETE m FROM user_messages m JOIN message_threads t ON t.id = m.thread_id
+           WHERE t.u_low = ? OR t.u_high = ?", [$userId, $userId], 'messages');
+    $del("DELETE FROM message_threads WHERE u_low = ? OR u_high = ?", [$userId, $userId], 'threads');
+    $del("DELETE FROM user_friends WHERE user_id = ? OR friend_id = ?", [$userId, $userId], 'friends');
+    $del("DELETE FROM user_blocks WHERE user_id = ? OR blocked_id = ?", [$userId, $userId], 'blocks');
     // The pair, not an id column: hash_votes identifies a voter as a type plus a key, because an
     // anonymous vote is keyed by an IP bucket instead.
     $del("DELETE FROM hash_votes WHERE voter_type = 'user' AND voter_key = ?", [(string)$userId], 'votes');

@@ -56,9 +56,24 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
 // Lists, the same shape of decision one line lower: the site switch, their group's grant, their own
 // section flag — and then each list's own is_public, which the endpoint applies.
 $profLists = listsContext($db, $cfg, $viewer);
+$profPeople = peopleContext($db, $cfg, $viewer);
+// A block with `hide_profile` closes the page for that one reader, and closes it the way every
+// other "no" closes it: the same not-found page a name nobody has renders. Telling them "you have
+// been blocked" here would answer a question they did not ask and confirm the account exists.
+if (!$isSelf && profileHiddenFrom($db, (int)$profile['id'], (int)$viewer['id'])) {
+    echo '<h1>' . _h('profile.h1') . '</h1><p>' . _h('profile.not_found') . '</p>';
+    echo '<p><a class="btn btn-secondary" href="' . $baseUrl . '">' . _h('common.back_home') . '</a></p>';
+    return;
+}
+$profState   = $profPeople['may_friend'] && !$isSelf ? friendState($db, (int)$viewer['id'], (int)$profile['id']) : 'none';
+$profBlocked = !$isSelf && blockRow($db, (int)$viewer['id'], (int)$profile['id']) !== null;
 $showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profLists['may_view'] && listsVisibleFor($db, $cfg, $profile)));
 ?>
 <h1><?= _h('profile.h1') ?></h1>
+<?php /* The token every POST from this page needs — following somebody, blocking them, un-starring
+         a row of your own list. Without it the scripts here posted an empty token and every write
+         answered 403, which reads exactly like a permission problem and is not one. */ ?>
+<input type="hidden" id="account-csrf" value="<?= $csrfToken ?>">
 
 <div class="profile-head">
     <span class="profile-name"><?= sanitize($profile['username']) ?></span>
@@ -72,6 +87,17 @@ $showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profL
              address is built from the name — so the setting is about whether the operator wants the
              site handing out links at all, and a profile is not an exception to that. The fallback
              box below it is what appears on plain HTTP, where the clipboard API does not exist. */ ?>
+    <?php if (!$isSelf && ($profPeople['may_message'] || $profPeople['may_friend'])): ?>
+    <?php /* What this reader may do about this person. Drawn by assets/js/people.js from these
+             answers — the page decides, the script only renders. */ ?>
+    <span class="profile-people" id="profile-people"
+          data-user="<?= sanitize($profile['username']) ?>"
+          data-state="<?= sanitize($profState) ?>"
+          data-blocked="<?= $profBlocked ? '1' : '0' ?>"
+          data-pm="<?= $profPeople['may_message'] ? '1' : '0' ?>"
+          data-friends="<?= $profPeople['may_friend'] ? '1' : '0' ?>"
+          data-block="<?= ($profPeople['may_message'] || $profPeople['may_friend']) ? '1' : '0' ?>"></span>
+    <?php endif; ?>
     <?php if (($cfg['search_share_enabled'] ?? '1') === '1'): ?>
     <button type="button" class="search-share profile-share js-profile-share" id="profile-share"
             data-user="<?= sanitize($profile['username']) ?>"

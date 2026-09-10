@@ -4,6 +4,85 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.45.0] — 2026-09-10
+
+Schema **52**.
+
+### Added — people: messages, following and friendship, blocks, and a directory
+
+Accounts could see each other's public pages and nothing else. They can reach each other now, and
+every part of that is off until an operator turns it on.
+
+**Private messages.** An inbox with unread counts, a conversation with the person rather than a
+subject line, and the same BBCode/Markdown the public descriptions use — one sanitizer decides what
+may be displayed on this site, and a message goes through it like everything else. Two ceilings, and
+they answer different questions: an IP rate limit is about a script, `pm_max_per_day` is about an
+account.
+
+**Following and friendship are one row, read two ways.** `user_friends` holds "A asked B"; until B
+answers, that *is* a follow, and accepted it is a friendship. That is the operator's own decision:
+a one-sided follow is useful on its own, and a friendship that exists in one direction and not the
+other is a bug waiting to be written. Following back somebody who already asked you *is* accepting —
+one row, and the two end up friends rather than each holding a request the other cannot see.
+
+**Who may write to me** is the reader's own setting, and `NULL` is not a fourth value — it means
+"whatever the site says". So an operator changing `pm_who` moves everybody who never expressed a
+preference and overrules nobody who did. The site ships with **friends**, not **all**: an inbox
+anybody may write to is a decision to make deliberately rather than one to arrive at by not thinking
+about it.
+
+**A block stops the messages, and optionally hides the profile** — two decisions, asked in the same
+breath, because some people want the messages to stop and some want to disappear. Blocking somebody
+also stops *you* writing to *them*: a one-way conversation with somebody you have blocked is not
+something to offer. **The blocked sender is told.** Silently swallowing a message teaches somebody
+that they are being ignored, which is both false and slower to find out than the truth. A hidden
+profile answers with the same not-found page a name nobody has answers with.
+
+**A member directory** (`?action=members`), listing the people who ticked *list me in the member
+directory* and nobody else. "My profile is public" and "put me on a list strangers browse" are
+different sentences, and reading one as the other would put somebody on a page they never asked to
+be on. It leaves out anybody who has hidden their profile from this reader, and anybody this reader
+has blocked.
+
+### Added — a queue for reported messages, and a rule about how much of one it shows
+
+Reporting a message puts it in front of a moderator on the Reports page, behind **its own
+permission** (`panel.messages.view` / `panel.messages.handle`) that the migration grants to
+**nobody** — not even to the seeded moderator group. Reading somebody's private message is a
+different kind of access from working the torrent-report queue, and an operator hands it out on
+purpose.
+
+**A report carries the reported line and the one before it. Never the conversation.** Two people's
+correspondence is not evidence in bulk, and somebody deciding about one line does not need the rest
+of it. The rule is in the schema (`message_reports.context_id`), in the endpoint (two LEFT JOINs by
+id, and no query anywhere in the panel that takes a thread and returns its contents) and in
+`tests/people_test.php`, which asserts that the panel source has no thread-wide read in it. Three
+actions and no fourth: close, reopen, delete the reported message — every one of them audited with
+both accounts named.
+
+Deleting an account takes the whole correspondence with it: the reports first, then the messages,
+then the threads, then the friendships and blocks — the rows are keyed by thread, not by user, so
+the order matters.
+
+### Fixed — a profile page posted an empty CSRF token
+
+Every write from `?action=u` — following somebody, blocking them, un-starring a row of your own list
+— answered 403, because the page carried no token for the scripts to find. That reads exactly like a
+permission problem and is not one.
+
+### Fixed — the inbox showed what was in it when the page loaded
+
+Switching to the Messages tab is a hash change or no navigation at all, so nothing re-fetched — and
+coming back to an inbox is precisely when somebody wants to know what arrived. The tab bar tells
+`people.js` it is on screen, and the inbox reloads.
+
+### Changed — pmCanWrite() asks about the SENDER
+
+It took a sender and then checked `userCan()`, which answers about whoever is making the request.
+Behind the endpoint those are the same person; anywhere else they are not — a CLI test has no session
+and a panel session answers yes to everything. A gate that cannot be asked about a named account is a
+gate that cannot be tested.
+
 ## [1.44.1] — 2026-09-10
 
 ### Fixed — a privacy switch that saved an answer nothing acted on

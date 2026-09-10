@@ -572,6 +572,24 @@
     color: #ff9800;
 }
 
+/* Reported messages. Cards, not rows: what a moderator reads here is two lines of somebody's
+   conversation, and that does not fit a table of names and hashes. */
+.msgrep-note { margin: 0 0 0.8rem; }
+.msgrep-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.8rem; }
+.msgrep-closed { opacity: 0.75; }
+.msgrep-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem; margin-bottom: 0.4rem; }
+.msgrep-who { font-weight: 600; }
+.msgrep-when { font-size: 0.75rem; color: #768390; }
+.msgrep-reason { font-size: 0.85rem; margin-bottom: 0.6rem; }
+.msgrep-msg { border: 1px solid #30363d; border-radius: 6px; padding: 0.5rem 0.7rem; margin-bottom: 0.5rem; }
+/* The reported line is the one being decided about, so it is the one that stands out. */
+.msgrep-reported { border-color: #6b4f1a; }
+.msgrep-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem; }
+.msgrep-body { font-size: 0.9rem; line-height: 1.5; word-break: break-word; }
+.msgrep-gone { font-style: italic; font-size: 0.85rem; }
+.msgrep-acts { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.6rem; }
+.msgrep-note-in { max-width: 22rem; }
+
 /* Which partner filed a report, beside the name they filed it under. Quiet on purpose: it is
    provenance, not a status — the row's own status badge is the one to read first. */
 .badge-api {

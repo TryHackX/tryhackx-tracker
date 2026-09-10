@@ -28,6 +28,7 @@ require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/favourites.php';
 require_once __DIR__ . '/includes/lists.php';
+require_once __DIR__ . '/includes/people.php';
 // The partner guide (?action=apidocs) cleans its own query string through the SAME function
 // the endpoint uses, so an operator cannot be shown a page describing fields the API would
 // not actually require. Without this the page silently fell back to 'nothing beyond the hash'.
@@ -145,6 +146,9 @@ $routes = [
     // allows a dot and both cases. A name can never be an action, so the collision problem does not
     // arise — 'Bob.Smith' would have become 'bobsmith', a different person or nobody.
     'u'            => 'templates/pages/profile.php',
+    // The member directory. Its own action rather than a tab on the account page: it is a page
+    // about other people, and the account page is a page about you.
+    'members'      => 'templates/pages/members.php',
     // The partner integration guide. Unlisted rather than locked: nothing on it is secret — it is
     // the shape of a public API — and the key it documents travels separately, from a person. It
     // reads its own configuration out of the query string, so the operator hands a partner an
@@ -226,7 +230,7 @@ if (in_array($action, $adminPanelActions, true) || $action === $adminLoginAction
 }
 
 // user pages exist only while the account system is on (and the account page needs a session)
-if (in_array($action, ['login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search', 'u'], true) && !usersEnabled($cfg)) {
+if (in_array($action, ['login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search', 'u', 'members'], true) && !usersEnabled($cfg)) {
     $action = 'home';
 }
 

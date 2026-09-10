@@ -38,6 +38,7 @@ $allowed = [
     // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
     'fav_enabled', 'fav_max_per_user', 'fav_public_enabled', 'fav_who_enabled', 'profiles_enabled',
     'lists_enabled', 'lists_public_enabled', 'lists_max_per_user', 'lists_max_items',
+    'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
     // same screen they turned it on from.
@@ -306,6 +307,7 @@ $intClamp = [
     // Lists (v51). The same shape as fav_max_per_user: a ceiling that keeps one person's collection
     // from becoming everybody's query cost, clamped rather than refused.
     'lists_max_per_user' => [1, 200, 20], 'lists_max_items' => [10, 5000, 500],
+    'pm_max_per_day' => [1, 1000, 50], 'pm_max_chars' => [200, 20000, 4000],
     'wl_edit_max_pending' => [0, 50, 3],
     'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],
     'wl_dead_after_days' => [0, 3650, 0], 'wl_dead_every_days' => [1, 365, 30],
@@ -431,6 +433,9 @@ if (isset($data['users_default_group'])) {
     $sgChk = $db->prepare("SELECT 1 FROM user_groups WHERE slug = ? LIMIT 1");
     $sgChk->execute([$data['users_default_group']]);
     if (!$sgChk->fetchColumn()) jsonResponse(['error' => __('api.settings.default_group_missing')], 400);
+}
+if (isset($data['pm_who']) && !in_array($data['pm_who'], ['all', 'friends', 'nobody'], true)) {
+    $data['pm_who'] = 'friends';
 }
 if (isset($data['whitelist_submit_mode']) && !in_array($data['whitelist_submit_mode'], ['public', 'users'], true)) {
     jsonResponse(['error' => __('api.settings.whitelist_submit_mode_invalid')], 400);

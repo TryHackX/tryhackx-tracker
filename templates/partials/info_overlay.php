@@ -78,6 +78,26 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
 </div>
 <?php endif; ?>
 
+<?php if (pmEnabled($cfg) || friendsEnabled($cfg)): ?>
+<?php /* Blocking asks two questions at once, because they are two decisions: stop the messages,
+         and (if they want it) disappear from that person's view of the site. */ ?>
+<div class="files-overlay" id="block-overlay" hidden>
+    <div class="files-box bk-box" role="dialog" aria-modal="true" aria-labelledby="bk-title">
+        <div class="files-head">
+            <h3 id="bk-title"><?= _h('people.block_title') ?> <span class="text-muted" id="bk-who"></span></h3>
+            <button type="button" class="files-close" id="bk-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
+        </div>
+        <div class="files-body">
+            <p class="text-muted"><?= __('people.block_body') ?></p>
+            <label class="search-check acc-check"><input type="checkbox" id="bk-hide"><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('people.block_hide_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('people.block_hide_hint') ?></p>
+            <button type="button" class="btn btn-small" id="bk-go"><?= _h('people.block_go') ?></button>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <?php if ($ioWho): ?>
 <?php /* The fourth instance of this shell (search results, the file list, the Info panel, this).
          Its pager and its search box are its own; the list inside is usernames, and every one of

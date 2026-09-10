@@ -31,10 +31,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $sets = [];
     $args = [];
-    foreach (['fav_public', 'fav_listed', 'lists_public'] as $flag) {
+    foreach (['fav_public', 'fav_listed', 'lists_public', 'profile_listed'] as $flag) {
         if (!array_key_exists($flag, $input)) continue;
         $sets[] = "`$flag` = ?";
         $args[] = !empty($input[$flag]) ? 1 : 0;
+    }
+    // Who may write to me. NULL is a real answer here — "whatever the site says" — so it is set by
+    // sending an empty string, not by leaving the key out (which means "do not touch this").
+    if (array_key_exists('pm_who', $input)) {
+        $v = (string)$input['pm_who'];
+        $sets[] = "`pm_who` = ?";
+        $args[] = in_array($v, ['all', 'friends', 'nobody'], true) ? $v : null;
     }
     if (!$sets) jsonResponse(['error' => 'nothing_to_change'], 400);
     $args[] = (int)$u['id'];
@@ -47,6 +54,9 @@ jsonResponse([
     'fav_public'  => (int)($u['fav_public'] ?? 0) === 1,
     'fav_listed'  => (int)($u['fav_listed'] ?? 0) === 1,
     'lists_public' => (int)($u['lists_public'] ?? 0) === 1,
+    'profile_listed' => (int)($u['profile_listed'] ?? 0) === 1,
+    'pm_who'       => $u['pm_who'] ?? null,
+    'pm_who_default' => pmDefaultWho($cfg),
     // What the site currently does with them, so the page can say "this is off for everyone right
     // now" instead of showing a control that silently does nothing.
     'may_publish' => favPublicEnabled($cfg) && userCan($db, $cfg, 'favourites.public'),

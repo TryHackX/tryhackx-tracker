@@ -26,6 +26,12 @@
         <a href="<?= $baseUrl ?>?action=search" class="<?= $action === 'search' ? 'active' : '' ?>"><?= _h('nav.search') ?></a>
         <?php endif; ?>
         <?php $navUser = $navUser ?? (usersEnabled($cfg) ? currentUser($db) : null); ?>
+        <?php /* The directory sits with the other places somebody can GO, and only for a reader who
+                 may actually browse it — a link that answers 404 is a worse link than no link. */ ?>
+        <?php if (directoryEnabled($cfg) && $navUser !== null && userCan($db, $cfg, 'directory.view')): ?>
+        <span class="sep">|</span>
+        <a href="<?= $baseUrl ?>?action=members" class="<?= $action === 'members' ? 'active' : '' ?>"><?= _h('nav.members') ?></a>
+        <?php endif; ?>
         <?php $accountActive = in_array($action, ['account', 'login', 'register', 'reset', 'verify'], true); ?>
         <?php if ($navUser !== null): ?>
         <span class="sep">|</span>
