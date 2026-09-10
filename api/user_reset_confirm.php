@@ -23,6 +23,10 @@ if ($userId === null) {
     jsonResponse(['error' => __('api.users.reset_link_invalid')], 400);
 }
 $db->prepare("UPDATE users SET pass_hash = ? WHERE id = ?")->execute([password_hash($password, PASSWORD_DEFAULT), $userId]);
+// Everything that was signed in as this account stops being signed in. A reset is what somebody does
+// when they believe the account is not only theirs any more; leaving the other sessions alive would
+// leave whoever they are worried about exactly where they were.
+userSignOutOthers($db, $userId, false);
 $db->prepare("DELETE FROM user_tokens WHERE type = 'remember' AND user_id = ?")->execute([$userId]);
 userNotify($db, $userId, 'account', 'Your password was reset', 'If this was not you, contact the site admin.');
 jsonResponse(['success' => true]);

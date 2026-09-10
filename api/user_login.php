@@ -36,6 +36,28 @@ if (!$user) {
 if ($user['status'] !== 'active') {
     jsonResponse(['error' => __('api.login.suspended')], 403);
 }
+
+/* ── the second factor ─────────────────────────────────────────────────────────────────────────
+ *
+ * After the password, never instead of it, and asked for in a SECOND request: the first reply says
+ * `twofa: true` and the form grows a field. That shape matters — a form that always shows a code box
+ * teaches everybody that this site wants one, and a reply that asked for the code and the password
+ * together would have to hold the password somewhere between the two.
+ *
+ * The code is checked before anything is opened: no session, no remember cookie, no panel. A wrong
+ * code leaves the account exactly as it was, and the attempt has already cost one of this address's
+ * ten tries in fifteen minutes.
+ */
+if (user2faEnabled($db, (int)$user['id'])) {
+    $code = trim((string)($input['code'] ?? ''));
+    if ($code === '') {
+        jsonResponse(['error' => 'twofa_required', 'twofa' => true], 401);
+    }
+    if (!user2faVerify($db, (int)$user['id'], $code)) {
+        resetCaptchaGrace($cfg);
+        jsonResponse(['error' => 'twofa_invalid', 'twofa' => true], 401);
+    }
+}
 $choice = (string)($input['session'] ?? '');
 if ($choice === '' && !empty($input['remember'])) $choice = '30d';   // legacy checkbox
 if (!array_key_exists($choice, userSessionChoices())) $choice = 'forever';

@@ -227,6 +227,8 @@ function settingsCatalogKeywords(): array {
         'digest_hours'             => 'digest email frequency hours interval how often summary',
         'digest_min'               => 'digest email threshold minimum waiting before sending summary',
         'health_token'             => 'health check endpoint token uptime kuma monitoring json status probe',
+        'user_2fa_enabled'         => 'two factor authentication 2fa members accounts totp authenticator app',
+        'user_2fa_required'        => 'two factor required force 2fa panel access moderators admins',
         'pm_enabled'               => 'private messages pm inbox conversations members write dm',
         'pm_who'                   => 'private messages who can write default friends everybody nobody',
         'pm_max_per_day'           => 'private messages limit per day spam flood cap',

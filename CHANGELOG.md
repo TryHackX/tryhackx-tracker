@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.47.0] — 2026-09-10
+
+Schema **53** — `user_twofa`, `users.sessions_valid_from`, `user_tokens.ip` / `.ua`.
+
+### Added — a second factor for member accounts
+
+The panel has had two-factor authentication since 1.14.0; an account has had a password and nothing
+else. `user_2fa_enabled` (off by default) lets members turn one on for themselves from the account
+page: the password, then a QR **drawn by this server's own encoder**, then one code to prove the
+phone received the secret, then ten recovery codes shown once. Signing in afterwards asks for the
+password and then the code, in a second request — a form that always showed a code box would tell
+every visitor that this site wants one, and would be asking before it knew whether the account had
+one.
+
+A code works **once**: the accepted TOTP step is stored, and anything not newer is refused however
+correct the digits are. Without that the same six digits are good for up to ninety seconds. Recovery
+codes are stored hashed, work once, and the list shrinks by exactly one when one is used.
+
+`user_2fa_required` — `off`, `panel`, or `all` — **never refuses a sign-in**. What it withholds is
+the admin panel: an account that can open the panel and has no second factor keeps working as an
+account, and the account page says why the panel will not open. A requirement that can lock somebody
+out of their own account is one an operator turns off again.
+
+### Added — "signed in on N devices", and signing out everywhere else
+
+The account page lists the browsers that asked to be remembered, with the address and user agent each
+token was handed to, and marks the one you are reading it on. It says that is what it is listing: a
+plain sign-in leaves no row anywhere, so the number is what the site can prove rather than every open
+tab in the world.
+
+Ending them is not limited that way. `users.sessions_valid_from` is a unix stamp on the account, and
+`currentUser()` drops any session that began before it — which reaches the sessions no cookie points
+at. A **password change** now sweeps them too (it already cleared the remember tokens, which was half
+of it), and a password **reset** sweeps everything including the browser doing the resetting.
+
+The column is a `BIGINT` of unix seconds rather than a `DATETIME`, deliberately: it is compared
+against a time PHP wrote into the session, and a comparison between a clock the database keeps and a
+clock PHP keeps is one this project has already got wrong once.
+
 ## [1.46.0] — 2026-09-10
 
 Schema **52** (unchanged).

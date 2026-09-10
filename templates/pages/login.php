@@ -42,6 +42,16 @@ $bridgeName = $bridgeLogin !== '' ? authBridgeProviderName($db, $cfg) : '';
             <input type="password" id="login-password" name="password" maxlength="200" autocomplete="current-password" required>
             <div class="error-msg"><?= _h('login.password_err') ?></div>
         </div>
+        <?php /* The second factor, hidden until the server asks for it.
+                 Always in the markup, never shown first: a form that opens with a code box tells
+                 every visitor that this site wants one, and it would be asking for a code before it
+                 knows whether this account has one. The reply to the password says `twofa: true`,
+                 and assets/js/app.js reveals this. */ ?>
+        <div class="form-group" id="login-2fa-group" hidden>
+            <label for="login-code"><?= _h('login.code') ?></label>
+            <input type="text" id="login-code" name="code" maxlength="10" inputmode="numeric" autocomplete="one-time-code">
+            <div class="form-hint"><?= _h('login.code_hint') ?></div>
+        </div>
         <div class="form-group">
             <label for="login-session"><?= _h('login.stay') ?></label>
             <select id="login-session" name="session">

@@ -40,6 +40,7 @@ $allowed = [
     'lists_enabled', 'lists_public_enabled', 'lists_max_per_user', 'lists_max_items',
     'index_keep_saved', 'index_keep_saved_days',
     'digest_enabled', 'digest_to', 'digest_hours', 'digest_min', 'health_token',
+    'user_2fa_enabled', 'user_2fa_required',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -443,6 +444,9 @@ if (isset($data['pm_who']) && !in_array($data['pm_who'], ['all', 'friends', 'nob
 }
 if (isset($data['index_keep_saved']) && !in_array($data['index_keep_saved'], ['off', 'forever', 'extend'], true)) {
     $data['index_keep_saved'] = 'off';
+}
+if (isset($data['user_2fa_required']) && !in_array($data['user_2fa_required'], ['off', 'panel', 'all'], true)) {
+    $data['user_2fa_required'] = 'off';
 }
 if (isset($data['whitelist_submit_mode']) && !in_array($data['whitelist_submit_mode'], ['public', 'users'], true)) {
     jsonResponse(['error' => __('api.settings.whitelist_submit_mode_invalid')], 400);

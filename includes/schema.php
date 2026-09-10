@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 52;  // 52 = message_threads/user_messages/message_reports + user_friends + user_blocks + users.pm_who/profile_listed — people reaching each other
+const TRACKER_SCHEMA_VERSION = 53;  // 53 = user_twofa + users.sessions_valid_from + user_tokens.ip/ua — a second factor for member accounts, and "signed in on N devices"
+                                    // 52 = message_threads/user_messages/message_reports + user_friends + user_blocks + users.pm_who/profile_listed — people reaching each other
                                     // 47 = user_favourites  // 47 = user_favourites + users.fav_public/fav_listed + whitelist.submitter_id/submitter_public — favourites, public profiles and "my uploads"
                                     // 46 = csp_reports (one row per KIND of violation, hits counts occurrences) + the four csp_* settings — the policy moved out of .htaccess and into PHP, where a nonce can exist
 // 45 = settings only (transport: cookie_secure_mode, client_proto_header, hsts_*) — every reader carries its own `?? default`, so the rows only make them visible in Settings
@@ -426,6 +427,12 @@ function trackerSchemaStatements(): array {
             -- not covered by fav_public — somebody may be happy to show what they starred and not
             -- what they collected — and each list carries its own is_public underneath it.
             `lists_public` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v53. The instant every OTHER session of this account stopped counting: a unix time,
+            -- stamped by 'sign out everywhere else' and by a password change. A UNIX TIMESTAMP and
+            -- not a DATETIME on purpose — it is compared against the session login time, which
+            -- PHP wrote, and this schema has been bitten before by a database and an app that
+            -- disagree about which zone they are in.
+            `sessions_valid_from` BIGINT UNSIGNED NOT NULL DEFAULT 0,
             -- v52. NULL is not a fourth value: it means 'whatever the site says', so an operator who
             -- changes the default changes it for everybody who never expressed a preference, and
             -- nobody who did is overruled.
@@ -483,6 +490,11 @@ function trackerSchemaStatements(): array {
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `expires_at` DATETIME NOT NULL,
             `used_at` DATETIME DEFAULT NULL,
+            -- v53: what this token was handed to, so 'signed in on N devices' can say something
+            -- about each one. Written when the token is issued and again on every rotation, so the
+            -- list describes where the cookie is NOW, not where it started.
+            `ip` VARCHAR(45) DEFAULT NULL,
+            `ua` VARCHAR(255) DEFAULT NULL,
             UNIQUE KEY `uq_ut_hash` (`token_hash`),
             KEY `idx_ut_user` (`user_id`, `type`),
             KEY `idx_ut_expires` (`expires_at`)
@@ -646,6 +658,32 @@ function trackerSchemaStatements(): array {
             KEY `idx_list_added` (`list_id`, `added_at`),
             -- which public lists is this hash on, for the Info panel
             KEY `idx_item_hash` (`info_hash`)
+        ) $engine",
+
+        // ── A second factor for a member account (v53) ───────────────────────────────────────
+        //
+        // Its own table rather than columns on `users`, for the reason a row here is EXCEPTIONAL:
+        // most accounts never set one up, the secret is the most sensitive thing this schema holds,
+        // and a JOIN that returns nothing is a cheaper answer than four more columns on every user
+        // row in every query the site makes.
+        //
+        // `enabled = 0` with a secret present is a setup somebody started and never confirmed with a
+        // code; it expires by `created_at` rather than being cleaned up, so an abandoned attempt
+        // costs one row and never a half-armed account.
+        "CREATE TABLE IF NOT EXISTS `user_twofa` (
+            `user_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `secret` VARCHAR(64) NOT NULL,
+            `enabled` TINYINT(1) NOT NULL DEFAULT 0,
+            -- SHA-256 of each unused recovery code, as a JSON array. Hashed for the same reason the
+            -- password is: a code that can be read out of the database is a password nobody typed.
+            `recovery` TEXT DEFAULT NULL,
+            -- The last TOTP step this account accepted. A code stays valid for a whole 30-second
+            -- window (and one either side), so without this the same six digits — shoulder-surfed,
+            -- or replayed off the wire on a plain-HTTP install — work twice.
+            `last_step` BIGINT UNSIGNED DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `confirmed_at` DATETIME DEFAULT NULL,
+            `last_used_at` DATETIME DEFAULT NULL
         ) $engine",
 
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
@@ -1023,6 +1061,9 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // v52: who may write to me, and may strangers find me by browsing.
     if (!schemaColumnExists($db, 'users', 'pm_who')) $uparts[] = "ADD COLUMN `pm_who` ENUM('all','friends','nobody') DEFAULT NULL";
     if (!schemaColumnExists($db, 'users', 'profile_listed')) $uparts[] = "ADD COLUMN `profile_listed` TINYINT(1) NOT NULL DEFAULT 0";
+    // v53: when every other session of this account stopped counting. 0 = never, which is what every
+    // existing account gets, so an upgrade signs nobody out.
+    if (!schemaColumnExists($db, 'users', 'sessions_valid_from')) $uparts[] = "ADD COLUMN `sessions_valid_from` BIGINT UNSIGNED NOT NULL DEFAULT 0";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
 
     // v47: who registered a whitelist row, and whether they want it shown on their profile.
@@ -1125,6 +1166,23 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         UNIQUE KEY `uq_block_once` (`user_id`, `blocked_id`),
         KEY `idx_block_target` (`blocked_id`)
     ) $engine";
+
+    // v53: the second factor, and what a remember-me token was handed to. Same definitions as the
+    // CREATE above, for the reason the v51 comment gives.
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_twofa` (
+        `user_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+        `secret` VARCHAR(64) NOT NULL,
+        `enabled` TINYINT(1) NOT NULL DEFAULT 0,
+        `recovery` TEXT DEFAULT NULL,
+        `last_step` BIGINT UNSIGNED DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `confirmed_at` DATETIME DEFAULT NULL,
+        `last_used_at` DATETIME DEFAULT NULL
+    ) $engine";
+    $tparts = [];
+    if (!schemaColumnExists($db, 'user_tokens', 'ip')) $tparts[] = "ADD COLUMN `ip` VARCHAR(45) DEFAULT NULL";
+    if (!schemaColumnExists($db, 'user_tokens', 'ua')) $tparts[] = "ADD COLUMN `ua` VARCHAR(255) DEFAULT NULL";
+    if ($tparts) $out[] = "ALTER TABLE `user_tokens` " . implode(', ', $tparts);
 
     // v51: lists. Two new tables, so the definitions above carry the migration too — kept identical
     // on purpose, the way the v49 tables are.
@@ -1935,6 +1993,13 @@ function trackerSchemaDefaultSettings(): array {
         // be at least HEALTH_TOKEN_MIN characters or it is treated as empty, because a guessable
         // token is not a smaller secret — it is a public endpoint.
         'health_token'                => '',
+        // ── A second factor for member accounts (v53, includes/user2fa.php) ──────────────────
+        // Off, like everything else that is new. `user_2fa_required` is 'off' | 'panel' | 'all':
+        // 'panel' means an account that can open the admin panel must carry one — and until it does,
+        // THE PANEL does not open for it. The account itself still works: a requirement that locks
+        // people out of their own account is a requirement operators turn off again.
+        'user_2fa_enabled'            => '0',
+        'user_2fa_required'           => 'off',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

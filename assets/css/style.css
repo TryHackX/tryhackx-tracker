@@ -2280,6 +2280,35 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 }
 .pm-editor textarea:focus { outline: none; box-shadow: none; border-color: transparent; }
 .pm-editor .rt-preview { min-height: 6rem; max-height: 18rem; }
+/* ── Account security: the second factor, and where this account is signed in ─────────────────
+   The rows reuse .acc-pref-row from the mail preferences above them — same card, same shape, so
+   the block reads as one more set of answers about this account rather than as a new subject. */
+.acc-security-block { margin-top: 1.2rem; }
+.acc-2fa-box { margin: 0.6rem 0 0.4rem; padding: 0.8rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-code); }
+.acc-2fa-box[hidden] { display: none; }
+.acc-2fa-head { margin: 0 0 0.5rem; font-size: 0.9rem; }
+.acc-2fa-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin-top: 0.5rem; }
+.acc-2fa-row .profile-search { flex: 0 1 16rem; }
+.acc-2fa-msg { font-size: 0.82rem; }
+/* The QR is server-drawn SVG. White ground on purpose: a dark-on-dark square is a square no camera
+   reads, and this is the one place on the page where the page's own palette is the wrong answer. */
+.acc-2fa-qr { display: inline-block; padding: 0.5rem; background: #fff; border-radius: 4px; }
+.acc-2fa-qr svg { display: block; width: 190px; height: 190px; }
+.acc-2fa-secret { display: inline-block; margin: 0.2rem 0 0.4rem; padding: 0.2rem 0.45rem; border-radius: 4px;
+    background: rgba(255,255,255,0.06); font-family: var(--mono, monospace); font-size: 0.85rem; letter-spacing: 0.06em; word-break: break-all; }
+.acc-2fa-codes { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.6rem; }
+.acc-2fa-codes code { padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: 4px;
+    font-family: var(--mono, monospace); font-size: 0.85rem; letter-spacing: 0.05em; }
+.acc-sessions { margin-top: 1rem; }
+.acc-sessions-head { margin: 0 0 0.4rem; font-size: 0.92rem; }
+.acc-session { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; padding: 0.35rem 0; border-top: 1px solid var(--border); font-size: 0.86rem; }
+.acc-session-me { color: var(--text); }
+.acc-session-what { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+.acc-session-when { font-size: 0.78rem; white-space: nowrap; }
+.acc-sessions-act { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin-top: 0.6rem; }
+.acc-sessions-act[hidden] { display: none; }
+.acc-sessions-act .profile-search { flex: 0 1 14rem; }
+
 .pm-new-row { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
 .pm-new-row[hidden] { display: none; }
 .pm-new-row .profile-search { flex: 1 1 auto; }

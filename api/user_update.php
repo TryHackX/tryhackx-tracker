@@ -58,6 +58,10 @@ $verifySent = false;
 if ($newPass !== '') {
     $db->prepare("UPDATE users SET pass_hash = ? WHERE id = ?")
        ->execute([password_hash($newPass, PASSWORD_DEFAULT), (int)$u['id']]);
+    // …and every session that is already open, wherever it is. Clearing the cookies was only half of
+    // it: a browser signed in without one went on being signed in with a password that had changed
+    // under it, which is precisely the browser somebody changes their password because of.
+    userSignOutOthers($db, (int)$u['id'], true);
     // a password change invalidates every remember-me token (stolen-cookie hygiene)
     $db->prepare("DELETE FROM user_tokens WHERE type = 'remember' AND user_id = ?")->execute([(int)$u['id']]);
     $changed[] = 'password';

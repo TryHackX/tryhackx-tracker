@@ -1983,15 +1983,27 @@ const getJson = async (endpoint) => {
             const ok = [vLogin(true), vPass(true)].every(Boolean);
             if (!ok) return;
             btn.disabled = true;
+            const codeEl = $id('login-code');
             const json = await fetchWithCaptcha('user_login', {
                 csrf_token: csrfOf(form),
                 login: login.value.trim(),
                 password: pass.value,
                 session: ($id('login-session') || { value: 'forever' }).value,
+                // Empty on the first attempt, which is what makes the server ask.
+                code: codeEl ? codeEl.value.trim() : '',
             }, form.dataset.captchaFirst === '1');
             if (json && json.success) {
                 showAlert(alert, t('js.app.signed_in_loading'), true);
                 window.location.href = APP_BASE + '?action=account';
+            } else if (json && json.twofa) {
+                // The password was right. Show the code field and say which of the two things
+                // happened — "wrong code" and "now I need a code" are different sentences.
+                const group = $id('login-2fa-group');
+                if (group) group.hidden = false;
+                showAlert(alert, t(json.error === 'twofa_invalid' ? 'js.app.twofa_bad' : 'js.app.twofa_ask'),
+                          json.error !== 'twofa_invalid');
+                if (codeEl) { codeEl.value = ''; codeEl.focus(); }
+                btn.disabled = false;
             } else {
                 showAlert(alert, (json && json.error) || t('js.app.signin_failed'), false);
                 btn.disabled = false;

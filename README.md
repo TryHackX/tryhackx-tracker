@@ -896,6 +896,37 @@ a **wrong** token gets exactly what no token gets — the ordinary page — so a
 is a secret to find. Rate-limited to 120 requests a minute per address; the mode comparison reads the
 janitor's cached answer rather than forking `sudo` on every poll.
 
+### Account security — a second factor, and where you are signed in (1.47.0)
+
+Two switches on the account page, both about the same question: *who else can be me?*
+
+**Two-factor authentication for member accounts** (`user_2fa_enabled`, off by default). The panel has
+had its own since 1.14.0 and this does not touch it — that one is the operator's sign-in, this is a
+feature the site offers its members. A member turns it on for themselves: the page asks for their
+password, draws a QR **with this project's own encoder** (a hosted QR service would be handed a
+secret as good as the password), takes one code to prove the phone received it, and hands back ten
+recovery codes, once. After that, signing in asks for the password and *then* the code — a second
+request, so a form that always showed a code box would not be telling every visitor that this site
+wants one.
+
+A code works **once**. TOTP digits are valid for a 30-second step plus one either side, so the same
+six digits would otherwise work for up to 90 seconds; the accepted step is stored and anything not
+newer is refused. A recovery code works once too, and the list gets shorter rather than being marked.
+
+`user_2fa_required` is `off` | `panel` | `all`. **Requiring it never refuses a sign-in.** An account
+that has not set one up still works — what is withheld is the admin panel, and the account page says
+so and offers the switch. A rule that can lock somebody out of their own account is a rule that gets
+switched off again after the first support mail.
+
+**Signed in on N devices**, with *sign out everywhere else*. What the site can enumerate is
+remember-me tokens — one per browser that asked to be remembered, now carrying the address and user
+agent it was handed to — and the page says that rather than implying it can see every open tab.
+Ending them is not limited that way: `users.sessions_valid_from` is stamped, and every session older
+than that instant stops being honoured on its next request, including one opened without a cookie.
+The browser doing the asking stays signed in. A **password change** does the same sweep, and so does
+a password **reset** — that one keeps nothing, because a reset is what somebody does when they
+believe the account is not only theirs any more.
+
 ### The panel's log (1.22.0)
 
 **Log** in the panel navigation, behind its own `panel.audit.view` permission. Who did what, when,

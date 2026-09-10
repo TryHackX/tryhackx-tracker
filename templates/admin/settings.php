@@ -945,6 +945,34 @@
                 </div>
             </div>
 
+            <?php /* A second factor for member accounts. Not beside the panel's own 2FA setting on
+                     purpose: that one is about the operator's own sign-in, this one is a feature the
+                     site offers its members, and putting them together invited the reading that
+                     switching one moves the other. */ ?>
+            <div class="settings-section" id="section-user2fa" data-group="users" data-title="<?= _h('settings.user2fa_heading') ?>">
+                <h5><i class="bi bi-shield-lock"></i> <?= _h('settings.user2fa_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.user2fa_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-4" data-setting="user_2fa_enabled">
+                        <label class="form-label"><?= _h('settings.user2fa_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="user_2fa_enabled">
+                            <option value="0" <?= ($cfg['user_2fa_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.user2fa_off') ?></option>
+                            <option value="1" <?= ($cfg['user_2fa_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.user2fa_on') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.user2fa_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="user_2fa_required">
+                        <label class="form-label"><?= _h('settings.user2fa_required') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="user_2fa_required">
+                            <option value="off" <?= ($cfg['user_2fa_required'] ?? 'off') === 'off' ? 'selected' : '' ?>><?= _h('settings.user2fa_required_none') ?></option>
+                            <option value="panel" <?= ($cfg['user_2fa_required'] ?? 'off') === 'panel' ? 'selected' : '' ?>><?= _h('settings.user2fa_panel') ?></option>
+                            <option value="all" <?= ($cfg['user_2fa_required'] ?? 'off') === 'all' ? 'selected' : '' ?>><?= _h('settings.user2fa_all') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.user2fa_required_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
             <div class="settings-section" id="section-users" data-group="users" data-title="<?= _h('settings.users_title') ?>">
                 <h5><?= _h('settings.users_title') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.users_intro_a') ?> <a href="<?= $baseUrl ?>?action=admin-users"><?= _h('settings.users_page_link') ?></a>. <?= __('settings.users_intro_b') ?></small>

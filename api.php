@@ -37,6 +37,7 @@ require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/favourites.php';
 require_once __DIR__ . '/includes/lists.php';
 require_once __DIR__ . '/includes/people.php';
+require_once __DIR__ . '/includes/user2fa.php';
 require_once __DIR__ . '/includes/authbridge.php';
 require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/tuner.php';
@@ -243,6 +244,9 @@ $apiRoutes = [
     'user_logout'                => 'api/user_logout.php',
     'user_me'                    => 'api/user_me.php',
     'user_update'                => 'api/user_update.php',
+    // Account security (includes/user2fa.php): the second factor, and where this account is signed in.
+    'user_2fa'                   => 'api/user_2fa.php',
+    'user_sessions'              => 'api/user_sessions.php',
     'user_notifications'         => 'api/user_notifications.php',
     'user_reset_request'         => 'api/user_reset_request.php',
     'user_reset_confirm'         => 'api/user_reset_confirm.php',

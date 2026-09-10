@@ -353,6 +353,21 @@ function userMaybeOpenPanelSession(PDO $db, array $user): void {
     // permissions never got a panel session, and the entire moderator permission map was
     // unreachable by the audience it was written for. The feature existed and nobody could use it.
     if (!userIsAdminGroup($db, (int)$user['id']) && !userHasPanelAccess($db, (int)$user['id'])) return;
+    // A second factor, where the operator has said one is required.
+    //
+    // Enforced HERE and nowhere else: the account still signs in, reads its messages and keeps its
+    // favourites — only the panel stays shut, and the account page says why and offers the switch.
+    // Refusing the sign-in itself would lock somebody out of their own account over a setting an
+    // administrator changed while they were asleep, which is how a requirement gets switched off.
+    if (function_exists('user2faRequiredFor')) {
+        $cfg2 = $GLOBALS['cfg'] ?? [];
+        $need = user2faRequiredFor($db, is_array($cfg2) ? $cfg2 : [], $user);
+        if ($need['required'] && !user2faEnabled($db, (int)$user['id'])) {
+            $_SESSION['panel_needs_2fa'] = true;
+            return;
+        }
+    }
+    unset($_SESSION['panel_needs_2fa']);
     $_SESSION['loggedin'] = true;
     $_SESSION['login_time'] = time();
     $_SESSION['last_activity'] = time();
@@ -367,8 +382,13 @@ function userMaybeOpenPanelSession(PDO $db, array $user): void {
 function userRememberIssue(PDO $db, int $userId, ?int $expiresAt = null): void {
     $expiresAt = $expiresAt ?? (time() + USER_REMEMBER_DAYS * 86400);
     $token = bin2hex(random_bytes(32));
-    $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'remember', ?, FROM_UNIXTIME(?))")
-       ->execute([$userId, hash('sha256', $token), $expiresAt]);
+    // WHERE this cookie went, so "signed in on N devices" can describe each one rather than showing
+    // a list of identical rows. Written on every rotation too, so the entry follows the cookie.
+    $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at, ip, ua)
+                  VALUES (?, 'remember', ?, FROM_UNIXTIME(?), ?, ?)")
+       ->execute([$userId, hash('sha256', $token), $expiresAt,
+                  mb_substr((string)(function_exists('getClientIp') ? getClientIp($GLOBALS['cfg'] ?? []) : ''), 0, 45) ?: null,
+                  mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255) ?: null]);
     // cookieBaseParams() reads $GLOBALS['cfg'] when it is not handed one — the pattern getClientIp()
     // already uses. Deliberately NOT a new parameter on this function: its call site in
     // userTryRememberLogin() is pinned by exact source text in tests/audit_fixes_test.php, and a
@@ -397,12 +417,15 @@ function userRememberClear(PDO $db): void {
 function userTryRememberLogin(PDO $db): ?array {
     $raw = (string)($_COOKIE[USER_REMEMBER_COOKIE] ?? '');
     if ($raw === '' || !preg_match('/^(\d{1,10})\.([a-f0-9]{64})$/', $raw, $m)) return null;
-    $st = $db->prepare("SELECT user_id, UNIX_TIMESTAMP(expires_at) AS exp FROM user_tokens WHERE type = 'remember' AND user_id = ? AND token_hash = ? AND expires_at >= NOW() AND used_at IS NULL");
+    // The token's own age is compared against the account's epoch below — a cookie issued before
+    // "sign out everywhere else" must not walk back in through this door.
+    $st = $db->prepare("SELECT user_id, UNIX_TIMESTAMP(expires_at) AS exp, UNIX_TIMESTAMP(created_at) AS born FROM user_tokens WHERE type = 'remember' AND user_id = ? AND token_hash = ? AND expires_at >= NOW() AND used_at IS NULL");
     $st->execute([(int)$m[1], hash('sha256', $m[2])]);
     $tok = $st->fetch(PDO::FETCH_ASSOC);
     if (!$tok) return null;
     $u = userFindById($db, (int)$m[1]);
     if (!$u || $u['status'] !== 'active') return null;
+    if ((int)($u['sessions_valid_from'] ?? 0) > (int)$tok['born']) return null;
     // rotate: burn this token, hand out a fresh one (stolen-cookie replay shows up as a failed login)
     $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE type = 'remember' AND user_id = ? AND token_hash = ?")
        ->execute([(int)$m[1], hash('sha256', $m[2])]);
@@ -420,6 +443,80 @@ function userTryRememberLogin(PDO $db): ?array {
     return $u;
 }
 
+/**
+ * The devices this account is signed in on, newest first.
+ *
+ * What the site actually KNOWS is remember-me tokens: one per browser that asked to be remembered,
+ * rotated on every return. A plain session with no cookie behind it leaves no row anywhere — PHP
+ * sessions are files on disk with no account in their name — so the list says what it can prove and
+ * the account page names the current browser separately rather than pretending to enumerate them.
+ *
+ * `current` marks the row this request's own cookie belongs to, because "which of these is me?" is
+ * the first question anybody asks of a list like this.
+ */
+function userSessionList(PDO $db, int $userId): array
+{
+    $mine = '';
+    $raw = (string)($_COOKIE[USER_REMEMBER_COOKIE] ?? '');
+    if ($raw !== '' && preg_match('/^(\d{1,10})\.([a-f0-9]{64})$/', $raw, $m) && (int)$m[1] === $userId) {
+        $mine = hash('sha256', $m[2]);
+    }
+    $st = $db->prepare("SELECT token_hash, ip, ua, UNIX_TIMESTAMP(created_at) AS created,
+                               UNIX_TIMESTAMP(expires_at) AS expires
+                          FROM user_tokens
+                         WHERE user_id = ? AND type = 'remember' AND used_at IS NULL AND expires_at >= NOW()
+                         ORDER BY created_at DESC LIMIT 50");
+    $st->execute([$userId]);
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $out[] = [
+            // The hash never leaves the server: a caller that could name a token could revoke
+            // somebody else's. Rows are addressed by their position in this list instead.
+            'current' => $mine !== '' && hash_equals((string)$r['token_hash'], $mine),
+            'ip'      => $r['ip'] !== null ? (string)$r['ip'] : null,
+            'ua'      => $r['ua'] !== null ? (string)$r['ua'] : null,
+            'created' => (int)$r['created'],
+            'expires' => (int)$r['expires'],
+        ];
+    }
+    return $out;
+}
+
+/**
+ * End every session of this account except the one making the request.
+ *
+ * Two halves, and both are needed: the remember cookies go (so nothing can walk back in), and
+ * `sessions_valid_from` is stamped (so the sessions that are already open stop being honoured —
+ * see currentUser()). The current browser is kept by re-stamping its own login time afterwards and
+ * issuing it a fresh cookie, because the person doing this is not the one they are worried about.
+ *
+ * Returns how many remember tokens were destroyed.
+ */
+function userSignOutOthers(PDO $db, int $userId, bool $keepCurrent = true): int
+{
+    $keepHash = '';
+    $raw = (string)($_COOKIE[USER_REMEMBER_COOKIE] ?? '');
+    if ($keepCurrent && $raw !== '' && preg_match('/^(\d{1,10})\.([a-f0-9]{64})$/', $raw, $m) && (int)$m[1] === $userId) {
+        $keepHash = hash('sha256', $m[2]);
+    }
+    if ($keepHash !== '') {
+        $st = $db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type = 'remember' AND token_hash <> ?");
+        $st->execute([$userId, $keepHash]);
+    } else {
+        $st = $db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type = 'remember'");
+        $st->execute([$userId]);
+    }
+    $gone = $st->rowCount();
+    $now = time();
+    $db->prepare("UPDATE users SET sessions_valid_from = ? WHERE id = ?")->execute([$now, $userId]);
+    // This session survives its own sweep: the stamp is "everything older than now is over", and
+    // this request is now.
+    if ($keepCurrent && session_status() === PHP_SESSION_ACTIVE && (int)($_SESSION['user_id'] ?? 0) === $userId) {
+        $_SESSION['user_login_time'] = $now;
+    }
+    return $gone;
+}
+
 /** The logged-in user of this request, or null. Cached per request. */
 function currentUser(PDO $db): ?array {
     if (!empty($GLOBALS['__current_user_loaded'])) return $GLOBALS['__current_user_cache'];
@@ -434,6 +531,17 @@ function currentUser(PDO $db): ?array {
     if (!empty($_SESSION['user_id'])) {
         $u = userFindById($db, (int)$_SESSION['user_id']);
         if ($u && $u['status'] !== 'active') { unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']); $u = null; }
+        // "Sign out everywhere else", and a password change, stamp users.sessions_valid_from. Any
+        // session that began before that instant is over — this is the only place that can end a
+        // session belonging to a browser we are not currently talking to.
+        //
+        // Both sides are unix times PHP wrote. The column is a BIGINT rather than a DATETIME for
+        // exactly that reason: a comparison between a clock the database keeps and a clock PHP keeps
+        // is a comparison this project has already got wrong once.
+        if ($u && (int)($u['sessions_valid_from'] ?? 0) > (int)($_SESSION['user_login_time'] ?? 0)) {
+            unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']);
+            $u = null;
+        }
         // A session OPENED THROUGH THE BRIDGE ends when the far side says the person signed out
         // over there. Only those: an ordinary sign-in on this site is not the forum's to end, and
         // the flag is on the session, so nobody else's request grows a query for this.

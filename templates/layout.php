@@ -80,6 +80,12 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
     <?php if (pmEnabled($cfg) || friendsEnabled($cfg) || directoryEnabled($cfg)): ?>
     <script src="<?= $baseUrl ?>assets/js/people.js<?= assetVer('assets/js/people.js') ?>"></script>
     <?php endif; ?>
+    <?php /* The account page's security block: the second factor and the signed-in devices. Only
+             on that page — both halves are drawn nowhere else, and there is no reason for every
+             visitor to carry them. */ ?>
+    <?php if ($action === 'account'): ?>
+    <script src="<?= $baseUrl ?>assets/js/account-security.js<?= assetVer('assets/js/account-security.js') ?>"></script>
+    <?php endif; ?>
     <?php if ($timelineNeeded): ?>
     <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/stats-timeline.js<?= assetVer('assets/js/stats-timeline.js') ?>"></script>

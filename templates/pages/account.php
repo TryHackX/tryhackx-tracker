@@ -16,6 +16,17 @@ $accPeople = peopleContext($db, $cfg, $meUser);
 // Whether this reader may search inside file names — the same permission the search page asks, and
 // the endpoints ask it again themselves.
 $mayFileSearch = userCan($db, $cfg, 'index.files');
+// Account security: the second factor (when the operator has switched the feature on) and where this
+// account is signed in. Both are about the account itself rather than about what it publishes, so
+// they sit in the Profile card under their own heading and not in the privacy block.
+$accTwofa = ['feature' => user2faFeatureEnabled($cfg), 'enabled' => false, 'required' => false, 'why' => null, 'left' => 0];
+if ($accTwofa['feature']) {
+    $accNeed = user2faRequiredFor($db, $cfg, $meUser);
+    $accTwofa['enabled']  = user2faEnabled($db, (int)$meUser['id']);
+    $accTwofa['required'] = (bool)$accNeed['required'];
+    $accTwofa['why']      = $accNeed['why'];
+    $accTwofa['left']     = user2faRecoveryLeft($db, (int)$meUser['id']);
+}
 // The uploads tab is hidden ENTIRELY, not shown empty, where a submission cannot happen — a tab that
 // can only ever be empty teaches people the feature is broken rather than absent.
 $accShowUploads = $accFav['uploads'] && uploadsPublicEnabled($cfg);
@@ -123,6 +134,45 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
             </label>
         </div>
         <?php endif; ?>
+
+        <?php /* ── Account security ──────────────────────────────────────────────────────────────
+                 The second factor and the list of signed-in devices, in the card that already holds
+                 the mail and language preferences and in the row shape those use. Both answer the
+                 same question — "who else can be me?" — and neither is about what this account
+                 publishes, which is what the privacy block below is for. */ ?>
+        <div class="acc-mail-prefs acc-security-block" id="acc-security">
+            <h3 class="acc-sub"><?= _h('account.security') ?></h3>
+            <?php if ($accTwofa['feature']): ?>
+            <label class="search-check acc-pref-row">
+                <input type="checkbox" id="acc-2fa"<?= $accTwofa['enabled'] ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span class="acc-pref-text">
+                    <span class="acc-pref-name"><?= _h('account.twofa') ?> <span class="acc-pref-state" id="acc-2fa-state"><?= _h($accTwofa['enabled'] ? 'account.twofa_on' : 'account.twofa_off') ?></span></span>
+                    <span class="acc-pref-note"><?= _h('account.twofa_note') ?></span>
+                </span>
+            </label>
+            <?php if ($accTwofa['required'] && !$accTwofa['enabled']): ?>
+            <?php /* Not a scolding: it says what is actually withheld, which for 'panel' is the panel
+                     and nothing else — the account itself keeps working. */ ?>
+            <p class="acc-perm-warn"><?= __('account.twofa_required_' . $accTwofa['why']) ?></p>
+            <?php endif; ?>
+            <?php if ($accTwofa['enabled'] && $accTwofa['left'] > 0): ?>
+            <p class="text-muted acc-pref-note" id="acc-2fa-left"><?= __('account.twofa_left', ['n' => (int)$accTwofa['left']]) ?>
+                <button type="button" class="btn btn-secondary btn-small" id="acc-2fa-newcodes"><?= _h('account.twofa_newcodes') ?></button></p>
+            <?php endif; ?>
+            <div class="acc-2fa-box" id="acc-2fa-box" hidden></div>
+            <?php endif; ?>
+
+            <div class="acc-sessions" id="acc-sessions">
+                <p class="acc-sessions-head" id="acc-sessions-head"><?= _h('common.loading') ?></p>
+                <div class="acc-sessions-list" id="acc-sessions-list"></div>
+                <div class="acc-sessions-act" id="acc-sessions-act" hidden>
+                    <input type="password" class="profile-search" id="acc-sessions-pass" autocomplete="current-password" placeholder="<?= _h('account.cur_pass') ?>">
+                    <button type="button" class="btn btn-secondary btn-small" id="acc-sessions-go"><?= _h('account.sessions_clear') ?></button>
+                    <span class="text-muted" id="acc-sessions-msg"></span>
+                </div>
+                <p class="text-muted acc-pref-note"><?= __('account.sessions_note') ?></p>
+            </div>
+        </div>
     </div>
     <div class="account-card">
         <h2><?= _h('account.groups') ?></h2>
