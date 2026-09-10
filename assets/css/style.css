@@ -2153,9 +2153,14 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
    so it is given the whole next line rather than being squeezed in beside the name. */
 .profile-share { align-self: center; }
 .profile-head .share-url { flex: 1 0 100%; margin-top: 0; }
-/* The same pair on the account page: open my profile, or copy the link to it. */
-.acc-profile-links { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.5rem 0 0.2rem; }
-.acc-profile-links .share-url { flex: 1 0 100%; margin-top: 0; }
+/* Share, open, sign out — one group at the top of the account page. The fallback box the Share
+   button reveals on plain HTTP takes the whole next line rather than squeezing in between them. */
+.account-head-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.account-head-acts .share-url { flex: 1 0 100%; margin-top: 0.3rem; }
+/* A switch that is saved and not yet acted on says so, in the colour of a warning and not of an
+   error: nothing is broken, somebody else simply has to grant something. */
+.acc-perm-warn { font-size: 0.8rem; line-height: 1.5; margin: 0.4rem 0 0; color: #e0b15a; }
+.acc-perm-warn code { color: inherit; }
 .profile-section { margin-bottom: 2rem; }
 .profile-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
 /* This box used to carry a width and nothing else, and a bare <input> on this site is a WHITE box:
@@ -2246,6 +2251,18 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .list-items { border-top: 1px solid var(--border); margin-top: 0.5rem; padding-top: 0.6rem; }
 .list-items-tools { margin-bottom: 0.4rem; }
 .list-remove { min-width: 2em; }
+/* one list, in a window of its own */
+.lo-box { max-width: 60em; }
+#lo-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
+.lo-name { color: var(--accent); }
+.list-card { cursor: pointer; }
+.list-card:hover { border-color: var(--accent); }
+/* …but the controls on it are not the card: clicking one must not also open the list. */
+.list-card button, .list-card a, .list-card input { cursor: auto; }
+.list-card-acts button { cursor: pointer; }
+/* what the box under a list says while somebody is still typing */
+.list-add-bad { border-color: var(--error); }
+.list-add-ok { border-color: var(--success, #4caf50); }
 /* the picker, opened from the Info panel */
 .lp-box { max-width: 32em; }
 .lp-open { font-size: 1rem; line-height: 1; padding: 0.05rem 0.45rem; }
@@ -2262,9 +2279,9 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 
 .who-why { font-size: 0.8rem; line-height: 1.5; margin: 0.35rem 0 0; }
 .who-names { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0; }
-.who-name { padding: 0.15rem 0.5rem; border: 1px solid var(--border); border-radius: 12px;
+.who-name, .who-list { padding: 0.15rem 0.5rem; border: 1px solid var(--border); border-radius: 12px;
     font-size: 0.82rem; text-decoration: none; }
-.who-name:hover { border-color: var(--accent); }
+.who-name:hover, .who-list:hover { border-color: var(--accent); }
 
 .acc-tabs { margin-bottom: 1rem; }
 /* The same checkbox the mail preferences above it use, for the same reason those carry the extra

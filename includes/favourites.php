@@ -184,6 +184,35 @@ function favRowsFor(PDO $db, array $hashes): array {
 }
 
 /**
+ * Which of THESE hashes have a file whose path matches a needle.
+ *
+ * The driving set is one person's own rows — their favourites, or one of their lists — so this is an
+ * IN() over at most a few hundred hashes and never a scan of a files table with millions of rows in
+ * it. That bound is the whole reason it is allowed to exist: do not call it with anything else.
+ */
+function favHashesMatchingFiles(PDO $db, array $hashes, string $needle): array {
+    $needle = trim($needle);
+    if (!$hashes || $needle === '' || mb_strlen($needle) < 2) return [];
+    $like = '%' . str_replace(['%', '_'], ['\%', '\_'], $needle) . '%';
+    $hit = [];
+    foreach (array_chunk($hashes, 300) as $chunk) {
+        $in = implode(',', array_fill(0, count($chunk), '?'));
+        foreach ([
+            "SELECT DISTINCT info_hash FROM index_files WHERE info_hash IN ($in) AND path LIKE ? LIMIT 500",
+            "SELECT DISTINCT w.info_hash FROM whitelist_files f JOIN whitelist w ON w.id = f.whitelist_id
+               WHERE w.info_hash IN ($in) AND f.path LIKE ? LIMIT 500",
+        ] as $sql) {
+            try {
+                $st = $db->prepare($sql);
+                $st->execute(array_merge($chunk, [$like]));
+                foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $h) $hit[strtolower((string)$h)] = true;
+            } catch (\Throwable $e) { /* a files table this install does not have is not a failure */ }
+        }
+    }
+    return $hit;
+}
+
+/**
  * The group ids that hold one permission, as SQL can use them.
  *
  * Permissions live as JSON on a handful of group rows, so the decision cannot be made in SQL — but
@@ -262,16 +291,28 @@ function whitelistDisplayStatus(array $row, array $cfg): string {
  */
 function favContext(PDO $db, array $cfg, ?array $viewer): array {
     $on = favEnabled($cfg);
+    $uid = $viewer !== null ? (int)$viewer['id'] : 0;
+    // `may_publish` asks the GRANT, not userCan(), because every page that READS these lists asks
+    // the grant — see userIdHasGrantedPermission(). Asking a different question here is what made
+    // an administrator tick "show my favourites", watch it save, and find their own profile still
+    // saying it shares nothing: the switch was real and the thing it controls was not.
+    $favGrant = $uid > 0 && userIdHasGrantedPermission($db, $cfg, $uid, 'favourites.public');
+    $upGrant  = $uid > 0 && userIdHasGrantedPermission($db, $cfg, $uid, 'uploads.public');
     return [
         'enabled'      => $on,
         'may_use'      => $on && $viewer !== null && userCan($db, $cfg, 'favourites.use'),
         'public_ok'    => favPublicEnabled($cfg),
-        'may_publish'  => favPublicEnabled($cfg) && $viewer !== null && userCan($db, $cfg, 'favourites.public'),
+        'may_publish'  => favPublicEnabled($cfg) && $favGrant,
+        // The site allows it and this reader's groups do not. The switch is still shown — hiding it
+        // would leave them with no way to find out why their profile is empty — with a sentence
+        // beside it saying who has to change what.
+        'publish_blocked' => favPublicEnabled($cfg) && $uid > 0 && !$favGrant,
         'who_ok'       => favWhoEnabled($cfg),
         'may_view'     => $viewer !== null && userCan($db, $cfg, 'favourites.view_others'),
         'profiles'     => profilesEnabled($cfg),
         'uploads'      => uploadsPossible($cfg),
-        'uploads_pub'  => uploadsPublicEnabled($cfg) && $viewer !== null && userCan($db, $cfg, 'uploads.public'),
+        'uploads_pub'  => uploadsPublicEnabled($cfg) && $upGrant,
+        'uploads_blocked' => uploadsPublicEnabled($cfg) && $uid > 0 && !$upGrant,
         'max'          => favMaxPerUser($cfg),
     ];
 }

@@ -47,6 +47,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $hash = strtolower($p['hash']);
 
     $op = (string)($input['op'] ?? 'add');
+    // What the box under a list asks while somebody is still typing. Behind the same rate limit and
+    // the same permission as an add, so live feedback cannot become a faster way to probe the
+    // catalogue than adding to it would be.
+    if ($op === 'check') {
+        if (!userCan($db, $cfg, 'index.view')) jsonResponse(['error' => 'no_permission'], 403);
+        $k = listHashKnown($db, $hash);
+        jsonResponse(['success' => true, 'hash' => $hash, 'known' => $k['known'], 'name' => $k['name'],
+                      'blocked' => isHashBlocked($db, $cfg, $hash)]);
+    }
     if ($op === 'remove') {
         $db->prepare("DELETE FROM user_list_items WHERE list_id = ? AND info_hash = ?")->execute([$lid, $hash]);
         $db->prepare("UPDATE user_lists SET updated_at = NOW() WHERE id = ?")->execute([$lid]);
@@ -55,9 +64,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // A hash somebody cannot find is a hash they cannot collect: the same rule the star applies.
     if (!userCan($db, $cfg, 'index.view')) jsonResponse(['error' => 'no_permission'], 403);
-    // And one the tracker refuses is not something to gather a pack around. This is the only reason
-    // an add is turned down for what the hash IS rather than for what it looks like.
+    // And one the tracker refuses is not something to gather a pack around.
     if (isHashBlocked($db, $cfg, $hash)) jsonResponse(['error' => 'hash_blocked'], 409);
+    // IT HAS TO BE A HASH THIS TRACKER KNOWS. Not necessarily RESOLVED — a registered row whose
+    // metadata the worker has not fetched yet is still a torrent this tracker has, and waiting for a
+    // background job is not a reason to refuse it. But any forty hex characters at all would make a
+    // list a place to keep arbitrary strings on somebody else's server, and would hand the reader a
+    // row that can never become anything but a hash.
+    $known = listHashKnown($db, $hash);
+    if (!$known['known']) jsonResponse(['error' => 'hash_unknown'], 404);
 
     $max = listsMaxItems($cfg);
     if (listItemCount($db, $lid) >= $max) jsonResponse(['error' => 'list_full', 'limit' => $max], 409);
@@ -65,12 +80,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // The name, in this order: what the sender's magnet called it, then what the catalogue knows,
     // then nothing. The stored name is a fallback for the day the catalogue prunes the hash — see
     // listItemsWithMeta(), which prefers the live row whenever there is one.
-    $name = $p['name'] !== null ? mb_substr(cleanTorrentName((string)$p['name']), 0, 255) : null;
+    // The catalogue's name wins where there is one — it is what every other page shows for this
+    // hash — and the magnet's own `dn=` is the fallback for a row that is registered but unresolved.
+    $name = $known['name'] !== null ? mb_substr((string)$known['name'], 0, 255) : null;
     if ($name === null || $name === '') {
-        $meta = favRowsFor($db, [$hash]);
-        foreach ($meta as $m) if (strtolower((string)$m['info_hash']) === $hash && !empty($m['name'])) {
-            $name = mb_substr((string)$m['name'], 0, 255);
-        }
+        $name = $p['name'] !== null ? mb_substr(cleanTorrentName((string)$p['name']), 0, 255) : null;
     }
     $db->prepare("INSERT IGNORE INTO user_list_items (list_id, info_hash, name) VALUES (?, ?, ?)")
        ->execute([$lid, $hash, $name !== '' ? $name : null]);
@@ -124,9 +138,12 @@ $items = listItemsWithMeta($db, $rows);
 
 if ($search !== '') {
     $needle = mb_strtolower($search);
-    $items = array_values(array_filter($items, static function ($i) use ($needle) {
+    // The file names too, bounded by the hashes this list already holds — see favHashesMatchingFiles().
+    $inFiles = favHashesMatchingFiles($db, array_column($items, 'info_hash'), $search);
+    $items = array_values(array_filter($items, static function ($i) use ($needle, $inFiles) {
         return str_contains(mb_strtolower((string)($i['name'] ?? '')), $needle)
-            || str_contains((string)$i['info_hash'], $needle);
+            || str_contains((string)$i['info_hash'], $needle)
+            || isset($inFiles[strtolower((string)$i['info_hash'])]);
     }));
 }
 usort($items, static function ($a, $b) use ($sort) {

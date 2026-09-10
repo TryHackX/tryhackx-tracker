@@ -19,7 +19,17 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use'];
 ?>
 <div class="account-head">
     <h1><?= __('account.h1_named', ['user' => sanitize($meUser['username'])]) ?></h1>
-    <button type="button" class="btn btn-secondary" id="account-logout"><?= _h('common.sign_out') ?></button>
+    <?php /* The two things somebody does with their own profile, where they can see them: at the top
+             of the page, beside the one button that was already there. Down in Privacy they were a
+             quiet grey pair under a paragraph, and the first person to look for them missed them. */ ?>
+    <div class="account-head-acts">
+        <?php if (($cfg['search_share_enabled'] ?? '1') === '1'): ?>
+        <button type="button" class="btn btn-secondary js-profile-share" data-user="<?= sanitize((string)$meUser['username']) ?>"
+                title="<?= _h('profile.share_title') ?>"><?= _h('search.share') ?></button>
+        <?php endif; ?>
+        <a class="btn btn-secondary" href="<?= $baseUrl ?>?action=u&amp;name=<?= urlencode((string)$meUser['username']) ?>"><?= _h('account.open_profile') ?></a>
+        <button type="button" class="btn btn-secondary" id="account-logout"><?= _h('common.sign_out') ?></button>
+    </div>
 </div>
 <input type="hidden" id="account-csrf" value="<?= $csrfToken ?>">
 <?php if ($accRestricted): ?>
@@ -131,25 +141,21 @@ if (count($accLangs) > 1):
                  make them look like a separate subject. */ ?>
         <div class="acc-mail-prefs acc-privacy-block" id="acc-privacy">
             <h3 class="acc-sub"><?= _h('account.fav_privacy') ?></h3>
-            <?php if ($accFav['may_use'] && $accFav['may_publish']): ?>
+            <?php if ($accFav['may_use'] && ($accFav['may_publish'] || $accFav['publish_blocked'])): ?>
             <label class="search-check acc-check"><input type="checkbox" id="acc-fav-public"<?= (int)($meUser['fav_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
                 <span><?= _h('account.fav_public_label') ?></span></label>
             <p class="text-muted acc-verify-note"><?= __('account.fav_public_hint', ['name' => sanitize($meUser['username'])]) ?></p>
-            <?php /* The address the sentence above names, as the two things somebody actually wants
-                     to do with it: open it, or hand it to somebody. It was a <code> span and nothing
-                     else — the page told the reader where their profile is and left them to type it. */ ?>
-            <div class="acc-profile-links">
-                <a class="btn btn-secondary btn-small" href="<?= $baseUrl ?>?action=u&amp;name=<?= urlencode((string)$meUser['username']) ?>"><?= _h('account.open_profile') ?></a>
-                <?php if (($cfg['search_share_enabled'] ?? '1') === '1'): ?>
-                <button type="button" class="search-share js-profile-share" data-user="<?= sanitize((string)$meUser['username']) ?>"
-                        title="<?= _h('profile.share_title') ?>"><?= _h('search.share') ?></button>
-                <?php endif; ?>
-            </div>
+            <?php if ($accFav['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'favourites.public']) ?></p>
             <?php endif; ?>
-            <?php if ($accLists['public_ok'] && $accLists['may_use']): ?>
+            <?php endif; ?>
+            <?php if ($accLists['may_use'] && ($accLists['may_publish'] || $accLists['publish_blocked'])): ?>
             <label class="search-check acc-check"><input type="checkbox" id="acc-lists-public"<?= (int)($meUser['lists_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
                 <span><?= _h('account.lists_public_label') ?></span></label>
             <p class="text-muted acc-verify-note"><?= __('account.lists_public_hint') ?></p>
+            <?php if ($accLists['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'lists.public']) ?></p>
+            <?php endif; ?>
             <?php endif; ?>
             <?php if ($accFav['may_use'] && $accFav['who_ok']): ?>
             <label class="search-check acc-check"><input type="checkbox" id="acc-fav-listed"<?= (int)($meUser['fav_listed'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>

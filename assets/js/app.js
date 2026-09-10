@@ -2581,6 +2581,17 @@ const getJson = async (endpoint) => {
             return;
         }
         title.textContent = json.name || name || t('js.app.details');
+        // Registered here, not merely seen in the swarm. The search row has carried this badge since
+        // the catalogue and the whitelist were folded into one list; the panel that opens FROM that
+        // row did not, so the one place with room to say it said nothing.
+        if (json.whitelisted === true) {
+            const wl = document.createElement('span');
+            wl.className = 'search-wl-badge';
+            wl.title = t('js.app.wl_badge_title');
+            wl.textContent = t('js.app.wl_badge');
+            title.appendChild(document.createTextNode(' '));
+            title.appendChild(wl);
+        }
 
         // The panel always has the hash, so the star is always available here even when the row
         // could not carry one.
@@ -2597,7 +2608,9 @@ const getJson = async (endpoint) => {
             if (infoCanFavWho && typeof window.openWhoFavourited === 'function') {
                 const w = document.createElement('button');
                 w.type = 'button';
-                w.className = 'search-share';
+                // A class of its own: the panel's head now holds a star, a "+" and this, and
+                // "the first button that is not the star" stopped being a description of it.
+                w.className = 'search-share fav-who-open';
                 w.title = t('js.fav.who_title');
                 w.textContent = t('js.fav.who');
                 w.addEventListener('click', () => window.openWhoFavourited(hash));

@@ -297,7 +297,7 @@
     function listCardsInto(box, cfg) {
         var state = { lists: [], openId: 0, ctx: {} };
 
-        function itemsBox(card, list) {
+        function itemsBox(countHolder, list) {
             var wrap = el('div', { className: 'list-items' });
             var tools = el('div', { className: 'profile-toolbar list-items-tools' });
             var search = el('input', { type: 'text', className: 'profile-search', maxlength: 120,
@@ -319,6 +319,43 @@
                                           placeholder: t('js.lists.add_ph') });
                 var addGo = el('button', { type: 'button', className: 'btn btn-small', text: t('js.lists.add') });
                 var addMsg = el('span', { className: 'list-add-msg text-muted' });
+                // Format first, in the browser, and only then a question for the server. The look of
+                // an info hash is decidable here — forty hex characters, or a magnet carrying them —
+                // so a typo costs no request at all, and the check that DOES cost one is debounced
+                // and sits behind the same rate limit as adding.
+                var hashOf = function (v) {
+                    v = (v || '').trim();
+                    var m = /^([0-9a-fA-F]{40})$/.exec(v);
+                    if (m) return m[1].toLowerCase();
+                    m = /[?&]xt=urn:btih:([0-9a-fA-F]{40})(?![0-9a-zA-Z])/.exec(v);
+                    if (m) return m[1].toLowerCase();
+                    if (/^magnet:\?/i.test(v) && /[?&]xt=urn:btih:[a-zA-Z2-7]{32}(?![a-zA-Z0-9])/.test(v)) return 'base32';
+                    return null;
+                };
+                var checkTimer = 0;
+                var setState = function (cls, text) {
+                    addIn.classList.remove('list-add-bad', 'list-add-ok');
+                    if (cls) addIn.classList.add(cls);
+                    addMsg.textContent = text || '';
+                };
+                addIn.addEventListener('input', function () {
+                    clearTimeout(checkTimer);
+                    var v = addIn.value.trim();
+                    if (!v) { setState(null, ''); addGo.disabled = false; return; }
+                    var h = hashOf(v);
+                    if (!h) { setState('list-add-bad', t('js.lists.add_failed_invalid')); addGo.disabled = true; return; }
+                    setState(null, t('js.lists.checking'));
+                    addGo.disabled = false;
+                    if (h === 'base32') { setState(null, ''); return; }   // the server decodes those
+                    checkTimer = setTimeout(async function () {
+                        var r = await post('user_list_items', { op: 'check', list: list.id, magnet: v });
+                        if (addIn.value.trim() !== v) return;             // they kept typing
+                        if (!r || !r.success) { setState(null, ''); return; }
+                        if (r.blocked) { setState('list-add-bad', t('js.lists.add_failed_blocked')); addGo.disabled = true; return; }
+                        if (!r.known) { setState('list-add-bad', t('js.lists.add_failed_unknown')); addGo.disabled = true; return; }
+                        setState('list-add-ok', r.name ? t('js.lists.known_named', { name: r.name }) : t('js.lists.known'));
+                    }, 600);
+                });
                 var doAdd = async function () {
                     var v = addIn.value.trim();
                     if (!v) return;
@@ -326,14 +363,17 @@
                     var r = await post('user_list_items', { op: 'add', list: list.id, magnet: v });
                     addGo.disabled = false;
                     if (!r || !r.success) {
-                        addMsg.textContent = t('js.lists.add_failed_' + ((r && r.error) === 'list_full' ? 'full'
-                            : (r && r.error) === 'hash_blocked' ? 'blocked' : 'invalid'));
+                        var why = (r && r.error) === 'list_full' ? 'full'
+                            : (r && r.error) === 'hash_blocked' ? 'blocked'
+                            : (r && r.error) === 'hash_unknown' ? 'unknown' : 'invalid';
+                        setState('list-add-bad', t('js.lists.add_failed_' + why));
                         return;
                     }
+                    setState(null, '');
                     addIn.value = '';
                     addMsg.textContent = t('js.lists.added');
                     list.items = r.items;
-                    var cnt = card.querySelector('.list-count');
+                    var cnt = countHolder.querySelector('.list-count');
                     if (cnt) cnt.textContent = t(r.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: r.items });
                     load(1);
                 };
@@ -371,7 +411,7 @@
                             var rr = await post('user_list_items', { op: 'remove', list: list.id, hash: r.info_hash });
                             if (!rr || !rr.success) { rm.disabled = false; return; }
                             list.items = rr.items;
-                            var c2 = card.querySelector('.list-count');
+                            var c2 = countHolder.querySelector('.list-count');
                             if (c2) c2.textContent = t(rr.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: rr.items });
                             load(1);
                         });
@@ -390,6 +430,12 @@
 
         function card(list) {
             var c = el('div', { className: 'list-card' + (list.is_public ? ' list-card-public' : '') });
+            // The whole card opens it. A name that happens to be a link is a target somebody has to
+            // aim at; the card is the thing on the screen that IS the list.
+            c.addEventListener('click', function (e) {
+                if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a')) return;
+                openListOverlay(list, cfg, state);
+            });
             var head = el('div', { className: 'list-card-head' });
             var name = el('button', { type: 'button', className: 'list-name', text: list.name, title: t('js.lists.open') });
             head.appendChild(name);
@@ -438,11 +484,7 @@
                 c.appendChild(acts);
             }
 
-            name.addEventListener('click', function () {
-                state.openId = state.openId === list.id ? 0 : list.id;
-                render();
-            });
-            if (state.openId === list.id) c.appendChild(itemsBox(c, list));
+            name.addEventListener('click', function () { openListOverlay(list, cfg, state); });
             return c;
         }
 
@@ -496,12 +538,60 @@
             render();
         }
 
+        // The overlay borrows this shelf's renderer: same trackers, same permissions, same rows.
+        itemsBoxFor = function (holder, list) { return itemsBox(holder, list); };
+        state.reload = load;
         return { load: load, create: async function (name) {
             var r = await post('user_lists', { op: 'create', name: name });
             if (r && r.success) await load();
             return r;
         } };
     }
+
+    /**
+     * One list, in a window of its own.
+     *
+     * It used to unfold inside its card, which put a search box, an add box and twenty-five rows
+     * into a tile sized for a name and a count. The rows here are the same rows the search results
+     * use and they need the width.
+     */
+    function openListOverlay(list, cfg, state) {
+        var box = document.getElementById('list-overlay');
+        if (!box) return;
+        var head = document.getElementById('lo-title');
+        var body = document.getElementById('lo-body');
+        head.textContent = '';
+        head.appendChild(el('span', { className: 'lo-name', text: list.name }));
+        head.appendChild(el('span', { className: 'list-count text-muted',
+            text: t(list.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: list.items }) }));
+        if (list.is_public) head.appendChild(el('span', { className: 'pf-badge list-badge-public', text: t('js.lists.public') }));
+        body.textContent = '';
+        if (list.description) body.appendChild(el('div', { className: 'list-desc text-muted', text: list.description }));
+        body.appendChild(itemsBoxFor(head, list, cfg));
+        box.hidden = false;
+        document.addEventListener('keydown', escList);
+        // The shelf behind it has to agree when this closes: the count on the card is the number
+        // somebody just changed in here.
+        box.dataset.reload = '1';
+        window.__listReload = state && state.reload ? state.reload : null;
+    }
+    function escList(e) { if (e.key === 'Escape') closeListOverlay(); }
+    function closeListOverlay() {
+        var box = document.getElementById('list-overlay');
+        if (!box) return;
+        box.hidden = true;
+        document.removeEventListener('keydown', escList);
+        if (typeof window.__listReload === 'function') window.__listReload();
+    }
+    function initListOverlay() {
+        var box = document.getElementById('list-overlay');
+        if (!box) return;
+        box.addEventListener('click', function (e) { if (e.target === box) closeListOverlay(); });
+        var x = document.getElementById('lo-close');
+        if (x) x.addEventListener('click', closeListOverlay);
+    }
+    // Set by listCardsInto() so the overlay can build its rows with that shelf's own settings.
+    var itemsBoxFor = function () { return el('div'); };
 
     function initLists() {
         var own = document.getElementById('account-lists');
@@ -602,6 +692,13 @@
                         return;
                     }
                     msg.textContent = cb.checked ? t('js.lists.added') : t('js.lists.removed');
+                    // The number beside the name is the number this click just changed. Leaving it
+                    // stale is how a page teaches somebody to reload it to find out what happened.
+                    if (typeof r.items === 'number') {
+                        l.items = r.items;
+                        var c = label.querySelector('.lp-count');
+                        if (c) c.textContent = t(r.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: r.items });
+                    }
                 });
                 body.appendChild(label);
             });
@@ -618,7 +715,10 @@
                 if (r && r.success) {
                     // Made from a torrent's panel, so the torrent goes into it: that is what the
                     // reader was doing when they typed the name.
-                    await post('user_list_items', { op: 'add', list: r.id, magnet: hash });
+                    var added = await post('user_list_items', { op: 'add', list: r.id, magnet: hash });
+                    if (added && !added.success && added.error === 'hash_unknown') {
+                        msg.textContent = t('js.lists.add_failed_unknown');
+                    }
                     nameIn.value = '';
                     msg.textContent = t('js.lists.added');
                     await draw();
@@ -745,7 +845,9 @@
                 body.appendChild(el('div', { className: 'who-lists-head text-muted', text: t('js.lists.who_head') }));
                 var lb = el('div', { className: 'who-names who-lists' });
                 j.lists.forEach(function (l) {
-                    var a = el('a', { className: 'who-name who-list',
+                    // NOT .who-name: that class means "a person on this list", and a chip that is a
+                    // collection is a different kind of answer. They share a look, not a meaning.
+                    var a = el('a', { className: 'who-list',
                                       href: BASE + '?action=u&name=' + encodeURIComponent(l.username) + '#lists' });
                     a.appendChild(el('span', { className: 'who-list-name', text: l.name }));
                     a.appendChild(el('span', { className: 'who-list-by text-muted', text: t('js.lists.who_by', { user: l.username }) }));
@@ -827,6 +929,7 @@
         initAccountTabs();
         initWho();
         initListPicker();   // before initLists(): the "+" asks whether the picker exists
+        initListOverlay();
         initLists();
     });
 

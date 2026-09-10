@@ -64,7 +64,7 @@ if ($who === '') {
     $owner = userFindByLogin($db, $who);
     if (!$owner || ($owner['status'] ?? '') !== 'active') jsonResponse(['error' => 'not_found'], 404);
     $isOwn = (int)$owner['id'] === (int)($me['id'] ?? 0);
-    if (!$isOwn && !userIdHasPermission($db, $cfg, (int)$owner['id'], 'uploads.public')) {
+    if (!$isOwn && !userIdHasGrantedPermission($db, $cfg, (int)$owner['id'], 'uploads.public')) {
         jsonResponse(['error' => 'not_found'], 404);
     }
 }

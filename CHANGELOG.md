@@ -4,6 +4,59 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.44.1] — 2026-09-10
+
+### Fixed — a privacy switch that saved an answer nothing acted on
+
+Somebody ticked *Show my favourites on my profile*, watched it save, opened their own profile from
+another account and read **"This account does not share anything publicly."** The switch was real and
+the thing it controls was not: `favContext()` decided whether to offer it with `userCan()`, which
+answers yes to any administrator, while every page that READS such a list asks the grant on the group
+row (1.43.1, and rightly — publishing is consent, not authority).
+
+Both halves ask the grant now, and where the site allows publishing and the reader's groups do not,
+the switch is **still shown** — hiding it would leave them with no way to find out why their profile
+is empty — under a line that says which permission is missing and who grants it. `api/user_uploads.php`
+and `api/user_favourites.php` were still asking the blanket too; they ask the grant.
+
+### Added — the Info panel says when a torrent is registered here
+
+The search row has carried the **WL** badge since the catalogue and the whitelist were folded into one
+list. The panel that opens from that row did not, so the one place with room to explain it said
+nothing.
+
+### Changed — a list opens in a window of its own, from anywhere on its card
+
+Unfolding inside the card put a filter, an add box and twenty-five rows into a tile sized for a name
+and a count. The rows are the same rows the search results use and they need the width. The whole
+card opens it now — a name that happens to be a link is a target somebody has to aim at.
+
+### Changed — adding to a list only takes hashes this tracker knows
+
+**Not "resolved"**: a registered row whose metadata the worker has not fetched yet is still a torrent
+this tracker has, and waiting for a background job is not a reason to refuse it. What is refused is
+forty hex characters nobody here has ever seen — that is not a torrent, it is a string, and a list is
+not a place to keep strings on somebody else's server. The box says so **while somebody types**: the
+format is decided in the browser (so a typo costs no request at all) and the "do you know this?"
+question is debounced and sits behind the same rate limit as adding, so live feedback cannot become a
+faster way to probe the catalogue than adding would be. A known hash comes back named.
+
+### Fixed — three counts that went stale under the reader's cursor
+
+The list picker's per-list count after ticking a box, the count in the list window after adding or
+removing, and the card behind that window after it closes.
+
+### Added — favourites and lists search file names too
+
+Somebody looking for a track or an episode inside a pack knows the file, not the release name. The
+search page has offered that for a while; a list that could not do it sent them back there to look
+the hash up. Bounded by the hashes the list already holds — never a scan of a files table.
+
+### Changed — Share and Open my profile moved to the top of the account page
+
+They were a quiet grey pair under a paragraph in Privacy, and the first person to look for them did
+not find them. They sit beside *Sign out* now, in that order: Share, Open, Sign out.
+
 ## [1.44.0] — 2026-09-10
 
 Schema **51**.

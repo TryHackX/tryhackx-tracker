@@ -42,6 +42,20 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
     </div>
 </div>
 
+<?php if (!empty($ioLists['enabled'])): ?>
+<?php /* One list, in a window of its own. Inside its card it had to fit a search box, an add box and
+         twenty-five rows into a tile sized for a name and a count. */ ?>
+<div class="files-overlay" id="list-overlay" hidden>
+    <div class="files-box lo-box" role="dialog" aria-modal="true" aria-labelledby="lo-title">
+        <div class="files-head">
+            <h3 id="lo-title"></h3>
+            <button type="button" class="files-close" id="lo-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
+        </div>
+        <div class="files-body" id="lo-body"></div>
+    </div>
+</div>
+<?php endif; ?>
+
 <?php if (!empty($ioLists['may_use'])): ?>
 <?php /* "Put this in a list" — the picker. A checkbox per list, because a torrent can be in
          several, and a name box at the bottom so a new list can be made without leaving the

@@ -90,12 +90,18 @@ function listsContext(PDO $db, array $cfg, ?array $viewer): array
 {
     $on = listsEnabled($cfg);
     $mayUse = $on && $viewer !== null && userCan($db, $cfg, 'lists.use');
+    $uid = $viewer !== null ? (int)$viewer['id'] : 0;
+    // The GRANT, for the reason favContext() gives: publishing is consent, and every page that reads
+    // a published list asks the grant. A control that asks a different question is a control that
+    // saves an answer nothing acts on.
+    $grant = $uid > 0 && userIdHasGrantedPermission($db, $cfg, $uid, 'lists.public');
     return [
         'enabled'     => $on,
         'public_ok'   => listsPublicEnabled($cfg),
         'may_use'     => $mayUse,
-        // May THIS reader mark a list public — the site switch and their own group, not their choice.
-        'may_publish' => $mayUse && listsPublicEnabled($cfg) && userCan($db, $cfg, 'lists.public'),
+        // May THIS reader mark a list public — the site switch and their group's grant.
+        'may_publish' => $mayUse && listsPublicEnabled($cfg) && $grant,
+        'publish_blocked' => $mayUse && listsPublicEnabled($cfg) && !$grant,
         // May they read somebody else's? The same permission that opens profiles and favourites:
         // one decision about whether this install shows people to each other at all.
         'may_view'    => $on && $viewer !== null && userCan($db, $cfg, 'favourites.view_others'),
@@ -116,6 +122,34 @@ function listsVisibleFor(PDO $db, array $cfg, array $owner): bool
     return listsPublicEnabled($cfg)
         && (int)($owner['lists_public'] ?? 0) === 1
         && userIdHasGrantedPermission($db, $cfg, (int)$owner['id'], 'lists.public');
+}
+
+/**
+ * Does this tracker know this hash at all, and what does it call it?
+ *
+ * "Known" is deliberately weaker than "resolved": a registered whitelist row whose metadata the
+ * worker has not fetched yet is a torrent this tracker has, and refusing it would mean somebody can
+ * only collect a torrent after a background job catches up with it. What it excludes is forty hex
+ * characters nobody here has ever seen — which is not a torrent, it is a string.
+ */
+function listHashKnown(PDO $db, string $hash): array
+{
+    $hash = strtolower(trim($hash));
+    $out = ['known' => false, 'name' => null, 'source' => null];
+    if (!preg_match('/^[0-9a-f]{40}$/', $hash)) return $out;
+    try {
+        // The whitelist first, and it wins: a registered hash is deleted out of index_hashes, so
+        // where both exist the whitelist row is the newer truth (the same order favRowsFor uses).
+        $st = $db->prepare("SELECT name FROM whitelist WHERE info_hash = ? LIMIT 1");
+        $st->execute([$hash]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if ($row) return ['known' => true, 'name' => $row['name'] ?: null, 'source' => 'whitelist'];
+        $st = $db->prepare("SELECT name FROM index_hashes WHERE info_hash = ? LIMIT 1");
+        $st->execute([$hash]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if ($row) return ['known' => true, 'name' => $row['name'] ?: null, 'source' => 'index'];
+    } catch (Throwable $e) { /* a table this install does not have is not a failure */ }
+    return $out;
 }
 
 /** How many torrents are in one list. One statement, so the ceiling and the reply agree. */

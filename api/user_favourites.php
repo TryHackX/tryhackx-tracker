@@ -74,7 +74,7 @@ if ($who === '') {
         if ((int)($owner['fav_public'] ?? 0) !== 1) jsonResponse(['error' => 'not_found'], 404);
         // Their group has to allow a public list, not just their own checkbox: an operator who takes
         // `favourites.public` away from a group means it, and a stale checkbox must not outlive it.
-        if (!userIdHasPermission($db, $cfg, (int)$owner['id'], 'favourites.public')) jsonResponse(['error' => 'not_found'], 404);
+        if (!userIdHasGrantedPermission($db, $cfg, (int)$owner['id'], 'favourites.public')) jsonResponse(['error' => 'not_found'], 404);
     }
 }
 
@@ -100,9 +100,14 @@ if ($search !== '') {
     // A LIKE over an array PHP already holds. This set is one person's favourites, capped at
     // fav_max_per_user — never a table scan. Do not copy this to anything that reads a table.
     $needle = mb_strtolower($search);
-    $rows = array_values(array_filter($rows, static function (array $r) use ($needle) {
+    // …and over the FILE NAMES of those same hashes. Somebody looking for a track or an episode
+    // inside a pack knows the file, not the release name — the search page has offered that for a
+    // while, and a list that could not do it sent them back there to look the hash up.
+    $inFiles = favHashesMatchingFiles($db, $hashes, $search);
+    $rows = array_values(array_filter($rows, static function (array $r) use ($needle, $inFiles) {
         return ($r['name'] !== null && str_contains(mb_strtolower((string)$r['name']), $needle))
-            || str_starts_with($r['info_hash'], strtolower($needle));
+            || str_starts_with($r['info_hash'], strtolower($needle))
+            || isset($inFiles[strtolower((string)$r['info_hash'])]);
     }));
 }
 
