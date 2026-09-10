@@ -500,6 +500,7 @@
                                  collecting answers the API will never look at. */ ?>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary" id="cl-opts-scope">
                             <option value="whitelist"><?= _h('a.wl.cl_scope_wl') ?></option>
+                            <option value="abuse"><?= _h('a.wl.cl_scope_abuse') ?></option>
                             <option value="users"><?= _h('a.wl.cl_scope_users') ?></option>
                             <option value="federation"><?= _h('a.wl.cl_scope_fed') ?></option>
                             <option value="all"><?= _h('a.wl.cl_scope_all') ?></option>
@@ -537,6 +538,35 @@
                             <div class="form-check cl-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-url" value="url"><label class="form-check-label" for="cl-opts-f-url"><?= _h('a.wl.cl_f_url') ?> <code>ref.url</code></label></div>
                             <div class="form-check cl-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-source_id" value="source_id"><label class="form-check-label" for="cl-opts-f-source_id"><?= _h('a.wl.cl_f_source_id') ?> <code>ref.post_id</code></label></div>
                             <div class="cl-hint"><?= __('a.wl.cl_fields_hint') ?></div>
+                        </div>
+                    </div>
+
+                    <?php /* Only for a key that can REPORT. The two questions look like the two above
+                             them and mean something else: this one decides whether a partner's
+                             message takes a torrent off the tracker without anybody reading it. That
+                             is why its default is the opposite one, and why it says so out loud. */ ?>
+                    <div id="cl-opts-abuse-block" hidden>
+                        <div class="cl-field">
+                            <label class="cl-label" for="cl-opts-abuse"><?= _h('a.wl.cl_abuse') ?></label>
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary" id="cl-opts-abuse">
+                                <option value="review"><?= _h('a.wl.cl_abuse_rev') ?></option>
+                                <option value="auto"><?= _h('a.wl.cl_abuse_auto') ?></option>
+                            </select>
+                            <div class="cl-hint" id="cl-opts-abuse-hint"><?= __('a.wl.cl_abuse_hint') ?></div>
+                        </div>
+                        <div class="cl-field">
+                            <div class="cl-label"><?= _h('a.wl.cl_afields') ?></div>
+                            <div class="form-check cl-check cl-check-fixed">
+                                <input class="form-check-input" type="checkbox" id="cl-opts-af-hash" checked disabled>
+                                <label class="form-check-label" for="cl-opts-af-hash"><?= _h('a.wl.cl_f_hash') ?> <code>magnet</code> / <code>hash</code>
+                                    <span class="cl-always"><?= _h('a.wl.cl_f_always') ?></span></label>
+                            </div>
+                            <div class="form-check cl-check"><input class="form-check-input cl-opts-afield" type="checkbox" id="cl-opts-af-title" value="title"><label class="form-check-label" for="cl-opts-af-title"><?= _h('a.wl.cl_af_title') ?> <code>title</code></label></div>
+                            <div class="form-check cl-check"><input class="form-check-input cl-opts-afield" type="checkbox" id="cl-opts-af-evidence" value="evidence_url"><label class="form-check-label" for="cl-opts-af-evidence"><?= _h('a.wl.cl_af_evidence') ?> <code>evidence_url</code></label></div>
+                            <div class="form-check cl-check"><input class="form-check-input cl-opts-afield" type="checkbox" id="cl-opts-af-reason" value="reason"><label class="form-check-label" for="cl-opts-af-reason"><?= _h('a.wl.cl_af_reason') ?> <code>reason</code></label></div>
+                            <div class="form-check cl-check"><input class="form-check-input cl-opts-afield" type="checkbox" id="cl-opts-af-reporter" value="reporter"><label class="form-check-label" for="cl-opts-af-reporter"><?= _h('a.wl.cl_af_reporter') ?> <code>reporter</code></label></div>
+                            <div class="form-check cl-check"><input class="form-check-input cl-opts-afield" type="checkbox" id="cl-opts-af-statement" value="statement"><label class="form-check-label" for="cl-opts-af-statement"><?= _h('a.wl.cl_af_statement') ?> <code>statement</code></label></div>
+                            <div class="cl-hint"><?= __('a.wl.cl_afields_hint') ?></div>
                         </div>
                     </div>
 

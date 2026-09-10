@@ -242,7 +242,7 @@ async function loadReports() {
         return `
         <tr>
             <td class="dash-id">${r.id}</td>
-            <td title="${escAttr(r.name)}">${esc(r.name)}</td>
+            <td title="${escAttr(r.name)}">${esc(r.name)}${r.api_client_label ? ' <span class="badge-table badge-api" title="' + escAttr(t('js.reports.via_api_title')) + '">' + esc(r.api_client_label) + '</span>' : ''}</td>
             <td title="${escAttr(r.email)}"><small>${esc(r.email)}</small></td>
             <td class="editable-cell" title="${escAttr(r.company)}" data-edit-id="${r.id}" data-edit-field="company">${esc(r.company)}</td>
             <td class="editable-cell" title="${escAttr(r.representative)}" data-edit-id="${r.id}" data-edit-field="representative">${esc(r.representative)}</td>
@@ -319,6 +319,7 @@ async function openModal(id) {
             <p><strong>${esc(t('js.reports.col_email'))}:</strong> ${esc(r.email)}</p>
             <p><strong>${esc(t('js.reports.col_company'))}:</strong> ${esc(r.company)}</p>
             <p><strong>${esc(t('js.reports.lbl_representative'))}:</strong> ${esc(r.representative)}</p>
+            ${r.api_client_label ? '<p><strong>' + esc(t('js.reports.via_api')) + ':</strong> ' + esc(r.api_client_label) + '</p>' : ''}
             <p><strong>${esc(t('js.reports.col_object'))}:</strong> ${esc(r.objectTitle)}</p>
             <p><strong>${esc(t('js.reports.lbl_link'))}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
             <p><strong>${esc(t('js.reports.lbl_hash'))}:</strong> <code class="text-info">${r.infoHash}</code></p>

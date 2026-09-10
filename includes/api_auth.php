@@ -292,7 +292,15 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
         $fail('malformed', 'Authorization header is not "Bearer <key_id>.<secret>"');
     }
     $keyId = strtolower($m[1]); $secret = strtolower($m[2]);
-    $st = $db->prepare("SELECT id, label, key_id, secret_hash, scope, enabled FROM api_clients WHERE key_id = ? LIMIT 1");
+    // EVERY per-key setting the endpoints read, in this one SELECT. The list used to stop at
+    // `enabled`, so `$client['auto_approve']` and `$client['required_fields']` were simply not there
+    // when api/v1/whitelist_submit.php looked for them — and both of its `?? ` fallbacks meant
+    // "publish immediately, demand nothing". A key set to hold submissions for review published
+    // them; a key told to require a title accepted items without one. The queue itself worked, the
+    // panel showed the setting, and nothing on the way in ever read it.
+    $st = $db->prepare("SELECT id, label, key_id, secret_hash, scope, enabled, auto_approve,
+                               abuse_auto_block, required_fields
+                          FROM api_clients WHERE key_id = ? LIMIT 1");
     $st->execute([$keyId]);
     $client = $st->fetch();
     if (!$client) $fail('unknown_key', 'no client with this key id', $keyId);
@@ -314,7 +322,7 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
 }
 
 /** Valid client scopes: what family of v1 endpoints a key may call ('all' = everything). */
-function apiClientScopes(): array { return ['whitelist', 'users', 'federation', 'all']; }
+function apiClientScopes(): array { return ['whitelist', 'abuse', 'users', 'federation', 'all']; }
 
 /**
  * Enforce the client's scope AFTER apiAuthenticate(). A wrong scope is an admin-side configuration
@@ -336,13 +344,36 @@ function apiRequireScope(array $client, string $scope): void {
  */
 const API_REQUIRED_FIELDS = ['name', 'url', 'source_id'];
 
-function apiClientCleanFields($raw): array {
+/**
+ * The same idea for an abuse report, and a DIFFERENT list, because it is a different claim.
+ *
+ * Registering a hash says "this exists"; reporting one says "this infringes something of mine, and
+ * I am the one who may say so". The fields an operator can demand are therefore about the work, the
+ * evidence and the person — not about which forum post the hash came from.
+ *
+ *   title         the work being infringed          (reports.objectTitle)
+ *   evidence_url  where it can be seen              (reports.link)
+ *   reason        what is actually being claimed    (reports.add_message)
+ *   reporter      who is filing it: the four identity fields the public form demands
+ *   statement     an explicit good-faith declaration, sent as `"statement": true`
+ */
+const API_ABUSE_FIELDS = ['title', 'evidence_url', 'reason', 'reporter', 'statement'];
+
+/** The field names one scope may be told to demand. 'all' can do both jobs, so it gets both lists. */
+function apiScopeFields(?string $scope): array {
+    if ($scope === 'abuse') return API_ABUSE_FIELDS;
+    if ($scope === 'whitelist') return API_REQUIRED_FIELDS;
+    return array_merge(API_REQUIRED_FIELDS, API_ABUSE_FIELDS);
+}
+
+function apiClientCleanFields($raw, ?string $scope = null): array {
     if (is_string($raw)) $raw = explode(',', $raw);
     if (!is_array($raw)) return [];
+    $allowed = apiScopeFields($scope);
     $out = [];
     foreach ($raw as $f) {
         $f = strtolower(trim((string)$f));
-        if (in_array($f, API_REQUIRED_FIELDS, true) && !in_array($f, $out, true)) $out[] = $f;
+        if (in_array($f, $allowed, true) && !in_array($f, $out, true)) $out[] = $f;
     }
     return $out;
 }

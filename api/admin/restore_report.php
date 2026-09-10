@@ -18,13 +18,16 @@ if (!$report) {
 
 // Move back to reports
 $stmt = $db->prepare(
-    "INSERT INTO reports (id, name, representative, company, email, objectTitle, link, infoHash, magnet_link, ip, add_message, checked, blocked, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    // …including api_client_id: a restored report that has forgotten which partner filed it is a
+    // report the queue cannot label, and this is the same round trip that archived it.
+    "INSERT INTO reports (id, name, representative, company, email, objectTitle, link, infoHash, magnet_link, ip, add_message, checked, blocked, api_client_id, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 );
 $stmt->execute([
     $report['id'], $report['name'], $report['representative'], $report['company'],
     $report['email'], $report['objectTitle'], $report['link'], $report['infoHash'],
     $report['magnet_link'] ?? null, $report['ip'], $report['add_message'], $report['checked'], 0,
+    isset($report['api_client_id']) && $report['api_client_id'] !== null ? (int)$report['api_client_id'] : null,
     $report['timestamp']
 ]);
 

@@ -22,7 +22,7 @@ require_once __DIR__ . '/csp.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.42.3';
+const TRACKER_VERSION = '1.43.0';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.
@@ -1626,15 +1626,20 @@ function autoCloseRelatedAppeals(PDO $db, string $infoHash, string $appealType, 
 function archiveReport(PDO $db, array $r): bool {
     try {
         $db->beginTransaction();
+        // api_client_id travels with the row. Archiving is the moment the record becomes the
+        // permanent one, and dropping the partner here would lose who filed the report exactly then
+        // — the column list is explicit, so a new column is only carried across if it is named.
         $ins = $db->prepare(
-            "INSERT INTO archives (id, name, representative, company, email, objectTitle, link, infoHash, magnet_link, ip, add_message, checked, blocked, timestamp)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO archives (id, name, representative, company, email, objectTitle, link, infoHash, magnet_link, ip, add_message, checked, blocked, api_client_id, timestamp)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE checked = VALUES(checked), blocked = VALUES(blocked)"
         );
         $ins->execute([
             $r['id'], $r['name'], $r['representative'], $r['company'], $r['email'],
             $r['objectTitle'], $r['link'], $r['infoHash'], $r['magnet_link'] ?? null,
-            $r['ip'], $r['add_message'], $r['checked'], $r['blocked'], $r['timestamp']
+            $r['ip'], $r['add_message'], $r['checked'], $r['blocked'],
+            isset($r['api_client_id']) && $r['api_client_id'] !== null ? (int)$r['api_client_id'] : null,
+            $r['timestamp']
         ]);
         $db->prepare("DELETE FROM reports WHERE id = ?")->execute([$r['id']]);
         $db->commit();

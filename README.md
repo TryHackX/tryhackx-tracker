@@ -58,7 +58,7 @@ Provides a public-facing website for tracker information, abuse report submissio
   here (making the account the first time) and a member signed in here can be sent to the forum
   signed in. One-time tickets, two-way sign-out, no password crosses, and never account-matching by
   email. Where an account signs in from is shown to the person and to the operator.
-- **Server-to-server API** (`v1/whitelist/submit`, `v1/whitelist/ping`) — `Authorization: Bearer key_id.secret` (only the secret's SHA-256 is stored), additive-only, idempotent; **any failed authentication attempt bans the source IP (v4 exact / v6 /64) for 30 days**, storing the whole offending request for review; exempt-IP list (seeded with the server's own addresses); admin panel to create/disable/delete clients and to view/lift bans
+- **Server-to-server API** (`v1/whitelist/submit`, `v1/whitelist/ping`, `v1/blacklist/submit`) — `Authorization: Bearer key_id.secret` (only the secret's SHA-256 is stored), additive-only, idempotent; **any failed authentication attempt bans the source IP (v4 exact / v6 /64) for 30 days**, storing the whole offending request for review; exempt-IP list (seeded with the server's own addresses); admin panel to create/disable/delete clients and to view/lift bans
 - **Admin Whitelist page** — status card (mode, file health, DB counts, pending reload, last reload, worker heartbeat, warnings), table with multi-column sort, hash-prefix / IP / name / file-name search (FULLTEXT), source & metadata filters, **Group by IP**, bulk delete/ban/fetch-metadata, details modal (magnet generator, name/size/file tree, seeders/leechers via live scrape, source & forum reference), Banned hashes, API clients, API bans (pretty-printed request snapshot)
 - **Metadata worker** — optional `python3-libtorrent` daemon (systemd, unprivileged, column-level MySQL grants) that resolves name / size / file list through DHT + trackers in upload mode; the panel queues rows and polls
 - **Mode-aware moderation** — in whitelist mode "block" = ban (removed from the served list, can never be re-registered) and the report/appeal flows, status page and public copy adapt automatically
@@ -713,6 +713,15 @@ default — with it off, everything behaves exactly like the classic single-admi
   `v1/users/lookup | grant | revoke | provision` from your shop after a purchase — see
   [tools/api_client_example.py](tools/api_client_example.py). Grants made through the API notify the
   user in-app (and optionally by email) and extend like admin grants.
+- **Abuse reports from a rights holder** (1.43.0): an API key with the **abuse** scope may call
+  `v1/blacklist/submit` — the same claim the public *Report* page files, in batches, from their own
+  system. A report lands in the Reports queue labelled with the partner that filed it, and **nothing
+  about the torrent changes until somebody decides**: `api_clients.abuse_auto_block` defaults to
+  **0**, the opposite of the whitelist's `auto_approve`, because registering a hash and taking a
+  torrent away from everybody who has it are not the same act. Per key, the operator can demand a
+  title, an evidence URL, a reason, the reporter's identity and a good-faith declaration; an item
+  missing one is refused on its own with the field named. The guide to send a partner is
+  `?action=apidocs&scope=abuse&…`, built by the panel when the key is made.
 
 ### Federation / cluster — a shared metadata catalogue (1.6.0)
 

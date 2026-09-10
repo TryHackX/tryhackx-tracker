@@ -16,9 +16,13 @@ $c = apiClientCreate($db, $label, $scope);
 // apiClientCreate(): that function is also called by the installer and by tests, and a new required
 // argument there would be a new way to get it wrong in three places instead of one.
 $autoApprove = array_key_exists('auto_approve', $input) ? (!empty($input['auto_approve']) ? 1 : 0) : 1;
-$fields = apiClientCleanFields($input['required_fields'] ?? []);
-$db->prepare("UPDATE api_clients SET auto_approve = ?, required_fields = ? WHERE id = ?")
-   ->execute([$autoApprove, implode(',', $fields), (int)$c['id']]);
+// The abuse half is the other way round on purpose: absent means REVIEW. `auto_approve` above
+// defaults to 1 because a partner's registrations are not an escalation; a key that can take a
+// torrent off the tracker starts with nobody having said it may (see api/v1/blacklist_submit.php).
+$autoBlock = !empty($input['abuse_auto_block']) && $input['abuse_auto_block'] !== '0' && $input['abuse_auto_block'] !== 'false' ? 1 : 0;
+$fields = apiClientCleanFields($input['required_fields'] ?? [], $scope);
+$db->prepare("UPDATE api_clients SET auto_approve = ?, abuse_auto_block = ?, required_fields = ? WHERE id = ?")
+   ->execute([$autoApprove, $autoBlock, implode(',', $fields), (int)$c['id']]);
 jsonResponse([
     'success' => true,
     'id' => $c['id'],
@@ -28,6 +32,7 @@ jsonResponse([
     'scope' => $c['scope'],
     'bearer' => $c['key_id'] . '.' . $c['secret'],
     'auto_approve' => $autoApprove === 1,
+    'abuse_auto_block' => $autoBlock === 1,
     'required_fields' => $fields,
     // The address of the instructions to send with the key. It carries no secret — only which
     // choices were made — so it is safe in the same mail as the key without being the key.

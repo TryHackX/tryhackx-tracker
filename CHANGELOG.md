@@ -4,6 +4,70 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.43.0] — 2026-09-10
+
+Schema **50**.
+
+### Added — abuse reports over the partner API (`v1/blacklist/submit`, scope `abuse`)
+
+A company that finds its work on this tracker had one way in: the public *Report* page, one form at a
+time, by hand. A partner with a catalogue to defend now has the same claim as an API call, in
+batches, from their own system — and it lands in the same queue, in front of the same person.
+
+**It is a scope of its own, not a flag on the whitelist key.** Registering a hash says "this exists";
+reporting one says "this infringes something of mine, and I am the one who may say so". A forum
+trusted with the first is not thereby trusted with the second, so a key needs `abuse` even if it
+already holds `whitelist`.
+
+**And its default is the opposite one.** `api_clients.auto_approve` defaults to 1: a partner's
+registrations publish straight through, because the cost of being wrong there is a row in a
+catalogue. `api_clients.abuse_auto_block` defaults to **0**, because the cost of being wrong here is
+a torrent that stops working for everybody who has it, and nobody outside this server can undo it.
+An operator who trusts a rights holder that far has to say so, per key, in the panel — where the
+choice now sits under a sentence that says exactly what it does.
+
+Per key, the operator can demand a title, an evidence URL, a reason, the reporter's identity
+(name, representative, company, e-mail) and a good-faith declaration. An item missing one is refused
+on its own with the field named; the rest of the batch goes through. The guide to send a partner is
+`?action=apidocs&scope=abuse&…`, and it is built by the panel while the operator is still choosing.
+
+Each report carries the key that filed it (`reports.api_client_id`), so the queue says who is asking
+rather than showing a company name anybody could type. That label survives being archived and
+restored — both of those copy their columns by name, and a column nobody names is dropped at exactly
+the moment the record becomes the permanent one.
+
+`deploy/smoke_blacklist.py` proves the part that matters against the real endpoint, a real key and
+the real blacklist file: **a report waiting for review has not blocked anything**, the tracker still
+serves the hash, and the row is in the panel queue with the partner named. Then the same file, with a
+key that was given the power: `blocked`, and the hash is in the file the tracker reads.
+
+### Fixed — a key's own settings never reached the endpoint that was supposed to obey them
+
+`apiAuthenticate()` selected six columns from `api_clients`, and `auto_approve` and `required_fields`
+were not among them. `api/v1/whitelist_submit.php` read both — `(int)($client['auto_approve'] ?? 1)`
+and `$client['required_fields'] ?? ''` — off a row that did not contain them, so both fallbacks
+applied to every key ever used: **publish immediately, demand nothing.**
+
+So "hold this partner's submissions for review" published them, and a key told to require a title
+accepted items without one. The queue worked, the generator withheld pending rows exactly as
+`tests/partner_api_test.php` proves, the panel showed the operator's choice back to them — and
+nothing on the way in ever looked at it. The gap was invisible to every test, because the tests that
+know about the setting write the rows themselves and the test that goes over HTTP had a key with
+default settings.
+
+Three checks in `deploy/smoke_admin.py` now create a key that holds submissions and demands a title,
+send two items through the real endpoint and read what comes back. Reverted against the old
+`SELECT`, they fail with `status: added` on both items.
+
+### Fixed — a migration that assumed a table the schema does not own
+
+The v50 columns hang off `reports` and `archives`, which install.php writes by hand — they are not in
+`trackerSchemaStatements()`. An `ALTER` against a table that is not there throws, `ensureSchema()`
+stops on that line, and every migration after it never runs: the version stays where it was and
+nothing says why. `tests/install_test.php` builds its scratch databases from the statement list alone
+and caught it immediately (nine checks red, schema stuck at 0). There is a `schemaTableExists()` now,
+and the two ALTERs ask before they speak.
+
 ## [1.42.3] — 2026-09-10
 
 ### Fixed — an administrator was invisible to "who has this in favourites"

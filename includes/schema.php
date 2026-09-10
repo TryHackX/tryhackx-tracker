@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 49;  // 49 = user_identities + auth_handoffs — the two-way sign-in bridge for a forum
+const TRACKER_SCHEMA_VERSION = 50;  // 50 = abuse reports over the partner API: reports/archives.api_client_id + api_clients.abuse_auto_block
                                     // 47 = user_favourites  // 47 = user_favourites + users.fav_public/fav_listed + whitelist.submitter_id/submitter_public — favourites, public profiles and "my uploads"
                                     // 46 = csp_reports (one row per KIND of violation, hits counts occurrences) + the four csp_* settings — the policy moved out of .htaccess and into PHP, where a nonce can exist
 // 45 = settings only (transport: cookie_secure_mode, client_proto_header, hsts_*) — every reader carries its own `?? default`, so the rows only make them visible in Settings
@@ -912,6 +912,31 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     }
     if ($aparts) $out[] = "ALTER TABLE `api_clients` " . implode(', ', $aparts);
 
+    // v50: a report can now arrive from a partner's key instead of from the public form, and the
+    // queue has to say which. The column is NULLABLE and has no default: every report that exists
+    // today came from a person on the Report page, and writing a partner id into those rows — or
+    // inventing one — would be the migration making a claim about where they came from.
+    //
+    // `archives` gets the same column because archiveReport() copies a row across verbatim when a
+    // report is resolved; without it the partner's name would be lost at exactly the moment the
+    // record becomes the permanent one.
+    foreach (['reports', 'archives'] as $rt) {
+        if (!schemaTableExists($db, $rt)) continue;   // install.php owns these two; see the helper
+        if (!schemaColumnExists($db, $rt, 'api_client_id')) {
+            $out[] = "ALTER TABLE `$rt` ADD COLUMN `api_client_id` INT UNSIGNED DEFAULT NULL";
+        }
+        if (!schemaIndexExists($db, $rt, 'idx_' . $rt . '_api_client')) {
+            $out[] = "ALTER TABLE `$rt` ADD INDEX `idx_" . $rt . "_api_client` (`api_client_id`)";
+        }
+    }
+    // DEFAULT 0, and that is the decision this release is about: `auto_approve` above defaults to 1
+    // because registering a hash a partner already published is not an escalation. Blocking one is.
+    // A key that can file abuse reports gets them REVIEWED unless somebody deliberately says
+    // otherwise, so the two settings are separate columns rather than one column read two ways.
+    if (!schemaColumnExists($db, 'api_clients', 'abuse_auto_block')) {
+        $out[] = "ALTER TABLE `api_clients` ADD COLUMN `abuse_auto_block` TINYINT(1) NOT NULL DEFAULT 0";
+    }
+
     // v49: the sign-in bridge. Two new tables, so CREATE TABLE IF NOT EXISTS carries the whole
     // migration — the definitions are the ones above, kept identical on purpose.
     $out[] = "CREATE TABLE IF NOT EXISTS `user_identities` (
@@ -1691,6 +1716,21 @@ function schemaColumnNullable(PDO $db, string $table, string $column): bool {
                          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
     $st->execute([$table, $column]);
     return strtoupper((string)$st->fetchColumn()) === 'YES';
+}
+
+/**
+ * Does this table exist at all?
+ *
+ * `reports`, `archives` and the rest of the pre-schema tables are written by install.php, not by
+ * trackerSchemaStatements() — so a database built from the statement list alone (which is what
+ * tests/install_test.php builds, deliberately) does not have them. An ALTER against a table that is
+ * not there throws, ensureSchema() stops on the spot, and every migration after it silently never
+ * runs: the schema version stays where it was and nothing says why.
+ */
+function schemaTableExists(PDO $db, string $table): bool {
+    $st = $db->prepare("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1");
+    $st->execute([$table]);
+    return (bool)$st->fetchColumn();
 }
 
 function schemaIndexExists(PDO $db, string $table, string $index): bool {

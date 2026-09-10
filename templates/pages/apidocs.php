@@ -24,12 +24,13 @@ $apiOn = ($cfg['api_enabled'] ?? '0') === '1';
 
 // A fixed vocabulary, chosen by key. A query parameter that is not one of these is not an error —
 // it is somebody editing the address, and the honest response is the default page.
-$docScopes = ['whitelist' => 'v1/whitelist/submit', 'users' => 'v1/users/lookup',
+$docScopes = ['whitelist' => 'v1/whitelist/submit', 'abuse' => 'v1/blacklist/submit',
+              'users' => 'v1/users/lookup',
               'federation' => 'v1/federation/export', 'auth' => 'v1/auth/login',
               'all' => 'v1/whitelist/submit'];
 $docScope = isset($_GET['scope']) && isset($docScopes[(string)$_GET['scope']]) ? (string)$_GET['scope'] : 'whitelist';
 $docReview = ((string)($_GET['approve'] ?? 'auto')) === 'review';
-$docFields = function_exists('apiClientCleanFields') ? apiClientCleanFields($_GET['fields'] ?? []) : [];
+$docFields = function_exists('apiClientCleanFields') ? apiClientCleanFields($_GET['fields'] ?? [], $docScope) : [];
 // ABSOLUTE. Every address on this page is copied into somebody else's code on somebody else's
 // server; "/api.php?endpoint=…" is their host, not this one.
 $docBase = function_exists('apiAbsoluteBase') ? apiAbsoluteBase($cfg) : rtrim(getBaseUrl(), '/');
@@ -42,6 +43,9 @@ $docUrl = $docApi . $docScopes[$docScope];
 // The bridge belongs to the 'users' scope rather than a scope of its own — that is what
 // api/v1/auth_*.php enforces — so a users key is told about both halves of what it can do.
 $showSubmit = in_array($docScope, ['whitelist', 'all'], true);
+// The reporting half. `approve=auto` means something much heavier here than it does above, and the
+// chapter says so where somebody integrating will read it.
+$showAbuse  = in_array($docScope, ['abuse', 'all'], true);
 $showAuth   = in_array($docScope, ['auth', 'users', 'all'], true);
 $showUsers  = in_array($docScope, ['users', 'all'], true);
 $showFed    = in_array($docScope, ['federation', 'all'], true);
@@ -65,6 +69,29 @@ $exReply = json_encode([
     'required_fields' => $docFields,
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
+// The abuse example, built from the same answers. Only the fields this key must send are shown:
+// an integrator copying this should be copying something their key will accept.
+$exAbuseItem = ['magnet' => 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'];
+if (in_array('title', $docFields, true)) $exAbuseItem['title'] = 'Example Film (2026)';
+if (in_array('evidence_url', $docFields, true)) $exAbuseItem['evidence_url'] = 'https://rightsholder.example/catalogue/1234';
+if (in_array('reason', $docFields, true)) $exAbuseItem['reason'] = 'Unlicensed copy of our film';
+$exAbuseBody = ['items' => [$exAbuseItem]];
+if (in_array('reporter', $docFields, true)) {
+    $exAbuseBody = ['reporter' => ['name' => 'Example Pictures', 'representative' => 'A. Nowak',
+                                   'company' => 'Example Anti-Piracy', 'email' => 'abuse@example.org']] + $exAbuseBody;
+}
+if (in_array('statement', $docFields, true)) $exAbuseBody['statement'] = true;
+$exAbuse = json_encode($exAbuseBody, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exAbuseReply = json_encode([
+    'ok' => true,
+    'results' => [['index' => 0, 'hash' => '0123456789abcdef0123456789abcdef01234567',
+                   'status' => $docReview ? 'received' : 'blocked', 'report_id' => 41, 'error' => null]],
+    'summary' => $docReview ? ['received' => 1, 'blocked' => 0, 'duplicate' => 0, 'already_blocked' => 0, 'invalid' => 0]
+                            : ['received' => 0, 'blocked' => 1, 'duplicate' => 0, 'already_blocked' => 0, 'invalid' => 0],
+    'auto_block' => !$docReview,
+    'required_fields' => $docFields,
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
 $exLogin = json_encode(['external_id' => '412', 'username' => 'kasia', 'email' => 'kasia@example.org'],
                        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 $exLoginReply = json_encode([
@@ -84,9 +111,17 @@ $exLoginReply = json_encode([
 <div class="apidocs-summary">
     <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_endpoint') ?></span>
         <code class="apidocs-v"><?= sanitize($docUrl) ?></code></div>
+    <?php if ($showAbuse): ?>
+    <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_blocking') ?></span>
+        <span class="apidocs-v"><?= _h($docReview ? 'apidocs.block_review' : 'apidocs.block_auto') ?></span></div>
+    <?php endif; ?>
     <?php if ($showSubmit): ?>
     <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_approval') ?></span>
         <span class="apidocs-v"><?= _h($docReview ? 'apidocs.approve_review' : 'apidocs.approve_auto') ?></span></div>
+    <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_required') ?></span>
+        <span class="apidocs-v"><?= $docFields ? sanitize(implode(', ', $docFields)) : _h('apidocs.required_none') ?></span></div>
+    <?php endif; ?>
+    <?php if ($showAbuse && !$showSubmit): ?>
     <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_required') ?></span>
         <span class="apidocs-v"><?= $docFields ? sanitize(implode(', ', $docFields)) : _h('apidocs.required_none') ?></span></div>
     <?php endif; ?>
@@ -124,6 +159,41 @@ Content-Type: application/json</code></pre>
         <tr><td><code>exists</code></td><td><?= _h('apidocs.st_exists') ?></td></tr>
         <tr><td><code>banned</code></td><td><?= _h('apidocs.st_banned') ?></td></tr>
         <tr><td><code>invalid</code></td><td><?= _h('apidocs.st_invalid') ?></td></tr>
+    </tbody>
+</table>
+</div>
+<?php endif; ?>
+
+<?php if ($showAbuse): ?>
+<?php /* Reporting. Deliberately its own chapter with its own warning: everything above is about
+         adding a hash to a catalogue, and this is about taking a torrent away from everybody who
+         has it. A partner reading only this page should still know which one they are doing. */ ?>
+<h2><?= _h('apidocs.h_abuse') ?></h2>
+<p><?= __('apidocs.abuse_intro') ?></p>
+<div class="alert <?= $docReview ? 'alert-info' : 'alert-warning' ?> show"><?= __($docReview ? 'apidocs.abuse_note_review' : 'apidocs.abuse_note_auto') ?></div>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/blacklist/submit') ?>
+
+<?= sanitize($exAbuse) ?></code></pre>
+
+<?php if ($docFields): ?>
+<div class="alert alert-warning show"><?= __('apidocs.required_note', ['fields' => sanitize(implode(', ', $docFields))]) ?></div>
+<?php endif; ?>
+
+<h2><?= _h('apidocs.h_abuse_reply') ?></h2>
+<p><?= __($docReview ? 'apidocs.abuse_reply_review' : 'apidocs.abuse_reply_auto') ?></p>
+<pre class="apidocs-pre"><code><?= sanitize($exAbuseReply) ?></code></pre>
+
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_status') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>received</code></td><td><?= _h('apidocs.ab_received') ?></td></tr>
+        <?php if (!$docReview): ?>
+        <tr><td><code>blocked</code></td><td><?= _h('apidocs.ab_blocked') ?></td></tr>
+        <?php endif; ?>
+        <tr><td><code>duplicate</code></td><td><?= _h('apidocs.ab_duplicate') ?></td></tr>
+        <tr><td><code>already_blocked</code></td><td><?= _h('apidocs.ab_already') ?></td></tr>
+        <tr><td><code>invalid</code></td><td><?= _h('apidocs.ab_invalid') ?></td></tr>
     </tbody>
 </table>
 </div>

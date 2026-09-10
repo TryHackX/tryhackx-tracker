@@ -5,7 +5,8 @@ $source = ($_GET['source'] ?? 'reports') === 'archives' ? 'archives' : 'reports'
 // Single report by ID
 if (isset($_GET['id'])) {
     $id = (int)$_GET['id'];
-    $stmt = $db->prepare("SELECT * FROM `$source` WHERE id = ?");
+    $stmt = $db->prepare("SELECT r.*, c.label AS api_client_label FROM `$source` r
+                          LEFT JOIN api_clients c ON c.id = r.api_client_id WHERE r.id = ?");
     $stmt->execute([$id]);
     $report = $stmt->fetch();
     jsonResponse(['report' => $report ?: null]);
@@ -17,18 +18,21 @@ $perPage = (int)($cfg['items_per_page'] ?? 25);
 $offset = ($page - 1) * $perPage;
 
 // Safe sort whitelist
+// Table-qualified, because the list query below joins api_clients to name the partner that filed
+// the report — and `id` exists on both sides. The count query does not join and does not sort, so
+// its WHERE keeps using bare column names; none of those exist on both tables.
 $allowedSorts = [
-    'date'           => 'timestamp',
-    'checked'        => 'checked',
-    'blocked'        => '(CASE WHEN blocked = 1 THEN 2 WHEN checked = 1 THEN 1 ELSE 0 END)',
-    'id'             => 'id',
-    'name'           => 'name',
-    'company'        => 'company',
-    'email'          => 'email',
-    'representative' => 'representative',
-    'object'         => 'objectTitle',
-    'hash'           => 'infoHash',
-    'ip'             => 'ip',
+    'date'           => 'r.timestamp',
+    'checked'        => 'r.checked',
+    'blocked'        => '(CASE WHEN r.blocked = 1 THEN 2 WHEN r.checked = 1 THEN 1 ELSE 0 END)',
+    'id'             => 'r.id',
+    'name'           => 'r.name',
+    'company'        => 'r.company',
+    'email'          => 'r.email',
+    'representative' => 'r.representative',
+    'object'         => 'r.objectTitle',
+    'hash'           => 'r.infoHash',
+    'ip'             => 'r.ip',
 ];
 
 // Multi-sort support: sort=name:asc,company:desc,date:desc
@@ -42,7 +46,7 @@ foreach (explode(',', $sortParam) as $part) {
     $orderParts[] = "$col $dir";
 }
 if (empty($orderParts)) {
-    $orderParts[] = 'timestamp DESC';
+    $orderParts[] = 'r.timestamp DESC';
 }
 
 // Build WHERE conditions
@@ -82,7 +86,12 @@ $pages = max(1, (int)ceil($total / $perPage));
 
 // Fetch reports
 $orderClause = implode(', ', $orderParts);
-$sql = "SELECT * FROM `$source` $whereClause ORDER BY $orderClause LIMIT ? OFFSET ?";
+// The partner's LABEL, not just their id: a queue that says "api_client_id 3" tells the person
+// working it nothing, and looking the number up is their job for as long as it is not done here.
+// LEFT JOIN, because almost every report ever filed came from the public form and has no partner.
+$sql = "SELECT r.*, c.label AS api_client_label FROM `$source` r
+        LEFT JOIN api_clients c ON c.id = r.api_client_id
+        $whereClause ORDER BY $orderClause LIMIT ? OFFSET ?";
 $stmt = $db->prepare($sql);
 $paramIdx = 1;
 foreach ($params as $p) {

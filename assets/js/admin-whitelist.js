@@ -1399,9 +1399,16 @@
             const tr = el('tr');
             tr.appendChild(el('td', { className: 'wl-cl-label', text: c.label, title: c.label }));
             const scopeTd = el('td', {}, badge(c.scope || 'whitelist', c.scope === 'all' ? 'wl-b-warn' : ''));
-            if (c.auto_approve === false) {
+            // "held for review" reads the setting that belongs to the scope: on a whitelist key that
+            // is auto_approve, on an abuse key it is abuse_auto_block — and on an abuse key the
+            // ALARMING state is the other one, so that is the badge that gets the warning colour.
+            if ((c.scope === 'whitelist' || c.scope === 'all') && c.auto_approve === false) {
                 scopeTd.appendChild(document.createTextNode(' '));
                 scopeTd.appendChild(badge(t('js.wl.cl_approve_rev'), 'wl-b-pending'));
+            }
+            if ((c.scope === 'abuse' || c.scope === 'all') && c.abuse_auto_block === true) {
+                scopeTd.appendChild(document.createTextNode(' '));
+                scopeTd.appendChild(badge(t('js.wl.cl_abuse_auto_badge'), 'wl-b-warn'));
             }
             if (c.required_fields && c.required_fields.length) {
                 scopeTd.appendChild(document.createTextNode(' '));
@@ -1432,6 +1439,7 @@
                 // of being quietly rewritten by a dialog that never showed those two controls.
                 const body = { id: c.id, label: v.label };
                 if (v.auto_approve !== undefined) body.auto_approve = v.auto_approve;
+                if (v.abuse_auto_block !== undefined) body.abuse_auto_block = v.abuse_auto_block;
                 if (v.required_fields !== undefined) body.required_fields = v.required_fields;
                 const rr = await apiCall('admin/api_client_update', 'POST', body);
                 if (rr.success) { showToast(t('js.wl.cl_saved'), 'success'); loadClients(); } else showToast(rr.error || t('js.wl.rename_failed'), 'danger');
@@ -1458,7 +1466,9 @@
         const modalEl = $('clOptsModal');
         const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         const label = $('cl-opts-label'), scope = $('cl-opts-scope'), approve = $('cl-opts-approve');
+        const abuse = $('cl-opts-abuse');
         const boxes = [...modalEl.querySelectorAll('.cl-opts-field')];
+        const aboxes = [...modalEl.querySelectorAll('.cl-opts-afield')];
         const docs = $('cl-opts-docs'), openLink = $('cl-opts-docs-open');
         $('cl-opts-title').textContent = title;
         $('cl-opts-save').textContent = okLabel;
@@ -1470,8 +1480,12 @@
         scope.disabled = !!client;
         $('cl-opts-scope-hint').textContent = client ? t('js.wl.cl_scope_locked') : t('js.wl.cl_scope_hint');
         approve.value = client && client.auto_approve === false ? 'review' : 'auto';
+        // The other way round, deliberately: a key nobody has said anything about does NOT get to
+        // take torrents off the tracker on its own.
+        abuse.value = client && client.abuse_auto_block === true ? 'auto' : 'review';
         const have = new Set((client && client.required_fields) || []);
         boxes.forEach(b => { b.checked = have.has(b.value); });
+        aboxes.forEach(b => { b.checked = have.has(b.value); });
 
         // WHICH ANSWERS THIS SCOPE ACTUALLY HAS.
         //
@@ -1481,19 +1495,32 @@
         // and stored ONLY for a scope that can submit; for the others they are not merely hidden,
         // they are excluded from read() so nothing stale rides along to the server.
         const canSubmit = () => scope.value === 'whitelist' || scope.value === 'all';
+        const canAbuse = () => scope.value === 'abuse' || scope.value === 'all';
         const canUsers = () => scope.value === 'users' || scope.value === 'all';
 
         const read = () => {
             const v = { label: label.value.trim(), scope: scope.value };
+            // `required_fields` is ONE column and two vocabularies. Only the blocks this scope can
+            // actually use contribute to it, so a key can never be sent demanding a field the
+            // endpoint it may call has never heard of.
+            const fields = [];
             if (canSubmit()) {
                 v.auto_approve = approve.value !== 'review' ? 1 : 0;
-                v.required_fields = boxes.filter(b => b.checked).map(b => b.value);
+                fields.push(...boxes.filter(b => b.checked).map(b => b.value));
             }
+            if (canAbuse()) {
+                v.abuse_auto_block = abuse.value === 'auto' ? 1 : 0;
+                fields.push(...aboxes.filter(b => b.checked).map(b => b.value));
+            }
+            if (canSubmit() || canAbuse()) v.required_fields = fields;
             return v;
         };
         const paint = () => {
             const v = read();
-            const url = docsUrlFor(v.scope, v.auto_approve !== 0, v.required_fields || []);
+            // On an abuse key the guide's `approve=` describes the BLOCKING decision, because that is
+            // what "what happens to what they send" means for a report.
+            const approving = v.scope === 'abuse' ? v.abuse_auto_block === 1 : v.auto_approve !== 0;
+            const url = docsUrlFor(v.scope, approving, v.required_fields || []);
             docs.textContent = url;
             openLink.href = url;
         };
@@ -1502,19 +1529,22 @@
         // operator deciding how far to trust a partner is deciding about exactly this list.
         const ENDPOINTS = {
             whitelist: ['v1/whitelist/submit', 'v1/whitelist/ping'],
+            abuse: ['v1/blacklist/submit'],
             users: ['v1/users/lookup', 'v1/users/provision', 'v1/users/grant', 'v1/users/revoke',
                     'v1/auth/login', 'v1/auth/logout', 'v1/auth/verify', 'v1/auth/merge', 'v1/auth/status'],
             federation: ['v1/federation/ping', 'v1/federation/export'],
         };
-        ENDPOINTS.all = [...ENDPOINTS.whitelist, ...ENDPOINTS.users, ...ENDPOINTS.federation];
+        ENDPOINTS.all = [...ENDPOINTS.whitelist, ...ENDPOINTS.abuse, ...ENDPOINTS.users, ...ENDPOINTS.federation];
 
         const bridgeOn = (document.body.dataset.bridgeOn || '0') === '1';
         const submitBlock = $('cl-opts-submit-block');
+        const abuseBlock = $('cl-opts-abuse-block');
         const bridgeNote = $('cl-opts-bridge-note');
         const canBox = $('cl-opts-can');
 
         const applyScope = () => {
             submitBlock.hidden = !canSubmit();
+            abuseBlock.hidden = !canAbuse();
             // The endpoint list is rebuilt every time, so it can never disagree with the select above it.
             canBox.textContent = '';
             canBox.appendChild(el('div', { className: 'cl-can-head', text: t('js.wl.cl_can') }));
@@ -1538,7 +1568,7 @@
         };
         applyScope();
         // The scope redraws the dialog; everything else only redraws the guide address.
-        const watched = [label, approve, ...boxes];
+        const watched = [label, approve, abuse, ...boxes, ...aboxes];
         watched.forEach(c => c.addEventListener('change', paint));
         scope.addEventListener('change', applyScope);
 
@@ -1569,7 +1599,7 @@
         // approve= and fields= describe submissions. On a key that cannot submit they would be two
         // parameters the guide has to ignore, and an operator comparing the link to the dialog would
         // find them saying something the dialog does not.
-        if (scope === 'whitelist' || scope === 'all') {
+        if (scope === 'whitelist' || scope === 'abuse' || scope === 'all') {
             u.searchParams.set('approve', autoApprove ? 'auto' : 'review');
             if (fields && fields.length) u.searchParams.set('fields', fields.join(','));
         }

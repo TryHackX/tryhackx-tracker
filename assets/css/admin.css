@@ -572,6 +572,14 @@
     color: #ff9800;
 }
 
+/* Which partner filed a report, beside the name they filed it under. Quiet on purpose: it is
+   provenance, not a status — the row's own status badge is the one to read first. */
+.badge-api {
+    background: rgba(74, 158, 255, 0.15);
+    color: #4a9eff;
+    margin-left: 0.35rem;
+}
+
 .report-message-block {
     margin-top: 0.75rem;
     padding: 0.75rem 1rem;
