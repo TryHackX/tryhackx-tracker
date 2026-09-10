@@ -220,6 +220,8 @@ function settingsCatalogKeywords(): array {
         'lists_public_enabled'     => 'lists public share profile visible privacy collection',
         'lists_max_per_user'       => 'lists limit maximum how many collections per user cap',
         'lists_max_items'          => 'list items limit maximum hashes in one list cap size',
+        'index_keep_saved'         => 'keep favourites lists protect prune janitor never delete saved starred',
+        'index_keep_saved_days'    => 'keep favourites extra days grace protection saved starred lists',
         'pm_enabled'               => 'private messages pm inbox conversations members write dm',
         'pm_who'                   => 'private messages who can write default friends everybody nobody',
         'pm_max_per_day'           => 'private messages limit per day spam flood cap',

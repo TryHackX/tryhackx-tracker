@@ -146,8 +146,10 @@ $routes = [
     // allows a dot and both cases. A name can never be an action, so the collision problem does not
     // arise — 'Bob.Smith' would have become 'bobsmith', a different person or nobody.
     'u'            => 'templates/pages/profile.php',
-    // The member directory. Its own action rather than a tab on the account page: it is a page
-    // about other people, and the account page is a page about you.
+    // The member directory — a tab of the account page now (see the redirect below), kept as an
+    // action so that links to it, and the nav entries of installs that were upgraded, still land
+    // somewhere. It was its own page first, on the reasoning that it is about other people; it sits
+    // better beside the reader's own friends and blocks, which are about other people too.
     'members'      => 'templates/pages/members.php',
     // The partner integration guide. Unlisted rather than locked: nothing on it is secret — it is
     // the shape of a public API — and the key it documents travels separately, from a person. It
@@ -236,6 +238,13 @@ if (in_array($action, ['login', 'register', 'account', 'reset', 'verify', 'email
 
 if (!isset($routes[$action])) {
     $action = 'home';
+}
+
+// ?action=members is an address, not a page: the directory lives in the account page's tabs. Sent
+// here, before the layout writes a byte, because a redirect after output is not one.
+if ($action === 'members') {
+    header('Location: ' . $baseUrl . '?action=account#members', true, 302);
+    exit;
 }
 
 $pageTemplate = __DIR__ . '/' . $routes[$action];

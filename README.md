@@ -480,6 +480,12 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
   939 ms) drops expired rows and caps the table at `index_max_rows` (oldest unprotected `last_seen` first);
   it first backfills the protection window for rows whose metadata resolved since the last poll, and runs
   under a lock so two prunes can never over-delete. A 200 000-row cap is ~100–150 MB on disk.
+- **Keep what people kept** (`index_keep_saved`, 1.45.1, **off** by default) — what the pruner does with
+  a hash somebody has starred or put on a list: `off` leaves the lifecycle above exactly as it is,
+  `forever` spares it while anybody still has it, `extend` gives it `index_keep_saved_days` (1–3650) on
+  top of whatever protection it already had, measured from `protected_until` so a hash that reappears
+  has both clocks restarted at once. It applies to the grace window, the protection window and the row
+  cap — a starred hash evicted for being old is exactly the row the setting exists to protect.
 - **Worker** — set `index_table = index_hashes` in `tracker-metadata.conf` and grant the `tracker_meta`
   user on the index tables (see [worker/README.md](worker/README.md)). Leave `index_table` empty to keep
   whitelist-only behaviour.

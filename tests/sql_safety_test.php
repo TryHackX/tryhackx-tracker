@@ -174,6 +174,11 @@ $REVIEWED = [
     // up in $sortCols plus one of two literal directions. Nothing from the request reaches either.
     'api/user_privacy.php:$sets'               => 'literal column fragments chosen from a two-name allow-list; values bound',
     'api/user_uploads.php:$order'              => 'column looked up in $sortCols, direction one of two literals',
+    // indexKeepSavedClause() returns one of three things: '', a literal EXISTS pair, or that pair
+    // plus an interval whose only variable is indexKeepSavedDays() — clamped to [1, 3650] and cast
+    // to int before it is spelled. The column name is the caller's own literal, never input.
+    'includes/index.php:$keepGrace'            => 'from indexKeepSavedClause(): literal SQL, the only number an int from a clamped helper',
+    'includes/index.php:$keepProtect'          => 'from indexKeepSavedClause(): literal SQL, the only number an int from a clamped helper',
     'includes/index.php:$clA'                  => 'literal conditions from $where plus one clause built with placeholders; values bound',
     'includes/index.php:$clB'                  => 'literal conditions from $where plus one clause built with placeholders; values bound',
     'includes/schema.php:$one'                 => 'one of this file\'s own CREATE/ALTER statements',

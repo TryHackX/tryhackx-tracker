@@ -137,6 +137,53 @@ function indexMinSeeders(array $cfg): int { return max(0, min(100000, (int)($cfg
 function indexMaxRows(array $cfg): int { return max(10, min(5000000, (int)($cfg['index_max_rows'] ?? 200000) ?: 200000)); }
 function indexGraceDays(array $cfg): int { return max(1, min(90, (int)($cfg['index_grace_days'] ?? 3) ?: 3)); }
 function indexProtectDays(array $cfg): int { return max(1, min(365, (int)($cfg['index_protect_days'] ?? 10) ?: 10)); }
+
+/**
+ * What the janitor does with a hash SOMEBODY HAS KEPT — starred, or put on a list.
+ *
+ *   'off'     — nothing; the ordinary lifecycle decides, as it always has.
+ *   'forever' — never pruned while anybody has it.
+ *   'extend'  — it gets `index_keep_saved_days` on top of whatever protection it already had.
+ *
+ * ── why 'extend' resets by itself ──────────────────────────────────────────────────────────────
+ * `protected_until` is pushed forward on every poll where the swarm still has the hash. The extra
+ * window is measured FROM that column, so a hash that reappears has both clocks restarted at once —
+ * there is no second timestamp to keep in step, and none to forget to update.
+ */
+function indexKeepSavedMode(array $cfg): string
+{
+    $v = (string)($cfg['index_keep_saved'] ?? 'off');
+    return in_array($v, ['off', 'forever', 'extend'], true) ? $v : 'off';
+}
+
+function indexKeepSavedDays(array $cfg): int
+{
+    return max(1, min(3650, (int)($cfg['index_keep_saved_days'] ?? 90) ?: 90));
+}
+
+/**
+ * The WHERE fragment that spares kept hashes, for one expiry column.
+ *
+ * Returns '' when the feature is off, so the queries below read exactly as they did before an
+ * operator turned it on. Two EXISTS over two indexed columns (`idx_fav_hash`, `idx_item_hash`) —
+ * the prune deletes in batches of 5 000, so this is 10 000 index lookups per batch and no scan.
+ *
+ * The favourites and the lists are asked SEPARATELY rather than through a UNION: they are two
+ * features with two tables, either may be switched off, and a UNION would make a missing table on
+ * an old install fail the whole prune instead of one half of one clause.
+ */
+function indexKeepSavedClause(array $cfg, string $expiryCol): string
+{
+    $mode = indexKeepSavedMode($cfg);
+    if ($mode === 'off') return '';
+    $kept = "(EXISTS (SELECT 1 FROM user_favourites kf WHERE kf.info_hash = index_hashes.info_hash)
+           OR EXISTS (SELECT 1 FROM user_list_items kl WHERE kl.info_hash = index_hashes.info_hash))";
+    if ($mode === 'forever') return " AND NOT $kept";
+    $days = indexKeepSavedDays($cfg);
+    // Kept rows die later, by exactly that many days, measured from the same column everything else
+    // is measured from.
+    return " AND (NOT $kept OR $expiryCol < NOW() - INTERVAL $days DAY)";
+}
 function indexMetaDailyBudget(array $cfg): int { return max(0, min(1000000, (int)($cfg['index_meta_daily_budget'] ?? 500))); }
 function indexMetaAutoQueue(array $cfg): bool { return (($cfg['index_meta_auto_queue'] ?? '0') === '1'); }
 function indexKeepFiles(array $cfg): bool { return (($cfg['index_keep_files'] ?? '1') === '1'); }
@@ -726,11 +773,16 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
     $res['protected_backfill'] = $bf->rowCount();
     // expired: never-resolved past grace, or done past protection. Batched with LIMIT so one prune never
     // takes a huge row-lock set on a 200k table (each chunk autocommits — prune runs outside a transaction).
+    // A hash somebody has starred or put on a list can be spared here — see indexKeepSavedClause().
+    // The two branches carry their own clause because they expire on different columns, and an
+    // operator who says "keep what people kept" means both of them.
+    $keepGrace   = indexKeepSavedClause($cfg, 'grace_until');
+    $keepProtect = indexKeepSavedClause($cfg, 'protected_until');
     do {
         $nd = (int)$db->exec(
             "DELETE FROM index_hashes WHERE
-                ((meta_status <> 'done' AND grace_until IS NOT NULL AND grace_until < NOW())
-              OR (meta_status  = 'done' AND protected_until IS NOT NULL AND protected_until < NOW()))
+                ((meta_status <> 'done' AND grace_until IS NOT NULL AND grace_until < NOW()$keepGrace)
+              OR (meta_status  = 'done' AND protected_until IS NOT NULL AND protected_until < NOW()$keepProtect))
              LIMIT 5000");
         $res['expired'] += $nd;
     } while ($nd === 5000);
@@ -756,8 +808,11 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
         $left = $excess;
         while ($left > 0) {
             $batch = min(5000, $left);
+            // The cap spares kept rows too. It has to: a hash somebody starred that gets evicted for
+            // being old is exactly the row the setting exists to protect, and the eviction order is
+            // "oldest first", which is where those rows live.
             $d = $db->prepare("DELETE FROM index_hashes
-                                WHERE protected_until IS NULL OR protected_until < NOW()
+                                WHERE (protected_until IS NULL OR protected_until < NOW())$keepProtect
                                 ORDER BY last_seen ASC LIMIT " . (int)$batch);
             $d->execute();
             $n = $d->rowCount();

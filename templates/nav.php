@@ -27,10 +27,13 @@
         <?php endif; ?>
         <?php $navUser = $navUser ?? (usersEnabled($cfg) ? currentUser($db) : null); ?>
         <?php /* The directory sits with the other places somebody can GO, and only for a reader who
-                 may actually browse it — a link that answers 404 is a worse link than no link. */ ?>
+                 may actually browse it — a link that answers 404 is a worse link than no link.
+                 It is a tab of the account page now rather than a page of its own, so the link
+                 carries the hash; ?action=members still answers, with a redirect to the same place,
+                 because links to it are out in the world. */ ?>
         <?php if (directoryEnabled($cfg) && $navUser !== null && userCan($db, $cfg, 'directory.view')): ?>
         <span class="sep">|</span>
-        <a href="<?= $baseUrl ?>?action=members" class="<?= $action === 'members' ? 'active' : '' ?>"><?= _h('nav.members') ?></a>
+        <a href="<?= $baseUrl ?>?action=account#members" class="<?= $action === 'members' ? 'active' : '' ?>"><?= _h('nav.members') ?></a>
         <?php endif; ?>
         <?php $accountActive = in_array($action, ['account', 'login', 'register', 'reset', 'verify'], true); ?>
         <?php if ($navUser !== null): ?>

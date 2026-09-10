@@ -397,6 +397,7 @@ ul.feature-list li::before {
     transition: opacity 0.2s;
     text-decoration: none;
 }
+.btn { line-height: 1.25; vertical-align: middle; }
 .btn:hover { opacity: 0.85; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
@@ -1762,6 +1763,11 @@ body.page-search .container { max-width: 86em; }
     font: inherit; font-size: 0.78rem; padding: 0.15rem 0.5rem; border-radius: 4px; cursor: pointer;
     white-space: nowrap; }
 .search-share:hover { color: var(--accent); border-color: var(--accent); }
+/* The two buttons that actually say "Share" — not the quiet "+" and "Who has this" that borrow this
+   class for their shape. Muted grey on a muted border made the one control on the toolbar somebody
+   is LOOKING for the hardest one on it to find. */
+.share-btn { color: var(--text); border-color: var(--accent); }
+.share-btn:hover { background: rgba(74,158,255,0.12); }
 .search-share.copied { color: var(--success, #4caf50); border-color: var(--success, #4caf50); }
 /* No `margin-left: auto` here. Two auto margins in one flex row — one on .info-acts, one here —
    split the free space between them, which is why the star and "Who has this" sat marooned in the
@@ -1849,6 +1855,13 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
     background: rgba(0, 0, 17, 0.85);
 }
 .files-overlay[hidden] { display: none; }
+/* Stacking, in the order these actually open on top of each other. A list opens from a card; the
+   Info panel opens from a row INSIDE that list; the picker, the "who has this" list and the block
+   dialog all open from the Info panel. They shared one z-index, so the panel opened UNDER the list
+   it was opened from and the reader saw the overlay they had just left. */
+#list-overlay { z-index: 1000; }
+#info-overlay { z-index: 1100; }
+#lp-overlay, #who-overlay, #block-overlay { z-index: 1200; }
 .files-box {
     width: 100%; max-width: 46em; max-height: 80vh;
     display: flex; flex-direction: column;
@@ -2258,6 +2271,22 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 }
 .pm-input:focus { outline: none; border-color: var(--accent); }
 .pm-composer-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
+/* The editor inside a conversation. The tabs, rail and preview are the ones the description form
+   uses; only the textarea rules have to be repeated, because those were written for a .form-group
+   and a message is not in one. Shorter than a description by default — a message usually is. */
+.pm-editor textarea {
+    width: 100%; box-sizing: border-box; min-height: 6rem; margin: 0; border: 0; border-radius: 0;
+    background: var(--bg-code); resize: vertical;
+}
+.pm-editor textarea:focus { outline: none; box-shadow: none; border-color: transparent; }
+.pm-editor .rt-preview { min-height: 6rem; max-height: 18rem; }
+.pm-new-row { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
+.pm-new-row[hidden] { display: none; }
+.pm-new-row .profile-search { flex: 1 1 auto; }
+/* The number on the People tab: somebody is waiting for an answer. Same shape as the inbox's. */
+.pm-unread-badge { display: none; min-width: 1.2em; margin-left: 0.35em; padding: 0 0.35em; border-radius: 999px;
+    background: var(--accent); color: #fff; font-size: 0.72rem; line-height: 1.5; text-align: center; }
+.pm-unread-badge:not([hidden]) { display: inline-block; }
 .pm-msg-note { font-size: 0.8rem; }
 .pm-closed { margin-top: 0.7rem; border-top: 1px solid var(--border); padding-top: 0.7rem; color: #e0b15a; font-size: 0.85rem; }
 .pm-note { font-size: 0.8rem; margin-top: 0.6rem; }
@@ -2323,8 +2352,12 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .lp-row + .lp-row { border-top: 1px solid var(--border); }
 .lp-name { flex: 1 1 auto; }
 .lp-count { font-size: 0.78rem; }
-.lp-new { display: flex; gap: 0.4rem; margin-top: 0.7rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }
-.lp-new .profile-search { flex: 1 1 auto; }
+/* One box at the top: it filters the lists as somebody types, and the button beside it appears only
+   when what they typed is not a list they already have. */
+.lp-find { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; }
+.lp-find .profile-search { flex: 1 1 auto; }
+.lp-find .btn[hidden] { display: none; }
+.lp-pager { margin-top: 0.5rem; }
 .lp-msg { font-size: 0.8rem; min-height: 1.2em; margin-top: 0.4rem; }
 .who-lists-head { font-size: 0.8rem; margin-top: 0.8rem; }
 .who-list { display: inline-flex; gap: 0.4rem; align-items: baseline; }

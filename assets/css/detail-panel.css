@@ -39,6 +39,11 @@
 .info-kv-label { opacity: 0.7; font-size: 0.85rem; }
 .info-kv-value { font-size: 0.88rem; text-align: right; }
 .info-hash { font-size: 0.7rem; word-break: break-all; }
+/* Forty characters do not belong in a 13rem column beside a right-aligned label: the hash broke
+   across three lines while the label sat alone on the first. This row takes the whole grid and puts
+   its label above its value, which is the shape a long value wants. */
+.info-kv-wide { grid-column: 1 / -1; flex-direction: column; align-items: flex-start; gap: 0.15rem; }
+.info-kv-wide .info-kv-value { text-align: left; width: 100%; }
 
 
 /* ── the rich-text tags added in 1.21.0 ─────────────────────────────────────

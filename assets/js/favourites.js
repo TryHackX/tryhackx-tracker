@@ -197,6 +197,36 @@
         return row;
     }
 
+    /**
+     * Whether this reader may search inside file names.
+     *
+     * The same permission the search page asks (`index.files`), carried on the Info overlay because
+     * that partial is included on every page that shows one of these lists — and asked AGAIN by the
+     * endpoints, which are the ones that answer. This only decides whether to draw the control.
+     */
+    function canSearchFiles() {
+        var o = document.getElementById('info-overlay');
+        return !!o && o.dataset.canFiles === '1';
+    }
+
+    /**
+     * The "also search file names" checkbox, in the shape the search page uses it.
+     *
+     * On by default here, unlike the search page. There it is a LIKE over the whole catalogue and
+     * costs something; here it is bounded by the hashes already on the list — and somebody filtering
+     * their own favourites for a file they remember is the case that made this necessary.
+     */
+    function fileCheck() {
+        if (!canSearchFiles()) return null;
+        var lab = el('label', { className: 'search-check', title: t('js.fav.files_title') });
+        var cb = el('input', { type: 'checkbox' });
+        cb.checked = true;
+        lab.appendChild(cb);
+        lab.appendChild(el('span', { className: 'search-check-box' }));
+        lab.appendChild(el('span', { text: t('js.fav.files') }));
+        return { label: lab, box: cb };
+    }
+
     function renderPagerInto(box, page, pages, go) {
         box.textContent = '';
         if (pages <= 1) return;
@@ -224,6 +254,7 @@
         var searchEl = document.getElementById(cfg.search);
         var sortEl = document.getElementById(cfg.sort);
         var statusEl = cfg.status ? document.getElementById(cfg.status) : null;
+        var filesEl = cfg.files ? document.getElementById(cfg.files) : null;
         var page = 1, timer = 0;
 
         async function load(p) {
@@ -235,6 +266,9 @@
             if (searchEl && searchEl.value.trim()) qs += '&search=' + encodeURIComponent(searchEl.value.trim());
             if (sortEl && sortEl.value) qs += '&sort=' + encodeURIComponent(sortEl.value);
             if (statusEl && statusEl.value) qs += '&status=' + encodeURIComponent(statusEl.value);
+            // Sent either way: the endpoint's own default is "yes", and a box somebody UNTICKED has
+            // to be able to say so.
+            if (filesEl) qs += '&files=' + (filesEl.checked ? '1' : '0');
             var j = await get(qs);
             listEl.textContent = '';
             if (!j || !j.success) {
@@ -256,6 +290,7 @@
         if (searchEl) searchEl.addEventListener('input', reload);
         if (sortEl) sortEl.addEventListener('change', function () { load(1); });
         if (statusEl) statusEl.addEventListener('change', function () { load(1); });
+        if (filesEl) filesEl.addEventListener('change', function () { load(1); });
         // Un-starring on your own list should take the row away, not leave a dead star behind.
         if (cfg.reloadOnChange) document.addEventListener('favourites:changed', function () { load(page); });
         load(1);
@@ -308,7 +343,10 @@
                 sort.appendChild(el('option', { value: o[0], text: t('js.fav.' + o[1]) }));
             });
             var total = el('span', { className: 'profile-total' });
-            tools.appendChild(search); tools.appendChild(sort); tools.appendChild(total);
+            var files = fileCheck();
+            tools.appendChild(search); tools.appendChild(sort);
+            if (files) tools.appendChild(files.label);
+            tools.appendChild(total);
             wrap.appendChild(tools);
 
             // Adding by hash or magnet, for the reason the endpoint gives: in blacklist mode there
@@ -394,6 +432,7 @@
                 var qs = 'user_list_items&list=' + list.id + '&page=' + (p || 1) + '&per_page=25'
                        + '&sort=' + encodeURIComponent(sort.value);
                 if (search.value.trim()) qs += '&search=' + encodeURIComponent(search.value.trim());
+                if (files) qs += '&files=' + (files.box.checked ? '1' : '0');
                 var j = await get(qs);
                 rows.textContent = '';
                 if (!j || !j.success) {
@@ -424,6 +463,7 @@
             }
             search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 350); });
             sort.addEventListener('change', function () { load(1); });
+            if (files) files.box.addEventListener('change', function () { load(1); });
             load(1);
             return wrap;
         }
@@ -652,12 +692,30 @@
 
     /* ── the picker, opened from the Info panel ───────────────────────── */
 
+    /**
+     * "Put this in a list".
+     *
+     * ── one box, at the top ───────────────────────────────────────────────────────────────────────
+     * It had a list of checkboxes and, underneath them, a separate box for naming a new one. With a
+     * dozen lists the reader scrolled past all of them to reach it, and with two dozen they scrolled
+     * past it to reach the list they wanted. Now there is one box: it filters while they type, and
+     * the button beside it appears only when what they have typed is not a list they already have.
+     * The same keystrokes either way, and no decision to make before starting.
+     *
+     * The lists are fetched once per opening and filtered here. They are capped by
+     * lists_max_per_user, so this is a small array — a request per keystroke would be the expensive
+     * way to answer a question the browser already holds the answer to.
+     */
     function initListPicker() {
         var box = document.getElementById('lp-overlay');
         if (!box) return;
         var body = document.getElementById('lp-body');
         var msg = document.getElementById('lp-msg');
+        var pager = document.getElementById('lp-pager');
+        var go = document.getElementById('lp-new-go');
+        var nameIn = document.getElementById('lp-new-name');
         var hash = null, name = null;
+        var all = [], page = 1, PER = 8;
 
         function close() { box.hidden = true; document.removeEventListener('keydown', esc); }
         function esc(e) { if (e.key === 'Escape') close(); }
@@ -665,50 +723,83 @@
         var x = document.getElementById('lp-close');
         if (x) x.addEventListener('click', close);
 
-        async function draw() {
-            body.textContent = '';
-            body.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
-            var j = await get('user_lists&hash=' + encodeURIComponent(hash));
-            body.textContent = '';
-            if (!j || !j.success) { body.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
-            if (!j.lists.length) { body.appendChild(el('div', { className: 'pf-empty', text: t('js.lists.none_yet') })); return; }
-            j.lists.forEach(function (l) {
-                var label = el('label', { className: 'search-check lp-row' });
-                var cb = el('input', { type: 'checkbox' });
-                cb.checked = !!l.has;
-                label.appendChild(cb);
-                label.appendChild(el('span', { className: 'search-check-box' }));
-                label.appendChild(el('span', { className: 'lp-name', text: l.name }));
-                label.appendChild(el('span', { className: 'text-muted lp-count',
-                    text: t(l.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: l.items }) }));
-                cb.addEventListener('change', async function () {
-                    cb.disabled = true;
-                    var r = await post('user_list_items', { op: cb.checked ? 'add' : 'remove', list: l.id, magnet: hash });
-                    cb.disabled = false;
-                    if (!r || !r.success) {
-                        cb.checked = !cb.checked;
-                        msg.textContent = t(r && r.error === 'list_full' ? 'js.lists.add_failed_full'
-                            : r && r.error === 'hash_blocked' ? 'js.lists.add_failed_blocked' : 'js.fav.load_failed');
-                        return;
-                    }
-                    msg.textContent = cb.checked ? t('js.lists.added') : t('js.lists.removed');
-                    // The number beside the name is the number this click just changed. Leaving it
-                    // stale is how a page teaches somebody to reload it to find out what happened.
-                    if (typeof r.items === 'number') {
-                        l.items = r.items;
-                        var c = label.querySelector('.lp-count');
-                        if (c) c.textContent = t(r.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: r.items });
-                    }
-                });
-                body.appendChild(label);
+        function query() { return nameIn ? nameIn.value.trim() : ''; }
+
+        function rowFor(l) {
+            var label = el('label', { className: 'search-check lp-row' });
+            var cb = el('input', { type: 'checkbox' });
+            cb.checked = !!l.has;
+            label.appendChild(cb);
+            label.appendChild(el('span', { className: 'search-check-box' }));
+            label.appendChild(el('span', { className: 'lp-name', text: l.name }));
+            label.appendChild(el('span', { className: 'text-muted lp-count',
+                text: t(l.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: l.items }) }));
+            cb.addEventListener('change', async function () {
+                cb.disabled = true;
+                var r = await post('user_list_items', { op: cb.checked ? 'add' : 'remove', list: l.id, magnet: hash });
+                cb.disabled = false;
+                if (!r || !r.success) {
+                    cb.checked = !cb.checked;
+                    msg.textContent = t(r && r.error === 'list_full' ? 'js.lists.add_failed_full'
+                        : r && r.error === 'hash_blocked' ? 'js.lists.add_failed_blocked' : 'js.fav.load_failed');
+                    return;
+                }
+                l.has = cb.checked;
+                msg.textContent = cb.checked ? t('js.lists.added') : t('js.lists.removed');
+                // The number beside the name is the number this click just changed. Leaving it
+                // stale is how a page teaches somebody to reload it to find out what happened.
+                if (typeof r.items === 'number') {
+                    l.items = r.items;
+                    var c = label.querySelector('.lp-count');
+                    if (c) c.textContent = t(r.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: r.items });
+                }
             });
+            return label;
         }
 
-        var go = document.getElementById('lp-new-go');
-        var nameIn = document.getElementById('lp-new-name');
+        function render() {
+            var q = query().toLowerCase();
+            var rows = !q ? all : all.filter(function (l) { return l.name.toLowerCase().indexOf(q) !== -1; });
+            var pages = Math.max(1, Math.ceil(rows.length / PER));
+            if (page > pages) page = pages;
+
+            if (go) {
+                // Offered when nothing they have answers to what they typed. While the filter is
+                // still showing lists, the rows are the answer — ticking one is what this window is
+                // for, and a "make another" button beside them is a second way to do one thing.
+                go.hidden = !q || rows.length > 0;
+                go.textContent = t('js.lists.new_named', { name: query().length > 24 ? query().slice(0, 24) + '…' : query() });
+            }
+
+            body.textContent = '';
+            if (!all.length) {
+                body.appendChild(el('div', { className: 'pf-empty', text: t('js.lists.none_yet') }));
+            } else if (!rows.length) {
+                body.appendChild(el('div', { className: 'pf-empty', text: t('js.lists.no_match') }));
+            } else {
+                rows.slice((page - 1) * PER, page * PER).forEach(function (l) { body.appendChild(rowFor(l)); });
+            }
+            renderPagerInto(pager, page, pages, function (p) { page = p; render(); });
+        }
+
+        async function load() {
+            body.textContent = '';
+            if (pager) pager.textContent = '';
+            body.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
+            var j = await get('user_lists&hash=' + encodeURIComponent(hash));
+            if (!j || !j.success) {
+                body.textContent = '';
+                body.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') }));
+                return;
+            }
+            all = j.lists || [];
+            page = 1;
+            render();
+        }
+
         if (go && nameIn) {
             var mk = async function () {
-                var v = nameIn.value.trim();
+                var v = query();
                 if (!v) { nameIn.focus(); return; }
                 go.disabled = true;
                 var r = await post('user_lists', { op: 'create', name: v });
@@ -718,25 +809,34 @@
                     var added = await post('user_list_items', { op: 'add', list: r.id, magnet: hash });
                     if (added && !added.success && added.error === 'hash_unknown') {
                         msg.textContent = t('js.lists.add_failed_unknown');
+                    } else {
+                        msg.textContent = t('js.lists.added');
                     }
                     nameIn.value = '';
-                    msg.textContent = t('js.lists.added');
-                    await draw();
-                } else {
-                    msg.textContent = t(r && r.error === 'too_many_lists' ? 'js.lists.too_many' : 'js.fav.load_failed');
+                    go.disabled = false;
+                    await load();
+                    return;
                 }
+                msg.textContent = t(r && r.error === 'too_many_lists' ? 'js.lists.too_many' : 'js.fav.load_failed');
                 go.disabled = false;
             };
             go.addEventListener('click', mk);
-            nameIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); mk(); } });
+            nameIn.addEventListener('input', function () { page = 1; render(); });
+            nameIn.addEventListener('keydown', function (e) {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                if (!go.hidden) mk();
+            });
         }
 
         window.openListPicker = function (h, n) {
             hash = h; name = n || null;
             msg.textContent = '';
+            if (nameIn) nameIn.value = '';
             box.hidden = false;
             document.addEventListener('keydown', esc);
-            draw();
+            load();
+            if (nameIn) nameIn.focus();
         };
     }
 
@@ -760,7 +860,7 @@
         if (root.dataset.fav === '1') {
             listSection({
                 endpoint: 'user_favourites', user: user, list: 'pf-fav-list', pager: 'pf-fav-pager',
-                total: 'pf-fav-total', search: 'pf-fav-search', sort: 'pf-fav-sort',
+                total: 'pf-fav-total', search: 'pf-fav-search', sort: 'pf-fav-sort', files: 'pf-fav-files',
                 trackers: root.dataset.magnet === '1' ? trackers : null,
                 star: mine, reloadOnChange: mine,
             });
@@ -783,7 +883,7 @@
         var trackers = [host.dataset.announce, host.dataset.announceHttps].filter(Boolean);
         listSection({
             endpoint: 'user_favourites', list: 'af-list', pager: 'af-pager', total: 'af-total',
-            search: 'af-search', sort: 'af-sort',
+            search: 'af-search', sort: 'af-sort', files: 'af-files',
             trackers: host.dataset.magnet === '1' ? trackers : null,
             star: true, reloadOnChange: true,
             emptyText: host.dataset.emptyText || '',
@@ -873,7 +973,7 @@
     function initTabs() {
         var bar = document.getElementById('acc-tabs');
         if (!bar) return;
-        var panes = ['overview', 'favourites', 'uploads', 'lists', 'messages', 'people'];
+        var panes = ['overview', 'favourites', 'uploads', 'lists', 'messages', 'people', 'members'];
         function show(name) {
             // `#messages:somebody` opens the inbox AT that conversation — the part before the colon
             // is the pane, the rest belongs to people.js. A tab bar that did not know that fell
@@ -893,6 +993,11 @@
             });
             // An inbox that is being shown again is an inbox somebody came back to. assets/js/people.js
             // owns it; this only says "you are on screen now".
+            // The directory is a whole page of strangers; it is fetched the first time somebody
+            // asks to see it, not on every visit to the account page.
+            if (name === 'members' && window.Directory && typeof window.Directory.refresh === 'function') {
+                window.Directory.refresh();
+            }
             if (name === 'messages' && window.PM && typeof window.PM.refresh === 'function') {
                 var who = String(location.hash || '').split(':')[1];
                 window.PM.refresh(who ? decodeURIComponent(who) : null);

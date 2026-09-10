@@ -107,7 +107,13 @@
             var j = await get('user_messages&with=' + encodeURIComponent(name));
             if (openWith !== name) return;
             pane.textContent = '';
-            if (!j || !j.success) { pane.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
+            if (!j || !j.success) {
+                // "There is no such account" is an answer, not a failure to load one — and it is the
+                // answer somebody typing a name into the box above will get wrong first.
+                pane.appendChild(el('div', { className: 'pf-empty',
+                    text: t(j && j.error === 'not_found' ? 'js.pm.why_not_found' : 'js.fav.load_failed') }));
+                return;
+            }
             badge(j.unread);
 
             var head = el('div', { className: 'pm-head' });
@@ -143,7 +149,7 @@
             pane.appendChild(body);
 
             if (j.can_write) {
-                pane.appendChild(composer(name, function () { openThread(name); }));
+                mountComposer(pane, name, function () { openThread(name); });
             } else {
                 pane.appendChild(el('div', { className: 'pm-closed', text: t('js.pm.why_' + (j.reason || 'nobody')) }));
             }
@@ -156,6 +162,42 @@
             btn.disabled = true;
             var r = await post('user_messages', { op: 'report', message: id, reason: reason });
             if (r && r.success) { btn.textContent = t('js.pm.reported'); } else { btn.disabled = false; }
+        }
+
+        /**
+         * Writing to somebody who is not in the inbox yet.
+         *
+         * Every route into a conversation began somewhere else — a profile, the directory, a
+         * notification — so an inbox with nobody in it was a page with nothing to do on it. The name
+         * box is hidden until asked for, and the datalist beside it is the reader's friends, because
+         * that is who they usually mean.
+         */
+        var newBtn = document.getElementById('pm-new');
+        var newRow = document.getElementById('pm-new-row');
+        var newWho = document.getElementById('pm-new-who');
+        var newGo = document.getElementById('pm-new-go');
+        if (newBtn && newRow && newWho && newGo) {
+            var filled = false;
+            newBtn.addEventListener('click', async function () {
+                newRow.hidden = !newRow.hidden;
+                if (newRow.hidden) return;
+                newWho.focus();
+                if (filled) return;
+                filled = true;
+                var j = await get('user_people&view=friends');
+                var dl = document.getElementById('pm-friends');
+                if (!dl || !j || !j.success) return;
+                (j.rows || []).forEach(function (p) { dl.appendChild(el('option', { value: p.username })); });
+            });
+            var open = function () {
+                var who = newWho.value.trim();
+                if (!who) { newWho.focus(); return; }
+                newWho.value = '';
+                newRow.hidden = true;
+                openThread(who);
+            };
+            newGo.addEventListener('click', open);
+            newWho.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); open(); } });
         }
 
         if (searchEl) searchEl.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(loadInbox, 300); });
@@ -179,17 +221,54 @@
         });
     }
 
-    /** The box somebody types into. Used in the inbox and in the "write to them" overlay. */
-    function composer(name, onSent) {
+    /**
+     * The box somebody types into — the editor the rest of the site writes in.
+     *
+     * It was a bare textarea while descriptions had tabs, a formatting rail, a live preview and a
+     * counter; a message written in the same markup showed none of it, so the syntax was something
+     * you had to already know. The markup is a <template> on the account page (so its labels come
+     * from the same dictionary as the rest of that page) and assets/js/app.js mounts the behaviour.
+     *
+     * It appends ITSELF, because the editor finds its parts by id and they have to be in the
+     * document before it can. Falls back to a plain box where the template is absent.
+     */
+    function mountComposer(parent, name, onSent) {
         var wrap = el('div', { className: 'pm-composer' });
-        var ta = el('textarea', { className: 'pm-input', rows: 3, maxlength: 20000, placeholder: t('js.pm.write_ph') });
+        var tpl = document.getElementById('pm-editor-tpl');
+        var rich = !!(tpl && tpl.content);
+        var ta;
+        if (rich) {
+            wrap.appendChild(tpl.content.cloneNode(true));
+            ta = wrap.querySelector('#pm-body');
+        }
+        if (!ta) {
+            rich = false;
+            ta = el('textarea', { className: 'pm-input', rows: 3, maxlength: 20000, placeholder: t('js.pm.write_ph') });
+            wrap.appendChild(ta);
+        }
         var send = el('button', { type: 'button', className: 'btn btn-small', text: t('js.pm.send') });
         var msg = el('span', { className: 'text-muted pm-msg-note' });
+        var row = el('div', { className: 'pm-composer-row' });
+        row.appendChild(send); row.appendChild(msg);
+        wrap.appendChild(row);
+        parent.appendChild(wrap);
+        if (rich && window.RichText && typeof window.RichText.mount === 'function') {
+            // The preview endpoint is told what this is: a message is gated on being allowed to send
+            // one, not on being allowed to upload a torrent.
+            window.RichText.mount('pm-body', { previewFor: 'message' });
+        }
+
         send.addEventListener('click', async function () {
             var body = ta.value.trim();
             if (!body) { ta.focus(); return; }
+            var fmtEl = rich ? document.getElementById('pm-body-format') : null;
             send.disabled = true;
-            var r = await post('user_messages', { op: 'send', to: name, body: body, format: 'bbcode' });
+            var r = await post('user_messages', {
+                op: 'send', to: name, body: body,
+                // Whichever tab they wrote in. The server validates it either way — richtext.php is
+                // the one place that decides what a message may contain.
+                format: fmtEl && fmtEl.value ? fmtEl.value : 'bbcode',
+            });
             send.disabled = false;
             if (!r || !r.success) {
                 msg.textContent = t('js.pm.why_' + ((r && r.error) || 'failed'));
@@ -199,10 +278,6 @@
             msg.textContent = '';
             if (typeof onSent === 'function') onSent();
         });
-        wrap.appendChild(ta);
-        var row = el('div', { className: 'pm-composer-row' });
-        row.appendChild(send); row.appendChild(msg);
-        wrap.appendChild(row);
         return wrap;
     }
 
@@ -217,6 +292,10 @@
         var view = 'friends', timer = 0;
 
         function counts(c) {
+            // The tab bar above the panes carries the same number: somebody waiting for an answer is
+            // the one thing on the account page that goes stale while it is being looked at.
+            var head = document.getElementById('pe-incoming');
+            if (head) { head.textContent = c.incoming ? String(c.incoming) : ''; head.hidden = !c.incoming; }
             if (!tabs) return;
             tabs.querySelectorAll('.rt-tab').forEach(function (b) {
                 var n = c[b.dataset.view];
@@ -236,10 +315,10 @@
             if (!j || !j.success) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
             counts(j.counts || {});
             if (!j.rows.length) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.people.empty_' + view) })); return; }
-            j.rows.forEach(function (p) { listEl.appendChild(personRow(p, view, load)); });
+            j.rows.forEach(function (p) { listEl.appendChild(personRow(p, view, load, !!j.may_message)); });
         }
 
-        function personRow(p, kind, reload) {
+        function personRow(p, kind, reload, mayMessage) {
             var row = el('div', { className: 'pf-row pe-row' });
             var main = el('div', { className: 'pf-main' });
             main.appendChild(el('a', { className: 'pf-name', href: BASE + '?action=u&name=' + encodeURIComponent(p.username), text: p.username }));
@@ -259,6 +338,20 @@
                 });
                 return b;
             };
+            // Writing to a friend from the row that says they are one. Not on the blocks tab: the
+            // point of that list is the people this reader is not talking to.
+            if (mayMessage && kind !== 'blocks') {
+                var w = el('a', { className: 'btn btn-secondary btn-small',
+                                  href: '#messages:' + encodeURIComponent(p.username),
+                                  text: t('js.pm.message') });
+                // The tab bar reacts to the hash CHANGING. Clicking a link to the hash the page is
+                // already on changes nothing, so that one case is asked for directly.
+                w.addEventListener('click', function () {
+                    if (location.hash !== w.getAttribute('href')) return;
+                    if (window.PM && typeof window.PM.refresh === 'function') window.PM.refresh(p.username);
+                });
+                acts.appendChild(w);
+            }
             if (kind === 'incoming') { acts.appendChild(act(t('js.people.accept'), 'accept')); acts.appendChild(act(t('js.people.decline'), 'decline')); }
             if (kind === 'pending')  acts.appendChild(act(t('js.people.cancel'), 'unfollow'));
             if (kind === 'friends')  acts.appendChild(act(t('js.people.unfriend'), 'unfollow'));
@@ -345,7 +438,15 @@
             }
         }
         if (searchEl) searchEl.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 300); });
-        load(1);
+        // Inside a tab, this is a page most readers of the account page never open, so it is not
+        // fetched until it is looked at. The tab bar in assets/js/favourites.js says when.
+        var pane = root.closest ? root.closest('.acc-pane') : null;
+        var loaded = false;
+        window.Directory = { refresh: function () { if (loaded) return; loaded = true; load(1); } };
+        // …unless it is already open. The tab bar picks the pane from the address on DOMContentLoaded
+        // and assets/js/favourites.js gets that event first, so an arrival straight at #members asked
+        // for a refresh before this file had anything to answer with.
+        if (!pane || !pane.hidden) { loaded = true; load(1); }
     }
 
     /* ─────────────────────────── a public profile ─────────────────────────── */

@@ -13,6 +13,9 @@ $accCooldownDays = userEmailChangeCooldownDays($cfg);
 $accFav = favContext($db, $cfg, $meUser);
 $accLists = listsContext($db, $cfg, $meUser);
 $accPeople = peopleContext($db, $cfg, $meUser);
+// Whether this reader may search inside file names — the same permission the search page asks, and
+// the endpoints ask it again themselves.
+$mayFileSearch = userCan($db, $cfg, 'index.files');
 // The uploads tab is hidden ENTIRELY, not shown empty, where a submission cannot happen — a tab that
 // can only ever be empty teaches people the feature is broken rather than absent.
 $accShowUploads = $accFav['uploads'] && uploadsPublicEnabled($cfg);
@@ -67,7 +70,13 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
         <span class="pm-unread-badge" id="pm-unread"<?= $accPeople['unread'] ? '' : ' hidden' ?>><?= (int)$accPeople['unread'] ?></span></button>
     <?php endif; ?>
     <?php if ($accPeople['may_friend']): ?>
-    <button type="button" class="rt-tab" data-pane="people"><?= _h('account.tab_people') ?></button>
+    <button type="button" class="rt-tab" data-pane="people"><?= _h('account.tab_people') ?>
+        <?php /* Somebody waiting for an answer is the one thing on this page that is about to go
+                 stale, so it is the one that carries a number. */ ?>
+        <span class="pm-unread-badge" id="pe-incoming" hidden></span></button>
+    <?php endif; ?>
+    <?php if ($accPeople['may_directory']): ?>
+    <button type="button" class="rt-tab" data-pane="members"><?= _h('people.dir_h1') ?></button>
     <?php endif; ?>
 </div>
 <?php endif; ?>
@@ -244,6 +253,9 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
                 <option value="size:desc"><?= _h('profile.sort_size') ?></option>
                 <option value="seeders:desc"><?= _h('profile.sort_seeders') ?></option>
             </select>
+            <?php if ($mayFileSearch): ?>
+            <label class="search-check" title="<?= _h('search.files_title') ?>"><input type="checkbox" id="af-files" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.files') ?></label>
+            <?php endif; ?>
             <span class="profile-total" id="af-total"></span>
         </div>
         <div class="profile-list" id="af-list"></div>
@@ -366,12 +378,67 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
         <div class="pm-left">
             <div class="profile-toolbar">
                 <input type="text" class="profile-search" id="pm-search" maxlength="60" placeholder="<?= _h('pm.search_ph') ?>" autocomplete="off">
+                <?php /* An inbox with nobody in it needs a way in. The name box below only appears
+                         when this is pressed — a page that opens with an empty form on it is a page
+                         telling somebody to fill it in. */ ?>
+                <button type="button" class="btn btn-small" id="pm-new"><?= _h('pm.new') ?></button>
+            </div>
+            <div class="pm-new-row" id="pm-new-row" hidden>
+                <input type="text" class="profile-search" id="pm-new-who" maxlength="32" placeholder="<?= _h('pm.new_ph') ?>" autocomplete="off" list="pm-friends">
+                <datalist id="pm-friends"></datalist>
+                <button type="button" class="btn btn-small" id="pm-new-go"><?= _h('pm.new_go') ?></button>
             </div>
             <div class="pm-list" id="pm-threads"></div>
         </div>
         <div class="pm-right" id="pm-thread" hidden></div>
     </div>
     <p class="text-muted pm-note"><?= __('pm.note', ['n' => (int)$accPeople['max_per_day']]) ?></p>
+
+    <?php /* THE COMPOSER, cloned into a conversation when one opens.
+             It is the editor the description form uses — tabs, the formatting rail, the live
+             preview and the counter — because a message is the same kind of text and the site
+             already knows how to write one. Rendered here rather than built in JavaScript so its
+             labels come from the same dictionary as everything else on the page. */ ?>
+    <template id="pm-editor-tpl">
+        <div class="rt-editor pm-editor">
+            <div class="rt-tabs">
+                <button type="button" class="rt-tab active" data-rt="write"><?= _h('whitelist.write') ?></button>
+                <button type="button" class="rt-tab" data-rt="preview"><?= _h('whitelist.preview') ?></button>
+                <span class="rt-counter" id="pm-body-count"></span>
+                <select id="pm-body-format" class="rt-format" title="<?= _h('whitelist.format_title') ?>">
+                    <option value="bbcode">BBCode</option>
+                    <option value="markdown">Markdown</option>
+                </select>
+            </div>
+            <div class="rt-tools" id="pm-body-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
+                <span class="rt-tool-group">
+                    <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><strong>B</strong></button>
+                    <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><em>I</em></button>
+                    <button type="button" data-md="underline" title="<?= _h('rt.underline') ?>"><u>U</u></button>
+                    <button type="button" data-md="strike" title="<?= _h('rt.strike') ?>"><s>S</s></button>
+                </span>
+                <span class="rt-tool-group">
+                    <button type="button" data-md="color" title="<?= _h('rt.color') ?>">&#127912;</button>
+                    <button type="button" data-md="size" title="<?= _h('rt.size') ?>">A&#8593;</button>
+                    <button type="button" data-md="highlight" title="<?= _h('rt.highlight') ?>">&#9635;</button>
+                </span>
+                <span class="rt-tool-group">
+                    <button type="button" data-md="link" title="<?= _h('rt.link') ?>">&#128279;</button>
+                    <button type="button" data-md="list" title="<?= _h('rt.list') ?>">&#8226;&nbsp;<?= _h('rt.list_word') ?></button>
+                    <button type="button" data-md="olist" title="<?= _h('rt.olist') ?>">1.&nbsp;<?= _h('rt.list_word') ?></button>
+                </span>
+                <span class="rt-tool-group">
+                    <button type="button" data-md="quote" title="<?= _h('rt.quote') ?>">&rdquo;</button>
+                    <button type="button" data-md="code" title="<?= _h('rt.code') ?>">&lt;/&gt;</button>
+                    <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>">&#128065;</button>
+                </span>
+            </div>
+            <textarea id="pm-body" class="pm-input" rows="4" maxlength="<?= (int)$accPeople['max_chars'] ?>" placeholder="<?= _h('js.pm.write_ph') ?>"></textarea>
+            <div class="rt-preview rt-body" id="pm-body-preview" hidden></div>
+        </div>
+        <div class="form-hint" id="pm-body-syntax"></div>
+        <div class="form-hint" id="pm-body-help"></div>
+    </template>
 </div>
 <?php endif; ?>
 
@@ -391,6 +458,23 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
             <input type="text" class="profile-search" id="pe-search" maxlength="60" placeholder="<?= _h('people.search_ph') ?>" autocomplete="off">
         </div>
         <div class="profile-list" id="pe-list"></div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($accPeople['may_directory']): ?>
+<?php /* The member directory, as a tab rather than a page of its own: it is one more list of people
+         beside the reader's own, and ?action=members now lands here. */ ?>
+<div class="acc-pane" id="acc-pane-members" hidden>
+    <h2 class="section-heading-spaced"><?= _h('people.dir_h1') ?></h2>
+    <div id="member-directory" class="profile-section">
+        <p class="text-muted lists-intro"><?= __('people.dir_intro') ?></p>
+        <div class="profile-toolbar">
+            <input type="text" class="profile-search" id="dir-search" maxlength="60" placeholder="<?= _h('people.dir_search_ph') ?>" autocomplete="off">
+            <span class="profile-total" id="dir-total"></span>
+        </div>
+        <div class="profile-list" id="dir-list"></div>
+        <div class="trans-pagination" id="dir-pager"></div>
     </div>
 </div>
 <?php endif; ?>

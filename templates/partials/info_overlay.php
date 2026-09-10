@@ -25,6 +25,10 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
      lives at the bottom of it; the "N files" chip beside a search result opens the tree on its own. -->
 <div class="files-overlay" id="info-overlay" hidden
      data-files-mode="<?= sanitize(indexFilesMode($cfg)) ?>"
+     <?php /* The same permission the search page asks before offering "search inside file names".
+              The lists on these pages carry the same checkbox and it is gated the same way — and
+              gated AGAIN in the endpoints, which are the ones that answer. */ ?>
+     data-can-files="<?= userCan($db, $cfg, 'index.files') ? '1' : '0' ?>"
      data-fav="<?= !empty($ioFav['may_use']) ? '1' : '0' ?>"
      data-fav-who="<?= $ioWho ? '1' : '0' ?>"
      data-lists="<?= !empty($ioLists['may_use']) ? '1' : '0' ?>">
@@ -33,7 +37,7 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
             <h3 id="info-title"><?= _h('search.details') ?></h3>
             <span class="info-acts" id="info-acts"></span>
 <?php if ($ioShare): ?>
-            <button type="button" class="search-share info-share" id="info-share"
+            <button type="button" class="search-share share-btn info-share" id="info-share"
                     title="<?= _h('search.share_one_title') ?>"><?= _h('search.share') ?></button>
 <?php endif; ?>
             <button type="button" class="files-close" id="info-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
@@ -67,11 +71,16 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
             <button type="button" class="files-close" id="lp-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
         </div>
         <div class="files-body">
-            <div id="lp-body"></div>
-            <div class="lp-new">
-                <input type="text" class="profile-search" id="lp-new-name" maxlength="80" placeholder="<?= _h('lists.new_ph') ?>" autocomplete="off">
-                <button type="button" class="btn btn-small" id="lp-new-go"><?= _h('lists.new') ?></button>
+            <?php /* ONE box, at the top, doing both jobs. It filters the lists while somebody types,
+                     and when what they have typed is not the name of a list they already have, the
+                     button beside it offers to make one — which is the same keystrokes either way,
+                     and no decision to make before starting to type. */ ?>
+            <div class="lp-find">
+                <input type="text" class="profile-search" id="lp-new-name" maxlength="80" placeholder="<?= _h('lists.find_or_new_ph') ?>" autocomplete="off">
+                <button type="button" class="btn btn-small" id="lp-new-go" hidden><?= _h('lists.new') ?></button>
             </div>
+            <div id="lp-body"></div>
+            <div class="trans-pagination lp-pager" id="lp-pager"></div>
             <div class="lp-msg text-muted" id="lp-msg"></div>
         </div>
     </div>

@@ -92,7 +92,7 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
         </select>
         <span class="search-total text-muted" id="search-total"></span>
 <?php if ($canShare): ?>
-        <button type="button" class="search-share" id="search-share" hidden
+        <button type="button" class="search-share share-btn" id="search-share" hidden
                 title="<?= _h('search.share_view_title') ?>"><?= _h('search.share') ?></button>
 <?php endif; ?>
         <p class="search-hint text-muted" id="search-hint" hidden></p>

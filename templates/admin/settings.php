@@ -2244,6 +2244,23 @@
                         <small class="settings-hint"><?= _h('settings.index_protect_hint') ?></small>
                     </div>
                     <div class="col-md-3">
+                        <?php /* What happens to a hash somebody KEPT. Beside the two lifetimes it
+                                 modifies, because it is a rule about those and reads as nonsense
+                                 anywhere else. */ ?>
+                        <label class="form-label"><?= _h('settings.keep_saved') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="index_keep_saved">
+                            <option value="off" <?= ($cfg['index_keep_saved'] ?? 'off') === 'off' ? 'selected' : '' ?>><?= _h('settings.keep_saved_off') ?></option>
+                            <option value="extend" <?= ($cfg['index_keep_saved'] ?? 'off') === 'extend' ? 'selected' : '' ?>><?= _h('settings.keep_saved_extend') ?></option>
+                            <option value="forever" <?= ($cfg['index_keep_saved'] ?? 'off') === 'forever' ? 'selected' : '' ?>><?= _h('settings.keep_saved_forever') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.keep_saved_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.keep_saved_days') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_keep_saved_days" value="<?= sanitize($cfg['index_keep_saved_days'] ?? '90') ?>" min="1" max="3650">
+                        <small class="settings-hint"><?= _h('settings.keep_saved_days_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.index_meta_budget') ?></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="index_meta_daily_budget" value="<?= sanitize($cfg['index_meta_daily_budget'] ?? '500') ?>" min="0" max="1000000">
                         <small class="settings-hint"><?= __('settings.index_meta_budget_hint') ?></small>

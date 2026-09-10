@@ -269,6 +269,91 @@ for ($i = 1; $i <= 11; $i++) $db->exec("INSERT INTO index_hashes (info_hash, las
 $prB = indexPrune($db, $cfgCap, null, true);   // 12 rows, cap 10 → 2 pruned, but NEVER the done row
 check('prune backfills protection for freshly-done rows', $prB['protected_backfill'] === 1, json_encode($prB));
 check('freshly-done row survives the cap prune', (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE info_hash='" . h(950) . "' AND protected_until IS NOT NULL")->fetchColumn() === 1);
+/* ── 8b. "keep what people kept" (index_keep_saved) ─────────────────────────────────────────────
+ *
+ * The janitor's own rules decide when a hash dies; this setting says that a hash SOMEBODY HAS KEPT
+ * — starred, or on one of their lists — is not an ordinary hash. Three modes, and each is checked
+ * against a row that would otherwise be pruned, because a setting that spares a row nothing was
+ * going to touch proves nothing.
+ */
+$db->exec("TRUNCATE TABLE index_hashes"); $db->exec("TRUNCATE TABLE index_files"); @unlink(indexStateFile());
+foreach (['user_favourites', 'user_lists', 'user_list_items'] as $t) $db->exec("DELETE FROM `$t` WHERE 1");
+$KS = ['star' => h(1200), 'listed' => h(1201), 'plain' => h(1202), 'grace' => h(1203)];
+$mkKept = static function (PDO $db, array $KS): void {
+    $db->exec("TRUNCATE TABLE index_hashes");
+    // done + protection expired 2 days ago: the ordinary rules drop all three of these
+    foreach (['star', 'listed', 'plain'] as $k) {
+        $db->exec("INSERT INTO index_hashes (info_hash, last_seen, grace_until, protected_until, meta_status)
+                   VALUES ('" . $KS[$k] . "', NOW(), NOW() - INTERVAL 9 DAY, NOW() - INTERVAL 2 DAY, 'done')");
+    }
+    // and one that never got its metadata, past its grace: the other half of the WHERE
+    $db->exec("INSERT INTO index_hashes (info_hash, last_seen, grace_until, meta_status)
+               VALUES ('" . $KS['grace'] . "', NOW(), NOW() - INTERVAL 2 DAY, 'none')");
+};
+$db->exec("INSERT INTO user_favourites (user_id, info_hash) VALUES (4242, '" . $KS['star'] . "')");
+$db->exec("INSERT INTO user_favourites (user_id, info_hash) VALUES (4242, '" . $KS['grace'] . "')");
+$db->exec("INSERT INTO user_lists (id, user_id, name, slug) VALUES (9911, 4242, 'keep', 'keep')");
+$db->exec("INSERT INTO user_list_items (list_id, info_hash) VALUES (9911, '" . $KS['listed'] . "')");
+$alive = static function (PDO $db, string $hash): bool {
+    return (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE info_hash='$hash'")->fetchColumn() === 1;
+};
+
+check('keep_saved: the helper reads the three modes and nothing else',
+    indexKeepSavedMode(['index_keep_saved' => 'forever']) === 'forever'
+    && indexKeepSavedMode(['index_keep_saved' => 'extend']) === 'extend'
+    && indexKeepSavedMode(['index_keep_saved' => 'nonsense']) === 'off'
+    && indexKeepSavedMode([]) === 'off');
+check('keep_saved: off writes no clause at all', indexKeepSavedClause(['index_keep_saved' => 'off'], 'protected_until') === '');
+check('keep_saved: the days are clamped to [1, 3650]',
+    indexKeepSavedDays(['index_keep_saved_days' => '0']) === 90
+    && indexKeepSavedDays(['index_keep_saved_days' => '99999']) === 3650
+    && indexKeepSavedDays(['index_keep_saved_days' => '7']) === 7);
+
+// off — the setting changes nothing, which is what an install that never touched it must see
+$cfgOff = $cfg; $cfgOff['index_keep_saved'] = 'off';
+$mkKept($db, $KS);
+indexPrune($db, $cfgOff, null, true);
+check('keep_saved off: a starred hash is pruned like any other', !$alive($db, $KS['star']));
+check('keep_saved off: a listed hash is pruned like any other', !$alive($db, $KS['listed']));
+
+// forever — kept means kept
+$cfgFor = $cfg; $cfgFor['index_keep_saved'] = 'forever';
+$mkKept($db, $KS);
+$prK = indexPrune($db, $cfgFor, null, true);
+check('keep_saved forever: the starred hash survives', $alive($db, $KS['star']), json_encode($prK));
+check('keep_saved forever: a hash on a list survives too', $alive($db, $KS['listed']));
+check('keep_saved forever: a hash nobody kept still goes', !$alive($db, $KS['plain']));
+check('keep_saved forever: the grace branch is spared as well', $alive($db, $KS['grace']));
+
+// extend — later, by exactly that many days, measured from the same column
+$cfgExt = $cfg; $cfgExt['index_keep_saved'] = 'extend'; $cfgExt['index_keep_saved_days'] = '5';
+$mkKept($db, $KS);
+indexPrune($db, $cfgExt, null, true);
+check('keep_saved extend: 2 days past protection, 5 days of grace → still there', $alive($db, $KS['star']));
+check('keep_saved extend: a hash nobody kept is unaffected', !$alive($db, $KS['plain']));
+$cfgExt1 = $cfgExt; $cfgExt1['index_keep_saved_days'] = '1';
+$mkKept($db, $KS);
+indexPrune($db, $cfgExt1, null, true);
+check('keep_saved extend: 2 days past protection, 1 day of grace → gone', !$alive($db, $KS['star']));
+
+// the cap evicts oldest-first, which is exactly where kept rows live
+$db->exec("TRUNCATE TABLE index_hashes"); @unlink(indexStateFile());
+$db->exec("INSERT INTO index_hashes (info_hash, last_seen, grace_until, meta_status)
+           VALUES ('" . $KS['star'] . "', NOW() - INTERVAL 40 HOUR, NOW() + INTERVAL 2 DAY, 'none')");
+for ($i = 1; $i <= 12; $i++) {
+    $db->exec("INSERT INTO index_hashes (info_hash, last_seen, grace_until, meta_status)
+               VALUES ('" . h(1300 + $i) . "', NOW() - INTERVAL " . (13 - $i) . " HOUR, NOW() + INTERVAL 2 DAY, 'none')");
+}
+$cfgCapKeep = $cfgFor; $cfgCapKeep['index_max_rows'] = '10';
+$prCap = indexPrune($db, $cfgCapKeep, null, true);
+check('keep_saved forever: the cap does not evict a starred hash, oldest though it is',
+    $alive($db, $KS['star']) && (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn() === 10, json_encode($prCap));
+
+foreach (['user_favourites', 'user_lists', 'user_list_items'] as $t) $db->exec("DELETE FROM `$t` WHERE 1");
+// The table goes, the state file STAYS: the throttle check below is asking whether the prune that
+// just ran is remembered, and deleting the memory would make it pass for the wrong reason.
+$db->exec("TRUNCATE TABLE index_hashes");
+
 // prune lock: while held, a concurrent prune is refused (returns null even with force)
 $plh = fopen(indexPruneLockFile(), 'c'); flock($plh, LOCK_EX);
 check('prune lock: concurrent prune returns null', indexPrune($db, $cfgCap, null, true) === null);

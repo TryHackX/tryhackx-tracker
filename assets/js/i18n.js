@@ -29,7 +29,11 @@
     function t(key, params) {
         var s = Object.prototype.hasOwnProperty.call(strings, key) ? strings[key] : key;
         if (params) {
-            Object.keys(params).forEach(function (k) {
+            // Longest name first. ":page" is a prefix of ":pages", so replacing in the order the
+            // caller happened to write them turned "Page :page of :pages" into "Page 1 of 1s" — the
+            // pager on every list said "of 1s" whatever the count was. PHP's strtr() has always
+            // matched longest-first; this is the same rule, spelled out.
+            Object.keys(params).sort(function (a, b) { return b.length - a.length; }).forEach(function (k) {
                 s = s.split(':' + k).join(String(params[k]));
             });
         }

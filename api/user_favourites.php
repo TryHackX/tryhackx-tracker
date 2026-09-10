@@ -88,6 +88,11 @@ $page = max(1, (int)($_GET['page'] ?? 1));
 $perPage = max(1, min(100, (int)($_GET['per_page'] ?? 25)));
 $search = trim((string)($_GET['search'] ?? ''));
 $sort = (string)($_GET['sort'] ?? 'added:desc');
+// Whether the file names are searched too. Default yes — this is bounded by one person's own
+// hashes, and the reader who typed a file name is the reason it exists — but the toolbar carries the
+// same checkbox the search page carries, and an unticked box has to be able to say so. Gated on
+// index.files either way: searching inside a file list you may not open is still reading it.
+$wantFiles = (string)($_GET['files'] ?? '1') !== '0' && userCan($db, $cfg, 'index.files');
 
 $hashes = favHashesOf($db, (int)$owner['id'], favMaxPerUser($cfg));
 $rows = $hashes ? favRowsFor($db, $hashes) : [];
@@ -103,7 +108,7 @@ if ($search !== '') {
     // …and over the FILE NAMES of those same hashes. Somebody looking for a track or an episode
     // inside a pack knows the file, not the release name — the search page has offered that for a
     // while, and a list that could not do it sent them back there to look the hash up.
-    $inFiles = favHashesMatchingFiles($db, $hashes, $search);
+    $inFiles = $wantFiles ? favHashesMatchingFiles($db, $hashes, $search) : [];
     $rows = array_values(array_filter($rows, static function (array $r) use ($needle, $inFiles) {
         return ($r['name'] !== null && str_contains(mb_strtolower((string)$r['name']), $needle))
             || str_starts_with($r['info_hash'], strtolower($needle))

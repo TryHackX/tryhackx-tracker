@@ -57,6 +57,7 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
 // section flag — and then each list's own is_public, which the endpoint applies.
 $profLists = listsContext($db, $cfg, $viewer);
 $profPeople = peopleContext($db, $cfg, $viewer);
+$mayFileSearch = userCan($db, $cfg, 'index.files');   // see the account page: the same gate, asked once
 // A block with `hide_profile` closes the page for that one reader, and closes it the way every
 // other "no" closes it: the same not-found page a name nobody has renders. Telling them "you have
 // been blocked" here would answer a question they did not ask and confirm the account exists.
@@ -99,7 +100,7 @@ $showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profL
           data-block="<?= ($profPeople['may_message'] || $profPeople['may_friend']) ? '1' : '0' ?>"></span>
     <?php endif; ?>
     <?php if (($cfg['search_share_enabled'] ?? '1') === '1'): ?>
-    <button type="button" class="search-share profile-share js-profile-share" id="profile-share"
+    <button type="button" class="btn btn-secondary btn-small profile-share js-profile-share" id="profile-share"
             data-user="<?= sanitize($profile['username']) ?>"
             title="<?= _h('profile.share_title') ?>"><?= _h('search.share') ?></button>
     <?php endif; ?>
@@ -129,6 +130,9 @@ $showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profL
                 <option value="size:desc"><?= _h('profile.sort_size') ?></option>
                 <option value="seeders:desc"><?= _h('profile.sort_seeders') ?></option>
             </select>
+            <?php if ($mayFileSearch): ?>
+            <label class="search-check" title="<?= _h('search.files_title') ?>"><input type="checkbox" id="pf-fav-files" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.files') ?></label>
+            <?php endif; ?>
             <span class="profile-total" id="pf-fav-total"></span>
         </div>
         <div class="profile-list" id="pf-fav-list"></div>

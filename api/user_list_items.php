@@ -121,6 +121,11 @@ $page    = max(1, (int)($_GET['page'] ?? 1));
 $perPage = max(1, min(100, (int)($_GET['per_page'] ?? 25)));
 $search  = trim((string)($_GET['search'] ?? ''));
 $sort    = (string)($_GET['sort'] ?? 'added:desc');
+// Whether the file names are searched too. Default yes — this is bounded by one person's own
+// hashes, and the reader who typed a file name is the reason it exists — but the toolbar carries the
+// same checkbox the search page carries, and an unticked box has to be able to say so. Gated on
+// index.files either way: searching inside a file list you may not open is still reading it.
+$wantFiles = (string)($_GET['files'] ?? '1') !== '0' && userCan($db, $cfg, 'index.files');
 
 // The rows of ONE list, bounded by the same ceiling that bounds writing to it — so the page is cut
 // from an array that can never be bigger than lists_max_items, and the search runs over the stored
@@ -139,7 +144,7 @@ $items = listItemsWithMeta($db, $rows);
 if ($search !== '') {
     $needle = mb_strtolower($search);
     // The file names too, bounded by the hashes this list already holds — see favHashesMatchingFiles().
-    $inFiles = favHashesMatchingFiles($db, array_column($items, 'info_hash'), $search);
+    $inFiles = $wantFiles ? favHashesMatchingFiles($db, array_column($items, 'info_hash'), $search) : [];
     $items = array_values(array_filter($items, static function ($i) use ($needle, $inFiles) {
         return str_contains(mb_strtolower((string)($i['name'] ?? '')), $needle)
             || str_contains((string)$i['info_hash'], $needle)

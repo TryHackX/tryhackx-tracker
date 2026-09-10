@@ -2115,6 +2115,18 @@ const getJson = async (endpoint) => {
                 b.textContent = n.body;
                 item.appendChild(b);
             }
+            // Where this notification happened. A friend request that says somebody is waiting and
+            // then leaves the reader to find the tab themselves is a notification that has told
+            // them half of it. The hash is enough: assets/js/favourites.js listens for it.
+            const NOTIF_TAB = { friend_request: 'people', friend_accepted: 'people', pm: 'messages' };
+            const tab = NOTIF_TAB[n.type];
+            if (tab) {
+                const go = document.createElement('a');
+                go.className = 'btn btn-secondary btn-small acc-notif-go';
+                go.href = '#' + tab;
+                go.textContent = t('js.app.notif_go_' + tab);
+                item.appendChild(go);
+            }
             if (!n.read_at) {
                 const mark = document.createElement('button');
                 mark.type = 'button';
@@ -2404,9 +2416,9 @@ const getJson = async (endpoint) => {
     }
     function escInfo(e) { if (e.key === 'Escape') closeInfo(); }
 
-    function infoRow(label, value) {
+    function infoRow(label, value, cls) {
         const d = document.createElement('div');
-        d.className = 'info-kv';
+        d.className = 'info-kv' + (cls ? ' ' + cls : '');
         const l = document.createElement('span');
         l.className = 'info-kv-label';
         l.textContent = label;
@@ -2807,7 +2819,8 @@ const getJson = async (endpoint) => {
         const hashEl = document.createElement('code');
         hashEl.className = 'info-hash';
         hashEl.textContent = json.info_hash;
-        grid.appendChild(infoRow(t('js.app.row_info_hash'), hashEl));
+        // Full width, label above value: forty characters have nowhere to go in half a grid column.
+        grid.appendChild(infoRow(t('js.app.row_info_hash'), hashEl, 'info-kv-wide'));
         const det = document.createElement('div');
         det.className = 'info-section';
         const detH = document.createElement('div');
@@ -3765,16 +3778,37 @@ const getJson = async (endpoint) => {
  */
 (function () {
     'use strict';
-    const ta = document.getElementById('wl-desc');
-    if (!ta) return;
-    const box = document.getElementById('wl-desc-preview');
-    const counter = document.getElementById('wl-desc-count');
-    const help = document.getElementById('wl-desc-help');
-    const syntax = document.getElementById('wl-desc-syntax');
-    const tools = document.getElementById('wl-desc-tools');
-    const tabs = [...document.querySelectorAll('.rt-tab')];
-    const fmtEl = document.getElementById('wl-desc-format');
-    const csrf = document.querySelector('#wl-form input[name="csrf_token"]');
+
+    /**
+     * Mount the editor on one textarea.
+     *
+     * It used to be hard-wired to `#wl-desc`, which is why the private-message composer arrived as a
+     * bare box: the only editor on the site could not be pointed at a second textarea. The elements
+     * are found by convention around the id — `<id>-preview`, `-count`, `-help`, `-syntax`, `-tools`,
+     * `-format` — and the tabs are looked for INSIDE the editor rather than in the document, because
+     * `.rt-tab` is also the account page's tab bar and a global query grabbed those too.
+     */
+    function mountRichtext(id, opts) {
+    opts = opts || {};
+    const previewFor = opts.previewFor || 'description';
+    const ta = document.getElementById(id);
+    if (!ta || ta.dataset.rtMounted === '1') return;
+    ta.dataset.rtMounted = '1';
+    const box = document.getElementById(id + '-preview');
+    const counter = document.getElementById(id + '-count');
+    const help = document.getElementById(id + '-help');
+    const syntax = document.getElementById(id + '-syntax');
+    const tools = document.getElementById(id + '-tools');
+    const editor = ta.closest('.rt-editor') || document;
+    const tabs = [...editor.querySelectorAll('.rt-tab')];
+    const fmtEl = document.getElementById(id + '-format');
+    // Whichever page this editor was mounted on. It was the whitelist form's token and nothing
+    // else, so the preview on the account page posted an empty one and was answered 403 — the
+    // editor was reusable, its token was not.
+    const csrfEl = () => document.querySelector('#wl-form input[name="csrf_token"]')
+        || document.getElementById('account-csrf')
+        || document.getElementById('search-csrf')
+        || document.querySelector('input[name="csrf_token"]');
     let timer = null;
     let lastShown = null;          // {key, ok} — what the box is currently displaying
 
@@ -3868,7 +3902,7 @@ const getJson = async (endpoint) => {
         }
         box.textContent = t('js.app.rendering');
         const r = await postJson('richtext_preview', {
-            text, format: f, csrf_token: csrf ? csrf.value : '' });
+            text, format: f, for: previewFor, csrf_token: (csrfEl() || {}).value || '' });
         if (!r) { box.textContent = t('js.app.server_unreachable'); lastShown = { key, ok: false }; return; }
         if (!r.success) { box.textContent = r.error || t('js.app.render_failed'); lastShown = { key, ok: false }; return; }
         // The server built this from fully escaped input with a fixed tag whitelist
@@ -3923,6 +3957,12 @@ const getJson = async (endpoint) => {
     if (fmtEl && fmtEl.tagName === 'SELECT') fmtEl.addEventListener('change', syncFormat);
     syncFormat();
     if (counter && ta.maxLength > 0) counter.textContent = t('js.app.count_characters', {used: 0, limit: ta.maxLength});
+    }
+
+    mountRichtext('wl-desc');
+    // The message composer is drawn by assets/js/people.js after a conversation loads, so it asks
+    // for this rather than being found by it.
+    window.RichText = { mount: mountRichtext };
 })();
 
 /* ── watching a submission prove itself ─────────────────────────────────────

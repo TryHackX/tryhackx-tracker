@@ -4,6 +4,68 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.45.1] — 2026-09-10
+
+Schema **52** (unchanged).
+
+### Added — "keep what people kept"
+
+The janitor prunes the catalogue on its own schedule: a hash nobody has announced for a while loses
+its grace, a hash whose metadata never arrived loses its window, and the row cap evicts oldest-first.
+None of that knew anything about the people using the site, so a torrent somebody had starred or put
+on a list could quietly disappear out from under the list that named it.
+
+**Settings → Index** now carries `index_keep_saved`, with three answers:
+
+* **off** — nothing changes; the lifecycle an install already has is not something to alter under an
+  operator who has not asked. This is the default.
+* **forever** — while anybody has it starred or on a list, it stays.
+* **extend** — it gets `index_keep_saved_days` on top of whatever protection it already had.
+
+The extra window is measured from `protected_until`, the same column everything else is measured
+from — which is pushed forward every time the swarm is seen — so a hash that comes back has both
+clocks restarted at once. There is no second timestamp to keep in step and none to forget to update.
+The clause is two `EXISTS` over two indexed columns and disappears entirely when the setting is off,
+so a prune on an install that never touched this runs the query it always ran.
+
+### Changed — the polish pass over favourites, lists and people
+
+* **The list picker is one box.** It filters the lists while somebody types and offers *New list
+  "name"* when nothing they have answers to what they typed — the same keystrokes either way, and no
+  decision to make before starting to type. It paginates, so a shelf of thirty lists is a window
+  rather than a scroll.
+* **The message composer is the editor the rest of the site writes in**: the tabs, the formatting
+  rail, the live preview and the counter that descriptions have had since 1.21. The editor was
+  hard-wired to one textarea, which is why a message got a bare box; it takes an id now.
+* **Messages can be started from the inbox.** Every route into a conversation used to begin
+  somewhere else — a profile, the directory, a notification — so an inbox with nobody in it was a
+  page with nothing to do on it. A friend can also be written to from the row that says they are one.
+* **A friend request in the notifications links to the tab where it can be answered**, and the
+  People tab carries the number of people waiting.
+* **The member directory moved into the account page's tabs.** It is one more list of people beside
+  the reader's own friends and blocks; `?action=members` redirects there, because links to it are
+  out in the world.
+* **Searching a favourites list or a list matches file names**, with the same *Also search file
+  names* checkbox the search page carries — gated on the same `index.files` permission, in the
+  endpoint as well as in the page.
+* **The Info panel opens on top of the list it was opened from.** Every overlay shared one
+  `z-index`, so opening the panel from a row inside a list window showed the reader the window they
+  had just left.
+* The info hash gets a row of its own in the Info panel instead of breaking across three lines in
+  half a grid column; Share is drawn to be seen rather than in muted grey on a muted border; and a
+  link styled as a button is now the same height as the buttons beside it.
+
+### Fixed
+
+* **`t()` replaced `:page` inside `:pages`**, so every paginated list in the browser said "Page 1 of
+  1s" whatever the count was. Placeholders are replaced longest-name-first now, which is the rule
+  PHP's `strtr()` has always used.
+* **The rich-text preview posted the whitelist form's CSRF token and nothing else**, so the same
+  editor on any other page was answered 403. It now finds the token the page it is on carries.
+* **The preview endpoint asked the wrong question about a message**: gated on "may submit content"
+  and on the whitelist's description switch, it refused to show a member their own message on a
+  tracker with descriptions off. It takes `for: 'message'` and asks whether they may send one.
+
 ## [1.45.0] — 2026-09-10
 
 Schema **52**.

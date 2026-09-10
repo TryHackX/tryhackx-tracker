@@ -1917,6 +1917,11 @@ function trackerSchemaDefaultSettings(): array {
         'lists_public_enabled'        => '0',   // may any list be public at all
         'lists_max_per_user'          => '20',  // clamped [1, 200]
         'lists_max_items'             => '500', // rows in one list; clamped [10, 5000]
+        // What the janitor does with a hash somebody kept: off | forever | extend (see
+        // indexKeepSavedClause()). 'off' by default — the lifecycle an install already has is not
+        // something to change under an operator who has not asked.
+        'index_keep_saved'            => 'off',
+        'index_keep_saved_days'       => '90',  // clamped [1, 3650]
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

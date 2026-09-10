@@ -183,4 +183,7 @@ jsonResponse([
         'blocks'   => $cnt("SELECT COUNT(*) FROM user_blocks WHERE user_id = ?", [$uid]),
     ],
     'friends_enabled' => friendsEnabled($cfg),
+    // So a friend can be written to from the row that says they are one, rather than by going to
+    // their profile to find the button. The same question the directory asks.
+    'may_message' => pmEnabled($cfg) && userCan($db, $cfg, 'pm.send'),
 ]);

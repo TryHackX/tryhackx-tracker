@@ -13,17 +13,32 @@
 requirePost();
 $input = readJsonBody();
 
-if (($cfg['wl_allow_description'] ?? '0') !== '1') {
-    jsonResponse(['error' => __('api.content.descriptions_disabled')], 404);
-}
 if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
     jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 
-// Same permission as writing one: a preview is a parser, and handing it to somebody who may not
-// submit is handing out the parser for nothing.
-if (!userCan($db, $cfg, 'content.submit')) {
-    jsonResponse(['error' => __('api.content.access_required')], 403);
+/**
+ * WHAT is being previewed decides who may preview it.
+ *
+ * The same markup is written in two places now — a torrent's description and a private message —
+ * and they are not the same permission. Gating a message on "may submit content" told a member who
+ * may write to people but not upload that their own message could not be shown to them; gating it
+ * on the whitelist's description switch answered 404 on a tracker that has descriptions off and
+ * messages on. One renderer, one rate limit, and the gate that matches the text.
+ */
+$for = ($input['for'] ?? '') === 'message' ? 'message' : 'description';
+if ($for === 'message') {
+    if (!pmEnabled($cfg)) jsonResponse(['error' => 'pm_disabled'], 404);
+    if (!userCan($db, $cfg, 'pm.send')) jsonResponse(['error' => __('api.content.access_required')], 403);
+} else {
+    if (($cfg['wl_allow_description'] ?? '0') !== '1') {
+        jsonResponse(['error' => __('api.content.descriptions_disabled')], 404);
+    }
+    // Same permission as writing one: a preview is a parser, and handing it to somebody who may not
+    // submit is handing out the parser for nothing.
+    if (!userCan($db, $cfg, 'content.submit')) {
+        jsonResponse(['error' => __('api.content.access_required')], 403);
+    }
 }
 
 $perMin = max(5, min(300, (int)($cfg['rate_limit_preview'] ?? 30) ?: 30));
@@ -37,7 +52,9 @@ if (!in_array($fmt, richtextFormats($cfg), true)) $fmt = richtextFormats($cfg)[0
 
 // Cap before parsing, not after. A megabyte of nested tags is a CPU bill, and refusing it is
 // cheaper than rendering it and then deciding it was too long.
-$max = richtextMaxChars($cfg);
+// A message is capped by the message setting, a description by the description one — the counter
+// under the box has to say the number the send would actually be judged against.
+$max = $for === 'message' ? pmMaxChars($cfg) : richtextMaxChars($cfg);
 if ($max > 0 && mb_strlen($text) > $max) {
     jsonResponse(['error' => __('api.content.description_too_long', ['length' => mb_strlen($text), 'limit' => $max]),
                   'too_long' => true, 'length' => mb_strlen($text), 'limit' => $max], 400);
