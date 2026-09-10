@@ -2357,6 +2357,10 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
     background: var(--accent); color: #fff; font-size: 0.72rem; line-height: 1.5; text-align: center; }
 .pm-unread-badge:not([hidden]) { display: inline-block; }
 .pm-msg-note { font-size: 0.8rem; }
+/* "…is writing". Under the conversation, above the box — one line, and it says nothing at all when
+   nobody is writing rather than reserving space for the possibility. */
+.pm-typing { font-size: 0.8rem; font-style: italic; margin-top: 0.35rem; }
+.pm-typing[hidden] { display: none; }
 .pm-closed { margin-top: 0.7rem; border-top: 1px solid var(--border); padding-top: 0.7rem; color: #e0b15a; font-size: 0.85rem; }
 .pm-note { font-size: 0.8rem; margin-top: 0.6rem; }
 .pm-unread-badge, .nav-pm-badge { background: var(--accent); color: #000; border-radius: 999px; padding: 0 0.4em; font-size: 0.7rem; margin-left: 0.3rem; }

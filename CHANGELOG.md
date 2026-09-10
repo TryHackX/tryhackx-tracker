@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.48.0] — 2026-09-10
+
+Schema **54** — `message_typing`.
+
+### Added — a conversation that keeps up with itself
+
+An open conversation can now ask, every few seconds, whether anything arrived — and say so when the
+other person is writing. Both are **off by default** and both are the operator's decision:
+`pm_live_seconds` (0 = off, otherwise 2–60) and `pm_typing_enabled` in Settings → Messages.
+
+It is a poll, and it is a small one. The request carries the id of the last line the page already
+has and the reply carries **new rows only**, so the usual answer is three numbers and an empty list.
+A tab in the background asks nothing at all and catches up the moment somebody comes back to it. New
+lines are appended rather than the thread being redrawn — redrawing would take away the half-written
+sentence in the box underneath. And it never scrolls somebody away from the line they are reading:
+the conversation follows the bottom only if they were already at the bottom.
+
+The same reply carries two courtesies that used to need a reload: the unread badge, and the **read**
+mark on your own side of the conversation.
+
+**"…is writing" expires by itself.** One row per person per conversation, with a moment a few
+seconds ahead of the last keystroke — not a "started" event waiting for a "stopped" that may never
+arrive from a closed tab, a slept phone or a dropped connection. A keyboard produces at most one
+tiny write every four seconds; the janitor sweeps rows whose moment has passed, and losing the whole
+table would cost one refresh of one line.
+
 ## [1.47.1] — 2026-09-10
 
 Schema **53** (unchanged).

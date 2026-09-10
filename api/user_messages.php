@@ -117,6 +117,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         jsonResponse(['success' => true, 'reported' => $mid]);
     }
 
+    if ($op === 'typing') {
+        // Cheapest write in the application: one upsert, no history, and it expires by itself.
+        // Gated the same way sending is — somebody who may not write here may not say they are
+        // writing here — and rate-limited, because it is a POST that a keyboard can produce.
+        if (!pmTypingEnabled($cfg)) jsonResponse(['success' => true, 'typing' => false]);
+        if (!rateLimitAllow('pmtyping', ipBucket(getClientIp($cfg)), 120, 60)) {
+            jsonResponse(['success' => true, 'typing' => false]);
+        }
+        $them = userValidUsername((string)($input['with'] ?? '')) ? userFindByLogin($db, (string)$input['with']) : null;
+        if (!$them) jsonResponse(['error' => 'not_found'], 404);
+        $gate = pmCanWrite($db, $cfg, $me, $them);
+        if (!$gate['ok']) jsonResponse(['error' => $gate['reason']], 403);
+        $thread = pmThreadFor($db, $uid, (int)$them['id'], false);
+        if ($thread) pmTypingTouch($db, $cfg, (int)$thread['id'], $uid);
+        jsonResponse(['success' => true, 'typing' => true]);
+    }
+
     jsonResponse(['error' => 'unknown_op'], 400);
 }
 
@@ -124,12 +141,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // "May I write to them?" — asked by the profile before it draws a button, so the button can say
 // what will happen instead of finding out after somebody has typed a paragraph.
+// Let go of the session lock before any of the read paths. PHP serialises requests from one
+// browser on the session file, so a conversation polling every few seconds would hold up every
+// other request that browser makes. Nothing below this line writes to the session.
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+header('Cache-Control: private, no-store');
+
 $can = trim((string)($_GET['can'] ?? ''));
 if ($can !== '') {
     $them = userValidUsername($can) ? userFindByLogin($db, $can) : null;
     $gate = pmCanWrite($db, $cfg, $me, $them);
     jsonResponse(['success' => true, 'ok' => $gate['ok'], 'reason' => $gate['reason'],
                   'max_chars' => pmMaxChars($cfg)]);
+}
+
+/* ── the poll ──────────────────────────────────────────────────────────────────────────────────
+ *
+ * What an OPEN conversation asks every few seconds: has anything arrived, has the other side read
+ * what I said, and are they writing. It answers with NEW ROWS ONLY — `after` is the last id the
+ * page already has — so the usual reply is three small numbers and an empty list.
+ *
+ * Deliberately narrow. It does not re-send the conversation, does not re-check who may write (the
+ * page has that from opening it), and does not exist at all while `pm_live_seconds` is 0: an
+ * operator who has not asked for this pays nothing for it.
+ */
+if ((string)($_GET['poll'] ?? '') === '1') {
+    if (pmLiveSeconds($cfg) < 1) jsonResponse(['success' => true, 'off' => true, 'rows' => []]);
+    if (!rateLimitAllow('pmpoll', ipBucket(getClientIp($cfg)), 600, 60)) {
+        jsonResponse(['error' => 'rate_limit', 'retry_after' => 60], 429);
+    }
+    $with = trim((string)($_GET['with'] ?? ''));
+    $after = max(0, (int)($_GET['after'] ?? 0));
+    $them = userValidUsername($with) ? userFindByLogin($db, $with) : null;
+    if (!$them) jsonResponse(['error' => 'not_found'], 404);
+    $thread = pmThreadFor($db, $uid, (int)$them['id'], false);
+    if (!$thread) jsonResponse(['success' => true, 'rows' => [], 'typing' => false, 'unread' => 0, 'read_upto' => 0]);
+
+    $st = $db->prepare("SELECT id, sender_id, body, body_format, created_at, read_at, reported
+                          FROM user_messages WHERE thread_id = ? AND id > ? ORDER BY id ASC LIMIT 50");
+    $st->execute([(int)$thread['id'], $after]);
+    $fresh = $st->fetchAll(PDO::FETCH_ASSOC);
+    // Arriving in front of somebody who is looking at the conversation is the same as opening it:
+    // they have read it. Only written when something actually came in.
+    $incoming = array_filter($fresh, static fn($m) => (int)$m['sender_id'] !== $uid);
+    if ($incoming) {
+        $db->prepare("UPDATE user_messages SET read_at = NOW() WHERE thread_id = ? AND sender_id <> ? AND read_at IS NULL")
+           ->execute([(int)$thread['id'], $uid]);
+    }
+    // …and the other half of the same courtesy: how far the other side has read MY side.
+    $rd = $db->prepare("SELECT COALESCE(MAX(id), 0) FROM user_messages WHERE thread_id = ? AND sender_id = ? AND read_at IS NOT NULL");
+    $rd->execute([(int)$thread['id'], $uid]);
+
+    jsonResponse([
+        'success'   => true,
+        'rows'      => array_map(static fn($m) => [
+            'id'      => (int)$m['id'],
+            'mine'    => (int)$m['sender_id'] === $uid,
+            'html'    => pmRenderBody((string)$m['body'], (string)$m['body_format'], $cfg),
+            'created' => (string)$m['created_at'],
+            'read'    => $m['read_at'] !== null,
+            'reported' => (int)$m['reported'] === 1,
+        ], $fresh),
+        'typing'    => pmSomeoneTyping($db, $cfg, (int)$thread['id'], (int)$them['id']),
+        'read_upto' => (int)$rd->fetchColumn(),
+        'unread'    => pmUnreadCount($db, $uid),
+    ]);
 }
 
 $with = trim((string)($_GET['with'] ?? ''));
@@ -164,6 +240,7 @@ if ($with !== '') {
     jsonResponse(['success' => true, 'with' => (string)$them['username'], 'rows' => $rows,
                   'can_write' => $gate['ok'], 'reason' => $gate['reason'],
                   'may_report' => userCan($db, $cfg, 'pm.report'),
+                  'live' => pmLiveSeconds($cfg), 'typing_on' => pmTypingEnabled($cfg),
                   'unread' => pmUnreadCount($db, $uid)]);
 }
 

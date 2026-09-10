@@ -47,6 +47,7 @@ require_once $root . '/includes/reputation.php';
 require_once $root . '/includes/wlmaint.php';
 require_once $root . '/includes/wlprobe.php';
 require_once $root . '/includes/digest.php';
+require_once $root . '/includes/people.php';
 
 try {
     $db  = getDb();
@@ -245,6 +246,13 @@ try {
             (int)($wm['dead']['marked'] ?? 0), (int)($wm['dead']['deleted'] ?? 0),
             $wm['error'] ? ' error=' . $wm['error'] : ''), "
 ";
+    }
+
+    // "…is writing" rows whose moment has passed. Tiny, and it keeps a table that is pure state
+    // from growing a history nobody asked for.
+    if (function_exists('pmTypingPrune')) {
+        $tp = pmTypingPrune($db);
+        if ($tp > 0 && in_array('-v', $argv ?? [], true)) echo "[pm] pruned $tp stale typing rows\n";
     }
 
     // The operator's digest, LAST of the queue-changing work above so the numbers it reports are the

@@ -60,6 +60,68 @@ function pmWhoFor(array $cfg, array $user): string
 function pmMaxPerDay(array $cfg): int { return max(1, min(1000, (int)($cfg['pm_max_per_day'] ?? 50) ?: 50)); }
 function pmMaxChars(array $cfg): int  { return max(200, min(20000, (int)($cfg['pm_max_chars'] ?? 4000) ?: 4000)); }
 
+/**
+ * How often an OPEN conversation asks whether anything arrived. 0 = never; the page stays as it was
+ * until somebody reloads it, which is what every install does until an operator says otherwise.
+ *
+ * Clamped at two seconds because that is the floor at which this stops being a refresh and starts
+ * being a load: one request per reader per interval, and the reply is empty unless something was
+ * actually said.
+ */
+function pmLiveSeconds(array $cfg): int
+{
+    $v = (int)($cfg['pm_live_seconds'] ?? 0);
+    return $v <= 0 ? 0 : max(2, min(60, $v));
+}
+
+/** The "…is writing" line. Its own switch: it costs a write every few keystrokes. */
+function pmTypingEnabled(array $cfg): bool
+{
+    return pmLiveSeconds($cfg) > 0 && (($cfg['pm_typing_enabled'] ?? '0') === '1');
+}
+
+/** How long one keystroke keeps somebody "writing" — a little longer than the poll interval. */
+function pmTypingWindow(array $cfg): int { return max(4, min(20, pmLiveSeconds($cfg) * 2 + 2)); }
+
+/**
+ * Somebody pressed a key. One upsert, no history, and the row means nothing a second after `until`.
+ *
+ * Deliberately not "started typing" / "stopped typing" events: a stop that never arrives (a closed
+ * tab, a dropped connection, a phone that slept) would leave the other person watching a line that
+ * is not true. An expiry cannot be forgotten.
+ */
+function pmTypingTouch(PDO $db, array $cfg, int $threadId, int $userId): void
+{
+    if (!pmTypingEnabled($cfg)) return;
+    try {
+        $db->prepare("INSERT INTO message_typing (thread_id, user_id, until)
+                      VALUES (?, ?, NOW() + INTERVAL ? SECOND)
+                      ON DUPLICATE KEY UPDATE until = VALUES(until)")
+           ->execute([$threadId, $userId, pmTypingWindow($cfg)]);
+    } catch (\Throwable $e) { /* a database that predates v54: the line simply never appears */ }
+}
+
+/** Is the OTHER person writing? One primary-key lookup. */
+function pmSomeoneTyping(PDO $db, array $cfg, int $threadId, int $otherId): bool
+{
+    if (!pmTypingEnabled($cfg)) return false;
+    try {
+        $st = $db->prepare("SELECT 1 FROM message_typing WHERE thread_id = ? AND user_id = ? AND until > NOW() LIMIT 1");
+        $st->execute([$threadId, $otherId]);
+        return (bool)$st->fetchColumn();
+    } catch (\Throwable $e) { return false; }
+}
+
+/** Rows whose moment has passed. Called from the janitor; a minute of slack costs nothing. */
+function pmTypingPrune(PDO $db): int
+{
+    try {
+        $st = $db->prepare("DELETE FROM message_typing WHERE until < NOW() - INTERVAL 1 MINUTE LIMIT 500");
+        $st->execute();
+        return $st->rowCount();
+    } catch (\Throwable $e) { return 0; }
+}
+
 /* ── friendship and following ─────────────────────────────────────────────── */
 
 /**
@@ -223,6 +285,8 @@ function peopleContext(PDO $db, array $cfg, ?array $viewer): array
         'my_who'        => $signed ? pmWhoFor($cfg, $viewer) : pmDefaultWho($cfg),
         'max_chars'     => pmMaxChars($cfg),
         'max_per_day'   => pmMaxPerDay($cfg),
+        'live_seconds'  => pmLiveSeconds($cfg),
+        'typing'        => pmTypingEnabled($cfg),
         'unread'        => ($pm && $signed) ? pmUnreadCount($db, (int)$viewer['id']) : 0,
     ];
 }

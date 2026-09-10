@@ -2045,6 +2045,19 @@
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_max_chars" value="<?= sanitize($cfg['pm_max_chars'] ?? '4000') ?>" min="200" max="20000">
                         <small class="settings-hint"><?= _h('settings.pm_chars_hint') ?></small>
                     </div>
+                    <div class="col-md-3" data-setting="pm_live_seconds">
+                        <label class="form-label"><?= _h('settings.pm_live') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_live_seconds" value="<?= sanitize($cfg['pm_live_seconds'] ?? '0') ?>" min="0" max="60">
+                        <small class="settings-hint"><?= __('settings.pm_live_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="pm_typing_enabled">
+                        <label class="form-label"><?= _h('settings.pm_typing') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="pm_typing_enabled">
+                            <option value="1" <?= ($cfg['pm_typing_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['pm_typing_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.pm_typing_hint') ?></small>
+                    </div>
                     <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.friends_enabled') ?></label>
                         <select class="form-select bg-dark text-light border-secondary" name="friends_enabled">

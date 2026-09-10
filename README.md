@@ -735,7 +735,11 @@ default — with it off, everything behaves exactly like the classic single-admi
   1.47.1 (`?action=members` redirects there), sorted by name or by the date people joined; the inbox
   filter searches the names of the people in it, and — with the box beside it ticked — inside the
   messages themselves, which is a `LIKE` over this reader's own conversations and therefore opt-in,
-  debounced and rate-limited.
+  debounced and rate-limited. **Live refresh** (1.48.0, `pm_live_seconds`, off by default) lets an
+  open conversation ask every few seconds whether anything arrived — new rows only, nothing at all
+  from a background tab, appended rather than redrawn so a half-written reply survives — and
+  `pm_typing_enabled` adds the "…is writing" line, which is a row with an expiry rather than a
+  "started" event waiting for a "stopped" that may never come.
 - **Lists** (1.44.0, `lists_enabled`, off by default): a **collection somebody makes on purpose** —
   a name, the torrents they put in it, and their own answer to who may see it. Useful in blacklist
   mode, where there is no whitelist to group anything by: a reader can still gather a pack and hand

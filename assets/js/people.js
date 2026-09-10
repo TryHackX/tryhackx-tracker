@@ -61,6 +61,26 @@
     }
     function when(s) { return String(s || '').replace('T', ' ').slice(0, 16); }
 
+    /**
+     * Whether this tracker has the "…is writing" line switched on, and who to say it to.
+     *
+     * Module-level because the composer is built outside the inbox that knows the answer, and
+     * because there is only ever one conversation open: two of these would be two conversations on
+     * one screen, which this page does not have.
+     */
+    var typingAllowed = false;
+    var typingSentAt = 0;
+    function typingPing(name) {
+        // At most one write every four seconds, whatever the keyboard does. The row it writes lives
+        // a little longer than that, so a steady typist is continuously "writing" at the cost of a
+        // quarter of a request per second.
+        if (!typingAllowed || !name) return;
+        var now = Date.now();
+        if (now - typingSentAt < 4000) return;
+        typingSentAt = now;
+        post('user_messages', { op: 'typing', with: name });
+    }
+
     /* ─────────────────────────── the inbox ─────────────────────────── */
 
     function initInbox() {
@@ -71,6 +91,13 @@
         var searchEl = document.getElementById('pm-search');
         var deepEl = document.getElementById('pm-deep');
         var openWith = null, timer = 0;
+        // Live state for the conversation that is open: how often to ask, what the last line we
+        // have is, and where to put a new one. All of it resets when a different thread opens.
+        var live = 0, pollTimer = 0, lastId = 0, msgsBox = null, typingLine = null, mayReport = false;
+        // One poll at a time. A request that takes longer than the interval would otherwise be
+        // overtaken by the next one, which asks with the SAME `after` id and appends the same line
+        // twice — visible as a message that arrived in duplicate on a slow connection.
+        var polling = false;
 
         function badge(n) {
             var b = document.getElementById('pm-unread');
@@ -109,8 +136,80 @@
             });
         }
 
+        function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; } }
+
+        /** One message, as a row. The first draw and every later arrival go through here. */
+        function renderMsg(m) {
+            var wrap = el('div', { className: 'pm-msg' + (m.mine ? ' pm-msg-mine' : '') });
+            wrap.dataset.id = String(m.id || 0);
+            if (m.mine) wrap.dataset.mine = '1';
+            wrap.appendChild(el('div', { className: 'pm-body richtext', html: m.html }));
+            var foot = el('div', { className: 'pm-msg-foot text-muted' });
+            foot.appendChild(el('span', { text: when(m.created) }));
+            if (m.mine && m.read) foot.appendChild(el('span', { className: 'pm-read', text: t('js.pm.read') }));
+            if (!m.mine && mayReport) {
+                var rep = el('button', { type: 'button', className: 'pm-report',
+                                         title: t('js.pm.report_title'),
+                                         text: (m.reported ? '⚑ ' : '⚐ ') + (m.reported ? t('js.pm.reported') : t('js.pm.report')) });
+                rep.disabled = !!m.reported;
+                rep.addEventListener('click', function () { reportMessage(m.id, rep); });
+                foot.appendChild(rep);
+            }
+            wrap.appendChild(foot);
+            return wrap;
+        }
+
+        /**
+         * The conversation, keeping up with itself.
+         *
+         * It asks for NEW ROWS ONLY and appends them — it never redraws the thread, because
+         * redrawing would take away the half-written sentence in the box underneath it. Skipped
+         * entirely while the tab is in the background: a conversation nobody is looking at does not
+         * need to be up to date, and it catches up the moment they come back.
+         */
+        async function pollOnce() {
+            // Nothing to ask while nobody can see the answer: another browser tab, or another tab
+            // of the account page. offsetParent is null for anything with a hidden ancestor, which
+            // is exactly the question — is this conversation on the screen?
+            if (!openWith || !msgsBox || document.hidden || msgsBox.offsetParent === null || polling) return;
+            var name = openWith;
+            polling = true;
+            var j = null;
+            try { j = await get('user_messages&poll=1&with=' + encodeURIComponent(name) + '&after=' + lastId); }
+            finally { polling = false; }
+            if (!j || !j.success || openWith !== name || !msgsBox) return;
+            if (j.off) { stopPoll(); return; }          // the operator switched it off mid-session
+            var atBottom = msgsBox.scrollHeight - msgsBox.scrollTop - msgsBox.clientHeight < 40;
+            (j.rows || []).forEach(function (m) {
+                // Never the same line twice, whatever the network did: the DOM already holds the
+                // ids it is showing, and that is the only copy that matters.
+                if (m.id <= lastId || msgsBox.querySelector('.pm-msg[data-id="' + m.id + '"]')) return;
+                lastId = m.id;
+                msgsBox.appendChild(renderMsg(m));
+            });
+            if ((j.rows || []).length) {
+                badge(j.unread);
+                // Only follow the conversation down if they were already at the bottom of it —
+                // scrolling somebody away from the line they are reading is worse than a missed row.
+                if (atBottom) msgsBox.scrollTop = msgsBox.scrollHeight;
+            }
+            // "read", on my own side, without redrawing anything that is already correct.
+            if (j.read_upto) {
+                msgsBox.querySelectorAll('.pm-msg[data-mine="1"]').forEach(function (w) {
+                    if (Number(w.dataset.id) > j.read_upto) return;
+                    var foot = w.querySelector('.pm-msg-foot');
+                    if (foot && !foot.querySelector('.pm-read')) {
+                        foot.appendChild(el('span', { className: 'pm-read', text: t('js.pm.read') }));
+                    }
+                });
+            }
+            if (typingLine) typingLine.hidden = !j.typing;
+        }
+
         async function openThread(name) {
             openWith = name;
+            stopPoll();
+            msgsBox = null; typingLine = null; lastId = 0;
             pane.textContent = '';
             pane.hidden = false;
             pane.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
@@ -129,35 +228,32 @@
             var head = el('div', { className: 'pm-head' });
             head.appendChild(el('a', { className: 'pm-head-name', href: BASE + '?action=u&name=' + encodeURIComponent(name), text: name }));
             var back = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t('js.pm.back') });
-            back.addEventListener('click', function () { pane.hidden = true; openWith = null; loadInbox(); });
+            back.addEventListener('click', function () { stopPoll(); pane.hidden = true; openWith = null; loadInbox(); });
             head.appendChild(back);
             var hide = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t('js.pm.hide') });
             hide.addEventListener('click', async function () {
                 await post('user_messages', { op: 'hide', with: name });
+                stopPoll();
                 pane.hidden = true; openWith = null; loadInbox();
             });
             head.appendChild(hide);
             pane.appendChild(head);
 
+            mayReport = !!j.may_report;
             var body = el('div', { className: 'pm-msgs' });
             (j.rows || []).forEach(function (m) {
-                var wrap = el('div', { className: 'pm-msg' + (m.mine ? ' pm-msg-mine' : '') });
-                wrap.appendChild(el('div', { className: 'pm-body richtext', html: m.html }));
-                var foot = el('div', { className: 'pm-msg-foot text-muted' });
-                foot.appendChild(el('span', { text: when(m.created) }));
-                if (m.mine && m.read) foot.appendChild(el('span', { className: 'pm-read', text: t('js.pm.read') }));
-                if (!m.mine && j.may_report) {
-                    var rep = el('button', { type: 'button', className: 'pm-report',
-                                             title: t('js.pm.report_title'),
-                                             text: (m.reported ? '⚑ ' : '⚐ ') + (m.reported ? t('js.pm.reported') : t('js.pm.report')) });
-                    rep.disabled = !!m.reported;
-                    rep.addEventListener('click', function () { reportMessage(m.id, rep); });
-                    foot.appendChild(rep);
-                }
-                wrap.appendChild(foot);
-                body.appendChild(wrap);
+                if (m.id > lastId) lastId = m.id;
+                body.appendChild(renderMsg(m));
             });
             pane.appendChild(body);
+            msgsBox = body;
+            // "…is writing", under the conversation and above the box being written in — which is
+            // where it is true.
+            typingLine = el('div', { className: 'pm-typing text-muted', text: t('js.pm.typing', { user: name }) });
+            typingLine.hidden = true;
+            pane.appendChild(typingLine);
+            typingAllowed = !!j.typing_on;
+            live = Number(j.live || 0);
 
             if (j.can_write) {
                 mountComposer(pane, name, function () { openThread(name); });
@@ -165,6 +261,9 @@
                 pane.appendChild(el('div', { className: 'pm-closed', text: t('js.pm.why_' + (j.reason || 'nobody')) }));
             }
             body.scrollTop = body.scrollHeight;
+            // Only once the conversation is on screen: a timer started before the first draw would
+            // ask about a thread this page has not read yet.
+            if (live > 0) pollTimer = setInterval(pollOnce, live * 1000);
         }
 
         /**
@@ -298,6 +397,9 @@
         row.appendChild(send); row.appendChild(msg);
         wrap.appendChild(row);
         parent.appendChild(wrap);
+        // Every keystroke asks; typingPing() is what turns that into one small write every four
+        // seconds, and into nothing at all where the operator has not switched the line on.
+        ta.addEventListener('input', function () { typingPing(name); });
         if (rich && window.RichText && typeof window.RichText.mount === 'function') {
             // The preview endpoint is told what this is: a message is gated on being allowed to send
             // one, not on being allowed to upload a torrent.

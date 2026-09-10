@@ -228,5 +228,48 @@ $modPerms = $mod ? json_decode((string)$mod['permissions'], true) : [];
 check('the seeded moderator group is NOT given the message queue by default',
     empty($modPerms['panel.messages.view']), implode(',', array_keys(array_filter($modPerms ?: []))));
 
+/* ── a conversation that keeps up with itself (v54) ─────────────────────────────────────────────
+ *
+ * Two facts, and the second is the one worth a test: "…is writing" EXPIRES. Anything that says a
+ * person started and waits to be told they stopped will one day leave somebody writing for ever,
+ * because the stop arrives from a browser that may be closed, asleep or gone.
+ */
+check('live refresh is off unless a number is set',
+    pmLiveSeconds([]) === 0 && pmLiveSeconds(['pm_live_seconds' => '0']) === 0);
+check('… and any number is clamped to something a server can serve',
+    pmLiveSeconds(['pm_live_seconds' => '1']) === 2 && pmLiveSeconds(['pm_live_seconds' => '5']) === 5
+    && pmLiveSeconds(['pm_live_seconds' => '9999']) === 60);
+check('the typing line needs BOTH switches, because it rides on the refresh',
+    !pmTypingEnabled(['pm_typing_enabled' => '1'])
+    && !pmTypingEnabled(['pm_live_seconds' => '5'])
+    && pmTypingEnabled(['pm_live_seconds' => '5', 'pm_typing_enabled' => '1']));
+check('the window outlives one poll interval, so a steady typist never flickers',
+    pmTypingWindow(['pm_live_seconds' => '5']) > 5);
+
+$liveCfg = array_merge($cfg, ['pm_enabled' => '1', 'pm_live_seconds' => '5', 'pm_typing_enabled' => '1']);
+$offCfg  = array_merge($cfg, ['pm_enabled' => '1', 'pm_live_seconds' => '0', 'pm_typing_enabled' => '1']);
+$db->exec("DELETE FROM message_typing WHERE thread_id = 99001");
+pmTypingTouch($db, $liveCfg, 99001, (int)$alice['id']);
+check('a keystroke says who is writing, in the thread they are writing in',
+    pmSomeoneTyping($db, $liveCfg, 99001, (int)$alice['id']) === true);
+check('… and says nothing about the other person', pmSomeoneTyping($db, $liveCfg, 99001, (int)$bob['id']) === false);
+check('… nor about another conversation', pmSomeoneTyping($db, $liveCfg, 99002, (int)$alice['id']) === false);
+check('with the feature off, nothing is written and nothing is read',
+    (function (PDO $db, array $offCfg, int $id): bool {
+        $db->exec("DELETE FROM message_typing WHERE thread_id = 99003");
+        pmTypingTouch($db, $offCfg, 99003, $id);
+        return (int)$db->query("SELECT COUNT(*) FROM message_typing WHERE thread_id = 99003")->fetchColumn() === 0
+            && pmSomeoneTyping($db, $offCfg, 99003, $id) === false;
+    })($db, $offCfg, (int)$alice['id']));
+
+// THE POINT: the row is a moment, not a state. Age it and it stops being true by itself.
+$db->prepare("UPDATE message_typing SET until = NOW() - INTERVAL 1 SECOND WHERE thread_id = 99001")->execute();
+check('a moment that has passed is not somebody still writing',
+    pmSomeoneTyping($db, $liveCfg, 99001, (int)$alice['id']) === false);
+$db->prepare("UPDATE message_typing SET until = NOW() - INTERVAL 5 MINUTE WHERE thread_id = 99001")->execute();
+check('and the janitor sweeps it up', pmTypingPrune($db) >= 1
+    && (int)$db->query("SELECT COUNT(*) FROM message_typing WHERE thread_id = 99001")->fetchColumn() === 0);
+$db->exec("DELETE FROM message_typing WHERE thread_id IN (99001, 99002, 99003)");
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

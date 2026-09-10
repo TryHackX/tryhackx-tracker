@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 53;  // 53 = user_twofa + users.sessions_valid_from + user_tokens.ip/ua — a second factor for member accounts, and "signed in on N devices"
+const TRACKER_SCHEMA_VERSION = 54;  // 54 = message_typing — a conversation that refreshes itself, and the line that says the other person is writing
+                                    // 53 = user_twofa + users.sessions_valid_from + user_tokens.ip/ua — a second factor for member accounts, and "signed in on N devices"
                                     // 52 = message_threads/user_messages/message_reports + user_friends + user_blocks + users.pm_who/profile_listed — people reaching each other
                                     // 47 = user_favourites  // 47 = user_favourites + users.fav_public/fav_listed + whitelist.submitter_id/submitter_public — favourites, public profiles and "my uploads"
                                     // 46 = csp_reports (one row per KIND of violation, hits counts occurrences) + the four csp_* settings — the policy moved out of .htaccess and into PHP, where a nonce can exist
@@ -686,6 +687,23 @@ function trackerSchemaStatements(): array {
             `last_used_at` DATETIME DEFAULT NULL
         ) $engine",
 
+        // ── "…is typing" (v54) ──────────────────────────────────────────────────────────────
+        //
+        // One row per person per conversation, and it EXPIRES: `until` is a few seconds ahead of
+        // whoever last pressed a key, so a browser that closes mid-sentence says nothing rather than
+        // leaving somebody permanently writing. Nothing here is history — the janitor sweeps rows
+        // whose moment has passed, and losing the whole table would cost one refresh of one line.
+        //
+        // A table rather than a cache: this install may be two web servers behind one database, and
+        // an APCu entry on one of them is a fact the other cannot see.
+        "CREATE TABLE IF NOT EXISTS `message_typing` (
+            `thread_id` INT UNSIGNED NOT NULL,
+            `user_id` INT UNSIGNED NOT NULL,
+            `until` DATETIME NOT NULL,
+            PRIMARY KEY (`thread_id`, `user_id`),
+            KEY `idx_typing_until` (`until`)
+        ) $engine",
+
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         //
         // A THREAD is a pair of accounts, not a subject line. Two people have one conversation here,
@@ -1165,6 +1183,15 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY `uq_block_once` (`user_id`, `blocked_id`),
         KEY `idx_block_target` (`blocked_id`)
+    ) $engine";
+
+    // v54: who is typing, right now. Same definition as the CREATE above.
+    $out[] = "CREATE TABLE IF NOT EXISTS `message_typing` (
+        `thread_id` INT UNSIGNED NOT NULL,
+        `user_id` INT UNSIGNED NOT NULL,
+        `until` DATETIME NOT NULL,
+        PRIMARY KEY (`thread_id`, `user_id`),
+        KEY `idx_typing_until` (`until`)
     ) $engine";
 
     // v53: the second factor, and what a remember-me token was handed to. Same definitions as the
@@ -2000,6 +2027,13 @@ function trackerSchemaDefaultSettings(): array {
         // people out of their own account is a requirement operators turn off again.
         'user_2fa_enabled'            => '0',
         'user_2fa_required'           => 'off',
+        // ── A conversation that keeps up with itself (v54) ───────────────────────────────────
+        // `pm_live_seconds` is how often an OPEN conversation asks whether anything arrived; 0 is
+        // off, which is what an install that has not thought about it should be doing. The typing
+        // line is a second switch because it costs a write per few keystrokes and an operator may
+        // want the refresh without it.
+        'pm_live_seconds'             => '0',   // 0 = off; otherwise clamped [2, 60]
+        'pm_typing_enabled'           => '0',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a
