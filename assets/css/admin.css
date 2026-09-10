@@ -588,6 +588,14 @@
 .msgrep-body { font-size: 0.9rem; line-height: 1.5; word-break: break-word; }
 .msgrep-gone { font-style: italic; font-size: 0.85rem; }
 .msgrep-acts { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.6rem; }
+/* Two rows, and the second one is about the PERSON — separated by a rule so that "delete this line"
+   and "silence this account for a month" cannot be clicked by the same reflex. */
+.msgrep-punish { border-top: 1px dashed #30363d; padding-top: 0.6rem; }
+.msgrep-pick { width: auto; min-width: 14rem; }
+.msgrep-state { font-size: 0.82rem; color: #e0b15a; margin-bottom: 0.4rem; }
+.msgrep-confirm { display: inline-flex; align-items: center; gap: 0.35rem; }
+.msgrep-confirm-q { font-size: 0.85rem; color: #e0e0e0; }
+.msgrep-said { font-size: 0.82rem; }
 .msgrep-note-in { max-width: 22rem; }
 
 /* Which partner filed a report, beside the name they filed it under. Quiet on purpose: it is

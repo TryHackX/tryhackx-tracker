@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 54;  // 54 = message_typing — a conversation that refreshes itself, and the line that says the other person is writing
+const TRACKER_SCHEMA_VERSION = 55;  // 55 = users.pm_muted_until + users.banned_until — a moderator can answer a reported message with something between nothing and a permanent ban
+                                    // 54 = message_typing — a conversation that refreshes itself, and the line that says the other person is writing
                                     // 53 = user_twofa + users.sessions_valid_from + user_tokens.ip/ua — a second factor for member accounts, and "signed in on N devices"
                                     // 52 = message_threads/user_messages/message_reports + user_friends + user_blocks + users.pm_who/profile_listed — people reaching each other
                                     // 47 = user_favourites  // 47 = user_favourites + users.fav_public/fav_listed + whitelist.submitter_id/submitter_public — favourites, public profiles and "my uploads"
@@ -428,6 +429,13 @@ function trackerSchemaStatements(): array {
             -- not covered by fav_public — somebody may be happy to show what they starred and not
             -- what they collected — and each list carries its own is_public underneath it.
             `lists_public` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v55. Two answers a moderator can give that are not 'delete the line': silence this
+            -- account's MESSAGES until a date, and ban the account until a date. Both are NULL for
+            -- everybody, both are a moment rather than a flag, and a moment that has passed needs
+            -- nobody to remember to undo it — a flag does, and the person who would have to
+            -- remember is the one who was angry a week ago.
+            `pm_muted_until` DATETIME DEFAULT NULL,
+            `banned_until` DATETIME DEFAULT NULL,
             -- v53. The instant every OTHER session of this account stopped counting: a unix time,
             -- stamped by 'sign out everywhere else' and by a password change. A UNIX TIMESTAMP and
             -- not a DATETIME on purpose — it is compared against the session login time, which
@@ -1082,6 +1090,9 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // v53: when every other session of this account stopped counting. 0 = never, which is what every
     // existing account gets, so an upgrade signs nobody out.
     if (!schemaColumnExists($db, 'users', 'sessions_valid_from')) $uparts[] = "ADD COLUMN `sessions_valid_from` BIGINT UNSIGNED NOT NULL DEFAULT 0";
+    // v55: the two moments a moderator can set — see the CREATE above.
+    if (!schemaColumnExists($db, 'users', 'pm_muted_until')) $uparts[] = "ADD COLUMN `pm_muted_until` DATETIME DEFAULT NULL";
+    if (!schemaColumnExists($db, 'users', 'banned_until')) $uparts[] = "ADD COLUMN `banned_until` DATETIME DEFAULT NULL";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
 
     // v47: who registered a whitelist row, and whether they want it shown on their profile.

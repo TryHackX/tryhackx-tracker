@@ -271,5 +271,47 @@ check('and the janitor sweeps it up', pmTypingPrune($db) >= 1
     && (int)$db->query("SELECT COUNT(*) FROM message_typing WHERE thread_id = 99001")->fetchColumn() === 0);
 $db->exec("DELETE FROM message_typing WHERE thread_id IN (99001, 99002, 99003)");
 
+/* ── silenced, and banned until a date (v55) ────────────────────────────────────────────────────
+ *
+ * A mute is a MOMENT on the sender's own row, and the gate reads it before it reads anything about
+ * the recipient: being silenced is about this account writing at all. The date is what makes it end
+ * without anybody remembering to end it, which is the whole design and the thing worth pinning.
+ */
+// A pair of its own: the cascade section above deletes the two accounts this file started with, and
+// a test that reads a row somebody else removed fails for a reason that has nothing to do with what
+// it is checking.
+$db->prepare("DELETE FROM users WHERE username IN ('pmmute','pmmate')")->execute();
+$alice = userFindById($db, $mk($db, $cfg, 'pmmute'));
+$bob   = userFindById($db, $mk($db, $cfg, 'pmmate'));
+$db->prepare("UPDATE users SET pm_muted_until = NOW() + INTERVAL 1 DAY WHERE id = ?")->execute([(int)$alice['id']]);
+$mutedAlice = userFindById($db, (int)$alice['id']);
+check('a silenced account is told so rather than having its messages vanish',
+    $reason(pmCanWrite($db, $on, $mutedAlice, $bob)) === 'muted');
+check('… before anything about the recipient — being silenced is about writing at all',
+    $reason(pmCanWrite($db, array_merge($on, ['pm_who' => 'nobody']), $mutedAlice, $bob)) === 'muted');
+check('… while the person they were writing to is not silenced by it',
+    pmCanWrite($db, $on, $bob, $mutedAlice)['ok'] === true);
+check('pmMutedUntil reports the moment while it lasts', pmMutedUntil($mutedAlice) !== null);
+
+$db->prepare("UPDATE users SET pm_muted_until = NOW() - INTERVAL 1 MINUTE WHERE id = ?")->execute([(int)$alice['id']]);
+$exAlice = userFindById($db, (int)$alice['id']);
+check('a moment that has passed is not a silence — nothing has to run for it to end',
+    pmMutedUntil($exAlice) === null && pmCanWrite($db, $on, $exAlice, $bob)['ok'] === true);
+
+// The janitor's tidy-up: it clears the column, and it un-bans an account whose days are up.
+$db->prepare("UPDATE users SET status = 'banned', banned_until = NOW() - INTERVAL 1 HOUR WHERE id = ?")->execute([(int)$bob['id']]);
+$lift = userLiftExpiredPunishments($db);
+check('a timed ban ends by itself', $lift['unbanned'] >= 1
+    && (string)$db->query("SELECT status FROM users WHERE id = " . (int)$bob['id'])->fetchColumn() === 'active');
+check('… and the stale silence is cleared with it', $lift['unmuted'] >= 1
+    && $db->query("SELECT pm_muted_until FROM users WHERE id = " . (int)$alice['id'])->fetchColumn() === null);
+// A ban with no end date is NOT lifted by the tick: that one is a decision, not a timer.
+$db->prepare("UPDATE users SET status = 'banned', banned_until = NULL WHERE id = ?")->execute([(int)$bob['id']]);
+userLiftExpiredPunishments($db);
+check('a ban with no end date stays until somebody lifts it',
+    (string)$db->query("SELECT status FROM users WHERE id = " . (int)$bob['id'])->fetchColumn() === 'banned');
+$db->prepare("UPDATE users SET status = 'active', banned_until = NULL WHERE id = ?")->execute([(int)$bob['id']]);
+$db->prepare("DELETE FROM users WHERE username IN ('pmmute','pmmate')")->execute();
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

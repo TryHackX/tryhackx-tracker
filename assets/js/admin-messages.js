@@ -37,7 +37,13 @@
                          headers: { Accept: 'application/json' } };
             if (body) {
                 opts.headers['Content-Type'] = 'application/json';
-                var tok = (document.querySelector('meta[name="csrf-token"]') || {}).content
+                // WHERE THE PANEL KEEPS ITS TOKEN: on the body, as `data-csrf` (see the CSRF()
+                // helper in admin-common.js). This file looked for a <meta> and an <input>, found
+                // neither, and posted an empty token — so every action on this card was answered
+                // 403 and looked like a button that did nothing. The two fallbacks stay for a page
+                // that carries the token the older way.
+                var tok = document.body.dataset.csrf
+                       || (document.querySelector('meta[name="csrf-token"]') || {}).content
                        || (document.querySelector('input[name="csrf_token"]') || {}).value || '';
                 opts.headers['X-CSRF-Token'] = tok;
                 body.csrf_token = tok;
@@ -55,6 +61,17 @@
         head.appendChild(el('span', 'msgrep-when text-muted', rep.created_at));
         if (rep.status === 'closed') head.appendChild(el('span', 'badge-table badge-reviewed', t('js.msgrep.closed')));
         c.appendChild(head);
+
+        // What the reported account already is. A report read without this looks like a first
+        // offence whether it is the first or the fifth.
+        var st0 = rep.state || {};
+        var facts = [];
+        if (st0.reports > 1) facts.push(t('js.msgrep.seen_before', { n: st0.reports }));
+        if (st0.muted_until) facts.push(t('js.msgrep.is_muted', { date: st0.muted_until.slice(0, 16) }));
+        if (st0.banned) facts.push(st0.banned_until ? t('js.msgrep.is_banned_until', { date: st0.banned_until.slice(0, 16) })
+                                                    : t('js.msgrep.is_banned'));
+        if (st0.staff) facts.push(t('js.msgrep.is_staff'));
+        if (facts.length) c.appendChild(el('div', 'msgrep-state', facts.join(' · ')));
 
         if (rep.reason) c.appendChild(el('div', 'msgrep-reason', rep.reason));
 
@@ -85,6 +102,7 @@
         c.appendChild(box);
 
         if (mayHandle) {
+            var st = rep.state || {};
             var acts = el('div', 'msgrep-acts');
             var note = document.createElement('input');
             note.type = 'text';
@@ -93,29 +111,86 @@
             note.maxLength = 500;
             acts.appendChild(note);
 
-            var act = function (label, action, cls) {
+            var say = el('span', 'msgrep-said text-muted');
+
+            /** One action, posted with whatever is in the note field. */
+            var run = async function (action, days, btn) {
+                btn.disabled = true;
+                var r = await api('admin/message_report_action', 'POST',
+                                  { id: rep.id, action: action, days: days || 0, note: note.value.trim() });
+                btn.disabled = false;
+                if (r && r.success) { load(page); return; }
+                // The two refusals a moderator can actually hit, said in words rather than left as
+                // a button that did nothing.
+                say.textContent = t(r && r.error === 'target_is_staff' ? 'js.msgrep.err_staff'
+                                  : r && r.error === 'target_is_you' ? 'js.msgrep.err_you'
+                                  : 'js.msgrep.err_failed');
+            };
+
+            var button = function (label, cls, onClick) {
                 var b = el('button', 'btn btn-sm ' + (cls || 'btn-outline-secondary'), label);
-                b.addEventListener('click', async function () {
-                    if (action === 'delete_message' && b.dataset.armed !== '1') {
-                        b.dataset.armed = '1';
-                        b.textContent = t('js.msgrep.delete_sure');
-                        setTimeout(function () {
-                            if (b.dataset.armed === '1') { b.dataset.armed = '0'; b.textContent = t('js.msgrep.delete'); }
-                        }, 4000);
-                        return;
-                    }
-                    b.disabled = true;
-                    var r = await api('admin/message_report_action', 'POST',
-                                      { id: rep.id, action: action, note: note.value.trim() });
-                    b.disabled = false;
-                    if (r && r.success) load(page);
-                });
+                b.addEventListener('click', function () { onClick(b); });
                 return b;
             };
-            acts.appendChild(act(rep.status === 'closed' ? t('js.msgrep.reopen') : t('js.msgrep.close'),
-                                 rep.status === 'closed' ? 'reopen' : 'close'));
-            if (rep.message) acts.appendChild(act(t('js.msgrep.delete'), 'delete_message', 'btn-outline-danger'));
+
+            /**
+             * Anything that cannot be undone asks first, in place.
+             *
+             * The old delete armed itself on the first click and disarmed after four seconds, which
+             * is a confirmation somebody has to WIN — and it looked, correctly, like a button that
+             * did not work. This is two buttons: the question stays until it is answered.
+             */
+            var confirmThen = function (holder, question, label, cls, go) {
+                return button(label, cls, function (b) {
+                    var row = el('span', 'msgrep-confirm');
+                    row.appendChild(el('span', 'msgrep-confirm-q', question));
+                    var yes = button(t('js.msgrep.yes'), 'btn-danger', function (yb) { go(yb); });
+                    var no = button(t('js.msgrep.no'), 'btn-outline-secondary', function () { row.replaceWith(b); });
+                    row.appendChild(yes); row.appendChild(no);
+                    b.replaceWith(row);
+                });
+            };
+
+            acts.appendChild(button(rep.status === 'closed' ? t('js.msgrep.reopen') : t('js.msgrep.close'),
+                                    'btn-outline-secondary',
+                                    function (b) { run(rep.status === 'closed' ? 'reopen' : 'close', 0, b); }));
+            if (rep.message) {
+                acts.appendChild(confirmThen(acts, t('js.msgrep.delete_q'), t('js.msgrep.delete'), 'btn-outline-danger',
+                                             function (b) { run('delete_message', 0, b); }));
+            }
             c.appendChild(acts);
+
+            /* ── what to do about the ACCOUNT ─────────────────────────────────────────────────
+             * Deleting the line answers the message. It does not answer the person, and until now
+             * that was the only answer this page had. */
+            var pun = el('div', 'msgrep-acts msgrep-punish');
+            if (st.staff) {
+                pun.appendChild(el('span', 'text-muted', t('js.msgrep.staff_note')));
+            } else {
+                var pick = document.createElement('select');
+                pick.className = 'form-select form-select-sm bg-dark text-light border-secondary msgrep-pick';
+                [['mute:1', 'mute_1'], ['mute:7', 'mute_7'], ['mute:30', 'mute_30'], ['mute:0', 'mute_forever'],
+                 ['ban:7', 'ban_7'], ['ban:30', 'ban_30'], ['ban:0', 'ban_forever']].forEach(function (o) {
+                    var op = document.createElement('option');
+                    op.value = o[0];
+                    op.textContent = t('js.msgrep.' + o[1]);
+                    pick.appendChild(op);
+                });
+                pun.appendChild(pick);
+                pun.appendChild(button(t('js.msgrep.apply'), 'btn-outline-warning', function (b) {
+                    var parts = pick.value.split(':');
+                    var q = t('js.msgrep.sure_' + parts[0], { user: rep.reported });
+                    var row = el('span', 'msgrep-confirm');
+                    row.appendChild(el('span', 'msgrep-confirm-q', q));
+                    row.appendChild(button(t('js.msgrep.yes'), 'btn-danger', function (yb) { run(parts[0], Number(parts[1]), yb); }));
+                    row.appendChild(button(t('js.msgrep.no'), 'btn-outline-secondary', function () { row.replaceWith(b); }));
+                    b.replaceWith(row);
+                }));
+                if (st.muted_until) pun.appendChild(button(t('js.msgrep.unmute'), 'btn-outline-success', function (b) { run('unmute', 0, b); }));
+                if (st.banned) pun.appendChild(button(t('js.msgrep.unban'), 'btn-outline-success', function (b) { run('unban', 0, b); }));
+            }
+            pun.appendChild(say);
+            c.appendChild(pun);
         }
         return c;
     }

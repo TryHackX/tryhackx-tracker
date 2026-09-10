@@ -91,6 +91,33 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
     ];
 }
 
+/* What the reported accounts already ARE — one query for the whole page, not one per card.
+ *
+ * A moderator deciding what to do about a line needs two facts the report itself cannot carry: how
+ * many times this account has been reported before, and whether somebody has already answered one
+ * of those. Without them every report reads like a first offence. */
+$state = [];
+$names = array_values(array_unique(array_map(static fn($r) => $r['reported'], $rows)));
+if ($names) {
+    $ph = implode(',', array_fill(0, count($names), '?'));
+    $q = $db->prepare("SELECT u.id, u.username, u.status, u.pm_muted_until, u.banned_until,
+                              (SELECT COUNT(*) FROM message_reports mr WHERE mr.reported_user_id = u.id) AS reports
+                         FROM users u WHERE u.username IN ($ph)");
+    $q->execute($names);
+    foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $u) {
+        $state[(string)$u['username']] = [
+            'banned'       => (string)$u['status'] === 'banned',
+            'banned_until' => $u['banned_until'] ? (string)$u['banned_until'] : null,
+            'muted_until'  => ($u['pm_muted_until'] !== null && strtotime((string)$u['pm_muted_until']) > time())
+                              ? (string)$u['pm_muted_until'] : null,
+            'reports'      => (int)$u['reports'],
+            // A moderator may not be punished from this card, so the card must not offer it.
+            'staff'        => userIdHasPermission($db, $cfg, (int)$u['id'], 'panel.access'),
+        ];
+    }
+}
+foreach ($rows as $i => $r) $rows[$i]['state'] = $state[$r['reported']] ?? null;
+
 $open = (int)$db->query("SELECT COUNT(*) FROM message_reports WHERE status = 'open'")->fetchColumn();
 jsonResponse([
     'reports' => $rows,

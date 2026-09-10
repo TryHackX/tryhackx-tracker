@@ -80,6 +80,21 @@ function pmTypingEnabled(array $cfg): bool
     return pmLiveSeconds($cfg) > 0 && (($cfg['pm_typing_enabled'] ?? '0') === '1');
 }
 
+/**
+ * Is this account silenced, and until when? NULL when it is not.
+ *
+ * A moment rather than a flag, and read rather than swept: a mute that has passed is simply a date
+ * in the past, so nothing has to run for it to end. The janitor tidies the column later because a
+ * stale value is confusing to READ, not because it would still be in force.
+ */
+function pmMutedUntil(?array $user): ?string
+{
+    if (!$user) return null;
+    $until = $user['pm_muted_until'] ?? null;
+    if ($until === null || $until === '') return null;
+    return strtotime((string)$until) > time() ? (string)$until : null;
+}
+
 /** How long one keystroke keeps somebody "writing" — a little longer than the poll interval. */
 function pmTypingWindow(array $cfg): int { return max(4, min(20, pmLiveSeconds($cfg) * 2 + 2)); }
 
@@ -206,6 +221,10 @@ function pmCanWrite(PDO $db, array $cfg, array $sender, ?array $target): array
     // answers yes to everything. A gate that cannot be asked about a named account is a gate that
     // cannot be tested.
     if (!userIdHasPermission($db, $cfg, $sid, 'pm.send')) return ['ok' => false, 'reason' => 'no_permission'];
+    // Silenced by a moderator. Asked about the SENDER and before anything about the recipient: a
+    // mute is about this account writing at all, not about who it is writing to — and the person
+    // is told, because a message that vanishes teaches somebody that the site is broken.
+    if (pmMutedUntil($sender) !== null) return ['ok' => false, 'reason' => 'muted'];
     if (blockRow($db, $tid, $sid) !== null) return ['ok' => false, 'reason' => 'blocked'];
     // Blocking somebody also stops YOU writing to THEM: a one-way conversation with somebody you
     // have blocked is not something to offer, and the reply could never arrive.

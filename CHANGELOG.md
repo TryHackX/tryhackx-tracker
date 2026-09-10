@@ -4,6 +4,42 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.49.0] — 2026-09-10
+
+Schema **55** — `users.pm_muted_until`, `users.banned_until`.
+
+### Added — an answer to the person, not only to the message
+
+A reported message could be deleted, and that was the whole vocabulary: the line went, the account
+that wrote it carried on. The report card now also carries **silence their messages** (1, 7, 30 days
+or until somebody lifts it) and **ban the account** (7, 30 days or until somebody lifts it), each
+asked about before it happens and each written to the audit log with both names.
+
+**Both are dates, not flags.** A punishment with an end needs nobody to remember to end it — and the
+person who would have to remember is the one who was angry a week ago, which is how accounts nobody
+thinks about stay punished for ever. Every reader compares the column with `NOW()`, so a moment that
+has passed is already not in force; the janitor tidies the columns afterwards because a row saying
+"banned until last Tuesday" is a row somebody will misread, not because anything depends on it.
+
+**A silenced account is told.** The composer says a moderator has silenced them and that they can
+still read what they have, rather than swallowing what they type — the same rule the blocked-sender
+message has followed since 1.45.0.
+
+**Nobody who can open the panel can be punished from this card**, and neither can you yourself.
+Removing a moderator is a decision that belongs on the Users page, where it is visible as what it
+is.
+
+### Changed — the reported-messages card
+
+* **Deleting asks a question that stays until it is answered.** It used to arm itself on the first
+  click and disarm four seconds later, which is a confirmation somebody has to win — and it looked,
+  correctly, like a button that did not work.
+* **The card says what the account already is**: how many times it has been reported in all, whether
+  its messages are silenced and until when, whether it is banned. Without those, every report reads
+  like a first offence whether it is the first or the fifth.
+* The two rows of buttons are separated: answering the message and answering the person are not the
+  same decision and should not share a reflex.
+
 ## [1.48.0] — 2026-09-10
 
 Schema **54** — `message_typing`.

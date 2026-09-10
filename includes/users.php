@@ -345,6 +345,29 @@ function userSessionLogout(PDO $db): void {
  * (admin_session_idle_minutes / admin_session_absolute_hours) — a "forever" site sign-in does NOT
  * keep the panel open forever; after the idle window the panel asks for its login again.
  */
+/**
+ * Bans and mutes whose moment has passed.
+ *
+ * Called from the account tick in the janitor. Nothing DEPENDS on this running — a `banned_until`
+ * in the past is already not in force, because everything that reads these columns compares them
+ * with NOW() — but a row that says "banned until last Tuesday" is a row somebody will misread, and
+ * an account that shows as banned in the panel a month after its week is over is a support mail.
+ */
+function userLiftExpiredPunishments(PDO $db): array {
+    $out = ['unbanned' => 0, 'unmuted' => 0];
+    try {
+        $st = $db->prepare("UPDATE users SET status = 'active', banned_until = NULL
+                             WHERE status = 'banned' AND banned_until IS NOT NULL AND banned_until < NOW() LIMIT 500");
+        $st->execute();
+        $out['unbanned'] = $st->rowCount();
+        $st2 = $db->prepare("UPDATE users SET pm_muted_until = NULL
+                              WHERE pm_muted_until IS NOT NULL AND pm_muted_until < NOW() LIMIT 500");
+        $st2->execute();
+        $out['unmuted'] = $st2->rowCount();
+    } catch (\Throwable $e) { /* a database that predates v55 */ }
+    return $out;
+}
+
 function userMaybeOpenPanelSession(PDO $db, array $user): void {
     // BOTH conditions, which is what panelCan() downstream already assumes.
     //
@@ -1073,9 +1096,15 @@ function userEmailChangeConsume(PDO $db, array $cfg, string $token): array {
  * old notifications and dead tokens (hourly). Cheap on the indexes; never throws.
  */
 function usersTick(PDO $db, array $cfg, ?int $now = null): array {
-    $out = ['enabled' => usersEnabled($cfg), 'expired' => 0, 'warned' => 0, 'pruned' => 0, 'error' => null];
+    $out = ['enabled' => usersEnabled($cfg), 'expired' => 0, 'warned' => 0, 'pruned' => 0,
+            'unbanned' => 0, 'unmuted' => 0, 'error' => null];
     if (!$out['enabled']) return $out;
     try {
+        // Timed bans and mutes whose moment has passed. First, because the rest of this tick may
+        // notify people and a notification to somebody the site still calls banned reads oddly.
+        $lift = userLiftExpiredPunishments($db);
+        $out['unbanned'] = $lift['unbanned'];
+        $out['unmuted'] = $lift['unmuted'];
         // expired memberships → drop + notify
         $st = $db->query(
             "SELECT m.id, m.user_id, g.name FROM user_group_members m JOIN user_groups g ON g.id = m.group_id

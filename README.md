@@ -739,7 +739,10 @@ default — with it off, everything behaves exactly like the classic single-admi
   open conversation ask every few seconds whether anything arrived — new rows only, nothing at all
   from a background tab, appended rather than redrawn so a half-written reply survives — and
   `pm_typing_enabled` adds the "…is writing" line, which is a row with an expiry rather than a
-  "started" event waiting for a "stopped" that may never come.
+  "started" event waiting for a "stopped" that may never come. A moderator answering a report can
+  (1.49.0) **silence an account's messages** or **ban the account** for a number of days or until
+  somebody lifts it — both stored as dates, so a punishment with an end needs nobody to remember to
+  end it, and neither can be applied from that card to an account that can open the panel.
 - **Lists** (1.44.0, `lists_enabled`, off by default): a **collection somebody makes on purpose** —
   a name, the torrents they put in it, and their own answer to who may see it. Useful in blacklist
   mode, where there is no whitelist to group anything by: a reader can still gather a pack and hand
