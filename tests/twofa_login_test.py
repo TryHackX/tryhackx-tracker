@@ -16,6 +16,21 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE = os.path.join(ROOT, "config", "admin_2fa.json")
 USER, PASS = "admin", "admin123"
 
+# THE BRUTE-FORCE LOCKOUT IS A FILE, AND IT OUTLIVES EVERY OTHER RESET.
+#
+# A test about signing in has to start from a known lockout state the same way it starts from a
+# known 2FA state. It does not, by default: an earlier suite that deliberately fails a few sign-ins
+# (smoke_admin does, on purpose) leaves the counter near its limit, and this file then reports
+# "Unauthorized" on every check after the first — a full suite of red for a product that is fine.
+# Deleting it here is the same act as the fixture setup below, not a way around the feature: the
+# lockout's own behaviour is covered by deploy/smoke_admin.py and tests/rate_limit_test.php.
+for _f in ("login_attempts.json", "rate_limits.json", "rate_limits.json.lock"):
+    try:
+        os.unlink(os.path.join(ROOT, "config", _f))
+    except OSError:
+        pass
+
+
 fails = 0
 n = 0
 skips = 0

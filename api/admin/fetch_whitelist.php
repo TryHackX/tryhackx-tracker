@@ -227,9 +227,18 @@ try {
     $counts['pending_meta'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE meta_status IN ('pending','fetching')")->fetchColumn();
 } catch (\Throwable $e) {}
 
+// HOW MANY PARTNER SUBMISSIONS ARE WAITING — of the whole table, not of this page and not of the
+// current filter. A queue nobody is told about is a queue nobody works: the Review filter existed
+// and nothing anywhere said there was anything to filter for. Served by idx_wl_review.
+$reviewPending = 0;
+try {
+    $reviewPending = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE review_status = 'pending'")->fetchColumn();
+} catch (\Throwable $e) { $reviewPending = 0; }   // a database that predates v48
+
 jsonResponse([
     'rows' => $rows,
     'total' => $total,
+    'review_pending' => $reviewPending,
     'page' => $page,
     'pages' => $pages,
     'ip_counts' => (object)$ipCounts,

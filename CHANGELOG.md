@@ -4,6 +4,75 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.42.1] — 2026-09-10
+
+### Fixed — a fresh install came up missing nineteen columns and a whole group
+
+`install.php` created the tables from `trackerSchemaStatements()` and then stamped
+`schema_version = TRACKER_SCHEMA_VERSION`. The reasoning was that everything had just been created.
+It had not: a column added after its table was written lives in `trackerSchemaGuardedStatements()`,
+a permission added later lives in `trackerSchemaDataMigrations()`, and `ensureSchema()` returns
+immediately when the version already matches — so on a fresh install neither ever ran.
+
+Measured against an upgraded database, a freshly installed tracker was short of **fourteen columns
+on `whitelist`** (`source_url`, `description`, `content_status`, `probe_status`, `dead_since`, the
+four rating columns…), four on `index_hashes`, `users.bulk_optout`, three indexes, the entire
+**`moderator` group**, and seven permissions on `guest`/`member` including all four of this
+release's favourites permissions. The whitelist page selects some of those columns by name, so the
+site did not come up. Nothing in the suite could see it, because every test runs against a database
+that was *upgraded*.
+
+The installer now writes `schema_version = 0` and calls the ordinary migration, which is the path
+every upgrade takes and the one the whole battery exercises on each run — one path, so there is
+nothing left to diverge. It also refuses to report a finished install if the schema stopped short.
+`tests/install_test.php` builds both databases from empty and diffs tables, columns, indexes,
+settings keys and group permissions; reverted against the old installer it fails on eleven checks.
+
+This is not a regression from 1.42.0 — the oldest missing column dates to 1.17.0. It is the answer
+to "does a fresh install come up", and until now the honest answer was no.
+
+### Fixed — the API key editor asked questions the scope could not answer
+
+A key scoped `federation` was still asked how its submissions should be approved and which fields
+they must carry. A federation key never creates a whitelist row, so those were questions about
+something that cannot happen — and a dialog that asks them teaches an operator that the answers
+there do not mean much.
+
+The scope now drives the dialog. `whitelist` (or `all`) is asked about approval and required
+fields; `users` and `federation` are not, and are told *why* in a sentence. Every scope now lists
+the endpoints it actually opens, because a scope is a word and the list is the thing the word buys.
+A `users` key — the one the sign-in bridge runs on — says whether the bridge is on, so nobody makes
+a key and then discovers every `v1/auth/*` call answering 503.
+
+The two submission settings are not merely hidden for the other scopes: they are left out of the
+request, and `api_client_update` treats a missing field as "leave it alone", so editing a federation
+key cannot silently rewrite settings its dialog never showed. The required-fields list also grew a
+row that is not a choice — the magnet or hash, ticked and locked — because "these three are what an
+item needs" and "these three are what you are adding on top" are different sentences.
+
+**Readability.** The hints under those controls were Bootstrap's own `.form-text` grey on a
+near-black dialog: about 2.4:1, which is legible on the machine it was written on and nowhere else.
+Each one is the sentence that says what the control above it does to a partner's traffic, so they
+now clear 4.5:1 — and the browser check computes the ratio rather than trusting the eye.
+
+### Fixed — the review queue never said it had anything in it
+
+1.42.0 added a Review filter to the whitelist toolbar and nothing anywhere that said there was
+something to filter for. A queue nobody is told about is a queue nobody works. The toolbar now
+carries **"N waiting for review"** when N is not zero — counted over the whole table rather than the
+current page or filter, served by `idx_wl_review` — and pressing it applies the filter, so the count
+and the way to act on it are one control. It is hidden at zero rather than showing a reassuring
+"0 waiting".
+
+### Fixed — a test suite could report a failure with nothing failing
+
+`config/login_attempts.json` is the panel's brute-force lockout and it is a *file*: it survives
+every `TRUNCATE` and every bootstrap. `deploy/smoke_admin.py` fails a few sign-ins on purpose, so by
+the time the battery reached `tests/twofa_login_test.py` that suite could not sign in at all — it
+printed `31 checks, 0 failed` and exited 1, and the battery counted a failed suite with not one FAIL
+line in the log. The two Python suites that sign in now clear the file at their start, the way they
+already clear the 2FA state; the lockout's own behaviour keeps its own tests.
+
 ## [1.42.0] — 2026-09-10
 
 ### Added — partner submissions a person approves (schema 48)

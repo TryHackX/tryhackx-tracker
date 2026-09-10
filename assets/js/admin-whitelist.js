@@ -633,6 +633,15 @@
         state.wl.ipCounts = r.ip_counts || {};
         state.wl.selected = new Set([...state.wl.selected].filter(id => state.wl.rows.has(id)));
         $('wl-total').textContent = t('js.wl.entries_total', {n: r.total});
+        // The partner queue, counted over the whole table. Hidden at zero rather than showing a
+        // reassuring "0 waiting" — an operator should notice this only when it has something to say.
+        const waitChip = $('wl-waiting');
+        if (waitChip) {
+            const nWait = Number(r.review_pending || 0);
+            waitChip.hidden = nWait === 0;
+            waitChip.textContent = t('js.wl.n_waiting_review', { n: nWait });
+            waitChip.classList.toggle('is-on', state.wl.review === 'pending');
+        }
         if (!r.rows.length) {
             body.appendChild(el('tr', null, el('td', { colspan: 12, className: 'text-center text-muted py-4', text: state.wl.search || state.wl.ip ? t('js.wl.no_entries_match') : t('js.wl.whitelist_empty') })));
         }
@@ -1418,9 +1427,13 @@
             act.appendChild(iconBtn('bi-sliders', t('js.wl.cl_settings'), 'btn-outline-secondary', async () => {
                 const v = await clientOpts({ title: t('js.wl.cl_opts_edit'), client: c, okLabel: t('js.wl.cl_save') });
                 if (!v) return;
-                const rr = await apiCall('admin/api_client_update', 'POST', {
-                    id: c.id, label: v.label, auto_approve: v.auto_approve, required_fields: v.required_fields,
-                });
+                // Only what this scope actually has. api_client_update treats a missing key as
+                // "leave it alone", so a federation key keeps whatever it was created with instead
+                // of being quietly rewritten by a dialog that never showed those two controls.
+                const body = { id: c.id, label: v.label };
+                if (v.auto_approve !== undefined) body.auto_approve = v.auto_approve;
+                if (v.required_fields !== undefined) body.required_fields = v.required_fields;
+                const rr = await apiCall('admin/api_client_update', 'POST', body);
                 if (rr.success) { showToast(t('js.wl.cl_saved'), 'success'); loadClients(); } else showToast(rr.error || t('js.wl.rename_failed'), 'danger');
             }));
             act.appendChild(iconBtn('bi-book', t('js.wl.cl_docs_copy'), 'btn-outline-secondary', (e) => copyToClipboard(c.docs_url || '', e.currentTarget)));
@@ -1460,21 +1473,74 @@
         const have = new Set((client && client.required_fields) || []);
         boxes.forEach(b => { b.checked = have.has(b.value); });
 
-        const read = () => ({
-            label: label.value.trim(),
-            scope: scope.value,
-            auto_approve: approve.value !== 'review' ? 1 : 0,
-            required_fields: boxes.filter(b => b.checked).map(b => b.value),
-        });
+        // WHICH ANSWERS THIS SCOPE ACTUALLY HAS.
+        //
+        // A federation key never creates a whitelist row, so "what happens to what they send" is a
+        // question about something that cannot happen — and a dialog that asks it anyway teaches the
+        // operator that the answers here do not mean much. The two submission settings are read, sent
+        // and stored ONLY for a scope that can submit; for the others they are not merely hidden,
+        // they are excluded from read() so nothing stale rides along to the server.
+        const canSubmit = () => scope.value === 'whitelist' || scope.value === 'all';
+        const canUsers = () => scope.value === 'users' || scope.value === 'all';
+
+        const read = () => {
+            const v = { label: label.value.trim(), scope: scope.value };
+            if (canSubmit()) {
+                v.auto_approve = approve.value !== 'review' ? 1 : 0;
+                v.required_fields = boxes.filter(b => b.checked).map(b => b.value);
+            }
+            return v;
+        };
         const paint = () => {
             const v = read();
-            const url = docsUrlFor(v.scope, v.auto_approve === 1, v.required_fields);
+            const url = docsUrlFor(v.scope, v.auto_approve !== 0, v.required_fields || []);
             docs.textContent = url;
             openLink.href = url;
         };
-        paint();
-        const watched = [label, scope, approve, ...boxes];
+
+        // The endpoints, by scope. Named rather than described: an integrator copies these, and an
+        // operator deciding how far to trust a partner is deciding about exactly this list.
+        const ENDPOINTS = {
+            whitelist: ['v1/whitelist/submit', 'v1/whitelist/ping'],
+            users: ['v1/users/lookup', 'v1/users/provision', 'v1/users/grant', 'v1/users/revoke',
+                    'v1/auth/login', 'v1/auth/logout', 'v1/auth/verify', 'v1/auth/merge', 'v1/auth/status'],
+            federation: ['v1/federation/ping', 'v1/federation/export'],
+        };
+        ENDPOINTS.all = [...ENDPOINTS.whitelist, ...ENDPOINTS.users, ...ENDPOINTS.federation];
+
+        const bridgeOn = (document.body.dataset.bridgeOn || '0') === '1';
+        const submitBlock = $('cl-opts-submit-block');
+        const bridgeNote = $('cl-opts-bridge-note');
+        const canBox = $('cl-opts-can');
+
+        const applyScope = () => {
+            submitBlock.hidden = !canSubmit();
+            // The endpoint list is rebuilt every time, so it can never disagree with the select above it.
+            canBox.textContent = '';
+            canBox.appendChild(el('div', { className: 'cl-can-head', text: t('js.wl.cl_can') }));
+            const list = el('div', { className: 'cl-can-list' });
+            (ENDPOINTS[scope.value] || []).forEach(e => list.appendChild(el('code', { text: e })));
+            canBox.appendChild(list);
+            if (!canSubmit()) {
+                canBox.appendChild(el('div', { className: 'cl-hint', text: t('js.wl.cl_only_wl') }));
+            }
+            // A `users` key is what the sign-in bridge runs on, so its state belongs on this screen:
+            // making the key and then finding every auth call answering 503 is a wasted afternoon.
+            bridgeNote.hidden = !canUsers();
+            if (canUsers()) {
+                bridgeNote.className = 'cl-note ' + (bridgeOn ? 'cl-note-ok' : 'cl-note-warn');
+                bridgeNote.textContent = t(bridgeOn ? 'js.wl.cl_bridge_on' : 'js.wl.cl_bridge_off');
+            }
+            if (scope.value === 'federation') {
+                canBox.appendChild(el('div', { className: 'cl-hint', text: t('js.wl.cl_fed_note') }));
+            }
+            paint();
+        };
+        applyScope();
+        // The scope redraws the dialog; everything else only redraws the guide address.
+        const watched = [label, approve, ...boxes];
         watched.forEach(c => c.addEventListener('change', paint));
+        scope.addEventListener('change', applyScope);
 
         return new Promise(resolve => {
             let done = null;
@@ -1483,6 +1549,7 @@
                 $('cl-opts-save').removeEventListener('click', save);
                 modalEl.removeEventListener('hidden.bs.modal', onHide);
                 watched.forEach(c => c.removeEventListener('change', paint));
+                scope.removeEventListener('change', applyScope);
                 resolve(done);
             };
             $('cl-opts-save').addEventListener('click', save);
@@ -1499,8 +1566,13 @@
         const u = new URL((document.body.dataset.apiBase || '/').replace(/api\.php\?endpoint=$/, ''), location.href);
         u.searchParams.set('action', 'apidocs');
         u.searchParams.set('scope', scope || 'whitelist');
-        u.searchParams.set('approve', autoApprove ? 'auto' : 'review');
-        if (fields && fields.length) u.searchParams.set('fields', fields.join(','));
+        // approve= and fields= describe submissions. On a key that cannot submit they would be two
+        // parameters the guide has to ignore, and an operator comparing the link to the dialog would
+        // find them saying something the dialog does not.
+        if (scope === 'whitelist' || scope === 'all') {
+            u.searchParams.set('approve', autoApprove ? 'auto' : 'review');
+            if (fields && fields.length) u.searchParams.set('fields', fields.join(','));
+        }
         return u.toString();
     }
 
@@ -1660,6 +1732,15 @@
         $('wl-filter-banned').addEventListener('change', (e) => { state.wl.banned = e.target.value; state.wl.page = 1; loadWhitelist(); });
         const revSel = $('wl-filter-review');
         if (revSel) revSel.addEventListener('change', (e) => { state.wl.review = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        const waitBtn = $('wl-waiting');
+        if (waitBtn) waitBtn.addEventListener('click', () => {
+            // A toggle, not a one-way trip: pressing it again gives the operator their table back.
+            const on = state.wl.review === 'pending';
+            state.wl.review = on ? '' : 'pending';
+            if (revSel) revSel.value = state.wl.review;
+            state.wl.page = 1;
+            loadWhitelist();
+        });
         // Approve / turn down whatever is selected. Behind panel.whitelist.content, the same
         // permission as approving a description — both are "a person decided whether this belongs".
         const partnerReviewAct = async (op) => {

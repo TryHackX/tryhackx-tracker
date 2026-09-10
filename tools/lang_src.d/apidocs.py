@@ -162,6 +162,24 @@ add('a.wl', {
 })
 
 add('js.wl', {
+    'cl_scope_wl':     ('whitelist — register torrents', 'whitelist — rejestrowanie torrentów'),
+    'cl_scope_users':  ('users — accounts and the sign-in bridge', 'users — konta i mostek logowania'),
+    'cl_scope_fed':    ('federation — exchange lists with another tracker',
+                        'federation — wymiana list z innym trackerem'),
+    'cl_scope_all':    ('all — everything above (use sparingly)', 'all — wszystko powyższe (używaj oszczędnie)'),
+    'cl_can':          ('What this key may call', 'Co ten klucz może wywołać'),
+    'cl_only_wl':      ('Approval and required fields apply to registering torrents, so they are only '
+                        'asked for a key that can do it.',
+                        'Zatwierdzanie i wymagane pola dotyczą rejestrowania torrentów, więc pytamy o nie '
+                        'tylko przy kluczu, który to potrafi.'),
+    'cl_bridge_on':    ('This key can sign the partner\'s members in here through the bridge. It is on.',
+                        'Ten klucz może logować tutaj użytkowników partnera przez mostek. Mostek jest włączony.'),
+    'cl_bridge_off':   ('The sign-in bridge is off, so the five v1/auth/* endpoints answer 503 for this '
+                        'key. Turn it on in Settings → Sign-in bridge.',
+                        'Mostek logowania jest wyłączony, więc pięć endpointów v1/auth/* odpowie temu '
+                        'kluczowi 503. Włącz go w Ustawieniach → Mostek logowania.'),
+    'cl_fed_note':     ('What this key may take is set once for every peer, in Settings → Federation.',
+                        'Co ten klucz może pobrać, ustawia się raz dla wszystkich peerów, w Ustawieniach → Federacja.'),
     'review_pending':  ('Waiting for review', 'Czeka na przegląd'),
     'review_approved': ('Approved', 'Zatwierdzone'),
     'review_rejected': ('Turned down', 'Odrzucone'),
@@ -172,6 +190,7 @@ add('js.wl', {
     'approved_n':      ('Approved :n', 'Zatwierdzono :n'),
     'rejected_n':      ('Turned down :n', 'Odrzucono :n'),
     'partner':         ('via :name', 'przez :name'),
+    'n_waiting_review': (':n waiting for review', ':n czeka na przegląd'),
     'lbl_review':      ('Review', 'Przegląd'),
     # Duplicated from a.wl above ON PURPOSE. The panel's JS bundle carries every `js.` string and
     # nothing else (langJsBundle), so a script reaching for an `a.` key renders the key itself. The
@@ -230,6 +249,36 @@ add('a.wl', {
     'cl_docs_open':    ('Open the guide', 'Otwórz instrukcję'),
     'cl_settings':     ('Settings', 'Ustawienia'),
     'cl_save':         ('Save', 'Zapisz'),
+
+    # ── the scope, named by what it lets a key DO ───────────────────────────
+    # "users" and "federation" are words from the code. On a screen where somebody is deciding how
+    # much to trust a partner, the option has to say what it buys them.
+    'cl_scope_wl':     ('whitelist — register torrents', 'whitelist — rejestrowanie torrentów'),
+    'cl_scope_users':  ('users — accounts and the sign-in bridge', 'users — konta i mostek logowania'),
+    'cl_scope_fed':    ('federation — exchange lists with another tracker',
+                        'federation — wymiana list z innym trackerem'),
+    'cl_scope_all':    ('all — everything above (use sparingly)', 'all — wszystko powyższe (używaj oszczędnie)'),
+    'cl_can':          ('What this key may call', 'Co ten klucz może wywołać'),
+    'cl_can_none':     ('Nothing — pick a scope.', 'Nic — wybierz zakres.'),
+
+    'cl_f_hash':       ('The torrent itself', 'Sam torrent'),
+    'cl_f_always':     ('always required', 'zawsze wymagane'),
+
+    # ── what a scope means for the rest of the dialog ───────────────────────
+    'cl_only_wl':      ('Approval and required fields apply to <strong>registering torrents</strong>, so '
+                        'they are only asked for a key that can do it.',
+                        'Zatwierdzanie i wymagane pola dotyczą <strong>rejestrowania torrentów</strong>, '
+                        'więc pytamy o nie tylko przy kluczu, który to potrafi.'),
+    'cl_bridge_on':    ('This key can sign the partner\'s members in here through the bridge. It is on.',
+                        'Ten klucz może logować tutaj użytkowników partnera przez mostek. Mostek jest włączony.'),
+    'cl_bridge_off':   ('The sign-in bridge is <strong>off</strong>, so the five <code>v1/auth/*</code> '
+                        'endpoints answer 503 for this key. Turn it on in Settings → Sign-in bridge.',
+                        'Mostek logowania jest <strong>wyłączony</strong>, więc pięć endpointów '
+                        '<code>v1/auth/*</code> odpowie temu kluczowi 503. Włącz go w Ustawieniach → Mostek logowania.'),
+    'cl_fed_note':     ('What this key may take is set once for every peer, in Settings → Federation — '
+                        'not here.',
+                        'Co ten klucz może pobrać, ustawia się raz dla wszystkich peerów, w Ustawieniach → '
+                        'Federacja — nie tutaj.'),
 })
 
 add('js.wl', {

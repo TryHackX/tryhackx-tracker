@@ -1,7 +1,18 @@
 """Render-level check of the two UI reports, the way smoke_admin.py authenticates."""
-import http.cookiejar, json, re, sys, urllib.request
+import http.cookiejar, json, os, re, sys, urllib.request
 
 BASE = "http://127.0.0.1:8089/"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# The brute-force lockout is a FILE and it outlives every other reset — an earlier suite that fails
+# a few sign-ins on purpose (smoke_admin does) leaves the counter near its limit, and this one then
+# cannot sign in at all. Clearing it is fixture setup, not a way around the feature: the lockout's
+# own behaviour is covered by deploy/smoke_admin.py and tests/rate_limit_test.php.
+for _f in ("login_attempts.json", "rate_limits.json", "rate_limits.json.lock"):
+    try:
+        os.unlink(os.path.join(ROOT, "config", _f))
+    except OSError:
+        pass
 jar = http.cookiejar.CookieJar()
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 

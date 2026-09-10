@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/detail-panel.css<?= assetVer('assets/css/detail-panel.css') ?>">
 </head>
 <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
-<body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-api-ban-days="<?= (int)($cfg['api_ban_days'] ?? 30) ?>" data-service="<?= sanitize($svcName) ?>" data-near-pages="<?= max(1, min(20, (int)($cfg['admin_near_pages'] ?? 2))) ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>" data-files-mode="<?= sanitize(indexFilesAdminMode($cfg)) ?>">
+<body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-api-ban-days="<?= (int)($cfg['api_ban_days'] ?? 30) ?>" data-service="<?= sanitize($svcName) ?>" data-near-pages="<?= max(1, min(20, (int)($cfg['admin_near_pages'] ?? 2))) ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>" data-files-mode="<?= sanitize(indexFilesAdminMode($cfg)) ?>" data-bridge-on="<?= (function_exists('authBridgeEnabled') && authBridgeEnabled($cfg)) ? '1' : '0' ?>">
     <div class="admin-container admin-wide wl-page">
         <div class="admin-header">
             <h2><i class="bi bi-list-check"></i> <?= _h('a.wl.title') ?></h2>
@@ -131,6 +131,10 @@
                         <?php /* The partner review queue. 'none' is a real answer rather than the
                                  absence of one: it means the row was published directly, which is a
                                  different thing from one nobody has looked at yet. */ ?>
+                        <?php /* Shown only when something is waiting, and it is a BUTTON: the count
+                                 and the way to act on it are the same control, so nobody has to
+                                 work out which filter value corresponds to the number they read. */ ?>
+                        <button type="button" class="btn btn-sm wl-waiting-chip" id="wl-waiting" hidden></button>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="wl-filter-review" title="<?= _h('a.wl.review_filter') ?>">
                             <option value=""><?= _h('a.wl.review_any') ?></option>
                             <option value="pending"><?= _h('a.wl.review_pending') ?></option>
@@ -482,44 +486,73 @@
                     <h5 class="modal-title"><i class="bi bi-key text-warning"></i> <span id="cl-opts-title"></span></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label wl-hint" for="cl-opts-label"><?= _h('a.wl.cl_label') ?></label>
+                <div class="modal-body cl-opts">
+                    <div class="cl-field">
+                        <label class="cl-label" for="cl-opts-label"><?= _h('a.wl.cl_label') ?></label>
                         <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="cl-opts-label" maxlength="100" placeholder="<?= _h('a.wl.cl_label_ph') ?>">
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label wl-hint" for="cl-opts-scope"><?= _h('a.wl.col_scope') ?></label>
+                    <div class="cl-field">
+                        <label class="cl-label" for="cl-opts-scope"><?= _h('a.wl.col_scope') ?></label>
+                        <?php /* THE SCOPE DECIDES WHAT THE REST OF THIS DIALOG IS.
+                                 Each option names the endpoints it opens, because "users" and
+                                 "federation" mean nothing to somebody who has not read the guide —
+                                 and everything below reacts to this choice rather than sitting there
+                                 collecting answers the API will never look at. */ ?>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary" id="cl-opts-scope">
-                            <option value="whitelist">whitelist</option>
-                            <option value="users">users</option>
-                            <option value="federation">federation</option>
-                            <option value="all">all</option>
+                            <option value="whitelist"><?= _h('a.wl.cl_scope_wl') ?></option>
+                            <option value="users"><?= _h('a.wl.cl_scope_users') ?></option>
+                            <option value="federation"><?= _h('a.wl.cl_scope_fed') ?></option>
+                            <option value="all"><?= _h('a.wl.cl_scope_all') ?></option>
                         </select>
-                        <div class="form-text wl-hint" id="cl-opts-scope-hint"><?= __('a.wl.cl_scope_hint') ?></div>
+                        <div class="cl-hint" id="cl-opts-scope-hint"><?= __('a.wl.cl_scope_hint') ?></div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label wl-hint" for="cl-opts-approve"><?= _h('a.wl.cl_approve') ?></label>
-                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="cl-opts-approve">
-                            <option value="auto"><?= _h('a.wl.cl_approve_auto') ?></option>
-                            <option value="review"><?= _h('a.wl.cl_approve_rev') ?></option>
-                        </select>
-                        <div class="form-text wl-hint"><?= __('a.wl.cl_approve_hint') ?></div>
+
+                    <?php /* What this key can call, spelled out in endpoints. A scope is a word; this
+                             is the thing the word buys. */ ?>
+                    <div class="cl-can" id="cl-opts-can"></div>
+
+                    <?php /* Only for a key that can SUBMIT. A federation key never creates a
+                             whitelist row, so asking how its submissions should be approved is
+                             asking about something that cannot happen. */ ?>
+                    <div id="cl-opts-submit-block" hidden>
+                        <div class="cl-field">
+                            <label class="cl-label" for="cl-opts-approve"><?= _h('a.wl.cl_approve') ?></label>
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary" id="cl-opts-approve">
+                                <option value="auto"><?= _h('a.wl.cl_approve_auto') ?></option>
+                                <option value="review"><?= _h('a.wl.cl_approve_rev') ?></option>
+                            </select>
+                            <div class="cl-hint" id="cl-opts-approve-hint"><?= __('a.wl.cl_approve_hint') ?></div>
+                        </div>
+                        <div class="cl-field">
+                            <div class="cl-label"><?= _h('a.wl.cl_fields') ?></div>
+                            <?php /* The hash is not a choice. Showing it ticked and locked is the
+                                     difference between "these three are what an item needs" and
+                                     "these three are what YOU are adding on top". */ ?>
+                            <div class="form-check cl-check cl-check-fixed">
+                                <input class="form-check-input" type="checkbox" id="cl-opts-f-hash" checked disabled>
+                                <label class="form-check-label" for="cl-opts-f-hash"><?= _h('a.wl.cl_f_hash') ?> <code>magnet</code> / <code>hash</code>
+                                    <span class="cl-always"><?= _h('a.wl.cl_f_always') ?></span></label>
+                            </div>
+                            <div class="form-check cl-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-name" value="name"><label class="form-check-label" for="cl-opts-f-name"><?= _h('a.wl.cl_f_name') ?> <code>name</code></label></div>
+                            <div class="form-check cl-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-url" value="url"><label class="form-check-label" for="cl-opts-f-url"><?= _h('a.wl.cl_f_url') ?> <code>ref.url</code></label></div>
+                            <div class="form-check cl-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-source_id" value="source_id"><label class="form-check-label" for="cl-opts-f-source_id"><?= _h('a.wl.cl_f_source_id') ?> <code>ref.post_id</code></label></div>
+                            <div class="cl-hint"><?= __('a.wl.cl_fields_hint') ?></div>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <div class="form-label wl-hint"><?= _h('a.wl.cl_fields') ?></div>
-                        <div class="form-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-name" value="name"><label class="form-check-label" for="cl-opts-f-name"><?= _h('a.wl.cl_f_name') ?> <code>name</code></label></div>
-                        <div class="form-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-url" value="url"><label class="form-check-label" for="cl-opts-f-url"><?= _h('a.wl.cl_f_url') ?> <code>ref.url</code></label></div>
-                        <div class="form-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-source_id" value="source_id"><label class="form-check-label" for="cl-opts-f-source_id"><?= _h('a.wl.cl_f_source_id') ?> <code>ref.post_id</code></label></div>
-                        <div class="form-text wl-hint"><?= __('a.wl.cl_fields_hint') ?></div>
-                    </div>
-                    <div class="mb-2">
-                        <div class="form-label wl-hint"><?= _h('a.wl.cl_docs') ?></div>
+
+                    <?php /* Only for a key that can act on accounts. The sign-in bridge lives on the
+                             `users` scope, and a key made for it is useless while the bridge is off —
+                             which is a thing to say here, next to the choice, not to discover later. */ ?>
+                    <div class="cl-note" id="cl-opts-bridge-note" hidden></div>
+
+                    <div class="cl-field cl-field-last">
+                        <div class="cl-label"><?= _h('a.wl.cl_docs') ?></div>
                         <div class="wl-copybox">
                             <code id="cl-opts-docs" class="wl-copybox-code"></code>
                             <button type="button" class="btn btn-sm wl-copybox-btn" id="cl-opts-docs-copy" title="<?= _h('a.wl.cl_docs_copy') ?>" aria-label="<?= _h('a.wl.cl_docs_copy') ?>"><i class="bi bi-clipboard"></i></button>
                             <a class="btn btn-sm wl-copybox-btn" id="cl-opts-docs-open" href="#" target="_blank" rel="noopener noreferrer" title="<?= _h('a.wl.cl_docs_open') ?>" aria-label="<?= _h('a.wl.cl_docs_open') ?>"><i class="bi bi-box-arrow-up-right"></i></a>
                         </div>
-                        <div class="form-text wl-hint"><?= __('a.wl.cl_docs_hint') ?></div>
+                        <div class="cl-hint"><?= __('a.wl.cl_docs_hint') ?></div>
                     </div>
                     <div class="d-flex justify-content-end gap-2 mt-3">
                         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>

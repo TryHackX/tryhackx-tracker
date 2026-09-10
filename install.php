@@ -396,14 +396,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 'footer_os_since_year' => date('Y'),
             ];
 
-            // Whitelist / CAPTCHA provider / API defaults + schema version (see includes/schema.php)
+            // Whitelist / CAPTCHA provider / API defaults (see includes/schema.php)
             require_once __DIR__ . '/includes/schema.php';
+            // ensureSchema() below runs the data migrations, which read the permission registry
+            // (userPermissionList / userLegacyDefault) and re-read settings. The installer loads
+            // only functions.php on its own, so those two come in here rather than being discovered
+            // as a fatal halfway through writing somebody's database.
+            require_once __DIR__ . '/includes/settings.php';
+            require_once __DIR__ . '/includes/mail.php';
+            require_once __DIR__ . '/includes/users.php';
             $defaults += trackerSchemaDefaultSettings();
-            $defaults['schema_version'] = (string)TRACKER_SCHEMA_VERSION;
+            // schema_version deliberately 0 — see the block below.
+            $defaults['schema_version'] = '0';
 
             $stmt = $pdo->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)");
             foreach ($defaults as $k => $v) {
                 $stmt->execute([$k, $v]);
+            }
+
+            // ── A FRESH INSTALL GOES THROUGH THE UPGRADE PATH, NOT AROUND IT ──────────────────
+            //
+            // This used to stamp schema_version = TRACKER_SCHEMA_VERSION and stop, on the reasoning
+            // that trackerSchemaStatements() above had just created every table. It had not. A
+            // column added after its table was written lives in trackerSchemaGuardedStatements(),
+            // and a group permission added later lives in trackerSchemaDataMigrations() — and
+            // ensureSchema() returns immediately when the version already matches, so neither ran.
+            //
+            // Measured against an upgraded database, a fresh install was short of: fourteen columns
+            // on `whitelist` (source_url, description, content_status, probe_status, dead_since, the
+            // four rating columns…), four on `index_hashes`, `users.bulk_optout`, the whole
+            // `moderator` group, and seven permissions on `guest`/`member`. The whitelist page
+            // selects some of those columns by name, so the site did not come up.
+            //
+            // The fix is not to copy those definitions into the CREATE statements — that is the same
+            // two-places-to-remember that produced this. It is to have ONE path: build the base
+            // tables, then let the ordinary migration run from zero. It is the path every upgrade
+            // takes and the one the whole test battery exercises on every run.
+            $installCfg = [];
+            foreach ($pdo->query("SELECT `key`, `value` FROM settings")->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $installCfg[$row['key']] = $row['value'];
+            }
+            ensureSchema($pdo, $installCfg);
+            $landed = (int)($pdo->query("SELECT `value` FROM settings WHERE `key` = 'schema_version'")->fetchColumn() ?: 0);
+            if ($landed < TRACKER_SCHEMA_VERSION) {
+                // Never a half-built install reported as finished. schemaDeferHeavy() only defers a
+                // rebuild of a table that cannot exist yet, so on an empty database this means a
+                // migration actually failed — and its message is in the PHP error log.
+                throw new Exception('the database schema stopped at version ' . $landed . ' of '
+                    . TRACKER_SCHEMA_VERSION . ' — see the PHP error log, then reload this page');
             }
 
             // Mirror the panel admin into the user system (admin group members pass every

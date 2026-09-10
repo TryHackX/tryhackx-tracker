@@ -121,6 +121,15 @@ sudo systemctl reload apache2
 Then open `https://tracker.example.org/install.php`, work through the four steps, and **delete
 `install.php`** at the end — the last step offers to do it for you.
 
+The installer builds the database by running the ordinary migration from version zero, which is the
+same path an upgrade takes. That matters: until 1.42.0 it created the tables and then simply
+declared the schema current, so every column and every group permission added by a later migration
+was skipped — a fresh install came up short of nineteen columns and a whole moderator group. If the
+last step reports that the schema *stopped at version N*, the install is not finished: the reason is
+in the PHP error log, and reloading the page after fixing it resumes from where it stopped.
+`tests/install_test.php` builds both databases and diffs them, so the two paths cannot drift apart
+again.
+
 ⚠ **The Content-Security-Policy is sent by the application, not by the web server.** It is built per
 request in `includes/csp.php` so that it works on nginx (which never reads `.htaccess`) and so that
 every inline `<script>` can carry a per-request nonce — `script-src` has no `'unsafe-inline'`. It
@@ -496,6 +505,10 @@ the panel shows what each archive actually contains and how far it compressed.
 - [ ] A backup has been made *and verified* at least once.
 - [ ] You have signed in once as an ordinary member and checked the public pages look right —
       permissions are per-group, and the owner sees things a member does not.
+- [ ] Whatever you want ON is on. Everything that touches privacy or trust ships **off**: the
+      account system, favourites and public profiles (*Settings → Favourites*), the sign-in bridge
+      (*Settings → Sign-in bridge*), address lists, HSTS, and CSP enforcement. A default that
+      switched any of those on would be a decision taken on your behalf.
 
 ---
 
