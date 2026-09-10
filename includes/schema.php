@@ -1922,6 +1922,19 @@ function trackerSchemaDefaultSettings(): array {
         // something to change under an operator who has not asked.
         'index_keep_saved'            => 'off',
         'index_keep_saved_days'       => '90',  // clamped [1, 3650]
+        // ── The janitor's digest (includes/digest.php) ───────────────────────────────────────
+        // Off, like every other mail this site can send on its own. `digest_hours` is a floor
+        // between mails rather than an alarm clock, and `digest_min` is how much has to be waiting
+        // before one is worth sending; `digest_last_at` is state this feature writes, not a setting.
+        'digest_enabled'              => '0',
+        'digest_to'                   => '',    // empty = the site contact address
+        'digest_hours'                => '24',  // clamped [1, 168]
+        'digest_min'                  => '1',   // clamped [0, 10000]
+        'digest_last_at'              => '0',
+        // ?action=health (includes/health.php). Empty = the endpoint does not exist; a token has to
+        // be at least HEALTH_TOKEN_MIN characters or it is treated as empty, because a guessable
+        // token is not a smaller secret — it is a public endpoint.
+        'health_token'                => '',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

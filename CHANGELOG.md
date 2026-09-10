@@ -4,6 +4,56 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.46.0] — 2026-09-10
+
+Schema **52** (unchanged).
+
+### Added — the partner loop closes
+
+`v1/whitelist/status` answers what happened to the hashes a partner sent. A key set to *hold for
+review* got `pending` back from `v1/whitelist/submit` and then never heard another word: a person
+here approved the row or turned it down **with a note written for that partner**, and the note went
+nowhere. Ask with one hash in the query string or a batch in the body; each answer says the state
+(`live`, `pending`, `rejected`, `banned`, `unknown`, `invalid`), whether the tracker is serving it,
+and when it was submitted and reviewed.
+
+**The note goes only to the key that submitted the row.** Any key with the `whitelist` scope may ask
+about any hash — `v1/whitelist/submit` already answers `exists`, so nothing new is disclosed — but
+somebody else's row comes back with `mine: false` and no note. The status is a fact about the
+tracker; the note is a message to one partner. The integration guide at `?action=apidocs` grew a
+chapter about it, which says different things for a key that publishes directly and one that does
+not, because they need it for different reasons.
+
+### Added — the operator's digest
+
+Everything a person has to *decide* waits silently in the panel: a partner's submission held for
+review, a description waiting to be read, an abuse report nobody has opened, a message somebody
+reported. The tracker runs itself; the queues do not. **Settings → Operator digest** sends one mail
+saying what is waiting, from the janitor timer, through the existing mail configuration, logged in
+`sent_emails` like everything else.
+
+`digest_hours` is a **floor between mails, not a timetable**: a tick that finds nothing waiting does
+not stamp the clock, so the first thing to arrive after a quiet week is reported at once rather than
+at the end of an interval that started while there was nothing to say. `digest_min` is the other
+half. `digest_to` falls back to the site contact when empty — but a value that is not an address
+stops the mail rather than quietly sending the operator's queue summary somewhere else.
+
+### Added — a health check an uptime monitor can act on
+
+A monitor pointed at the home page proves that Apache answers. It does not notice that the database
+is a schema behind the code, that the accesslist has not been written since a failed reload three
+hours ago, that the metadata worker died with a queue behind it, or that the panel says WHITELIST
+while the tracker is running open. `?action=health` answers all of that as one JSON document:
+version, schema, mode agreement, accesslist state, worker heartbeat, queue depths, and a `problems`
+list a human can read in the alert.
+
+The levels come from the panel's own status card, so the endpoint and the dashboard cannot disagree
+about what healthy means — a `danger` warning there is `fail` here, which answers **HTTP 503** so
+that a monitor understanding only up/down still tells you. Without `health_token` the address does
+not exist, and a **wrong** token gets exactly what no token gets: the ordinary page. A probe cannot
+learn there is a secret to find. A token under 16 characters counts as empty — that is not a smaller
+secret, it is a public endpoint.
+
 ## [1.45.1] — 2026-09-10
 
 Schema **52** (unchanged).

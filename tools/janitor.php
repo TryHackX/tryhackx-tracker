@@ -46,6 +46,7 @@ require_once $root . '/includes/livesync.php';
 require_once $root . '/includes/reputation.php';
 require_once $root . '/includes/wlmaint.php';
 require_once $root . '/includes/wlprobe.php';
+require_once $root . '/includes/digest.php';
 
 try {
     $db  = getDb();
@@ -244,6 +245,14 @@ try {
             (int)($wm['dead']['marked'] ?? 0), (int)($wm['dead']['deleted'] ?? 0),
             $wm['error'] ? ' error=' . $wm['error'] : ''), "
 ";
+    }
+
+    // The operator's digest, LAST of the queue-changing work above so the numbers it reports are the
+    // ones a person would see if they opened the panel now. It only counts; it changes no queue.
+    $dg = digestTick($db, $cfg);
+    if ($dg['enabled'] && ($dg['sent'] || ($dg['skipped'] !== null && $dg['skipped'] !== 'not_due') || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[digest] sent=%s waiting=%d%s', $dg['sent'] ? 'yes' : 'no', (int)$dg['total'],
+            $dg['skipped'] !== null ? ' skipped=' . $dg['skipped'] : ''), "\n";
     }
 
     // live peer sync: refresh the cached view so the panel never forks a root script from a poll

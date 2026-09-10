@@ -323,6 +323,63 @@
                 </div>
             </div>
 
+            <?php /* The digest. Its own section rather than a row in "Public pages", because it is the
+                     one mail this site sends to the OPERATOR — everything else goes to a visitor —
+                     and because the queues it reports are the whole reason the panel has a badge. */ ?>
+            <div class="settings-section" id="section-digest" data-group="general" data-title="<?= _h('settings.digest_heading') ?>">
+                <h5><i class="bi bi-envelope-paper"></i> <?= _h('settings.digest_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.digest_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="digest_enabled">
+                        <label class="form-label"><?= _h('settings.digest_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="digest_enabled">
+                            <option value="0" <?= ($cfg['digest_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.digest_off') ?></option>
+                            <option value="1" <?= ($cfg['digest_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.digest_on') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.digest_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="digest_to">
+                        <label class="form-label"><?= _h('settings.digest_to') ?></label>
+                        <input type="email" class="form-control bg-dark text-light border-secondary" name="digest_to" value="<?= sanitize($cfg['digest_to'] ?? '') ?>" placeholder="<?= sanitize($cfg['site_email'] ?? 'ops@example.org') ?>">
+                        <small class="settings-hint"><?= _h('settings.digest_to_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="digest_hours">
+                        <label class="form-label"><?= _h('settings.digest_hours') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="digest_hours" value="<?= sanitize($cfg['digest_hours'] ?? '24') ?>" min="1" max="168">
+                        <small class="settings-hint"><?= _h('settings.digest_hours_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="digest_min">
+                        <label class="form-label"><?= _h('settings.digest_min') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="digest_min" value="<?= sanitize($cfg['digest_min'] ?? '1') ?>" min="0" max="10000">
+                        <small class="settings-hint"><?= _h('settings.digest_min_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <?php /* The health endpoint. Beside the digest because both answer the same question —
+                     "is anybody going to find out?" — one by mail on a schedule, one to whatever is
+                     watching this machine. */ ?>
+            <div class="settings-section" id="section-health" data-group="general" data-title="<?= _h('settings.health_heading') ?>">
+                <h5><i class="bi bi-activity"></i> <?= _h('settings.health_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.health_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-6" data-setting="health_token">
+                        <label class="form-label"><?= _h('settings.health_token') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="health_token"
+                               value="<?= sanitize($cfg['health_token'] ?? '') ?>" maxlength="128" autocomplete="off"
+                               placeholder="<?= _h('settings.health_token_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.health_token_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.health_url') ?></label>
+                        <?php $healthTok = trim((string)($cfg['health_token'] ?? '')); ?>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" readonly
+                               value="<?= sanitize(rtrim((string)($cfg['site_url'] ?? ''), '/') . '/?action=health' . ($healthTok !== '' ? '&token=' . $healthTok : '')) ?>">
+                        <small class="settings-hint"><?= __('settings.health_url_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
             <!-- Tracker mode & whitelist -->
             <div class="settings-section" id="section-reputation" data-group="content" data-title="<?= _h('settings.rep_heading') ?>">
                 <h5><i class="bi bi-hand-thumbs-up"></i> <?= _h('settings.rep_heading') ?></h5>

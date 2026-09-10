@@ -39,6 +39,7 @@ $allowed = [
     'fav_enabled', 'fav_max_per_user', 'fav_public_enabled', 'fav_who_enabled', 'profiles_enabled',
     'lists_enabled', 'lists_public_enabled', 'lists_max_per_user', 'lists_max_items',
     'index_keep_saved', 'index_keep_saved_days',
+    'digest_enabled', 'digest_to', 'digest_hours', 'digest_min', 'health_token',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -310,6 +311,7 @@ $intClamp = [
     'lists_max_per_user' => [1, 200, 20], 'lists_max_items' => [10, 5000, 500],
     'pm_max_per_day' => [1, 1000, 50], 'pm_max_chars' => [200, 20000, 4000],
     'index_keep_saved_days' => [1, 3650, 90],
+    'digest_hours' => [1, 168, 24], 'digest_min' => [0, 10000, 1],
     'wl_edit_max_pending' => [0, 50, 3],
     'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],
     'wl_dead_after_days' => [0, 3650, 0], 'wl_dead_every_days' => [1, 365, 30],

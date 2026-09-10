@@ -292,6 +292,9 @@ $apiRoutes = [
     // ── Server-to-server API (bearer key; see includes/api_auth.php) ──
     'v1/whitelist/submit'        => 'api/v1/whitelist_submit.php',
     'v1/whitelist/ping'          => 'api/v1/whitelist_ping.php',
+    // What happened to the rows a partner sent — including the note a moderator wrote when turning
+    // one down. Without it a key that does not publish directly gets 'pending' and never hears again.
+    'v1/whitelist/status'        => 'api/v1/whitelist_status.php',
     // Its own scope, not a flag on the one above: registering a hash and blocking one are two
     // different authorities, and a forum trusted with the first is not thereby trusted with the second.
     'v1/blacklist/submit'        => 'api/v1/blacklist_submit.php',

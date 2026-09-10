@@ -850,6 +850,52 @@ listed as a trusted proxy. What none of that fixes is one person with a VPN and 
 bucketed to a /64, and the panel says anonymous votes are a weak signal rather than implying
 otherwise.
 
+### The operator's digest (1.46.0)
+
+Everything a person has to *decide* waits silently in the panel: a partner's submission held for
+review, a description waiting to be read, an abuse report nobody has opened, a message somebody
+reported. The tracker runs itself; the queues do not. **Settings → Operator digest** sends one mail
+saying what is waiting — from the janitor timer, never from a page view, through the same mail
+configuration and logged in `sent_emails` like everything else.
+
+`digest_hours` is a **floor between mails, not a timetable**: a tick that finds nothing waiting does
+not stamp the clock, so the first thing to arrive after a quiet week is reported at once rather than
+at the end of an interval that started while there was nothing to say. `digest_min` is the other
+half — an operator who does not want to hear about one held submission can ask for five. `digest_to`
+is empty by default and falls back to the site contact address; a value that is **not** an address
+stops the mail rather than quietly redirecting it, and the janitor prints `skipped=no_address`.
+
+### A health check an uptime monitor can act on (1.46.0)
+
+A monitor pointed at the home page proves that Apache answers. It does not notice that the database
+is a schema behind the code, that the accesslist has not been written since a failed reload three
+hours ago, that the metadata worker died with a queue behind it, or that the panel says WHITELIST
+while the tracker is actually running open. Each of those is a tracker that looks healthy from
+outside and is not doing its job.
+
+**Settings → Health check** sets `health_token` (16 characters minimum — a shorter one counts as
+empty, because a guessable token is not a smaller secret but a public endpoint). Then:
+
+```
+GET /?action=health&token=<token>            # or the X-Health-Token header, which keeps it out of the access log
+→ 200 {"ok":true,"status":"ok","version":"1.46.0","schema":{"version":52,"expected":52,"ok":true},
+       "mode":{"panel":"whitelist","actual":"whitelist","match":true},
+       "accesslist":{"entries":159,"file_bytes":6519,"written_age":48,"regen_needed":false,
+                     "pending_reload":false,"last_reload_ok":true,"fail_count":0},
+       "worker":{"heartbeat_age":21},
+       "queues":{"partners":0,"descriptions":0,"abuse":0,"messages":0,"meta_pending":0},
+       "problems":[],"server_time":1789067048}
+→ 503 {"ok":false,"status":"fail","problems":["schema 51, expected 52"], …}
+```
+
+The levels come from the panel's own status card, so the endpoint and the dashboard cannot disagree
+about what healthy means: a `danger` warning there is `fail` here (HTTP **503**, so a monitor that
+only understands up/down still tells you), a `warn` is `warn` (still 200 — keyword-match
+`"status":"ok"` in Uptime Kuma to catch those too). Without a token the address does not exist, and
+a **wrong** token gets exactly what no token gets — the ordinary page — so a probe cannot learn there
+is a secret to find. Rate-limited to 120 requests a minute per address; the mode comparison reads the
+janitor's cached answer rather than forking `sudo` on every poll.
+
 ### The panel's log (1.22.0)
 
 **Log** in the panel navigation, behind its own `panel.audit.view` permission. Who did what, when,
@@ -1518,6 +1564,13 @@ Content-Type: application/json
         "summary":{"added":1,"exists":0,"banned":0,"invalid":0},"active_in_seconds":37,"server_time":1755500000}
 
 GET  /api.php?endpoint=v1/whitelist/ping   → {"ok":true,"server_time":..,"mode":"whitelist","whitelist_count":159,"api_version":1,"client":"label"}
+
+GET  /api.php?endpoint=v1/whitelist/status&hash=<40 hex>[,<40 hex>…]
+POST /api.php?endpoint=v1/whitelist/status   {"items":["<40 hex>","magnet:?xt=urn:btih:…"]}
+→ 200 {"ok":true,"results":[{"index":0,"hash":"...","status":"live|pending|rejected|banned|unknown|invalid",
+        "served":false,"mine":true,"name":"...","review_note":"Duplicate of an earlier post",
+        "reviewed_at":"2026-09-10T11:20:00+00:00","submitted_at":"2026-09-10T09:05:00+00:00"}],
+       "summary":{"unknown":0,"pending":0,"rejected":1,"live":0,"banned":0,"invalid":0}}
 ```
 
 Rules (deliberately strict — "very restrictive"):
@@ -1549,6 +1602,15 @@ when they hand out the key. Both are on **Whitelist → API clients → ⚙**.
 - **Required with every item** — any of `name`, `ref.url`, `ref.post_id`. An item missing one is
   refused **on its own**, as `invalid` with `missing_<field>`; the rest of the batch still goes
   through. A review queue of unnamed hashes cannot be reviewed.
+
+**Asking what happened** (`v1/whitelist/status`, 1.46.0) is the other half of holding a submission.
+A held row comes back as `pending` and, until this endpoint existed, the partner never heard another
+word: a person here approved it or turned it down with a note written *for them*, and that note went
+nowhere. Ask with one hash in the query string or a batch in the body, and each answer says what
+state the row is in, whether the tracker is serving it, and — **only for the key that submitted the
+row** — the moderator's note and when it was written. Any key with the `whitelist` scope may ask
+about any hash (`v1/whitelist/submit` already answers `exists`), but `mine: false` comes back without
+a note: the status is a fact about the tracker, the note is a message to one partner.
 
 The review queue is the ordinary whitelist table with a **Review** filter (waiting / approved /
 turned down / not reviewed), Approve and Turn-down over a selection, and the **partner's name against

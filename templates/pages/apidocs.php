@@ -69,6 +69,22 @@ $exReply = json_encode([
     'required_fields' => $docFields,
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
+// "What happened to what I sent?" — the other half of a key that does not publish directly. The
+// example shows a row that was turned down, because that is the case the note exists for.
+$exStatusReply = json_encode([
+    'ok' => true,
+    'results' => [[
+        'index' => 0, 'hash' => '0123456789abcdef0123456789abcdef01234567',
+        'status' => $docReview ? 'rejected' : 'live', 'served' => !$docReview, 'mine' => true,
+        'name' => 'Example release name',
+        'review_note' => $docReview ? 'Duplicate of an earlier post' : null,
+        'reviewed_at' => $docReview ? '2026-09-10T11:20:00+00:00' : null,
+        'submitted_at' => '2026-09-10T09:05:00+00:00',
+    ]],
+    'summary' => ['unknown' => 0, 'pending' => 0, 'rejected' => $docReview ? 1 : 0,
+                  'live' => $docReview ? 0 : 1, 'banned' => 0, 'invalid' => 0],
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
 // The abuse example, built from the same answers. Only the fields this key must send are shown:
 // an integrator copying this should be copying something their key will accept.
 $exAbuseItem = ['magnet' => 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'];
@@ -162,6 +178,30 @@ Content-Type: application/json</code></pre>
     </tbody>
 </table>
 </div>
+
+<?php /* Asking again, later. A key that publishes directly rarely needs this; a key whose rows wait
+         for a person needs it every time, which is why the paragraph above the example changes. */ ?>
+<h2><?= _h('apidocs.h_check') ?></h2>
+<p><?= __($docReview ? 'apidocs.check_body_review' : 'apidocs.check_body_auto') ?></p>
+<pre class="apidocs-pre"><code>GET <?= sanitize($docApi . 'v1/whitelist/status') ?>&amp;hash=0123456789abcdef0123456789abcdef01234567
+
+POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
+
+{"items": ["0123456789abcdef0123456789abcdef01234567"]}</code></pre>
+<pre class="apidocs-pre"><code><?= sanitize($exStatusReply) ?></code></pre>
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_status') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>live</code></td><td><?= _h('apidocs.ck_live') ?></td></tr>
+        <tr><td><code>pending</code></td><td><?= _h('apidocs.ck_pending') ?></td></tr>
+        <tr><td><code>rejected</code></td><td><?= _h('apidocs.ck_rejected') ?></td></tr>
+        <tr><td><code>banned</code></td><td><?= _h('apidocs.ck_banned') ?></td></tr>
+        <tr><td><code>unknown</code></td><td><?= _h('apidocs.ck_unknown') ?></td></tr>
+    </tbody>
+</table>
+</div>
+<p class="text-muted"><?= __('apidocs.check_note') ?></p>
 <?php endif; ?>
 
 <?php if ($showAbuse): ?>

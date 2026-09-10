@@ -160,6 +160,34 @@ $routes = [
 
 $baseUrl = getBaseUrl();
 
+// ── ?action=health ──
+// One JSON answer for an uptime monitor, before the router for the same reason the bridge is: it
+// renders no page. Off unless `health_token` is set, and a WRONG token gets exactly what no token
+// gets — the request falls through to the ordinary router and the site behaves as though this
+// address did not exist. See includes/health.php.
+if ($action === 'health') {
+    require_once __DIR__ . '/includes/health.php';
+    require_once __DIR__ . '/includes/digest.php';   // the queue depths, counted in one place
+    if (healthAuthorised($cfg, $_SERVER['HTTP_X_HEALTH_TOKEN'] ?? null, $_GET['token'] ?? null)) {
+        // A monitor that starts hammering must not become the outage. The window is generous
+        // enough for a 30-second poll and small enough that a loop cannot cost anything.
+        if (!rateLimitAllow('health', ipBucket(getClientIp($cfg)), 120, 60)) {
+            http_response_code(429);
+            header('Retry-After: 60');
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'status' => 'rate_limited']);
+            exit;
+        }
+        $health = healthReport($db, $cfg);
+        http_response_code((int)$health['http']);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store');
+        echo json_encode($health['body'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $action = 'home';
+}
+
 // ── The sign-in bridge ──
 // Before the router, because neither of its two addresses renders anything: one spends a one-time
 // ticket and sets a session cookie, the other mints one and leaves. Both end in a redirect, and a
