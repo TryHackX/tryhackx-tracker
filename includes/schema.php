@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 55;  // 55 = users.pm_muted_until + users.banned_until — a moderator can answer a reported message with something between nothing and a permanent ban
+const TRACKER_SCHEMA_VERSION = 56;  // 56 = data only: the 'pm' notifications go, because an unread message is counted where it is read
+                                    // 55 = users.pm_muted_until + users.banned_until — a moderator can answer a reported message with something between nothing and a permanent ban
                                     // 54 = message_typing — a conversation that refreshes itself, and the line that says the other person is writing
                                     // 53 = user_twofa + users.sessions_valid_from + user_tokens.ip/ua — a second factor for member accounts, and "signed in on N devices"
                                     // 52 = message_threads/user_messages/message_reports + user_friends + user_blocks + users.pm_who/profile_listed — people reaching each other
@@ -1094,6 +1095,19 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'users', 'pm_muted_until')) $uparts[] = "ADD COLUMN `pm_muted_until` DATETIME DEFAULT NULL";
     if (!schemaColumnExists($db, 'users', 'banned_until')) $uparts[] = "ADD COLUMN `banned_until` DATETIME DEFAULT NULL";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
+
+    // v56: a message no longer leaves a notification behind.
+    //
+    // It used to leave two records of one event — a row in user_notifications and an unread message
+    // — and only one of them was cleared by reading the message, so the account link kept a number
+    // that nothing on the page could explain. The unread message is now the only record, counted on
+    // the Messages tab and added into the number in the navigation.
+    //
+    // The old rows are deleted rather than left to be filtered out for ever: they say "somebody sent
+    // you a message" about messages that have long since been read, and nothing will ever write
+    // another one. Statements here run on every upgrade past this version, which costs one indexed
+    // delete of nothing at all.
+    $out[] = "DELETE FROM `user_notifications` WHERE `type` = 'pm'";
 
     // v47: who registered a whitelist row, and whether they want it shown on their profile.
     //

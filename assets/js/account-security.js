@@ -104,9 +104,13 @@
             };
             go.addEventListener('click', run);
             pass.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); run(); } });
-            var row = el('div', { className: 'acc-2fa-row' });
-            row.appendChild(pass); row.appendChild(go); row.appendChild(cancel); row.appendChild(msg);
+            // The field on its own line and the two answers under it. Side by side they wrapped
+            // wherever the card happened to end, which put Cancel on a line of its own looking like
+            // a third, unrelated button.
             box.appendChild(el('p', { className: 'acc-2fa-head', text: t('js.sec.password_head') }));
+            box.appendChild(pass);
+            var row = el('div', { className: 'acc-2fa-row' });
+            row.appendChild(go); row.appendChild(cancel); row.appendChild(msg);
             box.appendChild(row);
             pass.focus();
         }
@@ -121,7 +125,9 @@
                 q.innerHTML = r.qr;
                 box.appendChild(q);
             }
-            box.appendChild(el('p', { className: 'text-muted', text: t('js.sec.secret_is') }));
+            // This sentence belongs to the key underneath it, not to the square above it — so the
+            // space goes above the sentence and not between the sentence and what it introduces.
+            box.appendChild(el('p', { className: 'text-muted acc-2fa-keynote', text: t('js.sec.secret_is') }));
             box.appendChild(el('code', { className: 'acc-2fa-secret', text: r.secret }));
             var code = el('input', { type: 'text', className: 'profile-search', inputmode: 'numeric',
                                      autocomplete: 'one-time-code', maxlength: 10, placeholder: t('js.sec.code_ph') });
@@ -140,8 +146,9 @@
             };
             go.addEventListener('click', run);
             code.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); run(); } });
+            box.appendChild(code);
             var row = el('div', { className: 'acc-2fa-row' });
-            row.appendChild(code); row.appendChild(go); row.appendChild(cancel); row.appendChild(msg);
+            row.appendChild(go); row.appendChild(cancel); row.appendChild(msg);
             box.appendChild(row);
             code.focus();
         }

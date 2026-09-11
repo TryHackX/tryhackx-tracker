@@ -4,6 +4,51 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.50.0] — 2026-09-11
+
+Schema **56** — data only: the `pm` notifications are removed.
+
+### Changed — one message is one record
+
+A message used to leave **two** records of one event: an unread message, and a notification saying
+somebody had sent one. Reading the message cleared one of them, so the number on the account link
+outlived the conversation it was about and nothing on the page could explain it.
+
+The unread message is now the only record. It is counted on the **Messages** tab, and the number on
+the account link is the **sum** of the two things a reader actually has waiting — notifications plus
+unread messages — so 2 notifications and 3 messages read as *5* in the navigation, *2* on
+Notifications and *3* on Messages. The migration deletes the `pm` notifications already written,
+because they describe messages that have long since been read and nothing will write another.
+
+### Changed — the inbox keeps up, and opening a conversation reads it
+
+* **The list is polled too**, wherever live refresh is switched on: two facts and no rows — the
+  moment of the newest line anywhere in the inbox, and how many are unread — and the list is redrawn
+  only when one of them has moved. A message can now arrive with the inbox on screen and be seen.
+  The baseline is handed out **with the list itself**, because a first tick that sets its own
+  baseline silently swallows everything that arrived while the list was being drawn.
+* **Opening a conversation marks its row read in the list**, immediately. The list stands beside the
+  conversation rather than being replaced by it, so a row still saying "2 waiting" next to the
+  conversation those two are in was simply wrong until the next reload.
+* **The waiting count is a badge beside the time**, not a bar across the row: as two children of a
+  two-column row it was landing in the column that holds the name, and being stretched to fill it.
+
+### Fixed — the account page
+
+* The **QR square for two-factor** is drawn at its own size again. The server draws one rectangle per
+  module at whole-pixel coordinates with `shape-rendering="crispEdges"`; the page was forcing that
+  onto 190 px, which no version of the code divides into, so the browser rounded each edge on its own
+  and rows of modules came out a pixel wider than their neighbours. The white behind it is now as
+  wide as the code rather than as wide as the card, and the sentence about typing the key by hand
+  sits with the key instead of against the square.
+* **The password field is a line of its own**, centred, with the two answers under it — in the
+  two-factor card and in "signed in on N devices", where the field and its button are now one column
+  of one width with room between them and the paragraph that explains them.
+* The three buttons under the account heading are sized like buttons under a heading.
+* The Settings label for the "…is writing" switch was written in HTML entities and printed through
+  `_h()`, which escapes — so it read `&ldquo;…is writing&rdquo;`. `tests/lang_test.php` now fails if
+  any escaped label is written that way.
+
 ## [1.49.0] — 2026-09-10
 
 Schema **55** — `users.pm_muted_until`, `users.banned_until`.

@@ -283,6 +283,30 @@ function pmUnreadCount(PDO $db, int $userId): int
 }
 
 /**
+ * The moment of the newest line anywhere in this reader's inbox — the one fact that says whether a
+ * drawn list is still the truth.
+ *
+ * Two lookups rather than one with OR: `idx_thread_low` and `idx_thread_high` each answer
+ * MAX(last_message_at) for one constant from the end of the index, and an OR across both indexes is
+ * the shape that has cost this project a 500 before. The two are compared as strings, which for
+ * 'Y-m-d H:i:s' is the same order as time.
+ *
+ * It is handed out BOTH by the drawing of the list and by the poll that watches it, because the
+ * only honest baseline is the moment the list on the screen was built. Letting the first tick set
+ * the baseline instead loses everything that arrived between the draw and that tick.
+ */
+function pmInboxStamp(PDO $db, int $userId): string
+{
+    $one = $db->prepare("SELECT MAX(last_message_at) FROM message_threads WHERE u_low = ? AND u_low_hidden = 0");
+    $one->execute([$userId]);
+    $a = (string)($one->fetchColumn() ?: '');
+    $two = $db->prepare("SELECT MAX(last_message_at) FROM message_threads WHERE u_high = ? AND u_high_hidden = 0");
+    $two->execute([$userId]);
+    $b = (string)($two->fetchColumn() ?: '');
+    return $a > $b ? $a : $b;
+}
+
+/**
  * Everything a page needs about one reader and this whole area, in one call.
  *
  * Same shape as favContext() and listsContext() — a page that reassembles gates is a page that gets

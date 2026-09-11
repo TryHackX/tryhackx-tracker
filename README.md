@@ -742,7 +742,11 @@ default — with it off, everything behaves exactly like the classic single-admi
   "started" event waiting for a "stopped" that may never come. A moderator answering a report can
   (1.49.0) **silence an account's messages** or **ban the account** for a number of days or until
   somebody lifts it — both stored as dates, so a punishment with an end needs nobody to remember to
-  end it, and neither can be applied from that card to an account that can open the panel.
+  end it, and neither can be applied from that card to an account that can open the panel. A message
+  writes **no notification** beside itself (1.50.0): the unread message is the record, counted on the
+  Messages tab, and the number on the account link is that count plus the unread notifications — so
+  reading a conversation is what clears it. With live refresh on, the **inbox list** keeps up the
+  same way an open conversation does, for two facts and no rows.
 - **Lists** (1.44.0, `lists_enabled`, off by default): a **collection somebody makes on purpose** —
   a name, the torrents they put in it, and their own answer to who may see it. Useful in blacklist
   mode, where there is no whitelist to group anything by: a reader can still gather a pack and hand

@@ -1,3 +1,28 @@
+/**
+ * The number on the account link in the navigation.
+ *
+ * It is the sum of two different things that are read in two different places — notifications, on
+ * the Notifications tab, and unread messages, on the Messages tab — so neither owner can write the
+ * number on its own. Both hand their half here instead: whoever learns a fresh count sets it, and
+ * this adds them up. The tab badges beside them stay separate, because a reader who sees 5 in the
+ * navigation needs the two tabs to tell them which is which.
+ */
+window.NavUnread = {
+    notif: 0,
+    pm: 0,
+    set: function (kind, n) {
+        this[kind] = Math.max(0, Number(n) || 0);
+        this.render();
+    },
+    render: function () {
+        var b = document.getElementById('nav-unread');
+        if (!b) return;
+        var total = this.notif + this.pm;
+        b.textContent = total ? String(total) : '';
+        b.hidden = total <= 0;
+    },
+};
+
 // === CAPTCHA ===
 // The modal itself lives in assets/js/captcha.js (window.showCaptchaModal / window.captchaReset),
 // shared with the admin panel and provider-agnostic (reCAPTCHA v2 / v3, Turnstile, hCaptcha).
@@ -2088,8 +2113,9 @@ const getJson = async (endpoint) => {
                 groupsBox.appendChild(div);
             });
         }
-        const navBadge = $id('nav-unread'), accBadge = $id('acc-unread-badge');
-        if (navBadge) { navBadge.textContent = String(me.unread); navBadge.hidden = me.unread <= 0; }
+        window.NavUnread.notif = Math.max(0, Number(me.unread) || 0);
+        window.NavUnread.set('pm', me.unread_pm);
+        const accBadge = $id('acc-unread-badge');
         if (accBadge) { accBadge.textContent = t('js.app.unread_count', {n: me.unread}); accBadge.hidden = me.unread <= 0; }
     }
     let notifPage = 1;
@@ -2130,7 +2156,7 @@ const getJson = async (endpoint) => {
             // Where this notification happened. A friend request that says somebody is waiting and
             // then leaves the reader to find the tab themselves is a notification that has told
             // them half of it. The hash is enough: assets/js/favourites.js listens for it.
-            const NOTIF_TAB = { friend_request: 'people', friend_accepted: 'people', pm: 'messages' };
+            const NOTIF_TAB = { friend_request: 'people', friend_accepted: 'people' };
             const tab = NOTIF_TAB[n.type];
             if (tab) {
                 const go = document.createElement('a');
@@ -2173,7 +2199,9 @@ const getJson = async (endpoint) => {
             // not on the account page — still light up the nav badge for signed-in users
             if ($id('nav-unread')) {
                 getJson('user_me').then(me => {
-                    if (me && me.success && me.unread > 0) { const b = $id('nav-unread'); b.textContent = String(me.unread); b.hidden = false; }
+                    if (!me || !me.success) return;
+                    window.NavUnread.notif = Math.max(0, Number(me.unread) || 0);
+                    window.NavUnread.set('pm', me.unread_pm);
                 });
             }
             return;

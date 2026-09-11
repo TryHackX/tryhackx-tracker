@@ -313,5 +313,46 @@ check('a ban with no end date stays until somebody lifts it',
 $db->prepare("UPDATE users SET status = 'active', banned_until = NULL WHERE id = ?")->execute([(int)$bob['id']]);
 $db->prepare("DELETE FROM users WHERE username IN ('pmmute','pmmate')")->execute();
 
+/* ── one message, one record (v56) ──────────────────────────────────────────────────────────────
+ *
+ * A message used to write a notification beside itself, and reading the message cleared only one of
+ * the two — so the number on the account link outlived the conversation it was about, and nothing
+ * on the page could explain it. The unread message is now the only record of the message, which is
+ * what makes reading it enough.
+ */
+$nid = $mk($db, $cfg, 'pmnotif');
+$db->prepare("INSERT INTO user_notifications (user_id, type, title) VALUES (?, 'pm', 'old one')")->execute([$nid]);
+$db->prepare("INSERT INTO user_notifications (user_id, type, title) VALUES (?, 'friend_request', 'keep me')")->execute([$nid]);
+$migrated = 0;
+foreach (trackerSchemaGuardedStatements($db) as $q) {
+    if (stripos($q, 'user_notifications') !== false) { $db->exec($q); $migrated++; }
+}
+check('the upgrade carries a statement for the notifications already written', $migrated === 1);
+check('… and it removes the ones a message left behind',
+    (int)$db->query("SELECT COUNT(*) FROM user_notifications WHERE user_id = $nid AND type = 'pm'")->fetchColumn() === 0);
+check('… and nothing else — a friend request is still a notification',
+    (int)$db->query("SELECT COUNT(*) FROM user_notifications WHERE user_id = $nid")->fetchColumn() === 1);
+check('the schema version was bumped, or the statement would never run', TRACKER_SCHEMA_VERSION >= 56);
+$src = (string)file_get_contents(__DIR__ . '/../api/user_messages.php');
+check('and sending a message does not write one any more', !str_contains($src, 'userNotify('));
+check('the inbox has a poll of its own — two facts and no rows',
+    str_contains($src, "'inbox' => true") && str_contains($src, "'stamp' =>"));
+// And the one fact the list is watched by: the moment of the newest line in this reader's inbox.
+$mateId = $mk($db, $cfg, 'pmstamp');
+check('an inbox with nothing in it has no moment', pmInboxStamp($db, $nid) === '');
+$th = pmThreadFor($db, $nid, $mateId);
+$db->prepare("UPDATE message_threads SET last_message_at = '2026-01-02 03:04:05' WHERE id = ?")->execute([(int)$th['id']]);
+check('… and one with a conversation in it reports that conversation',
+    pmInboxStamp($db, $nid) === '2026-01-02 03:04:05');
+$db->prepare("UPDATE message_threads SET last_message_at = '2026-01-02 03:04:06' WHERE id = ?")->execute([(int)$th['id']]);
+check('… and it moves when the newest line does', pmInboxStamp($db, $nid) === '2026-01-02 03:04:06');
+// Hidden means hidden: a conversation somebody has put away does not keep their list awake.
+$col = (int)$th['u_low'] === $nid ? 'u_low_hidden' : 'u_high_hidden';
+$db->prepare("UPDATE message_threads SET $col = 1 WHERE id = ?")->execute([(int)$th['id']]);
+check('… and a conversation this reader has put away is not one of theirs', pmInboxStamp($db, $nid) === '');
+$db->prepare("DELETE FROM message_threads WHERE id = ?")->execute([(int)$th['id']]);
+$db->prepare("DELETE FROM user_notifications WHERE user_id = ?")->execute([$nid]);
+$db->prepare("DELETE FROM users WHERE id IN (?, ?)")->execute([$nid, $mateId]);
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

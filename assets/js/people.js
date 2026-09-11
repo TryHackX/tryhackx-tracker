@@ -102,8 +102,47 @@
         function badge(n) {
             var b = document.getElementById('pm-unread');
             if (b) { b.textContent = n ? String(n) : ''; b.hidden = !n; }
-            var nav = document.querySelector('.nav-pm-badge');
-            if (nav) { nav.textContent = n ? String(n) : ''; nav.hidden = !n; }
+            // The account link in the navigation carries one number for the whole account, so the
+            // messages half is handed to whoever owns that sum rather than written from here.
+            if (window.NavUnread) window.NavUnread.set('pm', n);
+        }
+
+        /**
+         * The inbox, keeping up with itself.
+         *
+         * A conversation that is not open still receives messages, and a list that only changes when
+         * somebody reloads the page is a list that is wrong most of the time — which is how a new
+         * message could arrive with the inbox on screen and nothing to show for it.
+         *
+         * It asks for two facts and no rows: the moment of the newest line anywhere in this inbox,
+         * and how many are unread. The list is redrawn only when one of the two has moved from what
+         * was drawn, so the usual tick costs one small request and changes nothing. It runs a little
+         * slower than an open conversation does, because a list is read at a glance and a
+         * conversation is watched.
+         */
+        var inboxTimer = 0, inboxStamp = null, inboxUnread = -1;
+        function stopInbox() { if (inboxTimer) { clearInterval(inboxTimer); inboxTimer = 0; } }
+
+        async function inboxPoll() {
+            // Not while a conversation is open (that one asks for itself), not from a background
+            // tab, and not from another tab of the account page — offsetParent is null for anything
+            // with a hidden ancestor, which is the question being asked.
+            if (openWith || !list || document.hidden || list.offsetParent === null || polling) return;
+            polling = true;
+            var j = null;
+            try { j = await get('user_messages&poll=1'); }
+            finally { polling = false; }
+            if (!j || !j.success || openWith) return;
+            if (j.off) { stopInbox(); return; }     // the operator switched it off mid-session
+            badge(j.unread);
+            // The baseline came with the list itself, so a message that arrived between drawing it
+            // and this first tick is a difference, not something this tick quietly adopts.
+            //
+            // The unread count is asked as well as the moment, because the moment has a resolution
+            // of one second: two messages inside the same second carry the same stamp, and the
+            // second of them would wait for a third to be drawn.
+            if (inboxStamp !== null && (j.stamp !== inboxStamp || j.unread !== inboxUnread)) loadInbox();
+            else { inboxStamp = j.stamp; inboxUnread = j.unread; }
         }
 
         async function loadInbox() {
@@ -122,16 +161,35 @@
                 return;
             }
             badge(j.unread);
+            inboxStamp = j.stamp || null;
+            inboxUnread = Number(j.unread || 0);
+            live = Number(j.live || live || 0);
+            if (live > 0 && !inboxTimer) inboxTimer = setInterval(inboxPoll, Math.max(4, live) * 1000);
             var ql = q.toLowerCase();
             var rows = (j.threads || []).filter(function (x) { return deep || !ql || x.with.toLowerCase().indexOf(ql) !== -1; });
             if (!rows.length) { list.appendChild(el('div', { className: 'pf-empty', text: t(q ? 'js.pm.no_match' : 'js.pm.no_threads') })); return; }
             rows.forEach(function (x) {
                 var row = el('button', { type: 'button', className: 'pm-row' + (x.unread ? ' pm-row-unread' : '') });
                 row.appendChild(el('span', { className: 'pm-who', text: x.with }));
+                // The count and the time are one cell, on the right of the name. Appended as two
+                // children of the row they were two grid items, and the count — landing in the
+                // column that holds the name — was stretched into a bar the width of the row.
+                var meta = el('span', { className: 'pm-meta' });
+                if (x.unread) meta.appendChild(el('span', { className: 'pm-count', text: String(x.unread) }));
+                meta.appendChild(el('span', { className: 'pm-when text-muted', text: when(x.last_at) }));
+                row.appendChild(meta);
                 row.appendChild(el('span', { className: 'pm-preview text-muted', text: (x.mine ? t('js.pm.you_prefix') : '') + x.preview }));
-                if (x.unread) row.appendChild(el('span', { className: 'pm-count', text: String(x.unread) }));
-                row.appendChild(el('span', { className: 'pm-when text-muted', text: when(x.last_at) }));
-                row.addEventListener('click', function () { openThread(x.with); });
+                row.addEventListener('click', function () {
+                    // Opening it IS reading it, and the list stands beside the conversation rather
+                    // than being replaced by it — so a row still saying "2 waiting" next to the
+                    // conversation those two are in is simply wrong until the next reload.
+                    row.classList.remove('pm-row-unread');
+                    var c = row.querySelector('.pm-count');
+                    if (c) c.remove();
+                    list.querySelectorAll('.pm-row-open').forEach(function (r) { r.classList.remove('pm-row-open'); });
+                    row.classList.add('pm-row-open');
+                    openThread(x.with);
+                });
                 list.appendChild(row);
             });
         }

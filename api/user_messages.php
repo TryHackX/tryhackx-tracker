@@ -71,7 +71,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // hiding is "I am done with this for now", not "never show me this person again".
         $db->prepare("UPDATE message_threads SET last_message_at = NOW(), u_low_hidden = 0, u_high_hidden = 0 WHERE id = ?")
            ->execute([(int)$thread['id']]);
-        userNotify($db, $tid, 'pm', __('notify.pm_new', ['user' => $me['username']]));
+        // No notification. The message IS the notification: it is counted on the Messages tab and
+        // added into the number on the account link, and reading it clears both. A second record of
+        // the same event was a number that stayed up after the conversation had been read.
         jsonResponse(['success' => true, 'thread' => (int)$thread['id']]);
     }
 
@@ -172,6 +174,16 @@ if ((string)($_GET['poll'] ?? '') === '1') {
     }
     $with = trim((string)($_GET['with'] ?? ''));
     $after = max(0, (int)($_GET['after'] ?? 0));
+    // ── no conversation named: the INBOX is asking ────────────────────────────────────────────
+    //
+    // A list of conversations goes stale exactly as fast as an open one does, and the person
+    // looking at it is looking at it. So it gets the same courtesy for less: two facts, neither of
+    // them a row — the moment of the newest line anywhere in this inbox (see pmInboxStamp), and how
+    // many are unread. The page redraws the list only when the first has moved from what it drew.
+    if ($with === '') {
+        jsonResponse(['success' => true, 'inbox' => true,
+                      'stamp' => pmInboxStamp($db, $uid), 'unread' => pmUnreadCount($db, $uid)]);
+    }
     $them = userValidUsername($with) ? userFindByLogin($db, $with) : null;
     if (!$them) jsonResponse(['error' => 'not_found'], 404);
     $thread = pmThreadFor($db, $uid, (int)$them['id'], false);
@@ -305,6 +317,9 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $t) {
         'preview' => mb_substr($preview, 0, 140),
     ];
 }
-jsonResponse(['success' => true, 'threads' => $threads, 'deep' => $deep, 'unread' => pmUnreadCount($db, $uid),
+// The stamp goes out with the list itself: the baseline the poll compares against has to be the
+// moment THIS list was built, or everything that arrives before the first tick is never drawn.
+jsonResponse(['success' => true, 'threads' => $threads, 'deep' => $deep, 'live' => pmLiveSeconds($cfg),
+              'stamp' => pmInboxStamp($db, $uid), 'unread' => pmUnreadCount($db, $uid),
               'max_chars' => pmMaxChars($cfg), 'max_per_day' => pmMaxPerDay($cfg),
               'sent_today' => pmSentToday($db, $uid)]);

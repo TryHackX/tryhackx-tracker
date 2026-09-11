@@ -332,6 +332,25 @@ foreach (glob($root . '/templates/*.php') + glob($root . '/templates/admin/*.php
 }
 check('every template takes <html lang> from langCurrent()', $badLang === [], implode(', ', $badLang));
 
+/* ── a label printed through _h() may not be written in HTML ─────────────────
+   `_h()` escapes, which is the whole point of it: these strings reach the page as text and a
+   stranger's translation must not be able to open a tag. So a dictionary entry that reaches a
+   template that way and contains `&ldquo;` prints the six characters, not the quote — which is
+   what the Settings page did with the "…is writing" switch for a release. Write the character. */
+$entities = [];
+$dict = require $root . '/lang/en.php';
+foreach (glob($root . '/templates/*.php') + glob($root . '/templates/admin/*.php') + glob($root . '/templates/pages/*.php') as $f) {
+    $src = (string)@file_get_contents($f);
+    if (!preg_match_all("/_h\(\s*'([A-Za-z0-9_.]+)'/", $src, $mk)) continue;
+    foreach (array_unique($mk[1]) as $k) {
+        $v = (string)($dict[$k] ?? '');
+        if ($v !== '' && preg_match('/&(?:[a-zA-Z][a-zA-Z0-9]{1,10}|#\d{2,5}|#x[0-9a-fA-F]{2,6});/', $v)) {
+            $entities[] = basename($f) . ' -> ' . $k;
+        }
+    }
+}
+check('no escaped label is written as HTML entities', $entities === [], implode(', ', $entities));
+
 
 /* ── the in-place language switch (assets/js/lang-swap.js) ───────────────────
    The browser half is driven by a real browser in scratchpad/shots/langswap_check.js. What is

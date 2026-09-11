@@ -30,4 +30,7 @@ jsonResponse([
     'verify_restricted' => $verifyGate && !$trusted && !userIsAdminGroup($db, (int)$u['id']),
     'email_change' => userEmailChangeState($db, $u),
     'unread' => userUnreadCount($db, (int)$u['id']),
+    // Waiting messages are counted separately from notifications because they are read in a
+    // different place. The navigation adds them up; the Notifications tab shows only its own.
+    'unread_pm' => pmEnabled($cfg) ? pmUnreadCount($db, (int)$u['id']) : 0,
 ]);
