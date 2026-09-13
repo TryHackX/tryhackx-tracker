@@ -405,6 +405,7 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
     <h2 class="section-heading-spaced"><?= _h('account.tab_lists') ?></h2>
     <div id="account-lists" class="profile-section"
          data-magnet="<?= userCan($db, $cfg, 'index.magnet') ? '1' : '0' ?>"
+         data-share="<?= ($cfg['search_share_enabled'] ?? '1') === '1' ? '1' : '0' ?>"
          data-may-publish="<?= $accLists['may_publish'] ? '1' : '0' ?>"
          data-public-ok="<?= $accLists['public_ok'] ? '1' : '0' ?>"
          data-max-lists="<?= (int)$accLists['max_lists'] ?>"

@@ -144,6 +144,11 @@ jsonResponse([
     'success'   => true,
     'info_hash' => $hash,
     'name'      => $idx['name'] ?? ($wl['name'] ?? null),
+    // Only for a reader who may have it — the same permission that lets a search row carry the hash.
+    // Built here, by buildMagnet(), so the panel offers the announce URLs this tracker actually
+    // answers on (every extra instance included) rather than a link a script glued together.
+    'magnet'    => userCan($db, $cfg, 'index.magnet')
+                   ? buildMagnet($hash, (string)($idx['name'] ?? ($wl['name'] ?? '')), $cfg) : null,
     'whitelisted' => $canWl ? (bool)$wl : null,
     // The panel always has the hash, so the star is available here even where the row could not
     // carry one (api/index_search.php sends info_hash only with index.magnet).

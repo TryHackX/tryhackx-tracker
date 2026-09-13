@@ -110,6 +110,11 @@ def php_str(value):
 PRIMARY_UDP = "udp://tracker.example.org:6969/announce"
 EXTRA_UDP = "udp://tracker.example.org:6970/announce"
 DOWN_PORT = "6971"
+# The ports are looked for as PARTS OF AN ADDRESS (":6971/"), never as bare digits: a page also
+# carries swarm counts, sizes and hashes, and a whitelist row with 16 971 seeders once made this
+# suite report that a down instance was being announced.
+EXTRA_BIT = ":6970/"
+DOWN_BIT = ":6971/"
 
 # The whitelist page only prints its announce block inside the branch that shows a working
 # registration form, so the run needs whitelist mode AND a configured CAPTCHA -- the dummy keys below
@@ -151,7 +156,7 @@ php("setSetting($db, 'ot_cluster_enabled', '0'); setSetting($db, 'ot_cluster_cmd
     "otClusterStateSet([]); echo 'off';")
 home_before = get_anon("/")
 check("with the cluster off the home page names the primary port", PRIMARY_UDP in home_before)
-check("... and no extra port", "6970" not in home_before and DOWN_PORT not in home_before)
+check("... and no extra port", EXTRA_BIT not in home_before and DOWN_BIT not in home_before)
 check("... and no multi-port note", "announce-extra-note" not in home_before)
 
 try:
@@ -181,7 +186,7 @@ try:
     # ── home ────────────────────────────────────────────────────────────────
     home = get("/")
     check("the home page now names the extra instance's port", EXTRA_UDP in home)
-    check("... and never names the instance that is not listening", DOWN_PORT not in home)
+    check("... and never names the instance that is not listening", DOWN_BIT not in home)
     check("... and still names the primary's, first",
           PRIMARY_UDP in home and home.index(PRIMARY_UDP) < home.index(EXTRA_UDP))
     check("... and says why there is more than one, in the visitor's own terms",
@@ -195,7 +200,7 @@ try:
     # ── whitelist ───────────────────────────────────────────────────────────
     wl = get("/?action=whitelist")
     check("the whitelist page carries the extra port too", EXTRA_UDP in wl)
-    check("... and not the one that is down", DOWN_PORT not in wl)
+    check("... and not the one that is down", DOWN_BIT not in wl)
     wl_copy = re.search(r'id="wl-announce-copy"[^>]*>(.*?)</span>', wl, re.S)
     check("... and its copy button covers every port",
           wl_copy is not None and EXTRA_UDP in wl_copy.group(1),
@@ -211,7 +216,7 @@ try:
     else:
         val = m.group(1).replace("&#039;", "'").replace("&amp;", "&")
         check("the search form hands the extra ports to the browser", EXTRA_UDP in val, val)
-        check("... and not the port of the instance that is down", DOWN_PORT not in val, val)
+        check("... and not the port of the instance that is down", DOWN_BIT not in val, val)
 
     # ── the magnet the server itself builds ─────────────────────────────────
     magnet = php(
@@ -220,8 +225,8 @@ try:
         "echo buildMagnet(str_repeat('c', 40), 'x', $cfg);"
     ).strip()
     check("the magnet the server builds names the extra port -- the only way a client reaches it",
-          "6970" in magnet, magnet)
-    check("... and does not name the port nothing is listening on", DOWN_PORT not in magnet, magnet)
+          EXTRA_BIT in magnet or "%3A6970%2F" in magnet, magnet)
+    check("... and does not name the port nothing is listening on", DOWN_BIT not in magnet and "%3A6971%2F" not in magnet, magnet)
 
 finally:
     restore = "".join(

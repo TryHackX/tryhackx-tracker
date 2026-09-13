@@ -4460,3 +4460,16 @@ add('', {
     'js.wl.cl_abuse_auto_badge': ('Blocks on arrival',
         'Blokuje od razu'),
 })
+
+
+# ── 1.51.0: the Info panel copies, and a public list can be handed over ─────
+add('', {
+    'js.app.copy_hash': ('Copy the info hash',
+        'Kopiuj info hash'),
+    'js.app.row_magnet': ('Magnet link',
+        'Link magnet'),
+    'js.lists.share': ('Share',
+        'Udostępnij'),
+    'js.lists.share_link': ('Link to this list',
+        'Link do tej listy'),
+})

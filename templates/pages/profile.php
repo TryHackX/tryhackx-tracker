@@ -117,6 +117,7 @@ $showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profL
      data-uploads="<?= $showUploads ? '1' : '0' ?>"
      data-lists="<?= $showLists ? '1' : '0' ?>"
      data-magnet="<?= $canMagnet ? '1' : '0' ?>"
+     data-share="<?= ($cfg['search_share_enabled'] ?? '1') === '1' ? '1' : '0' ?>"
      data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>"
      data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>">
     <?php if ($showFav): ?>

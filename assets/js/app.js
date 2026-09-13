@@ -2158,12 +2158,16 @@ const getJson = async (endpoint) => {
             // them half of it. The hash is enough: assets/js/favourites.js listens for it.
             const NOTIF_TAB = { friend_request: 'people', friend_accepted: 'people' };
             const tab = NOTIF_TAB[n.type];
+            // One row for whatever can be done about it, with room between the buttons. Appended to
+            // the card one after the other they were two inline elements touching.
+            const acts = document.createElement('div');
+            acts.className = 'acc-notif-acts';
             if (tab) {
                 const go = document.createElement('a');
                 go.className = 'btn btn-secondary btn-small acc-notif-go';
                 go.href = '#' + tab;
                 go.textContent = t('js.app.notif_go_' + tab);
-                item.appendChild(go);
+                acts.appendChild(go);
             }
             if (!n.read_at) {
                 const mark = document.createElement('button');
@@ -2174,8 +2178,9 @@ const getJson = async (endpoint) => {
                     await postJson('user_notifications', { csrf_token: $id('account-csrf').value, ids: [n.id] });
                     loadNotifications(); loadAccount();
                 });
-                item.appendChild(mark);
+                acts.appendChild(mark);
             }
+            if (acts.children.length) item.appendChild(acts);
             box.appendChild(item);
         });
         if (pag && json.pages > 1) {
@@ -2437,6 +2442,20 @@ const getJson = async (endpoint) => {
             dropShareBox(btn);
             flashShared(btn);
         }).catch(reveal);
+    }
+    // The list cards in assets/js/favourites.js hand over a list's address through this too, so the
+    // site has one clipboard routine and one fallback rather than two that drift apart.
+    window.ShareLink = share;
+    /** A small Copy beside a value in the Info panel. Same path, same fallback, same "Copied". */
+    function copyButton(text, label) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-secondary btn-small info-copy';
+        b.textContent = t('js.app.copy');
+        b.title = label;
+        b.setAttribute('aria-label', label);
+        b.addEventListener('click', () => share(b, text, label));
+        return b;
     }
 
     let infoOverlay = null, infoHash = null;
@@ -2860,7 +2879,26 @@ const getJson = async (endpoint) => {
         hashEl.className = 'info-hash';
         hashEl.textContent = json.info_hash;
         // Full width, label above value: forty characters have nowhere to go in half a grid column.
-        grid.appendChild(infoRow(t('js.app.row_info_hash'), hashEl, 'info-kv-wide'));
+        const hashWrap = document.createElement('span');
+        hashWrap.className = 'info-copyable';
+        hashWrap.appendChild(hashEl);
+        hashWrap.appendChild(copyButton(json.info_hash, t('js.app.copy_hash')));
+        grid.appendChild(infoRow(t('js.app.row_info_hash'), hashWrap, 'info-kv-wide'));
+        // The magnet is built by the server out of its own announce URLs (buildMagnet() in
+        // includes/whitelist.php — the same function the panel's rows use) and sent only to a reader
+        // with index.magnet, the gate the search rows already obey. Nothing here assembles a URL of
+        // its own.
+        if (json.magnet) {
+            const mWrap = document.createElement('span');
+            mWrap.className = 'info-copyable';
+            const mLink = document.createElement('a');
+            mLink.className = 'info-magnet';
+            mLink.href = json.magnet;
+            mLink.textContent = json.magnet;
+            mWrap.appendChild(mLink);
+            mWrap.appendChild(copyButton(json.magnet, t('js.app.copy_magnet')));
+            grid.appendChild(infoRow(t('js.app.row_magnet'), mWrap, 'info-kv-wide'));
+        }
         const det = document.createElement('div');
         det.className = 'info-section';
         const detH = document.createElement('div');

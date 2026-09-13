@@ -1,5 +1,13 @@
 /* === Base === */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* The hidden attribute beats every display a class sets. The user agent's own [hidden] rule is
+   `display: none` at zero specificity, so `.nav-unread { display: inline-block }` won over it and an
+   EMPTY badge drew as a pill after the account name whenever the count was zero — the link was wider
+   signed in with nothing waiting than with one thing waiting. The same shape sat under the
+   Notifications heading (.acc-badge) and behind the password checklist (.pw-checklist). One rule,
+   with !important, the way Bootstrap's reboot does it for the panel; the per-class
+   `.x[hidden] { display: none }` lines further down stay, but nothing depends on them any more. */
+[hidden] { display: none !important; }
 
 :root {
     --bg: #000011;
@@ -1663,6 +1671,10 @@ footer p { margin: 0.25rem 0; }
 .acc-notif-head { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .acc-notif-body { margin: 0.35rem 0; font-size: 0.9rem; white-space: pre-line; }
 .acc-notif .btn-small { margin-top: 0.25rem; }
+/* The actions under a notification are one row with room between them. Appended straight to the
+   card they were two inline elements with nothing in between — "Open People" glued to "Mark read". */
+.acc-notif-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.45rem; }
+.acc-notif-acts .btn-small { margin: 0; }
 .acc-notif-tools { display: inline-flex; gap: 0.4rem; margin-left: 0.5rem; vertical-align: 0.1em; }
 .acc-notif-tools .btn-small { margin: 0; }
 .acc-badge-ok { background: rgba(76, 175, 80, 0.2); color: var(--success); border: 1px solid var(--success); }
@@ -2353,8 +2365,18 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
                     margin: 0.7rem 0 1rem; }
 .acc-sessions-act[hidden] { display: none; }
 .acc-sessions-act .profile-search, .acc-sessions-act .btn { width: 100%; max-width: 18rem; }
+/* .profile-search carries `flex: 1 1 14rem` for the toolbars it usually sits in. This column is a
+   flex container too, and in a column the basis is the HEIGHT — so the password box came out
+   fourteen rem tall, a square with a caret in one corner. It is an input; it keeps its own height. */
+.acc-sessions-act .profile-search { flex: 0 0 auto; }
 .acc-sessions-act .text-muted { text-align: center; }
 
+/* A value with a Copy beside it, in the Info panel: the hash, the magnet. The magnet is one long
+   token and breaks anywhere rather than pushing the panel wider than the screen. */
+.info-copyable { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; max-width: 100%; }
+.info-copyable .info-hash, .info-copyable .info-magnet { min-width: 0; overflow-wrap: anywhere; word-break: break-all; }
+.info-copyable .info-magnet { font-family: var(--mono, monospace); font-size: 0.82rem; }
+.info-copyable .share-url { flex: 1 1 100%; }
 /* The report button: a flag, at message size, that stops disappearing when the eye is looking for
    it. Still quiet — it sits under somebody else's words and is pressed once in a hundred reads. */
 .pm-report { color: var(--text-muted); border: 1px solid transparent; border-radius: 4px; padding: 0 0.3rem; }
@@ -2375,7 +2397,7 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .pm-new-row[hidden] { display: none; }
 .pm-new-row .profile-search { flex: 1 1 auto; }
 /* The number on the People tab: somebody is waiting for an answer. Same shape as the inbox's. */
-.pm-unread-badge { display: none; min-width: 1.2em; margin-left: 0.35em; padding: 0 0.35em; border-radius: 999px;
+.pm-unread-badge { display: none; min-width: 1.2em; margin-left: 0.1em; padding: 0 0.35em; border-radius: 999px;
     background: var(--accent); color: #fff; font-size: 0.72rem; line-height: 1.5; text-align: center; }
 .pm-unread-badge:not([hidden]) { display: inline-block; }
 .pm-msg-note { font-size: 0.8rem; }
@@ -2385,7 +2407,10 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .pm-typing[hidden] { display: none; }
 .pm-closed { margin-top: 0.7rem; border-top: 1px solid var(--border); padding-top: 0.7rem; color: #e0b15a; font-size: 0.85rem; }
 .pm-note { font-size: 0.8rem; margin-top: 0.6rem; }
-.pm-unread-badge, .nav-pm-badge { background: var(--accent); color: #000; border-radius: 999px; padding: 0 0.4em; font-size: 0.7rem; margin-left: 0.3rem; }
+/* The number belongs to the word. The markup already leaves a space before the badge, and a margin
+   on top of that put "Messages" and its count a word apart; the margin now only keeps the pill off
+   the letter it follows. */
+.pm-unread-badge { background: var(--accent); color: #000; border-radius: 999px; padding: 0 0.4em; font-size: 0.7rem; margin-left: 0.1em; }
 .pe-tabs { margin-bottom: 0.6rem; }
 .pe-count { color: var(--text-muted); font-size: 0.8rem; }
 .pe-row .pf-main { gap: 0.6rem; }

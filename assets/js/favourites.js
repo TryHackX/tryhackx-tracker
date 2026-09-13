@@ -485,8 +485,12 @@
             c.appendChild(head);
             if (list.description) c.appendChild(el('div', { className: 'list-desc text-muted', text: list.description }));
 
+            var acts = el('div', { className: 'list-card-acts' });
+            // A public list has an address, and the address can be handed over — with the button the
+            // rest of the site uses for that, through the same clipboard routine (window.ShareLink,
+            // assets/js/app.js). A private list has no address anybody else could open.
+            if (list.is_public && shareEnabled()) acts.appendChild(shareButton(list, state));
             if (list.own) {
-                var acts = el('div', { className: 'list-card-acts' });
                 if (state.ctx.mayPublish) {
                     var vis = el('button', { type: 'button', className: 'pf-vis' + (list.is_public ? ' pf-vis-on' : ''),
                                              text: t(list.is_public ? 'js.lists.vis_on' : 'js.lists.vis_off') });
@@ -521,8 +525,8 @@
                     render();
                 });
                 acts.appendChild(del);
-                c.appendChild(acts);
             }
+            if (acts.children.length) c.appendChild(acts);
 
             name.addEventListener('click', function () { openListOverlay(list, cfg, state); });
             return c;
@@ -577,6 +581,7 @@
                 return;
             }
             state.ctx = { mayPublish: !!j.may_publish, maxLists: j.max_lists, maxItems: j.max_items };
+            state.owner = String(j.owner || '');
             state.lists = (j.lists || []).map(function (l) { return Object.assign({}, l, { own: !!j.own }); });
             if (cfg.totalEl) {
                 cfg.totalEl.textContent = state.lists.length
@@ -593,7 +598,42 @@
             var r = await post('user_lists', { op: 'create', name: name });
             if (r && r.success) await load();
             return r;
+        }, open: function (slug) {
+            // A shared address names the list by its slug; the overlay is the list.
+            var hit = null;
+            state.lists.forEach(function (l) { if (!hit && l.slug === slug) hit = l; });
+            if (hit) openListOverlay(hit, cfg, state);
+            return !!hit;
         } };
+    }
+
+    /* ─────────────────── handing a public list to somebody ─────────────────── */
+
+    /** Sharing is one switch for the whole site (search_share_enabled); the sections that carry lists say whether it is on. */
+    function shareEnabled() {
+        return !!document.querySelector('[data-share="1"]');
+    }
+    /** The list's address: the owner's profile, opened on that list. Absolute, because it leaves this page. */
+    function listAddress(list, state) {
+        var owner = (state && state.owner) || '';
+        if (!owner || !list.slug) return '';
+        var u;
+        try { u = new URL(location.href); } catch (e) { return ''; }
+        u.search = '';
+        u.hash = '';
+        u.searchParams.set('action', 'u');
+        u.searchParams.set('name', owner);
+        return u.href + '#list:' + encodeURIComponent(list.slug);
+    }
+    function shareButton(list, state) {
+        var b = el('button', { type: 'button', className: 'btn btn-secondary btn-small share-btn list-share',
+                               text: t('js.lists.share'), title: t('js.lists.share_link') });
+        b.addEventListener('click', function () {
+            var url = listAddress(list, state);
+            if (!url) return;
+            if (typeof window.ShareLink === 'function') window.ShareLink(b, url, t('js.lists.share_link'));
+        });
+        return b;
     }
 
     /**
@@ -613,6 +653,7 @@
         head.appendChild(el('span', { className: 'list-count text-muted',
             text: t(list.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: list.items }) }));
         if (list.is_public) head.appendChild(el('span', { className: 'pf-badge list-badge-public', text: t('js.lists.public') }));
+        if (list.is_public && shareEnabled()) head.appendChild(shareButton(list, state));
         body.textContent = '';
         if (list.description) body.appendChild(el('div', { className: 'list-desc text-muted', text: list.description }));
         body.appendChild(itemsBoxFor(head, list, cfg));
@@ -670,7 +711,11 @@
             var t2 = 0;
             var ps = document.getElementById('pl-search');
             if (ps) ps.addEventListener('input', function () { clearTimeout(t2); t2 = setTimeout(papi.load, 350); });
-            papi.load();
+            // A shared address (#list:<slug>) opens that list once the shelf is there to open it from.
+            papi.load().then(function () {
+                var h = String(location.hash || '');
+                if (h.indexOf('#list:') === 0) papi.open(decodeURIComponent(h.slice(6)));
+            });
         }
     }
 

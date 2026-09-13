@@ -4,6 +4,48 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.51.0] — 2026-09-13
+
+No schema change.
+
+### Added — a public list can be handed to somebody, and the Info panel copies
+
+* **Share on a public list.** A list that is public has an address — its owner's profile, opened on
+  that list (`?action=u&name=…#list:<slug>`) — and the card and the list's own window now carry the
+  same *Share* button the profile and the search use, through the same clipboard routine and the
+  same fallback box. A private list has no address anybody else could open, so it has no button.
+  Hidden with the rest of sharing when `search_share_enabled` is off.
+* **Copy the info hash, and the magnet, from the Info panel.** A *Copy* beside the hash; under it the
+  magnet link, as a link and with its own *Copy*. The magnet is built by the server with
+  `buildMagnet()` — the function the panel's rows already use, so it names every announce URL this
+  tracker answers on — and is sent only to a reader with `index.magnet`, the same gate the search
+  rows obey. Without that permission the row is simply not there.
+
+### Fixed — the account page
+
+* **`[hidden]` loses to a class that sets `display`.** The user agent's `[hidden] { display: none }`
+  has zero specificity, so `.nav-unread { display: inline-block }` beat it and an empty badge drew
+  as a pill after the account name whenever nothing was waiting — the link was *wider* with a count
+  of zero than with a count of one. The same trap sat under the Notifications heading and behind the
+  password checklist. One `[hidden] { display: none !important }` for the public stylesheet, the
+  way Bootstrap's reboot already does it for the panel; the site-wide scan that found the other two
+  is what this rule closes for good.
+* **The password box under "where am I signed in" was fourteen rem tall.** `.profile-search` carries
+  `flex: 1 1 14rem` for the toolbars it usually sits in; that column is a flex container too, and in
+  a column the basis is the height.
+* **The buttons under a notification** ("Open People", "Mark read") are one row with a gap; they
+  were two inline elements touching.
+* **The count on the Messages tab** sits with the word: the markup already leaves a space before the
+  badge, and a margin on top of it put them a word apart.
+
+### Tests
+
+* `tests/announce_multiport_test.py` looked for the down instance's port as bare digits (`"6971" not
+  in page`), so a swarm count or a size carrying those digits anywhere on the page failed the suite
+  by chance. It now looks for the port as part of an address.
+* New `scratchpad/shots/polish_check.js` covers everything above in a real browser; `lists_check.js`
+  counts the controls that would change a list, not the row they sit in, since Share now sits there too.
+
 ## [1.50.1] — 2026-09-13
 
 No schema change.
