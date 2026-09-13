@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.54.0] — 2026-09-13
+
+Schema **59** — `message_reports.reply`.
+
+### Fixed — a reported message's reporter hears back
+
+The card for a reported message had one text box, labelled *a note for the log*. A moderator who
+typed an answer into it and pressed **Close** had answered nobody: the note stayed in the panel, and
+the person who reported got nothing — not on close, not when the message was removed, not when the
+account was silenced. Somebody who reports and never hears back stops reporting.
+
+* **A second box: an answer to the reporter.** They receive it as a notification with the outcome:
+  *closed*, *the message you reported was removed*, or *handled* (a mute or a ban — the other
+  account's punishment is not the reporter's to know unless the moderator writes it). Without an
+  answer they still hear that a moderator looked. Reopening says nothing yet; lifting a mute or a
+  ban answers no report and says nothing to the reporter.
+* **The author of a removed message is told** that one of their messages was removed after a report
+  — the fact and nothing else. (A silenced or banned account was already told, since 1.49.0.)
+* The card shows the answer given and the note kept, so a second moderator sees what the first did.
+
+Reports of content and abuse (the email form) already had this loop by mail — reviewed, blocked,
+archived, a custom message — and are unchanged.
+
+### Tests
+
+* `tests/message_report_test.py` (as the panel: close with an answer, reopen, remove, silence — and
+  who was told what) and `scratchpad/shots/msgreport_check.js` (the card, in a real browser).
+
 ## [1.53.0] — 2026-09-13
 
 Schema **58** — a new table `hash_content`, `whitelist.content_user_id`, a nullable

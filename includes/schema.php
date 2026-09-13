@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 58;  // 58 = hash_content (words about a torrent the tracker has only seen), whitelist.content_user_id, proposals that may belong to either home, and content.view to the member group
+const TRACKER_SCHEMA_VERSION = 59;  // 59 = message_reports.reply — what the moderator answered the reporter, kept beside the log note
+                                    // 58 = hash_content (words about a torrent the tracker has only seen), whitelist.content_user_id, proposals that may belong to either home, and content.view to the member group
                                     // 57 = a grant only: status.hash_check to the member group — the status page can be asked what the tracker knows about a hash
                                     // 56 = data only: the 'pm' notifications go, because an unread message is counted where it is read
                                     // 55 = users.pm_muted_until + users.banned_until — a moderator can answer a reported message with something between nothing and a permanent ban
@@ -793,6 +794,7 @@ function trackerSchemaStatements(): array {
             `handled_by` VARCHAR(64) NOT NULL DEFAULT '',
             `handled_at` DATETIME DEFAULT NULL,
             `note` VARCHAR(500) NOT NULL DEFAULT '',
+            `reply` VARCHAR(500) DEFAULT NULL,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY `uq_report_once` (`message_id`, `reporter_id`),
             KEY `idx_mreport_status` (`status`, `created_at`),
@@ -1209,6 +1211,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `handled_by` VARCHAR(64) NOT NULL DEFAULT '',
         `handled_at` DATETIME DEFAULT NULL,
         `note` VARCHAR(500) NOT NULL DEFAULT '',
+        `reply` VARCHAR(500) DEFAULT NULL,
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY `uq_report_once` (`message_id`, `reporter_id`),
         KEY `idx_mreport_status` (`status`, `created_at`),
@@ -1258,6 +1261,11 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'wl_content_edits', 'hash_content_id')) {
         $out[] = "ALTER TABLE `wl_content_edits` MODIFY COLUMN `whitelist_id` INT UNSIGNED DEFAULT NULL,
                   ADD COLUMN `hash_content_id` INT UNSIGNED DEFAULT NULL, ADD KEY `idx_edits_hc` (`hash_content_id`)";
+    }
+
+    // v59: the answer to the reporter, beside the note for the log. Same definition as the CREATE above.
+    if (!schemaColumnExists($db, 'message_reports', 'reply')) {
+        $out[] = "ALTER TABLE `message_reports` ADD COLUMN `reply` VARCHAR(500) DEFAULT NULL";
     }
 
     // v54: who is typing, right now. Same definition as the CREATE above.

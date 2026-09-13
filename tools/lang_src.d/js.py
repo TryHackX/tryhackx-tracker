@@ -4537,3 +4537,11 @@ add('', {
         'Torrent, który tracker widział tylko w roju — nie jest zarejestrowany, a zatwierdzenie opisu go nie rejestruje.'),
     'js.wl.rv_by': ('by :user', 'autor: :user'),
 })
+
+
+# ── 1.54.0: the reporter hears back ─────────────────────────────────────────
+add('', {
+    'js.msgrep.reply_ph': ('An answer to the reporter — they will see it (optional)…', 'Odpowiedź dla zgłaszającego — zobaczy ją (opcjonalnie)…'),
+    'js.msgrep.answered': ('Answered: :text', 'Odpowiedziano: :text'),
+    'js.msgrep.noted': ('Note: :text', 'Notatka: :text'),
+})

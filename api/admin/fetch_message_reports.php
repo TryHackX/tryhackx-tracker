@@ -69,6 +69,7 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         'status'     => (string)$r['status'],
         'reason'     => (string)$r['reason'],
         'note'       => (string)$r['note'],
+        'reply'      => (string)($r['reply'] ?? ''),
         'reporter'   => (string)$r['reporter_name'],
         'reported'   => (string)$r['reported_name'],
         'created_at' => (string)$r['created_at'],

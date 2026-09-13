@@ -954,6 +954,12 @@ key *name*, so one added later is covered without anybody remembering, and a mat
 "changed" with no value either side. There is no delete and no edit — a log the panel it records can
 rewrite is not evidence. Retention is a setting; the janitor enforces it.
 
+### The reporter hears back (1.54.0)
+
+On a reported message's card, beside the note for the log, **an answer to the reporter** — delivered
+as a notification with the outcome (closed, the message removed, or handled) and the moderator's
+words when there are any. The author of a removed message is told that one of theirs was removed.
+
 ### Describing a torrent from the Info panel, in either mode (1.53.0)
 
 **Info panel → Add a description / Propose a rewrite**, for a reader with `content.submit` /

@@ -82,3 +82,22 @@ add('', {
     'notify.content_replaced_body': ('A moderator accepted somebody else\'s rewrite. Your version is kept and can be brought back.',
         'Moderator przyjął cudzą poprawkę. Twoja wersja jest zachowana i można ją przywrócić.'),
 })
+
+
+# ── 1.54.0: the reporter hears what became of a reported message ────────────
+add('', {
+    'notify.report_closed': ('Your report about a message from :user was closed',
+        'Twoje zgłoszenie wiadomości od :user zostało zamknięte'),
+    'notify.report_handled': ('Your report about a message from :user was handled',
+        'Twoje zgłoszenie wiadomości od :user zostało rozpatrzone'),
+    'notify.report_message_removed': ('The message you reported from :user was removed',
+        'Zgłoszona przez Ciebie wiadomość od :user została usunięta'),
+    'notify.report_reply': ('The moderator wrote: :reply',
+        'Moderator napisał(a): :reply'),
+    'notify.report_no_reply': ('A moderator looked at it. Thank you for reporting.',
+        'Moderator to obejrzał(a). Dziękujemy za zgłoszenie.'),
+    'notify.message_removed': ('One of your messages was removed',
+        'Jedna z Twoich wiadomości została usunięta'),
+    'notify.message_removed_body': ('A moderator removed a private message of yours after it was reported. If it happens again, your messages may be silenced.',
+        'Moderator usunął(ęła) Twoją prywatną wiadomość po zgłoszeniu. Jeśli to się powtórzy, Twoje wiadomości mogą zostać wyciszone.'),
+})

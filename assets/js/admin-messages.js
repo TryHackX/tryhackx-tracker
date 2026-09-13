@@ -72,6 +72,9 @@
                                                     : t('js.msgrep.is_banned'));
         if (st0.staff) facts.push(t('js.msgrep.is_staff'));
         if (facts.length) c.appendChild(el('div', 'msgrep-state', facts.join(' · ')));
+        // What was already said about it: the answer the reporter was given, and the note for the log.
+        if (rep.reply) c.appendChild(el('div', 'msgrep-answer', t('js.msgrep.answered', { text: rep.reply })));
+        if (rep.note) c.appendChild(el('div', 'msgrep-answer text-muted', t('js.msgrep.noted', { text: rep.note })));
 
         if (rep.reason) c.appendChild(el('div', 'msgrep-reason', rep.reason));
 
@@ -110,6 +113,15 @@
             note.placeholder = t('js.msgrep.note_ph');
             note.maxLength = 500;
             acts.appendChild(note);
+            // The answer to the reporter. A second box rather than a checkbox on the first: the two
+            // texts have two readers, and "a note for the log" was being read as "an answer" by the
+            // person typing it while nobody ever received it.
+            var reply = document.createElement('input');
+            reply.type = 'text';
+            reply.className = 'form-control form-control-sm bg-dark text-light border-secondary msgrep-reply-in';
+            reply.placeholder = t('js.msgrep.reply_ph');
+            reply.maxLength = 500;
+            acts.appendChild(reply);
 
             var say = el('span', 'msgrep-said text-muted');
 
@@ -117,7 +129,7 @@
             var run = async function (action, days, btn) {
                 btn.disabled = true;
                 var r = await api('admin/message_report_action', 'POST',
-                                  { id: rep.id, action: action, days: days || 0, note: note.value.trim() });
+                                  { id: rep.id, action: action, days: days || 0, note: note.value.trim(), reply: reply.value.trim() });
                 btn.disabled = false;
                 if (r && r.success) { load(page); return; }
                 // The two refusals a moderator can actually hit, said in words rather than left as

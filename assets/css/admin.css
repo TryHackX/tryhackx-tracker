@@ -2504,3 +2504,7 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 }
 .wl-waiting-chip:hover { background: rgba(255,152,0,0.20); color: #ffe6c2; }
 .wl-waiting-chip.is-on { background: rgba(255,152,0,0.28); color: #fff1dc; border-color: rgba(255,152,0,0.7); }
+
+/* ── reported messages: the answer given and the note kept (1.54.0) ─────────────────────────── */
+.msgrep-answer { font-size: 0.85rem; margin: 0.2rem 0 0; }
+.msgrep-reply-in { margin-top: 0.3rem; }
