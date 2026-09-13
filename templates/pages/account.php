@@ -3,6 +3,14 @@
 <h1><?= _h('account.h1') ?></h1>
 <p><?= _h('account.not_signed') ?></p>
 <p><a class="btn" href="<?= $baseUrl ?>?action=login"><?= _h('common.sign_in') ?></a></p>
+<?php
+// A visitor's page ends here. The lists, messages and people sections further down sit AFTER the
+// signed-in branch closes and read $accLists / $accPeople, which only that branch defines — so a
+// guest opening ?action=account produced eight "undefined variable" warnings per view (in the
+// server's error log on production, in the page itself on a dev box with display_errors) since
+// 1.44.0. The layout carries on with the footer; only this template stops.
+return;
+?>
 <?php else: ?>
 <?php
 $accHasEmail = trim((string)($meUser['email'] ?? '')) !== '';

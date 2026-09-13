@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.51.1] — 2026-09-13
+
+No schema change.
+
+### Fixed
+
+* **A visitor opening the account page produced eight PHP warnings per view** (since 1.44.0): the
+  lists, messages and people sections sit after the signed-in branch of the template closes and
+  read variables only that branch defines. The guest's page now ends at the sign-in link. Found in
+  the production error log during the 1.51.0 check — the warnings never reached the page there,
+  only the log.
+* `tests/guest_pages_test.py`: every public page fetched as a visitor must answer 200 with no PHP
+  warning or notice in the body, so the next leak of this kind fails the battery.
+
 ## [1.51.0] — 2026-09-13
 
 No schema change.
