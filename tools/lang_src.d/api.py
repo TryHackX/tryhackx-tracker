@@ -1647,3 +1647,12 @@ add('', {
     'api.settings.default_group_missing': ('There is no group with that slug — pick one that exists.',
         'Nie ma grupy o takim slugu — wybierz istniejącą.'),
 })
+
+
+# ── 1.52.0: the status page's hash check ────────────────────────────────────
+add('', {
+    'api.hashcheck.denied': ('Checking a hash needs an account with that permission.',
+        'Sprawdzanie hasha wymaga konta z tym uprawnieniem.'),
+    'api.hashcheck.empty': ('Enter an info hash or a magnet link.',
+        'Podaj info hash albo link magnet.'),
+})

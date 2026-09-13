@@ -2332,3 +2332,12 @@ add('', {
     'settings.user2fa_required_none': ('Nobody',
         'Nikogo'),
 })
+
+
+# ── 1.52.0: the status page's hash check ────────────────────────────────────
+add('', {
+    'settings.users_rl_hashcheck': ('Hash checks / hour (per IP)',
+        'Sprawdzeń hasha / godz. (na IP)'),
+    'settings.users_rl_hashcheck_hint': ('The status page\'s "what does this tracker know about a hash" (permission status.hash_check). 0 = no limit.',
+        '„Co ten tracker wie o hashu” na stronie statusu (uprawnienie status.hash_check). 0 = bez limitu.'),
+})

@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 56;  // 56 = data only: the 'pm' notifications go, because an unread message is counted where it is read
+const TRACKER_SCHEMA_VERSION = 57;  // 57 = a grant only: status.hash_check to the member group — the status page can be asked what the tracker knows about a hash
+                                    // 56 = data only: the 'pm' notifications go, because an unread message is counted where it is read
                                     // 55 = users.pm_muted_until + users.banned_until — a moderator can answer a reported message with something between nothing and a permanent ban
                                     // 54 = message_typing — a conversation that refreshes itself, and the line that says the other person is writing
                                     // 53 = user_twofa + users.sessions_valid_from + user_tokens.ip/ua — a second factor for member accounts, and "signed in on N devices"
@@ -1632,6 +1633,14 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
         'member' => ['pm.send', 'pm.report', 'friends.use', 'directory.view'],
     ]);
 
+    // v57: "what does this tracker know about this hash", on the status page. Members by default —
+    // the operator's own answer to "public or behind a permission" — and GUEST GETS NOTHING: the
+    // endpoint answers for unknown hashes too, and an anonymous caller with it is an oracle for
+    // walking the catalogue one hash at a time, rate limit or not.
+    schemaGrantOnce($db, 'v57_hash_check', [
+        'member' => ['status.hash_check'],
+    ]);
+
     schemaGrantOnce($db, 'v24_content_rating', [
         'guest'  => ['rating.vote', 'content.submit', 'content.propose'],
         'member' => ['rating.vote', 'content.submit', 'content.propose'],
@@ -1752,6 +1761,7 @@ function trackerSchemaDefaultSettings(): array {
         'rate_limit_user_login'       => '10',
         'rate_limit_user_register'    => '5',
         'rate_limit_index_search'     => '120',
+        'rate_limit_hash_check'       => '120',   // status page hash lookups per IP per hour; 0 = no limit
         // schema v8: whitelist registration audience ('public' = anyone with CAPTCHA,
         // 'users' = signed-in accounts with the whitelist.add permission, no CAPTCHA)
         'whitelist_submit_mode'       => 'public',

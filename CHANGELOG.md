@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.52.0] — 2026-09-13
+
+Schema **57** — a grant only: the new `status.hash_check` permission goes to the `member` group.
+
+### Added — the status page answers "what does this tracker know about this hash?"
+
+A second form on **Status**, for a reader with the new **`status.hash_check`** permission (members,
+as shipped; the guest group gets nothing unless the operator hands it out). Paste a 40-hex hash, a
+base32 hash or a whole magnet link — parsed by the same function the whitelist form uses — and the
+answer says, each on its own line:
+
+* **Registered here**, and in what state: live on the accesslist, submitted and waiting for review,
+  registered and waiting for its first peer, rejected, registered but never seen, or since banned;
+  and whether a description is published.
+* **Banned** (in blacklist mode: *blacklisted* — there the ban list is the accesslist).
+* **Seen in the swarm**: first and last time, how many times, seeders and leechers at the last look.
+* **Metadata**: fetched, queued, being fetched, failed, or not fetched. **Files**: how many are stored,
+  and how many the torrent has when the stored list is the capped first part.
+* Or, for a hash the tracker has never met, one sentence saying so — which is an answer too, and the
+  reason for the gate and for the new **Hash checks / hour (per IP)** limit under Settings →
+  Accounts (`rate_limit_hash_check`, 120 as shipped, 0 = none): unbounded, this is an oracle for
+  walking the catalogue one hash at a time.
+
+`includes/hashcheck.php` holds the lookup; `api/hash_check.php` is the endpoint. Two new tests:
+`tests/hash_check_test.php` (the lookup against fixtures in every state) and
+`tests/hash_check_test.py` (the gate, the limit, and one hash spelled three ways).
+
+### Fixed
+
+* The two password boxes on the account page ("Your password, first", "Sign out everywhere else")
+  are centred blocks in a centred column; their placeholder was pinned to the left edge. Centred.
+
 ## [1.51.1] — 2026-09-13
 
 No schema change.

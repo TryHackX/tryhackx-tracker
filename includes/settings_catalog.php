@@ -209,6 +209,7 @@ function settingsCatalogKeywords(): array {
         'rate_limit_user_login'    => 'login attempts per hour ip account throttle',
         'rate_limit_user_register' => 'registrations per hour ip throttle spam accounts',
         'rate_limit_index_search'  => 'search queries per hour throttle members index',
+        'rate_limit_hash_check'    => 'status page hash check lookups per hour throttle oracle',
         'index_search_enabled'     => 'member search page kill switch disable searching catalogue',
         'search_share_enabled'     => 'share link copy url permalink address search results torrent bookmark',
         'fav_enabled'              => 'favourites favorites bookmarks starred saved list star member',

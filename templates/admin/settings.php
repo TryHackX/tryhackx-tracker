@@ -1078,6 +1078,11 @@
                         <label class="form-label"><?= _h('settings.users_rl_search') ?></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_index_search" value="<?= sanitize($cfg['rate_limit_index_search'] ?? '120') ?>" min="0" max="100000">
                     </div>
+                    <div class="col-md-3" data-setting="rate_limit_hash_check">
+                        <label class="form-label"><?= _h('settings.users_rl_hashcheck') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_hash_check" value="<?= sanitize($cfg['rate_limit_hash_check'] ?? '120') ?>" min="0" max="100000">
+                        <small class="settings-hint"><?= _h('settings.users_rl_hashcheck_hint') ?></small>
+                    </div>
                     <div class="col-md-3" data-setting="rate_limit_preview">
                         <label class="form-label"><?= _h('settings.users_rl_preview') ?></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_preview" value="<?= sanitize($cfg['rate_limit_preview'] ?? '30') ?>" min="5" max="300">

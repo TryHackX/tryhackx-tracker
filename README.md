@@ -954,6 +954,16 @@ key *name*, so one added later is covered without anybody remembering, and a mat
 "changed" with no value either side. There is no delete and no edit — a log the panel it records can
 rewrite is not evidence. Retention is a setting; the janitor enforces it.
 
+### What does this tracker know about a hash? (1.52.0)
+
+**Status page**, for a reader with `status.hash_check` (members, as shipped). Paste an info hash,
+a base32 hash or a magnet link and get one card of answers: registered here (and whether it is live,
+waiting for review, waiting for its first peer, rejected, never seen, or since banned), banned or
+blacklisted, seen in the swarm (when, how often, how big), metadata and files. A hash the tracker
+has never met gets one sentence saying so. That last answer is why the form is a grant and not a
+public page, and why it is rate-limited per address (Settings → Accounts → *Hash checks / hour*):
+unbounded, it is an oracle for walking the catalogue one hash at a time.
+
 ### The stability probe (1.22.0)
 
 **Settings → Stability probe**, off by default; the card appears at the bottom of **Traffic**.

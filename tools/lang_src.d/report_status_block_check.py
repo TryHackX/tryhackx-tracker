@@ -93,3 +93,20 @@ add('status', {
     'bc_company':  ('Company / Organization', 'Firma / Organizacja'),
     'bc_entity':   ('Represented Entity', 'Reprezentowany podmiot'),
 })
+
+
+# ── 1.52.0: "what does this tracker know about this hash?" ──────────────────
+add('', {
+    'status.hc_head': ('What does this tracker know about a hash?',
+        'Co ten tracker wie o hashu?'),
+    'status.hc_intro': ('Paste an info hash or a magnet link. The answer says whether it is registered here and in what state, whether it is banned, whether it has been seen in the swarm, and what was fetched about it.',
+        'Wklej info hash albo link magnet. Odpowiedź mówi, czy jest tu zarejestrowany i w jakim stanie, czy jest zbanowany, czy był widziany w roju i co o nim pobrano.'),
+    'status.hc_label': ('Info hash or magnet link',
+        'Info hash albo link magnet'),
+    'status.hc_ph': ('a1b2c3d4e5f6… or magnet:?xt=urn:btih:…',
+        'a1b2c3d4e5f6… albo magnet:?xt=urn:btih:…'),
+    'status.hc_err': ('Enter a 40-character info hash, a 32-character base32 hash, or a magnet link',
+        'Podaj 40-znakowy info hash, 32-znakowy hash base32 albo link magnet'),
+    'status.hc_submit': ('Check the hash',
+        'Sprawdź hash'),
+})

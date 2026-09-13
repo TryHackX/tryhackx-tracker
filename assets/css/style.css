@@ -2557,3 +2557,26 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .acc-bridge-block { margin-top: 1rem; }
 .acc-bridge-line { margin: 0.25rem 0; font-size: 0.92rem; }
 .acc-bridge-go { margin-top: 0.6rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+/* ── Status page: "what does this tracker know about this hash?" ──────────────
+   A card of labelled answers, one per line. The hash itself is the one value that may not wrap
+   mid-glyph into something a reader copies wrong, so it breaks anywhere rather than overflowing. */
+.hc-section { margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+.hc-result { padding: 0.9rem 1.2rem; margin-top: 1rem; }
+.hc-row { display: grid; grid-template-columns: minmax(8rem, 13rem) 1fr; gap: 0.3rem 1rem; padding: 0.4rem 0;
+          border-bottom: 1px solid var(--border); font-size: 0.92rem; }
+.hc-row:last-child { border-bottom: 0; }
+.hc-key { color: var(--text-muted); }
+.hc-val { min-width: 0; overflow-wrap: anywhere; }
+.hc-hash { word-break: break-all; font-size: 0.85rem; }
+.hc-yes { color: var(--success); }
+.hc-wait { color: var(--warning); }
+.hc-bad { color: var(--error); }
+.hc-no { color: var(--text-muted); }
+.hc-unknown { margin: 0.5rem 0 0; color: var(--text-muted); }
+@media (max-width: 560px) { .hc-row { grid-template-columns: 1fr; gap: 0.1rem; } }
+
+/* The password boxes under "Your password, first" and "Sign out everywhere else" are centred blocks
+   in a centred column, and a placeholder pinned to their left edge read as misaligned against the
+   centred button under it. The text sits in the middle, typed or not. */
+.acc-2fa-box .profile-search, .acc-sessions-act .profile-search { text-align: center; }

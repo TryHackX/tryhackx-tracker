@@ -4139,3 +4139,103 @@ const getJson = async (endpoint) => {
         poll(hashes, timeoutMinutes || 10);
     };
 })();
+
+// === Status page: what does this tracker know about a hash? (?action=status, 1.52.0) ===
+// One GET, one card of answers, every value from the server; nothing is decided here beyond which
+// sentence to show for which state. Rendering is textContent throughout: the name is a torrent's.
+(function () {
+    'use strict';
+    const form = document.getElementById('hc-form');
+    if (!form) return;
+    const input = document.getElementById('hc-input');
+    const alertBox = document.getElementById('hc-alert');
+    const out = document.getElementById('hc-result');
+    const btn = document.getElementById('hc-go');
+
+    const when = (s) => s ? String(s).slice(0, 16) : '';
+    function row(label, value, cls) {
+        const r = document.createElement('div');
+        r.className = 'hc-row';
+        const k = document.createElement('span');
+        k.className = 'hc-key';
+        k.textContent = label;
+        const v = document.createElement('span');
+        v.className = 'hc-val' + (cls ? ' ' + cls : '');
+        if (value instanceof Node) v.appendChild(value); else v.textContent = value;
+        r.appendChild(k); r.appendChild(v);
+        return r;
+    }
+
+    function render(j) {
+        out.textContent = '';
+        const hash = document.createElement('code');
+        hash.className = 'hc-hash';
+        hash.textContent = j.hash;
+        out.appendChild(row(t('js.app.hc_hash'), hash));
+        if (!j.known) {
+            const p = document.createElement('p');
+            p.className = 'hc-unknown';
+            p.textContent = t('js.app.hc_unknown');
+            out.appendChild(p);
+            out.hidden = false;
+            return;
+        }
+        const name = (j.meta && j.meta.name) || (j.seen && j.seen.name) || (j.registered && j.registered.name) || '';
+        if (name) out.appendChild(row(t('js.app.hc_name'), name));
+
+        // registered here, and in what state
+        const reg = j.registered;
+        const regText = !reg ? t('js.app.hc_reg_no')
+            : t('js.app.hc_reg_' + (['live', 'review', 'probing', 'rejected', 'failed', 'banned'].includes(reg.state) ? reg.state : 'live'),
+                {date: when(reg.since)});
+        out.appendChild(row(t('js.app.hc_registered'), regText, !reg ? 'hc-no' : (reg.state === 'live' ? 'hc-yes' : (reg.state === 'banned' || reg.state === 'rejected' ? 'hc-bad' : 'hc-wait'))));
+        if (reg && reg.content === 'approved') out.appendChild(row(t('js.app.hc_description'), t('js.app.hc_description_yes'), 'hc-yes'));
+
+        // banned — the ban list is the accesslist in blacklist mode, a veto on top of it in whitelist mode
+        const banLabel = j.mode === 'blacklist' ? t('js.app.hc_blacklisted') : t('js.app.hc_banned');
+        out.appendChild(row(banLabel, j.banned ? t('js.app.hc_banned_yes', {date: when(j.banned.since)}) : t('js.app.hc_banned_no'),
+                            j.banned ? 'hc-bad' : 'hc-no'));
+
+        // seen in the swarm
+        const seen = j.seen;
+        out.appendChild(row(t('js.app.hc_seen'), seen
+            ? t('js.app.hc_seen_yes', {first: when(seen.first), last: when(seen.last), n: Number(seen.times).toLocaleString(),
+                                       s: Number(seen.seeders).toLocaleString(), l: Number(seen.leechers).toLocaleString()})
+            : t('js.app.hc_seen_no'), seen ? 'hc-yes' : 'hc-no'));
+
+        // metadata and files
+        const ms = (j.meta && j.meta.status) || 'none';
+        const mKey = ['done', 'pending', 'fetching', 'failed'].includes(ms) ? ms : 'none';
+        out.appendChild(row(t('js.app.hc_meta'), t('js.app.hc_meta_' + mKey), mKey === 'done' ? 'hc-yes' : (mKey === 'failed' ? 'hc-bad' : 'hc-no')));
+        const f = j.files || {};
+        const fetched = Number(f.fetched) || 0;
+        const total = f.total === null || f.total === undefined ? null : Number(f.total);
+        let filesText;
+        if (!fetched) filesText = total ? t('js.app.hc_files_known_only', {total: total.toLocaleString()}) : t('js.app.hc_files_none');
+        else if (total && total > fetched) filesText = t('js.app.hc_files_partial', {n: fetched.toLocaleString(), total: total.toLocaleString()});
+        else filesText = t('js.app.hc_files_all', {n: fetched.toLocaleString()});
+        out.appendChild(row(t('js.app.hc_files'), filesText, fetched ? 'hc-yes' : 'hc-no'));
+        out.hidden = false;
+    }
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const q = input.value.trim();
+        const group = form.querySelector('.form-group');
+        group.classList.toggle('has-error', !q);
+        alertBox.className = 'alert';
+        out.hidden = true;
+        if (!q) return;
+        btn.disabled = true;
+        const j = await getJson('hash_check&hash=' + encodeURIComponent(q));
+        btn.disabled = false;
+        if (!j || !j.success) {
+            alertBox.className = 'alert alert-error show';
+            alertBox.textContent = !j ? t('js.app.hc_failed')
+                : (j.error === 'rate_limit' ? t('js.app.hc_rate_limited') : (j.error || t('js.app.hc_failed')));
+            return;
+        }
+        render(j);
+    });
+    input.addEventListener('input', () => form.querySelector('.form-group').classList.remove('has-error'));
+})();

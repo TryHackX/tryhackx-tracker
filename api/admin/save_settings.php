@@ -102,6 +102,7 @@ $allowed = [
     // user accounts (includes/users.php)
     'users_enabled', 'users_registration_enabled', 'users_links_visible', 'users_default_group',
     'users_notify_expiry_days', 'rate_limit_user_login', 'rate_limit_user_register', 'rate_limit_index_search',
+    'rate_limit_hash_check',
     'rate_limit_preview',
     'wl_content_autopublish', 'wl_edit_max_pending',
     'wl_scrape_every_hours', 'wl_scrape_batch', 'wl_dead_after_days', 'wl_dead_action', 'wl_dead_every_days',
@@ -306,6 +307,7 @@ $intClamp = [
     'desc_max_links' => [0, 100, 10], 'search_sl_refresh_seconds' => [10, 3600, 120],
     'rate_limit_user_login' => [0, 1000, 10],
     'rate_limit_user_register' => [0, 1000, 5], 'rate_limit_index_search' => [0, 100000, 120],
+    'rate_limit_hash_check' => [0, 100000, 120],
     'rate_limit_preview' => [5, 300, 30],
     'rep_min_votes' => [1, 1000, 3], 'rep_anon_weight' => [0, 100, 25],
     // Lists (v51). The same shape as fav_max_per_user: a ceiling that keeps one person's collection

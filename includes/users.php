@@ -57,6 +57,10 @@ function userPermissionList(): array {
         'index.magnet'   => 'See info hashes / copy magnet links in index search results',
         'whitelist.view' => 'Browse the public whitelist page (whitelisted torrents also show up in search)',
         'whitelist.add'  => 'Register hashes on the whitelist (used when registration is set to "registered users")',
+        // The status page's "what does this tracker know about this hash": registered (and in what
+        // state), banned, seen in the swarm, metadata, files. Answered for unknown hashes too, which
+        // is why it is a grant and not a page anyone may hammer.
+        'status.hash_check' => 'Ask the status page what this tracker knows about a hash (registered, banned, seen in the swarm, metadata, files)',
         'stats.view'     => 'View the tracker statistics page',
         'stats.timeline' => 'See the statistics timeline chart',
         'home.stats'     => 'See the live stats widget on the home page',
@@ -181,7 +185,7 @@ function userGroupPresets(): array {
                         'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose',
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         'lists.use', 'lists.public',
-                        'pm.send', 'pm.report', 'friends.use', 'directory.view'],
+                        'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check'],
         ],
     ];
 }

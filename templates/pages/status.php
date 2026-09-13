@@ -156,3 +156,26 @@
         </form>
     </div>
 </div>
+
+<?php /* "What does this tracker know about this hash?" — a second question the status page can answer,
+         for a reader who holds status.hash_check (members, as shipped). Registered and in what
+         state, banned, seen in the swarm, metadata, files; or nothing at all, which is an answer too.
+         The block is simply absent for anybody else: a form that answers 403 is a form that lies. */ ?>
+<?php if (userCan($db, $cfg, 'status.hash_check')): ?>
+<section class="hc-section" id="hash-check">
+    <h2><?= _h('status.hc_head') ?></h2>
+    <p><?= _h('status.hc_intro') ?></p>
+    <form id="hc-form" novalidate>
+        <div class="form-group">
+            <label for="hc-input"><?= _h('status.hc_label') ?></label>
+            <input type="text" id="hc-input" name="hash" placeholder="<?= _h('status.hc_ph') ?>" autocomplete="off" spellcheck="false" required>
+            <div class="error-msg"><?= _h('status.hc_err') ?></div>
+        </div>
+        <div class="form-center">
+            <button type="submit" class="btn" id="hc-go"><?= _h('status.hc_submit') ?></button>
+        </div>
+    </form>
+    <div id="hc-alert" class="alert"></div>
+    <div id="hc-result" class="card hc-result" hidden></div>
+</section>
+<?php endif; ?>
