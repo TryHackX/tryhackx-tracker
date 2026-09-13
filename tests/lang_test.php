@@ -428,5 +428,22 @@ foreach (glob($root . '/assets/js/*.js') as $jsPath) {
           $missing === [], implode(', ', array_slice($missing, 0, 6)));
 }
 
+// ── the generated files are what the sources make ───────────────────────────
+// lang/en.php and lang/pl.php are GENERATED from tools/lang_src.d/. Between 1.43 and 1.50, 369
+// strings were added to the generated files by hand and never to the sources, and the first
+// regeneration after that dropped every one of them. This check makes that a same-day failure.
+$py = '';
+foreach (['python3', 'python'] as $cand) {
+    if (preg_match('/^Python 3/', trim((string)@shell_exec($cand . ' --version 2>&1')))) { $py = $cand; break; }
+}
+if ($py === '') {
+    echo "SKIP the generated dictionaries match their sources  -> no python 3 on PATH\n";
+} else {
+    $out = []; $rc = 1;
+    @exec($py . ' ' . escapeshellarg($root . '/tools/lang_src.py') . ' --check ' . escapeshellarg($root) . ' 2>&1', $out, $rc);
+    check('the generated dictionaries match their sources (tools/lang_src.py --check)', $rc === 0,
+          implode(' | ', array_slice($out, 0, 4)));
+}
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

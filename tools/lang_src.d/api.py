@@ -1125,6 +1125,12 @@ add('', {
         'Budżet odpowiedzi ustawiony na :pps pakietów/s.'),
     'api.tuner.requested': ('Requested. The janitor starts it within a minute; the settings are recorded first, so they go back even if the run is interrupted.',
         'Zlecono. Janitor uruchomi ją w ciągu minuty; ustawienia są najpierw zapisywane, więc wrócą nawet jeśli przebieg zostanie przerwany.'),
+    'api.tuner.reaped': ('The run stopped without finishing: its process was gone. The settings were put back by the janitor.',
+        'Przebieg zatrzymał się bez zakończenia: jego proces zniknął. Sprzątacz przywrócił ustawienia.'),
+    'api.tuner.spawn_failed': ('The helper could not start the probe: :error',
+        'Pomocnik nie zdołał uruchomić sondy: :error'),
+    'api.tuner.spawn_systemd': ('The janitor runs as a systemd service, which stops every process it leaves behind — the probe included. Install the current tools/opentracker/tracker-netlimit.sh (it has probe-start) so the probe can run as a unit of its own.',
+        'Sprzątacz działa jako usługa systemd, która zatrzymuje każdy proces, jaki po sobie zostawia — również sondę. Zainstaluj aktualny tools/opentracker/tracker-netlimit.sh (ma probe-start), żeby sonda mogła działać jako własna jednostka.'),
     'api.tuner.unusable_limit': ('That is not a usable limit.',
         'To nie jest użyteczny limit.'),
     'api.twofa.already_on': ('Two-factor authentication is already on. Turn it off first if you want a new secret — that way the old one stops working the moment the new one starts.',
@@ -1629,4 +1635,15 @@ add('', {
         'Tabela naruszeń jeszcze nie istnieje — powstaje przy pierwszym żądaniu po aktualizacji. Przeładuj stronę za chwilę.'),
     'api.csp.cleared': ('Cleared :n reported violations.',
         'Wyczyszczono zgłoszone naruszenia: :n.'),
+})
+
+
+# ── recovered 2026-09-13 ────────────────────────────────────────────────────
+# These strings were added straight to lang/en.php and lang/pl.php between 1.43 and 1.50 and never to
+# these sources, so the first regeneration since then (1.50.1) dropped all of them. They are written
+# back here, where the generator reads from. tests/lang_test.php now checks that the generated files
+# match the sources, so a string added to the generated file alone fails the battery on the spot.
+add('', {
+    'api.settings.default_group_missing': ('There is no group with that slug — pick one that exists.',
+        'Nie ma grupy o takim slugu — wybierz istniejącą.'),
 })

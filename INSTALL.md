@@ -332,6 +332,11 @@ a mount namespace, not a permission bit. Several features therefore work in two 
 changes the kernel immediately and reports `deferred`, and the janitor (which has no such sandbox)
 writes the file a moment later. Without the timer running, those features appear to half-work.
 
+A oneshot service **kills every process it leaves behind** when `ExecStart` returns, so nothing the
+janitor starts may simply be backgrounded — that is why the stability probe is started through the
+netlimit helper as a transient unit of its own (`tracker-probe.service`), and why the backup runs as
+one too.
+
 The janitor also does: scheduled mode switching, whitelist regeneration and dead-row cleanup,
 statistics sampling and roll-up, the mail queue, audit-log retention, starting the stability probe,
 and — since 1.46.0 — the operator's digest (Settings → Operator digest: one mail saying what is
@@ -569,6 +574,7 @@ blank error after thirty.
 | A setting changed but nothing happened | the janitor timer is not running, or the worker needs a restart |
 | A chart is a flat zero | the column existed before the data did — check whether the series is new |
 | The probe reports nothing | it needs the netlimit helper and its sudoers line |
+| The probe stops "without finishing" a second after it starts | the helper predates 1.50.1: reinstall `tracker-netlimit.sh` so the probe runs as `tracker-probe.service` instead of dying with the janitor's oneshot unit |
 
 `journalctl -u tracker-whitelist-janitor -n 50` and the panel's own **Log** page answer most of the
 rest between them.

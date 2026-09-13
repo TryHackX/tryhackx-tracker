@@ -52,12 +52,15 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATE_PATH = os.path.join(ROOT, 'config', 'tuner_state.json')
+# The same override includes/tuner.php honours, so a test can run both halves against one file
+# that is not the install's own.
+STATE_PATH = os.environ.get('TRACKER_TUNER_STATE') or os.path.join(ROOT, 'config', 'tuner_state.json')
 IS_LINUX = platform.system() == 'Linux'
 
 # How long each step is held, and how often it is sampled inside that. Short enough that a bad step
@@ -116,6 +119,40 @@ def state_update(**kw) -> dict:
     st['updated_at'] = int(time.time())
     state_write(st)
     return st
+
+
+def state_begin(**kw) -> dict:
+    """
+    The first write of a run.
+
+    It drops what the PREVIOUS run left behind and this one would otherwise read as its own. The one
+    that mattered: the panel's Stop writes `cancel` into the file and the run loop honours it at its
+    first sample -- so a flag from a run stopped last week ended every later run at step one, each
+    of them reporting "stopped from the panel" to a panel nobody had touched. The outcome fields go
+    too; `launch` stays, because it says how THIS process was started.
+    """
+    st = state_read()
+    for k in ('cancel', 'restore_result', 'restored_at', 'finished_at', 'error', 'note', 'report'):
+        st.pop(k, None)
+    st.update(kw)
+    st['updated_at'] = int(time.time())
+    state_write(st)
+    return st
+
+
+def _on_stop_signal(signum, frame):
+    """SIGTERM is what `systemctl stop tracker-probe` sends. Turned into the exit Ctrl-C takes, so the
+    run goes out through the restore path instead of dying with the test limit in force."""
+    raise KeyboardInterrupt('signal %d' % signum)
+
+
+def install_stop_signals() -> None:
+    for name in ('SIGTERM', 'SIGHUP'):
+        if hasattr(signal, name):
+            try:
+                signal.signal(getattr(signal, name), _on_stop_signal)
+            except (ValueError, OSError):   # not the main thread, or a platform that has the name only
+                pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -487,8 +524,9 @@ def run(args) -> int:
     had_table = bool(live.get('table'))
 
     # ── rule 1: the way back, before anything moves ──
-    state_update(
-        running=True, started_at=int(time.time()), dry_run=dry, phase='baseline',
+    install_stop_signals()
+    state_begin(
+        running=True, started_at=int(time.time()), dry_run=dry, phase='baseline', pid=os.getpid(),
         restore={'mode': 'limit' if had_table else 'off', 'pps': current_limit,
                  'burst': current_burst, 'port': port, 'egress_pps': egress_pps},
         steps=[], report=None, error=None, note='',
@@ -954,6 +992,28 @@ def self_test() -> int:
     finally:
         globals()['run_helper'] = real2
         state_write({})
+
+    # ── what a new run inherits from the last one: nothing that could end it ──
+    try:
+        state_write({'cancel': 1700000000, 'launch': {'via': 'unit'}, 'restore_result': {'ok': True},
+                     'finished_at': 1700000001, 'error': 'old', 'report': {'summary': 'old'}})
+        st = state_begin(running=True, phase='baseline', pid=1)
+        check('a new run drops the Stop flag the last run left behind',
+              'cancel' not in st and 'cancel' not in state_read(), st)
+        check('… and the last run\'s outcome', not any(k in st for k in ('restore_result', 'finished_at', 'error', 'report')), st)
+        check('… but keeps how it was launched (that is about this process)', st.get('launch') == {'via': 'unit'}, st)
+        check('… and stamps a fresh heartbeat', int(st.get('updated_at', 0)) >= int(time.time()) - 5, st)
+    finally:
+        state_write({})
+
+    # ── a stop signal is an interruption, not a death ──
+    try:
+        _on_stop_signal(15, None)
+        check('SIGTERM is turned into the exit Ctrl-C takes, so the run restores on its way out', False)
+    except KeyboardInterrupt:
+        check('SIGTERM is turned into the exit Ctrl-C takes, so the run restores on its way out', True)
+    install_stop_signals()
+    check('the handler is installed for SIGTERM', signal.getsignal(signal.SIGTERM) is _on_stop_signal)
 
     # Counted, not typed in. A hardcoded total drifts from the file the first time a check is added
     # or a loop changes length, and then the suite reports a number nobody has verified.

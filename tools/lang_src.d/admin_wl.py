@@ -249,3 +249,36 @@ add('a.wl', {
     'ab_ip_ph':         ('203.0.113.7 or 2001:db8::1', '203.0.113.7 albo 2001:db8::1'),
     'ab_days':          ('Days', 'Dni'),
 })
+
+
+# ── recovered 2026-09-13 ────────────────────────────────────────────────────
+# These strings were added straight to lang/en.php and lang/pl.php between 1.43 and 1.50 and never to
+# these sources, so the first regeneration since then (1.50.1) dropped all of them. They are written
+# back here, where the generator reads from. tests/lang_test.php now checks that the generated files
+# match the sources, so a string added to the generated file alone fails the battery on the spot.
+add('', {
+    'a.wl.cl_abuse': ('What happens to a report they file',
+        'Co się dzieje ze zgłoszeniem od nich'),
+    'a.wl.cl_abuse_auto': ('Block the torrent immediately',
+        'Blokuj torrent natychmiast'),
+    'a.wl.cl_abuse_hint': ('Blocking is not the same as registering: a hash this key reports is taken off the tracker for everybody who has it, and nobody outside this server can undo that. Held reports land in the Reports queue with the partner named, and stay there until somebody decides.',
+        'Blokada to nie to samo co rejestracja: hash zgłoszony tym kluczem znika z trackera wszystkim, którzy go mają, i nikt spoza tego serwera tego nie cofnie. Wstrzymane zgłoszenia trafiają do kolejki Zgłoszeń z nazwą partnera i czekają, aż ktoś zdecyduje.'),
+    'a.wl.cl_abuse_rev': ('Hold for review (recommended)',
+        'Wstrzymaj do przeglądu (zalecane)'),
+    'a.wl.cl_af_evidence': ('Where the work can be seen',
+        'Gdzie można zobaczyć utwór'),
+    'a.wl.cl_af_reason': ('What is being claimed',
+        'Czego dotyczy roszczenie'),
+    'a.wl.cl_af_reporter': ('Who is filing it (name, representative, company, e-mail)',
+        'Kto zgłasza (nazwa, przedstawiciel, firma, e-mail)'),
+    'a.wl.cl_af_statement': ('A good-faith declaration',
+        'Oświadczenie o działaniu w dobrej wierze'),
+    'a.wl.cl_af_title': ('The work being infringed',
+        'Naruszany utwór'),
+    'a.wl.cl_afields': ('Require with every report',
+        'Wymagaj przy każdym zgłoszeniu'),
+    'a.wl.cl_afields_hint': ('A report missing one of these is refused on its own, with the field named. A claim nobody can check is not a claim somebody can act on.',
+        'Zgłoszenie bez któregoś z tych pól jest odrzucane osobno, z nazwą pola. Roszczenia, którego nie da się sprawdzić, nie da się też rozpatrzyć.'),
+    'a.wl.cl_scope_abuse': ('abuse — file reports against torrents',
+        'abuse — zgłaszanie torrentów do zablokowania'),
+})

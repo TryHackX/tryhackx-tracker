@@ -2,7 +2,8 @@
 """
 Build lang/en.php and lang/pl.php from every module in tools/lang_src.d/.
 
-    python tools/lang_src.py .
+    python tools/lang_src.py .            # write lang/en.php and lang/pl.php
+    python tools/lang_src.py --check .    # exit 1 if the files on disk differ from what these sources make
 
 Every string is written ONCE, as an (English, Polish) pair, and both files are generated from it.
 That is the point: a key added to one language and forgotten in the other is the ordinary way a
@@ -45,8 +46,17 @@ def collect():
     return out
 
 
-def emit(root):
+def emit(root, check=False):
+    """
+    Write the two files -- or, with check=True, only say whether they already match the sources.
+
+    The check exists because 369 strings were once added straight to the generated files, over six
+    releases, and the first regeneration after that dropped every one of them. tests/lang_test.php
+    runs it, so a string that reaches lang/*.php without its (English, Polish) pair here fails the
+    battery the same day rather than the day somebody regenerates.
+    """
     S = collect()
+    stale = 0
     for code, idx in (('en', 0), ('pl', 1)):
         lines = ["<?php", "/**",
                  " * %s strings for the tracker." % code.upper(),
@@ -61,9 +71,30 @@ def emit(root):
             lines.append("    '%s' => '%s'," % (k, v))
         lines.append("];")
         path = os.path.join(root, 'lang', code + '.php')
-        io.open(path, 'w', encoding='utf-8', newline='\n').write('\n'.join(lines) + '\n')
+        content = '\n'.join(lines) + '\n'
+        if check:
+            try:
+                on_disk = io.open(path, encoding='utf-8', newline='\n').read()
+            except OSError:
+                on_disk = ''
+            if on_disk != content:
+                stale += 1
+                have = set(l for l in on_disk.split('\n') if l.startswith("    '"))
+                want = set(l for l in content.split('\n') if l.startswith("    '"))
+                print('%s differs from the sources: %d line(s) only on disk, %d only in the sources'
+                      % (path, len(have - want), len(want - have)))
+                for l in sorted(have - want)[:5]:
+                    print('  disk only: ' + l[:110])
+                for l in sorted(want - have)[:5]:
+                    print('  source only: ' + l[:110])
+            else:
+                print('%s matches the sources (%d strings)' % (path, len(S)))
+            continue
+        io.open(path, 'w', encoding='utf-8', newline='\n').write(content)
         print('%s  %d strings' % (path, len(S)))
+    return stale
 
 
 if __name__ == '__main__':
-    emit(sys.argv[1] if len(sys.argv) > 1 else '.')
+    args = [a for a in sys.argv[1:] if a != '--check']
+    sys.exit(1 if emit(args[0] if args else '.', check='--check' in sys.argv) else 0)

@@ -4,6 +4,50 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.50.1] — 2026-09-13
+
+No schema change.
+
+### Fixed — the stability probe died one second after it started
+
+On every machine that runs the janitor from a systemd timer — which is every machine that follows
+INSTALL.md — a run of the stability probe ended within a second of starting, and the card then said
+*"A run stopped without finishing. The janitor puts the settings back within a minute."* for as
+long as anybody looked. It was not a regression in the probe: the janitor's service is `oneshot`,
+and a oneshot service kills every process left in its control group the moment the janitor exits.
+The probe was that process. `setsid` and `nohup` would not have helped; systemd tracks by cgroup.
+
+* **The probe is started as a unit of its own.** The janitor asks the netlimit helper (already in
+  sudoers) for the new `probe-start` verb, which runs `tools/tuner.py` through `systemd-run` as
+  `tracker-probe.service` — as the web user, never root, with the arguments checked one by one and
+  the script path pinned to `…/tools/tuner.py`. `systemctl stop tracker-probe` is now a valid Stop:
+  the probe turns SIGTERM into the same exit Ctrl-C takes, so it restores on its way out.
+  Where there is no `systemd-run`, the helper says so by name and the janitor falls back to the old
+  background job — but only when it is not itself under systemd. Under a systemd janitor with an
+  older helper it records an honest failure naming the file to install, instead of a corpse.
+  **Reinstall the helper:** `sudo install -m 0755 tools/opentracker/tracker-netlimit.sh /usr/local/sbin/`.
+* **A dead run is closed, not left as a flag.** The reap restores the settings *and* marks the run
+  aborted; a new request or a Stop on a dead run does the same. Before, `running:true` outlived the
+  process by a week.
+* **The panel's writes no longer revive a dead run.** A request or a Stop stamps `panel_at`; only the
+  process writes `updated_at`, the heartbeat liveness is judged by. A request written over a dead
+  run used to refresh that heartbeat, so the janitor refused to start the new run for five minutes.
+* **A Stop no longer stops the next run too.** The `cancel` flag was never cleared, and the run loop
+  honours it at its first sample — so after one Stop every later run would have ended at step one
+  saying "stopped from the panel". A new run drops what the last one left behind.
+* The card says how the process was started (**Runs as**: its own unit, or a background job), and
+  says plainly when the firewall helper is not configured, since the probe both measures and starts
+  through it.
+
+### Fixed — 369 strings that existed only in the generated dictionaries
+
+`lang/en.php` and `lang/pl.php` are generated from `tools/lang_src.d/`. Between 1.43 and 1.50, 369
+strings (account security, lists, people and messages, the digest, the health endpoint, the abuse
+API docs, notifications, and their Settings sections) were added to the generated files by hand and
+never to the sources, so the first regeneration since then dropped every one of them. They are
+written back into the sources, and `tools/lang_src.py --check` — run by `tests/lang_test.php` —
+now fails the battery the day a string reaches the generated file without its pair in the sources.
+
 ## [1.50.0] — 2026-09-11
 
 Schema **56** — data only: the `pm` notifications are removed.

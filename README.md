@@ -974,6 +974,16 @@ It can move the receive limit, the reply budget, or both. It deliberately does *
 buffers: a socket's buffer is fixed when the socket is created, so testing one means restarting the
 tracker at every step.
 
+**How it is started (1.50.1).** The janitor does not run it in the background itself: the janitor is
+a oneshot systemd service, and a oneshot service kills every process left in its control group the
+moment it exits — which is exactly what happened to the probe, one second after every start. Instead
+the janitor asks the netlimit helper for `probe-start`, and the helper runs `tools/tuner.py` through
+`systemd-run` as **`tracker-probe.service`**, as the web user. The card's *Runs as* line says which
+way it went. `systemctl stop tracker-probe` is a valid Stop — the probe restores on its way out. On a
+machine without `systemd-run` the helper says so and the janitor falls back to a background job, which
+is fine under cron; under a systemd timer with a helper older than 1.50.1 the card reports the failure
+and names the file to reinstall.
+
 ### Writing to members, with formatting (1.19.0)
 
 **Users → Write to members.** Plain text, Markdown or BBCode, with a toolbar and Ctrl+B / Ctrl+I /

@@ -660,11 +660,65 @@ exit 1
     check('helper: a missing include is reported', ($r['json']['include_ok'] ?? null) === false && ($r['json']['ok'] ?? null) === false);
     check('helper: and it says what to add', str_contains((string)($r['json']['hint'] ?? ''), 'include'));
 
+    // ── probe-start: the probe as a unit of its own ─────────────────────────
+    // The janitor is a oneshot service; a background child of it is killed when it exits. So the
+    // helper starts the probe through systemd-run, as the caller, with arguments it has checked.
+    // Stubs: systemd-run records its argv, systemctl answers is-active from STUB_ACTIVE, and an
+    // interpreter that does nothing stands in for python.
+    file_put_contents($tmp . '/bin/systemd-run', "#!/bin/bash\nfor a in \"\$@\"; do printf '%s\\n' \"\$a\"; done >\"\$STUB_STATE/sdrun\"\nexit 0\n");
+    file_put_contents($tmp . '/bin/systemctl', "#!/bin/bash\ncase \"\$1\" in is-active) [ \"\${STUB_ACTIVE:-0}\" = 1 ] && echo active || echo inactive; exit 0 ;; reset-failed) touch \"\$STUB_STATE/reset\"; exit 0 ;; esac\nexit 1\n");
+    file_put_contents($tmp . '/bin/pystub', "#!/bin/bash\nexit 0\n");
+    foreach (['systemd-run', 'systemctl', 'pystub'] as $b) @chmod($tmp . '/bin/' . $b, 0755);
+    // the script path the helper accepts is POSIX-absolute and ends in /tools/tuner.py; on Git Bash
+    // that is /c/Users/… rather than C:/Users/…
+    $script = preg_replace_callback('#^([A-Za-z]):/#', fn($m) => '/' . strtolower($m[1]) . '/', $posix($root . '/tools/tuner.py'));
+    putenv('SYSTEMCTL_BIN=' . $posix($tmp . '/bin/systemctl'));
+    putenv('SYSTEMD_RUN=' . $posix($tmp . '/bin/systemd-run'));
+    putenv('STUB_ACTIVE=0');
+
+    foreach ([['probe-start', 'no script'], ['probe-start /etc/passwd --run', 'a script that is not tools/tuner.py'],
+              ['probe-start tools/tuner.py --run', 'a relative script path'],
+              ["probe-start $script --python pystub", 'neither --run nor --dry-run'],
+              ["probe-start $script --python pystub --run --steps 99", 'steps out of range'],
+              ["probe-start $script --python pystub --run --dwell 5", 'dwell out of range'],
+              ["probe-start $script --python pystub --run --what sideways", 'an unknown limit to move'],
+              ["probe-start $script --python pystub --run --bogus", 'an argument it does not know'],
+              ["probe-start $script --python 'py;rm' --run", 'an interpreter with shell characters'],
+              ["probe-start $script --python no-such-interpreter-here --run", 'an interpreter that is not there']] as [$args, $what]) {
+        @unlink($tmp . '/state/sdrun');
+        $r = $run($args);
+        check("probe-start: refuses $what", $r['rc'] !== 0 && is_array($r['json']) && $r['json']['ok'] === false && !is_file($tmp . '/state/sdrun'), $r['out']);
+    }
+
+    $r = $run("probe-start $script --python pystub --dry-run --steps 3 --dwell 45 --what outbound");
+    $argv = is_file($tmp . '/state/sdrun') ? file($tmp . '/state/sdrun', FILE_IGNORE_NEW_LINES) : [];
+    check('probe-start: starts it through systemd-run', $r['rc'] === 0 && ($r['json']['via'] ?? '') === 'unit' && ($r['json']['unit'] ?? '') === 'tracker-probe.service', $r['out']);
+    check('probe-start: as a named, collected unit', in_array('--unit=tracker-probe', $argv, true) && in_array('--collect', $argv, true), implode(' ', $argv));
+    $uidArg = array_values(array_filter($argv, fn($a) => str_starts_with($a, '--uid=')));
+    check('probe-start: as the caller, never root', $uidArg !== [] && $uidArg[0] !== '--uid=0' && ($r['json']['uid'] ?? 0) !== 0, implode(' ', $argv));
+    $sep = array_search('--', $argv, true);
+    $cmd = $sep === false ? [] : array_slice($argv, $sep + 1);
+    check('probe-start: the command is interpreter, script, mode and the checked numbers — nothing else',
+          count($cmd) === 9 && str_ends_with($cmd[0], 'pystub') && $cmd[1] === $script
+          && array_slice($cmd, 2) === ['--dry-run', '--steps', '3', '--dwell', '45', '--what', 'outbound'], implode(' ', $cmd));
+    check('probe-start: with a lowered priority, like the janitor itself', in_array('--property=Nice=10', $argv, true));
+
+    putenv('STUB_ACTIVE=1');
+    @unlink($tmp . '/state/sdrun');
+    $r = $run("probe-start $script --python pystub --run");
+    check('probe-start: refuses while a probe unit is active', $r['rc'] === 5 && str_contains((string)($r['json']['error'] ?? ''), 'already running') && !is_file($tmp . '/state/sdrun'), $r['out']);
+    putenv('STUB_ACTIVE=0');
+
+    putenv('SYSTEMD_RUN=/nonexistent/systemd-run');
+    $r = $run("probe-start $script --python pystub --run");
+    check('probe-start: without systemd-run it says so by name, so the panel can fall back', $r['rc'] === 6 && ($r['json']['no_systemd'] ?? null) === true && ($r['json']['ok'] ?? null) === false, $r['out']);
+    check('probe-start: … and starts nothing itself', !is_file($tmp . '/state/sdrun'));
+
     // clean up
-    foreach (['/bin/nft', '/bin/id', '/nftables.conf', '/nftd/ottrack-in.nft', '/state/loaded', '/state/t_in', '/state/t_out', '/state/manual', '/state/epps'] as $f) @unlink($tmp . $f);
+    foreach (['/bin/nft', '/bin/id', '/bin/systemd-run', '/bin/systemctl', '/bin/pystub', '/nftables.conf', '/nftd/ottrack-in.nft', '/state/loaded', '/state/t_in', '/state/t_out', '/state/manual', '/state/epps', '/state/sdrun', '/state/reset'] as $f) @unlink($tmp . $f);
     foreach (['/bin', '/nftd', '/state', ''] as $d) @rmdir($tmp . $d);
     putenv('PATH=' . $pathBefore);
-    foreach (['STUB_STATE', 'STUB_NOISE', 'NFT_BIN', 'NFT_DIR', 'NFT_CONF'] as $v) putenv($v);
+    foreach (['STUB_STATE', 'STUB_NOISE', 'STUB_ACTIVE', 'NFT_BIN', 'NFT_DIR', 'NFT_CONF', 'SYSTEMD_RUN', 'SYSTEMCTL_BIN'] as $v) putenv($v);
 }
 
 // ── 8. storage: sampling, retention and the series the chart reads ───────────

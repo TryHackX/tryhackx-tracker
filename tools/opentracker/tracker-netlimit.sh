@@ -23,6 +23,9 @@
 #                                                  lines; omitting it keeps the lists already loaded.
 #   tracker-netlimit.sh off [--dry-run]            delete the table and the file (traffic unthrottled)
 #   tracker-netlimit.sh egress <pps> [--dry-run]   change the rate of the EXISTING `inet ottrack` budget
+#   tracker-netlimit.sh probe-start <tools/tuner.py> [--python P] --run|--dry-run [--steps N] [--dwell S] [--what W]
+#                                                  start the stability probe as its own transient
+#                                                  systemd unit (tracker-probe.service), as the caller
 #
 # Every action prints one JSON object on stdout and exits 0 on success, non-zero on failure (the
 # JSON then carries "ok":false and "error"). Arguments are validated here, never interpolated into
@@ -938,6 +941,95 @@ action_egress() {
         "$(jstr "$([ "$rc" = 1 ] && printf '%s' "$PERSIST_HINT")")"
 }
 
+# ── the stability probe: start it OUTSIDE the janitor's control group ────────
+#
+# WHY THIS IS THE HELPER'S JOB. The janitor is a oneshot systemd service, and a oneshot service kills
+# every process still in its control group the moment ExecStart returns (KillMode=control-group is
+# the default). A probe the janitor put in the background with `&` was therefore killed one second
+# after it started -- on every machine that runs the janitor from a timer, which is every machine
+# that follows INSTALL.md. `setsid` and `nohup` do not help: systemd tracks processes by cgroup, not
+# by session or parent. The only way out of a cgroup is to be started by something outside it, and
+# on a systemd machine that is `systemd-run`, which needs root. Hence this verb.
+#
+# The unit runs as the CALLER -- the web user -- never as root. The probe's only privilege is the
+# sudoers line it already has for this script, and its state file has to stay writable by the panel.
+# Without systemd-run this verb refuses (with "no_systemd":true) and the panel falls back to a plain
+# background job, which is fine under cron and honestly impossible under a systemd timer.
+PROBE_UNIT="tracker-probe"
+SYSTEMD_RUN="${SYSTEMD_RUN:-systemd-run}"
+SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
+
+action_probe_start() {
+    local script="${1-}"; shift || true
+    [ -n "$script" ] || fail "probe-start needs the path of tools/tuner.py"
+    case "$script" in
+        /*/tools/tuner.py) ;;
+        *) fail "probe-start only starts an absolute path ending in /tools/tuner.py (got '$script')" ;;
+    esac
+    [ -f "$script" ] || fail "the probe script does not exist: $script"
+    local python="python3" mode="" steps="" dwell="" what="" a
+    while [ $# -gt 0 ]; do
+        a="$1"; shift
+        case "$a" in
+            --python)  python="${1-}"; shift || true ;;
+            --run|--dry-run) [ -z "$mode" ] || fail "probe-start: --run or --dry-run, not both"; mode="$a" ;;
+            --steps)   want_range "${1-}" 2 12 "steps"; steps="$1"; shift ;;
+            --dwell)   want_range "${1-}" 30 1800 "dwell"; dwell="$1"; shift ;;
+            --what)    case "${1-}" in inbound|outbound|both) what="$1" ;;
+                           *) fail "probe-start: --what must be inbound, outbound or both" ;; esac; shift ;;
+            *) fail "probe-start: unknown argument '$a'" ;;
+        esac
+    done
+    [ -n "$mode" ] || fail "probe-start needs --run or --dry-run"
+    # The same character rule the panel applies to tuner_python. The value is never handed to a
+    # shell here either; this only keeps a stray quote or space from becoming a second argument.
+    case "$python" in ''|*[!A-Za-z0-9_./-]*) fail "probe-start: the interpreter path contains characters this will not execute" ;; esac
+    local pybin
+    pybin="$(command -v "$python" 2>/dev/null || true)"
+    [ -n "$pybin" ] || fail "probe-start: interpreter not found: $python"
+
+    # Whom to run it as: the user who asked (sudo tells us), else whoever owns the config directory
+    # the state file lives in. Never root -- a root-owned tuner_state.json is one the panel can no
+    # longer write, and the request after that fails without a word.
+    local uid="${SUDO_UID:-0}" gid="${SUDO_GID:-0}" cfgdir
+    cfgdir="$(dirname "$(dirname "$script")")/config"
+    if [ "$uid" = "0" ]; then
+        uid="$(stat -c %u "$cfgdir" 2>/dev/null || echo 0)"
+        gid="$(stat -c %g "$cfgdir" 2>/dev/null || echo 0)"
+    fi
+    is_uint "$uid" && is_uint "$gid" || fail "probe-start: could not work out which user to run the probe as"
+    [ "$uid" != "0" ] || fail "probe-start: refusing to run the probe as root — its state file belongs to the web user"
+
+    if ! command -v "$SYSTEMD_RUN" >/dev/null 2>&1; then
+        printf '{"ok":false,"no_systemd":true,"error":%s}\n' \
+            "$(jstr "systemd-run is not available here, so the probe cannot be started as its own unit")"
+        exit 6
+    fi
+    local st
+    st="$("$SYSTEMCTL_BIN" is-active "$PROBE_UNIT.service" 2>/dev/null || true)"
+    case "$st" in
+        active|activating|deactivating|reloading)
+            fail "a probe is already running as $PROBE_UNIT.service — stop it from the panel, or: systemctl stop $PROBE_UNIT" 5 ;;
+    esac
+    # --collect unloads a failed unit on its own; this covers a name left behind by a systemd too old
+    # to honour it, so the name is free by the time the new run asks for it.
+    "$SYSTEMCTL_BIN" reset-failed "$PROBE_UNIT.service" >/dev/null 2>&1 || true
+
+    local -a args
+    args=("$pybin" "$script" "$mode")
+    [ -z "$steps" ] || args+=(--steps "$steps")
+    [ -z "$dwell" ] || args+=(--dwell "$dwell")
+    [ -z "$what" ]  || args+=(--what "$what")
+    local out
+    out="$("$SYSTEMD_RUN" --quiet --collect --unit="$PROBE_UNIT" \
+            --description="Tracker stability probe (started by the panel's janitor)" \
+            --uid="$uid" --gid="$gid" --property=Nice=10 \
+            -- "${args[@]}" 2>&1)" \
+        || fail "systemd-run refused to start the probe: $out" 3
+    printf '{"ok":true,"started":true,"via":"unit","unit":%s,"uid":%s,"gid":%s}\n' \
+        "$(jstr "$PROBE_UNIT.service")" "$uid" "$gid"
+}
+
 # Every reply is captured first and written in a single printf. A command substitution that leaks a
 # line to stderr can then only produce a SEPARATE line — never one spliced into the middle of the
 # JSON, which is what made a healthy firewall report itself as unavailable.
@@ -954,7 +1046,8 @@ case "${1:-status}" in
     off)     shift; action_off "${1-}" ;;
     persist) action_persist ;;
     egress)  shift; action_egress "${1-}" "${2-}" ;;
+    probe-start) shift; action_probe_start "$@" ;;
     -h|--help|help)
-        sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//' ; exit 0 ;;
-    *) fail "unknown action '${1:-}' — use: status | check | monitor [port] | set <pps> [burst] [port] [--trusted=a,b] [--blocked=a,b] [--sets=file] [--dry-run] | persist | off | egress <pps>" 1 ;;
+        sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//' ; exit 0 ;;
+    *) fail "unknown action '${1:-}' — use: status | check | monitor [port] | set <pps> [burst] [port] [--trusted=a,b] [--blocked=a,b] [--sets=file] [--dry-run] | persist | off | egress <pps> | probe-start <tools/tuner.py> --run|--dry-run [...]" 1 ;;
 esac

@@ -45,8 +45,11 @@
         $('tn-updated').textContent = state.updated_at
             ? t('js.tuner.updated_ago', {ago: fmtAgo(Math.max(0, state.server_time - state.updated_at))}) : '';
         $('tn-cancel').classList.toggle('d-hidden', !state.running);
-        $('tn-start').disabled = state.running || !state.available;
-        $('tn-dry').disabled = state.running || !state.available;
+        // No helper, no probe: every measurement it takes comes through tracker-netlimit.sh, and so
+        // does the start itself (see "Runs as" below).
+        const canStart = state.available && state.helper !== false;
+        $('tn-start').disabled = state.running || !canStart;
+        $('tn-dry').disabled = state.running || !canStart;
 
         const g = $('tn-grid');
         g.textContent = '';
@@ -67,6 +70,14 @@
         if (state.running && state.eta_s) {
             const left = Math.max(0, state.started_at + state.eta_s - state.server_time);
             g.appendChild(kv(t('js.tuner.about'), t('js.tuner.time_left', {t: fmtAgo(left)})));
+        }
+        // How the process was started. It matters: a background child of the janitor's oneshot
+        // service is killed the moment the janitor exits, and that was a week of "stopped without
+        // finishing". A unit of its own survives, and can be stopped with `systemctl stop`.
+        if (state.launch && state.launch.via) {
+            g.appendChild(kv(t('js.tuner.runs_as'), state.launch.via === 'unit'
+                ? t('js.tuner.via_unit', {unit: state.unit || 'tracker-probe'})
+                : t('js.tuner.via_background')));
         }
         // The one fact that makes this safe to press, said on the card rather than only in the docs.
         g.appendChild(kv(t('js.tuner.way_back'), state.has_restore
@@ -90,6 +101,9 @@
         } else if (!state.available) {
             note.className = 'nl-note nl-note-warn';
             note.textContent = t('js.tuner.note_unavailable');
+        } else if (state.helper === false) {
+            note.className = 'nl-note nl-note-warn';
+            note.textContent = t('js.tuner.note_no_helper');
         } else {
             note.className = 'nl-note nl-note-info';
             note.textContent = t('js.tuner.note_idle');
