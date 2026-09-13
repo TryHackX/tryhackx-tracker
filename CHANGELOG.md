@@ -4,6 +4,54 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.53.0] — 2026-09-13
+
+Schema **58** — a new table `hash_content`, `whitelist.content_user_id`, a nullable
+`wl_content_edits.whitelist_id` beside a new `hash_content_id`, and the new `content.view`
+permission granted to the `member` group.
+
+### Added — a description for any torrent the tracker knows, from the Info panel, in either mode
+
+Until now a description could only be attached from the whitelist form — which exists in whitelist
+mode, and registers. A torrent the tracker had only *seen* (every torrent in blacklist mode) could
+not be described by anybody.
+
+* **The Info panel offers *Add a description*** to a reader with `content.submit`, and ***Propose a
+  rewrite*** when there already is one and the reader holds `content.propose`. The editor is the
+  whitelist form's own — same rail, same preview, same limits — cloned into the panel. Whatever is
+  sent goes through the same door as the form (`contentAttach()` in `includes/content.php`), lands
+  in the same review queue, and obeys the same switches (descriptions on, review on, autopublish,
+  the pending-proposals cap).
+* **Words about a torrent that is not registered live in `hash_content`**, not on a whitelist row:
+  a whitelist row is a registration — the index poll drops such a hash out of the index, and in
+  whitelist mode the accesslist is built from those rows. Describing a torrent does not register it,
+  and approving the words does not either. The review queue lists both homes, marks an index-only
+  row as such, and the *Rewrites* tab handles proposals for either.
+* **The author is recorded and shown.** *Description by <name>* under the text, linked to the
+  profile where profiles are on; `content_user_id` on both homes, set when words are attached and
+  moved to the proposer when a rewrite is accepted. The review cards carry the author too.
+* **The author hears what happened**: a notification when their description is published or turned
+  down (with the moderator's note when there is one), when their rewrite is accepted or not, and when
+  somebody else's rewrite replaced their text. The Info panel tells the author when their own words
+  are waiting or were turned down.
+* **Reading descriptions is a permission of its own, `content.view`** — members as shipped, guests
+  only if the operator says so. A reader without it is told that there *is* a description shown to
+  members, rather than shown an empty space. With accounts switched off nothing changes: the legacy
+  fallback answers yes for every `content.*` id, as it always has.
+* The status page's hash check says what became of the words for either home: published, waiting
+  for review, or turned down.
+
+What was already there and is unchanged: writing needs `content.submit`, proposing needs
+`content.propose`, the global switches (`wl_allow_description`, `wl_allow_source_url`,
+`wl_content_review`, `wl_content_autopublish`, `wl_edit_max_pending`) apply to every door.
+
+### Tests
+
+* `tests/content_test.php` (every path the words can take, in both homes, and who is told),
+  `tests/content_test.py` (the `content.view` gate on the Info endpoint and the submit door over
+  HTTP, in both tracker modes), `scratchpad/shots/content_check.js` (the editor inside the panel,
+  in a real browser). `tests/sql_safety_test.php` reviews the queue's two UNIONed WHEREs.
+
 ## [1.52.0] — 2026-09-13
 
 Schema **57** — a grant only: the new `status.hash_check` permission goes to the `member` group.

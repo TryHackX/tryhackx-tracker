@@ -117,16 +117,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 
-// The link and the description belong to the whitelist row, and only once approved. A pending one is
-// text nobody has looked at yet; a rejected one is text somebody decided against. Neither is public.
-$sourceUrl = null;
-$sourceAuto = false;
-$descHtml  = '';
-if ($wl && !(int)$wl['banned'] && ($wl['content_status'] ?? 'none') === 'approved') {
-    $sourceUrl = $wl['source_url'] ?: null;
-    $descHtml  = richtextRender($wl['description'] ?? '', (string)$wl['description_format'], $cfg,
-                                richtextViewerSignedIn($db));
+// The words about it — from whichever home holds them (includes/content.php): the whitelist row of
+// a registered torrent, or the hash_content row of one the tracker has only seen. Approved only, and
+// a whitelist row's words are that row's: invisible to a reader who may not see the row itself.
+// Reading them at all is content.view (1.53.0); a reader without it is told that there ARE words,
+// so the empty space under the name does not read as "nobody has written anything".
+$canContent = userCan($db, $cfg, 'content.view');
+$content = richtextContentFor($db, $cfg, $hash);
+if (($content['kind'] ?? null) === 'wl' && !$wl) {
+    $content = ['source_url' => null, 'source_trusted' => false, 'description_html' => '', 'content_status' => 'none',
+                'kind' => null, 'author' => null, 'author_id' => null];
 }
+$hasWords = ($content['content_status'] ?? 'none') === 'approved'
+         && (($content['description_html'] ?? '') !== '' || ($content['source_url'] ?? null) !== null);
+$sourceUrl  = $canContent ? ($content['source_url'] ?? null) : null;
+$sourceAuto = false;
+$descHtml   = $canContent ? (string)($content['description_html'] ?? '') : '';
 
 // A link the IMPORTER recorded (whitelist.source_ref, written by api/v1/whitelist_submit.php when the
 // forum posts a magnet) belongs in the same row as one somebody typed into the form — it answers the
@@ -135,9 +141,27 @@ if ($wl && !(int)$wl['banned'] && ($wl['content_status'] ?? 'none') === 'approve
 // only when richtextIsTrusted() says it points at this operator's own site. An importer run by
 // somebody else can still record a link; that one stays admin-only until a moderator approves it as
 // a normal source link. The form-supplied link always wins when both exist.
-if ($sourceUrl === null && $wl && !(int)$wl['banned']) {
+if ($canContent && $sourceUrl === null && $wl && !(int)$wl['banned']) {
     $auto = richtextAutoSourceUrl($wl['source_ref'] ?? null, $cfg);
     if ($auto !== null) { $sourceUrl = $auto; $sourceAuto = true; }
+}
+
+// What THIS reader may do about the words, and what became of their own. The record (any status)
+// decides between "add" and "propose"; the permission is the submitter's own; the switches are the
+// operator's. A visitor who cannot submit sees no button rather than a button that answers 403.
+$rec = contentRecordFor($db, $hash);
+if ($rec !== null && $rec['kind'] === 'wl' && !$wl) $rec = null;
+$me = usersEnabled($cfg) ? currentUser($db) : null;
+$occupied = $rec !== null && contentOccupied($rec);
+$canAdd = contentEnabled($cfg) && !$occupied && userCan($db, $cfg, 'content.submit')
+       && (($rec !== null && !$rec['banned']) || ($idx && !$rec));
+$canPropose = contentEnabled($cfg) && $occupied && !$rec['banned'] && userCan($db, $cfg, 'content.propose')
+           && max(0, min(50, (int)($cfg['wl_edit_max_pending'] ?? 3))) > 0;
+$mine = null; $mineNote = null;
+if ($me !== null && $rec !== null && $rec['content_user_id'] === (int)$me['id']
+    && in_array($rec['content_status'], ['pending', 'rejected'], true)) {
+    $mine = $rec['content_status'];
+    $mineNote = $rec['content_rejected_note'];
 }
 
 jsonResponse([
@@ -161,6 +185,17 @@ jsonResponse([
         ? ((($wl['source'] ?? '') === 'forum') ? __('api.index.source_auto_forum') : __('api.index.source_auto_importer'))
         : null,
     'description_html' => $descHtml,
+    // 1.53.0: who wrote it, whether the reader is being kept from it, what they may do, and what became
+    // of their own words. The editor's limits ride along so the panel does not have to ask again.
+    'content_author'    => $canContent ? ($content['author'] ?? null) : null,
+    'content_author_profile' => function_exists('profilesEnabled') && profilesEnabled($cfg),
+    'content_hidden'    => !$canContent && $hasWords,
+    'content_mine'      => $mine,
+    'content_mine_note' => $mineNote,
+    'can_content_submit'  => $canAdd,
+    'can_content_propose' => $canPropose,
+    'content_formats'   => richtextFormats($cfg),
+    'content_max'       => richtextMaxChars($cfg),
     'stats' => [
         'first_seen'  => $idx['first_seen'] ?? ($wl['created_at'] ?? null),
         'last_seen'   => $idx['last_seen'] ?? null,

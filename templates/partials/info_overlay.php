@@ -125,3 +125,84 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
     </div>
 </div>
 <?php endif; ?>
+
+<?php /* The editor the Info panel clones when a reader may add or propose a description (1.53.0):
+         the whitelist form's rail, buttons and preview, with ids under `info-desc` so
+         window.RichText.mount() finds its parts. Present only while descriptions or source links are
+         switched on at all; whether THIS reader may write about THIS hash is the endpoint's answer
+         (api/index_info.php), and the panel draws the button only when it says so. */ ?>
+<?php if (function_exists('contentEnabled') && contentEnabled($cfg)): ?>
+<?php $ioFormats = function_exists('richtextFormats') ? richtextFormats($cfg) : ['bbcode']; ?>
+<template id="info-desc-tpl">
+<div class="info-desc-editor" id="info-desc-editor">
+<?php if (($cfg['wl_allow_source_url'] ?? '0') === '1'): ?>
+    <div class="form-group">
+        <label for="info-desc-source"><?= _h('search.desc_source') ?></label>
+        <input type="url" id="info-desc-source" maxlength="500" placeholder="https://example.org/torrents/12345">
+    </div>
+<?php endif; ?>
+<?php if (($cfg['wl_allow_description'] ?? '0') === '1'): ?>
+    <div class="form-group">
+        <label for="info-desc"><?= _h('whitelist.desc') ?></label>
+        <div class="rt-editor">
+            <div class="rt-tabs">
+                <button type="button" class="rt-tab active" data-rt="write"><?= _h('whitelist.write') ?></button>
+                <button type="button" class="rt-tab" data-rt="preview"><?= _h('whitelist.preview') ?></button>
+                <span class="rt-counter" id="info-desc-count"></span>
+                <?php if (count($ioFormats) > 1): ?>
+                <select id="info-desc-format" class="rt-format" title="<?= _h('whitelist.format_title') ?>">
+                    <option value="bbcode">BBCode</option>
+                    <option value="markdown">Markdown</option>
+                </select>
+                <?php else: ?>
+                <input type="hidden" id="info-desc-format" value="<?= sanitize($ioFormats[0]) ?>">
+                <span class="rt-format-fixed"><?= $ioFormats[0] === 'markdown' ? 'Markdown' : 'BBCode' ?></span>
+                <?php endif; ?>
+            </div>
+            <div class="rt-tools" id="info-desc-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
+                <span class="rt-tool-group">
+                    <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><strong>B</strong></button>
+                    <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><em>I</em></button>
+                    <button type="button" data-md="underline" title="<?= _h('rt.underline') ?>"><u>U</u></button>
+                    <button type="button" data-md="strike" title="<?= _h('rt.strike') ?>"><s>S</s></button>
+                </span>
+                <span class="rt-tool-group">
+                    <button type="button" data-md="color" title="<?= _h('rt.color') ?>">&#127912;</button>
+                    <button type="button" data-md="size" title="<?= _h('rt.size') ?>">A&#8593;</button>
+                    <button type="button" data-md="highlight" title="<?= _h('rt.highlight') ?>">&#9635;</button>
+                    <button type="button" data-md="sub" title="<?= _h('rt.sub') ?>">X&#8322;</button>
+                    <button type="button" data-md="sup" title="<?= _h('rt.sup') ?>">X&#178;</button>
+                </span>
+                <span class="rt-tool-group">
+                    <button type="button" data-md="link" title="<?= _h('rt.link') ?>">&#128279;</button>
+                    <button type="button" data-md="image" title="<?= _h('rt.image') ?>">&#128444;</button>
+                    <button type="button" data-md="list" title="<?= _h('rt.list') ?>">&#8226;&nbsp;<?= _h('rt.list_word') ?></button>
+                    <button type="button" data-md="olist" title="<?= _h('rt.olist') ?>">1.&nbsp;<?= _h('rt.list_word') ?></button>
+                </span>
+                <span class="rt-tool-group">
+                    <button type="button" data-md="quote" title="<?= _h('rt.quote') ?>">&rdquo;</button>
+                    <button type="button" data-md="code" title="<?= _h('rt.code') ?>">&lt;/&gt;</button>
+                    <button type="button" data-md="table" title="<?= _h('rt.table') ?>">&#9636;</button>
+                    <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>">&#128065;</button>
+                    <button type="button" data-md="center" title="<?= _h('rt.center') ?>">&#8801;</button>
+                    <button type="button" data-md="hr" title="<?= _h('rt.hr') ?>">&mdash;</button>
+                </span>
+            </div>
+            <textarea id="info-desc" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
+            <div class="rt-preview rt-body" id="info-desc-preview" hidden></div>
+        </div>
+        <div class="form-hint" id="info-desc-syntax"></div>
+        <div class="form-hint" id="info-desc-help"></div>
+    </div>
+<?php endif; ?>
+<?php if (($cfg['wl_content_review'] ?? '1') === '1' && ($cfg['wl_content_autopublish'] ?? '0') !== '1'): ?>
+    <p class="form-hint"><?= __('whitelist.review_note') ?></p>
+<?php endif; ?>
+    <div class="info-desc-foot">
+        <button type="button" class="btn btn-small" id="info-desc-send"><?= _h('search.desc_send') ?></button>
+        <button type="button" class="btn btn-secondary btn-small" id="info-desc-cancel"><?= _h('common.cancel') ?></button>
+        <span class="text-muted info-desc-msg" id="info-desc-msg" aria-live="polite"></span>
+    </div>
+</div>
+</template>
+<?php endif; ?>

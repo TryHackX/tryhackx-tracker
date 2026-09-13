@@ -2580,3 +2580,11 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    in a centred column, and a placeholder pinned to their left edge read as misaligned against the
    centred button under it. The text sits in the middle, typed or not. */
 .acc-2fa-box .profile-search, .acc-sessions-act .profile-search { text-align: center; }
+
+/* ── Info panel: the words' author, the notes about them, and the editor (1.53.0) ───────────── */
+.info-desc-by, .info-desc-note { font-size: 0.85rem; margin: 0.35rem 0 0; }
+.info-desc-acts { margin-top: 0.5rem; }
+.info-desc-editor { margin-top: 0.6rem; }
+.info-desc-editor .form-group { margin-bottom: 0.6rem; }
+.info-desc-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
+.info-desc-msg { font-size: 0.85rem; }

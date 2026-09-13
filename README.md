@@ -954,6 +954,17 @@ key *name*, so one added later is covered without anybody remembering, and a mat
 "changed" with no value either side. There is no delete and no edit — a log the panel it records can
 rewrite is not evidence. Retention is a setting; the janitor enforces it.
 
+### Describing a torrent from the Info panel, in either mode (1.53.0)
+
+**Info panel → Add a description / Propose a rewrite**, for a reader with `content.submit` /
+`content.propose`. Words about a *registered* torrent stay on its whitelist row; words about a
+torrent the tracker has only *seen* live in `hash_content` — never on a whitelist row, because a
+whitelist row is a registration and describing something must not register it. Both go through one
+door (`includes/content.php`), one review queue (**Whitelist → To review**, where an index-only row
+is marked), and one set of switches. The author is recorded and shown (*Description by …*) and is
+told when their words are published, turned down, or replaced. Reading descriptions is
+`content.view` (members as shipped); a reader without it is told there is a description for members.
+
 ### What does this tracker know about a hash? (1.52.0)
 
 **Status page**, for a reader with `status.hash_check` (members, as shipped). Paste an info hash,

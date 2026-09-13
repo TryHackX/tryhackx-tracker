@@ -1656,3 +1656,20 @@ add('', {
     'api.hashcheck.empty': ('Enter an info hash or a magnet link.',
         'Podaj info hash albo link magnet.'),
 })
+
+
+# ── 1.53.0: descriptions from the Info panel ────────────────────────────────
+add('', {
+    'api.content.nothing_to_attach': ('Write a description or give a source link.',
+        'Napisz opis albo podaj link źródłowy.'),
+    'api.content.unknown_hash': ('This tracker does not know that hash, so there is nothing to describe.',
+        'Ten tracker nie zna tego hasha, więc nie ma czego opisywać.'),
+    'api.content.hash_banned': ('That hash is banned here.',
+        'Ten hash jest tu zbanowany.'),
+    'api.content.saved_pending': ('Sent. A moderator will look at it before it is shown.',
+        'Wysłano. Moderator obejrzy to, zanim zostanie pokazane.'),
+    'api.content.saved_published': ('Published.',
+        'Opublikowano.'),
+    'api.content.proposed': ('Proposed. A moderator decides whether it replaces what is shown now.',
+        'Zaproponowano. Moderator zdecyduje, czy zastąpi to, co jest teraz.'),
+})

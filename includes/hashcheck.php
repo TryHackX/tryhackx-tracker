@@ -15,6 +15,8 @@
  * it is a free oracle for probing the catalogue one hash at a time.
  */
 
+require_once __DIR__ . '/content.php';
+
 /** Everything the tracker knows about one lower-case 40-hex hash. */
 function hashCheckLookup(PDO $db, array $cfg, string $hash): array {
     $hash = strtolower($hash);
@@ -84,6 +86,16 @@ function hashCheckLookup(PDO $db, array $cfg, string $hash): array {
     $st = $db->prepare("SELECT COUNT(*) FROM index_files WHERE info_hash = ?");
     $st->execute([$hash]);
     $out['files']['fetched'] = (int)$st->fetchColumn();
+
+    // The words about it, from whichever home holds them (includes/content.php) — a hash the tracker
+    // has only seen can carry a description too since 1.53.0.
+    if (function_exists('contentRecordFor')) {
+        $rec = contentRecordFor($db, $hash);
+        $out['content'] = $rec !== null && ($rec['content_status'] ?? 'none') !== 'none'
+            ? ['status' => (string)$rec['content_status'], 'kind' => $rec['kind']] : null;
+    } else {
+        $out['content'] = null;
+    }
 
     $out['known'] = $out['banned'] !== null || $out['registered'] !== null || $out['seen'] !== null;
     return $out;

@@ -2802,12 +2802,14 @@ const getJson = async (endpoint) => {
             // fixed tag whitelist. This is the only assignment of innerHTML on the public pages.
             d.innerHTML = json.description_html;
             body.appendChild(d);
-        } else if (!json.source_url) {
+        } else if (!json.source_url && !json.content_hidden) {
             const none = document.createElement('p');
             none.className = 'text-muted info-section';
             none.textContent = t('js.app.no_description');
             body.appendChild(none);
         }
+        // 2b. who wrote it, whether the reader is being kept from it, and what they may do about it
+        renderContentExtras(json, body, hash);
 
         // 3. what people think of it
         //
@@ -3083,6 +3085,96 @@ const getJson = async (endpoint) => {
     // because the panel's own Share button strips them: a link to ONE torrent must not carry the
     // sender's query, filter and page number with it.
     const OWNED = ['search', 'search_files', 'content', 'sort', 'page', 'per_page', 'hash'];
+
+    /** The CSRF token whichever page this panel is on carries; empty when the page has none. */
+    function csrfForContent() {
+        const el = document.querySelector('#wl-form input[name="csrf_token"]') || $id('account-csrf')
+            || $id('search-csrf') || document.querySelector('input[name="csrf_token"]');
+        return el ? el.value : '';
+    }
+
+    /**
+     * Under the description: the author, a note when the reader may not see the words, what became
+     * of the reader's own words, and the one button they may press about it — add, or propose a
+     * rewrite. The server decided all of that (api/index_info.php); this only draws it.
+     */
+    function renderContentExtras(json, body, hash) {
+        if (json.content_author) {
+            const by = document.createElement('p');
+            by.className = 'info-desc-by text-muted info-section';
+            by.appendChild(document.createTextNode(t('js.app.desc_by') + ' '));
+            if (json.content_author_profile) {
+                const a = document.createElement('a');
+                let u = null;
+                try { u = new URL(location.href); u.search = ''; u.hash = ''; u.searchParams.set('action', 'u'); u.searchParams.set('name', json.content_author); } catch (e) { u = null; }
+                a.href = u ? u.href : '#';
+                a.textContent = json.content_author;
+                by.appendChild(a);
+            } else {
+                by.appendChild(document.createTextNode(json.content_author));
+            }
+            body.appendChild(by);
+        }
+        const note = (key, vars, cls) => {
+            const p = document.createElement('p');
+            p.className = 'info-desc-note info-section ' + (cls || 'text-muted');
+            p.textContent = t(key, vars || {});
+            body.appendChild(p);
+        };
+        if (json.content_hidden) note('js.app.content_hidden');
+        if (json.content_mine === 'pending') note('js.app.content_mine_pending');
+        if (json.content_mine === 'rejected') note(json.content_mine_note ? 'js.app.content_mine_rejected_note' : 'js.app.content_mine_rejected', {note: json.content_mine_note || ''});
+        const canAdd = !!json.can_content_submit, canPropose = !!json.can_content_propose;
+        if ((canAdd || canPropose) && $id('info-desc-tpl') && csrfForContent()) {
+            const row = document.createElement('div');
+            row.className = 'info-desc-acts info-section';
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'btn btn-secondary btn-small info-desc-open';
+            b.textContent = canAdd ? t('js.app.desc_add') : t('js.app.desc_propose');
+            b.addEventListener('click', () => openContentEditor(json, row, hash, b));
+            row.appendChild(b);
+            body.appendChild(row);
+        }
+    }
+
+    /** The whitelist form's editor, cloned into the panel, mounted by the same code, sent to content_submit. */
+    function openContentEditor(json, host, hash, opener) {
+        if ($id('info-desc') || $id('info-desc-editor')) return;   // one at a time
+        const tpl = $id('info-desc-tpl');
+        if (!tpl) return;
+        host.appendChild(tpl.content.cloneNode(true));
+        opener.hidden = true;
+        const ta = $id('info-desc');
+        if (ta && json.content_max) ta.maxLength = json.content_max;
+        if (ta && window.RichText && typeof window.RichText.mount === 'function') {
+            window.RichText.mount('info-desc', { previewFor: 'description' });
+        }
+        const src = $id('info-desc-source');
+        const send = $id('info-desc-send'), cancel = $id('info-desc-cancel'), msg = $id('info-desc-msg');
+        const editor = $id('info-desc-editor');
+        cancel.addEventListener('click', () => { editor.remove(); opener.hidden = false; });
+        send.addEventListener('click', async () => {
+            const text = ta ? ta.value.trim() : '';
+            const sUrl = src ? src.value.trim() : '';
+            if (!text && !sUrl) { msg.textContent = t('js.app.desc_empty'); return; }
+            send.disabled = true;
+            const fmtEl = $id('info-desc-format');
+            const r = await postJson('content_submit', { csrf_token: csrfForContent(), hash,
+                description: text, description_format: fmtEl ? fmtEl.value : 'bbcode', source_url: sUrl });
+            send.disabled = false;
+            if (!r || !r.success) {
+                msg.textContent = !r ? t('js.app.desc_failed') : (r.error === 'rate_limit' ? t('js.app.desc_rate_limited') : (r.error || t('js.app.desc_failed')));
+                return;
+            }
+            msg.textContent = r.message || (r.proposed ? t('js.app.desc_sent_proposed') : (r.pending ? t('js.app.desc_sent_pending') : t('js.app.desc_sent_published')));
+            send.hidden = true; cancel.hidden = true;
+            if (ta) ta.readOnly = true;
+            // Published at once: draw the panel again with the words on it.
+            if (r.saved && !r.pending) setTimeout(() => openInfo(hash, json.name), 1200);
+        });
+        if (ta) ta.focus();
+    }
 
     /** Wire the panel up wherever its markup is on the page, and hand it to whoever needs it. */
     function initInfoPanel() {
@@ -4189,7 +4281,13 @@ const getJson = async (endpoint) => {
             : t('js.app.hc_reg_' + (['live', 'review', 'probing', 'rejected', 'failed', 'banned'].includes(reg.state) ? reg.state : 'live'),
                 {date: when(reg.since)});
         out.appendChild(row(t('js.app.hc_registered'), regText, !reg ? 'hc-no' : (reg.state === 'live' ? 'hc-yes' : (reg.state === 'banned' || reg.state === 'rejected' ? 'hc-bad' : 'hc-wait'))));
-        if (reg && reg.content === 'approved') out.appendChild(row(t('js.app.hc_description'), t('js.app.hc_description_yes'), 'hc-yes'));
+        // the words about it, from either home: published, waiting, or turned down
+        if (j.content && j.content.status && j.content.status !== 'none') {
+            const cs = j.content.status;
+            out.appendChild(row(t('js.app.hc_description'),
+                t(cs === 'approved' ? 'js.app.hc_description_yes' : (cs === 'pending' ? 'js.app.hc_description_pending' : 'js.app.hc_description_rejected')),
+                cs === 'approved' ? 'hc-yes' : (cs === 'pending' ? 'hc-wait' : 'hc-no')));
+        }
 
         // banned — the ban list is the accesslist in blacklist mode, a veto on top of it in whitelist mode
         const banLabel = j.mode === 'blacklist' ? t('js.app.hc_blacklisted') : t('js.app.hc_banned');

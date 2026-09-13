@@ -193,6 +193,13 @@ $REVIEWED = [
     // two queries provably the same shape, which is the property that matters for a queue whose
     // whole point is that it reads exactly two message rows.
     'api/admin/fetch_message_reports.php:$base' => 'a literal FROM/JOIN fragment defined in the same file',
+    // The review queue reads two homes (1.53.0: whitelist rows and hash_content rows) with one
+    // UNION. Each WHERE is literal SQL — a status condition that is either a fixed string or a `?`,
+    // plus, when there is a search, four LIKE placeholders — and every value is bound. The search
+    // text itself never enters the string: it goes through the LIKE escape and then into the
+    // bound-argument list.
+    'api/admin/wl_content.php:$whereW'         => 'literal conditions with ? placeholders for the whitelist branch; values bound',
+    'api/admin/wl_content.php:$whereC'         => 'literal conditions with ? placeholders for the hash_content branch; values bound',
 
     // The installer, reviewed with the same care and holding up: the identifier is validated
     // before it is used, and the one value interpolated goes through PDO::quote().
@@ -259,10 +266,18 @@ check('the paths that handle submitted text use prepare() and nothing else',
 $rt = (string)file_get_contents($root . '/includes/richtext.php');
 check('a description is length-checked before it is stored, not truncated by the column',
       str_contains($rt, 'richtextMaxChars') && str_contains($rt, 'mb_strlen($text) > $max'));
+// Since 1.53.0 the write itself lives in includes/content.php (contentAttach — the one door the
+// whitelist form and the Info panel share). The form still validates before it registers anything,
+// and the door validates again before its own UPDATE, so a caller that forgot would still be caught.
 $sub = (string)file_get_contents($root . '/api/whitelist_submit.php');
 check('… and the submit path runs that check before it writes anything',
       strpos($sub, 'richtextValidate') !== false
-      && strpos($sub, 'richtextValidate') < strpos($sub, 'UPDATE whitelist SET source_url'));
+      && strpos($sub, 'richtextValidate') < strpos($sub, 'whitelistAddHashes($db, $cfg, $items, $addCtx)')
+      && strpos($sub, 'richtextValidate') < strpos($sub, 'contentAttach('));
+$door = (string)file_get_contents($root . '/includes/content.php');
+check('… and so does the shared door, before its own UPDATE',
+      strpos($door, 'richtextValidate') !== false
+      && strpos($door, 'richtextValidate') < strpos($door, 'UPDATE `$table` SET source_url'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

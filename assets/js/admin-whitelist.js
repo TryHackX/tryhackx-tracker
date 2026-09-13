@@ -406,6 +406,9 @@
             el('span', { className: 'wl-small text-muted', text: fmtDate(String(row.created_at).replace(' ', 'T')) }),
             el('span', { className: 'wl-badge wl-b-muted', text: t('js.wl.via_source', {source: row.source || 'web'}) }),
         ]);
+        // Which home (a torrent the tracker has only seen has no whitelist row), and who wrote it.
+        if (row.kind === 'idx') meta.appendChild(el('span', { className: 'wl-badge wl-b-warn', title: t('js.wl.rv_index_only_title'), text: t('js.wl.rv_index_only') }));
+        if (row.author) meta.appendChild(el('span', { className: 'wl-small text-muted', text: t('js.wl.rv_by', {user: row.author}) }));
         // Ratings decide the order of this queue, so the number that did the deciding is on the card.
         // A moderator who cannot see why something is at the top is being asked to trust a sort.
         if (row.votes_count) {
@@ -454,18 +457,18 @@
         if (row.content_status !== 'approved') {
             const ok = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success wl-act' },
                 [el('i', { className: 'bi bi-check-lg' }), ' ' + t('js.wl.publish')]);
-            ok.addEventListener('click', () => reviewAct(row.id, 'approve'));
+            ok.addEventListener('click', () => reviewAct(row.id, 'approve', { kind: row.kind || 'wl' }));
             acts.appendChild(ok);
         }
         if (row.content_status !== 'rejected') {
             const no = el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning wl-act' },
                 [el('i', { className: 'bi bi-x-lg' }), ' ' + t('js.wl.reject')]);
-            no.addEventListener('click', () => reviewReject(row.id));
+            no.addEventListener('click', () => reviewReject(row.id, row.kind || 'wl'));
             acts.appendChild(no);
         }
         const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: t('js.wl.delete_text_title') },
             [el('i', { className: 'bi bi-trash' }), ' ' + t('js.wl.delete_text')]);
-        del.addEventListener('click', () => reviewClear(row.id, row.info_hash));
+        del.addEventListener('click', () => reviewClear(row.id, row.info_hash, row.kind || 'wl'));
         acts.appendChild(del);
         card.appendChild(acts);
         return card;
@@ -515,6 +518,8 @@
                 el('code', { className: 'rv-hash', text: row.info_hash }),
                 el('span', { className: 'wl-small text-muted', text: fmtDate(String(row.created_at).replace(' ', 'T')) }),
                 el('span', { className: 'wl-small text-muted', text: row.ip ? t('js.wl.from_ip', {ip: row.ip}) : '' }),
+                row.author ? el('span', { className: 'wl-small text-muted', text: t('js.wl.rv_by', {user: row.author}) }) : '',
+                row.kind === 'idx' ? el('span', { className: 'wl-badge wl-b-warn', text: t('js.wl.rv_index_only') }) : '',
             ]),
         ]));
 
@@ -572,7 +577,7 @@
         if (r && r.success) loadReview();
     }
 
-    async function reviewReject(id) {
+    async function reviewReject(id, kind) {
         const note = await promptModal({
             title: t('js.wl.reject_text_title'),
             label: t('js.wl.reject_why_label'),
@@ -581,15 +586,15 @@
             okLabel: t('js.wl.reject'),
         });
         if (note === null) return;
-        reviewAct(id, 'reject', { note });
+        reviewAct(id, 'reject', { note, kind: kind || 'wl' });
     }
 
-    async function reviewClear(id, hash) {
+    async function reviewClear(id, hash, kind) {
         if (!await confirmAction(t('js.wl.delete_text_title_2'), t('js.wl.delete_text_body'),
             { code: hash, after: t('js.wl.delete_text_after'), okLabel: t('js.wl.delete'), danger: true })) return;
         const pw = await promptPassword(t('js.wl.delete_text_title_2'), t('js.wl.confirm_admin_password'));
         if (!pw) return;
-        reviewAct(id, 'clear', { password: pw });
+        reviewAct(id, 'clear', { password: pw, kind: kind || 'wl' });
     }
 
     // ───────────────────────── whitelist view ─────────────────────────

@@ -4513,3 +4513,27 @@ add('', {
     'js.app.hc_failed': ('The check did not go through. Try again in a moment.', 'Sprawdzenie nie przeszło. Spróbuj ponownie za chwilę.'),
     'js.app.hc_rate_limited': ('Too many checks from your address. Try again in an hour.', 'Za dużo sprawdzeń z Twojego adresu. Spróbuj ponownie za godzinę.'),
 })
+
+
+# ── 1.53.0: descriptions from the Info panel, with an author ────────────────
+add('', {
+    'js.app.desc_by': ('Description by', 'Opis dodał(a)'),
+    'js.app.desc_add': ('Add a description', 'Dodaj opis'),
+    'js.app.desc_propose': ('Propose a rewrite', 'Zaproponuj poprawkę'),
+    'js.app.desc_empty': ('Write a description or give a source link first.', 'Najpierw napisz opis albo podaj link źródłowy.'),
+    'js.app.desc_failed': ('That did not go through. Try again in a moment.', 'Nie przeszło. Spróbuj ponownie za chwilę.'),
+    'js.app.desc_rate_limited': ('Too many submissions from your address. Try again in an hour.', 'Za dużo zgłoszeń z Twojego adresu. Spróbuj ponownie za godzinę.'),
+    'js.app.desc_sent_pending': ('Sent. A moderator will look at it before it is shown.', 'Wysłano. Moderator obejrzy to, zanim zostanie pokazane.'),
+    'js.app.desc_sent_published': ('Published.', 'Opublikowano.'),
+    'js.app.desc_sent_proposed': ('Proposed. A moderator decides whether it replaces what is shown now.', 'Zaproponowano. Moderator zdecyduje, czy zastąpi to, co jest teraz.'),
+    'js.app.content_hidden': ('There is a description, but it is shown to signed-in members only.', 'Jest opis, ale widzą go tylko zalogowani członkowie.'),
+    'js.app.content_mine_pending': ('Your description is waiting for a moderator.', 'Twój opis czeka na moderatora.'),
+    'js.app.content_mine_rejected': ('Your description was not published.', 'Twój opis nie został opublikowany.'),
+    'js.app.content_mine_rejected_note': ('Your description was not published: :note', 'Twój opis nie został opublikowany: :note'),
+    'js.app.hc_description_pending': ('waiting for review', 'czeka na przegląd'),
+    'js.app.hc_description_rejected': ('submitted and turned down', 'zgłoszony i odrzucony'),
+    'js.wl.rv_index_only': ('index only', 'tylko indeks'),
+    'js.wl.rv_index_only_title': ('A torrent the tracker has only seen in the swarm — it is not registered, and approving the words does not register it.',
+        'Torrent, który tracker widział tylko w roju — nie jest zarejestrowany, a zatwierdzenie opisu go nie rejestruje.'),
+    'js.wl.rv_by': ('by :user', 'autor: :user'),
+})

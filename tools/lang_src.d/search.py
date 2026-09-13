@@ -74,3 +74,10 @@ add('search', {
                          'Kopiuj link do tego torrenta — otworzy ten panel temu, kto w niego kliknie'),
     'files_head':  ('Files', 'Pliki'),
 })
+
+
+# ── 1.53.0: the description editor inside the Info panel ────────────────────
+add('', {
+    'search.desc_source': ('Source link (optional)', 'Link źródłowy (opcjonalnie)'),
+    'search.desc_send': ('Send', 'Wyślij'),
+})

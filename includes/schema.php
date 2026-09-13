@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 57;  // 57 = a grant only: status.hash_check to the member group — the status page can be asked what the tracker knows about a hash
+const TRACKER_SCHEMA_VERSION = 58;  // 58 = hash_content (words about a torrent the tracker has only seen), whitelist.content_user_id, proposals that may belong to either home, and content.view to the member group
+                                    // 57 = a grant only: status.hash_check to the member group — the status page can be asked what the tracker knows about a hash
                                     // 56 = data only: the 'pm' notifications go, because an unread message is counted where it is read
                                     // 55 = users.pm_muted_until + users.banned_until — a moderator can answer a reported message with something between nothing and a permanent ban
                                     // 54 = message_typing — a conversation that refreshes itself, and the line that says the other person is writing
@@ -583,7 +584,9 @@ function trackerSchemaStatements(): array {
         // decides on. Nothing here changes what is public until somebody says so.
         "CREATE TABLE IF NOT EXISTS `wl_content_edits` (
             `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            `whitelist_id` INT UNSIGNED NOT NULL,
+            -- one of the two is set: the whitelist row, or (v58) the hash_content row, the proposal is about
+            `whitelist_id` INT UNSIGNED DEFAULT NULL,
+            `hash_content_id` INT UNSIGNED DEFAULT NULL,
             `info_hash` CHAR(40) NOT NULL,
             `source_url` VARCHAR(500) DEFAULT NULL,
             `description` MEDIUMTEXT DEFAULT NULL,
@@ -595,8 +598,30 @@ function trackerSchemaStatements(): array {
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `reviewed_at` DATETIME DEFAULT NULL,
             KEY `idx_edits_status` (`status`, `created_at`),
-            KEY `idx_edits_hash` (`info_hash`)
+            KEY `idx_edits_hash` (`info_hash`),
+            KEY `idx_edits_hc` (`hash_content_id`)
         ) $engine",
+
+        // ── Words about a torrent the tracker has only SEEN (v58) ─────────
+        // A description of an index-only hash. It is NOT a whitelist row on purpose: a whitelist row
+        // is a registration — the index poll drops such a hash out of the index, and in whitelist
+        // mode the accesslist is built from those rows. Words are not a registration. Same content
+        // columns as the whitelist's, so includes/content.php treats both homes through one contract.
+        "CREATE TABLE IF NOT EXISTS `hash_content` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `source_url` VARCHAR(500) DEFAULT NULL,
+            `description` MEDIUMTEXT DEFAULT NULL,
+            `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode',
+            `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
+            `content_user_id` INT UNSIGNED DEFAULT NULL,
+            `content_reviewed_at` DATETIME DEFAULT NULL,
+            `content_rejected_note` VARCHAR(255) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_hc_hash` (`info_hash`),
+            KEY `idx_hc_status` (`content_status`, `created_at`)
+        ) $engine",
+
 
         // ── Ratings: one row per hash per identity ───────────────────────
         // The UNIQUE key is the point. One vote per identity is enforced HERE, where two requests
@@ -1211,6 +1236,30 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         KEY `idx_block_target` (`blocked_id`)
     ) $engine";
 
+    // v58: the second home for descriptions, the author of the current text on a whitelist row, and
+    // proposals that may point at either home. Same definition as the CREATE above.
+    $out[] = "CREATE TABLE IF NOT EXISTS `hash_content` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `source_url` VARCHAR(500) DEFAULT NULL,
+            `description` MEDIUMTEXT DEFAULT NULL,
+            `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode',
+            `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
+            `content_user_id` INT UNSIGNED DEFAULT NULL,
+            `content_reviewed_at` DATETIME DEFAULT NULL,
+            `content_rejected_note` VARCHAR(255) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_hc_hash` (`info_hash`),
+            KEY `idx_hc_status` (`content_status`, `created_at`)
+        ) $engine";
+    if (!schemaColumnExists($db, 'whitelist', 'content_user_id')) {
+        $out[] = "ALTER TABLE `whitelist` ADD COLUMN `content_user_id` INT UNSIGNED DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'wl_content_edits', 'hash_content_id')) {
+        $out[] = "ALTER TABLE `wl_content_edits` MODIFY COLUMN `whitelist_id` INT UNSIGNED DEFAULT NULL,
+                  ADD COLUMN `hash_content_id` INT UNSIGNED DEFAULT NULL, ADD KEY `idx_edits_hc` (`hash_content_id`)";
+    }
+
     // v54: who is typing, right now. Same definition as the CREATE above.
     $out[] = "CREATE TABLE IF NOT EXISTS `message_typing` (
         `thread_id` INT UNSIGNED NOT NULL,
@@ -1639,6 +1688,14 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // walking the catalogue one hash at a time, rate limit or not.
     schemaGrantOnce($db, 'v57_hash_check', [
         'member' => ['status.hash_check'],
+    ]);
+
+    // v58: reading descriptions is a grant of its own, to members — the operator's answer to "who may
+    // see them": signed-in readers. GUEST GETS NOTHING, unless the operator hands it out. With
+    // accounts switched off userLegacyDefault() still answers true for content.*, so an install
+    // without groups keeps showing what it showed.
+    schemaGrantOnce($db, 'v58_content_view', [
+        'member' => ['content.view'],
     ]);
 
     schemaGrantOnce($db, 'v24_content_rating', [

@@ -55,3 +55,30 @@ add('', {
     'notify.unmuted_body': ('You can send private messages again.',
         'Możesz znowu wysyłać wiadomości prywatne.'),
 })
+
+
+# ── 1.53.0: the author hears what became of their words ─────────────────────
+add('', {
+    'notify.content_published': ('Your description of ":name" was published',
+        'Twój opis „:name” został opublikowany'),
+    'notify.content_published_body': ('It is shown in the Info panel now. Thank you.',
+        'Widać go teraz w panelu Info. Dziękujemy.'),
+    'notify.content_rejected': ('Your description of ":name" was not published',
+        'Twój opis „:name” nie został opublikowany'),
+    'notify.content_rejected_body': ('A moderator decided against it. The text is kept; you may propose a different one.',
+        'Moderator zdecydował inaczej. Tekst jest zachowany; możesz zaproponować inny.'),
+    'notify.content_rejected_body_note': ('A moderator decided against it: :note',
+        'Moderator zdecydował inaczej: :note'),
+    'notify.content_proposal_applied': ('Your rewrite of ":name" was accepted',
+        'Twoja poprawka opisu „:name” została przyjęta'),
+    'notify.content_proposal_applied_body': ('It replaced the description that was shown before.',
+        'Zastąpiła opis, który był pokazywany wcześniej.'),
+    'notify.content_proposal_rejected': ('Your rewrite of ":name" was not accepted',
+        'Twoja poprawka opisu „:name” nie została przyjęta'),
+    'notify.content_proposal_rejected_body': ('What is shown is unchanged.',
+        'To, co jest pokazywane, się nie zmieniło.'),
+    'notify.content_replaced': ('Your description of ":name" was replaced',
+        'Twój opis „:name” został zastąpiony'),
+    'notify.content_replaced_body': ('A moderator accepted somebody else\'s rewrite. Your version is kept and can be brought back.',
+        'Moderator przyjął cudzą poprawkę. Twoja wersja jest zachowana i można ją przywrócić.'),
+})

@@ -63,7 +63,8 @@ function digestCounts(PDO $db): array
     };
     return [
         'partners'     => $one($db, "SELECT COUNT(*) FROM whitelist WHERE review_status = 'pending'"),
-        'descriptions' => $one($db, "SELECT COUNT(*) FROM whitelist WHERE content_status = 'pending'"),
+        'descriptions' => $one($db, "SELECT (SELECT COUNT(*) FROM whitelist WHERE content_status = 'pending')
+                                          + (SELECT COUNT(*) FROM hash_content WHERE content_status = 'pending')"),
         'abuse'        => $one($db, "SELECT COUNT(*) FROM reports WHERE checked = 0"),
         'messages'     => $one($db, "SELECT COUNT(*) FROM message_reports WHERE status = 'open'"),
     ];

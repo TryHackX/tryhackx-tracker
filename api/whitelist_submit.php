@@ -164,52 +164,19 @@ $contentSaved = false;
 $contentPending = false;
 $contentProposed = false;
 if ($sourceUrl !== '' || $descText !== '') {
+    // Through contentAttach() (includes/content.php) since 1.53.0 — the same door the Info panel uses,
+    // so the whitelist form and the panel cannot disagree about who may write, what "occupied" means,
+    // or who is recorded as the author. An empty row is filled directly, an occupied one gets a
+    // proposal a moderator decides on.
     foreach ($r['results'] as $res) {
         if (empty($res['hash']) || !in_array($res['status'], ['added', 'exists'], true)) continue;
-
-        $cur = $db->prepare("SELECT id, source_url, description, content_status FROM whitelist WHERE info_hash = ? LIMIT 1");
-        $cur->execute([$res['hash']]);
-        $row = $cur->fetch();
-        if (!$row) break;
-
-        $occupied = ($row['description'] !== null && $row['description'] !== '')
-                 || ($row['source_url'] !== null && $row['source_url'] !== '');
-
-        if ($occupied) {
-            if (!userCan($db, $cfg, 'content.propose')) {
-                jsonResponse(['error' => __('api.wl.propose_needs_access')], 403);
-            }
-            $maxPending = max(0, min(50, (int)($cfg['wl_edit_max_pending'] ?? 3)));
-            if ($maxPending === 0) {
-                jsonResponse(['error' => __('api.wl.proposals_not_accepted')], 409);
-            }
-            $st = $db->prepare("SELECT COUNT(*) FROM wl_content_edits WHERE whitelist_id = ? AND status = 'pending'");
-            $st->execute([(int)$row['id']]);
-            if ((int)$st->fetchColumn() >= $maxPending) {
-                jsonResponse(['error' => __('api.wl.proposals_pending_limit', ['max' => $maxPending])], 429);
-            }
-            $db->prepare("INSERT INTO wl_content_edits (whitelist_id, info_hash, source_url, description,
-                                 description_format, ip, user_id)
-                          VALUES (?, ?, ?, ?, ?, ?, ?)")
-               ->execute([(int)$row['id'], $res['hash'], $sourceUrl !== '' ? $sourceUrl : null,
-                          $descText !== '' ? $descText : null, $descFmt, $ip,
-                          $submitUser !== null ? (int)$submitUser['id'] : null]);
-            $contentProposed = true;
-            break;
-        }
-
-        // An empty row. Published at once when the operator has said so, otherwise it waits — and
-        // either way the torrent is already registered and serving.
-        $auto = ($cfg['wl_content_autopublish'] ?? '0') === '1';
-        $status = ($auto || ($cfg['wl_content_review'] ?? '1') !== '1') ? 'approved' : 'pending';
-        $db->prepare("UPDATE whitelist SET source_url = ?, description = ?, description_format = ?,
-                             content_status = ?, content_reviewed_at = NULL, content_rejected_note = NULL
-                       WHERE info_hash = ?")
-           ->execute([$sourceUrl !== '' ? $sourceUrl : null,
-                      $descText !== '' ? $descText : null,
-                      $descFmt, $status, $res['hash']]);
-        $contentSaved = true;
-        $contentPending = ($status === 'pending');
+        $ca = contentAttach($db, $cfg, $res['hash'],
+            ['description' => $descText, 'description_format' => $descFmt, 'source_url' => $sourceUrl],
+            $submitUser, $ip);
+        if (empty($ca['ok'])) jsonResponse(['error' => (string)$ca['error']], (int)($ca['code'] ?? 400));
+        $contentSaved = !empty($ca['saved']);
+        $contentPending = !empty($ca['pending']);
+        $contentProposed = !empty($ca['proposed']);
         break;
     }
 }

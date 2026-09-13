@@ -70,6 +70,10 @@ function userPermissionList(): array {
         'rating.vote'     => 'Rate torrents up or down (needs ratings switched on in Settings)',
         'content.submit'  => 'Attach a source link and a description when registering a torrent',
         'content.propose' => 'Propose a rewrite of a description somebody else wrote',
+        // Reading them is its own grant since 1.53.0: an operator may keep the catalogue's words for
+        // signed-in readers. With accounts switched off the legacy fallback answers true for every
+        // content.* id, so nothing changes on an install that never had groups.
+        'content.view'    => 'See published descriptions and source links in the Info panel',
         // ── favourites, profiles and uploads (v47) ──
         // Four ids for four separate decisions, because "may they keep a list" and "may that list be
         // read by a stranger" are not the same question and an operator will want to answer them
@@ -182,7 +186,7 @@ function userGroupPresets(): array {
             'label' => 'Site member',
             'about' => 'The public-site features, no panel at all.',
             'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'whitelist.view', 'whitelist.add',
-                        'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose',
+                        'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose', 'content.view',
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         'lists.use', 'lists.public',
                         'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check'],

@@ -26,6 +26,8 @@
  */
 
 /** Formats the site is willing to accept, from settings. Never empty — falls back to bbcode. */
+require_once __DIR__ . '/content.php';
+
 function richtextFormats(array $cfg): array {
     $out = [];
     if (($cfg['desc_allow_bbcode'] ?? '1') === '1') $out[] = 'bbcode';
@@ -946,23 +948,27 @@ function richtextExcerpt(?string $text, int $len = 160): string {
  */
 function richtextContentFor(PDO $db, array $cfg, string $hash, bool $asAdmin = false): array {
     $out = ['source_url' => null, 'source_trusted' => false, 'description_html' => '',
-            'content_status' => 'none', 'format' => 'bbcode', 'rejected_note' => null];
-    $st = $db->prepare("SELECT source_url, description, description_format, content_status,
-                               content_rejected_note
-                          FROM whitelist WHERE info_hash = ? LIMIT 1");
-    $st->execute([strtolower($hash)]);
-    $r = $st->fetch();
-    if (!$r) return $out;
+            'content_status' => 'none', 'format' => 'bbcode', 'rejected_note' => null,
+            'kind' => null, 'author' => null, 'author_id' => null];
+    // Both homes (includes/content.php): the whitelist row of a registered torrent, or the
+    // hash_content row of one the tracker has only seen.
+    $rec = contentRecordFor($db, $hash);
+    if ($rec === null) return $out;
+    $out['kind'] = $rec['kind'];
+    // A banned row's words are not public, whatever their status; a moderator still sees them.
+    if ($rec['kind'] === 'wl' && !empty($rec['banned']) && !$asAdmin) return $out;
 
-    $status = (string)($r['content_status'] ?? 'none');
+    $status = (string)($rec['content_status'] ?? 'none');
     $out['content_status'] = $status;
-    $out['format'] = (string)($r['description_format'] ?? 'bbcode');
-    $out['rejected_note'] = $r['content_rejected_note'] ?? null;
+    $out['format'] = (string)($rec['description_format'] ?? 'bbcode');
+    $out['rejected_note'] = $rec['content_rejected_note'] ?? null;
     if (!$asAdmin && $status !== 'approved') return $out;   // pending or rejected is not public
 
-    $out['source_url'] = $r['source_url'] ?: null;
+    $out['source_url'] = $rec['source_url'] ?: null;
     $out['source_trusted'] = $out['source_url'] ? richtextIsTrusted((string)$out['source_url'], $cfg) : false;
-    $out['description_html'] = richtextRender($r['description'] ?? '', $out['format'], $cfg,
+    $out['description_html'] = richtextRender($rec['description'] ?? '', $out['format'], $cfg,
                                               richtextViewerSignedIn($db));
+    $out['author_id'] = $rec['content_user_id'];
+    $out['author'] = contentAuthorName($db, $rec['content_user_id']);
     return $out;
 }
