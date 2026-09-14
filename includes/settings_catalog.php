@@ -257,6 +257,7 @@ function settingsCatalogKeywords(): array {
         'shout_emote_max_px'       => 'shoutbox emote pixels width height dimensions limit maximum picture size',
         'shout_emote_per_user'     => 'shoutbox emote per user cap how many uploads each member limit',
         'shout_stickers_enabled'   => 'shoutbox stickers big emote whole message naklejki large image sticker',
+        'shout_emote_approval'     => 'shoutbox emote approval approve waiting queue moderation review member upload hold pending zatwierdzanie kolejka',
         'pm_typing_enabled'        => 'typing indicator is writing messages live chat',
         'pm_enabled'               => 'private messages pm inbox conversations members write dm',
         'pm_who'                   => 'private messages who can write default friends everybody nobody',

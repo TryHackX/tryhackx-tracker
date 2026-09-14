@@ -30,6 +30,9 @@ endif;
 
 $shoutLimit = shoutPageRows($cfg);
 $shoutOnPage = true;
+// The heading is drawn INSIDE the widget's head row from 1.59.1 (the partial, guarded on
+// $shoutOnPage), so the title, the links and the refresh button read as one line instead of a title
+// with a ragged row of controls under it. The "no" branch above keeps its own <h1>: there is no
+// widget there to put one in.
 ?>
-<h1><?= _h('shout.h1') ?></h1>
 <?php include __DIR__ . '/../partials/shoutbox_widget.php'; ?>

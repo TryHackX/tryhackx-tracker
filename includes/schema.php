@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 64;  // 64 = shoutbox emotes and stickers (includes/shout.php): `shout_emotes` (images as rows, like `sounds`), the five shout_emote_*/shout_stickers_* settings, the `shout.upload_emote` permission (registered, granted to nobody), and the shipped examples seeded from assets/emotes/*.svg
+const TRACKER_SCHEMA_VERSION = 65;  // 65 = shout_emote_approval and the approved_at stamp beside it: a member's uploaded emote waits for the operator instead of being everybody's the moment it lands, and the stamp is what keeps "waiting to be let in" apart from "switched off afterwards"
+                                    // 64 = shoutbox emotes and stickers (includes/shout.php): `shout_emotes` (images as rows, like `sounds`), the five shout_emote_*/shout_stickers_* settings, the `shout.upload_emote` permission (registered, granted to nobody), and the shipped examples seeded from assets/emotes/*.svg
                                     // 63 = the shoutbox (includes/shout.php): `shouts` + `shout_mentions` + users.shout_seen_id, the shout_* settings, and shout.view/post/delete_own to the member group (shout.moderate to the moderator one)
                                     // 62 = index_hashes.idx_index_meta_done_fetched (a heavy index, built by the janitor's CLI run) for the bounded protection backfill; the owner's mirror row takes the panel's current password hash (once), csp_report_enabled ships off, the old pm-notification delete runs once instead of at every bump
                                     // 61 = sounds (the owner's uploads, as rows) + users.sound_prefs + sounds.use to the member group + sounds_enabled / sound_default_* settings
@@ -875,6 +876,12 @@ function trackerSchemaStatements(): array {
         //
         // `mime` is the type this code SNIFFED, never the one an uploader declared, and it is what
         // api/shout_emote.php sends back with nosniff on top.
+        //
+        // `approved_at` (v65) is a DECISION, and `enabled` is a state — two facts that looked like
+        // one for as long as the approval gate had only the second. NULL means nobody has let this
+        // picture through yet; a stamp means somebody did, whatever the row is switched to now. So a
+        // moderator who deliberately switches an approved emote off gets an emote that is off, not
+        // one that climbs back into the waiting queue asking to be approved a second time.
         "CREATE TABLE IF NOT EXISTS `shout_emotes` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             `code` VARCHAR(32) NOT NULL,
@@ -885,6 +892,7 @@ function trackerSchemaStatements(): array {
             `height` SMALLINT UNSIGNED DEFAULT NULL,
             `is_sticker` TINYINT(1) NOT NULL DEFAULT 0,
             `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            `approved_at` DATETIME DEFAULT NULL,
             `uploaded_by` INT UNSIGNED DEFAULT NULL,
             `sha1` CHAR(40) NOT NULL,
             `data` MEDIUMBLOB NOT NULL,
@@ -1485,6 +1493,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `height` SMALLINT UNSIGNED DEFAULT NULL,
         `is_sticker` TINYINT(1) NOT NULL DEFAULT 0,
         `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+        `approved_at` DATETIME DEFAULT NULL,
         `uploaded_by` INT UNSIGNED DEFAULT NULL,
         `sha1` CHAR(40) NOT NULL,
         `data` MEDIUMBLOB NOT NULL,
@@ -1493,6 +1502,13 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         UNIQUE KEY `uq_emote_sha1` (`sha1`),
         KEY `idx_emote_user` (`uploaded_by`)
     ) $engine";
+    // v65: the moment somebody let this picture through, as opposed to whether it happens to be
+    // switched on right now. An install that already has the table gets the column here; a fresh one
+    // gets it from the CREATE above. The rows that pre-date it are stamped by the data migration —
+    // untouched, they would every one of them read as "nobody has looked at this yet".
+    if (!schemaColumnExists($db, 'shout_emotes', 'approved_at')) {
+        $out[] = "ALTER TABLE `shout_emotes` ADD COLUMN `approved_at` DATETIME DEFAULT NULL";
+    }
 
     // v53: the second factor, and what a remember-me token was handed to. Same definitions as the
     // CREATE above, for the reason the v51 comment gives.
@@ -1980,8 +1996,10 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
             $kind = shoutEmoteSniff($bytes);
             if ($kind === null) continue;   // a shipped file that would be refused from a form is refused here too
             try {
-                $st = $db->prepare("INSERT IGNORE INTO shout_emotes (code, name, mime, bytes, width, height, is_sticker, enabled, uploaded_by, sha1, data)
-                                    VALUES (?, ?, ?, ?, ?, ?, 0, 1, NULL, ?, ?)");
+                // approved_at NOW(): the examples are the site's own, and the site's own never
+                // queue — the person who would be approving them is the one who installed them.
+                $st = $db->prepare("INSERT IGNORE INTO shout_emotes (code, name, mime, bytes, width, height, is_sticker, enabled, uploaded_by, approved_at, sha1, data)
+                                    VALUES (?, ?, ?, ?, ?, ?, 0, 1, NULL, NOW(), ?, ?)");
                 $st->bindValue(1, $m[1]);
                 $st->bindValue(2, shoutEmotePrettyName($m[1]));
                 $st->bindValue(3, $kind['mime']);
@@ -1994,6 +2012,24 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
             } catch (\Throwable $e) {
                 error_log('[tracker schema] v64 emote ' . $f . ': ' . $e->getMessage());
             }
+        }
+    }
+
+    // v65: everything that was already in the room when `approved_at` arrived counts as approved.
+    //
+    // A site upgrading from 1.59.0 has no queue — nobody could have uploaded into one, because the
+    // column that remembers the decision did not exist. Leaving those rows NULL would invent a queue
+    // out of the whole library the morning after an upgrade, and every emote an operator had ever
+    // switched off would sit in it asking to be approved. `created_at` rather than NOW() so the date
+    // the manager prints is the day the picture arrived, not the day of the upgrade.
+    //
+    // WHERE approved_at IS NULL, so it is safe to meet twice: it stamps what has no stamp and reads
+    // no rows it has already done.
+    if (schemaOnce($db, 'v65_emote_approved')) {
+        try {
+            $db->exec("UPDATE shout_emotes SET approved_at = created_at WHERE approved_at IS NULL");
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v65 emote approval backfill: ' . $e->getMessage());
         }
     }
 
@@ -2485,6 +2521,12 @@ function trackerSchemaDefaultSettings(): array {
         'shout_emote_max_px'          => '128',   // clamped [32, 512]
         'shout_emote_per_user'        => '20',    // clamped [1, 200]
         'shout_stickers_enabled'      => '1',
+        // ── A member's upload waits for the operator (v65) ──────────────────────────────────────
+        // ON, and it changes nothing until somebody is granted `shout.upload_emote`: this is the
+        // answer to "what happens the first time I grant it". An upload by an ACCOUNT lands
+        // switched off and shows in the manager's waiting queue; the panel's own never waits, and
+        // with this off the behaviour is what it was in 1.59.0 — visible to everybody at once.
+        'shout_emote_approval'        => '1',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

@@ -579,6 +579,7 @@ const SHOUT_EMOTE_CODE_RE = '/^[a-z0-9_]{2,32}$/';
 const SHOUT_EMOTE_TOKEN_RE = '/:([a-z0-9_]{2,32}):/';
 const SHOUT_EMOTE_MIN_BYTES = 32;
 const SHOUT_EMOTE_NAME_MAX = 60;
+const SHOUT_EMOTE_NAME_MIN = 2;
 
 /** Where the shipped examples live; the v64 migration seeds the table from this directory. */
 function shoutEmoteSeedDir(): string { return dirname(__DIR__) . '/assets/emotes'; }
@@ -595,6 +596,19 @@ function shoutEmotesEnabled(array $cfg): bool
 function shoutStickersEnabled(array $cfg): bool
 {
     return shoutEmotesEnabled($cfg) && (($cfg['shout_stickers_enabled'] ?? '1') === '1');
+}
+
+/**
+ * Does a MEMBER's upload wait for the operator before the whole site can see it?
+ *
+ * On by default (v65). Nobody holds `shout.upload_emote` until an operator hands it out, so this
+ * changes nothing on an install that has not granted it — it is the answer to "what happens the
+ * first time I do". The panel's own uploads (`uploaded_by` NULL) are never held: the person who
+ * would be approving is the person who added it.
+ */
+function shoutEmoteApproval(array $cfg): bool
+{
+    return ($cfg['shout_emote_approval'] ?? '1') === '1';
 }
 
 function shoutEmoteMaxKb(array $cfg): int    { return max(8, min(512, (int)($cfg['shout_emote_max_kb'] ?? 64) ?: 64)); }
@@ -616,6 +630,53 @@ function shoutEmoteCleanName(string $name): string
     $name = trim((string)preg_replace('/[\x00-\x1f\x7f]+/', ' ', $name));
     $name = (string)preg_replace('/\s+/', ' ', $name);
     return mb_substr($name, 0, SHOUT_EMOTE_NAME_MAX);
+}
+
+/** What two names are compared by: cleaned, then case-folded. "Wave" and " wave " are one name. */
+function shoutEmoteNameKey(string $name): string
+{
+    return mb_strtolower(shoutEmoteCleanName($name), 'UTF-8');
+}
+
+/**
+ * Every name the table already answers to, as comparison keys. `$exceptId` is the row being
+ * renamed: a name is not taken by itself.
+ *
+ * Straight from the database rather than through shoutEmotes(), because a name has to be unique
+ * among ALL of them — a switched-off one and a member's upload still waiting for the operator are
+ * both going to be on the screen beside the others the moment they come back.
+ */
+function shoutEmoteNamesTaken(PDO $db, int $exceptId = 0): array
+{
+    $keys = [];
+    try {
+        $rows = $db->query("SELECT id, name FROM shout_emotes")->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (\Throwable $e) {
+        return $keys;   // the table arrives with schema 64; mid-upgrade nothing is taken
+    }
+    foreach ($rows as $r) {
+        if ((int)$r['id'] === $exceptId) continue;
+        $keys[shoutEmoteNameKey((string)$r['name'])] = true;
+    }
+    return $keys;
+}
+
+/**
+ * The one place the NAME rules live, so an upload and a rename cannot drift apart — the rule the
+ * sounds library got in 1.59.0 (soundNameProblem), for the same reason: two emotes called "Wave"
+ * are two identical lines in the manager and on the Emotes page, and the person picking one of them
+ * is guessing. Returns a lang key, or null when the name is fine.
+ *
+ * The upper bound is not an error: shoutEmoteCleanName() has already cut the name to
+ * SHOUT_EMOTE_NAME_MAX, which is also the width of the column.
+ */
+function shoutEmoteNameProblem(PDO $db, string $name, int $exceptId = 0): ?string
+{
+    $name = shoutEmoteCleanName($name);
+    if ($name === '') return 'api.emote.name_required';
+    if (mb_strlen($name, 'UTF-8') < SHOUT_EMOTE_NAME_MIN) return 'api.emote.name_short';
+    if (isset(shoutEmoteNamesTaken($db, $exceptId)[shoutEmoteNameKey($name)])) return 'api.emote.name_taken';
+    return null;
 }
 
 /* ── the table ─────────────────────────────────────────────────────────────── */
@@ -642,7 +703,7 @@ function shoutEmotes(?PDO $db, array $cfg, bool $enabledOnly = true, bool $flush
     if (isset($cache[$key])) return $cache[$key];
     if (!$on) return $cache[$key] = [];
 
-    $sql = "SELECT id, code, name, mime, bytes, width, height, is_sticker, enabled, uploaded_by, sha1, created_at
+    $sql = "SELECT id, code, name, mime, bytes, width, height, is_sticker, enabled, approved_at, uploaded_by, sha1, created_at
               FROM shout_emotes ";
     $sql .= $enabledOnly ? "WHERE enabled = 1 ORDER BY code" : "ORDER BY code";
     try {
@@ -662,6 +723,11 @@ function shoutEmotes(?PDO $db, array $cfg, bool $enabledOnly = true, bool $flush
             'height'      => $r['height'] === null ? null : (int)$r['height'],
             'is_sticker'  => (int)$r['is_sticker'] === 1,
             'enabled'     => (int)$r['enabled'] === 1,
+            'approved_at' => $r['approved_at'] === null ? null : (string)$r['approved_at'],
+            // Two facts, not one. `enabled` is what the row IS; `waiting` is whether anybody has
+            // ever answered for it. Reading the second off the first — which is all 1.59.1 could do
+            // — put every emote a moderator had switched off back into the approval queue.
+            'waiting'     => $r['approved_at'] === null,
             'uploaded_by' => $r['uploaded_by'] === null ? null : (int)$r['uploaded_by'],
             'sha1'        => (string)$r['sha1'],
             'created_at'  => (string)$r['created_at'],
@@ -886,8 +952,15 @@ function shoutEmoteStore(PDO $db, array $cfg, string $code, string $name, string
     if (function_exists('richtextEmoji') && isset(richtextEmoji()[$code])) {
         return ['ok' => false, 'status' => 409, 'error' => 'api.emote.code_reserved'];
     }
+    // The NAME, judged here and in shoutEmoteRename() by one function. An empty box still falls back
+    // to the prettified code — that is the convenience it always was — but the FALLBACK is checked
+    // too: silently storing a second "Wave" because nobody typed anything is the same collision,
+    // arrived at by not thinking about it.
     $name = shoutEmoteCleanName($name);
     if ($name === '') $name = shoutEmotePrettyName($code);
+    if (($bad = shoutEmoteNameProblem($db, $name)) !== null) {
+        return ['ok' => false, 'status' => 409, 'error' => $bad, 'detail' => $name];
+    }
 
     $len = strlen($bytes);
     if ($len < SHOUT_EMOTE_MIN_BYTES) return ['ok' => false, 'status' => 400, 'error' => 'api.emote.too_small'];
@@ -923,8 +996,20 @@ function shoutEmoteStore(PDO $db, array $cfg, string $code, string $name, string
     $st->execute([$code]);
     if ($st->fetchColumn() !== false) return ['ok' => false, 'status' => 409, 'error' => 'api.emote.code_taken'];
 
-    $st = $db->prepare("INSERT INTO shout_emotes (code, name, mime, bytes, width, height, is_sticker, enabled, uploaded_by, sha1, data)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)");
+    // Whether the whole site can see it YET. A member's upload waits for somebody with
+    // `shout.moderate` while the gate is on; the panel's own (NULL) never does, because the person
+    // who would be approving is the person who just added it, and neither does a member's while the
+    // gate is off — going live at once is the whole of what "off" means.
+    //
+    // Anything that does not wait is STAMPED here rather than merely switched on. The stamp is what
+    // lets somebody switch this emote off tomorrow without it queueing up to be approved again: a
+    // row with no stamp is a question nobody has answered, and that is the only thing a queue is.
+    $approved = $uploader === null || !shoutEmoteApproval($cfg);
+    $enabled = $approved ? 1 : 0;
+    $approvedAt = $approved ? date('Y-m-d H:i:s') : null;
+
+    $st = $db->prepare("INSERT INTO shout_emotes (code, name, mime, bytes, width, height, is_sticker, enabled, uploaded_by, approved_at, sha1, data)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     $st->bindValue(1, $code);
     $st->bindValue(2, $name);
     $st->bindValue(3, $kind['mime']);
@@ -932,17 +1017,20 @@ function shoutEmoteStore(PDO $db, array $cfg, string $code, string $name, string
     $st->bindValue(5, $kind['w'] > 0 ? $kind['w'] : null, $kind['w'] > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
     $st->bindValue(6, $kind['h'] > 0 ? $kind['h'] : null, $kind['h'] > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
     $st->bindValue(7, $sticker ? 1 : 0, PDO::PARAM_INT);
-    $st->bindValue(8, $uploader, $uploader === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
-    $st->bindValue(9, $sha);
-    $st->bindValue(10, $bytes, PDO::PARAM_LOB);
+    $st->bindValue(8, $enabled, PDO::PARAM_INT);
+    $st->bindValue(9, $uploader, $uploader === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+    $st->bindValue(10, $approvedAt, $approved ? PDO::PARAM_STR : PDO::PARAM_NULL);
+    $st->bindValue(11, $sha);
+    $st->bindValue(12, $bytes, PDO::PARAM_LOB);
     $st->execute();
     shoutEmotesInvalidate();
 
     $id = (int)$db->lastInsertId();
-    return ['ok' => true, 'status' => 200, 'row' => [
+    return ['ok' => true, 'status' => 200, 'pending' => !$approved, 'row' => [
         'id' => $id, 'code' => $code, 'name' => $name, 'mime' => $kind['mime'], 'bytes' => $len,
         'width' => $kind['w'] > 0 ? $kind['w'] : null, 'height' => $kind['h'] > 0 ? $kind['h'] : null,
-        'is_sticker' => $sticker, 'enabled' => true, 'uploaded_by' => $uploader, 'sha1' => $sha,
+        'is_sticker' => $sticker, 'enabled' => $enabled === 1, 'approved_at' => $approvedAt,
+        'waiting' => !$approved, 'uploaded_by' => $uploader, 'sha1' => $sha,
     ]];
 }
 
@@ -970,8 +1058,38 @@ function shoutEmoteDelete(PDO $db, int $id, ?int $asUser = null): array
 }
 
 /**
+ * Rename one. Only the display text changes: the CODE is what people type into a sentence, and
+ * changing it would break every line that already says it — so it stays, exactly as a sound's id
+ * stays across soundRename().
+ *
+ * ['ok' => true, 'row' => ['id' => …, 'name' => …]] or ['ok' => false, 'error' => <lang key>].
+ */
+function shoutEmoteRename(PDO $db, int $id, string $name): array
+{
+    if ($id <= 0) return ['ok' => false, 'status' => 404, 'error' => 'api.emote.unknown'];
+    $st = $db->prepare("SELECT id, code FROM shout_emotes WHERE id = ?");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return ['ok' => false, 'status' => 404, 'error' => 'api.emote.unknown'];
+    $name = shoutEmoteCleanName($name);
+    // An empty box means the prettified code here too, so "clear the name" is a way back to the
+    // default rather than a refusal — and the fallback is checked like any other name.
+    if ($name === '') $name = shoutEmotePrettyName((string)$row['code']);
+    if (($bad = shoutEmoteNameProblem($db, $name, $id)) !== null) {
+        return ['ok' => false, 'status' => 409, 'error' => $bad, 'detail' => $name];
+    }
+    $db->prepare("UPDATE shout_emotes SET name = ? WHERE id = ?")->execute([$name, $id]);
+    shoutEmotesInvalidate();
+    return ['ok' => true, 'status' => 200, 'row' => ['id' => $id, 'code' => (string)$row['code'], 'name' => $name]];
+}
+
+/**
  * Switch one flag on a row. `$field` is one of two names and each has its own literal statement —
  * there is no column name built from a string here, and there is not going to be one.
+ *
+ * `approved_at` is deliberately NOT reachable from here. Switching an emote off is tidying and must
+ * leave the decision that let it through standing; the one thing that may write that column is
+ * shoutEmoteApprove() below.
  */
 function shoutEmoteSetFlag(PDO $db, int $id, string $field, bool $on): bool
 {
@@ -983,6 +1101,24 @@ function shoutEmoteSetFlag(PDO $db, int $id, string $field, bool $on): bool
     if ($sql === '' || $id <= 0) return false;
     $st = $db->prepare($sql);
     $st->execute([$on ? 1 : 0, $id]);
+    shoutEmotesInvalidate();
+    return $st->rowCount() > 0;
+}
+
+/**
+ * Let one through: the room gets it, and the decision is remembered.
+ *
+ * COALESCE, not a plain assignment, so this says the same thing whichever of the two acts it is.
+ * Approving a picture nobody had answered for stamps the moment somebody did; switching an already
+ * approved one back on is not a second approval and must not move the date the manager prints
+ * beside it. Either way the row ends up enabled, which is what the person pressing the button asked
+ * for — and `approved_at` is the reason it will never be asked for again.
+ */
+function shoutEmoteApprove(PDO $db, int $id): bool
+{
+    if ($id <= 0) return false;
+    $st = $db->prepare("UPDATE shout_emotes SET enabled = 1, approved_at = COALESCE(approved_at, ?) WHERE id = ?");
+    $st->execute([date('Y-m-d H:i:s'), $id]);
     shoutEmotesInvalidate();
     return $st->rowCount() > 0;
 }

@@ -4,6 +4,60 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.59.1] — 2026-09-14
+
+Schema **65** — the `shout_emote_approval` setting and an `approved_at` stamp on `shout_emotes`,
+with every emote that already exists marked approved as the column arrives, so no site wakes up
+from the upgrade with a queue of things it had already accepted.
+
+### Added — a member's emote waits for you
+
+A picture uploaded by an ACCOUNT (`shout.upload_emote`, which nobody holds until you grant it) is
+stored switched off and shows in a waiting queue at the top of the emote table in
+Settings → Shoutbox, with **Approve** and **Delete**. Nobody else sees it anywhere until it is
+approved — not in the picker, not on the Emotes page, not in a rendered shout — while its uploader
+sees their own marked as waiting and can take it back. The panel's own uploads never wait. Off, the
+behaviour is exactly what 1.59.0 did. Approving stamps the emote and is written to the audit log,
+and because the stamp is what the queue reads, an emote a moderator switches off afterwards stays
+switched off instead of coming back to ask a second time.
+
+### Added — emote names are checked, and can be changed
+
+`shoutEmoteNameProblem()` is to emotes what `soundNameProblem()` is to sounds: a name has to survive
+trimming, be at least two characters and not already belong to another emote (case-insensitively).
+It is enforced on upload — including on the prettified-code fallback an empty box falls back to, so
+a second "Wave" cannot arrive by nobody typing anything — and on the new **Rename**, which changes
+the display name and never the code, because the code is what people type into a sentence.
+
+### Changed — Settings → Shoutbox, after the first day of use
+
+The emote manager is rebuilt in the shape Settings → Sounds got in 1.59.0: the six switches in one
+grid with every hint under its own field, a real table (preview, code and name, type · size ·
+dimensions, who uploaded it, added, actions) with column headings and a count above it, a state chip
+per row saying `Enabled`/`Off` and `Emote`/`Sticker`, and buttons that say what they do —
+`Disable`, `Make a sticker`, `Rename`, `Delete`. The drop zone spans the block and Code, Name, the
+sticker box and Add sit on one line beneath it.
+
+### Changed — the Emotes page and the shoutbox itself
+
+`?action=emotes` is a card grid of equal tiles: the picture centred on an inset panel so a white PNG
+and a dark SVG both read, the `:code:` under it as a click-to-copy chip, the name, and the uploader
+line muted. The intro and the Code placeholder said `:fire:`, which is a built-in shortcode and not
+an emote anybody can upload — they say `:flame:` now, which is one the tracker ships.
+
+In the shoutbox: the formatting toolbar the description and message editors already have, beside the
+format select and swapping with it; a refresh button top right that asks for what is newer even while
+polling is paused and says so when there is nothing; a dashed rule between rows with the name and
+time columns aligned so a long name no longer pushes the text out of line; links inside a shout keep
+the link colour after a click, because it is a conversation and not a document; and the format select
+no longer keeps a focus ring after a mouse click.
+
+### Fixed
+
+`api/shout_emote.php` set its own strict policy on top of the site's, so a client received two
+`Content-Security-Policy` headers and enforced the intersection. Safe, untidy — it removes the page
+policy (and the report-only one) before setting its own.
+
 ## [1.59.0] — 2026-09-14
 
 Schema **64** — `shout_emotes` (custom emotes and stickers, as rows), the `shout.upload_emote`

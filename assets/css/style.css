@@ -2629,23 +2629,60 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    has other things on it, and a block that pushes them below the fold has taken the page over. */
 .shoutbox { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card);
             padding: 0.6rem 0.7rem; margin-bottom: 1.2rem; }
-.shout-head { display: flex; align-items: center; gap: 0.6rem; min-height: 1.5rem; margin-bottom: 0.35rem; }
-.shout-head .shout-open { margin-left: auto; font-size: 0.8rem; }
+/* The head is ONE line in reading order — what it is, where to go, then the two buttons — and it
+   wraps rather than overflowing, the way the metrics grid and the account tabs were made to in
+   1.57.1. `margin-left: auto` sits on the refresh button alone: it used to sit on whichever link
+   happened to be last, so the row rearranged itself depending on which features were switched on. */
+.shout-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem;
+              min-height: 1.9rem; margin-bottom: 0.5rem; }
+.shout-title { margin: 0; font-size: 1.15rem; line-height: 1.3; }
+.shout-head .shout-open, .shout-head .shout-emotes-link { font-size: 0.8rem; }
+.shout-head .shout-refresh { margin-left: auto; }
 .shout-older[hidden] { display: none; }
-.shout-list { display: flex; flex-direction: column; gap: 0.1rem; max-height: 22rem; overflow-y: auto;
+/* A round icon button, because it acts on the whole block rather than on anything in particular —
+   the one control here that is a symbol and not a word. */
+.shout-refresh {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 0 0 auto; width: 1.7rem; height: 1.7rem; padding: 0;
+    background: none; border: 1px solid var(--control-border); border-radius: 50%;
+    color: var(--text-muted); cursor: pointer; transition: color 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.shout-refresh:hover { color: var(--text); border-color: var(--accent); }
+.shout-refresh:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Disabled is the two seconds after a fetch, not an error: dimmed, not greyed out of the layout. */
+.shout-refresh:disabled { opacity: 0.45; cursor: default; }
+.shout-refresh.is-spinning svg { animation: rotate-cw 0.8s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+    /* Somebody who has asked for no motion still has to be able to tell that it is working, so the
+       spin becomes a fade rather than nothing at all. */
+    .shout-refresh.is-spinning svg { animation: none; }
+    .shout-refresh.is-spinning { opacity: 0.45; }
+}
+.shout-list { display: flex; flex-direction: column; max-height: 22rem; overflow-y: auto;
               padding-right: 0.2rem; overscroll-behavior: contain; }
 .shoutbox-page .shout-list { max-height: 34rem; }
 /* `position: relative` + the room on the right are for the delete button: in the flow it is a flex
    item, and on a narrow screen a wrapped body pushed it onto a line of its own — every row twice as
    tall for a cross nobody had asked to see yet. */
-.shout-row { position: relative; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem;
-             padding: 0.18rem 1.3rem 0.18rem 0.3rem; border-radius: 4px; font-size: 0.88rem; line-height: 1.45; }
-.shout-row:hover { background: rgba(255,255,255,0.035); }
+/* A dashed rule between the lines, on the ROW rather than as an element of its own, so a row that is
+   appended brings its own separator and the list never has to be walked to fix them up. Dashed and
+   dark: a solid rule at this spacing reads as a table, and twenty-five of them is a fence. */
+.shout-row { position: relative; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem;
+             padding: 0.34rem 1.3rem 0.34rem 0.3rem; border-bottom: 1px dashed #23233a;
+             border-radius: 4px; font-size: 0.88rem; line-height: 1.5; }
+/* Nothing under the last one: a rule there is a promise of a row that is not coming. */
+.shout-row:last-child { border-bottom: 0; }
+.shout-row:hover { background: rgba(255,255,255,0.045); }
 /* A line that names me. The bar is the signal; the tint alone would be one more grey on grey. */
 .shout-row-mention { background: rgba(255,255,255,0.05); box-shadow: inset 3px 0 0 var(--accent); }
-.shout-who { flex: 0 0 auto; font-weight: 600; color: var(--accent); }
+/* A COLUMN, not a word of whatever length the name happens to be: with `flex: 0 0 auto` every row
+   started its text at a different x, and one long name set the ragged edge for the whole list. Cut
+   with an ellipsis; the anchor carries the full name as its title. */
+.shout-who { flex: 0 0 8rem; min-width: 0; font-weight: 600; color: var(--accent);
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shout-who::after { content: ':'; color: var(--text-muted); }
-.shout-time { flex: 0 0 auto; font-size: 0.72rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.shout-time { flex: 0 0 auto; width: 2.6rem; font-size: 0.72rem; color: var(--text-muted);
+              font-variant-numeric: tabular-nums; }
 .shout-body { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
 /* The renderer's block rules are written for a description. Inside a shout they would put a
    paragraph's margin under every line and a 520px image in the middle of a conversation. */
@@ -2653,6 +2690,13 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shout-body.rt-body p { display: inline; margin: 0; }
 .shout-body.rt-body .rt-img { max-height: 3.5rem; margin: 0; vertical-align: text-bottom; }
 .shout-body.rt-body .rt-quote, .shout-body.rt-body .rt-code, .shout-body.rt-body .rt-list { margin: 0.2rem 0; }
+/* A link inside a shout does NOT go purple once it has been clicked. The site-wide a:visited rule is
+   right for a document — it says which of these you have already read — and wrong for a room: the
+   same address said twice by two people is one visited colour and one link colour, which reads as
+   two different things. Scoped to the body of a shout and to the picker's rows; the rule itself is
+   left exactly as it is everywhere else on the site. */
+.shout-body a:visited, .shout-picker a:visited, .shout-row a:visited { color: var(--link); }
+.shout-body .shout-mention:visited, .shout-row .shout-who:visited { color: var(--accent); }
 .shout-mention { color: var(--accent); }
 .shout-mention-me { font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .shout-del { position: absolute; top: 0.15rem; right: 0.15rem; background: none; border: 0; padding: 0 0.25rem;
@@ -2677,6 +2721,26 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shout-compose > .shout-input:focus { outline: none; border-color: var(--accent); }
 .shout-editor textarea { min-height: 3.2rem; }
 .shout-editor .rt-preview { min-height: 3rem; max-height: 12rem; }
+/* A MOUSE click on the format select left a white ring behind it — the browser's default :focus,
+   painted in a colour this palette does not contain. :focus-visible is the distinction the platform
+   already makes: a pointer leaves no ring, a Tab still does, and it is drawn in the accent. */
+.rt-format:focus { outline: none; }
+.rt-format:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.shout-acts .btn:focus, .shout-older:focus, .shout-yes:focus, .shout-no:focus, .shout-del:focus { outline: none; }
+.shout-acts .btn:focus-visible, .shout-older:focus-visible,
+.shout-yes:focus-visible, .shout-no:focus-visible, .shout-del:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+}
+/* The formatting rail shares the line with the tabs and the select rather than taking a row of its
+   own: a shout is two lines tall, and a toolbar above it would be half the composer. So the rule and
+   the padding .rt-tools carries as a band of its own come off, and it wraps onto a second line only
+   when there is genuinely no room. */
+.shout-editor .rt-tabs { flex-wrap: wrap; row-gap: 0.25rem; }
+.rt-tools.shout-tools { padding: 0; border-bottom: 0; margin-left: 0.5rem; flex: 1 1 auto; }
+.rt-tools.shout-tools button { min-width: 1.75rem; padding: 0.1rem 0.35rem; font-size: 0.75rem; }
+.rt-tools.shout-tools .rt-tool-group { margin-right: 0.35rem; }
+.rt-tools.shout-tools button:focus { outline: none; }
+.rt-tools.shout-tools button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .shout-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.45rem; }
 .shout-count { font-size: 0.75rem; font-variant-numeric: tabular-nums; margin-left: auto; }
 .shout-note { font-size: 0.8rem; color: #e0b15a; flex: 1 1 100%; }
@@ -2687,6 +2751,13 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     .shoutbox-page .shout-list { max-height: 22rem; }
     /* Touch has no hover, so a delete button that only appears on one is a button nobody has. */
     .shout-del { opacity: 1; }
+    /* A narrower name column, because the words matter more than the column does at this width. */
+    .shout-who { flex-basis: 5.5rem; }
+    .shout-title { font-size: 1.05rem; }
+    /* The head has already wrapped by here; the refresh button keeps the right of its own line
+       rather than being pushed onto one of its own by the margin. */
+    .shout-head { gap: 0.45rem; }
+    .rt-tools.shout-tools { margin-left: 0; flex-basis: 100%; }
 }
 
 /* ── emoji, emotes and stickers (1.59.0) ─────────────────────────────────────
@@ -2713,7 +2784,6 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     vertical-align: bottom;
 }
 .shout-emotes-link { font-size: 0.8rem; }
-.shout-emotes-link-end { margin-left: auto; }
 
 /* The handle. A button that is one character wide and looks like the character, not like a button —
    it sits in a row with Send and must not compete with it. */
@@ -2773,42 +2843,72 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     .shout-picker-grid { height: 9.5rem; }
 }
 
-/* ── ?action=emotes ────────────────────────────────────────────────────────── */
+/* ── ?action=emotes ──────────────────────────────────────────────────────────
+   A GRID rather than a wrapped row of fixed-width boxes: with `flex-wrap` the last line of tiles sat
+   short of the right edge at most widths and the cards were all as tall as the tallest label in
+   their line, which is what "nie wygląda najlepiej" was about. `auto-fill` + `1fr` gives equal
+   columns at every width, and `align-items: stretch` (the default) gives every card in a row the
+   same height for free. */
 .emote-intro { margin-bottom: 0.8rem; }
 .emote-intro code { background: var(--bg-code); border-radius: 4px; padding: 0 0.25rem; }
 .emote-count { font-size: 0.8rem; font-weight: normal; }
-.emote-grid { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.emote-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 0.6rem; }
+.emote-grid-big { grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); }
 .emote-card {
-    position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.15rem;
-    width: 8.5rem; padding: 0.55rem 0.4rem;
+    position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+    padding: 0.55rem 0.45rem;
     background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
     text-align: center; overflow-wrap: anywhere;
 }
-.emote-grid-big .emote-card { width: 10.5rem; }
-.emote-shot { display: flex; align-items: center; justify-content: center; min-height: 2.6rem; }
+/* The picture on a panel of its own. A white PNG and a dark SVG are both uploaded here, and against
+   any single flat ground one of the two disappears — the faint check is what makes both of them
+   read, and says "this is transparent" where the picture is. */
+.emote-shot {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; min-height: 3.6rem; padding: 0.35rem; border-radius: 4px;
+    background:
+        repeating-conic-gradient(rgba(255,255,255,0.05) 0% 25%, transparent 0% 50%) 50% / 14px 14px,
+        var(--bg-code);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+}
 .emote-grid-big .emote-shot { min-height: 8.2rem; }
 /* Twice the size it has in a sentence: this page is where somebody decides whether they want it. */
 .emote-shot .shout-emote { height: 2.4em; max-width: 100%; vertical-align: middle; }
-.emote-code { font-size: 0.8rem; color: var(--accent); }
+/* The code, as something to press. The whole reason anybody opens this page is to get one of these
+   into a shout, and selecting eight characters by hand on a phone is not a way to do that. */
+.emote-copy {
+    max-width: 100%; padding: 0.02rem 0.5rem;
+    background: var(--bg-code); border: 1px solid var(--control-border); border-radius: 999px;
+    color: var(--accent); font-family: inherit; font-size: 0.78rem; line-height: 1.5;
+    cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    transition: border-color 0.15s, color 0.15s;
+}
+.emote-copy:hover { border-color: var(--accent); color: var(--text); }
+.emote-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.emote-copy.is-copied { border-color: var(--success); color: var(--success); }
 .emote-name { font-size: 0.78rem; }
 .emote-by { font-size: 0.72rem; }
-.emote-off {
-    font-size: 0.68rem; color: var(--warning); border: 1px solid var(--warning);
-    border-radius: 4px; padding: 0 0.3rem;
+.emote-off, .emote-wait {
+    font-size: 0.68rem; border-radius: 4px; padding: 0 0.3rem;
 }
-.emote-empty { padding: 0.5rem 0.2rem; font-size: 0.88rem; }
+.emote-off { color: var(--text-muted); border: 1px solid var(--control-border); }
+/* Waiting is not the same fact as switched off, and the colour is the fastest way to say so: this
+   one is a queue with somebody on the other end of it. */
+.emote-wait { color: var(--warning); border: 1px solid var(--warning); }
+.emote-empty { grid-column: 1 / -1; padding: 0.5rem 0.2rem; font-size: 0.88rem; }
 .emote-del {
-    margin-top: 0.2rem; background: none; border: 1px solid var(--control-border); border-radius: 4px;
+    margin-top: auto; background: none; border: 1px solid var(--control-border); border-radius: 4px;
     padding: 0 0.4rem; font-family: inherit; font-size: 0.72rem; color: var(--text-muted); cursor: pointer;
 }
 .emote-del:hover { border-color: var(--error); color: var(--error); }
+.emote-del:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .emote-card .shout-confirm { margin: 0.2rem 0 0; justify-content: center; }
 
 /* The upload: the drop zone the panel's imports use, in the colours of the public side. The real
    file input stays in the DOM (it is what opens the picker and what carries the file) and a
    label-shaped box is laid over it, rather than a button that fakes one. */
 .emote-upload {
-    max-width: 34rem; margin-bottom: 0.4rem; padding: 0.9rem;
+    max-width: 44rem; margin-bottom: 0.4rem; padding: 0.9rem;
     background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
 }
 .emote-drop {
@@ -2832,12 +2932,18 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     color: var(--text); font-family: inherit; font-size: 0.9rem;
 }
 .emote-fields input[type="text"]:focus { outline: none; border-color: var(--accent); }
-.emote-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.7rem; }
+/* The sticker box and the button on ONE line with the answer beside them, rather than a checkbox
+   with a paragraph under it and a button somewhere below that. */
+.emote-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.7rem; margin-top: 0.7rem; }
+.emote-stick-check { flex: 0 0 auto; margin: 0; }
 .emote-note { font-size: 0.8rem; color: var(--success); }
 .emote-note-bad { color: #e0b15a; }
 .emote-note:empty { display: none; }
+.emote-limits { margin-top: 0.6rem; }
 .emote-back { margin-top: 1.2rem; }
 @media (max-width: 640px) {
-    .emote-card { width: calc(50% - 0.3rem); }
-    .emote-grid-big .emote-card { width: 100%; }
+    /* Two to a row, and the grid works out the widths — `width: 50%` on a grid item did nothing but
+       leave the column it sat in half empty. */
+    .emote-grid { grid-template-columns: repeat(2, 1fr); }
+    .emote-grid-big { grid-template-columns: 1fr; }
 }

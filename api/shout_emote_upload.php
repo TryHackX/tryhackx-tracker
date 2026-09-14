@@ -50,5 +50,11 @@ if (empty($r['ok'])) {
     jsonResponse(['error' => substr((string)$r['error'], strlen('api.emote.')), 'message' => __((string)$r['error'], $vars),
                   'detail' => (string)($r['detail'] ?? '')], (int)($r['status'] ?? 400));
 }
-jsonResponse(['success' => true, 'message' => __('api.emote.added'),
+// `pending` is the whole of what the approval gate looks like from out here: the row is stored and
+// it is theirs, but nobody else sees it until somebody with `shout.moderate` says so. The page marks
+// their own card as waiting rather than pretending the picture is live — being told "added" about a
+// picture that does not work is how somebody uploads it a second time.
+$pending = !empty($r['pending']);
+jsonResponse(['success' => true, 'pending' => $pending,
+              'message' => __($pending ? 'api.emote.waiting' : 'api.emote.added'),
               'emote' => shoutEmoteForClient($r['row'], getBaseUrl())]);

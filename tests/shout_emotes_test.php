@@ -16,6 +16,13 @@
  * shout that is nothing but one sticker token becomes a single big image — which is the shape
  * assets/js/shoutbox.js is written against.
  *
+ * And the difference between WAITING and SWITCHED OFF, which `approved_at` is the whole of. Both
+ * used to be `enabled = 0`, so an emote a moderator had deliberately taken down climbed back into
+ * the approval queue and asked to be approved again — for ever. A row nobody has answered for is
+ * waiting; a row somebody answered for is off; switching one off is not a question and switching it
+ * back on is not a second approval. The backfill is here too: a site upgrading from 1.59.0 has no
+ * queue, and its whole library must not become one overnight.
+ *
  * Self-cleaning: every row it makes is removed in the finally, and no setting is written at all —
  * the functions take $cfg, so the whole run happens against an array this file builds.
  */
@@ -46,20 +53,48 @@ $db = getDb();
 $cfg = getSettings($db);
 ensureSchema($db, $cfg);
 $cfg = getSettings($db, true);
+// ensureSchema() returns the moment schema_version already matches, so a box that recorded 65 from
+// an earlier build of this release never sees a column ADDED to 65 afterwards — and every check
+// below would then fail for a reason with nothing to do with the code under test. The guarded
+// statement is the migration itself, asked for by name: it offers the ALTER only while the column is
+// missing, which is exactly the question being asked here.
+foreach (trackerSchemaGuardedStatements($db) as $q) {
+    if (is_string($q) && str_contains($q, 'shout_emotes')) $db->exec($q);
+}
 
 // ── schema, settings, registry ───────────────────────────────────────────────
-check('schema version is at least 64', (int)($cfg['schema_version'] ?? 0) >= 64, (string)($cfg['schema_version'] ?? '?'));
+check('schema version is at least 65', (int)($cfg['schema_version'] ?? 0) >= 65, (string)($cfg['schema_version'] ?? '?'));
 check('the shout_emotes table exists', (bool)$db->query("SHOW TABLES LIKE 'shout_emotes'")->fetchColumn());
-$cols = array_column($db->query("SHOW COLUMNS FROM `shout_emotes`")->fetchAll(PDO::FETCH_ASSOC), 'Field');
-$want = ['id', 'code', 'name', 'mime', 'bytes', 'width', 'height', 'is_sticker', 'enabled', 'uploaded_by', 'sha1', 'data', 'created_at'];
+$colRows = $db->query("SHOW COLUMNS FROM `shout_emotes`")->fetchAll(PDO::FETCH_ASSOC);
+$cols = array_column($colRows, 'Field');
+$want = ['id', 'code', 'name', 'mime', 'bytes', 'width', 'height', 'is_sticker', 'enabled', 'approved_at',
+         'uploaded_by', 'sha1', 'data', 'created_at'];
 check('… with every column the feature needs', array_diff($want, $cols) === [], implode(',', array_diff($want, $cols)));
+$approvedCol = [];
+foreach ($colRows as $c) if ($c['Field'] === 'approved_at') $approvedCol = $c;
+// NULL is the entire point of the column — it is the only value that means "nobody has answered
+// yet", so any default at all would be the database answering on somebody's behalf.
+check('… and approved_at is nullable, with no default to speak for a decision nobody made',
+      ($approvedCol['Null'] ?? '') === 'YES' && ($approvedCol['Default'] ?? null) === null, json_encode($approvedCol));
+// The four places this codebase takes a column: both copies of the CREATE (a split between the two
+// lists is what once stopped a fresh install at version 0), a guarded ALTER for an install that
+// already has the table, and a one-time data migration for the rows that pre-date it.
+$schemaSrc = (string)file_get_contents($root . '/includes/schema.php');
+check('the column is in both CREATEs, in a guarded ALTER, and backfilled once',
+      substr_count($schemaSrc, '`approved_at` DATETIME DEFAULT NULL') === 3
+      && str_contains($schemaSrc, "schemaColumnExists(\$db, 'shout_emotes', 'approved_at')")
+      && str_contains($schemaSrc, "schemaOnce(\$db, 'v65_emote_approved')")
+      && str_contains($schemaSrc, 'UPDATE shout_emotes SET approved_at = created_at WHERE approved_at IS NULL'),
+      'CREATE/ALTER copies: ' . substr_count($schemaSrc, '`approved_at` DATETIME DEFAULT NULL'));
 $keys = array_unique(array_column($db->query("SHOW INDEX FROM `shout_emotes`")->fetchAll(PDO::FETCH_ASSOC), 'Key_name'));
 check('… the code and the bytes are both unique, and the uploader is indexed',
       in_array('uq_emote_code', $keys, true) && in_array('uq_emote_sha1', $keys, true) && in_array('idx_emote_user', $keys, true),
       implode(',', $keys));
 $defaults = trackerSchemaDefaultSettings();
 foreach (['shout_emotes_enabled' => '1', 'shout_emote_max_kb' => '64', 'shout_emote_max_px' => '128',
-          'shout_emote_per_user' => '20', 'shout_stickers_enabled' => '1'] as $k => $v) {
+          'shout_emote_per_user' => '20', 'shout_stickers_enabled' => '1',
+          // v65: on, and it changes nothing until somebody is granted shout.upload_emote.
+          'shout_emote_approval' => '1'] as $k => $v) {
     check("the default for $k ships as '$v'", ($defaults[$k] ?? null) === $v, var_export($defaults[$k] ?? null, true));
 }
 check('shout.upload_emote is in the registry', isset(userPermissionList()['shout.upload_emote']));
@@ -202,9 +237,13 @@ check('the extension is chosen here, never taken from a file name',
 $names = ['emtuser', 'emtother'];
 $in = implode(',', array_fill(0, count($names), '?'));
 $db->prepare("DELETE FROM users WHERE username IN ($in)")->execute($names);
+// The approval gate is OFF for the body of this suite: every check below is about what an upload IS,
+// and a row that lands switched off because it is waiting for somebody would answer a different
+// question. The gate has a section of its own further down, where it is switched on deliberately.
 $cfgOn = array_merge($cfg, ['users_enabled' => '1', 'shout_enabled' => '1', 'users_require_email_verify' => '0',
                             'shout_emotes_enabled' => '1', 'shout_stickers_enabled' => '1',
                             'shout_emote_max_kb' => '64', 'shout_emote_max_px' => '128', 'shout_emote_per_user' => '20',
+                            'shout_emote_approval' => '0',
                             'shout_max_chars' => '500', 'shout_flood_seconds' => '0', 'shout_format' => 'bbcode',
                             'desc_allow_bbcode' => '1', 'desc_allow_markdown' => '1']);
 $uid = [];
@@ -290,6 +329,145 @@ try {
     check('no other column can be reached through that door', shoutEmoteSetFlag($db, $firstId, 'code', true) === false);
     check('the whole list is nothing while the feature is off',
           shoutEmotes($db, array_merge($cfgOn, ['shout_emotes_enabled' => '0'])) === []);
+
+    // ── the NAME, which nothing used to check at all (1.59.1) ────────────────
+    // The sounds library's rule, for the reason that file gives: two emotes called "Wave" are two
+    // identical lines in the manager and on the Emotes page, and whoever picks one is guessing.
+    check('a name that is nothing after trimming is refused',
+          shoutEmoteNameProblem($db, '   ') === 'api.emote.name_required'
+          && shoutEmoteNameProblem($db, "\t\n") === 'api.emote.name_required');
+    check('… one character is not a name', shoutEmoteNameProblem($db, ' x ') === 'api.emote.name_short');
+    check('… two is', shoutEmoteNameProblem($db, 'ok') === null);
+    // The upper bound is not an error: shoutEmoteCleanName() has already cut it to 60.
+    check('… and a name longer than the column is CUT rather than refused',
+          shoutEmoteNameProblem($db, str_repeat('a', 200)) === null
+          && mb_strlen(shoutEmoteCleanName(str_repeat('a', 200))) === 60);
+    check('a name another emote already answers to is taken, whatever its case',
+          shoutEmoteNameProblem($db, 'My fire') === 'api.emote.name_taken'
+          && shoutEmoteNameProblem($db, '  mY   FIRE  ') === 'api.emote.name_taken',
+          (string)shoutEmoteNameProblem($db, 'mY FIRE'));
+    check('… but a name is never taken by the row that already has it',
+          shoutEmoteNameProblem($db, 'My fire', $firstId) === null);
+    $r = shoutEmoteStore($db, $cfgOn, 'zztaken', 'my fire', $svg('<title>taken</title>'), $me, false);
+    check('storing under a taken name is refused, and says which name it was',
+          ($r['error'] ?? '') === 'api.emote.name_taken' && ($r['status'] ?? 0) === 409
+          && ($r['detail'] ?? '') === 'my fire', json_encode($r));
+    // The fallback is a name like any other: a second "Zzpretty" arrived at by nobody typing
+    // anything is the same collision as one arrived at deliberately.
+    check('an empty name still falls back to the prettified code',
+          (shoutEmoteStore($db, $cfgOn, 'zzpretty', '', $svg('<title>pretty</title>'), $me, false)['row']['name'] ?? '') === 'Zzpretty');
+    // `zz_pretty` prettifies to exactly the name the row below is given, which is the collision a
+    // fallback walks into without anybody having typed a name at all.
+    shoutEmoteStore($db, $cfgOn, 'zzclash', 'Zz pretty', $svg('<title>clash</title>'), $me, false);
+    $r = shoutEmoteStore($db, $cfgOn, 'zz_pretty', '  ', $svg('<title>pretty2</title>'), $me, false);
+    check('… and when that fallback collides it is refused rather than stored twice',
+          ($r['error'] ?? '') === 'api.emote.name_taken' && ($r['detail'] ?? '') === 'Zz pretty', json_encode($r));
+
+    // ── renaming: the NAME moves, the code never does ────────────────────────
+    $r = shoutEmoteRename($db, $firstId, '  Renamed   fire  ');
+    check('a rename tidies the new name and leaves the code alone',
+          !empty($r['ok']) && ($r['row']['name'] ?? '') === 'Renamed fire' && ($r['row']['code'] ?? '') === 'zzfire',
+          json_encode($r));
+    check('… and the table says so', (shoutEmotes($db, $cfgOn, false)['zzfire']['name'] ?? '') === 'Renamed fire');
+    check('renaming to a name somebody else has is refused',
+          (shoutEmoteRename($db, $firstId, 'Zzpretty')['error'] ?? '') === 'api.emote.name_taken');
+    check('… renaming a row to the name it already has is not a collision',
+          !empty(shoutEmoteRename($db, $firstId, 'Renamed fire')['ok']));
+    check('… one character is still not a name', (shoutEmoteRename($db, $firstId, 'x')['error'] ?? '') === 'api.emote.name_short');
+    $r = shoutEmoteRename($db, $firstId, '');
+    check('… and an empty box means the prettified code, which is a way back rather than a refusal',
+          !empty($r['ok']) && ($r['row']['name'] ?? '') === 'Zzfire', json_encode($r));
+    check('renaming something that is not there is not found',
+          (shoutEmoteRename($db, 999999999, 'Whatever')['error'] ?? '') === 'api.emote.unknown');
+    // And back to the name the rendering checks below are written against. A test that quietly
+    // changes what a later one is measuring is worse than no test at all.
+    check('… and the name goes back where the rest of this file expects it',
+          !empty(shoutEmoteRename($db, $firstId, 'My fire')['ok']));
+
+    // ── the approval gate (v65) ──────────────────────────────────────────────
+    check('the gate is on unless it is switched off',
+          shoutEmoteApproval([]) === true && shoutEmoteApproval(['shout_emote_approval' => '1']) === true
+          && shoutEmoteApproval(['shout_emote_approval' => '0']) === false);
+    $gateOn = array_merge($cfgOn, ['shout_emote_approval' => '1']);
+    $r = shoutEmoteStore($db, $gateOn, 'zzhold', 'Zz hold', $svg('<title>hold</title>'), $me, false);
+    check('with the gate on, a MEMBER\'s upload lands switched off and says it is waiting',
+          !empty($r['ok']) && $r['row']['enabled'] === false && !empty($r['pending'])
+          && $r['row']['approved_at'] === null && !empty($r['row']['waiting']), json_encode($r));
+    $holdId = (int)$r['row']['id'];
+    shoutEmotesInvalidate();
+    // array_key_exists, not ??: the value under test IS null, and `?? something` cannot tell that
+    // apart from a key nobody wrote — which would have made this check pass on a missing column.
+    $held = shoutEmotes($db, $gateOn, false)['zzhold'] ?? [];
+    check('… and the ROW says it, rather than the setting being asked about it later',
+          ($held['waiting'] ?? false) === true
+          && array_key_exists('approved_at', $held) && $held['approved_at'] === null, json_encode($held));
+    check('… so the room does not have it: not in the reader\'s list, not rendered in a line',
+          !isset(shoutEmotes($db, $gateOn)['zzhold'])
+          && shoutRenderEmotes('hi :zzhold:', shoutEmotes($db, $gateOn), '') === 'hi :zzhold:');
+    check('… while the manager, who has to be able to approve it, still sees it',
+          isset(shoutEmotes($db, $gateOn, false)['zzhold']));
+    // Switching the gate off afterwards does not answer the question for anybody: somebody is still
+    // waiting to hear about this picture, and the only thing that can say so is the row.
+    check('… and it is still waiting even if the gate is switched off afterwards',
+          (shoutEmotes($db, $cfgOn, false)['zzhold']['waiting'] ?? false) === true);
+    $r = shoutEmoteStore($db, $gateOn, 'zzsitenow', 'Zz site now', $svg('<title>sitenow</title>'), null, false);
+    check('… and the panel\'s own never waits: the person who would approve it just added it',
+          !empty($r['ok']) && $r['row']['enabled'] === true && empty($r['pending'])
+          && $r['row']['approved_at'] !== null && empty($r['row']['waiting']), json_encode($r));
+
+    // Approving, and then the thing the column exists for: taking that same emote down again.
+    check('approving switches it on and stamps the decision',
+          shoutEmoteApprove($db, $holdId) && isset(shoutEmotes($db, $gateOn)['zzhold']));
+    $stamp = shoutEmotes($db, $gateOn, false)['zzhold']['approved_at'] ?? null;
+    check('… with a real moment rather than a flag',
+          is_string($stamp) && $stamp !== '' && abs(time() - (int)strtotime($stamp)) < 600, var_export($stamp, true));
+    check('… so nobody is waiting on it any more',
+          (shoutEmotes($db, $gateOn, false)['zzhold']['waiting'] ?? true) === false);
+    // The 1.59.1 defect, in one check: "switched off by a moderator" and "waiting for a moderator"
+    // were the same row, so a picture somebody had deliberately taken down asked to be approved
+    // again every time the manager was opened.
+    check('a moderator switching an approved emote off leaves the decision standing',
+          shoutEmoteSetFlag($db, $holdId, 'enabled', false));
+    $backOff = shoutEmotes($db, $gateOn, false)['zzhold'] ?? [];
+    check('… so it is off, it is not waiting, and it does not climb back into the queue',
+          ($backOff['enabled'] ?? true) === false && ($backOff['waiting'] ?? true) === false
+          && ($backOff['approved_at'] ?? null) === $stamp, json_encode($backOff));
+    check('… and switching it back on is not a second approval: the date does not move',
+          shoutEmoteApprove($db, $holdId)
+          && (shoutEmotes($db, $gateOn, false)['zzhold']['approved_at'] ?? '') === $stamp);
+    check('nothing but approving may write that column',
+          shoutEmoteSetFlag($db, $holdId, 'approved_at', true) === false
+          && (shoutEmotes($db, $gateOn, false)['zzhold']['approved_at'] ?? '') === $stamp);
+    $r = shoutEmoteStore($db, $cfgOn, 'zzfree', 'Zz free', $svg('<title>free</title>'), $me, false);
+    check('with the gate OFF a member\'s upload is everybody\'s at once, exactly as in 1.59.0',
+          !empty($r['ok']) && $r['row']['enabled'] === true && empty($r['pending'])
+          && $r['row']['approved_at'] !== null && empty($r['row']['waiting']), json_encode($r));
+
+    // ── the backfill: a library that pre-dates the column is not a queue ─────
+    // A 1.59.0 row, simulated the only honest way there is: stored before anything remembered a
+    // decision, and switched off — because THAT is the row the defect was really about. An operator
+    // who had already taken a picture down must not be asked about it again after an upgrade.
+    $r = shoutEmoteStore($db, $cfgOn, 'zzlegacy', 'Zz legacy', $svg('<title>legacy</title>'), $me, false);
+    $legacyId = (int)$r['row']['id'];
+    shoutEmoteSetFlag($db, $legacyId, 'enabled', false);
+    $db->prepare("UPDATE shout_emotes SET approved_at = NULL WHERE id = ?")->execute([$legacyId]);
+    shoutEmotesInvalidate();
+    check('a row with no stamp reads as waiting, whatever it is switched to',
+          (shoutEmotes($db, $cfgOn, false)['zzlegacy']['waiting'] ?? false) === true);
+    // The migration itself, asked rather than trusted: forget the marker (schemaOnce burns one) and
+    // run the data migrations again, exactly as the seed check above does.
+    $db->exec("DELETE FROM settings WHERE `key` = 'schema_once_v65_emote_approved'");
+    trackerSchemaDataMigrations($db, getSettings($db, true));
+    shoutEmotesInvalidate();
+    $legacy = shoutEmotes($db, $cfgOn, false)['zzlegacy'] ?? [];
+    check('the migration stamps it with the day it arrived, not the day of the upgrade',
+          ($legacy['approved_at'] ?? null) === ($legacy['created_at'] ?? ''),
+          json_encode([$legacy['approved_at'] ?? null, $legacy['created_at'] ?? null]));
+    check('… so a picture somebody had already switched off is off, and not a question',
+          ($legacy['enabled'] ?? true) === false && ($legacy['waiting'] ?? true) === false, json_encode($legacy));
+    check('… and every other row it found is answered for as well',
+          (int)$db->query("SELECT COUNT(*) FROM shout_emotes WHERE approved_at IS NULL")->fetchColumn() === 0,
+          (string)$db->query("SELECT COUNT(*) FROM shout_emotes WHERE approved_at IS NULL")->fetchColumn());
 
     // ── rendering ────────────────────────────────────────────────────────────
     shoutEmotesInvalidate();
@@ -390,19 +568,70 @@ check('the member upload checks CSRF, the permission and the size before it deco
 $save = (string)file_get_contents($root . '/api/admin/save_settings.php');
 check('every emote setting is saveable and clamped',
       str_contains($save, "'shout_emotes_enabled'") && str_contains($save, "'shout_stickers_enabled'")
+      && str_contains($save, "'shout_emote_approval'")
       && str_contains($save, "'shout_emote_max_kb' => [8, 512, 64]")
       && str_contains($save, "'shout_emote_max_px' => [32, 512, 128]")
       && str_contains($save, "'shout_emote_per_user' => [1, 200, 20]"));
 $kw = settingsCatalogKeywords();
 $tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
 $gone = [];
-foreach (['shout_emotes_enabled', 'shout_emote_max_kb', 'shout_emote_max_px', 'shout_emote_per_user', 'shout_stickers_enabled'] as $k) {
+foreach (['shout_emotes_enabled', 'shout_emote_max_kb', 'shout_emote_max_px', 'shout_emote_per_user',
+          'shout_stickers_enabled', 'shout_emote_approval'] as $k) {
     if (!isset($kw[$k]) || !str_contains($tpl, 'name="' . $k . '"')) $gone[] = $k;
 }
 check('every setting is on the Settings page and in the search catalogue', $gone === [], implode(', ', $gone));
+$adminJs = (string)file_get_contents($root . '/assets/js/admin-shout.js');
 check('the manager is drawn in the shoutbox section and driven by admin-shout.js',
       str_contains($tpl, 'id="admin-emotes"') && str_contains($tpl, 'id="admin-emote-drop"')
-      && str_contains((string)file_get_contents($root . '/assets/js/admin-shout.js'), "admin/shout_emotes"));
+      && str_contains($adminJs, "admin/shout_emotes"));
+// 1.59.1: the shape the owner asked for, checked by reading it rather than by trusting the diff.
+check('… as a TABLE with headings and a count, not a list',
+      str_contains($tpl, 'id="admin-emotes-count"') && str_contains($adminJs, "el('thead'")
+      && str_contains($adminJs, 'js.shoutadmin.col_code') && str_contains($adminJs, 'js.shoutadmin.count'));
+check('… the buttons say what they do and the row says what it is',
+      str_contains($adminJs, 'js.shoutadmin.emote_make_sticker') && str_contains($adminJs, 'js.shoutadmin.emote_rename')
+      && str_contains($adminJs, 'js.shoutadmin.emote_state_on') && str_contains($adminJs, 'js.shoutadmin.emote_kind_sticker')
+      && !str_contains($adminJs, 'js.shoutadmin.emote_inline'));
+check('… and the waiting queue is drawn above it, with Approve',
+      str_contains($tpl, 'id="admin-emotes-waiting"') && str_contains($adminJs, 'js.shoutadmin.emote_approve'));
+$adminApi = (string)file_get_contents($root . '/api/admin/shout_emotes.php');
+check('the manager can rename, and approving is audited',
+      str_contains($adminApi, "\$op === 'rename'") && str_contains($adminApi, 'shoutEmoteRename')
+      && str_contains($adminApi, "'shout.emote_approve'"));
+// The selection, by reading it: a queue built on `enabled` is the defect, whatever it is called.
+check('the queue asks whether anybody has approved, never whether the row is switched on',
+      str_contains($adminApi, "'pending' => !empty(\$e['waiting'])")
+      && !str_contains($adminApi, "\$e['enabled'] === false && \$e['uploaded_by']")
+      && str_contains($adminApi, 'shoutEmoteApprove($db, $id)'));
+check('… and the browser draws it from the row rather than from the setting',
+      str_contains($adminJs, 'rows.filter((r) => r.pending)') && !str_contains($adminJs, 'approval ? rows.filter'));
+// 1.59.1, the one-line tidy: two policies on one response is safe and untidy, so the page's own
+// (and the report-only one, which is a different header name and would have survived) come off first.
+check('the picture stream sends exactly ONE Content-Security-Policy',
+      str_contains($stream, "header_remove('Content-Security-Policy')")
+      && str_contains($stream, "header_remove('Content-Security-Policy-Report-Only')")
+      && strpos($stream, "header_remove('Content-Security-Policy')") < strpos($stream, 'header("Content-Security-Policy:'));
+// The widget and the page it links to, also by reading them: a rule that is in the stylesheet and
+// nowhere in the markup styles nothing.
+$widget = (string)file_get_contents($root . '/templates/partials/shoutbox_widget.php');
+$css = (string)file_get_contents($root . '/assets/css/style.css');
+check('the widget has a refresh button and the formatting rail beside the format select',
+      str_contains($widget, 'id="shout-refresh"') && str_contains($widget, 'id="shout-body-tools"')
+      && str_contains($widget, 'data-md="bold"') && str_contains($widget, 'data-md="spoiler"'));
+check('… driven by the poll\'s own fetch rather than a second one',
+      str_contains((string)file_get_contents($root . '/assets/js/shoutbox.js'), 'function fetchNew')
+      && substr_count((string)file_get_contents($root . '/assets/js/shoutbox.js'), "get('shout_list&after=") === 1);
+check('a link inside a shout keeps the link colour, and the site-wide rule is untouched',
+      str_contains($css, '.shout-body a:visited') && str_contains($css, 'a:visited { color: var(--link-visited); }'));
+check('the rows carry a dashed rule and the last one does not',
+      str_contains($css, 'border-bottom: 1px dashed') && str_contains($css, '.shout-row:last-child { border-bottom: 0; }'));
+$page = (string)file_get_contents($root . '/templates/pages/emotes.php');
+check('the Emotes page offers the code as something to click, and no longer advertises :fire:',
+      str_contains($page, 'data-emote-copy') && !str_contains($page, ':fire:')
+      && !str_contains(__('shout.emotes_intro'), ':fire:'), __('shout.emotes_intro'));
+check('… and the uploader\'s own card asks the same question the manager\'s queue does',
+      str_contains($page, "\$emWait = !empty(\$e['waiting'])") && str_contains($page, 'if ($emWait):')
+      && !str_contains($page, 'if ($emOff && $emApproval):'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

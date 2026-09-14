@@ -55,10 +55,14 @@ add('shout', {
     'emotes_h1':     ('Emotes', 'Emote'),
     # The example is the same token in both languages on purpose: a `:word` in one and not in the
     # other is what the dictionary test reads as a placeholder somebody forgot to translate.
-    'emotes_intro':  ('Write the code between colons in a shout — <code>:fire:</code> — and it becomes the picture. '
-                      'The button beside the send button inserts them for you.',
-                      'Wpisz kod między dwukropkami — <code>:fire:</code> — a zamieni się w obrazek. '
-                      'Przycisk obok „Wyślij” wstawia je za ciebie.'),
+    #
+    # `flame` and not `fire`: `fire` is one of richtextEmoji()'s built-in shortcodes, so it is
+    # refused as an emote code (api.emote.code_reserved) and there is no `:fire:` emote to write.
+    # An example nobody can follow is worse than no example; `flame` is one the tracker ships.
+    'emotes_intro':  ('Write the code between colons in a shout — <code>:flame:</code> — and it becomes the picture. '
+                      'The button beside the send button inserts them for you, and a code below copies itself when you click it.',
+                      'Wpisz kod między dwukropkami — <code>:flame:</code> — a zamieni się w obrazek. '
+                      'Przycisk obok „Wyślij” wstawia je za ciebie, a kod poniżej kopiuje się po kliknięciu.'),
     'emotes_head':   ('Emotes', 'Emote'),
     'emotes_none':   ('Nothing here yet.', 'Na razie nic tu nie ma.'),
     'stickers_head': ('Stickers', 'Naklejki'),
@@ -87,6 +91,20 @@ add('shout', {
                       'Do :kb KB i :px×:px, najwyżej :n na osobę.'),
     'emote_mine_head': ('Yours', 'Twoje'),
     'emote_mine_none': ('You have not uploaded any yet.', 'Nie wysłałeś jeszcze żadnej.'),
+})
+
+# ── 1.59.1 ──────────────────────────────────────────────────────────────────
+# The button in the widget's head, the click-to-copy chip under every picture, and the two sentences
+# the approval gate needs: what a card that is waiting says, and what the form says before anybody
+# uploads anything into a queue they did not know was there.
+add('shout', {
+    'refresh':        ('Check for new lines', 'Sprawdź, czy są nowe wpisy'),
+    'emote_copy_title': ('Click to copy the code', 'Kliknij, by skopiować kod'),
+    'emote_waiting':  ('waiting', 'czeka'),
+    'emote_waiting_hint': ('Nobody else can see it until a moderator lets it through.',
+                           'Nikt inny jej nie widzi, dopóki moderator jej nie przepuści.'),
+    'emote_approval_note': ('What you add waits for a moderator before anybody else can see it.',
+                            'To, co dodasz, czeka na moderatora, zanim zobaczy to ktokolwiek inny.'),
 })
 
 # The browser tab. The key is the action, exactly as templates/layout.php looks it up.

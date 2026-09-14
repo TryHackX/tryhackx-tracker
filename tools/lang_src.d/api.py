@@ -1746,3 +1746,19 @@ add('', {
     'api.emote.code_reserved': ('That code already stands for a built-in emoji — pick another.',
         'Ten kod już oznacza wbudowaną emoji — wybierz inny.'),
 })
+
+# ── 1.59.1: the NAME is checked too, it can be changed, and an upload can wait ──
+#
+# The name rules are the sounds library's rules (api.sounds.name_*), for the reason that file gives:
+# two emotes called "Wave" are two identical lines in the manager and on the Emotes page, and the
+# person picking one of them is guessing. `waiting` is the other half of shout_emote_approval -- an
+# upload that is stored and is theirs, but is nobody else's yet.
+add('', {
+    'api.emote.name_required': ('An emote needs a name.', 'Emotka potrzebuje nazwy.'),
+    'api.emote.name_short': ('A name needs at least 2 characters.', 'Nazwa musi mieć co najmniej 2 znaki.'),
+    'api.emote.name_taken': ('Another emote is already called “:name”.', 'Inna emotka już nazywa się „:name”.'),
+    'api.emote.renamed': ('Renamed.', 'Zmieniono nazwę.'),
+    'api.emote.approved': ('Approved. Everybody can write it now.', 'Zatwierdzono. Każdy może już jej użyć.'),
+    'api.emote.waiting': ('Added. It waits for a moderator before anybody else can see it.',
+        'Dodano. Czeka na moderatora, zanim zobaczy ją ktokolwiek inny.'),
+})

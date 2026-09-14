@@ -371,6 +371,7 @@
         var noteEl = document.getElementById('shout-note');
         var fmtEl = document.getElementById('shout-body-format');
         var emojiBtn = document.getElementById('shout-emoji');
+        var refreshBtn = document.getElementById('shout-refresh');
         if (!listEl) return;
 
         var newest = Number(box.dataset.newest || 0);
@@ -395,7 +396,10 @@
             var row = el('div', { className: 'shout-row' + (r.own ? ' shout-row-own' : '') + (r.mentions_me ? ' shout-row-mention' : '') });
             row.dataset.id = String(Number(r.id) || 0);
             row.dataset.user = name;
-            row.appendChild(el('a', { className: 'shout-who', href: BASE + '?action=u&name=' + encodeURIComponent(name), text: name }));
+            // `title` because the column is a fixed width: a name longer than it is cut with an
+            // ellipsis so it cannot push the words out of line, and a cut name with no way to read
+            // the whole of it is a worse trade than the ragged column it replaced.
+            row.appendChild(el('a', { className: 'shout-who', title: name, href: BASE + '?action=u&name=' + encodeURIComponent(name), text: name }));
             row.appendChild(el('span', { className: 'shout-time', title: at, text: at.slice(11, 16) }));
             row.appendChild(el('span', { className: 'shout-body rt-body', html: r.html || '' }));
             if (r.deletable) {
@@ -446,25 +450,64 @@
 
         function stop() { if (timer) { clearInterval(timer); timer = 0; } }
 
-        async function poll() {
-            if (!live || polling || !visible()) return;
+        /**
+         * Ask for what is newer than `newest`. ONE fetch, used by the tick and by the button.
+         *
+         * `force` is the difference between them and it is the whole point of the button: the tick
+         * refuses when the feature is off, when the tab is behind another one or when the box is not
+         * on the screen — which is right for something that runs by itself, and is exactly why
+         * somebody coming back to the window has no way to ask. Pressed, it asks anyway. A flight
+         * already in the air still wins: two of these racing would append the same rows twice.
+         *
+         * Returns how many rows landed, so the button can say "nothing new" and the tick can stay
+         * silent about it.
+         */
+        async function fetchNew(force) {
+            if (polling) return 0;
+            if (!force && (!live || !visible())) return 0;
             polling = true;
             var j = null;
             try { j = await get('shout_list&after=' + newest); } finally { polling = false; }
-            if (!j) return;
+            if (!j) return 0;
             if (!j.success) {
                 // Switched off, signed out, or the permission taken away mid-session: stop asking. The
                 // box stays on the screen with what it had, which is honest — those rows were real.
                 if (j.error === 'disabled' || j.error === 'no_permission' || j.error === 'login_required') stop();
-                return;
+                if (force) note(errText(j, maxChars));
+                return 0;
             }
             var added = appendRows(j.rows);
             if (Number(j.newest) > newest) newest = Number(j.newest);
-            if (!added.length) return;
+            if (!added.length) return 0;
             markSeen(newest);
             // The hook the sound player listens on (and F3's nav counter will). The counts themselves
             // come from the pulse — this only says that rows landed while somebody was looking.
             window.dispatchEvent(new CustomEvent('shout:new', { detail: { rows: added } }));
+            return added.length;
+        }
+
+        function poll() { return fetchNew(false); }
+
+        /**
+         * The button in the head: the same fetch, asked for on purpose.
+         *
+         * It spins while it waits and stays dead for two seconds afterwards, which is not politeness
+         * to the server so much as an answer to the button itself — a control that does nothing
+         * visible when there is nothing new invites being pressed again, and again.
+         */
+        var refreshCool = 0;
+        async function refresh() {
+            if (!refreshBtn || refreshBtn.disabled) return;
+            refreshBtn.disabled = true;
+            refreshBtn.classList.add('is-spinning');
+            note('');
+            var n = 0;
+            try { n = await fetchNew(true); } finally { refreshBtn.classList.remove('is-spinning'); }
+            // The same line that answers "older" when there is nothing above: one status line, one
+            // place to look, whichever of the two buttons was pressed.
+            if (!n) note(t('js.shout.nothing_new'));
+            clearTimeout(refreshCool);
+            refreshCool = setTimeout(function () { refreshBtn.disabled = false; }, 2000);
         }
 
         /** Older rows, pasted in ABOVE without moving what is being read. */
@@ -590,6 +633,7 @@
             if (b && listEl.contains(b)) askDelete(b);
         });
         if (olderBtn) olderBtn.addEventListener('click', older);
+        if (refreshBtn) refreshBtn.addEventListener('click', refresh);
         if (sendBtn) sendBtn.addEventListener('click', send);
         if (ta) {
             ta.addEventListener('input', countUpdate);
@@ -625,7 +669,8 @@
         if (live > 0) timer = setInterval(poll, live * 1000);
         // One tick on demand, for the browser checks and for anything that wants to catch up now.
         window.ShoutTick = poll;
-        window.Shout = { tick: poll, older: older, newest: function () { return newest; }, insert: insert };
+        window.Shout = { tick: poll, refresh: refresh, older: older,
+                         newest: function () { return newest; }, insert: insert };
     }
 
     /* ─────────────────────────── ?action=emotes ─────────────────────────── */
@@ -647,6 +692,31 @@
             noteEl.textContent = text || '';
             noteEl.classList.toggle('emote-note-bad', !!bad);
         }
+
+        /* ── the code, into the clipboard ──
+           The whole reason somebody opens this page is to get a `:code:` into a shout, and selecting
+           eight characters by hand on a phone is not a way to do that. The same swap-the-label
+           feedback the short hash on a profile's torrent list uses (assets/js/favourites.js): the
+           chip says "Copied" for a moment and then says the code again.
+
+           Delegated from the page rather than bound per chip, because the reader's own list grows a
+           card when they upload one — a handler per chip would miss it. */
+        root.addEventListener('click', function (e) {
+            var chip = e.target.closest ? e.target.closest('[data-emote-copy]') : null;
+            if (!chip || !root.contains(chip)) return;
+            e.preventDefault();
+            var token = chip.dataset.emoteCopy || chip.textContent;
+            if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+            navigator.clipboard.writeText(token).then(function () {
+                if (chip.dataset.was === undefined) chip.dataset.was = chip.textContent;
+                chip.textContent = t('js.common.copied');
+                chip.classList.add('is-copied');
+                setTimeout(function () {
+                    chip.textContent = chip.dataset.was;
+                    chip.classList.remove('is-copied');
+                }, 1500);
+            }, function () { /* the browser refused the clipboard; nothing to say about it */ });
+        });
 
         /* ── taking one away ── */
         var mine = document.getElementById('emote-mine');
@@ -726,13 +796,25 @@
             fileIn.addEventListener('change', function () { dropped = null; markFile(chosen()); });
         }
 
-        /** A card in the reader's own list, built from what the endpoint just accepted. */
-        function myCard(row) {
+        /**
+         * A card in the reader's own list, built from what the endpoint just accepted.
+         *
+         * `pending` is the approval gate seen from here: the row is stored and it is theirs, but
+         * nobody else can see it yet. Saying so on the card is the difference between somebody
+         * waiting and somebody uploading the same picture a second time because the first one
+         * "did not work".
+         */
+        function myCard(row, pending) {
             var card = el('div', { className: 'emote-card', dataset: { id: String(row.id || 0), code: String(row.code || '') } });
             card.appendChild(el('div', { className: 'emote-shot' },
                 [emoteImg(row, row.sticker ? 'shout-sticker' : 'shout-emote')]));
-            card.appendChild(el('code', { className: 'emote-code', text: ':' + row.code + ':' }));
+            card.appendChild(el('button', { type: 'button', className: 'emote-copy', title: t('js.shout.emote_copy_title'),
+                                            dataset: { emoteCopy: ':' + row.code + ':' }, text: ':' + row.code + ':' }));
             card.appendChild(el('span', { className: 'emote-name', text: row.name || row.code }));
+            if (pending) {
+                card.appendChild(el('span', { className: 'emote-wait', title: t('js.shout.emote_waiting_hint'),
+                                              text: t('js.shout.emote_waiting') }));
+            }
             card.appendChild(el('button', { type: 'button', className: 'emote-del', dataset: { id: String(row.id || 0) },
                                             text: t('js.shout.delete') }));
             return card;
@@ -752,7 +834,11 @@
                 note(t('js.shout.uploading'));
                 var r = await post('shout_emote_upload', {
                     code: code,
-                    name: (nameIn ? nameIn.value : '').trim() || code,
+                    // Empty stays EMPTY. The server falls back to the prettified code
+                    // (shoutEmotePrettyName: "thumbs_up" -> "Thumbs up") and checks that fallback for
+                    // a collision like any other name; sending the bare code from here produced a
+                    // second, lower-case fallback that the server never applies.
+                    name: (nameIn ? nameIn.value : '').trim(),
                     sticker: !!(stickIn && stickIn.checked),
                     data: String(reader.result),
                 });
@@ -762,7 +848,7 @@
                 if (row && row.code && row.url && mine) {
                     var empty = mine.querySelector('.emote-empty');
                     if (empty) empty.remove();
-                    mine.insertBefore(myCard(row), mine.firstChild);
+                    mine.insertBefore(myCard(row, !!r.pending), mine.firstChild);
                 } else {
                     // The endpoint accepted it but did not hand back a row to draw: the server's own
                     // rendering of the page is the honest answer, so ask for it again.
@@ -778,7 +864,11 @@
                 emotesPromise = null;                  // the picker's copy is one emote out of date
                 // The whole token, not the bare code: `:code` is what t() replaces, so a dictionary
                 // string written as `:code:` would have eaten its own opening colon.
-                note(t('js.shout.emote_added', { token: ':' + row.code + ':' }));
+                //
+                // Two different answers, because they are two different situations: a picture that
+                // works now, and one that is stored and waiting for somebody. Telling the second one
+                // "write :code: to use it" would be a straight lie — the token does nothing yet.
+                note(r.pending ? t('js.shout.emote_pending') : t('js.shout.emote_added', { token: ':' + row.code + ':' }));
             };
             reader.readAsDataURL(f);
         });

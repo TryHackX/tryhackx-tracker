@@ -829,72 +829,110 @@
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="shout_rules" value="<?= sanitize($cfg['shout_rules'] ?? '') ?>" maxlength="500" placeholder="<?= _h('settings.shout_rules_ph') ?>">
                         <small class="settings-hint"><?= __('settings.shout_rules_hint') ?></small>
                     </div>
-                    <?php /* ── Emotes and stickers (1.59.0) ──────────────────────────────────
-                             Five switches. Emoji are NOT among them: those are Unicode characters
-                             drawn by the reader's own device font, so there is nothing here to
-                             configure about them. */ ?>
-                    <div class="col-md-3" data-setting="shout_emotes_enabled">
-                        <label class="form-label"><?= _h('settings.shout_emotes_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="shout_emotes_enabled">
-                            <option value="1" <?= ($cfg['shout_emotes_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['shout_emotes_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.shout_emotes_enabled_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_stickers_enabled">
-                        <label class="form-label"><?= _h('settings.shout_stickers_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="shout_stickers_enabled">
-                            <option value="1" <?= ($cfg['shout_stickers_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['shout_stickers_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.shout_stickers_enabled_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_emote_max_kb">
-                        <label class="form-label"><?= _h('settings.shout_emote_max_kb') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_max_kb" value="<?= sanitize($cfg['shout_emote_max_kb'] ?? '64') ?>" min="8" max="512">
-                        <small class="settings-hint"><?= __('settings.shout_emote_max_kb_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_emote_max_px">
-                        <label class="form-label"><?= _h('settings.shout_emote_max_px') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_max_px" value="<?= sanitize($cfg['shout_emote_max_px'] ?? '128') ?>" min="32" max="512">
-                        <small class="settings-hint"><?= __('settings.shout_emote_max_px_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_emote_per_user">
-                        <label class="form-label"><?= _h('settings.shout_emote_per_user') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_per_user" value="<?= sanitize($cfg['shout_emote_per_user'] ?? '20') ?>" min="1" max="200">
-                        <small class="settings-hint"><?= __('settings.shout_emote_per_user_hint') ?></small>
-                    </div>
                 </div>
-                <?php /* The emote manager: drawn and driven by assets/js/admin-shout.js. The file input has
-                         no name on purpose — it is not a setting and never travels with the form; the script
-                         reads the file and posts it to admin/shout_emotes as base64, and the server decides
-                         from the BYTES what it is (and refuses an SVG carrying anything executable). */ ?>
-                <div class="mt-3" id="admin-emotes" data-max-kb="<?= (int)(function_exists('shoutEmoteMaxKb') ? shoutEmoteMaxKb($cfg) : 64) ?>">
-                    <label class="form-label"><?= _h('settings.shout_emotes_manage') ?></label>
-                    <div id="admin-emotes-list" class="mb-2"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
-                    <div class="row g-2 align-items-end">
-                        <div class="col-md-4">
-                            <div class="ipl-drop" id="admin-emote-drop" tabindex="0" role="button" aria-label="<?= _h('settings.shout_emote_drop_aria') ?>">
-                                <i class="bi bi-file-earmark-image ipl-drop-icon"></i>
-                                <span class="ipl-drop-main"><u><?= _h('settings.shout_emote_drop_choose') ?></u> <?= _h('settings.shout_emote_drop_or') ?></span>
-                                <span class="ipl-drop-sub"><?= _h('settings.shout_emote_drop_sub') ?></span>
-                                <input type="file" id="admin-emote-file" class="ipl-drop-input" accept=".svg,.png,.gif,.webp,image/svg+xml,image/png,image/gif,image/webp">
-                            </div>
+                <?php /* ── Emotes and stickers (1.59.0, rebuilt in 1.59.1) ──────────────────────
+                         Its own block rather than six more cells in the grid above: the switches, the
+                         table and the form that adds one are three parts of a single subject, and in
+                         the grid the numbers ended up on a row of their own with `Per member` orphaned
+                         beside two empty cells. Same shape as Settings → Sounds, which is the block
+                         this one was measured against.
+
+                         Emoji are NOT configured here: those are Unicode characters drawn by the
+                         reader's own device font, so there is nothing about them to switch.
+
+                         The file input has no name on purpose — it is not a setting and never travels
+                         with the form; assets/js/admin-shout.js reads the file and posts it to
+                         admin/shout_emotes as base64, and the server decides from the BYTES what it is
+                         (and refuses an SVG carrying anything executable). */ ?>
+                <?php /* No data-approval any more: whether a row is waiting is a fact of the row
+                         (`approved_at` is NULL), not of the setting. Handing the script the switch
+                         as well only let it hide a queue somebody is still waiting on. */ ?>
+                <div class="mt-4" id="admin-emotes"
+                     data-max-kb="<?= (int)(function_exists('shoutEmoteMaxKb') ? shoutEmoteMaxKb($cfg) : 64) ?>">
+                    <h6 class="admin-emotes-title"><i class="bi bi-emoji-smile"></i> <?= _h('settings.shout_emotes_manage') ?></h6>
+                    <small class="settings-hint d-block mb-3"><?= __('settings.shout_emotes_sub') ?></small>
+                    <div class="row g-3">
+                        <div class="col-md-4" data-setting="shout_emotes_enabled">
+                            <label class="form-label"><?= _h('settings.shout_emotes_enabled') ?></label>
+                            <select class="form-select bg-dark text-light border-secondary" name="shout_emotes_enabled">
+                                <option value="1" <?= ($cfg['shout_emotes_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                                <option value="0" <?= ($cfg['shout_emotes_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            </select>
+                            <small class="settings-hint"><?= __('settings.shout_emotes_enabled_hint') ?></small>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label" for="admin-emote-code"><?= _h('settings.shout_emote_code_label') ?></label>
-                            <input type="text" id="admin-emote-code" class="form-control bg-dark text-light border-secondary" maxlength="32" placeholder="<?= _h('settings.shout_emote_code_ph') ?>">
+                        <div class="col-md-4" data-setting="shout_stickers_enabled">
+                            <label class="form-label"><?= _h('settings.shout_stickers_enabled') ?></label>
+                            <select class="form-select bg-dark text-light border-secondary" name="shout_stickers_enabled">
+                                <option value="1" <?= ($cfg['shout_stickers_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                                <option value="0" <?= ($cfg['shout_stickers_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            </select>
+                            <small class="settings-hint"><?= __('settings.shout_stickers_enabled_hint') ?></small>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label" for="admin-emote-name"><?= _h('settings.shout_emote_name_label') ?></label>
-                            <input type="text" id="admin-emote-name" class="form-control bg-dark text-light border-secondary" maxlength="60" placeholder="<?= _h('settings.shout_emote_name_ph') ?>">
+                        <?php /* v65. Its place is beside the two switches rather than beside the numbers:
+                                 it answers "who may see this", which is what the other two answer. */ ?>
+                        <div class="col-md-4" data-setting="shout_emote_approval">
+                            <label class="form-label"><?= _h('settings.shout_emote_approval') ?></label>
+                            <select class="form-select bg-dark text-light border-secondary" name="shout_emote_approval">
+                                <option value="1" <?= ($cfg['shout_emote_approval'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                                <option value="0" <?= ($cfg['shout_emote_approval'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            </select>
+                            <small class="settings-hint"><?= __('settings.shout_emote_approval_hint') ?></small>
                         </div>
-                        <div class="col-md-2">
-                            <div class="form-check mb-2">
+                        <div class="col-md-4" data-setting="shout_emote_max_kb">
+                            <label class="form-label"><?= _h('settings.shout_emote_max_kb') ?></label>
+                            <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_max_kb" value="<?= sanitize($cfg['shout_emote_max_kb'] ?? '64') ?>" min="8" max="512">
+                            <small class="settings-hint"><?= __('settings.shout_emote_max_kb_hint') ?></small>
+                        </div>
+                        <div class="col-md-4" data-setting="shout_emote_max_px">
+                            <label class="form-label"><?= _h('settings.shout_emote_max_px') ?></label>
+                            <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_max_px" value="<?= sanitize($cfg['shout_emote_max_px'] ?? '128') ?>" min="32" max="512">
+                            <small class="settings-hint"><?= __('settings.shout_emote_max_px_hint') ?></small>
+                        </div>
+                        <div class="col-md-4" data-setting="shout_emote_per_user">
+                            <label class="form-label"><?= _h('settings.shout_emote_per_user') ?></label>
+                            <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_per_user" value="<?= sanitize($cfg['shout_emote_per_user'] ?? '20') ?>" min="1" max="200">
+                            <small class="settings-hint"><?= __('settings.shout_emote_per_user_hint') ?></small>
+                        </div>
+                    </div>
+                    <?php /* The waiting queue, when the gate is on and somebody's picture is in it. Drawn
+                             by the script above the table, because a queue below a list of thirty is a
+                             queue nobody answers. */ ?>
+                    <div id="admin-emotes-waiting" class="admin-emotes-waiting mt-4" hidden></div>
+                    <div class="admin-emotes-head">
+                        <label class="form-label mb-0"><?= _h('settings.shout_emotes_list') ?></label>
+                        <?php /* "4 of 9 switched on": the reason a code somebody typed does nothing is
+                                 very often that its row is off, so the number is beside the heading
+                                 rather than only findable by reading the table. Filled by the script. */ ?>
+                        <span class="admin-emotes-count" id="admin-emotes-count" hidden></span>
+                    </div>
+                    <div id="admin-emotes-list" class="mb-3"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
+                    <div class="admin-emote-add">
+                        <h6 class="admin-emote-add-title"><i class="bi bi-plus-circle"></i> <?= _h('settings.shout_emotes_add_heading') ?></h6>
+                        <?php /* The same drop zone the sounds block and the language install use: the
+                                 <input type=file> stays in the DOM, invisible, over a box that also takes
+                                 a dropped file. Full width and shallow, so the four controls below read as
+                                 one row rather than as a column beside a tall box. */ ?>
+                        <div class="ipl-drop ipl-drop-wide" id="admin-emote-drop" tabindex="0" role="button" aria-label="<?= _h('settings.shout_emote_drop_aria') ?>">
+                            <i class="bi bi-file-earmark-image ipl-drop-icon"></i>
+                            <span class="ipl-drop-main"><u><?= _h('settings.shout_emote_drop_choose') ?></u> <?= _h('settings.shout_emote_drop_or') ?></span>
+                            <span class="ipl-drop-sub"><?= _h('settings.shout_emote_drop_sub') ?></span>
+                            <input type="file" id="admin-emote-file" class="ipl-drop-input" accept=".svg,.png,.gif,.webp,image/svg+xml,image/png,image/gif,image/webp">
+                        </div>
+                        <?php /* Code, Name, the sticker box and Add on one line. Each box says what it is
+                                 for in its own placeholder — the paragraph that used to explain all four
+                                 under the block was read once and then in the way. */ ?>
+                        <div class="admin-emote-add-row">
+                            <input type="text" id="admin-emote-code" class="form-control form-control-sm bg-dark text-light border-secondary admin-emote-code-in"
+                                   maxlength="32" placeholder="<?= _h('settings.shout_emote_code_ph') ?>" aria-label="<?= _h('settings.shout_emote_code_label') ?>"
+                                   autocomplete="off" spellcheck="false">
+                            <input type="text" id="admin-emote-name" class="form-control form-control-sm bg-dark text-light border-secondary"
+                                   maxlength="60" placeholder="<?= _h('settings.shout_emote_name_ph') ?>" aria-label="<?= _h('settings.shout_emote_name_label') ?>"
+                                   autocomplete="off">
+                            <div class="form-check mb-0 admin-emote-stick-check">
                                 <input class="form-check-input" type="checkbox" id="admin-emote-sticker">
                                 <label class="form-check-label small" for="admin-emote-sticker"><?= _h('settings.shout_emote_sticker_label') ?></label>
                             </div>
-                            <button type="button" class="btn btn-sm btn-info w-100" id="admin-emote-upload"><i class="bi bi-plus-lg"></i> <?= _h('settings.shout_emote_upload') ?></button>
+                            <button type="button" class="btn btn-sm btn-info" id="admin-emote-upload"><i class="bi bi-plus-lg"></i> <?= _h('settings.shout_emote_upload') ?></button>
                         </div>
                     </div>
                     <small class="settings-hint"><?= __('settings.shout_emotes_hint') ?></small>

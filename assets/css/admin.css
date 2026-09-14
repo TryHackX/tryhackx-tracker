@@ -2574,3 +2574,85 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .admin-sound-add-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
 .admin-sound-add-row .form-control { flex: 1 1 auto; min-width: 0; }
 .admin-sound-add-row .btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* ── Settings → Shoutbox → the emotes, rebuilt in the sounds shape (1.59.1) ──────────────────────
+   What it replaced: four settings in a ragged grid with `Per member` alone on a row, then a LIST
+   whose preview sat far left, a gap, the code, the meta, and three buttons hugging the right edge.
+   A table with headings answers the questions in the order somebody asks them — what is it, what is
+   it called, how big, whose, since when — and the buttons say what they do rather than what the row
+   currently is. */
+.admin-emotes-title { margin-bottom: 0.35rem; font-size: 0.9rem; color: #c3ccd8; }
+.admin-emotes-title .bi { color: #4d9fd6; }
+.admin-emotes-head { display: flex; align-items: center; gap: 0.5rem; margin: 1.25rem 0 0.4rem; }
+/* "4 of 9 switched on". Not an error at any value — it is the reason a code that is typed correctly
+   can still do nothing, which is the one thing a list of pictures cannot show by itself. */
+.admin-emotes-count {
+    padding: 0.05rem 0.45rem;
+    border: 1px solid rgba(77,159,214,0.35);
+    border-radius: 999px;
+    background: rgba(77,159,214,0.12);
+    color: #9fd0ef;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+.admin-emotes-table th {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #8a94a2;
+    border-bottom-color: #2a3442;
+}
+.admin-emotes-table td { vertical-align: middle; }
+.admin-emotes-table .admin-emote-shot { width: 3.2rem; text-align: center; }
+/* The picture on a panel of its own, faintly inset: a white PNG and a dark SVG are both uploaded
+   here, and one of the two disappears against any single background this table could have. */
+.admin-emote-preview {
+    max-width: 32px; max-height: 32px; width: auto; height: auto;
+    padding: 2px; border-radius: 4px;
+    background: repeating-conic-gradient(#20262e 0% 25%, #171c23 0% 50%) 50% / 10px 10px;
+}
+.admin-emote-off .admin-emote-preview { opacity: 0.35; }
+.admin-emote-code { font-size: 0.85rem; color: #9fd0ef; }
+.admin-emote-name { font-size: 0.78rem; color: #8a94a2; word-break: break-word; }
+/* What the row IS, beside what the buttons will DO to it. Two chips, never more. */
+.admin-emote-chip {
+    display: inline-block; margin: 0.05rem 0.2rem 0.05rem 0; padding: 0.02rem 0.4rem;
+    border-radius: 999px; font-size: 0.7rem; white-space: nowrap;
+}
+.admin-emote-chip-on   { border: 1px solid rgba(108,195,138,0.35); background: rgba(108,195,138,0.12); color: #a7d9b8; }
+.admin-emote-chip-off  { border: 1px solid rgba(138,148,162,0.35); background: rgba(138,148,162,0.10); color: #97a2b0; }
+.admin-emote-chip-kind { border: 1px solid rgba(77,159,214,0.30);  background: rgba(77,159,214,0.10); color: #9fd0ef; }
+.admin-emote-chip-wait { border: 1px solid rgba(255,152,0,0.5);    background: rgba(255,152,0,0.14);  color: #ffd9a3; }
+
+/* The queue. Amber and above the table, because there is somebody on the other end of it waiting to
+   find out whether their picture is in the room. */
+.admin-emotes-waiting {
+    padding: 0.7rem 0.8rem 0.8rem;
+    border: 1px solid rgba(255,152,0,0.45);
+    border-radius: 8px;
+    background: rgba(255,152,0,0.07);
+}
+.admin-emotes-waiting[hidden] { display: none; }
+.admin-emotes-waiting-title { margin-bottom: 0.15rem; font-size: 0.85rem; color: #ffd9a3; }
+.admin-emotes-waiting-title .bi { margin-right: 0.3rem; }
+.admin-emotes-waiting-hint { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; color: #c3ccd8; }
+.admin-emotes-waiting .table { margin-bottom: 0; }
+
+/* Adding one: the drop zone across the whole block, then Code, Name, the sticker box and Add as one
+   row beneath it — the sounds block's row, with two more controls on it. */
+.admin-emote-add {
+    margin-top: 0.4rem;
+    padding: 0.7rem 0.8rem 0.8rem;
+    border: 1px solid #2a3442;
+    border-radius: 8px;
+    background: #10161f;
+}
+.admin-emote-add-title { margin-bottom: 0.5rem; font-size: 0.82rem; color: #c3ccd8; }
+.admin-emote-add-title .bi { color: #4d9fd6; }
+.admin-emote-add-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+.admin-emote-add-row .form-control { flex: 1 1 10rem; min-width: 0; }
+/* The code is the short one of the two boxes: it is at most 32 characters and never a sentence. */
+.admin-emote-add-row .admin-emote-code-in { flex: 0 1 11rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.admin-emote-add-row .admin-emote-stick-check { flex: 0 0 auto; white-space: nowrap; }
+.admin-emote-add-row .btn { flex: 0 0 auto; white-space: nowrap; }

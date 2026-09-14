@@ -50,7 +50,7 @@ $allowed = [
     'shout_format', 'shout_rules',
     // its emotes and stickers (1.59.0)
     'shout_emotes_enabled', 'shout_emote_max_kb', 'shout_emote_max_px', 'shout_emote_per_user',
-    'shout_stickers_enabled',
+    'shout_stickers_enabled', 'shout_emote_approval',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -404,7 +404,7 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
-          'shout_emotes_enabled', 'shout_stickers_enabled'] as $k) {
+          'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
 // ── The shoutbox ──

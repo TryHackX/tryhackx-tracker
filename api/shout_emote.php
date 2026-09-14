@@ -41,7 +41,12 @@ header('ETag: ' . $etag);
 header('Cache-Control: public, max-age=2592000, immutable');
 header('X-Content-Type-Options: nosniff');
 // header() replaces a header of the same name, so an enforcing site policy sent by
-// sendSecurityHeaders() is swapped for this stricter one rather than added to.
+// sendSecurityHeaders() is swapped for this stricter one rather than added to. The REPORT-ONLY one
+// is a different header name and would have survived, and so would an enforcing policy the web
+// server itself added — a client handed two of them enforces the intersection, which is safe and
+// untidy. Both are taken off first, so what leaves here is exactly one policy: this one.
+header_remove('Content-Security-Policy');
+header_remove('Content-Security-Policy-Report-Only');
 header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'");
 if (trim((string)($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) === $etag) {
     http_response_code(304);

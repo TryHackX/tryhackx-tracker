@@ -85,20 +85,45 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
      data-stickers="<?= $shoutStickersOn ? '1' : '0' ?>"
      data-page="<?= $shoutOnPage ? '1' : '0' ?>">
     <input type="hidden" id="shout-csrf" value="<?= $shoutCsrf ?>">
+    <?php /* ── the head: one line, in reading order ──────────────────────────────────────────────
+             What it is, then the two places to go from here, then the two buttons — and the refresh
+             on the right, where a control that acts on the whole block belongs. It used to be
+             "Older" first with the links pushed to the far edge by a margin, which at any width
+             narrower than the box read as three things that had nothing to do with each other.
+
+             The title is drawn HERE only on ?action=shoutbox, where this template owns the page. In
+             the home block the heading above the widget is the operator's own (Settings → Home
+             layout), printed by templates/pages/home.php, and a second copy of it inside the box
+             would be the same word twice. */ ?>
     <div class="shout-head">
-        <?php /* Above the list, not inside it: prepending older rows into the list would otherwise
-                 have to step over this button every time, and the button would scroll away just as
-                 somebody reached the place they need it. */ ?>
-        <button type="button" class="btn btn-secondary btn-small shout-older" id="shout-older"<?= $shoutMore ? '' : ' hidden' ?>><?= _h('shout.older') ?></button>
-        <?php if ($shoutBoth && !$shoutOnPage): ?>
-        <a class="shout-open" href="<?= $baseUrl ?>?action=shoutbox"><?= _h('shout.open_page') ?></a>
+        <?php if ($shoutOnPage): ?>
+        <h1 class="shout-title"><?= _h('shout.h1') ?></h1>
         <?php endif; ?>
         <?php /* The way to the emotes page for somebody who has no composer: a reader with
                  shout.view and nothing else never opens the picker, and the codes are no use to
                  them if there is nowhere that lists them. */ ?>
         <?php if ($shoutEmotesOn): ?>
-        <a class="shout-emotes-link<?= ($shoutBoth && !$shoutOnPage) ? '' : ' shout-emotes-link-end' ?>" href="<?= $baseUrl ?>?action=emotes"><?= _h('shout.emotes_link') ?></a>
+        <a class="shout-emotes-link" href="<?= $baseUrl ?>?action=emotes"><?= _h('shout.emotes_link') ?></a>
         <?php endif; ?>
+        <?php if ($shoutBoth && !$shoutOnPage): ?>
+        <a class="shout-open" href="<?= $baseUrl ?>?action=shoutbox"><?= _h('shout.open_page') ?></a>
+        <?php endif; ?>
+        <?php /* Above the list, not inside it: prepending older rows into the list would otherwise
+                 have to step over this button every time, and the button would scroll away just as
+                 somebody reached the place they need it. */ ?>
+        <button type="button" class="btn btn-secondary btn-small shout-older" id="shout-older"<?= $shoutMore ? '' : ' hidden' ?>><?= _h('shout.older') ?></button>
+        <?php /* "Is there anything I have not seen?", asked on demand. The poll answers that every
+                 few seconds, but only while the tab is in front and the box is on the screen — so a
+                 reader coming back to a window that has been behind another one has no way to ask
+                 except reloading the page, which throws away whatever they were typing. It runs the
+                 SAME fetch the poll runs (assets/js/shoutbox.js, window.Shout.refresh). */ ?>
+        <button type="button" class="shout-refresh" id="shout-refresh"
+                title="<?= _h('shout.refresh') ?>" aria-label="<?= _h('shout.refresh') ?>">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/>
+            </svg>
+        </button>
     </div>
     <div class="shout-list" id="shout-list">
         <?php if (!$shoutList): ?>
@@ -110,7 +135,10 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
                  that decides what may be displayed, and it is not this template. */ ?>
         <div class="shout-row<?= !empty($s['own']) ? ' shout-row-own' : '' ?><?= !empty($s['mentions_me']) ? ' shout-row-mention' : '' ?>"
              data-id="<?= (int)$s['id'] ?>" data-user="<?= sanitize((string)($s['user'] ?? '')) ?>">
-            <a class="shout-who" href="<?= $baseUrl ?>?action=u&amp;name=<?= urlencode((string)($s['user'] ?? '')) ?>"><?= sanitize((string)($s['user'] ?? '')) ?></a>
+            <?php /* `title` because the name column is a fixed width from 1.59.1: a name longer than
+                     it is cut with an ellipsis rather than pushing the words out of line, and a cut
+                     name with no way to read the whole of it would be the worse of the two. */ ?>
+            <a class="shout-who" title="<?= sanitize((string)($s['user'] ?? '')) ?>" href="<?= $baseUrl ?>?action=u&amp;name=<?= urlencode((string)($s['user'] ?? '')) ?>"><?= sanitize((string)($s['user'] ?? '')) ?></a>
             <span class="shout-time" title="<?= sanitize((string)($s['at'] ?? '')) ?>"><?= sanitize(substr((string)($s['at'] ?? ''), 11, 5)) ?></span>
             <span class="shout-body rt-body"><?= $s['html'] ?? '' ?></span>
             <?php if (!empty($s['deletable'])): ?>
@@ -144,6 +172,34 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
                     <option value="bbcode"<?= $shoutFmt === 'bbcode' ? ' selected' : '' ?>>BBCode</option>
                     <option value="markdown"<?= $shoutFmt === 'markdown' ? ' selected' : '' ?>>Markdown</option>
                 </select>
+                <?php /* The formatting rail the description and message editors have, on the SAME
+                         line as the select rather than on a row of its own: a shout is two lines
+                         tall and a toolbar above it would be half the composer.
+
+                         Wired by assets/js/app.js purely by convention around the textarea's id —
+                         `shout-body-tools`, buttons carrying `data-md`, groups in `.rt-tool-group` —
+                         so there is no second implementation of the insert here, and a button whose
+                         syntax the chosen format cannot express hides itself when the select moves.
+                         [u] is the one of these BBCode has and Markdown does not, which is what
+                         makes the swap visible rather than a claim in a comment.
+
+                         A short set on purpose: the eight marks somebody reaches for mid-sentence.
+                         Colour, size, tables and images are for a description, and the person who
+                         wants them is not writing a one-liner. */ ?>
+                <div class="rt-tools shout-tools" id="shout-body-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
+                    <span class="rt-tool-group">
+                        <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><strong>B</strong></button>
+                        <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><em>I</em></button>
+                        <button type="button" data-md="underline" title="<?= _h('rt.underline') ?>"><u>U</u></button>
+                        <button type="button" data-md="strike" title="<?= _h('rt.strike') ?>"><s>S</s></button>
+                    </span>
+                    <span class="rt-tool-group">
+                        <button type="button" data-md="code" title="<?= _h('rt.code') ?>">&lt;/&gt;</button>
+                        <button type="button" data-md="link" title="<?= _h('rt.link') ?>">&#128279;</button>
+                        <button type="button" data-md="quote" title="<?= _h('rt.quote') ?>">&rdquo;</button>
+                        <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>">&#128065;</button>
+                    </span>
+                </div>
             </div>
             <textarea id="shout-body" class="pm-input shout-input" rows="2" maxlength="<?= $shoutMax ?>" placeholder="<?= _h('shout.write_ph') ?>"></textarea>
             <div class="rt-preview rt-body" id="shout-body-preview" hidden></div>

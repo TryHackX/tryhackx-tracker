@@ -2492,8 +2492,10 @@ add('', {
     'settings.shout_emote_per_user_hint': ('How many one account may upload. What you add here does not count against anybody.',
         'Ile może wgrać jedno konto. To, co dodasz tutaj, nie liczy się nikomu.'),
     'settings.shout_emotes_manage': ('Emotes and stickers', 'Emotki i naklejki'),
-    'settings.shout_emotes_hint': ('Kept in the database, not as files: a backup that carries the database carries these. An SVG is refused if it contains a script, an event handler or a reference to another server, and every picture is served with a policy that forbids scripts anyway. Members need the <code>shout.upload_emote</code> permission to add their own, which nobody has until you grant it in Users → Groups.',
-        'Trzymane w bazie, nie jako pliki: kopia zapasowa bazy niesie i je. SVG zostaje odrzucony, jeśli zawiera skrypt, obsługę zdarzenia albo odwołanie do cudzego serwera, a każdy obrazek i tak jest serwowany z polityką zabraniającą skryptów. Członkowie, żeby dodawać własne, potrzebują uprawnienia <code>shout.upload_emote</code>, którego nikt nie ma, dopóki go nie nadasz w Użytkownicy → Grupy.'),
+    # One sentence under the block, not a paragraph. What used to be here said four things at once;
+    # three of them now sit on the field they are about, and this is the one that belongs to none.
+    'settings.shout_emotes_hint': ('An SVG carrying a script, an event handler or a reference to another server is refused, and every picture is served with a policy that forbids scripts anyway.',
+        'SVG ze skryptem, obsługą zdarzenia albo odwołaniem do cudzego serwera zostaje odrzucony, a każdy obrazek i tak jest serwowany z polityką zabraniającą skryptów.'),
     'settings.shout_emote_drop_aria': ('Choose an image file, or drop one here', 'Wybierz plik obrazka albo upuść go tutaj'),
     'settings.shout_emote_drop_choose': ('Choose a picture', 'Wybierz obrazek'),
     'settings.shout_emote_drop_or': ('or drop it here', 'albo upuść go tutaj'),
@@ -2504,6 +2506,17 @@ add('', {
     'settings.shout_emote_name_ph': ('Shown on hover', 'Widoczna po najechaniu'),
     'settings.shout_emote_sticker_label': ('Sticker', 'Naklejka'),
     'settings.shout_emote_upload': ('Add', 'Dodaj'),
+})
+
+# ── 1.59.1: the block rebuilt in the shape of Settings → Sounds, and the approval gate ──────────
+add('', {
+    'settings.shout_emotes_sub': ('Pictures somebody uploaded, written as <code>:code:</code> in a shout. They are rows in the database rather than files, so a backup that carries the database carries them too.',
+        'Obrazki, które ktoś wgrał, pisane w wypowiedzi jako <code>:code:</code>. To wiersze w bazie, nie pliki, więc kopia zapasowa bazy niesie i je.'),
+    'settings.shout_emotes_list': ('In the room', 'W pokoju'),
+    'settings.shout_emotes_add_heading': ('Add one', 'Dodaj nową'),
+    'settings.shout_emote_approval': ('A member\'s upload waits', 'Wgranie od członka czeka'),
+    'settings.shout_emote_approval_hint': ('On, a picture uploaded by an ACCOUNT is stored switched off and waits for you above the table — nobody else sees it anywhere until you approve it. What you add here never waits. Uploading at all needs <code>shout.upload_emote</code>, which nobody has until you grant it in Users → Groups.',
+        'Włączone: obrazek wgrany przez KONTO zapisuje się wyłączony i czeka na Ciebie nad tabelą — nikt inny nigdzie go nie widzi, dopóki go nie zatwierdzisz. To, co dodasz tutaj, nie czeka nigdy. Żeby w ogóle wgrywać, trzeba mieć <code>shout.upload_emote</code>, którego nikt nie ma, dopóki go nie nadasz w Użytkownicy → Grupy.'),
 })
 
 # The manager's own strings. `js.shoutadmin.` like the Purge button's, and for the same reason: that
@@ -2524,11 +2537,46 @@ add('', {
     'js.shoutadmin.emote_delete_title': ('Delete this emote', 'Usunięcie emotki'),
     'js.shoutadmin.emote_delete_confirm': ('This goes for good. Lines that used it will show the text again.',
         'To znika bezpowrotnie. Linie, które go używały, pokażą znowu sam tekst.'),
-    'js.shoutadmin.emote_enable': ('Switch on', 'Włącz'),
-    'js.shoutadmin.emote_disable': ('Switch off', 'Wyłącz'),
-    'js.shoutadmin.emote_sticker': ('Sticker', 'Naklejka'),
-    'js.shoutadmin.emote_inline': ('Inline', 'W linii'),
+    # The buttons say what pressing them DOES; the chips beside them say what the row currently IS.
+    # Until 1.59.1 the buttons did both jobs and managed neither — a button labelled "Sticker" on a
+    # row that was already a sticker is a button whose meaning you have to guess at.
+    'js.shoutadmin.emote_enable': ('Enable', 'Włącz'),
+    'js.shoutadmin.emote_disable': ('Disable', 'Wyłącz'),
     'js.shoutadmin.emote_sticker_hint': ('A sticker is drawn big when a shout is nothing but its token.',
         'Naklejka rysuje się duża, gdy wypowiedź to tylko jej token.'),
     'js.shoutadmin.emote_site': ('the site', 'strona'),
+})
+
+# ── 1.59.1: the emote manager as a table, with a queue above it ─────────────
+add('', {
+    'js.shoutadmin.col_emote': ('Picture', 'Obrazek'),
+    'js.shoutadmin.col_code': ('Code and name', 'Kod i nazwa'),
+    'js.shoutadmin.col_state': ('State', 'Stan'),
+    'js.shoutadmin.col_file': ('File', 'Plik'),
+    'js.shoutadmin.col_who': ('Added by', 'Kto dodał'),
+    'js.shoutadmin.col_added': ('Added', 'Dodano'),
+    'js.shoutadmin.col_actions': ('Actions', 'Akcje'),
+    # Not a cap — the reason a code somebody typed correctly can still do nothing.
+    'js.shoutadmin.count': (':n of :max switched on', ':n z :max włączonych'),
+    'js.shoutadmin.emote_state_on': ('Enabled', 'Włączona'),
+    'js.shoutadmin.emote_state_off': ('Off', 'Wyłączona'),
+    'js.shoutadmin.emote_kind_emote': ('Emote', 'Emotka'),
+    'js.shoutadmin.emote_kind_sticker': ('Sticker', 'Naklejka'),
+    'js.shoutadmin.emote_make_sticker': ('Make a sticker', 'Zrób z niej naklejkę'),
+    'js.shoutadmin.emote_make_emote': ('Make an emote', 'Zrób z niej emotkę'),
+    'js.shoutadmin.emote_adding': ('Adding…', 'Dodawanie…'),
+    'js.shoutadmin.emote_rename': ('Rename', 'Zmień nazwę'),
+    'js.shoutadmin.emote_rename_title': ('Rename the emote', 'Zmiana nazwy emotki'),
+    'js.shoutadmin.emote_rename_label': ('Name', 'Nazwa'),
+    'js.shoutadmin.emote_rename_hint': ('The code stays as it is — it is what people type into a sentence. Two emotes cannot share a name.',
+        'Kod zostaje, jaki jest — to właśnie wpisuje się w zdaniu. Dwie emotki nie mogą mieć jednej nazwy.'),
+    'js.shoutadmin.emote_renamed': ('Renamed.', 'Zmieniono nazwę.'),
+    'js.shoutadmin.emote_name_short': ('A name needs at least 2 characters.', 'Nazwa musi mieć co najmniej 2 znaki.'),
+    'js.shoutadmin.emote_name_taken': ('Another emote is already called “:name”.', 'Inna emotka już nazywa się „:name”.'),
+    # The queue. Somebody is on the other end of it waiting to find out whether their picture is in.
+    'js.shoutadmin.emote_waiting_head': ('Waiting for you (:n)', 'Czeka na Ciebie (:n)'),
+    'js.shoutadmin.emote_waiting_hint': ('Uploaded by a member. Nobody else sees it anywhere — not in the picker, not on the Emotes page, not in a shout — until you approve it.',
+        'Wgrane przez członka. Nikt inny nigdzie tego nie widzi — ani w wybieraku, ani na stronie Emotki, ani w wypowiedzi — dopóki tego nie zatwierdzisz.'),
+    'js.shoutadmin.emote_approve': ('Approve', 'Zatwierdź'),
+    'js.shoutadmin.emote_approved': ('Approved — everybody can write it now.', 'Zatwierdzono — każdy może już jej użyć.'),
 })

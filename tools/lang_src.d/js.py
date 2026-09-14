@@ -4661,3 +4661,19 @@ add('js.shout', {
     # written (api.emote.*), naming the limit it was judged against -- assets/js/shoutbox.js
     # shows that rather than a second, vaguer copy of it kept here.
 })
+
+# ── 1.59.1: the refresh button, the copy chip, and an upload that waits ─────
+# `nothing_new` goes on the same status line "older" uses when there is nothing above -- one line,
+# one place to look, whichever of the two buttons was pressed. The chip's own "Copied" is
+# js.common.copied, which is what the short hash on a profile's torrent list already says.
+add('js.shout', {
+    'nothing_new':    ('Nothing new.', 'Nic nowego.'),
+    'emote_copy_title': ('Click to copy the code', 'Kliknij, by skopiować kod'),
+    'emote_waiting':  ('waiting', 'czeka'),
+    'emote_waiting_hint': ('Nobody else can see it until a moderator lets it through.',
+                           'Nikt inny jej nie widzi, dopóki moderator jej nie przepuści.'),
+    # Not "write :token to use it": the token does nothing yet, and saying otherwise is a straight
+    # lie to somebody who will then go and try it.
+    'emote_pending':  ('Added — a moderator has to let it through before anybody else sees it.',
+                       'Dodano — moderator musi ją przepuścić, zanim zobaczy ją ktokolwiek inny.'),
+})

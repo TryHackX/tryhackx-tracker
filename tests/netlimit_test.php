@@ -228,6 +228,14 @@ if ($bash === null || !trackerExecAvailable()) {
     skip('helper: end-to-end against a stub nft', 'no usable bash (or exec() disabled) on this machine — run the suite on the server for this half');
 } else {
     $tmp = sys_get_temp_dir() . '/netlimit_test_' . getmypid();
+    // Start from an empty tree. The teardown at the bottom clears the directories with rmdir(),
+    // which refuses one that still holds a file, and the name is only the pid — which this platform
+    // hands out again soon enough. A leftover state/replaced then fails "a fresh table is loaded"
+    // while the helper had in fact reloaded: a check that accuses working code once every few
+    // batteries, and the only kind of failure worse than none is one nobody believes.
+    foreach (['/bin', '/nftd', '/state', ''] as $stale) {
+        foreach ((array)@glob($tmp . $stale . '/*') as $f) { if (is_file($f)) @unlink($f); }
+    }
     @mkdir($tmp . '/bin', 0777, true);
     @mkdir($tmp . '/nftd', 0777, true);
     @mkdir($tmp . '/state', 0777, true);

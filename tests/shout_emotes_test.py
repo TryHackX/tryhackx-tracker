@@ -119,7 +119,7 @@ def b64(data):
 USER, PAL, PASS = "emopyuser", "emopypal", "SmokePass123!"
 SETTINGS = ("users_enabled", "shout_enabled", "shout_placement", "shout_live_seconds", "shout_flood_seconds",
             "shout_format", "shout_emotes_enabled", "shout_stickers_enabled", "shout_emote_max_kb",
-            "shout_emote_max_px", "shout_emote_per_user")
+            "shout_emote_max_px", "shout_emote_per_user", "shout_emote_approval")
 clear_throttles()
 was = {k: php("echo $cfg['" + k + "'] ?? '';") for k in SETTINGS}
 member_before = php("$st = $db->query(\"SELECT permissions FROM user_groups WHERE slug = 'member'\"); echo $st->fetchColumn();")
@@ -128,7 +128,9 @@ php("setSetting($db, 'users_enabled', '1'); setSetting($db, 'shout_enabled', '1'
     "setSetting($db, 'shout_flood_seconds', '0'); setSetting($db, 'shout_format', 'bbcode');"
     "setSetting($db, 'shout_emotes_enabled', '1'); setSetting($db, 'shout_stickers_enabled', '1');"
     "setSetting($db, 'shout_emote_max_kb', '64'); setSetting($db, 'shout_emote_max_px', '128');"
-    "setSetting($db, 'shout_emote_per_user', '20');"
+    # The approval gate OFF for the body of this run: every check below is about what an upload IS
+    # and what the room does with it. The gate has a section of its own near the end.
+    "setSetting($db, 'shout_emote_per_user', '20'); setSetting($db, 'shout_emote_approval', '0');"
     "$db->exec(\"UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions,"
     " '{\\\"shout.view\\\":true,\\\"shout.post\\\":true,\\\"shout.delete_own\\\":true}') WHERE slug = 'member'\");"
     "$db->exec(\"UPDATE user_groups SET permissions = JSON_REMOVE(permissions, '$.\\\"shout.upload_emote\\\"') WHERE slug = 'member'\");"
@@ -341,19 +343,81 @@ try:
     check("deleting it twice is 404, in the same vocabulary shout_delete answers in",
           s == 404 and j.get("error") == "not_found", (s, j))
 
+    # ── a member's upload waits for the operator (v65) ───────────────────────
+    # Nobody but its uploader is told it exists, anywhere: not in the vocabulary the picker is built
+    # from, not on the Emotes page, and not in a line that writes its token. Its own uploader sees it
+    # on the Emotes page marked as waiting, which is the difference between somebody waiting and
+    # somebody uploading the same picture a second time because the first one "did not work".
+    php("setSetting($db, 'shout_emote_approval', '1');")
+    s, j = me.api("shout_emote_upload", "POST", {"csrf_token": me.csrf, "code": "zzpyhold", "name": "Py hold",
+                                                 "data": b64(svg("<title>hold</title>"))})
+    hold_id = (j.get("emote") or {}).get("id")
+    check("with the gate on the upload is accepted and SAYS it is waiting",
+          s == 200 and j.get("success") and j.get("pending") is True, (s, str(j)[:200]))
+    s, j = pal.api("shout_emotes")
+    check("… another member's picker does not have it",
+          "zzpyhold" not in [e["code"] for e in (j.get("emotes") or [])], str(j)[:200])
+    s, j = me.api("shout_emotes")
+    check("… and neither does its own uploader's: a token that would render as text is worse than no token",
+          "zzpyhold" not in [e["code"] for e in (j.get("emotes") or [])], str(j)[:200])
+    s, j = me.api("shout_post", "POST", {"csrf_token": me.csrf, "body": "waiting on :zzpyhold: here"})
+    check("… a shout that writes it comes back as the text it was typed as",
+          ":zzpyhold:" in ((j.get("row") or {}).get("html") or "")
+          and "<img" not in ((j.get("row") or {}).get("html") or ""), (j.get("row") or {}).get("html"))
+    s, html = me.page("emotes")
+    check("the uploader sees their own on the Emotes page, marked as waiting",
+          s == 200 and 'data-code="zzpyhold"' in html and "emote-wait" in html, (s, 'data-code="zzpyhold"' in html))
+    s, html = pal.page("emotes")
+    check("… and it is nowhere on anybody else's copy of that page", 'data-code="zzpyhold"' not in html, s)
+
+    # Approving it is the manager's ordinary `enable` — the same act, so the same op.
+    s, j = adm.api("admin/shout_emotes", "POST", {"op": "enable", "id": hold_id}, csrf_header=True)
+    rows = {e["code"]: e for e in (j.get("emotes") or [])}
+    check("the owner approves it from the manager",
+          s == 200 and rows.get("zzpyhold", {}).get("enabled") is True
+          and rows.get("zzpyhold", {}).get("pending") is False, (s, str(j)[:200]))
+    s, j = me.api("shout_emotes")
+    check("… and only then is it in the vocabulary everybody writes with",
+          "zzpyhold" in [e["code"] for e in (j.get("emotes") or [])], str(j)[:200])
+    s, j = me.api("shout_post", "POST", {"csrf_token": me.csrf, "body": "and now :zzpyhold: works"})
+    check("… and the token is a picture from now on",
+          'class="shout-emote"' in ((j.get("row") or {}).get("html") or ""), (j.get("row") or {}).get("html", "")[:200])
+
+    # The panel's own never waits: the person who would approve it is the person who added it.
+    s, j = adm.api("admin/shout_emotes", "POST", {"op": "upload", "code": "zzpynowait", "name": "Py no wait",
+                                                  "data": b64(svg("<title>nowait</title>"))}, csrf_header=True)
+    rows = {e["code"]: e for e in (j.get("emotes") or [])}
+    check("the panel's own upload is live at once even with the gate on",
+          s == 200 and rows.get("zzpynowait", {}).get("enabled") is True
+          and rows.get("zzpynowait", {}).get("pending") is False, (s, str(j)[:200]))
+
+    # ── renaming, which only the manager can do ──────────────────────────────
+    s, j = adm.api("admin/shout_emotes", "POST", {"op": "rename", "id": hold_id, "name": "Py renamed"}, csrf_header=True)
+    rows = {e["code"]: e for e in (j.get("emotes") or [])}
+    check("the owner renames one, and the CODE does not move with the name",
+          s == 200 and j.get("success") and rows.get("zzpyhold", {}).get("name") == "Py renamed", (s, str(j)[:200]))
+    s, j = adm.api("admin/shout_emotes", "POST", {"op": "rename", "id": hold_id, "name": "Py no wait"}, csrf_header=True)
+    check("… and a name another emote already answers to is refused", s == 409, (s, j))
+    s, j = me.api("shout_emote_upload", "POST", {"csrf_token": me.csrf, "code": "zzpyname", "name": "py renamed",
+                                                 "data": b64(svg("<title>nametaken</title>"))})
+    check("a member's upload is judged by the same name rule, whatever its case",
+          s == 409 and j.get("error") == "name_taken", (s, j))
+    php("setSetting($db, 'shout_emote_approval', '0');")
+
     # ── the settings round-trip ──────────────────────────────────────────────
     # Nonsense in every field at once: a key missing from the allowed list is silently ignored, which
     # looks exactly like a save that worked, and a missing clamp is a number nothing downstream expects.
     s, j = adm.api("admin/save_settings", "POST", {
-        "shout_emotes_enabled": "yes", "shout_stickers_enabled": "0",
+        "shout_emotes_enabled": "yes", "shout_stickers_enabled": "0", "shout_emote_approval": "nonsense",
         "shout_emote_max_kb": "99999", "shout_emote_max_px": "1", "shout_emote_per_user": "0"}, csrf_header=True)
-    keys = ["shout_emotes_enabled", "shout_stickers_enabled", "shout_emote_max_kb", "shout_emote_max_px", "shout_emote_per_user"]
+    keys = ["shout_emotes_enabled", "shout_stickers_enabled", "shout_emote_approval",
+            "shout_emote_max_kb", "shout_emote_max_px", "shout_emote_per_user"]
     stored = dict(zip(keys, php("$out = []; foreach (['" + "','".join(keys) + "'] as $k) $out[] = (string)($cfg[$k] ?? '');"
                                 " echo implode('|', $out);").split("|")))
     check("every field is saveable, and the nonsense is clamped or coerced rather than refused",
           s == 200 and j.get("success") and stored == {
-              "shout_emotes_enabled": "0", "shout_stickers_enabled": "0", "shout_emote_max_kb": "512",
-              "shout_emote_max_px": "32", "shout_emote_per_user": "1"}, (s, stored))
+              "shout_emotes_enabled": "0", "shout_stickers_enabled": "0", "shout_emote_approval": "0",
+              "shout_emote_max_kb": "512", "shout_emote_max_px": "32", "shout_emote_per_user": "1"}, (s, stored))
 finally:
     php("$db->exec(\"DELETE FROM shout_emotes WHERE code LIKE 'zzpy%'\");"
         "$db->exec('DELETE FROM shout_mentions'); $db->exec('DELETE FROM shouts');"

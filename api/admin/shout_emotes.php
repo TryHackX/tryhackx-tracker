@@ -7,6 +7,12 @@
  *       {"op": "upload",  "code": …, "name": …, "data": <base64>, "sticker": bool}
  *       {"op": "enable"|"disable"|"delete", "id": N}
  *       {"op": "sticker", "id": N, "on": bool}
+ *       {"op": "rename",  "id": N, "name": …}
+ *
+ * `enable` is also how a member's upload held by `shout_emote_approval` is APPROVED — it is the same
+ * act (the row becomes visible), so it is the same op rather than a second road to one UPDATE. The
+ * audit line says which of the two it was, because approving somebody else's picture is a decision
+ * about the site and switching your own off again is tidying.
  *
  * Not in adminEndpointPermission(), so this is owner-only like the rest of Settings — a moderator
  * takes a picture down through the public endpoint (shout_emote_delete, `shout.moderate`), which is
@@ -31,6 +37,13 @@ $listing = function () use ($db, $cfg, $base): array {
             'sticker' => $e['is_sticker'], 'enabled' => $e['enabled'],
             'url' => shoutEmoteUrl($e, $base), 'created_at' => $e['created_at'],
             'uploaded_by' => $e['uploaded_by'], 'uploader' => null,
+            // Waiting, rather than merely off: an ACCOUNT's picture nobody has let through YET.
+            // `approved_at` is what makes that a fact about the ROW instead of a guess from
+            // `enabled`. An emote a moderator switched off has been answered for and stays out of
+            // this queue; one that is still waiting stays IN it even if the gate is switched off
+            // afterwards, because nothing else would ever ask about it again and its uploader is
+            // still waiting for an answer.
+            'pending' => !empty($e['waiting']) && $e['uploaded_by'] !== null,
         ];
     }
     // One query for the names rather than one per row; NULL stays NULL, which the page prints as
@@ -50,7 +63,7 @@ $listing = function () use ($db, $cfg, $base): array {
 };
 $limits = fn(): array => ['max_kb' => shoutEmoteMaxKb($cfg), 'max_px' => shoutEmoteMaxPx($cfg),
                           'per_user' => shoutEmotePerUser($cfg), 'enabled' => shoutEmotesEnabled($cfg),
-                          'stickers' => shoutStickersEnabled($cfg)];
+                          'stickers' => shoutStickersEnabled($cfg), 'approval' => shoutEmoteApproval($cfg)];
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     jsonResponse(['success' => true, 'emotes' => $listing()] + $limits());
@@ -82,8 +95,10 @@ if ($op === 'upload') {
     $r = shoutEmoteStore($db, $cfg, (string)($input['code'] ?? ''), (string)($input['name'] ?? ''), $bytes,
                          null, !empty($input['sticker']));
     if (empty($r['ok'])) {
+        // `detail` is whichever identifier the refusal is about — the code that already holds these
+        // bytes, or the name that is already taken — so it fills both slots and the sentence picks one.
         $vars = ['kb' => $maxKb, 'px' => shoutEmoteMaxPx($cfg), 'n' => shoutEmotePerUser($cfg),
-                 'code' => (string)($r['detail'] ?? '')];
+                 'code' => (string)($r['detail'] ?? ''), 'name' => (string)($r['detail'] ?? '')];
         jsonResponse(['error' => __((string)$r['error'], $vars), 'detail' => (string)($r['detail'] ?? '')],
                      (int)($r['status'] ?? 400));
     }
@@ -94,12 +109,39 @@ if ($op === 'upload') {
 }
 
 if ($op === 'enable' || $op === 'disable') {
-    if (!shoutEmoteSetFlag($db, $id, 'enabled', $op === 'enable')) {
-        // rowCount() is 0 when the row is already in that state as well as when it does not exist;
-        // the listing below is what the page believes afterwards either way.
-        if (shoutEmoteGet($db, $id) === null) jsonResponse(['error' => __('api.emote.unknown')], 404);
+    // Read BEFORE the flag moves: afterwards there is no way to tell an approval from an ordinary
+    // switch back on, and the two are different lines in the log. Without the bytes — the blob is
+    // megabytes of nothing to do with this decision.
+    $st = $db->prepare("SELECT code, enabled, approved_at, uploaded_by FROM shout_emotes WHERE id = ?");
+    $st->execute([$id]);
+    $was = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+    if ($was === null) jsonResponse(['error' => __('api.emote.unknown')], 404);
+    // rowCount() is 0 when the row is already in that state as well as when it does not exist; the
+    // row above has already answered the second question, so nothing more is asked here.
+    //
+    // Enabling always goes through the approve path: it stamps a row nobody had decided about and
+    // leaves the stamp alone on one that has already been through here, so switching an emote back
+    // on is not a second approval. Disabling moves `enabled` and nothing else — the decision that
+    // let this picture through stands, which is what keeps it out of the queue afterwards.
+    if ($op === 'enable') shoutEmoteApprove($db, $id);
+    else                  shoutEmoteSetFlag($db, $id, 'enabled', false);
+    $approved = $op === 'enable' && $was['approved_at'] === null && $was['uploaded_by'] !== null;
+    if ($approved) {
+        auditLog($db, 'shout.emote_approve', ['target_type' => 'user', 'target_id' => (int)$was['uploaded_by'],
+            'summary' => ':' . (string)$was['code'] . ': approved']);
     }
-    jsonResponse(['success' => true, 'message' => __('api.emote.saved'), 'emotes' => $listing()] + $limits());
+    jsonResponse(['success' => true, 'message' => __($approved ? 'api.emote.approved' : 'api.emote.saved'),
+                  'emotes' => $listing()] + $limits());
+}
+
+if ($op === 'rename') {
+    $r = shoutEmoteRename($db, $id, (string)($input['name'] ?? ''));
+    if (empty($r['ok'])) {
+        jsonResponse(['error' => __((string)$r['error'], ['name' => (string)($r['detail'] ?? '')]),
+                      'detail' => (string)($r['detail'] ?? '')], (int)($r['status'] ?? 400));
+    }
+    jsonResponse(['success' => true, 'message' => __('api.emote.renamed'), 'emotes' => $listing(),
+                  'renamed' => ['id' => (int)$r['row']['id'], 'name' => (string)$r['row']['name']]] + $limits());
 }
 
 if ($op === 'sticker') {
