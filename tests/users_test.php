@@ -37,7 +37,21 @@ check('api_clients has scope column', schemaColumnExists($db, 'api_clients', 'sc
 check('index_hashes has meta_source column', schemaColumnExists($db, 'index_hashes', 'meta_source'));
 check('index_hashes has meta_fetched index', schemaIndexExists($db, 'index_hashes', 'idx_index_meta_fetched'));
 // deterministic start: restore the SEED permissions of the system groups (another tool/session may
-// have edited them in the shared test DB — e.g. a UI fixture granting guest everything)
+// have edited them in the shared test DB — e.g. a UI fixture granting guest everything) …
+// … and give them back when this suite is done. Whatever runs next — the next suite, the next
+// battery — starts from the MIGRATED groups, not from the seed this one needs: leaving the member
+// group stripped here is how hash_check_test once failed on a database whose migration was fine.
+$sysBefore = [];
+foreach (['guest', 'member'] as $slug) {
+    $st = $db->prepare("SELECT permissions FROM user_groups WHERE slug = ?");
+    $st->execute([$slug]);
+    $sysBefore[$slug] = (string)$st->fetchColumn();
+}
+register_shutdown_function(function () use ($db, $sysBefore) {
+    foreach ($sysBefore as $slug => $json) {
+        if ($json !== '') $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = ?")->execute([$json, $slug]);
+    }
+});
 $db->exec("UPDATE user_groups SET permissions = '" . json_encode(['whitelist.view' => true, 'stats.view' => true, 'stats.timeline' => true, 'home.stats' => true]) . "' WHERE slug = 'guest'");
 $db->exec("UPDATE user_groups SET permissions = '" . json_encode(['whitelist.view' => true, 'stats.view' => true, 'stats.timeline' => true, 'home.stats' => true]) . "' WHERE slug = 'member'");
 $guest = userGroupBySlug($db, 'guest');

@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 59;  // 59 = message_reports.reply — what the moderator answered the reporter, kept beside the log note
+const TRACKER_SCHEMA_VERSION = 60;  // 60 = a setting only: site_live_seconds, so an upgraded install gets the row and its default
+                                    // 59 = message_reports.reply — what the moderator answered the reporter, kept beside the log note
                                     // 58 = hash_content (words about a torrent the tracker has only seen), whitelist.content_user_id, proposals that may belong to either home, and content.view to the member group
                                     // 57 = a grant only: status.hash_check to the member group — the status page can be asked what the tracker knows about a hash
                                     // 56 = data only: the 'pm' notifications go, because an unread message is counted where it is read
@@ -2134,6 +2135,11 @@ function trackerSchemaDefaultSettings(): array {
         // want the refresh without it.
         'pm_live_seconds'             => '0',   // 0 = off; otherwise clamped [2, 60]
         'pm_typing_enabled'           => '0',
+        // ── The number on the account link, kept current (1.55.0) ────────────────────────────
+        // How often any page a signed-in reader has open asks api/user_pulse.php for the two
+        // counts. On by default, once a minute: two indexed COUNTs per reader per minute is what a
+        // badge that is not a snapshot costs, and one tab asks for all of them (localStorage lease).
+        'site_live_seconds'           => '60',  // 0 = off; otherwise clamped [10, 300]
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

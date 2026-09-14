@@ -41,6 +41,15 @@ function usersRegistrationEnabled(array $cfg): bool { return usersEnabled($cfg) 
 function usersLinksVisible(array $cfg): bool { return usersEnabled($cfg) && (($cfg['users_links_visible'] ?? '1') === '1'); }
 function usersDefaultGroupSlug(array $cfg): string { return trim((string)($cfg['users_default_group'] ?? 'member')) ?: 'member'; }
 function usersNotifyExpiryDays(array $cfg): int { return max(0, min(30, (int)($cfg['users_notify_expiry_days'] ?? 3))); }
+/**
+ * How often a signed-in reader's page asks for the two numbers on the account link (api/user_pulse.php).
+ * 0 = never, otherwise 10–300 s. Its own switch, separate from pm_live_seconds: an open conversation
+ * asking every few seconds and the whole site asking once a minute are different costs.
+ */
+function siteLiveSeconds(array $cfg): int {
+    $v = (int)($cfg['site_live_seconds'] ?? 60);
+    return $v <= 0 ? 0 : max(10, min(300, $v));
+}
 
 /** Registry of every permission a group can carry. Key => human description (admin UI + docs). */
 function userPermissionList(): array {

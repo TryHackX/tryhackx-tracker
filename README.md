@@ -954,6 +954,12 @@ key *name*, so one added later is covered without anybody remembering, and a mat
 "changed" with no value either side. There is no delete and no edit — a log the panel it records can
 rewrite is not evidence. Retention is a setting; the janitor enforces it.
 
+### The number on the account link stays current (1.55.0)
+
+Every page a signed-in reader has open asks `api/user_pulse.php` for the two counts behind the badge,
+at **Settings → Account badge refresh** (60 s as shipped, 0 = off). Hidden tabs ask nothing; one tab
+asks for all of a reader's tabs; the answer is numbers, never content.
+
 ### The reporter hears back (1.54.0)
 
 On a reported message's card, beside the note for the log, **an answer to the reporter** — delivered

@@ -33,7 +33,7 @@
         <?php $accountActive = in_array($action, ['account', 'login', 'register', 'reset', 'verify'], true); ?>
         <?php if ($navUser !== null): ?>
         <span class="sep">|</span>
-        <a href="<?= $baseUrl ?>?action=account" class="nav-user <?= $accountActive ? 'active' : '' ?>"><?= sanitize($navUser['username']) ?><span class="nav-unread" id="nav-unread" hidden></span></a>
+        <a href="<?= $baseUrl ?>?action=account" class="nav-user <?= $accountActive ? 'active' : '' ?>"><?= sanitize($navUser['username']) ?><span class="nav-unread" id="nav-unread" hidden data-pulse="<?= (int)siteLiveSeconds($cfg) ?>"></span></a>
         <?php elseif (usersLinksVisible($cfg)): ?>
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=login" class="<?= $accountActive ? 'active' : '' ?>"><?= _h('nav.account') ?></a>

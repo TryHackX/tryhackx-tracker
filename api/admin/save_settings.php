@@ -41,7 +41,7 @@ $allowed = [
     'index_keep_saved', 'index_keep_saved_days',
     'digest_enabled', 'digest_to', 'digest_hours', 'digest_min', 'health_token',
     'user_2fa_enabled', 'user_2fa_required',
-    'pm_live_seconds', 'pm_typing_enabled',
+    'pm_live_seconds', 'pm_typing_enabled', 'site_live_seconds',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -318,6 +318,7 @@ $intClamp = [
     // 0 is a real answer here — it means "do not poll at all" — so the floor is 0 and
     // pmLiveSeconds() is what raises anything between 1 and 2 to the two-second floor on read.
     'pm_live_seconds' => [0, 60, 0],
+    'site_live_seconds' => [0, 300, 60],
     'digest_hours' => [1, 168, 24], 'digest_min' => [0, 10000, 1],
     'wl_edit_max_pending' => [0, 50, 3],
     'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],

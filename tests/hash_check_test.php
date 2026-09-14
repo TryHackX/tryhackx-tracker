@@ -35,6 +35,14 @@ $cfg = getSettings($db, true);
 check('the permission exists in the registry', isset(userPermissionList()['status.hash_check']));
 check('the member preset carries it', in_array('status.hash_check', userGroupPresets()['member']['perms'], true));
 check('the migration recorded its grant', isset($cfg['schema_grant_v57_hash_check']));
+// The grant is a one-time migration and this is a shared database other suites edit (users_test
+// resets the system groups to their seed for its own checks). Ask the migration itself rather than
+// the leftovers: forget the marker, run the data migrations again — idempotent by design — and read
+// what they wrote.
+$db->exec("DELETE FROM settings WHERE `key` = 'schema_grant_v57_hash_check'");
+trackerSchemaDataMigrations($db, getSettings($db, true));
+$cfg = getSettings($db, true);
+check('… and records it again when asked to', isset($cfg['schema_grant_v57_hash_check']));
 $st = $db->prepare("SELECT permissions FROM user_groups WHERE slug = 'member'");
 $st->execute();
 $memberPerms = json_decode((string)$st->fetchColumn(), true) ?: [];

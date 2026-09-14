@@ -231,6 +231,7 @@ function settingsCatalogKeywords(): array {
         'user_2fa_enabled'         => 'two factor authentication 2fa members accounts totp authenticator app',
         'user_2fa_required'        => 'two factor required force 2fa panel access moderators admins',
         'pm_live_seconds'          => 'messages live refresh poll seconds chat realtime conversation updates',
+        'site_live_seconds'        => 'navigation badge unread count refresh pulse poll seconds notifications live site wide',
         'pm_typing_enabled'        => 'typing indicator is writing messages live chat',
         'pm_enabled'               => 'private messages pm inbox conversations members write dm',
         'pm_who'                   => 'private messages who can write default friends everybody nobody',

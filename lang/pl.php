@@ -5199,6 +5199,8 @@ Można je ponownie pobrać z DHT albo zaimportować jeszcze raz, jeśli zachowas
     'settings.site_github_url' => 'Adres GitHub',
     'settings.site_github_url_sub' => '(repozytorium projektu)',
     'settings.site_heading' => 'Konfiguracja strony',
+    'settings.site_live' => 'Odświeżanie licznika przy koncie (sekundy)',
+    'settings.site_live_hint' => 'Jak często dowolna otwarta strona zalogowanego czytelnika pyta o dwie liczby przy koncie (powiadomienia i wiadomości). <strong>0 = nigdy</strong>; inaczej 10–300. Jedna karta pyta za wszystkie karty czytelnika, ukryta karta nie pyta wcale. Niezależne od odświeżania rozmowy powyżej.',
     'settings.site_name' => 'Nazwa strony',
     'settings.site_url' => 'Adres strony (URL)',
     'settings.stats_cache_ttl' => 'Czas życia cache / TTL (s)',

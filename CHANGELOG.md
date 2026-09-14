@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.55.0] — 2026-09-13
+
+Schema **60** — a setting only: `site_live_seconds` gets its default row on upgrade.
+
+### Fixed — the number on the account link is no longer a snapshot
+
+Outside the account page the navigation badge was filled once, from `user_me` at load, and never
+again: a reader on the front page saw the count they had when they opened it. Now every page a
+signed-in reader has open asks **`api/user_pulse.php`** — two counts and nothing else, the session
+released before the reads — at the cadence of a new setting, **Account badge refresh**
+(`site_live_seconds`, 60 s as shipped, 0 = never), separate from the conversation refresh. A hidden
+tab asks nothing and asks the moment it is shown again; one flight at a time; and **one request per
+reader, not per tab** — the tab that asked leaves the answer in `localStorage` with its time, and
+any other tab whose turn comes inside that window takes it from there, told at once by the
+`storage` event. Signed out meanwhile, the loop stops.
+
+### Tests
+
+* `tests/pulse_test.py` (the endpoint: who gets what, the clamps, the session released before the
+  reads) and `scratchpad/shots/pulse_check.js` (a notification lands with the front page open and
+  shows on the badge without a reload; a second tab takes the stored answer; a hidden tab asks nothing).
+* `tests/users_test.php` now gives the system groups back when it ends — it resets them to their seed
+  for its own checks and left the member group stripped for whatever ran next — and
+  `tests/hash_check_test.php` asks the migration itself for the grant instead of trusting the
+  previous suite's leftovers.
+
 ## [1.54.0] — 2026-09-13
 
 Schema **59** — `message_reports.reply`.

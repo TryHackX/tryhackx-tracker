@@ -2341,3 +2341,12 @@ add('', {
     'settings.users_rl_hashcheck_hint': ('The status page\'s "what does this tracker know about a hash" (permission status.hash_check). 0 = no limit.',
         '„Co ten tracker wie o hashu” na stronie statusu (uprawnienie status.hash_check). 0 = bez limitu.'),
 })
+
+
+# ── 1.55.0: the number on the account link, kept current ────────────────────
+add('', {
+    'settings.site_live': ('Account badge refresh (seconds)',
+        'Odświeżanie licznika przy koncie (sekundy)'),
+    'settings.site_live_hint': ('How often any page a signed-in reader has open asks for the two numbers on the account link (notifications and messages waiting). <strong>0 = never</strong>; 10–300 otherwise. One tab asks for all of a reader\'s tabs, and a hidden tab asks nothing. Separate from the conversation refresh above.',
+        'Jak często dowolna otwarta strona zalogowanego czytelnika pyta o dwie liczby przy koncie (powiadomienia i wiadomości). <strong>0 = nigdy</strong>; inaczej 10–300. Jedna karta pyta za wszystkie karty czytelnika, ukryta karta nie pyta wcale. Niezależne od odświeżania rozmowy powyżej.'),
+})

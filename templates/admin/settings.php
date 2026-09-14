@@ -2055,6 +2055,11 @@
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_live_seconds" value="<?= sanitize($cfg['pm_live_seconds'] ?? '0') ?>" min="0" max="60">
                         <small class="settings-hint"><?= __('settings.pm_live_hint') ?></small>
                     </div>
+                    <div class="col-md-3" data-setting="site_live_seconds">
+                        <label class="form-label"><?= _h('settings.site_live') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="site_live_seconds" value="<?= sanitize($cfg['site_live_seconds'] ?? '60') ?>" min="0" max="300">
+                        <small class="settings-hint"><?= __('settings.site_live_hint') ?></small>
+                    </div>
                     <div class="col-md-3" data-setting="pm_typing_enabled">
                         <label class="form-label"><?= _h('settings.pm_typing') ?></label>
                         <select class="form-select bg-dark text-light border-secondary" name="pm_typing_enabled">

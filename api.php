@@ -258,6 +258,7 @@ $apiRoutes = [
     'index_info'                 => 'api/index_info.php',
     'hash_check'                 => 'api/hash_check.php',
     'content_submit'             => 'api/content_submit.php',
+    'user_pulse'                 => 'api/user_pulse.php',
     'richtext_preview'           => 'api/richtext_preview.php',
     'rate_hash'                  => 'api/rate_hash.php',
     // ── People reaching each other (includes/people.php) ──

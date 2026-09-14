@@ -2199,6 +2199,54 @@ const getJson = async (endpoint) => {
             pag.appendChild(mk(t('js.app.pg_next'), json.page + 1, json.page >= json.pages));
         }
     }
+    /**
+     * The number on the account link, kept current everywhere (1.55.0).
+     *
+     * Every page a signed-in reader has open asks api/user_pulse.php for the two counts, at the
+     * cadence the badge carries (data-pulse, from Settings; 0 = never). Four rules, each of which
+     * was learned the hard way on the conversation poll:
+     *   - a hidden tab asks for nothing, and asks the moment it is shown again;
+     *   - one flight at a time;
+     *   - numbers, never content — what arrived is read on the account page;
+     *   - ONE request per reader, not one per tab: a tab that fetched leaves the answer and its
+     *     time in localStorage, and any other tab whose turn comes inside that window uses the
+     *     stored answer instead of asking again. A `storage` event carries a fresh answer to the
+     *     other tabs at once.
+     */
+    function initPulse() {
+        const badge = $id('nav-unread');
+        if (!badge) return;
+        const every = Math.max(0, parseInt(badge.dataset.pulse || '0', 10) || 0);
+        if (every <= 0) return;
+        const KEY = 'thx_pulse';
+        let inFlight = false, stopped = false;
+        const apply = (v) => {
+            if (!v) return;
+            window.NavUnread.notif = Math.max(0, Number(v.unread) || 0);
+            window.NavUnread.set('pm', v.unread_pm);
+        };
+        const stored = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { return null; } };
+        const tick = async () => {
+            if (stopped || document.hidden || inFlight) return;
+            const s = stored();
+            // another tab asked recently enough: its answer is this tab's answer
+            if (s && typeof s.at === 'number' && Date.now() - s.at < every * 1000 * 0.8) { apply(s); return; }
+            inFlight = true;
+            try {
+                const r = await getJson('user_pulse');
+                if (!r) return;
+                if (!r.success) { stopped = true; return; }          // signed out meanwhile: stop asking
+                apply(r);
+                try { localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), unread: r.unread, unread_pm: r.unread_pm })); } catch (e) { /* private mode */ }
+                if (Number(r.live) <= 0) stopped = true;             // switched off in Settings since the page loaded
+            } finally { inFlight = false; }
+        };
+        window.addEventListener('storage', (e) => { if (e.key === KEY && e.newValue) { try { apply(JSON.parse(e.newValue)); } catch (err) { /* ignore */ } } });
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+        setInterval(tick, every * 1000);
+        window.PulseTick = tick;   // the browser check pokes it rather than waiting a minute
+    }
+
     function initAccount() {
         if (!$id('account-form')) {
             // not on the account page — still light up the nav badge for signed-in users
@@ -2209,8 +2257,10 @@ const getJson = async (endpoint) => {
                     window.NavUnread.set('pm', me.unread_pm);
                 });
             }
+            initPulse();
             return;
         }
+        initPulse();
         loadAccount();
         loadNotifications(1);
         $id('acc-mark-all').addEventListener('click', async (e) => {
