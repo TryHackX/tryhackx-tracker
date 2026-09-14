@@ -99,13 +99,14 @@
         // twice — visible as a message that arrived in duplicate on a slow connection.
         var polling = false;
 
-        function badge(n) {
+        function badge(n, fromFriends) {
             var b = document.getElementById('pm-unread');
             if (b) { b.textContent = n ? String(n) : ''; b.hidden = !n; }
             // The account link in the navigation carries one number for the whole account, so the
             // messages half is handed to whoever owns that sum rather than written from here.
             if (window.NavUnread) window.NavUnread.set('pm', n);
-            if (window.Sounds) window.Sounds.observe({ unread_pm: n });   // this tab asked: this tab may play
+            // this tab asked: this tab may play — and it knows how many of them are from friends
+            if (window.Sounds) window.Sounds.observe({ unread_pm: n, unread_pm_friend: fromFriends });
         }
 
         /**
@@ -136,7 +137,7 @@
             if (!j || openWith) return;
             if (!j.success) { if (j.error === 'login_required') stopInbox(); return; }   // signed out meanwhile: stop asking
             if (j.off) { stopInbox(); return; }     // the operator switched it off mid-session
-            badge(j.unread);
+            badge(j.unread, j.unread_friend);
             // The baseline came with the list itself, so a message that arrived between drawing it
             // and this first tick is a difference, not something this tick quietly adopts.
             //
@@ -162,7 +163,7 @@
                     text: t(j && j.error === 'rate_limit' ? 'js.pm.search_slow' : 'js.fav.load_failed') }));
                 return;
             }
-            badge(j.unread);
+            badge(j.unread, j.unread_friend);
             // An empty inbox has an empty stamp, and that IS a baseline: turning it into null made the
             // first message ever land silently, adopted by the first tick instead of drawn.
             inboxStamp = String(j.stamp || '');
@@ -251,7 +252,7 @@
                 msgsBox.appendChild(renderMsg(m));
             });
             if ((j.rows || []).length) {
-                badge(j.unread);
+                badge(j.unread, j.unread_friend);
                 // Only follow the conversation down if they were already at the bottom of it —
                 // scrolling somebody away from the line they are reading is worse than a missed row.
                 if (atBottom) msgsBox.scrollTop = msgsBox.scrollHeight;
@@ -286,7 +287,7 @@
                     text: t(j && j.error === 'not_found' ? 'js.pm.why_not_found' : 'js.fav.load_failed') }));
                 return;
             }
-            badge(j.unread);
+            badge(j.unread, j.unread_friend);
 
             var head = el('div', { className: 'pm-head' });
             head.appendChild(el('a', { className: 'pm-head-name', href: BASE + '?action=u&name=' + encodeURIComponent(name), text: name }));

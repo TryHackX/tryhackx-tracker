@@ -995,7 +995,20 @@
                                 <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_notification'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
                                 <?php endforeach; ?>
                             </select>
-                            <button type="button" class="btn btn-outline-light btn-sm js-sound-preview" data-target="setting-sound_default_notification" title="<?= _h('settings.sounds_preview') ?>">&#9654;</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_notification" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_message_friend">
+                        <label class="form-label" for="setting-sound_default_message_friend"><?= _h('settings.sounds_default_message_friend') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_message_friend" id="setting-sound_default_message_friend">
+                                <option value="" <?= (string)($cfg['sound_default_message_friend'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
+                                <?php foreach ($sndLib as $sndE): ?>
+                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_message_friend'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_message_friend" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
                         </div>
                         <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
                     </div>
@@ -1008,7 +1021,7 @@
                                 <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_message'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
                                 <?php endforeach; ?>
                             </select>
-                            <button type="button" class="btn btn-outline-light btn-sm js-sound-preview" data-target="setting-sound_default_message" title="<?= _h('settings.sounds_preview') ?>">&#9654;</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_message" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
                         </div>
                         <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
                     </div>
@@ -1019,10 +1032,24 @@
                 <div class="mt-3" id="admin-sounds" data-max-bytes="<?= (int)SOUNDS_MAX_BYTES ?>">
                     <label class="form-label"><?= _h('settings.sounds_custom') ?></label>
                     <div id="admin-sounds-list" class="mb-2"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
-                    <div class="d-flex flex-wrap gap-2 align-items-center">
-                        <input type="file" id="admin-sound-file" class="form-control bg-dark text-light border-secondary admin-sound-file" accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav">
-                        <input type="text" id="admin-sound-name" class="form-control bg-dark text-light border-secondary admin-sound-name" maxlength="60" placeholder="<?= _h('settings.sounds_name_ph') ?>">
-                        <button type="button" class="btn btn-outline-light btn-sm" id="admin-sound-upload"><?= _h('settings.sounds_upload') ?></button>
+                    <?php /* The same drop zone the language install and the address-list import use: the
+                             <input type=file> stays in the DOM, invisible, over a box that also takes a dropped file. */ ?>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-6">
+                            <div class="ipl-drop" id="admin-sound-drop" tabindex="0" role="button" aria-label="<?= _h('settings.sounds_drop_aria') ?>">
+                                <i class="bi bi-file-earmark-music ipl-drop-icon"></i>
+                                <span class="ipl-drop-main"><u><?= _h('settings.sounds_drop_choose') ?></u> <?= _h('settings.sounds_drop_or') ?></span>
+                                <span class="ipl-drop-sub"><?= _h('settings.sounds_drop_sub') ?></span>
+                                <input type="file" id="admin-sound-file" class="ipl-drop-input" accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="admin-sound-name"><?= _h('settings.sounds_name_label') ?></label>
+                            <input type="text" id="admin-sound-name" class="form-control bg-dark text-light border-secondary" maxlength="60" placeholder="<?= _h('settings.sounds_name_ph') ?>">
+                        </div>
+                        <div class="col-md-2">
+                            <button type="button" class="btn btn-sm btn-info w-100" id="admin-sound-upload"><i class="bi bi-plus-lg"></i> <?= _h('settings.sounds_upload') ?></button>
+                        </div>
                     </div>
                     <small class="settings-hint"><?= __('settings.sounds_custom_hint') ?></small>
                 </div>

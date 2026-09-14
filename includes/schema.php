@@ -2280,6 +2280,7 @@ function trackerSchemaDefaultSettings(): array {
         // owner picks from Settings → Sounds.
         'sounds_enabled'              => '1',
         'sound_default_notification'  => '',
+        'sound_default_message_friend' => '',
         'sound_default_message'       => '',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose

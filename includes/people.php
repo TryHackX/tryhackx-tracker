@@ -290,6 +290,24 @@ function pmUnreadCount(PDO $db, int $userId): int
 }
 
 /**
+ * Of the messages waiting (pmUnreadCount), how many are from a FRIEND — the sounds tell the two
+ * apart (includes/sounds.php). Same rows, same rule about the counterpart being active, one more
+ * condition: an accepted friendship in either direction.
+ */
+function pmUnreadCountFriends(PDO $db, int $userId): int
+{
+    $st = $db->prepare("SELECT COUNT(*) FROM user_messages m
+                          JOIN message_threads t ON t.id = m.thread_id
+                          JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
+                         WHERE m.sender_id <> ? AND m.read_at IS NULL AND u.status = 'active'
+                           AND ((t.u_low = ? AND t.u_low_hidden = 0) OR (t.u_high = ? AND t.u_high_hidden = 0))
+                           AND EXISTS (SELECT 1 FROM user_friends f WHERE f.status = 'accepted'
+                                          AND ((f.user_id = ? AND f.friend_id = u.id) OR (f.user_id = u.id AND f.friend_id = ?)))");
+    $st->execute([$userId, $userId, $userId, $userId, $userId, $userId]);
+    return (int)$st->fetchColumn();
+}
+
+/**
  * The moment of the newest line anywhere in this reader's inbox — the one fact that says whether a
  * drawn list is still the truth.
  *

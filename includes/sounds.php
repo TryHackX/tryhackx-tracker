@@ -42,10 +42,14 @@ function soundsEnabled(array $cfg): bool
     return usersEnabled($cfg) && (($cfg['sounds_enabled'] ?? '1') === '1');
 }
 
-/** The events a sound can answer. The shoutbox adds its own here when it arrives. */
+/**
+ * The events a sound can answer. A message from a FRIEND is its own event (the pulse and the inbox
+ * poll say how many of the waiting messages are from friends — includes/people.php,
+ * pmUnreadCountFriends); 'message' is everyone else. The shoutbox adds its own kinds when it arrives.
+ */
 function soundEventKinds(): array
 {
-    return ['notification', 'message'];
+    return ['notification', 'message_friend', 'message'];
 }
 
 function soundBuiltinDir(): string
@@ -327,12 +331,17 @@ function soundDelete(PDO $db, int $id): bool
 // A reader's preferences
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Off, moderately loud, a one-second hum first, every event on the site default. */
+/**
+ * Off, moderately loud, a second of silence first, every event on the site default. Silence rather
+ * than the tone: opening the stream is what wakes an HDMI link, and the tone — meant for amplifiers
+ * that stand by until they sense a signal — was heard as a buzz before every chime by the first
+ * person to try it. It stays an option for the amplifier that needs it.
+ */
 function soundPrefsDefault(): array
 {
     $ev = [];
     foreach (soundEventKinds() as $k) $ev[$k] = null;
-    return ['on' => 0, 'vol' => 60, 'pre' => 1000, 'pre_kind' => 'hum', 'ev' => $ev];
+    return ['on' => 0, 'vol' => 60, 'pre' => 1000, 'pre_kind' => 'silence', 'ev' => $ev];
 }
 
 /**
@@ -350,6 +359,7 @@ function soundPrefsValidate($raw, array $libraryIds): array
     if (isset($raw['vol']) && is_numeric($raw['vol'])) $p['vol'] = max(0, min(100, (int)$raw['vol']));
     if (isset($raw['pre']) && is_numeric($raw['pre'])) $p['pre'] = max(0, min(SOUNDS_PREROLL_MAX_MS, (int)(round((int)$raw['pre'] / 100) * 100)));
     if (isset($raw['pre_kind']) && in_array($raw['pre_kind'], ['silence', 'hum'], true)) $p['pre_kind'] = $raw['pre_kind'];
+    else $p['pre_kind'] = 'silence';
     $ev = is_array($raw['ev'] ?? null) ? $raw['ev'] : [];
     foreach (soundEventKinds() as $k) {
         if (!array_key_exists($k, $ev) || $ev[$k] === null) { $p['ev'][$k] = null; continue; }

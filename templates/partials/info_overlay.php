@@ -191,7 +191,10 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
             <textarea id="info-desc" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
             <div class="rt-preview rt-body" id="info-desc-preview" hidden></div>
         </div>
-        <div class="form-hint" id="info-desc-syntax"></div>
+        <details class="rt-syntax-fold">
+    <summary><?= _h('rt.syntax_help') ?></summary>
+    <div class="form-hint" id="info-desc-syntax"></div>
+</details>
         <div class="form-hint" id="info-desc-help"></div>
     </div>
 <?php endif; ?>

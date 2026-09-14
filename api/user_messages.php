@@ -188,7 +188,8 @@ if ((string)($_GET['poll'] ?? '') === '1') {
     // many are unread. The page redraws the list only when the first has moved from what it drew.
     if ($with === '') {
         jsonResponse(['success' => true, 'inbox' => true,
-                      'stamp' => pmInboxStamp($db, $uid), 'unread' => pmUnreadCount($db, $uid)]);
+                      'stamp' => pmInboxStamp($db, $uid), 'unread' => pmUnreadCount($db, $uid),
+                      'unread_friend' => pmUnreadCountFriends($db, $uid)]);
     }
     $them = userValidUsername($with) ? userFindByLogin($db, $with) : null;
     if (!$them) jsonResponse(['error' => 'not_found'], 404);

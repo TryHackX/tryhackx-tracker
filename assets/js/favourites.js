@@ -167,7 +167,18 @@
                 ? '—'
                 : r.seeders + ' / ' + (r.leechers === null || r.leechers === undefined ? '—' : r.leechers),
         }));
-        meta.appendChild(el('span', { className: 'pf-hash', text: (r.info_hash || '').slice(0, 12) }));
+        // The hash is shown short and SAID to be short (the ellipsis); a click or a tap copies the
+        // whole of it, which is the only thing anybody wants a hash for.
+        if (r.info_hash) {
+            var full = String(r.info_hash), short = full.slice(0, 12) + '…';
+            var hs = el('span', { className: 'pf-hash pf-hash-copy', text: short, title: t('js.fav.hash_copy_title') });
+            hs.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                var done = function () { hs.textContent = t('js.common.copied'); setTimeout(function () { hs.textContent = short; }, 1500); };
+                if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(full).then(done, function () { /* refused */ });
+            });
+            meta.appendChild(hs);
+        }
         row.appendChild(meta);
 
         var acts = el('div', { className: 'pf-acts' });

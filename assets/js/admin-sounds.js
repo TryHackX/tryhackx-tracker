@@ -17,6 +17,32 @@
     const nameIn = document.getElementById('admin-sound-name');
     const btn = document.getElementById('admin-sound-upload');
     const maxBytes = Number(root.dataset.maxBytes) || 524288;
+    const drop = document.getElementById('admin-sound-drop');
+
+    /** The box says which file it holds — the same zone the language install uses. */
+    function markFile(file) {
+        if (!drop) return;
+        drop.classList.toggle('has-file', !!file);
+        const main = drop.querySelector('.ipl-drop-main');
+        if (!main) return;
+        main.textContent = '';
+        if (file) main.appendChild(document.createTextNode(file.name + ' · ' + Math.round(file.size / 1024) + ' KB'));
+        else { main.appendChild(el('u', { text: t('js.sounds.drop_choose') })); main.appendChild(document.createTextNode(' ' + t('js.sounds.drop_or'))); }
+    }
+    let dropped = null;          // a file that came by drag rather than through the dialog
+    function chosen() { return dropped || (fileIn.files && fileIn.files[0]) || null; }
+    if (drop) {
+        // dragover must be cancelled or the browser navigates to the file, losing the page.
+        ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('dragging'); }));
+        ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove('dragging')));
+        drop.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+            if (f) { dropped = f; markFile(f); }
+        });
+        drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileIn.click(); } });
+        fileIn.addEventListener('change', () => { dropped = null; markFile(chosen()); });
+    }
     const urls = {};                     // sid -> url, for the preview buttons
     let player = null;
 
@@ -34,7 +60,7 @@
         const table = el('table', { className: 'table table-dark table-sm align-middle mb-0 admin-sounds-table' });
         rows.forEach((r) => {
             urls[r.sid] = r.url;
-            const play = el('button', { type: 'button', className: 'btn btn-outline-light btn-sm me-1', title: t('js.sounds.play') }, '▶');
+            const play = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary me-1', title: t('js.sounds.play') }, [el('i', { className: 'bi bi-play-fill' })]);
             play.addEventListener('click', () => preview(r.url));
             const del = el('button', { type: 'button', className: 'btn btn-outline-danger btn-sm' }, t('js.sounds.delete'));
             del.addEventListener('click', async () => {
@@ -69,7 +95,7 @@
     }
 
     btn.addEventListener('click', () => {
-        const f = fileIn.files && fileIn.files[0];
+        const f = chosen();
         if (!f) { showToast(t('js.sounds.pick_file'), 'warning'); return; }
         if (f.size > maxBytes) { showToast(t('js.sounds.too_large', { kb: Math.round(maxBytes / 1024) }), 'danger'); return; }
         const reader = new FileReader();
@@ -84,6 +110,8 @@
             selects().forEach((s) => s.appendChild(el('option', { value: j.added.sid }, j.added.name)));
             fileIn.value = '';
             nameIn.value = '';
+            dropped = null;
+            markFile(null);
             render(j.sounds || []);
             showToast(j.message || 'OK', 'success');
         };

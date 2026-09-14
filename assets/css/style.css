@@ -2604,3 +2604,20 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 
 /* 1.57.0: the one-line answer beside a visibility toggle that was refused */
 .pf-vis-msg { margin-left: 0.5em; font-size: 0.82rem; }
+
+/* 1.57.1: the Sounds tab's controls in the site's own dress (they were the browser's), the account
+   tabs that wrap on a phone, the metric cards that centre there, and the short hash that copies. */
+.snd-row select, .snd-form output { background: var(--bg-code); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.6rem; font: inherit; font-size: 0.9rem; }
+.snd-form output { border: none; background: transparent; padding: 0; }
+.snd-row input[type=range] { accent-color: var(--accent); }
+.snd-row .btn { font-size: 0.82rem; }
+@media (max-width: 640px) {
+    .acc-tabs { flex-wrap: wrap; row-gap: 0.3rem; }
+    .acc-tabs .rt-tab { padding: 0.25rem 0.55rem; }
+}
+@media (max-width: 480px) {
+    .metric-card { justify-content: center; text-align: center; }
+    .metric-card .metric-info { align-items: center; }
+}
+.pf-hash-copy { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.pf-hash-copy:hover { color: var(--text); }

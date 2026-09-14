@@ -22,5 +22,7 @@ jsonResponse([
     'success'   => true,
     'unread'    => userUnreadCount($db, (int)$u['id']),
     'unread_pm' => pmEnabled($cfg) ? pmUnreadCount($db, (int)$u['id']) : 0,
+    // … of which from friends: the sounds tell a friend's message from a stranger's
+    'unread_pm_friend' => pmEnabled($cfg) ? pmUnreadCountFriends($db, (int)$u['id']) : 0,
     'live'      => siteLiveSeconds($cfg),
 ]);

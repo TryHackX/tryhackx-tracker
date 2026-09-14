@@ -106,7 +106,7 @@ try:
     check("the member signs in", s == 200 and j.get("success"), (s, j))
     s, j = me.api("user_pulse")
     check("a member gets the two counts and the cadence", s == 200 and j.get("success") and j.get("unread") == 0 and j.get("unread_pm") == 0 and j.get("live") == 45, (s, j))
-    check("… and nothing else — numbers, never content", set(j.keys()) <= {"success", "unread", "unread_pm", "live"}, list(j.keys()))
+    check("… and nothing else — numbers, never content", set(j.keys()) <= {"success", "unread", "unread_pm", "unread_pm_friend", "live"}, list(j.keys()))
     php("userNotify($db, " + str(uid) + ", 'account', 'Pulse fixture', 'a line');")
     s, j = me.api("user_pulse")
     check("a notification that landed is counted on the next pulse", j.get("unread") == 1, j)

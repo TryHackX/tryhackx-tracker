@@ -18,6 +18,7 @@ require_once $root . '/includes/whitelist.php';
 require_once $root . '/includes/mail.php';
 require_once $root . '/includes/users.php';
 require_once $root . '/includes/sounds.php';
+require_once $root . '/includes/people.php';   // pmUnreadCount / pmUnreadCountFriends
 $fails = 0; $n = 0;
 function check(string $name, bool $ok, string $info = ''): void {
     global $fails, $n; $n++;
@@ -54,7 +55,7 @@ check('with accounts off the legacy fallback closes it (no account, nowhere to k
 check('the feature needs accounts and its own switch',
       !soundsEnabled(['users_enabled' => '0', 'sounds_enabled' => '1']) && soundsEnabled(['users_enabled' => '1'])
       && !soundsEnabled(['users_enabled' => '1', 'sounds_enabled' => '0']));
-check('two events for now', soundEventKinds() === ['notification', 'message']);
+check('three events: a notification, a message from a friend, a message from anyone else', soundEventKinds() === ['notification', 'message_friend', 'message']);
 
 // ── the shipped library ──────────────────────────────────────────────────────
 $b = soundBuiltins('/x/');
@@ -120,12 +121,12 @@ check('the client list carries no internals', !isset($forClient[0]['bytes']) && 
 $ids = array_keys($lib);
 
 // ── a reader's preferences ───────────────────────────────────────────────────
-check('nothing stored = muted, 60%, a one-second hum, every event on the site default', soundPrefsValidate(null, $ids) === soundPrefsDefault());
+check('nothing stored = muted, 60%, a second of silence first, every event on the site default', soundPrefsValidate(null, $ids) === soundPrefsDefault() && soundPrefsDefault()['pre_kind'] === 'silence');
 $p = soundPrefsValidate(['on' => 1, 'vol' => 150, 'pre' => 9999, 'pre_kind' => 'x', 'ev' => ['notification' => 'c:' . $id, 'message' => '', 'shout' => 'b:ding']], $ids);
 check('values are clamped, an unknown kind of pre-roll dropped, an unknown event ignored',
-      $p['on'] === 1 && $p['vol'] === 100 && $p['pre'] === 3000 && $p['pre_kind'] === 'hum' && $p['ev'] === ['notification' => 'c:' . $id, 'message' => ''], json_encode($p));
+      $p['on'] === 1 && $p['vol'] === 100 && $p['pre'] === 3000 && $p['pre_kind'] === 'silence' && $p['ev'] === ['notification' => 'c:' . $id, 'message_friend' => null, 'message' => ''], json_encode($p));
 $p = soundPrefsValidate(['ev' => ['notification' => 'c:999999', 'message' => 'nonsense']], $ids);
-check('an id the library does not have becomes "the site default"', $p['ev'] === ['notification' => null, 'message' => null], json_encode($p));
+check('an id the library does not have becomes "the site default"', $p['ev'] === ['notification' => null, 'message_friend' => null, 'message' => null], json_encode($p));
 $p = soundPrefsValidate('{"on":1,"vol":"30","pre":"1250","pre_kind":"silence"}', $ids);
 check('a stored JSON string decodes; the pre-roll rounds to tenths of a second', $p['vol'] === 30 && $p['pre'] === 1300 && $p['pre_kind'] === 'silence', json_encode($p));
 check('garbage decodes to the default', soundPrefsValidate('{not json', $ids) === soundPrefsDefault() && soundPrefsValidate(42, $ids) === soundPrefsDefault());
@@ -141,13 +142,31 @@ $prefs['ev']['notification'] = 'c:' . $id;
 check('a pick wins over the site default', (soundResolve($cfgT, $prefs, $lib, 'notification')['id'] ?? null) === 'c:' . $id);
 check('a site default that is not in the library is silence', soundResolve(['sound_default_notification' => 'c:424242'], soundPrefsDefault(), $lib, 'notification') === null);
 check('the site defaults are reported only when the library has them',
-      soundSiteDefaults(['sound_default_notification' => 'b:ding', 'sound_default_message' => 'c:424242'], $lib) === ['notification' => 'b:ding', 'message' => '']);
+      soundSiteDefaults(['sound_default_notification' => 'b:ding', 'sound_default_message' => 'c:424242'], $lib) === ['notification' => 'b:ding', 'message_friend' => '', 'message' => '']);
 
 // ── what a page is handed, with a real account ───────────────────────────────
 $db->prepare("DELETE FROM users WHERE username = ?")->execute(['sndtest']);
 userCreate($db, $cfg, 'sndtest', 'sndtest@example.org', 'SmokePass123!', '127.0.0.1');
 $uid = (int)$db->query("SELECT id FROM users WHERE username = 'sndtest'")->fetchColumn();
 check('the account exists', $uid > 0);
+// how many of the waiting messages are from friends
+$db->prepare("DELETE FROM users WHERE username IN (?, ?)")->execute(['sndfriend', 'sndother']);
+userCreate($db, $cfg, 'sndfriend', 'sndfriend@example.org', 'SmokePass123!', '127.0.0.1');
+userCreate($db, $cfg, 'sndother', 'sndother@example.org', 'SmokePass123!', '127.0.0.1');
+$fid = (int)$db->query("SELECT id FROM users WHERE username = 'sndfriend'")->fetchColumn();
+$oid = (int)$db->query("SELECT id FROM users WHERE username = 'sndother'")->fetchColumn();
+$mk = function (int $a, int $b) use ($db): void {
+    $lo = min($a, $b); $hi = max($a, $b);
+    $db->prepare("INSERT INTO message_threads (u_low, u_high, last_message_at) VALUES (?, ?, NOW())")->execute([$lo, $hi]);
+    $tid = (int)$db->lastInsertId();
+    $db->prepare("INSERT INTO user_messages (thread_id, sender_id, body, body_format) VALUES (?, ?, 'hi', 'bbcode')")->execute([$tid, $a]);
+};
+$mk($fid, $uid); $mk($oid, $uid);
+check('two messages wait, none from a friend yet', pmUnreadCount($db, $uid) === 2 && pmUnreadCountFriends($db, $uid) === 0);
+$db->prepare("INSERT INTO user_friends (user_id, friend_id, status, accepted_at) VALUES (?, ?, 'accepted', NOW())")->execute([$uid, $fid]);
+check('… and one of them is from a friend once the friendship is accepted', pmUnreadCountFriends($db, $uid) === 1);
+$db->prepare("DELETE FROM user_friends WHERE user_id = ? OR friend_id = ?")->execute([$uid, $uid]);
+$db->prepare("DELETE FROM users WHERE username IN (?, ?)")->execute(['sndfriend', 'sndother']);
 $u = ['id' => $uid];                       // no sound_prefs key: read from the table
 $cfgOn = array_merge($cfg, ['users_enabled' => '1', 'sounds_enabled' => '1', 'sound_default_notification' => 'b:ding', 'sound_default_message' => '']);
 try {
@@ -194,7 +213,7 @@ $app = (string)file_get_contents($root . '/assets/js/app.js');
 check('the pulse feeds the observer from its own fetch only, and keeps asking while hidden for a reader who wants to hear',
       str_contains($app, 'window.Sounds.observe(r)') && str_contains($app, 'window.Sounds.wants()'));
 $people = (string)file_get_contents($root . '/assets/js/people.js');
-check('the inbox poll feeds the observer too', str_contains($people, "window.Sounds.observe({ unread_pm: n })"));
+check('the inbox poll feeds the observer too, friends apart', str_contains($people, "window.Sounds.observe({ unread_pm: n, unread_pm_friend: fromFriends })") && str_contains($people, "badge(j.unread, j.unread_friend)"));
 $nav = (string)file_get_contents($root . '/templates/nav.php');
 check('the badge carries the config and the note sits beside the account link', str_contains($nav, 'data-sounds=') && str_contains($nav, 'id="sound-chip"'));
 

@@ -4576,3 +4576,10 @@ add('', {
     'js.app.probe_timed_out': ('Still probing after :timeout minutes. The result will show on the whitelist page later.',
         'Sonda trwa dłużej niż :timeout min. Wynik pokaże się później na stronie whitelisty.'),
 })
+
+# ── 1.57.1 ──────────────────────────────────────────────────────────────────
+add('', {
+    'js.fav.hash_copy_title': ('Shortened — click to copy the whole hash', 'Skrócony — kliknij, by skopiować cały hash'),
+    'js.sounds.drop_choose': ('Choose a file', 'Wybierz plik'),
+    'js.sounds.drop_or': ('or drop it here', 'albo upuść go tutaj'),
+})

@@ -29,7 +29,9 @@
     let cfg = null;
     try { cfg = badge && badge.dataset.sounds ? JSON.parse(badge.dataset.sounds) : null; } catch (e) { cfg = null; }
     const AC = window.AudioContext || window.webkitAudioContext;
-    const KEYS = { unread: 'notification', unread_pm: 'message' };
+    // Which count plays which event. A message from a friend and one from anyone else are two
+    // events: the callers hand over the total and the friends' share, and the difference is the rest.
+    const KEYS = { unread: 'notification', unread_pm_friend: 'message_friend', unread_pm_other: 'message' };
     const PENDING_MAX_MS = 300000;
     let ctx = null;
     let idleTimer = 0;
@@ -86,8 +88,9 @@
             osc.frequency.value = 60;
             const g = c.createGain();
             g.gain.setValueAtTime(0, t0);
-            g.gain.linearRampToValueAtTime(0.012, t0 + 0.08);
-            g.gain.setValueAtTime(0.012, t0 + Math.max(0.08, pre - 0.08));
+            // -48 dBFS: enough for a signal-sensing amplifier, not a buzz before every chime
+            g.gain.linearRampToValueAtTime(0.004, t0 + 0.08);
+            g.gain.setValueAtTime(0.004, t0 + Math.max(0.08, pre - 0.08));
             g.gain.linearRampToValueAtTime(0, t0 + pre);
             osc.connect(g).connect(c.destination);
             osc.start(t0);
@@ -116,9 +119,17 @@
     /** The tab that fetched these counts says so. The first look is the baseline; a rise plays. */
     function observe(counts) {
         if (!counts || typeof counts !== 'object') return;
+        const c = Object.assign({}, counts);
+        if (c.unread_pm !== undefined && c.unread_pm !== null) {
+            const total = Math.max(0, Number(c.unread_pm) || 0);
+            // A caller that does not know the friends' share (an older answer) counts everything as
+            // "anyone else" and leaves the friends' baseline alone — nothing false plays either way.
+            if (c.unread_pm_friend === undefined || c.unread_pm_friend === null) { c.unread_pm_other = total; delete c.unread_pm_friend; }
+            else c.unread_pm_other = Math.max(0, total - Math.max(0, Number(c.unread_pm_friend) || 0));
+        }
         Object.keys(KEYS).forEach((key) => {
-            if (counts[key] === undefined || counts[key] === null) return;
-            const n = Math.max(0, Number(counts[key]) || 0);
+            if (c[key] === undefined || c[key] === null) return;
+            const n = Math.max(0, Number(c[key]) || 0);
             const prev = last[key];
             last[key] = n;
             if (prev !== undefined && n > prev && cfg && cfg.ev && cfg.ev[KEYS[key]]) play(KEYS[key]);
@@ -164,7 +175,15 @@
         const $ = (id) => document.getElementById(id);
         const on = $('snd-on'), vol = $('snd-vol'), volOut = $('snd-vol-out'), pre = $('snd-pre'), preKind = $('snd-pre-kind');
         const status = $('snd-status');
-        const say = (msg) => { if (status) status.textContent = msg; };
+        let sayTimer = 0;
+        // A note that says what just happened and then goes: "Saved." sitting there for ever reads as
+        // a state the page is in rather than a thing that happened.
+        const say = (msg, keep) => {
+            if (!status) return;
+            status.textContent = msg;
+            clearTimeout(sayTimer);
+            if (!keep) sayTimer = setTimeout(() => { if (status.textContent === msg) status.textContent = ''; }, 3500);
+        };
         const byId = {};
         data.library.forEach((s) => { byId[s.id] = s; });
         const opt = (value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; return o; };
@@ -200,7 +219,7 @@
             const id = choice === null ? (data.defaults[k] || '') : choice;
             const s = id ? byId[id] : null;
             if (!s) { say(t('js.sounds.nothing_to_play')); return; }
-            say(t('js.sounds.testing'));
+            say(t('js.sounds.testing'), true);
             const r = await play(k, { url: s.url, vol: p.vol, pre: p.pre, pre_kind: p.pre_kind });
             say(t('js.sounds.test_' + r));
         }));

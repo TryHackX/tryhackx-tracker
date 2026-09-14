@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.57.1] — 2026-09-14
+
+No schema change (one new optional setting, `sound_default_message_friend`, read with a fallback).
+
+### Changed — sounds, after the first day of listening
+
+* A message from a **friend** is its own event, beside a notification and a message from anyone
+  else: the pulse, the account's own answer and the inbox poll say how many of the waiting messages
+  are from friends (`pmUnreadCountFriends`), and the player tells the two apart. Settings gains a
+  default for it; the account's tab a third row. (The shoutbox will add its own kinds — a shout from a
+  friend, from a stranger, and an @-mention.)
+* The wake-up before a sound is **silence** by default — opening the stream is what wakes an HDMI
+  link, and the low tone was heard as a buzz before every chime. The tone stays as an option for an
+  amplifier that stands by until it senses a signal, four times quieter than before.
+* The "Saved." note under the tab goes after a few seconds instead of sitting there; the tab's
+  selects and slider wear the site's own styling instead of the browser's.
+* Settings → Sounds: the upload is the same drop zone the language install uses (choose or drop the
+  file, the box says what it holds), and the buttons match the rest of the panel.
+
+### Fixed — four small things on the pages
+
+* The syntax help under a description editor folds away and stays folded, exactly as it does under a
+  message.
+* The shortened hash on favourites and lists says it is shortened (an ellipsis) and copies the whole
+  hash on a click or a tap.
+* On a phone the account page's tab bar wraps instead of escaping the layout, and the metric cards
+  centre their contents.
+
 ## [1.57.0] — 2026-09-14
 
 Schema **62** — `index_hashes.idx_index_meta_done_fetched` (a heavy index; the janitor's CLI run

@@ -108,6 +108,7 @@ php("setSetting($db, 'users_enabled', '1'); setSetting($db, 'sounds_enabled', '1
     "$db->exec(\"UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions, '{\\\"sounds.use\\\":true}') WHERE slug = 'member'\");"
     "$db->prepare('DELETE FROM users WHERE username = ?')->execute(['" + USER + "']);"
     "$db->exec(\"DELETE FROM sounds WHERE name LIKE 'Py test%'\");"
+    "$db->prepare('DELETE FROM sounds WHERE sha1 = ?')->execute([sha1_file('" + os.path.join(ROOT, 'assets', 'sounds', 'ding.mp3').replace("\\", "/") + "')]);"   # a row another suite left behind would make the upload a duplicate
     "userCreate($db, $cfg, '" + USER + "', 'snd@example.org', '" + PASS + "', '127.0.0.1');"
     "$db->exec(\"UPDATE users SET email_verified = 1 WHERE username = '" + USER + "'\");")
 uid = int(php("echo (int)$db->query(\"SELECT id FROM users WHERE username = '" + USER + "'\")->fetchColumn();") or 0)
@@ -130,8 +131,8 @@ try:
     lib = {e["id"]: e for e in (j.get("library") or [])}
     check("a member gets the library, muted preferences and the site defaults",
           s == 200 and j.get("success") and len(lib) >= 10 and "b:ding" in lib
-          and j.get("prefs", {}).get("on") == 0 and j["prefs"]["ev"] == {"notification": None, "message": None}
-          and j.get("defaults") == {"notification": "b:ding", "message": ""} and j.get("kinds") == ["notification", "message"], (s, str(j)[:300]))
+          and j.get("prefs", {}).get("on") == 0 and j["prefs"]["ev"] == {"notification": None, "message_friend": None, "message": None}
+          and j.get("defaults") == {"notification": "b:ding", "message_friend": "", "message": ""} and j.get("kinds") == ["notification", "message_friend", "message"], (s, str(j)[:300]))
     check("the shipped files are served as static files", lib["b:ding"]["url"].endswith("assets/sounds/ding.mp3"), lib["b:ding"])
     s, html = me.page("account")
     check("the account page has the tab and the pane with its data block",
@@ -142,7 +143,7 @@ try:
     s, j = me.api("user_sound_prefs", "POST", {"csrf_token": me.csrf, "prefs": {"on": 1, "vol": 250, "pre": -5, "pre_kind": "silence", "ev": {"notification": "b:ding", "message": "c:424242"}}})
     check("saving clamps the numbers and drops an id the library lacks",
           s == 200 and j.get("success") and j["prefs"]["vol"] == 100 and j["prefs"]["pre"] == 0 and j["prefs"]["pre_kind"] == "silence"
-          and j["prefs"]["ev"] == {"notification": "b:ding", "message": None}, (s, j))
+          and j["prefs"]["ev"] == {"notification": "b:ding", "message_friend": None, "message": None}, (s, j))
     check("… and answers with what the page will play", (j.get("client") or {}).get("vol") == 100 and j["client"]["ev"]["notification"]["id"] == "b:ding" and j["client"]["ev"]["message"] is None, j.get("client"))
     s, html = me.page("")
     m = re.search(r'data-sounds="([^"]+)"', html)
@@ -151,7 +152,7 @@ try:
           cfg_attr is not None and cfg_attr["ev"]["notification"]["url"].endswith("assets/sounds/ding.mp3") and 'id="sound-chip"' in html, (m.group(1)[:200] if m else html.count("nav-unread")))
     check("the page loads the script", "assets/js/sounds.js" in html)
     s, j = me.api("user_sound_prefs", "POST", {"csrf_token": me.csrf, "prefs": {"on": 1, "ev": {"notification": "", "message": ""}}})
-    check("every event silent: nothing for the page to play", s == 200 and j.get("client") is None and j["prefs"]["ev"] == {"notification": "", "message": ""}, (s, j))
+    check("every event silent: nothing for the page to play", s == 200 and j.get("client") is None and j["prefs"]["ev"] == {"notification": "", "message_friend": None, "message": ""}, (s, j))
     s, j = me.api("user_sound_prefs", "POST", {"csrf_token": "nope", "prefs": {"on": 1}})
     check("a bad CSRF token is refused", s == 403, (s, j))
 

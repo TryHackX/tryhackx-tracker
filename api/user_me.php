@@ -33,4 +33,5 @@ jsonResponse([
     // Waiting messages are counted separately from notifications because they are read in a
     // different place. The navigation adds them up; the Notifications tab shows only its own.
     'unread_pm' => pmEnabled($cfg) ? pmUnreadCount($db, (int)$u['id']) : 0,
+    'unread_pm_friend' => pmEnabled($cfg) ? pmUnreadCountFriends($db, (int)$u['id']) : 0,
 ]);

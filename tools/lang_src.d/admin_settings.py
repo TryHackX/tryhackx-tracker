@@ -2360,7 +2360,7 @@ add('', {
     'settings.sounds_enabled_hint': ('Off hides the tab and plays nothing, for everyone.',
         'Wyłączone chowa kartę i nic nie gra, dla nikogo.'),
     'settings.sounds_default_notification': ('Default for notifications', 'Domyślny dla powiadomień'),
-    'settings.sounds_default_message': ('Default for messages', 'Domyślny dla wiadomości'),
+    'settings.sounds_default_message': ('Default for a message from anyone else', 'Domyślny dla wiadomości od pozostałych'),
     'settings.sounds_default_hint': ('What a reader hears when they switched sounds on and left this to the site. "Nothing" is silence unless they pick one themselves.',
         'Co słyszy czytelnik, który włączył dźwięki i zostawił ten wybór stronie. „Nic” to cisza, chyba że sam coś wybierze.'),
     'settings.sounds_none': ('Nothing', 'Nic'),
@@ -2370,4 +2370,14 @@ add('', {
         'MP3, Ogg lub WAV, do 512 KB i 15 sekund, najwyżej 40. Trzymane w bazie i oferowane każdemu członkowi obok wbudowanych. Czym plik JEST, rozstrzygają jego bajty, nigdy nazwa.'),
     'settings.sounds_name_ph': ('Name (optional — the file name otherwise)', 'Nazwa (opcjonalnie — inaczej nazwa pliku)'),
     'settings.sounds_upload': ('Add', 'Dodaj'),
+})
+
+# ── 1.57.1: a friend's message is its own event; the upload is a drop zone ──
+add('', {
+    'settings.sounds_default_message_friend': ('Default for a message from a friend', 'Domyślny dla wiadomości od znajomego'),
+    'settings.sounds_drop_aria': ('Choose or drop a sound file', 'Wybierz lub upuść plik dźwiękowy'),
+    'settings.sounds_drop_choose': ('Choose a file', 'Wybierz plik'),
+    'settings.sounds_drop_or': ('or drop it here', 'albo upuść go tutaj'),
+    'settings.sounds_drop_sub': ('MP3, Ogg or WAV · up to 512 KB and 15 s', 'MP3, Ogg lub WAV · do 512 KB i 15 s'),
+    'settings.sounds_name_label': ('Name', 'Nazwa'),
 })
