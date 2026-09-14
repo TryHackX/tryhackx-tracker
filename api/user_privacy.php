@@ -59,7 +59,9 @@ jsonResponse([
     'pm_who_default' => pmDefaultWho($cfg),
     // What the site currently does with them, so the page can say "this is off for everyone right
     // now" instead of showing a control that silently does nothing.
-    'may_publish' => favPublicEnabled($cfg) && userCan($db, $cfg, 'favourites.public'),
+    // The GRANT, not userCan(): every page that READS a published list asks the grant, so a
+    // "you may publish" drawn from the administrator's blanket is a promise nothing keeps.
+    'may_publish' => favPublicEnabled($cfg) && userIdHasGrantedPermission($db, $cfg, (int)$u['id'], 'favourites.public'),
     'who_enabled' => favWhoEnabled($cfg),
-    'lists_may_publish' => listsPublicEnabled($cfg) && userCan($db, $cfg, 'lists.public'),
+    'lists_may_publish' => listsPublicEnabled($cfg) && userIdHasGrantedPermission($db, $cfg, (int)$u['id'], 'lists.public'),
 ]);

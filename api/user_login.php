@@ -33,7 +33,7 @@ if (!$user) {
     resetCaptchaGrace($cfg);
     jsonResponse(['error' => __('api.login.invalid_credentials')], 401);
 }
-if ($user['status'] !== 'active') {
+if (!userIsActive($user)) {
     jsonResponse(['error' => __('api.login.suspended')], 403);
 }
 

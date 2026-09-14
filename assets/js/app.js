@@ -2219,7 +2219,9 @@ const getJson = async (endpoint) => {
         if (!badge) return;
         const every = Math.max(0, parseInt(badge.dataset.pulse || '0', 10) || 0);
         if (every <= 0) return;
-        const KEY = 'thx_pulse';
+        // Per account, and cleared on sign-out: a lease another account left behind on a shared
+        // machine was adopted for up to a minute, badge numbers included.
+        const KEY = 'thx_pulse:' + (badge.dataset.uid || '0');
         let inFlight = false, stopped = false;
         const apply = (v) => {
             if (!v) return;
@@ -2338,6 +2340,9 @@ const getJson = async (endpoint) => {
         });
         $id('account-logout').addEventListener('click', async () => {
             await postJson('user_logout', { csrf_token: $id('account-csrf').value });
+            try {   // the pulse lease is this account's; the next person at this browser gets none of it
+                Object.keys(localStorage).filter(k => k.startsWith('thx_pulse')).forEach(k => localStorage.removeItem(k));
+            } catch (e) { /* private mode */ }
             window.location.href = APP_BASE;
         });
         // live validation: email format + repeat box when it changes; password policy + repeat box
@@ -2519,6 +2524,7 @@ const getJson = async (endpoint) => {
     // Read off the overlay's own markup, because the panel now opens on pages that have no
     // search form to read them from — the account page's favourites and both lists on a profile.
     let infoFilesMode = 'scroll', infoCanFav = false, infoCanFavWho = false;
+    let infoFilesObserver = null;   // the scroll sentinel's observer: one per open panel, dropped on close
     // The search page rewrites its address when the panel opens and closes, so a link to a
     // torrent is a link to the panel. Nowhere else has an address that means anything here.
     let infoOnOpen = null;
@@ -2527,6 +2533,8 @@ const getJson = async (endpoint) => {
         if (!infoOverlay) return;
         infoOverlay.hidden = true;
         infoHash = null;
+        // Every open panel used to leave an observer behind, holding its sentinel and its file list.
+        if (infoFilesObserver) { infoFilesObserver.disconnect(); infoFilesObserver = null; }
         if (infoOnOpen) infoOnOpen();
         document.removeEventListener('keydown', escInfo);
     }
@@ -3061,8 +3069,10 @@ const getJson = async (endpoint) => {
             const loadAll = async () => { while (more && !stalled) { if (!await loadMore()) break; } };
             btn.addEventListener('click', loadMore);
             if (infoFilesMode === 'scroll' && 'IntersectionObserver' in window) {
-                new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore(); },
-                                         { root: null, rootMargin: '200px' }).observe(sentinel);
+                if (infoFilesObserver) infoFilesObserver.disconnect();
+                infoFilesObserver = new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore(); },
+                                                             { root: null, rootMargin: '200px' });
+                infoFilesObserver.observe(sentinel);
             }
             await loadMore();
             if (infoFilesMode === 'all') await loadAll();
@@ -4259,6 +4269,14 @@ const getJson = async (endpoint) => {
     }
 
     async function poll(hashes, timeoutMinutes) {
+        // A hidden tab asks every fifteen seconds rather than three: nobody is reading the answer.
+        if (document.hidden) { timer = setTimeout(() => poll(hashes, timeoutMinutes), 15000); return; }
+        // The timeout in the sentence is the timeout of the loop too. A hash that stays "probing"
+        // past it (a stalled worker) used to keep this tab asking every three seconds for ever.
+        if (timeoutMinutes > 0 && Date.now() - started > (timeoutMinutes + 1) * 60000) {
+            note.textContent = t('js.app.probe_timed_out', {timeout: timeoutMinutes});
+            return;
+        }
         const r = await getJson('whitelist_probe&hashes=' + encodeURIComponent(hashes.join(',')));
         if (!r || !r.success) {
             note.textContent = (r && r.error) || t('js.app.probe_progress_failed');
@@ -4332,12 +4350,17 @@ const getJson = async (endpoint) => {
         const name = (j.meta && j.meta.name) || (j.seen && j.seen.name) || (j.registered && j.registered.name) || '';
         if (name) out.appendChild(row(t('js.app.hc_name'), name));
 
+        // A section the reader may not be told about (no index.view, no whitelist.view, no
+        // content.view) arrives withheld — and a withheld section is not a "no", so its row is not drawn.
+        const off = new Set(j.withheld || []);
         // registered here, and in what state
         const reg = j.registered;
+        if (!off.has('registered')) {
         const regText = !reg ? t('js.app.hc_reg_no')
             : t('js.app.hc_reg_' + (['live', 'review', 'probing', 'rejected', 'failed', 'banned'].includes(reg.state) ? reg.state : 'live'),
                 {date: when(reg.since)});
         out.appendChild(row(t('js.app.hc_registered'), regText, !reg ? 'hc-no' : (reg.state === 'live' ? 'hc-yes' : (reg.state === 'banned' || reg.state === 'rejected' ? 'hc-bad' : 'hc-wait'))));
+        }
         // the words about it, from either home: published, waiting, or turned down
         if (j.content && j.content.status && j.content.status !== 'none') {
             const cs = j.content.status;
@@ -4353,7 +4376,7 @@ const getJson = async (endpoint) => {
 
         // seen in the swarm
         const seen = j.seen;
-        out.appendChild(row(t('js.app.hc_seen'), seen
+        if (!off.has('seen')) out.appendChild(row(t('js.app.hc_seen'), seen
             ? t('js.app.hc_seen_yes', {first: when(seen.first), last: when(seen.last), n: Number(seen.times).toLocaleString(),
                                        s: Number(seen.seeders).toLocaleString(), l: Number(seen.leechers).toLocaleString()})
             : t('js.app.hc_seen_no'), seen ? 'hc-yes' : 'hc-no'));

@@ -6,6 +6,7 @@
  * Returns enabled:false and forks nothing when the feature is off, so an install that never turned
  * it on never pays for a card it does not have.
  */
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();   // polled: never hold the session lock across the read
 if (!sysctlEnabled($cfg)) {
     jsonResponse(['ok' => true, 'enabled' => false, 'configured' => ['cmd_set' => sysctlCommand($cfg) !== '']]);
 }

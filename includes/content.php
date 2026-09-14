@@ -52,11 +52,16 @@ function contentRecordFor(PDO $db, string $hash): ?array {
                          WHERE c.info_hash = ? LIMIT 1");
     $st->execute([$hash]);
     if ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        // The second home has no `banned` column of its own — the ban list is the only witness, so
+        // ask it. Hardcoding false here made every caller that trusts this flag (contentAttach, the
+        // Info panel, richtextContentFor) treat a banned hash as an ordinary one, which is the whole
+        // difference between the two homes disappearing at exactly the point it matters.
         return ['kind' => 'idx', 'id' => (int)$r['id'], 'info_hash' => $hash, 'name' => $r['name'],
                 'source_url' => $r['source_url'], 'description' => $r['description'],
                 'description_format' => (string)$r['description_format'], 'content_status' => (string)$r['content_status'],
                 'content_user_id' => $r['content_user_id'] !== null ? (int)$r['content_user_id'] : null,
-                'content_rejected_note' => $r['content_rejected_note'], 'banned' => false];
+                'content_rejected_note' => $r['content_rejected_note'],
+                'banned' => function_exists('isHashBanned') && isHashBanned($db, $hash)];
     }
     return null;
 }
@@ -117,7 +122,11 @@ function contentAttach(PDO $db, array $cfg, string $hash, array $in, ?array $use
     $srcOn  = ($cfg['wl_allow_source_url'] ?? '0') === '1';
     $desc = $descOn ? trim((string)($in['description'] ?? '')) : '';
     $src  = $srcOn ? trim((string)($in['source_url'] ?? '')) : '';
+    // Normalised whatever else arrives: both homes store it in an ENUM('markdown','bbcode'), so a
+    // format nobody asked for is a write that either fails or lands as ''. It used to be checked only
+    // on the path that has a description, and a submission carrying just a source link wrote it raw.
     $fmt  = (string)($in['description_format'] ?? 'bbcode');
+    if (!in_array($fmt, richtextFormats($cfg), true)) $fmt = richtextFormats($cfg)[0];
     if ($desc === '' && $src === '') {
         return ['ok' => false, 'error' => __('api.content.nothing_to_attach'), 'code' => 400];
     }
@@ -131,13 +140,13 @@ function contentAttach(PDO $db, array $cfg, string $hash, array $in, ?array $use
         if ($e !== null) return ['ok' => false, 'error' => $e, 'code' => 400];
     }
     if ($desc !== '') {
-        if (!in_array($fmt, richtextFormats($cfg), true)) $fmt = richtextFormats($cfg)[0];
         $e = richtextValidate($desc, $fmt, $cfg);
         if ($e !== null) return ['ok' => false, 'error' => $e, 'code' => 400];
     }
 
     $rec = contentRecordFor($db, $hash);
-    if ($rec !== null && $rec['kind'] === 'wl' && $rec['banned']) {
+    // Either home. A ban is about the hash, not about which table happens to hold its words.
+    if ($rec !== null && $rec['banned']) {
         return ['ok' => false, 'error' => __('api.content.hash_banned'), 'code' => 403];
     }
     if ($rec === null) {
@@ -148,6 +157,13 @@ function contentAttach(PDO $db, array $cfg, string $hash, array $in, ?array $use
         }
         if (!contentIndexKnows($db, $hash)) {
             return ['ok' => false, 'error' => __('api.content.unknown_hash'), 'code' => 404];
+        }
+        // Asked HERE, not only at the UPDATE below: the INSERT is what brings the record into
+        // existence, and a submitter who is about to be refused must not leave one behind. An empty
+        // hash_content row is not harmless — it is a record, and contentAttach then reads "an empty
+        // record exists" for the next person, who gets the submit path rather than the proposal one.
+        if (!$can('content.submit')) {
+            return ['ok' => false, 'error' => __('api.wl.content_needs_access'), 'code' => 403];
         }
         $db->prepare("INSERT IGNORE INTO hash_content (info_hash) VALUES (?)")->execute([$hash]);
         $rec = contentRecordFor($db, $hash);

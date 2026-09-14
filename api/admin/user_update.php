@@ -40,16 +40,22 @@ if ($password !== '' && !userValidPassword($password)) {
 // rather than against its name, so a custom group with panel permissions in it is covered too.
 $viaUser = (int)($_SESSION['admin_via_user'] ?? 0);
 $actorIsOwner = $viaUser <= 0 || userIsAdminGroup($db, $viaUser);
-if (!$actorIsOwner && ($password !== '' || $emailSet || isset($input['email_verified']))) {
+$targetCarriesPanel = false;
+if (!$actorIsOwner) {
     $targetCarriesPanel = userIsRootAdmin($u, $cfg) || userIsAdminGroup($db, $id);
     if (!$targetCarriesPanel) {
         foreach (array_keys(userEffectivePermissions($db, $id)) as $tp) {
             if (userIsPanelPermission($tp)) { $targetCarriesPanel = true; break; }
         }
     }
-    if ($targetCarriesPanel) {
-        jsonResponse(['error' => __('api.users.owner_only_credentials')], 403);
-    }
+}
+if (!$actorIsOwner && $targetCarriesPanel && ($password !== '' || $emailSet || isset($input['email_verified']))) {
+    jsonResponse(['error' => __('api.users.owner_only_credentials')], 403);
+}
+// Banning a moderator or an administrator is the owner's call too. The report card refuses it for
+// the same reason, and this page is not a way around that.
+if (!$actorIsOwner && $targetCarriesPanel && $status === 'banned') {
+    jsonResponse(['error' => 'target_is_staff'], 403);
 }
 if ($status === null && !$emailSet && $password === '' && !isset($input['email_verified'])) {
     jsonResponse(['error' => __('api.users.nothing_to_change')], 400);
@@ -60,7 +66,10 @@ $changed = [];
 $db->beginTransaction();
 try {
     if ($status !== null) {
-        $db->prepare("UPDATE users SET status = ? WHERE id = ?")->execute([$status, $id]);
+        // A status set here has no date: a ban is until somebody lifts it, and a lift is a lift. The
+        // date a timed ban from the report card left behind would otherwise make the janitor undo a
+        // later permanent ban the moment that old date passed.
+        $db->prepare("UPDATE users SET status = ?, banned_until = NULL WHERE id = ?")->execute([$status, $id]);
         if ($status === 'banned') {
             // a banned user must not ride an existing remember-me cookie back in
             $db->prepare("DELETE FROM user_tokens WHERE user_id = ?")->execute([$id]);

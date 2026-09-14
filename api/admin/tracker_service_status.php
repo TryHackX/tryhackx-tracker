@@ -7,6 +7,7 @@
  * items and whether an in-panel restart is even possible on this host.
  */
 
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();   // polled: never hold the session lock across the read
 $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
 
 if ($service === '') {

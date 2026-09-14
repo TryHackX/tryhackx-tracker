@@ -51,13 +51,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($name === '') jsonResponse(['error' => 'name_required'], 400);
         $name = mb_substr($name, 0, 80);
         $max = listsMaxPerUser($cfg);
-        $cnt = $db->prepare("SELECT COUNT(*) FROM user_lists WHERE user_id = ?");
-        $cnt->execute([$uid]);
-        if ((int)$cnt->fetchColumn() >= $max) jsonResponse(['error' => 'too_many_lists', 'limit' => $max], 409);
-        $slug = listUniqueSlug($db, $uid, $name);
-        $db->prepare("INSERT INTO user_lists (user_id, name, slug, description) VALUES (?, ?, ?, '')")
-           ->execute([$uid, $name, $slug]);
-        $newId = (int)$db->lastInsertId();
+        // Count, slug and insert are three statements about one account, and two tabs pressing
+        // Create together interleaved them: both counted `max - 1`, both took the same free slug.
+        // `SELECT … FOR UPDATE` on the account's own row serialises this person against themselves
+        // — nobody else waits for it — and uq_list_slug is the backstop if they manage it anyway.
+        $slug = '';
+        $newId = 0;
+        try {
+            $db->beginTransaction();
+            $db->prepare("SELECT id FROM users WHERE id = ? FOR UPDATE")->execute([$uid]);
+            $cnt = $db->prepare("SELECT COUNT(*) FROM user_lists WHERE user_id = ?");
+            $cnt->execute([$uid]);
+            if ((int)$cnt->fetchColumn() >= $max) {
+                $db->rollBack();
+                jsonResponse(['error' => 'too_many_lists', 'limit' => $max], 409);
+            }
+            $slug = listUniqueSlug($db, $uid, $name);
+            $db->prepare("INSERT INTO user_lists (user_id, name, slug, description) VALUES (?, ?, ?, '')")
+               ->execute([$uid, $name, $slug]);
+            $newId = (int)$db->lastInsertId();
+            $db->commit();
+        } catch (PDOException $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            // 23000 is the unique key: this person already has a list with that slug. It is an
+            // answer the page can use ("pick another name"), not a fault — a bare 500 here read as
+            // "the site is broken" for something the site understood perfectly well.
+            if ((string)$e->getCode() === '23000') jsonResponse(['error' => 'duplicate_name'], 409);
+            throw $e;
+        }
         jsonResponse(['success' => true, 'id' => $newId, 'name' => $name, 'slug' => $slug, 'is_public' => false, 'items' => 0]);
     }
 
@@ -80,7 +101,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $want = !empty($input['value']) && $input['value'] !== '0' && $input['value'] !== 'false';
         // Publishing needs the site switch AND the group. Turning it OFF never does: somebody must
         // always be able to take their own list back, whatever the operator has since changed.
-        if ($want && !(listsPublicEnabled($cfg) && userCan($db, $cfg, 'lists.public'))) {
+        // The GRANT, not userCan(): listsVisibleFor() decides what every reader sees and it asks the
+        // grant, so asking the blanket here would let an administrator publish a list that their own
+        // profile then refuses to show — the switch saves and nothing acts on it.
+        if ($want && !(listsPublicEnabled($cfg) && userIdHasGrantedPermission($db, $cfg, $uid, 'lists.public'))) {
             jsonResponse(['error' => 'no_permission'], 403);
         }
         $db->prepare("UPDATE user_lists SET is_public = ? WHERE id = ? AND user_id = ?")->execute([$want ? 1 : 0, $id, $uid]);
@@ -111,11 +135,15 @@ if ($who === '') {
     $isOwn = true;
 } else {
     // Somebody else's: every gate, and one 404 for all of them.
-    if (!$me || !userCan($db, $cfg, 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
+    // profilesEnabled() among them — a list of somebody else's is read on their PROFILE, and with
+    // profiles off there is no page for it to be on. Favourites and uploads already say so.
+    if (!$me || !profilesEnabled($cfg) || !userCan($db, $cfg, 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
     if (!userValidUsername($who)) jsonResponse(['error' => 'not_found'], 404);
     $cand = userFindByLogin($db, $who);
     if (!$cand || ($cand['status'] ?? '') !== 'active') jsonResponse(['error' => 'not_found'], 404);
     $isOwn = (int)$cand['id'] === (int)$me['id'];
+    // A `hide_profile` block closes the page; it closes what the page reads, too.
+    if (!$isOwn && profileHiddenFrom($db, (int)$cand['id'], (int)$me['id'])) jsonResponse(['error' => 'not_found'], 404);
     if (!$isOwn && !listsVisibleFor($db, $cfg, $cand)) jsonResponse(['error' => 'not_found'], 404);
     $owner = $cand;
 }
@@ -162,6 +190,11 @@ if ($search !== '') {
             if ($wantFiles) $hashes[strtolower((string)$it['info_hash'])] = true;
         }
         if ($wantFiles && $hashes) {
+            // The file arm reads a files table, so it is charged to the same hourly bucket as the
+            // search page's own file search — one meter for one cost, wherever it is spent from.
+            if (!rateLimitAllow('idxsearch', ipBucket(getClientIp($cfg)), (int)($cfg['rate_limit_index_search'] ?? 120), 3600)) {
+                jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
+            }
             $inFiles = favHashesMatchingFiles($db, array_slice(array_keys($hashes), 0, 5000), $search);
             if ($inFiles) {
                 foreach ($items as $it) {
@@ -207,7 +240,9 @@ jsonResponse([
     'success'   => true,
     'owner'     => (string)$owner['username'],
     'own'       => $isOwn,
-    'may_publish' => $isOwn && listsPublicEnabled($cfg) && userCan($db, $cfg, 'lists.public'),
+    // The grant, like the visibility op above and like every reader of a published list.
+    'may_publish' => $isOwn && listsPublicEnabled($cfg)
+                     && userIdHasGrantedPermission($db, $cfg, (int)($me['id'] ?? 0), 'lists.public'),
     'max_lists' => listsMaxPerUser($cfg),
     'max_items' => listsMaxItems($cfg),
     'lists'     => array_map(static fn($r) => [

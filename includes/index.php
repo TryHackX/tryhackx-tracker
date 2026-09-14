@@ -309,6 +309,8 @@ function indexStateDefaults(): array {
         'last_partial' => null,
         'meta_budget_day' => '', 'meta_budget_used' => 0, 'poll_skip' => 0,
         'last_prune_at' => 0, 'last_prune' => null, 'last_tick_at' => 0,
+        // when the protection backfill last ran — it only needs to look at rows resolved since
+        'protect_backfill_at' => 0,
         // The cap as the last tick saw it. Zero on a fresh state file, which differs from any legal
         // index_max_rows and therefore makes the first tick count once — the safe direction.
         'max_rows_seen' => 0,
@@ -767,9 +769,18 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
     // a row whose metadata resolved since the last poll has protected_until NULL until the next poll
     // touches it — grant the protection window here FIRST so the cap-prune below can never eat a row
     // the worker just resolved
+    //
+    // Bounded by WHEN the metadata arrived (idx_index_meta_fetched): every pass before this one
+    // already protected everything older, so only rows resolved since the last pass need looking
+    // at (a row done without a fetch time — a federation import — counts as new), a day of
+    // margin, and the first pass on an install looks at everything once. Unbounded,
+    // this was a scan of the whole catalogue every pass: four minutes on production, twice an hour,
+    // with the minute tick (and every chart's sample) waiting behind it.
+    $since = max(0, (int)($st['protect_backfill_at'] ?? 0) - 86400);
     $bf = $db->prepare("UPDATE index_hashes SET protected_until = DATE_ADD(NOW(), INTERVAL " . indexProtectDays($cfg) . " DAY)
-                        WHERE meta_status = 'done' AND protected_until IS NULL");
-    $bf->execute();
+                        WHERE meta_status = 'done' AND protected_until IS NULL
+                          AND (meta_fetched_at IS NULL OR meta_fetched_at >= FROM_UNIXTIME(?))");
+    $bf->execute([$since]);
     $res['protected_backfill'] = $bf->rowCount();
     // expired: never-resolved past grace, or done past protection. Batched with LIMIT so one prune never
     // takes a huge row-lock set on a 200k table (each chunk autocommits — prune runs outside a transaction).
@@ -844,7 +855,7 @@ function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false):
     // something. Stand down for the ordinary interval.
     $idle = ($force && $res['capped'] === 0 && $res['expired'] === 0) ? $now + IDX_PRUNE_EVERY : 0;
     indexStateUpdate(function (array &$s) use ($now, $res, $idle) {
-        $s['last_prune_at'] = $now; $s['last_prune'] = $res;
+        $s['last_prune_at'] = $now; $s['last_prune'] = $res; $s['protect_backfill_at'] = $now;
         if ($idle) $s['force_idle_until'] = $idle;
         return true;
     });

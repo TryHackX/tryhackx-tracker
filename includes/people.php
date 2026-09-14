@@ -214,7 +214,7 @@ function pmCanWrite(PDO $db, array $cfg, array $sender, ?array $target): array
     $sid = (int)$sender['id'];
     $tid = (int)$target['id'];
     if ($sid === $tid) return ['ok' => false, 'reason' => 'self'];
-    if (($target['status'] ?? '') !== 'active') return ['ok' => false, 'reason' => 'not_found'];
+    if (!userIsActive($target)) return ['ok' => false, 'reason' => 'not_found'];
     // The SENDER's permission, asked about the sender — not userCan(), which answers about whoever
     // is making the request. They are the same person when this runs behind the endpoint, and are
     // not the same person anywhere else: a CLI test has no session at all, and a panel session
@@ -225,7 +225,10 @@ function pmCanWrite(PDO $db, array $cfg, array $sender, ?array $target): array
     // mute is about this account writing at all, not about who it is writing to — and the person
     // is told, because a message that vanishes teaches somebody that the site is broken.
     if (pmMutedUntil($sender) !== null) return ['ok' => false, 'reason' => 'muted'];
-    if (blockRow($db, $tid, $sid) !== null) return ['ok' => false, 'reason' => 'blocked'];
+    // A block that hides the profile hides the account: the profile page answers not-found for it,
+    // and this must not be the cheap way to learn what that page refuses to say.
+    $blockedBy = blockRow($db, $tid, $sid);
+    if ($blockedBy !== null) return ['ok' => false, 'reason' => !empty($blockedBy['hide_profile']) ? 'not_found' : 'blocked'];
     // Blocking somebody also stops YOU writing to THEM: a one-way conversation with somebody you
     // have blocked is not something to offer, and the reply could never arrive.
     if (blockRow($db, $sid, $tid) !== null) return ['ok' => false, 'reason' => 'you_blocked'];
@@ -274,11 +277,15 @@ function pmOtherId(array $thread, int $userId): int
 /** How many messages are waiting for this account, across every thread. */
 function pmUnreadCount(PDO $db, int $userId): int
 {
+    // The same rule the inbox listing applies: a counterpart that is no longer active (banned,
+    // deleted) has no row to open, so its messages must not be a number either — a badge nothing on
+    // the page can clear is the bug 1.50.0 was written to remove.
     $st = $db->prepare("SELECT COUNT(*) FROM user_messages m
                           JOIN message_threads t ON t.id = m.thread_id
-                         WHERE m.sender_id <> ? AND m.read_at IS NULL
+                          JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
+                         WHERE m.sender_id <> ? AND m.read_at IS NULL AND u.status = 'active'
                            AND ((t.u_low = ? AND t.u_low_hidden = 0) OR (t.u_high = ? AND t.u_high_hidden = 0))");
-    $st->execute([$userId, $userId, $userId]);
+    $st->execute([$userId, $userId, $userId, $userId]);
     return (int)$st->fetchColumn();
 }
 
@@ -297,10 +304,12 @@ function pmUnreadCount(PDO $db, int $userId): int
  */
 function pmInboxStamp(PDO $db, int $userId): string
 {
-    $one = $db->prepare("SELECT MAX(last_message_at) FROM message_threads WHERE u_low = ? AND u_low_hidden = 0");
+    $one = $db->prepare("SELECT MAX(t.last_message_at) FROM message_threads t JOIN users u ON u.id = t.u_high
+                          WHERE t.u_low = ? AND t.u_low_hidden = 0 AND u.status = 'active'");
     $one->execute([$userId]);
     $a = (string)($one->fetchColumn() ?: '');
-    $two = $db->prepare("SELECT MAX(last_message_at) FROM message_threads WHERE u_high = ? AND u_high_hidden = 0");
+    $two = $db->prepare("SELECT MAX(t.last_message_at) FROM message_threads t JOIN users u ON u.id = t.u_low
+                          WHERE t.u_high = ? AND t.u_high_hidden = 0 AND u.status = 'active'");
     $two->execute([$userId]);
     $b = (string)($two->fetchColumn() ?: '');
     return $a > $b ? $a : $b;

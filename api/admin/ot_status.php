@@ -6,6 +6,7 @@
  * Auth is enforced by the router; GET, so CSRF-exempt like the other admin read endpoints. Polled
  * by a card, so the helper's answer is reused for OT_STATUS_TTL seconds.
  */
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();   // polled: never hold the session lock across the read
 $out = [
     'ok' => true,
     'server_time' => time(),

@@ -60,8 +60,15 @@ $tellReporter = function (string $titleKey) use ($db, $rep, $reply): void {
 
 if ($action === 'close' || $action === 'reopen') {
     $to = $action === 'close' ? 'closed' : 'open';
-    $db->prepare("UPDATE message_reports SET status = ?, note = ?, reply = ?, handled_by = ?, handled_at = NOW() WHERE id = ?")
-       ->execute([$to, $note, $reply !== '' ? $reply : null, mb_substr((string)(auditActor($db)['name'] ?? 'admin'), 0, 64), $id]);
+    if ($action === 'reopen') {
+        // A second thought, not a new answer: the note and the reply the first moderator left stay,
+        // so the next one sees what was done. The boxes on a freshly drawn card are empty, and
+        // writing them here erased exactly what the card promises to keep.
+        $db->prepare("UPDATE message_reports SET status = 'open' WHERE id = ?")->execute([$id]);
+    } else {
+        $db->prepare("UPDATE message_reports SET status = 'closed', note = ?, reply = ?, handled_by = ?, handled_at = NOW() WHERE id = ?")
+           ->execute([$note, $reply !== '' ? $reply : null, mb_substr((string)(auditActor($db)['name'] ?? 'admin'), 0, 64), $id]);
+    }
     // Closing is the answer; reopening is the moderator's own second thought and says nothing yet.
     if ($action === 'close') $tellReporter('notify.report_closed');
     auditLog($db, 'pm.report.' . $action, [
@@ -119,8 +126,17 @@ if (in_array($action, ['mute', 'unmute', 'ban', 'unban'], true)) {
                 : __('notify.unmuted_body'));
     } else {
         $ban = $action === 'ban';
+        // A ban the OWNER made from the Users page carries no date. This card may neither shorten it
+        // into a timed one nor lift it: that decision was not made here, and panel.messages.handle
+        // is not panel.users.edit.
+        $cur = userFindById($db, $target);
+        if ($cur && (string)$cur['status'] === 'banned' && empty($cur['banned_until'])) {
+            jsonResponse(['error' => 'ban_is_permanent'], $ban ? 409 : 403);
+        }
         $db->prepare("UPDATE users SET status = ?, banned_until = ? WHERE id = ?")
-           ->execute([$ban ? 'banned' : 'active', $ban ? $until : null, $target]);
+           // "For ever" from this card is a date far enough away to mean it (as a mute is): a ban with a
+           // date is one this card made and may lift; a ban with none is the owner's, from the Users page.
+           ->execute([$ban ? 'banned' : 'active', $ban ? ($until ?? '2099-12-31 23:59:59') : null, $target]);
         // A banned account's sessions end on their next request anyway (currentUser() refuses a
         // status that is not 'active'), and its remembered devices are worth taking with it.
         if ($ban && function_exists('userSignOutOthers')) userSignOutOthers($db, $target, false);

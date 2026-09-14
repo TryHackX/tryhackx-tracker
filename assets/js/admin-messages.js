@@ -199,7 +199,8 @@
                     b.replaceWith(row);
                 }));
                 if (st.muted_until) pun.appendChild(button(t('js.msgrep.unmute'), 'btn-outline-success', function (b) { run('unmute', 0, b); }));
-                if (st.banned) pun.appendChild(button(t('js.msgrep.unban'), 'btn-outline-success', function (b) { run('unban', 0, b); }));
+                // Only a ban this card can lift: one with a date. A dateless ban is the owner's, from the Users page.
+                if (st.banned && st.banned_until) pun.appendChild(button(t('js.msgrep.unban'), 'btn-outline-success', function (b) { run('unban', 0, b); }));
             }
             pun.appendChild(say);
             c.appendChild(pun);

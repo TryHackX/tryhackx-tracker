@@ -57,6 +57,16 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
 // section flag — and then each list's own is_public, which the endpoint applies.
 $profLists = listsContext($db, $cfg, $viewer);
 $profPeople = peopleContext($db, $cfg, $viewer);
+// The READER's own answers about the favourites feature. Only one of them is used here: whether
+// THEY may put a submission on a profile, which decides whether the visibility toggle is drawn on
+// their own page. Asking the grant (favContext does) and drawing the control from it keeps the
+// button and the endpoint behind it agreeing — a toggle that posts a 403 is a broken switch.
+$profFav = favContext($db, $cfg, $viewer);
+// The cluster's extra announce ports, exactly as templates/pages/search.php emits them: a magnet
+// built on this page has to name every port the tracker answers on, not only the two the Settings
+// page shows.
+$profExtra = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
+                                     array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')])));
 $mayFileSearch = userCan($db, $cfg, 'index.files');   // see the account page: the same gate, asked once
 // A block with `hide_profile` closes the page for that one reader, and closes it the way every
 // other "no" closes it: the same not-found page a name nobody has renders. Telling them "you have
@@ -117,9 +127,11 @@ $showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profL
      data-uploads="<?= $showUploads ? '1' : '0' ?>"
      data-lists="<?= $showLists ? '1' : '0' ?>"
      data-magnet="<?= $canMagnet ? '1' : '0' ?>"
+     data-may-publish="<?= $profFav['uploads_pub'] ? '1' : '0' ?>"
      data-share="<?= ($cfg['search_share_enabled'] ?? '1') === '1' ? '1' : '0' ?>"
      data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>"
-     data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>">
+     data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
+     data-announce-extra="<?= sanitize(implode(' ', $profExtra)) ?>">
     <?php if ($showFav): ?>
     <section class="profile-section" id="profile-fav">
         <h2><?= _h('profile.favourites') ?></h2>

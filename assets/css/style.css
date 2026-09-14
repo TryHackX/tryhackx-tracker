@@ -2601,3 +2601,6 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .snd-hint { margin: 0; font-size: 0.82rem; color: var(--text-muted); }
 .snd-acts { display: flex; align-items: center; gap: 0.8rem; }
 .snd-status { font-size: 0.85rem; color: var(--text-muted); }
+
+/* 1.57.0: the one-line answer beside a visibility toggle that was refused */
+.pf-vis-msg { margin-left: 0.5em; font-size: 0.82rem; }

@@ -67,7 +67,15 @@ function listSlugify(string $name): string
     return $s === '' ? 'list' : $s;
 }
 
-/** The slug this person may actually use, with a number on the end if the plain one is taken. */
+/**
+ * The slug this person may actually use, with a number on the end if the plain one is taken.
+ *
+ * This LOOKS then the caller WRITES, so on its own it is a race: two tabs creating "Films" at the
+ * same moment both find `films` free. It is not made safe here — a loop that re-checked after the
+ * insert would still be guessing. The caller holds the account's own row (`SELECT … FOR UPDATE`),
+ * which serialises one person against themselves, and uq_list_slug is the backstop behind that:
+ * api/user_lists.php turns SQLSTATE 23000 into a 409 rather than a 500.
+ */
 function listUniqueSlug(PDO $db, int $userId, string $name, int $exceptId = 0): string
 {
     $base = listSlugify($name);
@@ -131,8 +139,13 @@ function listsVisibleFor(PDO $db, array $cfg, array $owner): bool
  * worker has not fetched yet is a torrent this tracker has, and refusing it would mean somebody can
  * only collect a torrent after a background job catches up with it. What it excludes is forty hex
  * characters nobody here has ever seen — which is not a torrent, it is a string.
+ *
+ * $canWl is the reader's `whitelist.view` (with index_search_include_whitelist), asked by the
+ * caller. Without it the whitelist arm is skipped: answering "registered here: <name>" out of rows
+ * the search page refuses to show this reader would turn the add box into a way to read them one
+ * hash at a time.
  */
-function listHashKnown(PDO $db, string $hash): array
+function listHashKnown(PDO $db, string $hash, bool $canWl = true): array
 {
     $hash = strtolower(trim($hash));
     $out = ['known' => false, 'name' => null, 'source' => null];
@@ -140,10 +153,12 @@ function listHashKnown(PDO $db, string $hash): array
     try {
         // The whitelist first, and it wins: a registered hash is deleted out of index_hashes, so
         // where both exist the whitelist row is the newer truth (the same order favRowsFor uses).
-        $st = $db->prepare("SELECT name FROM whitelist WHERE info_hash = ? LIMIT 1");
-        $st->execute([$hash]);
-        $row = $st->fetch(PDO::FETCH_ASSOC);
-        if ($row) return ['known' => true, 'name' => $row['name'] ?: null, 'source' => 'whitelist'];
+        if ($canWl) {
+            $st = $db->prepare("SELECT name FROM whitelist WHERE info_hash = ? LIMIT 1");
+            $st->execute([$hash]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if ($row) return ['known' => true, 'name' => $row['name'] ?: null, 'source' => 'whitelist'];
+        }
         $st = $db->prepare("SELECT name FROM index_hashes WHERE info_hash = ? LIMIT 1");
         $st->execute([$hash]);
         $row = $st->fetch(PDO::FETCH_ASSOC);
@@ -167,15 +182,22 @@ function listItemCount(PDO $db, int $listId): int
  * by the catalogue (it may have been resolved since), and one it has pruned is described by the
  * name that was recorded when the row was added. A list of forty-hex strings is unreadable to the
  * person who made it, which is the failure this avoids.
+ *
+ * $canWl and $isOwner are the reader's, and they mean what they mean in favRowsFor(): may this
+ * reader see whitelist rows at all, and is this their own list.
  */
-function listItemsWithMeta(PDO $db, array $rows): array
+function listItemsWithMeta(PDO $db, array $rows, bool $canWl = true, bool $isOwner = true): array
 {
     if (!$rows) return [];
     $hashes = array_values(array_unique(array_map(static fn($r) => (string)$r['info_hash'], $rows)));
     // favRowsFor() is the one place that knows how to describe a hash from the catalogue and the
     // whitelist together, with the whitelist winning. A second copy of that reasoning here would be
     // a second thing to keep in step.
-    $meta = favRowsFor($db, $hashes);
+    // Asked AS THE OWNER even when the reader is not one: the banned flag has to survive the lookup
+    // so the loop below can drop the whole ITEM. Letting favRowsFor() drop the metadata instead
+    // would leave the item row here with banned = false on it — a magnet button on a hash the
+    // tracker refuses, which is the opposite of what dropping it is for.
+    $meta = favRowsFor($db, $hashes, $canWl, true);
     $byHash = [];
     foreach ($meta as $m) {
         $h = strtolower((string)($m['info_hash'] ?? ''));
@@ -185,7 +207,13 @@ function listItemsWithMeta(PDO $db, array $rows): array
     foreach ($rows as $r) {
         $h = strtolower((string)$r['info_hash']);
         $m = $byHash[$h] ?? [];
+        // Somebody else's list does not show a row the tracker refuses to serve; the owner's does,
+        // because they are the only person who can take it off.
+        if (!$isOwner && !empty($m['banned'])) continue;
         $out[] = [
+            // The row's own id, so it can be named without its hash: a reader without index.magnet
+            // gets rows with info_hash = null and still has to be able to remove one.
+            'id'         => isset($r['id']) ? (int)$r['id'] : null,
             'info_hash'  => $h,
             'name'       => $m['name'] ?? ($r['name'] ?? null),
             'total_size' => $m['total_size'] ?? null,
@@ -207,8 +235,12 @@ function listItemsWithMeta(PDO $db, array $rows): array
  * Every gate the profile applies is applied here too, in SQL, for the reason
  * api/hash_favourites.php gives at length: filtering after the LIMIT makes the total a lie. A list
  * whose owner has since taken their section down, or whose group lost the permission, is not here.
+ *
+ * $viewerId is who is asking, and it is here for one gate that cannot be asked without it: somebody
+ * who blocked this reader with `hide_profile` has closed their profile to them, and a chip on a
+ * torrent's page that links straight into it would be the profile answering after all.
  */
-function listsContainingHash(PDO $db, array $cfg, string $hash, int $limit = 20): array
+function listsContainingHash(PDO $db, array $cfg, string $hash, int $limit = 20, int $viewerId = 0): array
 {
     if (!listsPublicEnabled($cfg)) return [];
     $groupIds = userGroupIdsWithPermission($db, 'lists.public');
@@ -221,12 +253,20 @@ function listsContainingHash(PDO $db, array $cfg, string $hash, int $limit = 20)
               JOIN users u ON u.id = l.user_id
              WHERE i.info_hash = ? AND l.is_public = 1 AND u.lists_public = 1 AND u.status = 'active'
                AND EXISTS (SELECT 1 FROM user_group_members m WHERE m.user_id = u.id AND m.group_id IN ($in)
-                             AND (m.expires_at IS NULL OR m.expires_at > NOW()))";
+                             AND m.granted_at <= NOW() AND (m.expires_at IS NULL OR m.expires_at > NOW()))";
+    $params = [strtolower($hash)];
+    // The directory's clause, word for word: a membership that starts next week is not a membership
+    // today (userGroups() in includes/users.php reads it the same way), and a profile hidden from
+    // this reader takes its lists with it.
+    if ($viewerId > 0) {
+        $sql .= " AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id = u.id AND b.blocked_id = ? AND b.hide_profile = 1)";
+        $params[] = $viewerId;
+    }
     if (userEmailVerifyRequired($cfg)) $sql .= " AND u.email_verified = 1";
     $sql .= " ORDER BY l.updated_at DESC LIMIT " . max(1, min(100, $limit));
     try {
         $st = $db->prepare($sql);
-        $st->execute([strtolower($hash)]);
+        $st->execute($params);
         return array_map(static fn($r) => [
             'name' => (string)$r['name'], 'slug' => (string)$r['slug'],
             'username' => (string)$r['username'], 'items' => (int)$r['items'],

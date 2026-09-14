@@ -9,6 +9,12 @@
  * Gated by status.hash_check (members by default; the guest group gets it only if the operator hands
  * it out) and rate-limited per address: a hash the tracker has never met is answered too, and an
  * unbounded "do you know this one?" is a free oracle for walking the catalogue.
+ *
+ * That one permission buys the question. Each section of the answer is still the catalogue's, and
+ * hashCheckGates() asks the permissions that publish it elsewhere — index.view for the swarm,
+ * whitelist.view for the registration, content.view for the words — so this page is not the way
+ * round the Info panel's gates. Known-or-unknown and the ban are answered for every reader who gets
+ * this far, because a ban is the thing people come here to check.
  */
 require_once __DIR__ . '/../includes/hashcheck.php';
 
@@ -26,4 +32,4 @@ $p = parseMagnetOrHash((string)($_GET['hash'] ?? ''));
 if ($p['hash'] === null) {
     jsonResponse(['error' => $p['error'] === 'empty' ? __('api.hashcheck.empty') : (string)$p['error']], 400);
 }
-jsonResponse(['success' => true] + hashCheckLookup($db, $cfg, $p['hash']));
+jsonResponse(['success' => true] + hashCheckLookup($db, $cfg, $p['hash'], hashCheckGates($db, $cfg)));

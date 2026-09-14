@@ -4,6 +4,90 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.57.0] — 2026-09-14
+
+Schema **62** — `index_hashes.idx_index_meta_done_fetched` (a heavy index; the janitor's CLI run
+builds it), the owner's mirror row takes the panel's current password hash (once), the old
+pm-notification delete runs once, `csp_report_enabled` ships off, and every column and index a
+migration adds is now in the base `CREATE TABLE` too. No new feature: this release is the audit of
+1.45.0–1.56.0 (`deploy/AUDIT-1.45-1.56.md`) closed, and the gaps in every chart explained.
+
+### Fixed — the charts had gaps, twice an hour, growing with the catalogue
+
+Every long run of the janitor was a gap: the timer does not start a second instance while one is
+running, and the index poll (a hundred seconds on production) and the index prune (four minutes —
+a protection backfill that scanned the whole catalogue, then the cap deletes) sat inside the same
+minute tick as the timeline and traffic samplers. Two gaps each half hour since the catalogue passed
+a million rows. The slow half of the janitor — the index poll and prune, the whitelist upkeep and
+the submission probes — now runs as a transient unit of its own (`tracker-janitor-heavy`, started
+through the root helper's new `janitor-heavy-start` verb, as the same user, at the same lowered
+priority, one at a time), and inline as before on a machine without systemd. The backfill itself is
+bounded: it looks only at rows resolved since its last pass (a day of margin; the first pass looks
+at everything once), on the new index — a tight range instead of a scan.
+
+### Fixed — accounts and the panel
+
+* "Sign out everywhere else", a password change and a reset ended the account's sessions but not a
+  panel session opened through that account; it lived on until the idle limit. The panel session
+  now ends with the account's (`adminSessionValid()` checks the stamp; `currentUser()` drops the
+  panel keys with the user keys). The browser that asked keeps both — its login times are
+  re-stamped and its remember cookie is reissued rather than left to be refused at the next restart.
+* Signing in through the account opened the panel without the panel's own second factor. With the
+  panel TOTP on, an account without an armed member factor now stays out of the panel until it arms
+  one (the account page says so). The owner's mirror row in `users` also follows the panel password
+  from now on — it carried the hash from install day, so the old password kept working at
+  `?action=login`; schema 62 syncs it once.
+* One answer to "does this account hold `panel.access`": the e-mail verification gate applies in
+  `userHasPanelAccess()` and `panelCan()` as it does everywhere else.
+* A timed ban ends when its date says so (`userIsActive()`), not when the janitor next runs; the
+  Users page clears `banned_until` on every status change (a stale date from the report card used
+  to make the janitor undo a later permanent ban); the report card stores "for ever" as a far date
+  like a mute, may lift only bans it made, and refuses to shorten the owner's; a moderator with
+  `panel.users.edit` cannot ban staff from the Users page either. Reopening a report keeps the note
+  and the reply the first moderator left.
+* `user_update` (the password-checking account endpoint) has the same throttle as its siblings;
+  the timing dummy for a nonexistent login costs what a real hash costs; arming 2FA on an
+  already-armed account is refused instead of silently disarming it; a TOTP code is spent
+  atomically.
+
+### Fixed — messages, friends, lists, descriptions
+
+* The badge no longer counts messages from an account that is no longer active (the inbox never
+  listed them). `follow` notifies once per request made, not once per click, and answers "friends"
+  when the friendship already exists through the other row. A block that hides the profile answers
+  not-found to `user_messages` (`can=`, `with=`) as the profile does. The daily send limit is
+  counted under a lock. An empty inbox draws its first message.
+* Lists and favourites: a hide-profile block hides the data endpoints too; publishing a list asks
+  the GRANT like every reader does; list items carry no hash without `index.magnet` (a row id
+  removes instead); the whitelist arm of the row loader honours `whitelist.view` and drops banned
+  rows for strangers; uploads' publish toggle asks the grant; magnets carry the cluster's extra
+  announces; the caps are counted under a lock and a duplicate name is a 409, not a 500; lists 404
+  without profiles; a membership scheduled for later does not count yet; the file-name search on
+  lists is throttled like the search page; an owner keeps the hash of their own rows.
+* Descriptions: with accounts off the hash check is closed, as its own comment promised; the hash
+  check answers with catalogue facts only to readers `index_info` would answer (`index.view`,
+  `whitelist.view`, `content.view`); a banned hash stops accepting descriptions in both homes and a
+  ban clears its `hash_content` row; `description_format` is always normalised; a refused
+  submission leaves no row behind; an inline tag split by a blank line renders balanced.
+
+### Fixed — scripts and settings
+
+* `people.js`: the friends/blocks tabs no longer draw one view's rows with another's buttons; the
+  polls stop when the session has ended. `app.js`: the pulse lease is per account and cleared on
+  sign-out; the Info panel's scroll observer is one and let go on close; the submission probe gives
+  up at its own timeout and asks less from a hidden tab. `admin-sounds.js` says so when the
+  connection drops.
+* The eight polled panel status endpoints release the session before their read; `fav_max_per_user`
+  and `auth_bridge_ttl` are clamped on save; the browser installer finishes (the heavy `index_hashes`
+  additions are in the base CREATE and `install.php` never defers).
+
+### Tests
+
+`tests/audit_core_test.php` / `.py`, `tests/audit_lists_test.php` / `.py`, the extended
+`hash_check_test`, `content_test`, `index_test`, `netlimit_test` (the new verb through the stubs)
+and `tests/install_web_test.py` (a fresh install driven through the browser installer under a
+non-CLI SAPI).
+
 ## [1.56.0] — 2026-09-13
 
 Schema **61** — `sounds` (the owner's uploads, as rows), `users.sound_prefs`, `sounds.use` granted to

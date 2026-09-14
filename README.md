@@ -954,6 +954,16 @@ key *name*, so one added later is covered without anybody remembering, and a mat
 "changed" with no value either side. There is no delete and no edit — a log the panel it records can
 rewrite is not evidence. Retention is a setting; the janitor enforces it.
 
+### The audit of 1.45–1.56 closed, and the charts without gaps (1.57.0)
+
+Every finding of the audit in `deploy/AUDIT-1.45-1.56.md` is fixed (see CHANGELOG 1.57.0). The
+janitor's slow half — the index poll and prune, the whitelist upkeep and probes — runs as a
+transient unit of its own (`tracker-janitor-heavy`, through the root helper's `janitor-heavy-start`
+verb), so the minute tick that samples the timeline and the traffic never waits behind it; the
+prune's protection backfill looks only at rows resolved since its last pass. A panel session opened
+through an account ends with that account's sessions; the panel's own second factor is not bypassed
+by the account sign-in; a timed ban ends when its date says so; the browser installer finishes.
+
 ### A sound when something arrives (1.56.0)
 
 A member picks a short sound for a notification and another for a message on the account page's

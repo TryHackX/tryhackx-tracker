@@ -111,7 +111,7 @@ try:
     s, j = me.api("user_pulse")
     check("a notification that landed is counted on the next pulse", j.get("unread") == 1, j)
     s, html = me.page("")
-    check("the badge carries the cadence for the page's loop", 'id="nav-unread" hidden data-pulse="45"' in html)
+    check("the badge carries the account id and the cadence for the page's loop", 'id="nav-unread" hidden data-uid="' + str(uid) + '" data-pulse="45"' in html)
     src = open(os.path.join(ROOT, "assets", "js", "app.js"), encoding="utf-8").read()
     check("the loop reads it, skips hidden tabs, and shares one answer across tabs",
           "dataset.pulse" in src and "document.hidden && !(window.Sounds" in src and "localStorage.setItem(KEY" in src and "addEventListener('storage'" in src)

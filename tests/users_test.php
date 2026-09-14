@@ -8,6 +8,7 @@
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 $root = dirname(__DIR__);
 if (!is_file($root . '/config/database.php')) { fwrite(STDERR, "config/database.php missing — run the local bootstrap first\n"); exit(2); }
+require_once $root . '/config/app.php';   // ADMIN_PASSWORD_HASH: the owner's mirror row is re-seeded from it at the end
 require_once $root . '/config/database.php';
 require_once $root . '/includes/settings.php';
 require_once $root . '/includes/functions.php';
@@ -51,6 +52,10 @@ register_shutdown_function(function () use ($db, $sysBefore) {
     foreach ($sysBefore as $slug => $json) {
         if ($json !== '') $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = ?")->execute([$json, $slug]);
     }
+    // This suite truncates `users`, which takes the owner's mirror row with it — and nothing puts
+    // that back until the next schema bump, so signing in as the owner stopped opening the panel
+    // for every suite after this one. The data migrations are idempotent; run them once more.
+    try { trackerSchemaDataMigrations($db, getSettings($db, true)); } catch (\Throwable $e) { /* best effort */ }
 });
 $db->exec("UPDATE user_groups SET permissions = '" . json_encode(['whitelist.view' => true, 'stats.view' => true, 'stats.timeline' => true, 'home.stats' => true]) . "' WHERE slug = 'guest'");
 $db->exec("UPDATE user_groups SET permissions = '" . json_encode(['whitelist.view' => true, 'stats.view' => true, 'stats.timeline' => true, 'home.stats' => true]) . "' WHERE slug = 'member'");

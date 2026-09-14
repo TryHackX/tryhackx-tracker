@@ -297,6 +297,23 @@
         return { reload: function () { load(page); } };
     }
 
+    /**
+     * A short line beside a control that has just failed.
+     *
+     * app.js has pubTip() for this and does not export it, so rather than reach into another file's
+     * closure this writes a span the CSS already styles. Silence was the bug: the toggle went back
+     * to where it was and nothing on the screen said the server had refused it, which reads as a
+     * button that does not work.
+     */
+    function sayNear(node, text) {
+        if (!node || !node.parentNode) return;
+        var old = node.parentNode.querySelector('.pf-vis-msg');
+        if (old) old.remove();
+        var m = el('span', { className: 'pf-vis-msg text-muted', text: text });
+        node.parentNode.insertBefore(m, node.nextSibling);
+        setTimeout(function () { if (m.parentNode) m.remove(); }, 4000);
+    }
+
     // "on my profile" toggles, delegated for the same reason the star is.
     document.addEventListener('click', async function (e) {
         var b = e.target.closest ? e.target.closest('.pf-vis') : null;
@@ -305,17 +322,36 @@
         b.disabled = true;
         var r = await post('user_uploads', { op: 'visibility', hash: b.dataset.visHash, value: want ? 1 : 0 });
         b.disabled = false;
-        if (!r || !r.success) return;
+        if (!r || !r.success) {
+            // The permission can be gone since the page was drawn, the row can have stopped being
+            // theirs. Either way the reader is owed a line saying the switch did not move.
+            sayNear(b, t('js.fav.failed'));
+            return;
+        }
         b.setAttribute('aria-pressed', want ? 'true' : 'false');
         b.classList.toggle('pf-vis-on', want);
         b.textContent = want ? t('js.fav.public_on') : t('js.fav.public_off');
     });
 
-    /** The announce URLs a magnet needs, off whichever element carries them. */
+    /**
+     * Every announce URL a magnet should carry, off whichever element carries them.
+     *
+     * The two from Settings AND `data-announce-extra` — the cluster's other ports, which
+     * announceUrls() knows about and the two settings do not. templates/pages/search.php has emitted
+     * all three for a while; a magnet built here that named only two sent the client to a fraction
+     * of the swarm.
+     */
+    function announceFrom(elm) {
+        if (!elm) return [];
+        return [elm.dataset.announce, elm.dataset.announceHttps]
+            .concat(String(elm.dataset.announceExtra || '').split(/\s+/))
+            .filter(Boolean);
+    }
+
+    /** The same list, or null where this reader may not have magnets at all. */
     function trackersFrom(elm) {
         if (!elm) return null;
-        var t2 = [elm.dataset.announce, elm.dataset.announceHttps].filter(Boolean);
-        return elm.dataset.magnet === '1' ? t2 : null;
+        return elm.dataset.magnet === '1' ? announceFrom(elm) : null;
     }
 
     /* ──────────────────────────── lists ─────────────────────────────
@@ -442,12 +478,18 @@
                 if (!j.rows.length) rows.appendChild(el('div', { className: 'pf-empty', text: t('js.lists.empty') }));
                 j.rows.forEach(function (r) {
                     var row = torrentRow(r, { trackers: cfg.trackers, star: false });
-                    if (list.own) {
+                    // Something has to NAME the row: the hash where the reader may have it, and the
+                    // row's own id where they may not (no `index.magnet`, or a banned row — the
+                    // endpoint sends info_hash = null for both). Without the id, a reader who may
+                    // not build magnets could fill a list and never empty it.
+                    if (list.own && (r.info_hash || r.id)) {
                         var rm = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-remove',
                                                 title: t('js.lists.remove_title'), text: '×' });
                         rm.addEventListener('click', async function () {
                             rm.disabled = true;
-                            var rr = await post('user_list_items', { op: 'remove', list: list.id, hash: r.info_hash });
+                            var body = { op: 'remove', list: list.id };
+                            if (r.info_hash) body.hash = r.info_hash; else body.id = r.id;
+                            var rr = await post('user_list_items', body);
                             if (!rr || !rr.success) { rm.disabled = false; return; }
                             list.items = rr.items;
                             var c2 = countHolder.querySelector('.list-count');
@@ -914,7 +956,7 @@
     function initProfile() {
         var root = document.getElementById('profile-body');
         if (!root) return;
-        var trackers = [root.dataset.announce, root.dataset.announceHttps].filter(Boolean);
+        var trackers = announceFrom(root);
         var user = root.dataset.user;
         var mine = root.dataset.self === '1';
         if (root.dataset.fav === '1') {
@@ -930,7 +972,11 @@
                 endpoint: 'user_uploads', user: user, list: 'pf-up-list', pager: 'pf-up-pager',
                 total: 'pf-up-total', search: 'pf-up-search', sort: 'pf-up-sort', status: 'pf-up-status',
                 trackers: root.dataset.magnet === '1' ? trackers : null,
-                statusBadges: true, visibility: mine,
+                // Their own page, AND their group actually grants `uploads.public` — the same
+                // question api/user_uploads.php asks before it writes. The account page's uploads
+                // tab has drawn it from that answer for a while; here the toggle appeared for
+                // anybody looking at their own profile and every press answered 403.
+                statusBadges: true, visibility: mine && root.dataset.mayPublish === '1',
             });
         }
     }
@@ -940,7 +986,7 @@
     function initAccountTabs() {
         var host = document.getElementById('account-fav');
         if (!host) return;
-        var trackers = [host.dataset.announce, host.dataset.announceHttps].filter(Boolean);
+        var trackers = announceFrom(host);
         listSection({
             endpoint: 'user_favourites', list: 'af-list', pager: 'af-pager', total: 'af-total',
             search: 'af-search', sort: 'af-sort', files: 'af-files',
@@ -953,7 +999,8 @@
             listSection({
                 endpoint: 'user_uploads', list: 'au-list', pager: 'au-pager', total: 'au-total',
                 search: 'au-search', sort: 'au-sort', status: 'au-status',
-                trackers: up.dataset.magnet === '1' ? trackers : null,
+                // This section carries its own announce attributes, so it answers for itself.
+                trackers: trackersFrom(up),
                 statusBadges: true, visibility: up.dataset.mayPublish === '1',
                 emptyText: up.dataset.emptyText || '',
             });
@@ -1007,8 +1054,13 @@
                 j.lists.forEach(function (l) {
                     // NOT .who-name: that class means "a person on this list", and a chip that is a
                     // collection is a different kind of answer. They share a look, not a meaning.
+                    // The address is the LIST, not the shelf it sits on: `#lists` landed the reader
+                    // on a profile full of cards to find the one they had just clicked, while
+                    // `#list:<slug>` is the address the Share button hands out and the profile page
+                    // already knows how to open.
                     var a = el('a', { className: 'who-list',
-                                      href: BASE + '?action=u&name=' + encodeURIComponent(l.username) + '#lists' });
+                                      href: BASE + '?action=u&name=' + encodeURIComponent(l.username)
+                                          + '#list:' + encodeURIComponent(l.slug || '') });
                     a.appendChild(el('span', { className: 'who-list-name', text: l.name }));
                     a.appendChild(el('span', { className: 'who-list-by text-muted', text: t('js.lists.who_by', { user: l.username }) }));
                     lb.appendChild(a);

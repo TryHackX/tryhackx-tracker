@@ -39,7 +39,9 @@
             const del = el('button', { type: 'button', className: 'btn btn-outline-danger btn-sm' }, t('js.sounds.delete'));
             del.addEventListener('click', async () => {
                 if (!(await confirmAction(t('js.sounds.delete'), t('js.sounds.delete_confirm', { name: r.name })))) return;
-                const j = await apiCall('admin/sounds', 'POST', { op: 'delete', id: r.id });
+                let j;
+                try { j = await apiCall('admin/sounds', 'POST', { op: 'delete', id: r.id }); }
+                catch (e) { showToast(t('js.sounds.failed'), 'danger'); return; }
                 if (!j.success) { showToast(j.error || t('js.sounds.failed'), 'danger'); return; }
                 selects().forEach((s) => {
                     const o = s.querySelector('option[value="' + r.sid + '"]');
@@ -59,7 +61,8 @@
     }
 
     async function load() {
-        const j = await apiCall('admin/sounds');
+        let j;
+        try { j = await apiCall('admin/sounds'); } catch (e) { showToast(t('js.sounds.failed'), 'danger'); return; }
         if (!j.success) { showToast(j.error || t('js.sounds.failed'), 'danger'); return; }
         (j.builtins || []).forEach((b) => { urls[b.id] = b.url; });
         render(j.sounds || []);
@@ -73,7 +76,9 @@
         reader.onload = async () => {
             btn.disabled = true;
             const name = nameIn.value.trim() || f.name.replace(/\.[a-z0-9]+$/i, '');
-            const j = await apiCall('admin/sounds', 'POST', { op: 'upload', name, data: String(reader.result) });
+            let j;
+            try { j = await apiCall('admin/sounds', 'POST', { op: 'upload', name, data: String(reader.result) }); }
+            catch (e) { btn.disabled = false; showToast(t('js.sounds.failed'), 'danger'); return; }
             btn.disabled = false;
             if (!j.success) { showToast(j.error || t('js.sounds.failed'), 'danger'); return; }
             selects().forEach((s) => s.appendChild(el('option', { value: j.added.sid }, j.added.name)));

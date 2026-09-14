@@ -805,28 +805,59 @@ function richtextParagraphs(string $html): string {
     // — a <strong> opened in one paragraph and closed in another, which browsers repair by moving
     // elements around and which reparents the surrounding DOM. Closing and reopening is what a
     // browser would have done anyway, done deliberately and visibly.
-    $closers = function () use (&$open) {
+    $closeList = function (array $stack): string {
         $t = '';
-        foreach (array_reverse($open) as $tag) $t .= '</' . $tag . '>';
+        foreach (array_reverse($stack) as $tag) $t .= '</' . $tag . '>';
         return $t;
     };
-    $openers = function () use (&$open, $html) {
+    $openList = function (array $stack): string {
         // Reopen by NAME only, and never an anchor. The attributes belong to the run that was
         // interrupted; reopening <a> without its href produces a link that goes nowhere, and
         // reopening it WITH the href would silently turn one link into two. Emphasis survives the
         // interruption because a bare <strong> means the same thing; a link does not.
         $t = '';
-        foreach ($open as $tag) { if ($tag !== 'a') $t .= '<' . $tag . '>'; }
+        foreach ($stack as $tag) { if ($tag !== 'a') $t .= '<' . $tag . '>'; }
         return $t;
     };
+    $closers = function () use (&$open, $closeList) { return $closeList($open); };
+    $openers = function () use (&$open, $openList) { return $openList($open); };
 
-    $flush = function () use (&$buf, &$out, $closers, $openers) {
+    // A BLANK LINE inside an inline run is the same interruption as a block, and gets the same
+    // treatment: close what the chunk leaves open, reopen it at the top of the next one.
+    //
+    // The blanket `$closers()` this replaces described the tags open at the END of the buffer and
+    // stuck them on EVERY paragraph in it, which for `[b]a\n\nb[/b]` (one <strong> spanning the
+    // break, closed before the buffer is flushed, so $open is empty) emitted
+    // `<p><strong>a</p><p>b</strong></p>` — a <strong> opened in one paragraph, a closer in another
+    // that opened nothing, and a DOM the browser repairs by moving the rest of the text inside it.
+    // So each chunk is balanced against what it actually contains, carried across the break.
+    $flush = function () use (&$buf, &$out, $isInline, $closeList, $openList) {
         if ($buf === '') return;
-        $chunks = explode("\x02PARA\x02", $buf);
-        foreach ($chunks as $chunk) {
+        $carry = [];         // inline tags still open where the previous chunk ended
+        foreach (explode("\x02PARA\x02", $buf) as $chunk) {
+            $before = $carry;
+            // Every chunk is walked, emitted or not: one that is only `</em>` still closes it. A
+            // closer that closes nothing here is dropped rather than emitted, exactly as the loop
+            // below drops one at depth 0 — the paragraph it belonged to has already been closed.
+            $chunk = preg_replace_callback('#<(/?)([a-z][a-z0-9]*)\b[^>]*>#i', function ($m) use (&$carry, $isInline) {
+                $tag = strtolower($m[2]);
+                if (!isset($isInline[$tag])) return $m[0];
+                if ($m[1] === '/') {
+                    $k = array_search($tag, array_reverse($carry, true), true);
+                    if ($k === false) return '';
+                    unset($carry[$k]);
+                    $carry = array_values($carry);
+                } elseif (substr($m[0], -2) !== '/>') {
+                    $carry[] = $tag;
+                }
+                return $m[0];
+            }, $chunk) ?? $chunk;
             $plain = trim(str_replace(['<br>', '&nbsp;'], ' ', strip_tags($chunk)));
             if ($plain === '' && strpos($chunk, '<img') === false) continue;
-            $out .= '<p>' . trim($chunk, ' ') . $closers() . '</p>';
+            $out .= '<p>' . $openList($before) . trim($chunk, ' ') . $closeList($carry) . '</p>';
+            // The paragraph closed the anchor and the next one will not resume it, so it is not
+            // "still open" either — the same rule the block branch below applies.
+            $carry = array_values(array_filter($carry, fn ($t) => $t !== 'a'));
         }
         $buf = '';
     };
@@ -955,8 +986,10 @@ function richtextContentFor(PDO $db, array $cfg, string $hash, bool $asAdmin = f
     $rec = contentRecordFor($db, $hash);
     if ($rec === null) return $out;
     $out['kind'] = $rec['kind'];
-    // A banned row's words are not public, whatever their status; a moderator still sees them.
-    if ($rec['kind'] === 'wl' && !empty($rec['banned']) && !$asAdmin) return $out;
+    // A banned hash's words are not public, whatever their status and whichever home holds them; a
+    // moderator still sees them. This used to ask only the whitelist home, so a description attached
+    // to a hash the tracker had merely seen stayed published after the hash was banned.
+    if (!empty($rec['banned']) && !$asAdmin) return $out;
 
     $status = (string)($rec['content_status'] ?? 'none');
     $out['content_status'] = $status;

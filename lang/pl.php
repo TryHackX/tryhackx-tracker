@@ -1939,6 +1939,7 @@ return [
     'js.app.probe_start_many' => 'Sprawdzam :n zgłoszeń…',
     'js.app.probe_start_one' => 'Sprawdzam 1 zgłoszenie…',
     'js.app.probe_swarm' => ':seeders seedów, :leechers leecherów',
+    'js.app.probe_timed_out' => 'Sonda trwa dłużej niż :timeout min. Wynik pokaże się później na stronie whitelisty.',
     'js.app.probe_waiting' => 'Wciąż sprawdzanych: :n — może to potrwać kilka minut, a po :timeout min próba zostanie przerwana.',
     'js.app.pw_changed_sign_in' => 'Hasło zmienione — możesz się teraz zalogować.',
     'js.app.pw_digit' => 'Cyfra',

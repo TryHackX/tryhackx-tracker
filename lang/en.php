@@ -1939,6 +1939,7 @@ return [
     'js.app.probe_start_many' => 'Checking :n submissions…',
     'js.app.probe_start_one' => 'Checking 1 submission…',
     'js.app.probe_swarm' => ':seeders seeders, :leechers leechers',
+    'js.app.probe_timed_out' => 'Still probing after :timeout minutes. The result will show on the whitelist page later.',
     'js.app.probe_waiting' => ':n still being checked — this can take a few minutes, and gives up after :timeout.',
     'js.app.pw_changed_sign_in' => 'Password changed — you can sign in now.',
     'js.app.pw_digit' => 'A digit',

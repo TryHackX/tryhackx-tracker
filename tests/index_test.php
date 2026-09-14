@@ -255,6 +255,21 @@ $pr2 = indexPrune($db, $cfgCap, null, true);
 check('cap prunes 2 oldest unprotected (12 - max 10)', $pr2['capped'] === 2 && (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn() === 10, json_encode($pr2));
 $oldest = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE info_hash IN ('" . h(701) . "','" . h(702) . "')")->fetchColumn();
 check('cap kept the newest (dropped h701,h702)', $oldest === 0);
+// the protection backfill looks only at rows resolved since its last pass (a day of margin)
+$db->exec("TRUNCATE TABLE index_hashes"); @unlink(indexStateFile());
+$db->exec("INSERT INTO index_hashes (info_hash, last_seen, meta_status, meta_fetched_at) VALUES ('" . h(801) . "', NOW(), 'done', NOW()), ('" . h(802) . "', NOW(), 'done', NOW() - INTERVAL 3 DAY)");
+indexStateUpdate(function (array &$s) { $s['protect_backfill_at'] = time(); return true; });
+$pr3 = indexPrune($db, $cfg, null, true);
+$p801 = $db->query("SELECT protected_until FROM index_hashes WHERE info_hash='" . h(801) . "'")->fetchColumn();
+$p802 = $db->query("SELECT protected_until FROM index_hashes WHERE info_hash='" . h(802) . "'")->fetchColumn();
+check('backfill protects a row resolved since the last pass', $p801 !== null && $pr3['protected_backfill'] === 1, json_encode([$p801, $pr3]));
+check('… and leaves one resolved three days before it alone (every earlier pass had it)', $p802 === null, json_encode($p802));
+@unlink(indexStateFile());
+$pr4 = indexPrune($db, $cfg, null, true);
+check('the first pass on an install looks at everything', $pr4['protected_backfill'] === 1 && $db->query("SELECT protected_until FROM index_hashes WHERE info_hash='" . h(802) . "'")->fetchColumn() !== null, json_encode($pr4));
+check('… and records when it ran', (int)indexStateRead()['protect_backfill_at'] > 0);
+$db->exec("TRUNCATE TABLE index_hashes"); @unlink(indexStateFile());
+
 // protected rows are never capped
 $db->exec("TRUNCATE TABLE index_hashes"); @unlink(indexStateFile());
 for ($i = 1; $i <= 12; $i++) $db->exec("INSERT INTO index_hashes (info_hash, last_seen, protected_until, meta_status) VALUES ('" . h(800 + $i) . "', NOW() - INTERVAL " . (13 - $i) . " HOUR, NOW() + INTERVAL 5 DAY, 'done')");

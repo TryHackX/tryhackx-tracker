@@ -323,6 +323,9 @@ $db->prepare("DELETE FROM users WHERE username IN ('pmmute','pmmate')")->execute
 $nid = $mk($db, $cfg, 'pmnotif');
 $db->prepare("INSERT INTO user_notifications (user_id, type, title) VALUES (?, 'pm', 'old one')")->execute([$nid]);
 $db->prepare("INSERT INTO user_notifications (user_id, type, title) VALUES (?, 'friend_request', 'keep me')")->execute([$nid]);
+// The statement is a one-time step (schemaOnce): asking for the list burns its marker, so forget the
+// marker first — this asks the migration itself, not the leftovers of the previous suite.
+$db->exec("DELETE FROM settings WHERE `key` = 'schema_once_v56_pm_notifications'");
 $migrated = 0;
 foreach (trackerSchemaGuardedStatements($db) as $q) {
     if (stripos($q, 'user_notifications') !== false) { $db->exec($q); $migrated++; }

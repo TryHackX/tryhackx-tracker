@@ -133,7 +133,8 @@
             var j = null;
             try { j = await get('user_messages&poll=1'); }
             finally { polling = false; }
-            if (!j || !j.success || openWith) return;
+            if (!j || openWith) return;
+            if (!j.success) { if (j.error === 'login_required') stopInbox(); return; }   // signed out meanwhile: stop asking
             if (j.off) { stopInbox(); return; }     // the operator switched it off mid-session
             badge(j.unread);
             // The baseline came with the list itself, so a message that arrived between drawing it
@@ -162,7 +163,9 @@
                 return;
             }
             badge(j.unread);
-            inboxStamp = j.stamp || null;
+            // An empty inbox has an empty stamp, and that IS a baseline: turning it into null made the
+            // first message ever land silently, adopted by the first tick instead of drawn.
+            inboxStamp = String(j.stamp || '');
             inboxUnread = Number(j.unread || 0);
             live = Number(j.live || live || 0);
             if (live > 0 && !inboxTimer) inboxTimer = setInterval(inboxPoll, Math.max(4, live) * 1000);
@@ -236,7 +239,8 @@
             var j = null;
             try { j = await get('user_messages&poll=1&with=' + encodeURIComponent(name) + '&after=' + lastId); }
             finally { polling = false; }
-            if (!j || !j.success || openWith !== name || !msgsBox) return;
+            if (!j || openWith !== name || !msgsBox) return;
+            if (!j.success) { if (j.error === 'login_required') stopPoll(); return; }   // signed out meanwhile: stop asking
             if (j.off) { stopPoll(); return; }          // the operator switched it off mid-session
             var atBottom = msgsBox.scrollHeight - msgsBox.scrollTop - msgsBox.clientHeight < 40;
             (j.rows || []).forEach(function (m) {
@@ -512,17 +516,23 @@
             });
         }
 
+        var loadSeq = 0;
         async function load() {
             listEl.textContent = '';
             listEl.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
-            var qs = 'user_people&view=' + view;
+            // The view this request is FOR. A click on another tab while it is in flight changes
+            // `view`; an answer that arrives afterwards belongs to the old one and would draw those
+            // rows with the new tab's buttons — friends offered "Unblock".
+            var forView = view, my = ++loadSeq;
+            var qs = 'user_people&view=' + forView;
             if (searchEl && searchEl.value.trim()) qs += '&search=' + encodeURIComponent(searchEl.value.trim());
             var j = await get(qs);
+            if (my !== loadSeq || forView !== view) return;
             listEl.textContent = '';
             if (!j || !j.success) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
             counts(j.counts || {});
-            if (!j.rows.length) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.people.empty_' + view) })); return; }
-            j.rows.forEach(function (p) { listEl.appendChild(personRow(p, view, load, !!j.may_message)); });
+            if (!j.rows.length) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.people.empty_' + forView) })); return; }
+            j.rows.forEach(function (p) { listEl.appendChild(personRow(p, forView, load, !!j.may_message)); });
         }
 
         function personRow(p, kind, reload, mayMessage) {
@@ -585,6 +595,7 @@
     /* ─────────────────────────── the directory ─────────────────────────── */
 
     function initDirectory() {
+        var dirSeq = 0;   // a newer request supersedes an older answer, whichever lands last
         var root = document.getElementById('member-directory');
         if (!root) return;
         var listEl = document.getElementById('dir-list');
@@ -600,7 +611,9 @@
             var qs = 'user_directory&page=' + (page || 1) + '&per_page=30';
             if (searchEl && searchEl.value.trim()) qs += '&search=' + encodeURIComponent(searchEl.value.trim());
             if (sortEl && sortEl.value) qs += '&sort=' + encodeURIComponent(sortEl.value);
+            var my = ++dirSeq;
             var j = await get(qs);
+            if (my !== dirSeq) return;             // a newer request is in flight: this answer is stale
             listEl.textContent = '';
             if (!j || !j.success) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
             if (totalEl) totalEl.textContent = j.total ? t('js.people.count', { n: j.total.toLocaleString() }) : '';

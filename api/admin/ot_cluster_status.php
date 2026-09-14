@@ -3,6 +3,7 @@
  * GET admin/ot_cluster_status — the roster, the ports the panel would propose, and the two facts an
  * operator needs before deciding this is worth doing at all. Forks nothing when the feature is off.
  */
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();   // polled: never hold the session lock across the read
 if (!otClusterEnabled($cfg)) {
     jsonResponse(['ok' => true, 'enabled' => false, 'configured' => ['cmd_set' => otClusterCommand($cfg) !== '']]);
 }

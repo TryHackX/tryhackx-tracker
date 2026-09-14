@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 61;  // 61 = sounds (the owner's uploads, as rows) + users.sound_prefs + sounds.use to the member group + sounds_enabled / sound_default_* settings
+const TRACKER_SCHEMA_VERSION = 62;  // 62 = index_hashes.idx_index_meta_done_fetched (a heavy index, built by the janitor's CLI run) for the bounded protection backfill; the owner's mirror row takes the panel's current password hash (once), csp_report_enabled ships off, the old pm-notification delete runs once instead of at every bump
+                                    // 61 = sounds (the owner's uploads, as rows) + users.sound_prefs + sounds.use to the member group + sounds_enabled / sound_default_* settings
                                     // 60 = a setting only: site_live_seconds, so an upgraded install gets the row and its default
                                     // 59 = message_reports.reply — what the moderator answered the reporter, kept beside the log note
                                     // 58 = hash_content (words about a torrent the tracker has only seen), whitelist.content_user_id, proposals that may belong to either home, and content.view to the member group
@@ -126,6 +127,33 @@ function trackerSchemaStatements(): array {
             `review_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
             `review_note` VARCHAR(255) DEFAULT NULL,
             `reviewed_at` DATETIME DEFAULT NULL,
+            -- ── v19 / v21 / v58, written out here and NOT only as ALTERs ─────────────────────────
+            -- Every one of these also exists as a guarded ADD COLUMN in trackerSchemaGuardedStatements(),
+            -- which is where an upgrade picks them up. They have to be in both places: a fresh
+            -- install that only ran the CREATE list would have a different `whitelist` from an
+            -- upgraded one, and the pages select these by name. Types and defaults below are copied
+            -- from those ALTERs character for character — change one, change the other.
+            `content_user_id` INT UNSIGNED DEFAULT NULL,
+            `source_url` VARCHAR(500) DEFAULT NULL,
+            `description` MEDIUMTEXT DEFAULT NULL,
+            `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode',
+            `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
+            `content_reviewed_at` DATETIME DEFAULT NULL,
+            `content_rejected_note` VARCHAR(255) DEFAULT NULL,
+            -- 'none' = never asked to prove anything, which is what every row starts as.
+            `probe_status` ENUM('none','probing','passed','failed') NOT NULL DEFAULT 'none',
+            `probe_started_at` DATETIME DEFAULT NULL,
+            `probe_error` VARCHAR(255) DEFAULT NULL,
+            -- NULL means not dead as far as anybody knows, which is also what a row that has never
+            -- been scraped says — no data is not the same as no peers.
+            `dead_since` DATETIME DEFAULT NULL,
+            -- v21/v22: the rating totals kept on the row, so a listing of fifty is one query rather
+            -- than fifty aggregates. `votes_count` is its own column and not votes_up + votes_down:
+            -- in star mode there is no up and no down, there is a count and an average.
+            `votes_up` INT UNSIGNED NOT NULL DEFAULT 0,
+            `votes_down` INT UNSIGNED NOT NULL DEFAULT 0,
+            `score_x100` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `votes_count` INT UNSIGNED NOT NULL DEFAULT 0,
             UNIQUE KEY `uq_whitelist_hash` (`info_hash`),
             KEY `idx_wl_submitter` (`submitter_id`, `created_at`),
             KEY `idx_wl_review` (`review_status`, `created_at`),
@@ -134,6 +162,10 @@ function trackerSchemaStatements(): array {
             KEY `idx_whitelist_source` (`source`, `created_at`),
             KEY `idx_whitelist_meta` (`meta_status`, `meta_priority`, `meta_requested_at`),
             KEY `idx_whitelist_banned` (`banned`),
+            -- the three that come with the columns above (same rule, same ALTERs)
+            KEY `idx_whitelist_content` (`content_status`, `created_at`),
+            KEY `idx_whitelist_dead` (`dead_since`),
+            KEY `idx_whitelist_probe` (`probe_status`, `probe_started_at`),
             FULLTEXT KEY `ft_whitelist_name` (`name`)
         ) $engine",
 
@@ -173,6 +205,11 @@ function trackerSchemaStatements(): array {
             -- nobody can identify.
             `auto_approve` TINYINT(1) NOT NULL DEFAULT 1,
             `required_fields` VARCHAR(255) NOT NULL DEFAULT '',
+            -- v50, and DEFAULT 0 where `auto_approve` above defaults to 1: registering a hash a
+            -- partner already published is not an escalation, blocking one is. A key that can file
+            -- abuse reports gets them REVIEWED unless somebody deliberately says otherwise.
+            -- Also a guarded ALTER (upgrades) — the two definitions must stay identical.
+            `abuse_auto_block` TINYINT(1) NOT NULL DEFAULT 0,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `last_used_at` DATETIME DEFAULT NULL,
             `last_used_ip` VARCHAR(45) DEFAULT NULL,
@@ -386,6 +423,17 @@ function trackerSchemaStatements(): array {
             -- index, and the catalogue's own default first page was therefore a full scan and a
             -- filesort of the whole table: measured at 2 890 ms on 1.9 M rows, on a page any member
             -- can open. With the index below the same page is 1 ms.
+            -- v21/v22: the rating totals, kept on the row — the same four columns, with the same
+            -- types and defaults, that trackerSchemaGuardedStatements() adds to an existing
+            -- database. They matter here more than anywhere else in this file: THAT ALTER is one of
+            -- the two the web declines (index_hashes carries a FULLTEXT index, so adding a column
+            -- rebuilds the table), and a declined migration leaves schema_version unwritten. A
+            -- browser install would therefore stop at version 0 and wait for a CLI run. On an empty
+            -- table there is nothing to rebuild, so the right place for them is right here.
+            `votes_up` INT UNSIGNED NOT NULL DEFAULT 0,
+            `votes_down` INT UNSIGNED NOT NULL DEFAULT 0,
+            `score_x100` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `votes_count` INT UNSIGNED NOT NULL DEFAULT 0,
             `eff_seeders` INT UNSIGNED GENERATED ALWAYS AS (COALESCE(`scrape_seeders`, `last_seeders`)) VIRTUAL,
             KEY `idx_index_eff_seed` (`eff_seeders`, `info_hash`),
             KEY `idx_index_seen` (`seen_count`),
@@ -396,6 +444,14 @@ function trackerSchemaStatements(): array {
             KEY `idx_index_meta` (`meta_status`, `meta_priority`, `meta_requested_at`),
             KEY `idx_index_seeders` (`last_seeders`),
             KEY `idx_index_promoted` (`promoted_at`),
+            -- v19/v31: the composite indexes the catalogue and the fetch-order selectors need. The
+            -- other half of the same deferred ALTER as the four columns above — free on an empty
+            -- table, minutes long on a live one, so a fresh install builds them with the table.
+            KEY `idx_index_seed_seen` (`last_seeders`, `last_seen`),
+            KEY `idx_index_meta_seed` (`meta_status`, `last_seeders`, `last_seen`),
+            KEY `idx_index_meta_seen` (`meta_status`, `seen_count`),
+            KEY `idx_index_meta_completed` (`meta_status`, `last_completed`),
+            KEY `idx_index_meta_done_fetched` (`meta_status`, `meta_fetched_at`),
             FULLTEXT KEY `ft_index_name` (`name`)
         ) $engine",
         "CREATE TABLE IF NOT EXISTS `index_files` (
@@ -423,6 +479,11 @@ function trackerSchemaStatements(): array {
             `last_login_ip` VARCHAR(45) DEFAULT NULL,
             `pending_email` VARCHAR(190) DEFAULT NULL,
             `email_changed_at` DATETIME DEFAULT NULL,
+            -- v19: whoever does not want the newsletter must be able to say so once and be believed.
+            -- It lived only in the guarded ALTER list until now, which is exactly the split the
+            -- comment on `fav_public` below warns about — a fresh install and an upgraded one
+            -- disagreeing about the shape of `users`.
+            `bulk_optout` TINYINT(1) NOT NULL DEFAULT 0,
             `language` VARCHAR(3) DEFAULT NULL,
             -- v47. Two flags, not one, because they answer two different questions and a reader who
             -- says yes to one has not said yes to the other:
@@ -1126,9 +1187,11 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // which is not the same as any particular language -- change the site default and these accounts
     // follow it, while an account that picked English stays English.
     if (!schemaColumnExists($db, 'users', 'language')) $uparts[] = "ADD COLUMN `language` VARCHAR(3) DEFAULT NULL";
-    // v47: the two favourites privacy flags. In BOTH places on purpose — `bulk_optout` above is only
-    // in this list and not in the CREATE, so a fresh install and an upgraded one disagree about the
-    // shape of `users`. One such split is a bug waiting; two would be a habit.
+    // v47: the two favourites privacy flags. In BOTH places on purpose: the CREATE above carries every
+    // column and index this list adds (checked mechanically for 1.57.0 — a fresh install and an
+    // upgraded one build the same tables, and tests/install_web_test.py drives the browser installer
+    // to prove it). A split between the two is a bug waiting, and one such split once stopped a
+    // fresh install at version 0.
     if (!schemaColumnExists($db, 'users', 'fav_public')) $uparts[] = "ADD COLUMN `fav_public` TINYINT(1) NOT NULL DEFAULT 0";
     if (!schemaColumnExists($db, 'users', 'fav_listed')) $uparts[] = "ADD COLUMN `fav_listed` TINYINT(1) NOT NULL DEFAULT 0";
     // v51: the same rule, one flag lower — see the CREATE above.
@@ -1155,9 +1218,10 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     //
     // The old rows are deleted rather than left to be filtered out for ever: they say "somebody sent
     // you a message" about messages that have long since been read, and nothing will ever write
-    // another one. Statements here run on every upgrade past this version, which costs one indexed
-    // delete of nothing at all.
-    $out[] = "DELETE FROM `user_notifications` WHERE `type` = 'pm'";
+    // another one. ONCE: the table has no index on `type`, so this is a scan of every notification
+    // ever written — not "one indexed delete of nothing" — and it was repeated at every version bump
+    // (inside the schema lock, possibly from a web request) until 1.57.0.
+    if (schemaOnce($db, 'v56_pm_notifications')) $out[] = "DELETE FROM `user_notifications` WHERE `type` = 'pm'";
 
     // v47: who registered a whitelist row, and whether they want it shown on their profile.
     //
@@ -1543,6 +1607,11 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_completed')) {
         $iparts[] = "ADD KEY `idx_index_meta_completed` (`meta_status`, `last_completed`)";
     }
+    // v62: the prune's protection backfill asks "done rows resolved since the last pass (or never
+    // stamped)" — a tight range on this pair instead of a scan of the whole catalogue every hour.
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_done_fetched')) {
+        $iparts[] = "ADD KEY `idx_index_meta_done_fetched` (`meta_status`, `meta_fetched_at`)";
+    }
     // schema v36: what a list covers, not merely how many lines it has.
     foreach (['addr4' => "ADD COLUMN `addr4` BIGINT UNSIGNED NOT NULL DEFAULT 0",
               'nets6' => "ADD COLUMN `nets6` INT UNSIGNED NOT NULL DEFAULT 0"] as $col => $sql) {
@@ -1630,6 +1699,17 @@ function trackerSchemaGuardedStatements(PDO $db): array {
  *
  * Returns the number of groups actually changed.
  */
+/**
+ * A one-time step that is not a grant: records `schema_once_<marker>` and answers true exactly once
+ * per install. The local bootstrap wipes these (it keeps only schema_grant_* rows), so on a test
+ * database the step repeats — every such step must be idempotent anyway.
+ */
+function schemaOnce(PDO $db, string $marker): bool {
+    $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
+    $ins->execute(['schema_once_' . $marker, (string)time()]);
+    return $ins->rowCount() === 1;
+}
+
 function schemaGrantOnce(PDO $db, string $marker, array $bySlug): int {
     $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
     $ins->execute(['schema_grant_' . $marker, (string)time()]);
@@ -1746,6 +1826,18 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     schemaGrantOnce($db, 'v61_sounds', [
         'member' => ['sounds.use'],
     ]);
+
+    // v62: the owner's mirror row follows the panel password. api/admin/change_password.php kept
+    // only config/hash.txt up to date, so an owner who had rotated the panel password could still
+    // open the panel through ?action=login with the OLD one — the mirror's hash was the one from
+    // install day. Once here; from 1.57.0 on the endpoint writes both.
+    if (defined('ADMIN_PASSWORD_HASH') && ADMIN_PASSWORD_HASH !== '' && schemaOnce($db, 'v62_mirror_hash')) {
+        $adminUser = trim((string)($cfg['admin_username'] ?? ''));
+        if ($adminUser !== '') {
+            $db->prepare("UPDATE users SET pass_hash = ? WHERE username = ? AND pass_hash <> ?")
+               ->execute([ADMIN_PASSWORD_HASH, $adminUser, ADMIN_PASSWORD_HASH]);
+        }
+    }
 
     schemaGrantOnce($db, 'v24_content_rating', [
         'guest'  => ['rating.vote', 'content.submit', 'content.propose'],
@@ -2119,11 +2211,12 @@ function trackerSchemaDefaultSettings(): array {
         // source of CSP noise on the web — switching this on on upgrade day would point a firehose
         // of unauthenticated POSTs at a database three other applications share. The operator turns
         // it on for a day when they want evidence.
-        // On, because the shipped mode is report-only and the two together are the whole point:
-        // report-only blocks nothing, so with collection off it would be a header that does not
-        // protect and does not tell anyone what it would have blocked. The store is capped at
-        // csp_report_keep_rows and pruned by the janitor, so switching it on costs a bounded table.
-        'csp_report_enabled'          => '1',
+        // Off, as includes/csp.php says it is: every page that trips the policy is an unauthenticated
+        // POST into the database, most of it browser-extension noise, so collecting is a day of
+        // evidence the operator switches on deliberately, not a default. (Until 1.57.0 this row said
+        // '1' while the code's own fallback and its comment said off; an install that already has the
+        // row keeps whatever it chose.)
+        'csp_report_enabled'          => '0',
         'csp_report_keep_rows'        => '500',
         'csp_extra_hosts'             => '',
         // ── Favourites, public profiles and "my uploads" (v47) ──────────────────────────────

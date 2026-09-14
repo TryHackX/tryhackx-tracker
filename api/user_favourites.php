@@ -71,6 +71,10 @@ if ($who === '') {
     if (!$owner || ($owner['status'] ?? '') !== 'active') jsonResponse(['error' => 'not_found'], 404);
     $isOwn = (int)$owner['id'] === (int)($me['id'] ?? 0);
     if (!$isOwn) {
+        // A `hide_profile` block closes the PAGE for this reader (templates/pages/profile.php), and
+        // it has to close the endpoint behind it too — otherwise the page they cannot open serves
+        // its contents to anybody who asks for the JSON directly. Same 404 as every other no.
+        if (profileHiddenFrom($db, (int)$owner['id'], (int)$me['id'])) jsonResponse(['error' => 'not_found'], 404);
         if ((int)($owner['fav_public'] ?? 0) !== 1) jsonResponse(['error' => 'not_found'], 404);
         // Their group has to allow a public list, not just their own checkbox: an operator who takes
         // `favourites.public` away from a group means it, and a stale checkbox must not outlive it.
@@ -93,9 +97,12 @@ $sort = (string)($_GET['sort'] ?? 'added:desc');
 // same checkbox the search page carries, and an unticked box has to be able to say so. Gated on
 // index.files either way: searching inside a file list you may not open is still reading it.
 $wantFiles = (string)($_GET['files'] ?? '1') !== '0' && userCan($db, $cfg, 'index.files');
+// The same pair api/index_info.php asks before it hands over a whitelist row: the permission, and
+// the site setting that folds the whitelist into what a reader may find at all.
+$canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
 
 $hashes = favHashesOf($db, (int)$owner['id'], favMaxPerUser($cfg));
-$rows = $hashes ? favRowsFor($db, $hashes) : [];
+$rows = $hashes ? favRowsFor($db, $hashes, $canWl, $isOwn) : [];
 // The order of $hashes is "newest favourited first" and favRowsFor preserves it, so `added` needs no
 // column of its own — it is the order the list already arrived in.
 $byHash = array_flip($hashes);
@@ -108,6 +115,12 @@ if ($search !== '') {
     // …and over the FILE NAMES of those same hashes. Somebody looking for a track or an episode
     // inside a pack knows the file, not the release name — the search page has offered that for a
     // while, and a list that could not do it sent them back there to look the hash up.
+    // It reads a files table, so it costs what the search page's file search costs and is charged
+    // to the SAME hourly bucket: a loop over ?search= here must not be a cheaper way to spend the
+    // database than the page that meters it.
+    if ($wantFiles && !rateLimitAllow('idxsearch', ipBucket(getClientIp($cfg)), (int)($cfg['rate_limit_index_search'] ?? 120), 3600)) {
+        jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
+    }
     $inFiles = $wantFiles ? favHashesMatchingFiles($db, $hashes, $search) : [];
     $rows = array_values(array_filter($rows, static function (array $r) use ($needle, $inFiles) {
         return ($r['name'] !== null && str_contains(mb_strtolower((string)$r['name']), $needle))
@@ -133,9 +146,13 @@ $total = count($rows);
 $slice = array_slice($rows, ($page - 1) * $perPage, $perPage);
 $canMagnet = userCan($db, $cfg, 'index.magnet');
 foreach ($slice as &$r) {
-    // A banned hash renders without a magnet: the tracker refuses to serve it, and handing over a
-    // link that cannot work is worse than saying so.
-    if (!$canMagnet || $r['banned']) $r['info_hash'] = $canMagnet ? $r['info_hash'] : null;
+    // The hash is not only a magnet HERE: it is the name the star posts back to un-star a row. A
+    // reader who holds `favourites.use` and not `index.magnet` could add a favourite and then not
+    // remove it, because the row they were looking at carried nothing to name it by. So it is
+    // withheld only on somebody ELSE's list, where it would be a magnet and nothing else.
+    // A banned row keeps it on the owner's own list for the same reason, and the page draws no
+    // magnet for one (assets/js/favourites.js): a link that cannot work is worse than saying so.
+    if (!$canMagnet && !$isOwn) $r['info_hash'] = null;
     foreach (['total_size', 'files_count', 'seeders', 'leechers'] as $k) {
         $r[$k] = $r[$k] !== null ? (int)$r[$k] : null;
     }

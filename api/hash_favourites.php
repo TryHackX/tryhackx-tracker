@@ -51,9 +51,16 @@ $search = trim((string)($_GET['search'] ?? ''));
 
 $in = implode(',', array_map('intval', $groupIds));
 $where = ["f.info_hash = ?", "u.status = 'active'", "u.fav_public = 1", "u.fav_listed = 1",
+          // `granted_at <= NOW()` for the same reason userGroups() has it (includes/users.php): a
+          // membership that starts next week is not a membership today, and a list that counted it
+          // would publish somebody a week before their group says it may.
           "EXISTS (SELECT 1 FROM user_group_members m WHERE m.user_id = u.id AND m.group_id IN ($in)
-                     AND (m.expires_at IS NULL OR m.expires_at > NOW()))"];
-$params = [$hash];
+                     AND m.granted_at <= NOW() AND (m.expires_at IS NULL OR m.expires_at > NOW()))",
+          // And the directory's clause: a `hide_profile` block closes that person's profile to THIS
+          // reader, so their name does not appear on a list this reader can read either. In the
+          // WHERE rather than in PHP, because the count obeys every gate the rows do.
+          "NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id = u.id AND b.blocked_id = ? AND b.hide_profile = 1)"];
+$params = [$hash, (int)$me['id']];
 // An unverified account runs at guest level (v9), so its membership cannot count towards a list its
 // group would otherwise allow. No exception for administrators: appearing on this list is consent,
 // not authority — see userIdHasGrantedPermission() in includes/favourites.php.
@@ -84,7 +91,8 @@ $st->execute();
 // The public LISTS this hash is on, with the same gates applied in the same query — a collection
 // somebody published is another honest answer to "who has this", and the one that says why they
 // have it. Only on the first page: it is context for the overlay, not a second paginated thing.
-$lists = $page === 1 && function_exists('listsContainingHash') ? listsContainingHash($db, $cfg, $hash, 20) : [];
+$lists = $page === 1 && function_exists('listsContainingHash')
+    ? listsContainingHash($db, $cfg, $hash, 20, (int)$me['id']) : [];
 
 jsonResponse([
     'success'  => true,

@@ -86,6 +86,7 @@ class Client:
 
 
 HASH = "1c1e" * 10
+SEEN = "1c2d" * 10          # the index's own hash, with words on it: the two gated sections
 B32 = base64.b32encode(bytes.fromhex(HASH)).decode()
 MAGNET = "magnet:?xt=urn:btih:" + HASH.upper() + "&dn=Hash+check+fixture&tr=udp%3A%2F%2Ftracker.example.org%3A6969%2Fannounce"
 
@@ -105,10 +106,32 @@ GRANT = ("$db->exec(" + chr(34) + "UPDATE user_groups SET permissions = JSON_MER
          + chr(34) + " . $db->quote(json_encode(['status.hash_check' => %s])) . " + chr(34)
          + ") WHERE slug = 'member'" + chr(34) + ");")
 php(GRANT % "true")
+
+
+# The sections of the answer are gated by the permissions that publish the same facts on the Info
+# panel (includes/hashcheck.php: hashCheckGates), so each of those is put on the group and taken off
+# it here, one at a time. Over HTTP, because userEffectivePermissions() memoises per process and a
+# revocation inside one would not be seen.
+def grant(perms, slug="member"):
+    pairs = ", ".join("'%s' => %s" % (k, "true" if v else "false") for k, v in perms.items())
+    php("$db->exec(\"UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions, \" . $db->quote(json_encode([" + pairs + "])) . \") WHERE slug = '" + slug + "'\");")
+
+
 was_limit = php("echo $cfg['rate_limit_hash_check'] ?? '120';").strip()
+was_index = {k: php("echo $cfg['" + k + "'] ?? '';").strip()
+             for k in ("index_enabled", "index_search_enabled", "index_search_include_whitelist")}
+member_before = php("echo $db->query(\"SELECT permissions FROM user_groups WHERE slug = 'member'\")->fetchColumn();").strip()
 php("setSetting($db, 'users_enabled', '1'); setSetting($db, 'rate_limit_hash_check', '120');"
+    "setSetting($db, 'index_enabled', '1'); setSetting($db, 'index_search_enabled', '1');"
+    "setSetting($db, 'index_search_include_whitelist', '1');"
     "$db->prepare('DELETE FROM whitelist WHERE info_hash = ?')->execute(['" + HASH + "']);"
-    "$db->prepare(\"INSERT INTO whitelist (info_hash, name, source, created_at, banned, probe_status) VALUES (?, 'Hash check fixture', 'admin', '2026-09-02 09:00:00', 0, 'passed')\")->execute(['" + HASH + "']);")
+    "$db->prepare(\"INSERT INTO whitelist (info_hash, name, source, created_at, banned, probe_status) VALUES (?, 'Hash check fixture', 'admin', '2026-09-02 09:00:00', 0, 'passed')\")->execute(['" + HASH + "']);"
+    "foreach (['index_hashes', 'hash_content'] as $t) $db->prepare(\"DELETE FROM `$t` WHERE info_hash = ?\")->execute(['" + SEEN + "']);"
+    "$db->prepare(\"INSERT INTO index_hashes (info_hash, name, first_seen, last_seen, seen_count, last_seeders, last_leechers, meta_status, files_count)"
+    " VALUES (?, 'Seen over HTTP', '2026-08-01 08:00:00', '2026-09-10 20:30:00', 7, 11, 2, 'done', 4)\")->execute(['" + SEEN + "']);"
+    "$db->prepare(\"INSERT INTO hash_content (info_hash, description, description_format, content_status)"
+    " VALUES (?, 'Words about it.', 'bbcode', 'approved')\")->execute(['" + SEEN + "']);")
+grant({"index.view": True, "whitelist.view": True, "content.view": True})
 
 try:
     # ── the gate ──────────────────────────────────────────────────────────
@@ -139,6 +162,43 @@ try:
     s, u = member.api("hash_check&hash=" + "1c1f" * 10)
     check("a hash nobody has met is answered too, as unknown", s == 200 and u.get("known") is False and u.get("registered") is None, (s, u))
 
+    # ── one permission buys the question, not every answer ────────────────
+    s, full = member.api("hash_check&hash=" + SEEN)
+    check("with all three catalogue permissions the answer is whole",
+          s == 200 and (full.get("seen") or {}).get("times") == 7 and (full.get("content") or {}).get("status") == "approved"
+          and full.get("meta", {}).get("name") == "Seen over HTTP" and full.get("withheld") == [], (s, full))
+
+    grant({"index.view": False})
+    s, j = member.api("hash_check&hash=" + SEEN)
+    check("without index.view there is no swarm section", s == 200 and j.get("seen") is None and "seen" in (j.get("withheld") or []), (s, j))
+    check("… and no name, metadata or file counts out of the index row either",
+          j.get("meta", {}).get("name") is None and j.get("meta", {}).get("status") == "none"
+          and j.get("files", {}).get("fetched") == 0 and j.get("files", {}).get("total") is None, j)
+    check("… but the hash is still known, and a ban would still be answered", j.get("known") is True and j.get("banned") is None, j)
+    grant({"index.view": True})
+
+    grant({"whitelist.view": False})
+    s, j = member.api("hash_check&hash=" + HASH)
+    check("without whitelist.view there is no registered section", s == 200 and j.get("registered") is None
+          and "registered" in (j.get("withheld") or []) and j.get("known") is True, (s, j))
+    grant({"whitelist.view": True})
+
+    grant({"content.view": False})
+    s, j = member.api("hash_check&hash=" + SEEN)
+    check("without content.view there is no content section, and the rest is untouched",
+          s == 200 and j.get("content") is None and "content" in (j.get("withheld") or [])
+          and (j.get("seen") or {}).get("times") == 7, (s, j))
+    grant({"content.view": True})
+
+    php("setSetting($db, 'index_search_enabled', '0');")
+    s, j = member.api("hash_check&hash=" + SEEN)
+    check("the search switched off closes the swarm section for everybody", s == 200 and j.get("seen") is None, (s, j))
+    php("setSetting($db, 'index_search_enabled', '1');")
+    php("setSetting($db, 'index_search_include_whitelist', '0');")
+    s, j = member.api("hash_check&hash=" + HASH)
+    check("a search configured without whitelist rows closes the registered section", s == 200 and j.get("registered") is None, (s, j))
+    php("setSetting($db, 'index_search_include_whitelist', '1');")
+
     # ── what a bad input gets ─────────────────────────────────────────────
     s, e = member.api("hash_check&hash=")
     check("an empty input is a 400 with a sentence", s == 400 and e.get("error"), (s, e))
@@ -166,8 +226,11 @@ try:
     check("0 means no limit", codes == [200] * 5, codes)
 finally:
     php("setSetting($db, 'rate_limit_hash_check', '" + (was_limit or "120") + "'); setSetting($db, 'users_enabled', '" + (was_users or "1") + "');"
-        "$db->prepare('DELETE FROM whitelist WHERE info_hash = ?')->execute(['" + HASH + "']);"
-        "$db->prepare('DELETE FROM users WHERE username = ?')->execute(['" + USER + "']);")
+        + "".join("setSetting($db, '%s', '%s');" % (k, v) for k, v in was_index.items() if v != "")
+        + "$db->prepare('DELETE FROM whitelist WHERE info_hash = ?')->execute(['" + HASH + "']);"
+        "foreach (['index_hashes', 'hash_content'] as $t) $db->prepare(\"DELETE FROM `$t` WHERE info_hash = ?\")->execute(['" + SEEN + "']);"
+        "$db->prepare('DELETE FROM users WHERE username = ?')->execute(['" + USER + "']);"
+        "$db->prepare(\"UPDATE user_groups SET permissions = ? WHERE slug = 'member'\")->execute([" + json.dumps(member_before) + "]);")
     clear_throttles()
 
 print("\n%d checks, %d failed" % (n, fails))

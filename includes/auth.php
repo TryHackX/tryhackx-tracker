@@ -120,7 +120,12 @@ function adminSessionValid(array $cfg): bool {
             // Admin group OR panel.access: a moderator holds a panel session on the strength of a
             // granted permission rather than of admin membership. Losing either one closes the panel
             // on the next request, which is the property this block existed for.
-            $stillAllowed = $u && $u['status'] === 'active'
+            // "Sign out everywhere else", a password change and a reset stamp users.sessions_valid_from.
+            // A panel session that rode in on that account is over at that instant too — otherwise the
+            // one browser the person is worried about keeps the panel until the idle limit, which is
+            // exactly the scenario the stamp exists for. Both sides are unix times PHP wrote.
+            $stillAllowed = $u && (function_exists('userIsActive') ? userIsActive($u) : $u['status'] === 'active')
+                && (int)($u['sessions_valid_from'] ?? 0) <= (int)($_SESSION['login_time'] ?? 0)
                 && (userIsAdminGroup($db, (int)$u['id'])
                     || (function_exists('userHasPanelAccess') && userHasPanelAccess($db, (int)$u['id'])));
             if (!$stillAllowed) {

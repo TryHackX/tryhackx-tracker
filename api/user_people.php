@@ -62,9 +62,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 userNotify($db, $tid, 'friend_accepted', __('notify.friend_accepted', ['user' => $me['username']]));
                 jsonResponse(['success' => true, 'state' => 'friends']);
             }
-            $db->prepare("INSERT IGNORE INTO user_friends (user_id, friend_id, status) VALUES (?, ?, 'pending')")
-               ->execute([$uid, $tid]);
-            userNotify($db, $tid, 'friend_request', __('notify.friend_request', ['user' => $me['username']]));
+            // Already friends (through the row THEY hold): nothing to ask, and a second, pending row
+            // would leave friendState() answering by index order and "Cancel request" deleting the
+            // friendship. A stale tab is where this click comes from.
+            if (areFriends($db, $uid, $tid)) jsonResponse(['success' => true, 'state' => 'friends']);
+            $ins = $db->prepare("INSERT IGNORE INTO user_friends (user_id, friend_id, status) VALUES (?, ?, 'pending')");
+            $ins->execute([$uid, $tid]);
+            // One notification per request made, not per click: repeating the POST used to deliver
+            // one more line into the other person's inbox each time.
+            if ($ins->rowCount() === 1) {
+                userNotify($db, $tid, 'friend_request', __('notify.friend_request', ['user' => $me['username']]));
+            }
             jsonResponse(['success' => true, 'state' => friendState($db, $uid, $tid)]);
             // no break — jsonResponse() exits
 

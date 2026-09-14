@@ -48,6 +48,11 @@ if ($newPassword) {
         jsonResponse(['error' => __('api.account.hash_write_failed')], 500);
     }
     $changes[] = __('api.account.password_changed');
+    // The owner is mirrored into `users` as a member of the admin group (the account sign-in opens
+    // the panel for that row). A password rotated here must reach the mirror, or the OLD password
+    // keeps opening the panel through ?action=login. Same hash, and the mirror's other sessions end.
+    $db->prepare("UPDATE users SET pass_hash = ?, sessions_valid_from = ? WHERE username = ?")
+       ->execute([$newHash, time(), (string)($cfg['admin_username'] ?? 'admin')]);
 }
 
 if (empty($changes)) {

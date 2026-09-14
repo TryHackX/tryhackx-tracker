@@ -4570,3 +4570,9 @@ add('js.sounds', {
     'preview_failed': ('Could not play that.', 'Nie udało się tego odtworzyć.'),
     'failed': ('Something went wrong.', 'Coś poszło nie tak.'),
 })
+
+# ── 1.57.0: the probe's own deadline ────────────────────────────────────────
+add('', {
+    'js.app.probe_timed_out': ('Still probing after :timeout minutes. The result will show on the whitelist page later.',
+        'Sonda trwa dłużej niż :timeout min. Wynik pokaże się później na stronie whitelisty.'),
+})

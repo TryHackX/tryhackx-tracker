@@ -25,6 +25,11 @@ if (!empty($input['cancel_email_change'])) {
     jsonResponse(['success' => true, 'changed' => ['email_change_cancelled']]);
 }
 
+// The same budget as the other password-checking account endpoints (user_2fa, user_sessions): this
+// one verifies a password too, so it is a guessing surface like the login form.
+if (!rateLimitAllow('user_update', ipBucket(getClientIp($cfg)), 20, 900)) {
+    jsonResponse(['error' => __('api.login.too_many')], 429);
+}
 if (!password_verify((string)($input['current_password'] ?? ''), (string)$u['pass_hash'])) {
     jsonResponse(['error' => __('api.account.current_password_wrong')], 403);
 }

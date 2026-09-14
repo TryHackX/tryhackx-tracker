@@ -49,6 +49,66 @@ require_once $root . '/includes/wlprobe.php';
 require_once $root . '/includes/digest.php';
 require_once $root . '/includes/people.php';
 
+/**
+ * The slow half. The index poll walks a scrape of a million and a half torrents (a hundred seconds
+ * on production) and the whitelist upkeep scrapes and probes with network timeouts. Inside the
+ * minute tick those were minutes without a timeline sample and without a netlimit sample: the
+ * timer does not start a second instance while one is running, so every long run drew a gap in
+ * every chart — two of them each half hour, growing with the catalogue.
+ *
+ * So this half runs as a transient unit of its own (tracker-janitor-heavy, started through the
+ * root helper the stability probe already uses, as the same user, at the same lowered priority),
+ * and inline as before on a machine that cannot do that. One heavy run at a time: the helper
+ * refuses while the previous one is still going, and the tick simply comes back a minute later.
+ */
+function janitorHeavy(PDO $db, array $cfg, array $argv): void
+{
+    // observed-hash index: poll (if due) / meta budget / prune (no-op when disabled)
+    $ix = indexTick($db, $cfg);
+    if ($ix['enabled'] && ($ix['error'] !== null || $ix['polled'] || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[index] polled=%s%s meta_queued=%d%s%s', $ix['polled'] ? 'yes' : 'no',
+            $ix['poll'] ? ' (entries=' . (int)$ix['poll']['entries'] . ' kept=' . (int)$ix['poll']['kept'] . ($ix['poll']['truncated'] ? ' TRUNCATED' : '') . ' ms=' . (int)$ix['poll']['ms'] . ')' : '',
+            (int)$ix['meta_queued'], $ix['prune'] ? ' pruned=' . (int)$ix['prune']['expired'] . '/' . (int)$ix['prune']['capped'] : '',
+            $ix['error'] !== null ? ' error=' . $ix['error'] : ''), "\n";
+    }
+
+    // whitelist upkeep: refresh stale swarm counts, and the dead-row pass on its own schedule
+    // submissions proving themselves: metadata in, at least one peer, or give up with a reason
+    $wp = wlProbeTick($db, $cfg);
+    if ($wp['passed'] || $wp['failed']) {
+        echo sprintf('[wlprobe] checked=%d passed=%d failed=%d deleted=%d',
+            $wp['checked'], $wp['passed'], $wp['failed'], $wp['deleted']), "
+";
+    }
+
+    $wm = wlMaintTick($db, $cfg);
+    if (($wm['refresh']['ran'] ?? false) || ($wm['dead']['ran'] ?? false) || $wm['error']) {
+        echo sprintf('[wlmaint] scraped=%d dead_matched=%d marked=%d deleted=%d%s',
+            (int)($wm['refresh']['scraped'] ?? 0), (int)($wm['dead']['matched'] ?? 0),
+            (int)($wm['dead']['marked'] ?? 0), (int)($wm['dead']['deleted'] ?? 0),
+            $wm['error'] ? ' error=' . $wm['error'] : ''), "
+";
+    }
+
+    // "…is writing" rows whose moment has passed. Tiny, and it keeps a table that is pure state
+    // from growing a history nobody asked for.
+}
+
+function janitorHeavyDispatch(PDO $db, array $cfg, array $argv): void
+{
+    $verbose = in_array('-v', $argv, true);
+    if (function_exists('netlimitRun') && function_exists('netlimitCommand') && netlimitCommand($cfg) !== ''
+        && function_exists('trackerExecAvailable') && trackerExecAvailable()) {
+        $r = netlimitRun($cfg, ['janitor-heavy-start', __FILE__]);
+        if (!empty($r['ok'])) { if ($verbose) echo "[heavy] started as its own unit\n"; return; }
+        if (!empty($r['json']['active'])) { if ($verbose) echo "[heavy] the previous run is still going\n"; return; }
+        // A helper from before this verb ("unknown action"), a machine without systemd-run, or an
+        // exec that failed: the slow half runs here, as it always did.
+        if ($verbose) echo '[heavy] inline: ' . (string)($r['error'] ?? 'helper unavailable') . "\n";
+    }
+    janitorHeavy($db, $cfg, $argv);
+}
+
 try {
     $db  = getDb();
     $cfg = getSettings($db);
@@ -58,6 +118,8 @@ try {
     require_once __DIR__ . '/../includes/db_clock.php';
     dbClockPublish($db);
     $GLOBALS['db'] = $db; $GLOBALS['cfg'] = $cfg;
+    // --heavy: this process IS the slow half (see janitorHeavy); nothing of the minute tick runs here.
+    if (in_array('--heavy', $argv ?? [], true)) { janitorHeavy($db, $cfg, $argv ?? []); exit(0); }
     $before = whitelistStateRead();
     // scheduled mode first: it may flip tracker_mode (in $cfg too), which the whitelist janitor honours
     $sched = scheduleApply($db, $cfg);
@@ -109,14 +171,8 @@ try {
             $tl['prune'] ? ' pruned=' . (int)$tl['prune']['raw'] . '/' . (int)$tl['prune']['5m'] : '',
             $tl['error'] !== null ? ' error=' . $tl['error'] : ''), "\n";
     }
-    // observed-hash index: poll (if due) / meta budget / prune (no-op when disabled)
-    $ix = indexTick($db, $cfg);
-    if ($ix['enabled'] && ($ix['error'] !== null || $ix['polled'] || in_array('-v', $argv ?? [], true))) {
-        echo sprintf('[index] polled=%s%s meta_queued=%d%s%s', $ix['polled'] ? 'yes' : 'no',
-            $ix['poll'] ? ' (entries=' . (int)$ix['poll']['entries'] . ' kept=' . (int)$ix['poll']['kept'] . ($ix['poll']['truncated'] ? ' TRUNCATED' : '') . ' ms=' . (int)$ix['poll']['ms'] . ')' : '',
-            (int)$ix['meta_queued'], $ix['prune'] ? ' pruned=' . (int)$ix['prune']['expired'] . '/' . (int)$ix['prune']['capped'] : '',
-            $ix['error'] !== null ? ' error=' . $ix['error'] : ''), "\n";
-    }
+    // the slow half — its own unit when the machine can do that, inline otherwise (see janitorHeavy)
+    janitorHeavyDispatch($db, $cfg, $argv ?? []);
     // inbound UDP traffic: sample the nftables counters, expire a panic window, move the automatic
     // limit (no-op — not even a fork — while the monitor and the automatic mode are both off)
     $nl = netlimitTick($db, $cfg);
@@ -230,26 +286,6 @@ try {
     }
     bulkPrune($db);
 
-    // whitelist upkeep: refresh stale swarm counts, and the dead-row pass on its own schedule
-    // submissions proving themselves: metadata in, at least one peer, or give up with a reason
-    $wp = wlProbeTick($db, $cfg);
-    if ($wp['passed'] || $wp['failed']) {
-        echo sprintf('[wlprobe] checked=%d passed=%d failed=%d deleted=%d',
-            $wp['checked'], $wp['passed'], $wp['failed'], $wp['deleted']), "
-";
-    }
-
-    $wm = wlMaintTick($db, $cfg);
-    if (($wm['refresh']['ran'] ?? false) || ($wm['dead']['ran'] ?? false) || $wm['error']) {
-        echo sprintf('[wlmaint] scraped=%d dead_matched=%d marked=%d deleted=%d%s',
-            (int)($wm['refresh']['scraped'] ?? 0), (int)($wm['dead']['matched'] ?? 0),
-            (int)($wm['dead']['marked'] ?? 0), (int)($wm['dead']['deleted'] ?? 0),
-            $wm['error'] ? ' error=' . $wm['error'] : ''), "
-";
-    }
-
-    // "…is writing" rows whose moment has passed. Tiny, and it keeps a table that is pure state
-    // from growing a history nobody asked for.
     if (function_exists('pmTypingPrune')) {
         $tp = pmTypingPrune($db);
         if ($tp > 0 && in_array('-v', $argv ?? [], true)) echo "[pm] pruned $tp stale typing rows\n";

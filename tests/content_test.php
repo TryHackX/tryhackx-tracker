@@ -49,7 +49,8 @@ check('… and whitelist_id may be NULL there now', strtoupper((string)($col['Nu
 // ── fixtures ─────────────────────────────────────────────────────────────────
 $H = fn(string $tag) => str_repeat($tag, 10);
 $REG = $H('c0a1'); $SEEN = $H('c0a2'); $NONE = $H('c0a3'); $BANNED = $H('c0a4');
-$all = [$REG, $SEEN, $NONE, $BANNED];
+$FMT = $H('c0a5'); $NOROW = $H('c0a6');
+$all = [$REG, $SEEN, $NONE, $BANNED, $FMT, $NOROW];
 $ph = implode(',', array_fill(0, count($all), '?'));
 $clean = function () use ($db, $all, $ph) {
     foreach (['whitelist', 'index_hashes', 'hash_content', 'wl_content_edits', 'banned_hashes'] as $t) {
@@ -90,6 +91,8 @@ $notes = function (int $userId) use ($db): array {
 $db->prepare("INSERT INTO whitelist (info_hash, name, source, created_at, banned, probe_status) VALUES (?, 'Registered one', 'admin', NOW(), 0, 'passed')")->execute([$REG]);
 $db->prepare("INSERT INTO index_hashes (info_hash, name, meta_status) VALUES (?, 'Seen one', 'done')")->execute([$SEEN]);
 $db->prepare("INSERT INTO index_hashes (info_hash, name, meta_status) VALUES (?, 'Banned one', 'done')")->execute([$BANNED]);
+$db->prepare("INSERT INTO index_hashes (info_hash, name, meta_status) VALUES (?, 'Format one', 'done')")->execute([$FMT]);
+$db->prepare("INSERT INTO index_hashes (info_hash, name, meta_status) VALUES (?, 'No row one', 'done')")->execute([$NOROW]);
 $db->prepare("INSERT INTO banned_hashes (info_hash, reason, source) VALUES (?, 'fixture', 'admin')")->execute([$BANNED]);
 
 try {
@@ -146,7 +149,10 @@ try {
           && $rec['content_user_id'] === $alice['id'] && $rec['name'] === 'Seen one', json_encode($rec));
     $st = $db->prepare("SELECT COUNT(*) FROM whitelist WHERE info_hash = ?"); $st->execute([$SEEN]);
     check('… and NO whitelist row was created: describing is not registering', (int)$st->fetchColumn() === 0);
-    check('the hash check reports the words for it', (hashCheckLookup($db, $cfg, $SEEN)['content']['status'] ?? '') === 'pending');
+    // Gates passed explicitly: hashCheckLookup() asks the READER's permissions when they are not, and
+    // a CLI run is an anonymous one. Who may be told which section is tests/hash_check_test.php.
+    check('the hash check reports the words for it',
+          (hashCheckLookup($db, $cfg, $SEEN, ['seen' => true, 'registered' => true, 'content' => true])['content']['status'] ?? '') === 'pending');
     contentReject($db, $cfg, 'idx', $rec['id'], 'too short');
     $rec = contentRecordFor($db, $SEEN);
     check('rejecting by kind idx works, with the note kept', $rec['content_status'] === 'rejected' && $rec['content_rejected_note'] === 'too short', json_encode($rec));
@@ -168,6 +174,17 @@ try {
     check('a banned hash cannot be described', empty($r['ok']) && $r['code'] === 403, json_encode($r));
     $r = contentAttach($db, $cfg, $SEEN, ['description' => '', 'description_format' => 'bbcode', 'source_url' => ''], $alice, '127.0.0.1');
     check('nothing to attach is refused', empty($r['ok']) && $r['code'] === 400, json_encode($r));
+
+    // ── the format is normalised on every path, not only the one with words ──
+    // Both homes store it in an ENUM('markdown','bbcode'). A submission carrying only a source link
+    // never went past the description branch, so whatever the caller sent was written raw.
+    $r = contentAttach($db, $cfg, $FMT, ['description' => '', 'description_format' => 'html; drop table',
+                                         'source_url' => 'https://example.org/t/2'], $alice, '127.0.0.1');
+    check('a source link alone is attached', !empty($r['ok']) && $r['saved'] && $r['kind'] === 'idx', json_encode($r));
+    $rec = contentRecordFor($db, $FMT);
+    check('… and its format was forced into the closed set the column allows',
+          $rec['description_format'] === richtextFormats($cfg)[0] && in_array($rec['description_format'], ['markdown', 'bbcode'], true),
+          json_encode($rec['description_format']));
     // A third account, created AFTER the grant is taken away: userEffectivePermissions() memoises per
     // user for the length of the process, so Alice would still answer from the permissions she had.
     $mp2 = $mp; $mp2['content.submit'] = false;
@@ -177,6 +194,13 @@ try {
     $carol = $uid('ctcarol');
     $r = contentAttach($db, $cfg, $SEEN, ['description' => 'No permission.', 'description_format' => 'bbcode', 'source_url' => ''], $carol, '127.0.0.1');
     check('the permission asked is the submitter\'s own', empty($r['ok']) && $r['code'] === 403, json_encode($r));
+    // …and the refusal leaves nothing behind. Carol keeps content.propose, so the old order —
+    // create the row, then ask — handed her a 403 AND an empty hash_content row for a hash that had
+    // none, which is a record made by somebody who was not allowed to make one (and which turns the
+    // next person's "add" into a "propose" against a row that says nothing).
+    $r = contentAttach($db, $cfg, $NOROW, ['description' => 'No permission either.', 'description_format' => 'bbcode', 'source_url' => ''], $carol, '127.0.0.1');
+    $st = $db->prepare("SELECT COUNT(*) FROM hash_content WHERE info_hash = ?"); $st->execute([$NOROW]);
+    check('a refused submitter leaves no hash_content row behind', empty($r['ok']) && $r['code'] === 403 && (int)$st->fetchColumn() === 0, json_encode($r));
     $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'member'")->execute([json_encode($mp)]);
     $put(['wl_allow_description' => '0', 'wl_allow_source_url' => '0']);
     $r = contentAttach($db, $cfg, $SEEN, ['description' => 'Switched off.', 'description_format' => 'bbcode', 'source_url' => ''], $alice, '127.0.0.1');
@@ -184,6 +208,55 @@ try {
     $put(['wl_allow_description' => '1', 'wl_allow_source_url' => '1', 'wl_content_autopublish' => '1']);
     $r = contentAttach($db, $cfg, $SEEN, ['description' => 'Straight out.', 'description_format' => 'bbcode', 'source_url' => ''], $bob, '127.0.0.2');
     check('autopublish publishes at once', !empty($r['ok']) && $r['saved'] && !$r['pending'] && richtextContentFor($db, $cfg, $SEEN)['author'] === 'ctbob', json_encode($r));
+
+    // ── a ban reaches the second home too ──────────────────────────────────
+    //
+    // The whitelist home has a `banned` column on the row itself, so every reader of it can see the
+    // ban. hash_content has nothing of the kind — the ban list is the only witness — and until the
+    // audit nobody asked it: contentRecordFor() said banned => false for the idx home outright, so a
+    // banned torrent kept its published description and could be given a new one.
+    check('the words are public before the ban', str_contains(richtextContentFor($db, $cfg, $SEEN)['description_html'], 'Straight out'));
+    $pending = contentAttach($db, $cfg, $SEEN, ['description' => 'A proposal that will not outlive the ban.',
+                                                'description_format' => 'bbcode', 'source_url' => ''], $alice, '127.0.0.1');
+    check('… and a proposal is waiting on it', !empty($pending['proposed']));
+    whitelistBan($db, $cfg, [$SEEN], ['source' => 'admin', 'reason' => 'audit fixture']);
+    $rec = contentRecordFor($db, $SEEN);
+    check('the record of a banned hash says banned, in the second home as in the first', $rec['banned'] === true, json_encode($rec));
+    check('… and whitelistBan took the words out of the queue with the ban', $rec['content_status'] === 'rejected'
+          && $rec['content_rejected_note'] === 'the hash was banned', json_encode($rec));
+    $pub = richtextContentFor($db, $cfg, $SEEN);
+    check('… a public reader gets nothing for it any more', $pub['description_html'] === '' && $pub['source_url'] === null, json_encode($pub));
+    check('… a moderator still sees what was written, which is the point of keeping it',
+          str_contains(richtextContentFor($db, $cfg, $SEEN, true)['description_html'], 'Straight out'));
+    $st = $db->prepare("SELECT COUNT(*) FROM wl_content_edits WHERE info_hash = ? AND status = 'pending'"); $st->execute([$SEEN]);
+    check('… and no proposal about it is left waiting for a moderator', (int)$st->fetchColumn() === 0);
+    $r = contentAttach($db, $cfg, $SEEN, ['description' => 'After the ban.', 'description_format' => 'bbcode', 'source_url' => ''], $bob, '127.0.0.2');
+    check('… nor may new words be attached to it', empty($r['ok']) && $r['code'] === 403, json_encode($r));
+
+    // ── a blank line inside an inline run (includes/richtext.php) ───────────
+    // `[b]a\n\nb[/b]` used to render `<p><strong>a</p><p>b</strong></p>`: a <strong> opened in one
+    // paragraph and a closer in another that opened nothing. Browsers "repair" that by moving the
+    // rest of the document inside the unclosed tag.
+    $html = richtextRender("[b]a\n\nb[/b]", 'bbcode', $cfg, false);
+    check('a paragraph break inside [b] leaves two balanced paragraphs',
+          $html === '<p><strong>a</strong></p><p><strong>b</strong></p>', $html);
+    $balanced = function (string $h): bool {
+        preg_match_all('#<(/?)([a-z][a-z0-9]*)\b[^>]*>#i', $h, $ms, PREG_SET_ORDER);
+        $stack = [];
+        foreach ($ms as $m) {
+            if (in_array(strtolower($m[2]), ['br', 'img', 'hr'], true)) continue;
+            if ($m[1] === '/') { if (array_pop($stack) !== strtolower($m[2])) return false; }
+            else $stack[] = strtolower($m[2]);
+        }
+        return $stack === [];
+    };
+    foreach (["[i]one\n\ntwo\n\nthree[/i]", "[b][i]x\n\ny[/i][/b]", "[b]a\n\n[center]mid[/center]\n\nb[/b]",
+              "[url=https://example.org]a\n\nb[/url]", "[b]a\n\nb[/b] tail"] as $src) {
+        check('balanced across the break: ' . str_replace("\n", '\n', $src), $balanced(richtextRender($src, 'bbcode', $cfg, false)),
+              richtextRender($src, 'bbcode', $cfg, false));
+    }
+    check('and the same in markdown', $balanced(richtextRender("**a\n\nb**", 'markdown', $cfg, false)),
+          richtextRender("**a\n\nb**", 'markdown', $cfg, false));
 } finally {
     $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'member'")->execute([$memberBefore]);
     foreach ($saved as $k => $v) { if ($v !== null) setSetting($db, $k, $v); }

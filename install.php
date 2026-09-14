@@ -12,6 +12,27 @@
 require_once __DIR__ . '/includes/functions.php';
 session_start(sessionCookieParams([]));
 
+// ── THE INSTALLER MAY RUN EVERY MIGRATION, INCLUDING THE ONES THE WEB NORMALLY DECLINES ──────────
+//
+// schemaHeavyAllowed() answers false outside the CLI, so an ALTER that rebuilds `index_hashes`
+// (it carries a FULLTEXT index, so adding a column or an index is a full rebuild) is deferred on a
+// web request — minutes of shared lock in the middle of a page view is not a trade worth making.
+// ensureSchema() then deliberately does NOT record the new schema_version, because the schema
+// really is not at that version yet.
+//
+// That is right for a live site and wrong for exactly one caller: this one. Here the tables were
+// created seconds ago and are EMPTY — there is nothing to rebuild, the ALTER is instant, and a
+// deferral means the installer below sees version 0, refuses to report a finished install, and
+// writes no config/installed.lock. INSTALL.md tells the operator to open this file in a BROWSER
+// (php-fpm, PHP_SAPI !== 'cli'), so that was the ordinary path, not an edge case.
+//
+// Defined before includes/schema.php is loaded anywhere below, which is all schemaHeavyAllowed()
+// asks. Belt and braces: the base CREATE TABLEs in trackerSchemaStatements() now carry those
+// columns and indexes themselves, so on a fresh install the guarded ALTERs find nothing to do and
+// this constant changes nothing. It is here so that the NEXT column somebody adds to the guarded
+// list only — and forgets to mirror — cannot silently stop a browser install again.
+define('TRACKER_SCHEMA_FORCE_HEAVY', 1);
+
 // Whether installation has already completed. Gates the installer's AJAX + wizard steps
 // so that, if install.php is left on the server, it can't be used as an open endpoint.
 $installed = file_exists(__DIR__ . '/config/installed.lock');
@@ -428,10 +449,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
             // `moderator` group, and seven permissions on `guest`/`member`. The whitelist page
             // selects some of those columns by name, so the site did not come up.
             //
-            // The fix is not to copy those definitions into the CREATE statements — that is the same
-            // two-places-to-remember that produced this. It is to have ONE path: build the base
-            // tables, then let the ordinary migration run from zero. It is the path every upgrade
-            // takes and the one the whole test battery exercises on every run.
+            // The fix is to have ONE path: build the base tables, then let the ordinary migration
+            // run from zero. It is the path every upgrade takes and the one the whole test battery
+            // exercises on every run.
+            //
+            // That was necessary and, on its own, not sufficient — which is the later half of this
+            // story. Outside the CLI the migration DECLINES the ALTERs that rebuild `index_hashes`
+            // (see schemaHeavyAllowed()), and a declined migration leaves schema_version unwritten,
+            // so the check below refused a browser install and no config/installed.lock was ever
+            // written. Hence the two changes that go with this comment: those columns and indexes
+            // are now in the base CREATE TABLEs as well (trackerSchemaStatements(), where
+            // tests/install_test.php compares them against the migration's own, column type by
+            // column type), and TRACKER_SCHEMA_FORCE_HEAVY is defined at the top of this file so
+            // that the next column somebody adds to the guarded list ALONE still arrives here.
+            // Neither replaces this path: the group permissions below come only from the data
+            // migrations, and nothing but running them produces those.
             $installCfg = [];
             foreach ($pdo->query("SELECT `key`, `value` FROM settings")->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $installCfg[$row['key']] = $row['value'];

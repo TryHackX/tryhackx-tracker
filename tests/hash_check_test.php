@@ -52,7 +52,13 @@ $st->execute();
 $guestPerms = json_decode((string)$st->fetchColumn(), true) ?: [];
 check('… and the guest group does not', empty($guestPerms['status.hash_check']), json_encode($guestPerms));
 check('the limit ships with a default', (trackerSchemaDefaultSettings()['rate_limit_hash_check'] ?? null) === '120');
-check('with accounts switched off the legacy fallback opens it (like content.*), not closes it', userLegacyDefault('status.hash_check') === true);
+// The opposite of what this file asserted until the audit. content.* and rating.* are open with
+// accounts off because they would otherwise be switched off entirely — there is no group to grant
+// them. The hash check is not that: it is an oracle over the catalogue that the shipped groups hand
+// to members and withhold from guests, so with nobody to BE a member it stays shut rather than
+// becoming public on every install that does not use accounts.
+check('with accounts switched off the legacy fallback keeps it shut, unlike content.*', userLegacyDefault('status.hash_check') === false);
+check('… and that is the whole status.* family, not one hard-coded id', userLegacyDefault('status.anything') === false);
 
 // ── fixtures: one hash per state ─────────────────────────────────────────────
 $H = fn(string $tag) => str_repeat($tag, 10);   // 4 hex chars × 10 = 40
@@ -86,8 +92,19 @@ foreach (range(1, 5) as $k) $if->execute([$both, "part-$k.bin", 100]);
 $db->prepare("INSERT INTO banned_hashes (info_hash, reason, source, created_at) VALUES (?, 'fixture', 'admin', '2026-09-05 12:00:00')")->execute([$bannedOnly]);
 $db->prepare("INSERT INTO banned_hashes (info_hash, reason, source, created_at) VALUES (?, 'fixture', 'admin', '2026-09-06 12:00:00')")->execute([$wlBanned]);
 
+// The facts, asked for with every gate open — what the answer is made of, before the question of who
+// may be told which part of it. The gates themselves are the section at the bottom of this file.
+$OPEN = ['seen' => true, 'registered' => true, 'content' => true];
+$look = function (string $h) use ($db, &$cfg, $OPEN) { return hashCheckLookup($db, $cfg, $h, $OPEN); };
+// Settings and the guest group are put back in the finally below: the gate checks move both.
+$savedCfg = [];
+foreach (['index_enabled', 'index_search_enabled', 'index_search_include_whitelist', 'users_enabled'] as $k) $savedCfg[$k] = $cfg[$k] ?? null;
+$st = $db->prepare("SELECT permissions FROM user_groups WHERE slug = 'guest'");
+$st->execute();
+$guestBefore = (string)$st->fetchColumn();
+
 try {
-    $r = hashCheckLookup($db, $cfg, strtoupper($live));
+    $r = $look(strtoupper($live));
     check('the hash comes back lower-case whatever was given', $r['hash'] === $live, $r['hash']);
     check('a live whitelist row: registered, state live, since its date', ($r['registered']['state'] ?? '') === 'live' && ($r['registered']['since'] ?? '') === '2026-09-01 10:00:00', json_encode($r['registered']));
     check('… carries the published description flag and the name', ($r['registered']['content'] ?? '') === 'approved' && ($r['registered']['name'] ?? '') === 'Live fixture');
@@ -95,33 +112,99 @@ try {
     check('… metadata from the whitelist row, files: 0 stored of 3', $r['meta']['status'] === 'done' && $r['meta']['source'] === 'whitelist'
           && $r['files']['fetched'] === 0 && $r['files']['total'] === 3, json_encode($r['files']));
 
-    check('a row waiting for review says so', hashCheckLookup($db, $cfg, $review)['registered']['state'] === 'review');
-    check('a row waiting for its first peer says so', hashCheckLookup($db, $cfg, $probing)['registered']['state'] === 'probing');
-    check('a rejected submission says so', hashCheckLookup($db, $cfg, $rejected)['registered']['state'] === 'rejected');
-    check('a row whose probe found nothing says so', hashCheckLookup($db, $cfg, $failed)['registered']['state'] === 'failed');
-    $r = hashCheckLookup($db, $cfg, $wlBanned);
+    check('a row waiting for review says so', $look($review)['registered']['state'] === 'review');
+    check('a row waiting for its first peer says so', $look($probing)['registered']['state'] === 'probing');
+    check('a rejected submission says so', $look($rejected)['registered']['state'] === 'rejected');
+    check('a row whose probe found nothing says so', $look($failed)['registered']['state'] === 'failed');
+    $r = $look($wlBanned);
     check('a banned whitelist row is "banned" whatever its probe says, and the ban list agrees',
           $r['registered']['state'] === 'banned' && $r['banned'] !== null && $r['banned']['since'] === '2026-09-06 12:00:00', json_encode($r));
 
-    $r = hashCheckLookup($db, $cfg, $seenOnly);
+    $r = $look($seenOnly);
     check('a hash only the index knows: not registered, seen', $r['registered'] === null && $r['seen'] !== null && $r['known'] === true);
     check('… with when, how often and how big', $r['seen']['first'] === '2026-08-01 08:00:00' && $r['seen']['last'] === '2026-09-10 20:30:00'
           && $r['seen']['times'] === 17 && $r['seen']['seeders'] === 120 && $r['seen']['leechers'] === 4, json_encode($r['seen']));
     check('… metadata from the index, and both file numbers', $r['meta']['source'] === 'index' && $r['meta']['name'] === 'Seen fixture'
           && $r['files']['fetched'] === 2 && $r['files']['total'] === 2, json_encode($r));
 
-    $r = hashCheckLookup($db, $cfg, $bannedOnly);
+    $r = $look($bannedOnly);
     check('a hash only the ban list knows: banned, nothing else, known', $r['banned'] !== null && $r['registered'] === null && $r['seen'] === null && $r['known']);
 
-    $r = hashCheckLookup($db, $cfg, $both);
+    $r = $look($both);
     check('a hash in both tables: the index speaks for the metadata', $r['meta']['source'] === 'index' && $r['meta']['name'] === 'Both fixture (index)', json_encode($r['meta']));
     check('… and the stored file count is the real one, beside the torrent\'s own', $r['files']['fetched'] === 5 && $r['files']['total'] === 9000, json_encode($r['files']));
 
-    $r = hashCheckLookup($db, $cfg, $unknown);
+    $r = $look($unknown);
     check('a hash nobody has met: unknown in every column', !$r['known'] && $r['banned'] === null && $r['registered'] === null && $r['seen'] === null
           && $r['meta']['status'] === 'none' && $r['files']['fetched'] === 0 && $r['files']['total'] === null, json_encode($r));
     check('the answer names the mode, so the page can say "blacklisted" where that is the word', in_array($r['mode'], ['whitelist', 'blacklist'], true), $r['mode']);
+
+    // ── who may be told which part of it ─────────────────────────────────────
+    //
+    // status.hash_check buys the question. Every section of the answer is a catalogue fact that some
+    // other permission publishes elsewhere (api/index_info.php), and this page must not be the way
+    // round it. What survives every gate: known-or-unknown, and the ban.
+    $shut = hashCheckLookup($db, $cfg, $both, ['seen' => false, 'registered' => false, 'content' => false]);
+    check('with every gate shut a known hash is still known', $shut['known'] === true, json_encode($shut));
+    check('… but nothing of the catalogue comes with it', $shut['registered'] === null && $shut['seen'] === null && $shut['content'] === null
+          && $shut['meta']['status'] === 'none' && $shut['meta']['name'] === null && $shut['meta']['source'] === null
+          && $shut['files']['fetched'] === 0 && $shut['files']['total'] === null, json_encode($shut));
+    check('… and the sections held back are named, so a page need not read "withheld" as "no"',
+          $shut['withheld'] === ['registered', 'seen', 'content'], json_encode($shut['withheld']));
+    $shutBan = hashCheckLookup($db, $cfg, $wlBanned, ['seen' => false, 'registered' => false, 'content' => false]);
+    check('the ban survives every gate — it is what the page is for', $shutBan['banned'] !== null && $shutBan['known'] === true
+          && $shutBan['registered'] === null, json_encode($shutBan));
+    check('a gate array with keys missing reads as shut, not as permission',
+          hashCheckLookup($db, $cfg, $seenOnly, [])['seen'] === null);
+
+    $noIndex = hashCheckLookup($db, $cfg, $both, ['seen' => false, 'registered' => true, 'content' => true]);
+    check('without index.view: no swarm, and no metadata or files from the index row either',
+          $noIndex['seen'] === null && $noIndex['meta']['source'] === 'whitelist' && $noIndex['meta']['name'] === 'Both fixture'
+          && $noIndex['files']['fetched'] === 0 && $noIndex['files']['total'] === 9000, json_encode($noIndex));
+    check('… the registration it may see is still there, in full', ($noIndex['registered']['state'] ?? '') === 'live'
+          && $noIndex['withheld'] === ['seen'], json_encode($noIndex['registered']));
+    $noWl = hashCheckLookup($db, $cfg, $both, ['seen' => true, 'registered' => false, 'content' => true]);
+    check('without whitelist.view: no registration, and the index still speaks for the rest',
+          $noWl['registered'] === null && $noWl['seen'] !== null && $noWl['meta']['source'] === 'index', json_encode($noWl));
+    // The whitelist row's words are that row's — api/index_info.php:127 blanks them for a reader who
+    // may not be told the row exists, and an answer that said "a description is waiting" would be
+    // that reader learning it anyway.
+    check('… and the words of a row it may not see go with it, content.view or no content.view', $noWl['content'] === null, json_encode($noWl['content']));
+    $wordsOnly = hashCheckLookup($db, $cfg, $live, $OPEN);
+    check('with all three the words are reported as before', ($wordsOnly['content']['status'] ?? '') === 'approved'
+          && ($wordsOnly['content']['kind'] ?? '') === 'wl' && $wordsOnly['withheld'] === [], json_encode($wordsOnly['content']));
+    check('without content.view they are not', hashCheckLookup($db, $cfg, $live, ['seen' => true, 'registered' => true, 'content' => false])['content'] === null);
+
+    // ── the gates themselves: the same expressions the Info panel is decided by ──
+    $guest = function (array $perms) use ($db) {
+        $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'guest'")->execute([json_encode($perms)]);
+    };
+    $put = function (array $kv) use ($db): array {
+        foreach ($kv as $k => $v) setSetting($db, $k, $v);
+        return getSettings($db, true);
+    };
+    //
+    // ONE permission set per process: userEffectivePermissions() memoises per user for the length of
+    // it, so revoking a grant here would not be seen. Taking each of the three away one at a time is
+    // therefore tests/hash_check_test.py's job, over HTTP, where every request is its own process.
+    $c2 = $put(['users_enabled' => '1', 'index_enabled' => '1', 'index_search_enabled' => '1', 'index_search_include_whitelist' => '1']);
+    $guest(['index.view' => true, 'whitelist.view' => true, 'content.view' => true]);
+    check('a reader holding all three opens all three gates', hashCheckGates($db, $c2) === ['seen' => true, 'registered' => true, 'content' => true],
+          json_encode(hashCheckGates($db, $c2)));
+    // The legacy answers, which no cache stands in front of: with accounts off there are no groups,
+    // and index.* is shut there — so even if the endpoint's own gate were opened, the swarm section
+    // would not be. (It is not: status.* is shut too, see the legacy check at the top of this file.)
+    $off = $put(['users_enabled' => '0']);
+    check('with accounts off the gates are the legacy defaults, and the swarm stays shut',
+          hashCheckGates($db, $off) === ['seen' => false, 'registered' => true, 'content' => true], json_encode(hashCheckGates($db, $off)));
+    $c2 = $put(['users_enabled' => '1']);
+    check('the index switched off closes the swarm whoever asks', hashCheckGates($db, $put(['index_enabled' => '0']))['seen'] === false);
+    check('… and so does the search being off', hashCheckGates($db, $put(['index_enabled' => '1', 'index_search_enabled' => '0']))['seen'] === false);
+    check('a search configured not to include whitelist rows closes the registration',
+          hashCheckGates($db, $put(['index_search_enabled' => '1', 'index_search_include_whitelist' => '0']))['registered'] === false);
 } finally {
+    $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'guest'")->execute([$guestBefore]);
+    foreach ($savedCfg as $k => $v) { if ($v !== null) setSetting($db, $k, $v); }
     $clean();
 }
 

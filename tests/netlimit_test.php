@@ -703,6 +703,35 @@ exit 1
           && array_slice($cmd, 2) === ['--dry-run', '--steps', '3', '--dwell', '45', '--what', 'outbound'], implode(' ', $cmd));
     check('probe-start: with a lowered priority, like the janitor itself', in_array('--property=Nice=10', $argv, true));
 
+    // ── janitor-heavy-start: the janitor's slow half as a unit of its own ─────
+    $jscript = preg_replace_callback('#^([A-Za-z]):/#', fn($m) => '/' . strtolower($m[1]) . '/', $posix($root . '/tools/janitor.php'));
+    putenv('STUB_ACTIVE=0');
+    foreach ([['janitor-heavy-start', 'no script'], ['janitor-heavy-start /etc/passwd', 'a script that is not tools/janitor.php'],
+              ['janitor-heavy-start tools/janitor.php', 'a relative script path'],
+              ["janitor-heavy-start $jscript --verbose", 'an argument it does not know']] as [$args, $what]) {
+        @unlink($tmp . '/state/sdrun');
+        $r = $run($args);
+        check("janitor-heavy-start: refuses $what", $r['rc'] !== 0 && is_array($r['json']) && $r['json']['ok'] === false && !is_file($tmp . '/state/sdrun'), $r['out']);
+    }
+    @unlink($tmp . '/state/sdrun');
+    $r = $run("janitor-heavy-start $jscript");
+    $argv = is_file($tmp . '/state/sdrun') ? file($tmp . '/state/sdrun', FILE_IGNORE_NEW_LINES) : [];
+    check('janitor-heavy-start: starts it through systemd-run', $r['rc'] === 0 && ($r['json']['via'] ?? '') === 'unit' && ($r['json']['unit'] ?? '') === 'tracker-janitor-heavy.service', $r['out']);
+    check('janitor-heavy-start: as a named, collected unit at a lowered priority',
+          in_array('--unit=tracker-janitor-heavy', $argv, true) && in_array('--collect', $argv, true) && in_array('--property=Nice=10', $argv, true), implode(' ', $argv));
+    $uidArg = array_values(array_filter($argv, fn($a) => str_starts_with($a, '--uid=')));
+    check('janitor-heavy-start: as the caller, never root', $uidArg !== [] && $uidArg[0] !== '--uid=0', implode(' ', $argv));
+    $sep = array_search('--', $argv, true);
+    $cmd = $sep === false ? [] : array_slice($argv, $sep + 1);
+    check('janitor-heavy-start: the command is php, the script and --heavy — nothing else',
+          count($cmd) === 3 && str_contains($cmd[0], 'php') && $cmd[1] === $jscript && $cmd[2] === '--heavy', implode(' ', $cmd));
+    putenv('STUB_ACTIVE=1');
+    @unlink($tmp . '/state/sdrun');
+    $r = $run("janitor-heavy-start $jscript");
+    check('janitor-heavy-start: one at a time — refuses with active:true while the previous run is going',
+          $r['rc'] === 5 && ($r['json']['active'] ?? false) === true && !is_file($tmp . '/state/sdrun'), $r['out']);
+    putenv('STUB_ACTIVE=0');
+
     putenv('STUB_ACTIVE=1');
     @unlink($tmp . '/state/sdrun');
     $r = $run("probe-start $script --python pystub --run");

@@ -11,6 +11,7 @@
  * admin password.
  */
 
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();   // polled: never hold the session lock across the read
 $now = time();
 $dir = backupDir($cfg);
 $cmdSet = backupCommand($cfg) !== '';

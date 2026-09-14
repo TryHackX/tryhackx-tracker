@@ -314,6 +314,7 @@ $intClamp = [
     // Lists (v51). The same shape as fav_max_per_user: a ceiling that keeps one person's collection
     // from becoming everybody's query cost, clamped rather than refused.
     'lists_max_per_user' => [1, 200, 20], 'lists_max_items' => [10, 5000, 500],
+    'fav_max_per_user' => [10, 5000, 500], 'auth_bridge_ttl' => [30, 900, 120],
     'pm_max_per_day' => [1, 1000, 50], 'pm_max_chars' => [200, 20000, 4000],
     'index_keep_saved_days' => [1, 3650, 90],
     // 0 is a real answer here — it means "do not poll at all" — so the floor is 0 and

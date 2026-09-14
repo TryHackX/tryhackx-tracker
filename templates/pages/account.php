@@ -305,6 +305,12 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
 
 </div><?php /* /#acc-pane-overview */ ?>
 
+<?php /* The cluster's extra announce ports, the way templates/pages/search.php emits them: with
+         several opentracker ports a magnet that names only the two from Settings sends the client
+         to a fraction of the swarm. Computed once — all three sections below carry it. */
+$accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
+                                    array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')]))); ?>
+
 <?php if ($accFav['may_use']): ?>
 <div class="acc-pane" id="acc-pane-favourites" hidden>
     <h2 class="section-heading-spaced"><?= _h('account.fav_heading') ?></h2>
@@ -312,6 +318,7 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
          data-magnet="<?= userCan($db, $cfg, 'index.magnet') ? '1' : '0' ?>"
          data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>"
          data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
+         data-announce-extra="<?= sanitize(implode(' ', $accExtra)) ?>"
          data-empty-text="<?= _h('account.fav_none') ?>">
         <div class="profile-toolbar">
             <input type="text" class="profile-search" id="af-search" maxlength="120" placeholder="<?= _h('profile.search_ph') ?>" autocomplete="off">
@@ -340,6 +347,7 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
          data-may-publish="<?= $accFav['uploads_pub'] ? '1' : '0' ?>"
          data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>"
          data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
+         data-announce-extra="<?= sanitize(implode(' ', $accExtra)) ?>"
          data-empty-text="<?= _h('account.uploads_none') ?>">
         <div class="profile-toolbar">
             <input type="text" class="profile-search" id="au-search" maxlength="120" placeholder="<?= _h('profile.search_ph') ?>" autocomplete="off">
@@ -417,13 +425,17 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
     <h2 class="section-heading-spaced"><?= _h('account.tab_lists') ?></h2>
     <div id="account-lists" class="profile-section"
          data-magnet="<?= userCan($db, $cfg, 'index.magnet') ? '1' : '0' ?>"
-         data-share="<?= ($cfg['search_share_enabled'] ?? '1') === '1' ? '1' : '0' ?>"
+         <?php /* Sharing a list hands over a PROFILE address (?action=u&name=…#list:<slug>), so it
+                  needs the site's Share switch AND profiles to be on. With profiles off the button
+                  would copy a link to a page that answers "not found". */ ?>
+         data-share="<?= (($cfg['search_share_enabled'] ?? '1') === '1' && profilesEnabled($cfg)) ? '1' : '0' ?>"
          data-may-publish="<?= $accLists['may_publish'] ? '1' : '0' ?>"
          data-public-ok="<?= $accLists['public_ok'] ? '1' : '0' ?>"
          data-max-lists="<?= (int)$accLists['max_lists'] ?>"
          data-max-items="<?= (int)$accLists['max_items'] ?>"
          data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>"
-         data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>">
+         data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
+         data-announce-extra="<?= sanitize(implode(' ', $accExtra)) ?>">
         <div class="profile-toolbar">
             <input type="text" class="profile-search" id="ul-search" maxlength="80" placeholder="<?= _h('lists.search_ph') ?>" autocomplete="off">
             <?php /* A shelf of lists is searched by the NAME of the list — until somebody is looking

@@ -42,7 +42,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
         }
         $perDay = pmMaxPerDay($cfg);
-        if (pmSentToday($db, $uid) >= $perDay) jsonResponse(['error' => 'day_limit', 'limit' => $perDay], 429);
+        // The count and the insert under one lock on the account's row: two requests from one
+        // account in the same instant both read "one below the limit" otherwise, and the ceiling is
+        // only the IP one in practice. Every refusal below exits, which rolls this back.
+        $db->beginTransaction();
+        $db->prepare("SELECT id FROM users WHERE id = ? FOR UPDATE")->execute([$uid]);
+        if (pmSentToday($db, $uid) >= $perDay) { $db->rollBack(); jsonResponse(['error' => 'day_limit', 'limit' => $perDay], 429); }
 
         $name = trim((string)($input['to'] ?? ''));
         $them = userValidUsername($name) ? userFindByLogin($db, $name) : null;
@@ -71,6 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // hiding is "I am done with this for now", not "never show me this person again".
         $db->prepare("UPDATE message_threads SET last_message_at = NOW(), u_low_hidden = 0, u_high_hidden = 0 WHERE id = ?")
            ->execute([(int)$thread['id']]);
+        $db->commit();
         // No notification. The message IS the notification: it is counted on the Messages tab and
         // added into the number on the account link, and reading it clears both. A second record of
         // the same event was a number that stayed up after the conversation had been read.
@@ -224,6 +230,10 @@ $with = trim((string)($_GET['with'] ?? ''));
 if ($with !== '') {
     $them = userValidUsername($with) ? userFindByLogin($db, $with) : null;
     if (!$them) jsonResponse(['error' => 'not_found'], 404);
+    // Hidden from this reader by a block: the same not-found the profile gives, old lines included —
+    // see pmCanWrite().
+    $hid = blockRow($db, (int)$them['id'], $uid);
+    if ($hid !== null && !empty($hid['hide_profile'])) jsonResponse(['error' => 'not_found'], 404);
     $thread = pmThreadFor($db, $uid, (int)$them['id'], false);
     if (!$thread) {
         // No conversation yet is not an error: it is an empty one, and the page needs to know

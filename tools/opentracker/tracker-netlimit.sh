@@ -24,6 +24,8 @@
 #   tracker-netlimit.sh off [--dry-run]            delete the table and the file (traffic unthrottled)
 #   tracker-netlimit.sh egress <pps> [--dry-run]   change the rate of the EXISTING `inet ottrack` budget
 #   tracker-netlimit.sh probe-start <tools/tuner.py> [--python P] --run|--dry-run [--steps N] [--dwell S] [--what W]
+#   tracker-netlimit.sh janitor-heavy-start <tools/janitor.php>   the janitor's slow half as its own
+#                                                  transient unit (tracker-janitor-heavy.service)
 #                                                  start the stability probe as its own transient
 #                                                  systemd unit (tracker-probe.service), as the caller
 #
@@ -956,6 +958,7 @@ action_egress() {
 # Without systemd-run this verb refuses (with "no_systemd":true) and the panel falls back to a plain
 # background job, which is fine under cron and honestly impossible under a systemd timer.
 PROBE_UNIT="tracker-probe"
+HEAVY_UNIT="tracker-janitor-heavy"
 SYSTEMD_RUN="${SYSTEMD_RUN:-systemd-run}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 
@@ -1030,6 +1033,54 @@ action_probe_start() {
         "$(jstr "$PROBE_UNIT.service")" "$uid" "$gid"
 }
 
+# The janitor's slow half (the index poll, the whitelist upkeep) as a unit of its own, so the minute
+# tick that samples the charts is never the process that spends minutes on a scrape. Same rules as
+# probe-start: an absolute path the helper recognises, the config directory's owner, never root, one
+# at a time, a lowered priority. The janitor calls this every minute; "active" is the usual answer
+# while a run is going, and the tick comes back later.
+action_janitor_heavy_start() {
+    local script="${1-}"; shift || true
+    [ -n "$script" ] || fail "janitor-heavy-start needs the path of tools/janitor.php"
+    [ $# -eq 0 ] || fail "janitor-heavy-start takes the script path and nothing else"
+    case "$script" in
+        /*/tools/janitor.php) ;;
+        *) fail "janitor-heavy-start only starts an absolute path ending in /tools/janitor.php (got '$script')" ;;
+    esac
+    [ -f "$script" ] || fail "the janitor script does not exist: $script"
+    local phpbin
+    phpbin="$(command -v php 2>/dev/null || true)"
+    [ -n "$phpbin" ] || fail "janitor-heavy-start: php is not on the path"
+    local uid="${SUDO_UID:-0}" gid="${SUDO_GID:-0}" cfgdir
+    cfgdir="$(dirname "$(dirname "$script")")/config"
+    if [ "$uid" = "0" ]; then
+        uid="$(stat -c %u "$cfgdir" 2>/dev/null || echo 0)"
+        gid="$(stat -c %g "$cfgdir" 2>/dev/null || echo 0)"
+    fi
+    is_uint "$uid" && is_uint "$gid" || fail "janitor-heavy-start: could not work out which user to run it as"
+    [ "$uid" != "0" ] || fail "janitor-heavy-start: refusing to run the janitor as root"
+    if ! command -v "$SYSTEMD_RUN" >/dev/null 2>&1; then
+        printf '{"ok":false,"no_systemd":true,"error":%s}\n' \
+            "$(jstr "systemd-run is not available here, so the slow half runs inline")"
+        exit 6
+    fi
+    local st
+    st="$("$SYSTEMCTL_BIN" is-active "$HEAVY_UNIT.service" 2>/dev/null || true)"
+    case "$st" in
+        active|activating|deactivating|reloading)
+            printf '{"ok":false,"active":true,"error":%s}\n' "$(jstr "the previous run is still going as $HEAVY_UNIT.service")"
+            exit 5 ;;
+    esac
+    "$SYSTEMCTL_BIN" reset-failed "$HEAVY_UNIT.service" >/dev/null 2>&1 || true
+    local out
+    out="$("$SYSTEMD_RUN" --quiet --collect --unit="$HEAVY_UNIT" \
+            --description="Tracker janitor, the slow half (index poll, whitelist upkeep)" \
+            --uid="$uid" --gid="$gid" --property=Nice=10 \
+            -- "$phpbin" "$script" --heavy 2>&1)" \
+        || fail "systemd-run refused to start the slow half: $out" 3
+    printf '{"ok":true,"started":true,"via":"unit","unit":%s,"uid":%s,"gid":%s}\n' \
+        "$(jstr "$HEAVY_UNIT.service")" "$uid" "$gid"
+}
+
 # Every reply is captured first and written in a single printf. A command substitution that leaks a
 # line to stderr can then only produce a SEPARATE line — never one spliced into the middle of the
 # JSON, which is what made a healthy firewall report itself as unavailable.
@@ -1047,6 +1098,7 @@ case "${1:-status}" in
     persist) action_persist ;;
     egress)  shift; action_egress "${1-}" "${2-}" ;;
     probe-start) shift; action_probe_start "$@" ;;
+    janitor-heavy-start) shift; action_janitor_heavy_start "$@" ;;
     -h|--help|help)
         sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//' ; exit 0 ;;
     *) fail "unknown action '${1:-}' — use: status | check | monitor [port] | set <pps> [burst] [port] [--trusted=a,b] [--blocked=a,b] [--sets=file] [--dry-run] | persist | off | egress <pps> | probe-start <tools/tuner.py> --run|--dry-run [...]" 1 ;;

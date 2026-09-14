@@ -827,6 +827,16 @@ function whitelistBan(PDO $db, array $cfg, array $hashes, array $ctx = []): arra
             $db->prepare("UPDATE whitelist SET content_status = 'rejected',
                                  content_rejected_note = 'the hash was banned', content_reviewed_at = NOW()
                            WHERE content_status = 'pending' AND info_hash IN ($ph)")->execute($chunk);
+            // The second home (hash_content, 1.53.0) goes the same way — and the PUBLISHED words with
+            // it, which is where it differs from the whitelist above. A whitelist row carries
+            // `banned = 1` on itself, so every reader of that row can see the ban; a hash_content row
+            // has no such column and the ban list is the only witness. Withholding therefore rests on
+            // each reader remembering to ask it, and one that forgets publishes a banned torrent's
+            // description. The text is kept, as contentReject() keeps it — only its status changes.
+            $db->prepare("UPDATE hash_content SET content_status = 'rejected',
+                                 content_rejected_note = ?, content_reviewed_at = NOW()
+                           WHERE content_status IN ('pending', 'approved') AND info_hash IN ($ph)")
+               ->execute(array_merge(['the hash was banned'], $chunk));
             $db->prepare("UPDATE wl_content_edits SET status = 'rejected', reviewed_at = NOW(),
                                  note = 'the hash was banned'
                            WHERE status = 'pending' AND info_hash IN ($ph)")->execute($chunk);

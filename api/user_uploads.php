@@ -29,7 +29,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$me) jsonResponse(['error' => 'login_required'], 401);
     if ((string)($input['op'] ?? '') !== 'visibility') jsonResponse(['error' => __('api.index.unknown_op')], 400);
     if (!uploadsPublicEnabled($cfg)) jsonResponse(['error' => 'uploads_public_disabled'], 403);
-    if (!userCan($db, $cfg, 'uploads.public')) jsonResponse(['error' => 'no_permission'], 403);
+    // The GRANT, not userCan(): putting a submission on a profile is consent, and every reader of
+    // that profile asks the grant (userIdHasGrantedPermission, includes/favourites.php). An
+    // administrator whose group does not carry it could flip this switch and watch nothing happen.
+    if (!userIdHasGrantedPermission($db, $cfg, (int)$me['id'], 'uploads.public')) jsonResponse(['error' => 'no_permission'], 403);
     $hash = strtolower(trim((string)($input['hash'] ?? '')));
     if (!preg_match('/^[0-9a-f]{40}$/', $hash)) jsonResponse(['error' => __('api.common.invalid_hash')], 400);
     // Authorised by submitter_id and nothing else: this changes a row, and the only person who may
@@ -64,6 +67,11 @@ if ($who === '') {
     $owner = userFindByLogin($db, $who);
     if (!$owner || ($owner['status'] ?? '') !== 'active') jsonResponse(['error' => 'not_found'], 404);
     $isOwn = (int)$owner['id'] === (int)($me['id'] ?? 0);
+    // A `hide_profile` block closes the page for this reader; the endpoint behind it answers the
+    // same 404, or the page they cannot open serves its contents as JSON.
+    if (!$isOwn && profileHiddenFrom($db, (int)$owner['id'], (int)$me['id'])) {
+        jsonResponse(['error' => 'not_found'], 404);
+    }
     if (!$isOwn && !userIdHasGrantedPermission($db, $cfg, (int)$owner['id'], 'uploads.public')) {
         jsonResponse(['error' => 'not_found'], 404);
     }
@@ -144,5 +152,8 @@ jsonResponse([
     'page'       => $page,
     'pages'      => max(1, (int)ceil($total / $perPage)),
     'per_page'   => $perPage,
-    'may_publish'=> $isOwn && uploadsPublicEnabled($cfg) && userCan($db, $cfg, 'uploads.public'),
+    // The grant, the same question the POST above asks and the same one every reader of this
+    // profile asks. A control drawn from a different answer is a control that saves nothing.
+    'may_publish'=> $isOwn && uploadsPublicEnabled($cfg)
+                    && userIdHasGrantedPermission($db, $cfg, (int)($me['id'] ?? 0), 'uploads.public'),
 ]);

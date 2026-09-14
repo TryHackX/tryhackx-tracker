@@ -228,8 +228,12 @@ function userLegacyDefault(string $perm): bool {
     // The other way round from rating.* and content.*, and for the reason that decides both: those
     // two work without accounts, so answering false would switch them off for every install that
     // does not use the user system. Favourites and profiles do not exist without an account at all —
-    // there is nothing to be permissive about.
-    if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.') || str_starts_with($perm, 'sounds.')) return false;
+    // there is nothing to be permissive about. status.* is here for the opposite reason: the hash
+    // check is a free oracle over the catalogue (includes/hashcheck.php), granted to members and
+    // withheld from guests by default — with accounts off there is no "member", so opening it would
+    // hand every passer-by the one thing the grant exists to hold back.
+    if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.')
+        || str_starts_with($perm, 'sounds.') || str_starts_with($perm, 'status.')) return false;
     return !str_starts_with($perm, 'index.');
 }
 
@@ -313,11 +317,29 @@ function userCreate(PDO $db, array $cfg, string $username, string $email, string
     return ['user' => userFindById($db, $id)];
 }
 
+/**
+ * Is this account allowed in? 'active', or a timed ban whose date has passed. The janitor tidies the
+ * two columns afterwards (userLiftExpiredPunishments) but nothing waits for it: a ban ends when its
+ * date says so, the way a mute does (pmMutedUntil) — not a minute later, and not never when the
+ * timer is down. Everything that decides on `status` asks this.
+ */
+function userIsActive(array $u): bool {
+    $status = (string)($u['status'] ?? '');
+    if ($status === 'active') return true;
+    if ($status !== 'banned') return false;
+    $until = $u['banned_until'] ?? null;
+    return $until !== null && (string)$until !== '' && strtotime((string)$until) <= time();
+}
+
 /** Verify credentials. Returns the user row (status checked by the caller) or null. */
 function userAuthenticate(PDO $db, string $login, string $password): ?array {
     $u = userFindByLogin($db, $login);
-    // burn ~the same time when the user does not exist
-    $hash = $u['pass_hash'] ?? '$2y$10$usesomesillystringfore7hnbRJHxXVLeakoG8K30oukPsA.ztMG';
+    // burn ~the same time when the user does not exist — at the SAME cost the real hashes carry.
+    // PASSWORD_DEFAULT is bcrypt 12 on PHP >= 8.4; a cost-10 literal answered a nonexistent login
+    // four times faster, which is a way to tell the two apart.
+    static $dummy = null;
+    if ($dummy === null) $dummy = password_hash('this-account-does-not-exist', PASSWORD_DEFAULT);
+    $hash = $u['pass_hash'] ?? $dummy;
     $ok = password_verify($password, $hash);
     return ($ok && $u) ? $u : null;
 }
@@ -409,6 +431,15 @@ function userMaybeOpenPanelSession(PDO $db, array $user): void {
             return;
         }
     }
+    // The PANEL's own second factor (Settings → Security), where the owner switched it on: a sign-in
+    // through the account must not be a way around it. An account with an armed member factor has
+    // shown one in this very sign-in; any other stays out of the panel until it arms one — the
+    // account page says so and offers the switch.
+    if (function_exists('twofaEnabled') && twofaEnabled()
+        && !(function_exists('user2faEnabled') && user2faEnabled($db, (int)$user['id']))) {
+        $_SESSION['panel_needs_2fa'] = true;
+        return;
+    }
     unset($_SESSION['panel_needs_2fa']);
     $_SESSION['loggedin'] = true;
     $_SESSION['login_time'] = time();
@@ -466,7 +497,7 @@ function userTryRememberLogin(PDO $db): ?array {
     $tok = $st->fetch(PDO::FETCH_ASSOC);
     if (!$tok) return null;
     $u = userFindById($db, (int)$m[1]);
-    if (!$u || $u['status'] !== 'active') return null;
+    if (!$u || !userIsActive($u)) return null;
     if ((int)($u['sessions_valid_from'] ?? 0) > (int)$tok['born']) return null;
     // rotate: burn this token, hand out a fresh one (stolen-cookie replay shows up as a failed login)
     $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE type = 'remember' AND user_id = ? AND token_hash = ?")
@@ -555,6 +586,18 @@ function userSignOutOthers(PDO $db, int $userId, bool $keepCurrent = true): int
     // this request is now.
     if ($keepCurrent && session_status() === PHP_SESSION_ACTIVE && (int)($_SESSION['user_id'] ?? 0) === $userId) {
         $_SESSION['user_login_time'] = $now;
+        // The panel session this browser holds through the account survives on the same terms.
+        if ((int)($_SESSION['admin_via_user'] ?? 0) === $userId) $_SESSION['login_time'] = $now;
+    }
+    // The kept cookie was born before the stamp, and userTryRememberLogin() refuses exactly that the
+    // moment this PHP session lapses — so it is spent now and reissued with its own expiry. The
+    // browser that asked keeps walking back in; the others do not.
+    if ($keepHash !== '') {
+        $st = $db->prepare("SELECT UNIX_TIMESTAMP(expires_at) FROM user_tokens WHERE user_id = ? AND type = 'remember' AND token_hash = ?");
+        $st->execute([$userId, $keepHash]);
+        $exp = (int)($st->fetchColumn() ?: 0);
+        $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE user_id = ? AND type = 'remember' AND token_hash = ?")->execute([$userId, $keepHash]);
+        if ($exp > $now) userRememberIssue($db, $userId, $exp);
     }
     return $gone;
 }
@@ -572,7 +615,7 @@ function currentUser(PDO $db): ?array {
     }
     if (!empty($_SESSION['user_id'])) {
         $u = userFindById($db, (int)$_SESSION['user_id']);
-        if ($u && $u['status'] !== 'active') { unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']); $u = null; }
+        if ($u && !userIsActive($u)) { unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']); $u = null; }
         // "Sign out everywhere else", and a password change, stamp users.sessions_valid_from. Any
         // session that began before that instant is over — this is the only place that can end a
         // session belonging to a browser we are not currently talking to.
@@ -582,6 +625,10 @@ function currentUser(PDO $db): ?array {
         // is a comparison this project has already got wrong once.
         if ($u && (int)($u['sessions_valid_from'] ?? 0) > (int)($_SESSION['user_login_time'] ?? 0)) {
             unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']);
+            // … and the panel session that rode in on this account, when this is that browser.
+            if ((int)($_SESSION['admin_via_user'] ?? 0) === (int)$u['id']) {
+                unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+            }
             $u = null;
         }
         // A session OPENED THROUGH THE BRIDGE ends when the far side says the person signed out
@@ -796,7 +843,11 @@ function userIdHasPermission(PDO $db, array $cfg, int $userId, string $perm): bo
 
 /** Does this user hold panel.access through any of their active groups? */
 function userHasPanelAccess(PDO $db, int $userId): bool {
-    $p = userEffectivePermissions($db, $userId);
+    // With the configuration, so the e-mail verification gate applies here as it does in
+    // userIdHasPermission(): an unverified account in a panel group is a guest everywhere, not a
+    // guest on the site and a moderator in the panel.
+    $cfg = $GLOBALS['cfg'] ?? null;
+    $p = userEffectivePermissions($db, $userId, is_array($cfg) ? $cfg : null);
     return !empty($p['panel.access']);
 }
 
@@ -818,7 +869,7 @@ function panelCan(PDO $db, array $cfg, string $perm): bool {
     $viaUser = (int)($_SESSION['admin_via_user'] ?? 0);
     if ($viaUser <= 0) return true;                 // the owner's own session
     if (userIsAdminGroup($db, $viaUser)) return true;
-    $p = userEffectivePermissions($db, $viaUser);
+    $p = userEffectivePermissions($db, $viaUser, $cfg);   // the same gate userIdHasPermission() applies
     return !empty($p[$perm]);
 }
 

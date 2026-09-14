@@ -108,10 +108,25 @@ function favToggle(PDO $db, array $cfg, int $userId, string $hash, ?bool $want =
     if ($target) {
         // Checked here rather than by a trigger so the reply can say WHY, and checked before the
         // insert so the limit is a limit rather than a suggestion.
-        if (favCountOf($db, $userId) >= favMaxPerUser($cfg)) {
-            return ['on' => false, 'changed' => false, 'error' => 'fav_limit', 'limit' => favMaxPerUser($cfg)];
+        //
+        // COUNT and INSERT are two statements, and between them another tab can insert too: both
+        // read `max - 1`, both write, and the ceiling is crossed by whoever taps faster. So they run
+        // in one transaction behind `SELECT … FOR UPDATE` on the account's own row — the cheapest
+        // lock that serialises ONE account against itself and nobody else against anything.
+        $tx = !$db->inTransaction();
+        try {
+            if ($tx) $db->beginTransaction();
+            $db->prepare("SELECT id FROM users WHERE id = ? FOR UPDATE")->execute([$userId]);
+            if (favCountOf($db, $userId) >= favMaxPerUser($cfg)) {
+                if ($tx) $db->rollBack();
+                return ['on' => false, 'changed' => false, 'error' => 'fav_limit', 'limit' => favMaxPerUser($cfg)];
+            }
+            $db->prepare("INSERT IGNORE INTO user_favourites (user_id, info_hash) VALUES (?, ?)")->execute([$userId, $hash]);
+            if ($tx) $db->commit();
+        } catch (\Throwable $e) {
+            if ($tx && $db->inTransaction()) $db->rollBack();
+            throw $e;
         }
-        $db->prepare("INSERT IGNORE INTO user_favourites (user_id, info_hash) VALUES (?, ?)")->execute([$userId, $hash]);
         return ['on' => true, 'changed' => true];
     }
     $db->prepare("DELETE FROM user_favourites WHERE user_id = ? AND info_hash = ?")->execute([$userId, $hash]);
@@ -149,8 +164,23 @@ function favMarkFor(PDO $db, int $userId, array $hashes): array {
  * along with it would quietly empty people's lists; a hash on its own is still useful, because
  * magnetFor(hash, name) builds a working magnet from nothing else. A row with no catalogue entry
  * comes back with name === null and the page says so.
+ *
+ * ── what the READER may see, asked by the caller ───────────────────────────────────────────────
+ *
+ * $canWl is `whitelist.view` AND index_search_include_whitelist — the same pair api/index_info.php
+ * asks, because this is the same question: a whitelisted hash is deleted out of index_hashes, so the
+ * whitelist arm is the ONLY way its name, size and swarm can reach a reader. A favourites list that
+ * read it anyway served exactly what the search page refuses to.
+ *
+ * $isOwner keeps a banned row for the person whose list it is, and drops it for everybody else. The
+ * owner has to see it to un-star it knowingly; a stranger reading a published list has no such use
+ * for a row the tracker refuses to serve, and dropping it HERE (rather than blanking it later) is
+ * what keeps the count and the rows agreeing.
+ *
+ * Both default to the widest answer so a call that only wants the metadata — a CLI test, a tool —
+ * reads as it always did. Every endpoint passes them.
  */
-function favRowsFor(PDO $db, array $hashes): array {
+function favRowsFor(PDO $db, array $hashes, bool $canWl = true, bool $isOwner = true): array {
     $out = [];
     foreach ($hashes as $h) $out[$h] = ['info_hash' => $h, 'name' => null, 'total_size' => null,
                                         'files_count' => null, 'seeders' => null, 'leechers' => null,
@@ -169,6 +199,8 @@ function favRowsFor(PDO $db, array $hashes): array {
         // so where both exist the whitelist row is the newer truth. `banned` travels with the row —
         // a banned hash still renders, without a magnet, because pretending it is gone would leave
         // the reader with a favourite they can neither see nor remove knowingly.
+        // Skipped entirely without the permission: see the note above the function.
+        if (!$canWl) continue;
         $st = $db->prepare("SELECT info_hash, name, total_size, files_count,
                                    COALESCE(scrape_seeders, 0) AS seeders, COALESCE(scrape_leechers, 0) AS leechers,
                                    COALESCE(scraped_at, updated_at, created_at) AS last_seen, banned
@@ -180,6 +212,8 @@ function favRowsFor(PDO $db, array $hashes): array {
             $out[$r['info_hash']] = $r + ['src' => 'whitelist', 'banned' => $banned];
         }
     }
+    // A stranger's copy of the list has no row the tracker refuses to serve on it.
+    if (!$isOwner) $out = array_filter($out, static fn(array $r): bool => empty($r['banned']));
     return array_values($out);
 }
 
