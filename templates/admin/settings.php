@@ -973,6 +973,61 @@
                 </div>
             </div>
 
+            <div class="settings-section" id="section-sounds" data-group="users" data-title="<?= _h('settings.sounds_heading') ?>">
+                <h5><i class="bi bi-volume-up"></i> <?= _h('settings.sounds_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.sounds_intro') ?></small>
+                <?php $sndLib = soundLibrary($db, $baseUrl); ?>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="sounds_enabled">
+                        <label class="form-label"><?= _h('settings.sounds_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="sounds_enabled">
+                            <option value="1" <?= ($cfg['sounds_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['sounds_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.sounds_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_notification">
+                        <label class="form-label" for="setting-sound_default_notification"><?= _h('settings.sounds_default_notification') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_notification" id="setting-sound_default_notification">
+                                <option value="" <?= (string)($cfg['sound_default_notification'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
+                                <?php foreach ($sndLib as $sndE): ?>
+                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_notification'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" class="btn btn-outline-light btn-sm js-sound-preview" data-target="setting-sound_default_notification" title="<?= _h('settings.sounds_preview') ?>">&#9654;</button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_message">
+                        <label class="form-label" for="setting-sound_default_message"><?= _h('settings.sounds_default_message') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_message" id="setting-sound_default_message">
+                                <option value="" <?= (string)($cfg['sound_default_message'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
+                                <?php foreach ($sndLib as $sndE): ?>
+                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_message'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" class="btn btn-outline-light btn-sm js-sound-preview" data-target="setting-sound_default_message" title="<?= _h('settings.sounds_preview') ?>">&#9654;</button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                </div>
+                <?php /* The uploads: drawn and driven by assets/js/admin-sounds.js. The file input has no name on
+                         purpose — it is not a setting and never travels with the form; the script reads the file
+                         and posts it to admin/sounds as base64. */ ?>
+                <div class="mt-3" id="admin-sounds" data-max-bytes="<?= (int)SOUNDS_MAX_BYTES ?>">
+                    <label class="form-label"><?= _h('settings.sounds_custom') ?></label>
+                    <div id="admin-sounds-list" class="mb-2"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <input type="file" id="admin-sound-file" class="form-control bg-dark text-light border-secondary admin-sound-file" accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav">
+                        <input type="text" id="admin-sound-name" class="form-control bg-dark text-light border-secondary admin-sound-name" maxlength="60" placeholder="<?= _h('settings.sounds_name_ph') ?>">
+                        <button type="button" class="btn btn-outline-light btn-sm" id="admin-sound-upload"><?= _h('settings.sounds_upload') ?></button>
+                    </div>
+                    <small class="settings-hint"><?= __('settings.sounds_custom_hint') ?></small>
+                </div>
+            </div>
+
             <div class="settings-section" id="section-users" data-group="users" data-title="<?= _h('settings.users_title') ?>">
                 <h5><?= _h('settings.users_title') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.users_intro_a') ?> <a href="<?= $baseUrl ?>?action=admin-users"><?= _h('settings.users_page_link') ?></a>. <?= __('settings.users_intro_b') ?></small>
@@ -3410,6 +3465,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
          it admin-twofa.js returns immediately and the section sits on "Reading…" for ever. -->
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-twofa.js<?= assetVer('assets/js/admin-twofa.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-sounds.js<?= assetVer('assets/js/admin-sounds.js') ?>"></script>
     <!-- AFTER admin-common.js, which on this page is loaded below admin-settings.js: the editor
          needs window.AdminCommon and returned early without it, so the dialog never opened. -->
     <script src="<?= $baseUrl ?>assets/js/admin-languages.js<?= assetVer('assets/js/admin-languages.js') ?>"></script>

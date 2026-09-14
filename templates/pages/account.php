@@ -38,8 +38,9 @@ if ($accTwofa['feature']) {
 // The uploads tab is hidden ENTIRELY, not shown empty, where a submission cannot happen — a tab that
 // can only ever be empty teaches people the feature is broken rather than absent.
 $accShowUploads = $accFav['uploads'] && uploadsPublicEnabled($cfg);
+$accSounds = soundsEnabled($cfg) && userCan($db, $cfg, 'sounds.use');
 $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
-        || $accPeople['may_message'] || $accPeople['may_friend'];
+        || $accPeople['may_message'] || $accPeople['may_friend'] || $accSounds;
 ?>
 <div class="account-head">
     <h1><?= __('account.h1_named', ['user' => sanitize($meUser['username'])]) ?></h1>
@@ -96,6 +97,9 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
     <?php endif; ?>
     <?php if ($accPeople['may_directory']): ?>
     <button type="button" class="rt-tab" data-pane="members"><?= _h('people.dir_h1') ?></button>
+    <?php endif; ?>
+    <?php if ($accSounds): ?>
+    <button type="button" class="rt-tab" data-pane="sounds"><?= _h('account.tab_sounds') ?></button>
     <?php endif; ?>
 </div>
 <?php endif; ?>
@@ -591,6 +595,55 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
         </div>
         <div class="profile-list" id="dir-list"></div>
         <div class="trans-pagination" id="dir-pager"></div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($accSounds): ?>
+<?php /* Sounds: which noise answers what, for this reader. The library and the current choices travel
+         in a JSON block; assets/js/sounds.js draws the selects from it, plays the tests exactly as a
+         real event would sound (pre-roll first), and saves through user_sound_prefs. */ ?>
+<?php $sndLib = soundLibrary($db, $baseUrl); $sndPrefs = soundPrefsFor($db, $meUser, $sndLib); ?>
+<div class="acc-pane" id="acc-pane-sounds" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.tab_sounds') ?></h2>
+    <div id="account-sounds" class="profile-section">
+        <p class="text-muted lists-intro"><?= __('account.snd_intro') ?></p>
+        <script type="application/json" id="snd-data"<?= nonceAttr() ?>><?= json_encode([
+            'library' => soundLibraryForClient($sndLib), 'prefs' => $sndPrefs, 'defaults' => soundSiteDefaults($cfg, $sndLib),
+            'kinds' => soundEventKinds(),
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
+        <form id="snd-form" class="snd-form">
+            <label class="search-check snd-on"><input type="checkbox" id="snd-on"><span class="search-check-box" aria-hidden="true"></span> <?= _h('account.snd_on') ?></label>
+            <div class="snd-row">
+                <label for="snd-vol"><?= _h('account.snd_volume') ?></label>
+                <input type="range" id="snd-vol" min="0" max="100" step="5"> <output id="snd-vol-out" for="snd-vol"></output>
+            </div>
+            <div class="snd-row">
+                <label for="snd-pre"><?= _h('account.snd_pre') ?></label>
+                <select id="snd-pre">
+                    <?php foreach ([0, 500, 1000, 1500, 2000, 3000] as $sndMs): ?>
+                    <option value="<?= $sndMs ?>"><?= $sndMs === 0 ? _h('account.snd_pre_none') : number_format($sndMs / 1000, 1) . ' s' ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <select id="snd-pre-kind">
+                    <option value="silence"><?= _h('account.snd_pre_silence') ?></option>
+                    <option value="hum"><?= _h('account.snd_pre_hum') ?></option>
+                </select>
+            </div>
+            <p class="snd-hint"><?= __('account.snd_pre_hint') ?></p>
+            <?php foreach (soundEventKinds() as $sndKind): ?>
+            <div class="snd-row">
+                <label for="snd-ev-<?= $sndKind ?>"><?= _h('account.snd_ev_' . $sndKind) ?></label>
+                <select id="snd-ev-<?= $sndKind ?>" data-kind="<?= $sndKind ?>"></select>
+                <button type="button" class="btn btn-secondary btn-small snd-test" data-kind="<?= $sndKind ?>">&#9654; <?= _h('account.snd_test') ?></button>
+            </div>
+            <?php endforeach; ?>
+            <p class="snd-hint"><?= __('account.snd_autoplay') ?></p>
+            <div class="snd-acts">
+                <button type="submit" class="btn" id="snd-save"><?= _h('account.snd_save') ?></button>
+                <span class="snd-status" id="snd-status" aria-live="polite"></span>
+            </div>
+        </form>
     </div>
 </div>
 <?php endif; ?>

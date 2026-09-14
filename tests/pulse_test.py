@@ -114,7 +114,7 @@ try:
     check("the badge carries the cadence for the page's loop", 'id="nav-unread" hidden data-pulse="45"' in html)
     src = open(os.path.join(ROOT, "assets", "js", "app.js"), encoding="utf-8").read()
     check("the loop reads it, skips hidden tabs, and shares one answer across tabs",
-          "dataset.pulse" in src and "document.hidden || inFlight" in src and "localStorage.setItem(KEY" in src and "addEventListener('storage'" in src)
+          "dataset.pulse" in src and "document.hidden && !(window.Sounds" in src and "localStorage.setItem(KEY" in src and "addEventListener('storage'" in src)
 
     php("setSetting($db, 'site_live_seconds', '0');")
     s, j = me.api("user_pulse")

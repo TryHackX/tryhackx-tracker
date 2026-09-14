@@ -954,6 +954,17 @@ key *name*, so one added later is covered without anybody remembering, and a mat
 "changed" with no value either side. There is no delete and no edit — a log the panel it records can
 rewrite is not evidence. Retention is a setting; the janitor enforces it.
 
+### A sound when something arrives (1.56.0)
+
+A member picks a short sound for a notification and another for a message on the account page's
+**Sounds** tab; everyone starts muted. The tab sets the volume, the choice per event (site default,
+silence, or one of the library) and a **wake-up before the sound** — the stream is opened up to 3 s
+earlier with silence or a quiet low tone, for amplifiers and HDMI receivers that swallow the first
+second of a stream or stand by until they sense a signal. The library is the clips shipped under
+`assets/sounds/` plus the owner's uploads from **Settings → Sounds** (MP3/Ogg/WAV, 512 KB, 15 s, 40
+at most; kept in the database, sniffed by their bytes). Browsers allow a sound only after a click:
+a small 🔇 note beside the account link says so until then. Permission: `sounds.use` (members).
+
 ### The number on the account link stays current (1.55.0)
 
 Every page a signed-in reader has open asks `api/user_pulse.php` for the two counts behind the badge,

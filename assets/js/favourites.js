@@ -1033,7 +1033,7 @@
     function initTabs() {
         var bar = document.getElementById('acc-tabs');
         if (!bar) return;
-        var panes = ['overview', 'favourites', 'uploads', 'lists', 'messages', 'people', 'members'];
+        var panes = ['overview', 'favourites', 'uploads', 'lists', 'messages', 'people', 'members', 'sounds'];
         function show(name) {
             // `#messages:somebody` opens the inbox AT that conversation — the part before the colon
             // is the pane, the rest belongs to people.js. A tab bar that did not know that fell

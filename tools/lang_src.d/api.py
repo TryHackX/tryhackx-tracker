@@ -1673,3 +1673,18 @@ add('', {
     'api.content.proposed': ('Proposed. A moderator decides whether it replaces what is shown now.',
         'Zaproponowano. Moderator zdecyduje, czy zastąpi to, co jest teraz.'),
 })
+
+# ── 1.56.0: sounds ──────────────────────────────────────────────────────────
+add('', {
+    'api.sounds.name_required': ('Give the sound a name.', 'Nadaj dźwiękowi nazwę.'),
+    'api.sounds.too_small': ('That is too small to be a sound.', 'To za mało, by było dźwiękiem.'),
+    'api.sounds.too_large': ('The file is larger than 512 KB.', 'Plik jest większy niż 512 KB.'),
+    'api.sounds.too_many': ('The library already holds 40 of your own sounds; delete one first.', 'Biblioteka ma już 40 własnych dźwięków; najpierw usuń któryś.'),
+    'api.sounds.not_audio': ('That is not an MP3, Ogg or WAV file — decided from its bytes, not its name.', 'To nie jest plik MP3, Ogg ani WAV — rozstrzygnięto po bajtach, nie po nazwie.'),
+    'api.sounds.too_long': ('A notification sound may last 15 seconds at most.', 'Dźwięk powiadomienia może trwać najwyżej 15 sekund.'),
+    'api.sounds.duplicate': ('That exact file is already in the library.', 'Dokładnie ten plik już jest w bibliotece.'),
+    'api.sounds.uploaded': ('Added. It is offered to every member now.', 'Dodano. Jest już oferowany każdemu członkowi.'),
+    'api.sounds.deleted': ('Deleted.', 'Usunięto.'),
+    'api.sounds.unknown': ('No such sound.', 'Nie ma takiego dźwięku.'),
+    'api.sounds.unknown_op': ('Unknown operation.', 'Nieznana operacja.'),
+})

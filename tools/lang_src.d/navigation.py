@@ -40,3 +40,10 @@ add('', {
     'nav.members': ('Members',
         'Użytkownicy'),
 })
+
+# ── 1.56.0: the note beside the account link while the browser will not let the page play ──
+add('nav', {
+    'sounds_locked': ('sounds: click to enable', 'dźwięki: kliknij, by włączyć'),
+    'sounds_locked_title': ('This browser lets the page play a sound only after a click. Click anywhere.',
+        'Ta przeglądarka pozwala stronie zagrać dopiero po kliknięciu. Kliknij gdziekolwiek.'),
+})

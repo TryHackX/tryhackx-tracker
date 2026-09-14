@@ -105,6 +105,7 @@
             // The account link in the navigation carries one number for the whole account, so the
             // messages half is handed to whoever owns that sum rather than written from here.
             if (window.NavUnread) window.NavUnread.set('pm', n);
+            if (window.Sounds) window.Sounds.observe({ unread_pm: n });   // this tab asked: this tab may play
         }
 
         /**

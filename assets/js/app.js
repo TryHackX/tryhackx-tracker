@@ -2115,6 +2115,7 @@ const getJson = async (endpoint) => {
         }
         window.NavUnread.notif = Math.max(0, Number(me.unread) || 0);
         window.NavUnread.set('pm', me.unread_pm);
+        if (window.Sounds) window.Sounds.observe(me);
         const accBadge = $id('acc-unread-badge');
         if (accBadge) { accBadge.textContent = t('js.app.unread_count', {n: me.unread}); accBadge.hidden = me.unread <= 0; }
     }
@@ -2227,7 +2228,11 @@ const getJson = async (endpoint) => {
         };
         const stored = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { return null; } };
         const tick = async () => {
-            if (stopped || document.hidden || inFlight) return;
+            if (stopped || inFlight) return;
+            // A hidden tab asks nothing — unless this reader wants to HEAR what arrives, which is
+            // exactly the tab they are not looking at. (Browsers slow a hidden tab's timers to about
+            // once a minute, so the cadence is a ceiling there, never a cost.)
+            if (document.hidden && !(window.Sounds && window.Sounds.wants())) return;
             const s = stored();
             // another tab asked recently enough: its answer is this tab's answer
             if (s && typeof s.at === 'number' && Date.now() - s.at < every * 1000 * 0.8) { apply(s); return; }
@@ -2237,6 +2242,7 @@ const getJson = async (endpoint) => {
                 if (!r) return;
                 if (!r.success) { stopped = true; return; }          // signed out meanwhile: stop asking
                 apply(r);
+                if (window.Sounds) window.Sounds.observe(r);   // this tab fetched it: this tab may play
                 try { localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), unread: r.unread, unread_pm: r.unread_pm })); } catch (e) { /* private mode */ }
                 if (Number(r.live) <= 0) stopped = true;             // switched off in Settings since the page loaded
             } finally { inFlight = false; }
@@ -2255,6 +2261,7 @@ const getJson = async (endpoint) => {
                     if (!me || !me.success) return;
                     window.NavUnread.notif = Math.max(0, Number(me.unread) || 0);
                     window.NavUnread.set('pm', me.unread_pm);
+                    if (window.Sounds) window.Sounds.observe(me);   // the baseline: what was already waiting is not news
                 });
             }
             initPulse();

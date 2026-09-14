@@ -33,7 +33,8 @@
         <?php $accountActive = in_array($action, ['account', 'login', 'register', 'reset', 'verify'], true); ?>
         <?php if ($navUser !== null): ?>
         <span class="sep">|</span>
-        <a href="<?= $baseUrl ?>?action=account" class="nav-user <?= $accountActive ? 'active' : '' ?>"><?= sanitize($navUser['username']) ?><span class="nav-unread" id="nav-unread" hidden data-pulse="<?= (int)siteLiveSeconds($cfg) ?>"></span></a>
+        <a href="<?= $baseUrl ?>?action=account" class="nav-user <?= $accountActive ? 'active' : '' ?>"><?= sanitize($navUser['username']) ?><?php $navSounds = soundClientConfig($db, $cfg, $navUser, $baseUrl); ?><span class="nav-unread" id="nav-unread" hidden data-pulse="<?= (int)siteLiveSeconds($cfg) ?>"<?= $navSounds ? ' data-sounds="' . sanitize(json_encode($navSounds, JSON_UNESCAPED_SLASHES)) . '"' : '' ?>></span></a><?php /* Sounds (1.56.0): what this reader plays rides on the badge as data-sounds, and the note beside it is
+         shown by assets/js/sounds.js only while the browser refuses to let the page make a sound. */ ?><?php if ($navSounds): ?><span class="sound-chip" id="sound-chip" hidden title="<?= _h('nav.sounds_locked_title') ?>">&#128263; <?= _h('nav.sounds_locked') ?></span><?php endif; ?>
         <?php elseif (usersLinksVisible($cfg)): ?>
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=login" class="<?= $accountActive ? 'active' : '' ?>"><?= _h('nav.account') ?></a>

@@ -4545,3 +4545,28 @@ add('', {
     'js.msgrep.answered': ('Answered: :text', 'Odpowiedziano: :text'),
     'js.msgrep.noted': ('Note: :text', 'Notatka: :text'),
 })
+
+# ── 1.56.0: sounds ──────────────────────────────────────────────────────────
+add('js.sounds', {
+    'site_default': ('Site default (:name)', 'Domyślny strony (:name)'),
+    'none': ('nothing', 'nic'),
+    'off': ('Off', 'Wyłączony'),
+    'nothing_to_play': ('Nothing is picked for this, and the site has no default.', 'Nic tu nie wybrano, a strona nie ma domyślnego.'),
+    'testing': ('Playing…', 'Odtwarzanie…'),
+    'test_played': ('Played — with the wake-up first, exactly as it will sound.', 'Odtworzono — najpierw rozbieg, dokładnie tak, jak zabrzmi.'),
+    'test_blocked': ('The browser is waiting for a click before it lets this page make a sound. Click anywhere, then try again.',
+        'Przeglądarka czeka na kliknięcie, zanim pozwoli tej stronie wydać dźwięk. Kliknij gdziekolwiek i spróbuj ponownie.'),
+    'test_none': ('Nothing to play.', 'Nie ma czego odtworzyć.'),
+    'test_unsupported': ('This browser cannot play sounds this way.', 'Ta przeglądarka nie potrafi tak odtwarzać dźwięków.'),
+    'test_missing': ('That sound could not be loaded.', 'Nie udało się wczytać tego dźwięku.'),
+    'saved': ('Saved.', 'Zapisano.'),
+    'save_failed': ('Could not save.', 'Nie udało się zapisać.'),
+    'play': ('Play', 'Odtwórz'),
+    'delete': ('Delete', 'Usuń'),
+    'delete_confirm': ('Delete ":name"? Members who picked it fall back to the site default.', 'Usunąć „:name”? Członkowie, którzy go wybrali, wracają do domyślnego strony.'),
+    'no_uploads': ('No sounds of your own yet.', 'Jeszcze nie ma własnych dźwięków.'),
+    'pick_file': ('Pick a file first.', 'Najpierw wybierz plik.'),
+    'too_large': ('That file is larger than :kb KB.', 'Ten plik jest większy niż :kb KB.'),
+    'preview_failed': ('Could not play that.', 'Nie udało się tego odtworzyć.'),
+    'failed': ('Something went wrong.', 'Coś poszło nie tak.'),
+})

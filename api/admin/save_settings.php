@@ -42,6 +42,7 @@ $allowed = [
     'digest_enabled', 'digest_to', 'digest_hours', 'digest_min', 'health_token',
     'user_2fa_enabled', 'user_2fa_required',
     'pm_live_seconds', 'pm_typing_enabled', 'site_live_seconds',
+    'sounds_enabled', 'sound_default_notification', 'sound_default_message',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -383,8 +384,13 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled', 'ot_cluster_enabled',
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
-          'backup_enabled', 'backup_verify_after'] as $k) {
+          'backup_enabled', 'backup_verify_after', 'sounds_enabled'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
+}
+// A site-default sound must be one the library has; anything else is "nothing" (includes/sounds.php).
+foreach (soundEventKinds() as $k) {
+    $key = 'sound_default_' . $k;
+    if (isset($data[$key]) && (string)$data[$key] !== '' && !isset(soundLibrary($db)[(string)$data[$key]])) $data[$key] = '';
 }
 // ── UDP rate limit ──
 // The helper command is handed to the shell, so it gets the same treatment as the mode switch

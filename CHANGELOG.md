@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.56.0] — 2026-09-13
+
+Schema **61** — `sounds` (the owner's uploads, as rows), `users.sound_prefs`, `sounds.use` granted to
+the member group, and three settings (`sounds_enabled`, `sound_default_notification`,
+`sound_default_message`).
+
+### Added — a sound when something arrives
+
+A member can pick a short sound for a notification and another for a message, on a new **Sounds**
+tab of the account page. Everyone starts muted: sounds play only for a reader who switched them on
+there. The tab sets the volume, which sound answers which event (the site default, silence, or a
+pick from the library), and a **wake-up before the sound**: the stream is opened 0–3 s earlier with
+silence or a quiet low tone, for amplifiers and HDMI receivers that wake when a stream starts and
+swallow its first second, or that stand by until they sense a signal. A ▶ beside each choice plays
+it exactly as it will sound, wake-up included.
+
+The library is the thirteen clips shipped under `assets/sounds/` plus what the owner adds from
+**Settings → Sounds** (MP3, Ogg or WAV; up to 512 KB and 15 s; at most 40). An upload is kept in the
+database (`sounds`) and streamed by `api/sound.php` with a sha1-versioned URL and a month of caching;
+what it is gets decided from its bytes — MPEG frames, an Ogg page, a RIFF/WAVE header — never from
+its name or declared type, and the browser is handed the sniffed type with `nosniff`. Settings also
+picks the site default per event; deleting an upload clears a default that named it.
+
+The tab that fetched a count is the tab that plays (`window.Sounds.observe`, fed by the pulse loop
+and the inbox poll), so a reader with six tabs hears one chime; a hidden tab keeps asking while its
+reader wants to hear — the tab they are not looking at is the point. Browsers allow a sound only
+after a click on the page: when the context cannot start, a small 🔇 note appears beside the account
+link and the first click anywhere plays what was waiting. `sounds.use` is a permission (members by
+default); with the feature off in Settings the tab, the endpoints, the script and the note are gone.
+
+### Tests
+
+`tests/sounds_test.php` (the schema and the grant asked of the migration itself, sniffing real and
+fake files, the caps, storing and deleting, the clamps, resolution, the page's config),
+`tests/sounds_test.py` (the four endpoints end to end: visitor, member, the feature switch and the
+permission, the owner's upload, stream, 304, default, delete) and `scratchpad/shots/sounds_check.js`
+(the tab, saving, the badge's config, the autoplay note and the click that lifts it, the pulse
+handing a count to the player, a hidden tab that keeps asking — in a real browser; headless Chrome
+never gates Web Audio, so the check reproduces the gate with the semantics browsers implement).
+
 ## [1.55.0] — 2026-09-13
 
 Schema **60** — a setting only: `site_live_seconds` gets its default row on upgrade.

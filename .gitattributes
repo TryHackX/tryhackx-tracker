@@ -30,3 +30,8 @@ tools/opentracker/bin/* binary
 # Patches must keep LF whatever the checkout does: `patch` counts bytes, and CRLF in a hunk makes
 # every line fail to match on a Linux source tree.
 *.patch text eol=lf
+
+# Sounds (1.56.0): shipped clips — never line-ending-normalised
+*.mp3   binary
+*.ogg   binary
+*.wav   binary

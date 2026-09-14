@@ -162,3 +162,24 @@ add('', {
     'account.twofa_required_panel': ('Your account can open the admin panel, and this site asks those accounts for a second factor. <strong>Until you set one up the panel will not open</strong> — everything else about your account works as usual.',
         'Twoje konto może otworzyć panel administracyjny, a takie konta ta strona prosi o drugi składnik. <strong>Dopóki go nie ustawisz, panel się nie otworzy</strong> — cała reszta konta działa normalnie.'),
 })
+
+# ── 1.56.0: sounds ──────────────────────────────────────────────────────────
+add('', {
+    'account.tab_sounds': ('Sounds', 'Dźwięki'),
+    'account.snd_intro': ('A short sound when something arrives while a page of this site is open — also in a tab you are not looking at. Off until you switch it on here.',
+        'Krótki dźwięk, gdy coś przychodzi, a strona tej witryny jest otwarta — także w karcie, na którą nie patrzysz. Wyłączone, dopóki tu nie włączysz.'),
+    'account.snd_on': ('Play sounds', 'Odtwarzaj dźwięki'),
+    'account.snd_volume': ('Volume', 'Głośność'),
+    'account.snd_pre': ('Wake-up before the sound', 'Rozbieg przed dźwiękiem'),
+    'account.snd_pre_none': ('none', 'brak'),
+    'account.snd_pre_silence': ('silence', 'cisza'),
+    'account.snd_pre_hum': ('a quiet low tone', 'cichy niski ton'),
+    'account.snd_pre_hint': ('For speakers or an amplifier that wake up when a stream starts and swallow its first second (HDMI receivers do): the stream is opened this long before the sound. <em>A quiet low tone</em> also wakes amplifiers that stand by until they sense a signal.',
+        'Dla głośników lub wzmacniacza, które budzą się, gdy strumień rusza, i gubią jego pierwszą sekundę (tak robią odbiorniki HDMI): strumień jest otwierany o tyle wcześniej przed dźwiękiem. <em>Cichy niski ton</em> budzi też wzmacniacze, które czuwają, aż wyczują sygnał.'),
+    'account.snd_ev_notification': ('A notification', 'Powiadomienie'),
+    'account.snd_ev_message': ('A message', 'Wiadomość'),
+    'account.snd_test': ('Test', 'Test'),
+    'account.snd_autoplay': ('Browsers let a page make a sound only after you have clicked or typed on it. Until then a small &#128263; note appears beside your name at the top, and the first click anywhere plays what was waiting.',
+        'Przeglądarki pozwalają stronie wydać dźwięk dopiero po tym, jak na niej klikniesz albo coś wpiszesz. Do tego czasu przy twoim imieniu u góry pojawia się mała notka &#128263;, a pierwsze kliknięcie gdziekolwiek odtwarza to, co czekało.'),
+    'account.snd_save': ('Save', 'Zapisz'),
+})

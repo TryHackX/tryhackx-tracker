@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 60;  // 60 = a setting only: site_live_seconds, so an upgraded install gets the row and its default
+const TRACKER_SCHEMA_VERSION = 61;  // 61 = sounds (the owner's uploads, as rows) + users.sound_prefs + sounds.use to the member group + sounds_enabled / sound_default_* settings
+                                    // 60 = a setting only: site_live_seconds, so an upgraded install gets the row and its default
                                     // 59 = message_reports.reply — what the moderator answered the reporter, kept beside the log note
                                     // 58 = hash_content (words about a torrent the tracker has only seen), whitelist.content_user_id, proposals that may belong to either home, and content.view to the member group
                                     // 57 = a grant only: status.hash_check to the member group — the status page can be asked what the tracker knows about a hash
@@ -441,6 +442,8 @@ function trackerSchemaStatements(): array {
             -- remember is the one who was angry a week ago.
             `pm_muted_until` DATETIME DEFAULT NULL,
             `banned_until` DATETIME DEFAULT NULL,
+            -- v61: what this reader chose to hear (includes/sounds.php): a JSON blob, NULL = never asked = muted
+            `sound_prefs` VARCHAR(600) DEFAULT NULL,
             -- v53. The instant every OTHER session of this account stopped counting: a unix time,
             -- stamped by 'sign out everywhere else' and by a password change. A UNIX TIMESTAMP and
             -- not a DATETIME on purpose — it is compared against the session login time, which
@@ -733,6 +736,22 @@ function trackerSchemaStatements(): array {
         //
         // A table rather than a cache: this install may be two web servers behind one database, and
         // an APCu entry on one of them is a fact the other cannot see.
+        // ── Sounds (v61, includes/sounds.php): the owner's uploads, as rows ─────────────────────────
+        // A row rather than a file: the web root is installed read-only on purpose, and a backup that
+        // carries the database carries these. Capped at 512 KB and forty rows by the code that writes
+        // them; `sha1` keeps the same file from being stored twice and versions its URL.
+        "CREATE TABLE IF NOT EXISTS `sounds` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `name` VARCHAR(60) NOT NULL,
+            `mime` VARCHAR(32) NOT NULL,
+            `bytes` INT UNSIGNED NOT NULL,
+            `duration_ms` INT UNSIGNED DEFAULT NULL,
+            `sha1` CHAR(40) NOT NULL,
+            `data` MEDIUMBLOB NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_sounds_sha1` (`sha1`)
+        ) $engine",
+
         "CREATE TABLE IF NOT EXISTS `message_typing` (
             `thread_id` INT UNSIGNED NOT NULL,
             `user_id` INT UNSIGNED NOT NULL,
@@ -1123,6 +1142,8 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // v55: the two moments a moderator can set — see the CREATE above.
     if (!schemaColumnExists($db, 'users', 'pm_muted_until')) $uparts[] = "ADD COLUMN `pm_muted_until` DATETIME DEFAULT NULL";
     if (!schemaColumnExists($db, 'users', 'banned_until')) $uparts[] = "ADD COLUMN `banned_until` DATETIME DEFAULT NULL";
+    // v61: what this reader chose to hear — see the CREATE above.
+    if (!schemaColumnExists($db, 'users', 'sound_prefs')) $uparts[] = "ADD COLUMN `sound_prefs` VARCHAR(600) DEFAULT NULL";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
 
     // v56: a message no longer leaves a notification behind.
@@ -1268,6 +1289,19 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'message_reports', 'reply')) {
         $out[] = "ALTER TABLE `message_reports` ADD COLUMN `reply` VARCHAR(500) DEFAULT NULL";
     }
+
+    // v61: the owner's sound uploads. Same definition as the CREATE above.
+    $out[] = "CREATE TABLE IF NOT EXISTS `sounds` (
+        `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        `name` VARCHAR(60) NOT NULL,
+        `mime` VARCHAR(32) NOT NULL,
+        `bytes` INT UNSIGNED NOT NULL,
+        `duration_ms` INT UNSIGNED DEFAULT NULL,
+        `sha1` CHAR(40) NOT NULL,
+        `data` MEDIUMBLOB NOT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_sounds_sha1` (`sha1`)
+    ) $engine";
 
     // v54: who is typing, right now. Same definition as the CREATE above.
     $out[] = "CREATE TABLE IF NOT EXISTS `message_typing` (
@@ -1707,6 +1741,12 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
         'member' => ['content.view'],
     ]);
 
+    // v61: choosing a sound is a member's feature — the preferences live on the account, so a guest
+    // has nowhere to keep them, and there is nothing to grant a guest.
+    schemaGrantOnce($db, 'v61_sounds', [
+        'member' => ['sounds.use'],
+    ]);
+
     schemaGrantOnce($db, 'v24_content_rating', [
         'guest'  => ['rating.vote', 'content.submit', 'content.propose'],
         'member' => ['rating.vote', 'content.submit', 'content.propose'],
@@ -2140,6 +2180,14 @@ function trackerSchemaDefaultSettings(): array {
         // counts. On by default, once a minute: two indexed COUNTs per reader per minute is what a
         // badge that is not a snapshot costs, and one tab asks for all of them (localStorage lease).
         'site_live_seconds'           => '60',  // 0 = off; otherwise clamped [10, 300]
+        // ── Sounds (v61, includes/sounds.php) ──────────────────────────────────────────────────
+        // The feature is on, but every reader starts MUTED (users.sound_prefs): a page that begins
+        // making noise uninvited is a page people mute for good. The two defaults name what plays for
+        // a reader who switched sounds on and left the choice to the site; '' is "nothing", and the
+        // owner picks from Settings → Sounds.
+        'sounds_enabled'              => '1',
+        'sound_default_notification'  => '',
+        'sound_default_message'       => '',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

@@ -70,6 +70,8 @@ function userPermissionList(): array {
         // state), banned, seen in the swarm, metadata, files. Answered for unknown hashes too, which
         // is why it is a grant and not a page anyone may hammer.
         'status.hash_check' => 'Ask the status page what this tracker knows about a hash (registered, banned, seen in the swarm, metadata, files)',
+        // A member's feature by nature: the choices live on the account (users.sound_prefs).
+        'sounds.use'     => 'Pick a sound for what arrives (notifications, messages) on the Sounds tab of the account page',
         'stats.view'     => 'View the tracker statistics page',
         'stats.timeline' => 'See the statistics timeline chart',
         'home.stats'     => 'See the live stats widget on the home page',
@@ -198,7 +200,7 @@ function userGroupPresets(): array {
                         'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose', 'content.view',
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         'lists.use', 'lists.public',
-                        'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check'],
+                        'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check', 'sounds.use'],
         ],
     ];
 }
@@ -227,7 +229,7 @@ function userLegacyDefault(string $perm): bool {
     // two work without accounts, so answering false would switch them off for every install that
     // does not use the user system. Favourites and profiles do not exist without an account at all —
     // there is nothing to be permissive about.
-    if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.')) return false;
+    if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.') || str_starts_with($perm, 'sounds.')) return false;
     return !str_starts_with($perm, 'index.');
 }
 

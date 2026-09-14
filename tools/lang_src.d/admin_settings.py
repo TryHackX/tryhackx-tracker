@@ -2350,3 +2350,24 @@ add('', {
     'settings.site_live_hint': ('How often any page a signed-in reader has open asks for the two numbers on the account link (notifications and messages waiting). <strong>0 = never</strong>; 10–300 otherwise. One tab asks for all of a reader\'s tabs, and a hidden tab asks nothing. Separate from the conversation refresh above.',
         'Jak często dowolna otwarta strona zalogowanego czytelnika pyta o dwie liczby przy koncie (powiadomienia i wiadomości). <strong>0 = nigdy</strong>; inaczej 10–300. Jedna karta pyta za wszystkie karty czytelnika, ukryta karta nie pyta wcale. Niezależne od odświeżania rozmowy powyżej.'),
 })
+
+# ── 1.56.0: sounds ──────────────────────────────────────────────────────────
+add('', {
+    'settings.sounds_heading': ('Sounds', 'Dźwięki'),
+    'settings.sounds_intro': ('A short sound when something arrives — a notification, a message — for readers who switch it on. Everyone starts muted; the choice, the volume and the wake-up before the sound are on the account page (Sounds tab), for members whose group carries <code>sounds.use</code>.',
+        'Krótki dźwięk, gdy coś przychodzi — powiadomienie, wiadomość — dla czytelników, którzy go włączą. Każdy zaczyna wyciszony; wybór, głośność i rozbieg przed dźwiękiem są na stronie konta (karta Dźwięki), dla członków, których grupa ma <code>sounds.use</code>.'),
+    'settings.sounds_enabled': ('Sounds', 'Dźwięki'),
+    'settings.sounds_enabled_hint': ('Off hides the tab and plays nothing, for everyone.',
+        'Wyłączone chowa kartę i nic nie gra, dla nikogo.'),
+    'settings.sounds_default_notification': ('Default for notifications', 'Domyślny dla powiadomień'),
+    'settings.sounds_default_message': ('Default for messages', 'Domyślny dla wiadomości'),
+    'settings.sounds_default_hint': ('What a reader hears when they switched sounds on and left this to the site. "Nothing" is silence unless they pick one themselves.',
+        'Co słyszy czytelnik, który włączył dźwięki i zostawił ten wybór stronie. „Nic” to cisza, chyba że sam coś wybierze.'),
+    'settings.sounds_none': ('Nothing', 'Nic'),
+    'settings.sounds_preview': ('Play', 'Odtwórz'),
+    'settings.sounds_custom': ('Your own sounds', 'Własne dźwięki'),
+    'settings.sounds_custom_hint': ('MP3, Ogg or WAV, up to 512 KB and 15 seconds, at most 40. Kept in the database and offered to every member beside the shipped ones. What a file IS is decided from its bytes, never from its name.',
+        'MP3, Ogg lub WAV, do 512 KB i 15 sekund, najwyżej 40. Trzymane w bazie i oferowane każdemu członkowi obok wbudowanych. Czym plik JEST, rozstrzygają jego bajty, nigdy nazwa.'),
+    'settings.sounds_name_ph': ('Name (optional — the file name otherwise)', 'Nazwa (opcjonalnie — inaczej nazwa pliku)'),
+    'settings.sounds_upload': ('Add', 'Dodaj'),
+})

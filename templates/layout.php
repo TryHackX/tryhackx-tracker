@@ -72,13 +72,18 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
              for the same reason app.js is: the star is delegated from `document` and has to be there
              before the first row is drawn. Every entry point inside it asks whether its own markup
              exists first, so a page without any of this costs one querySelector. */ ?>
-    <?php if (favEnabled($cfg) || profilesEnabled($cfg) || listsEnabled($cfg)): ?>
+    <?php if (favEnabled($cfg) || profilesEnabled($cfg) || listsEnabled($cfg) || soundsEnabled($cfg)): ?>
     <script src="<?= $baseUrl ?>assets/js/favourites.js<?= assetVer('assets/js/favourites.js') ?>"></script>
     <?php endif; ?>
     <?php /* People: the inbox, friends and blocks, the directory, and the buttons a public profile
              grows. Same rule as above — every entry point asks for its own markup first. */ ?>
     <?php if (pmEnabled($cfg) || friendsEnabled($cfg) || directoryEnabled($cfg)): ?>
     <script src="<?= $baseUrl ?>assets/js/people.js<?= assetVer('assets/js/people.js') ?>"></script>
+    <?php endif; ?>
+    <?php /* Sounds: the badge's data-sounds says whether this reader hears anything; the account page's
+             tab lives in the same file. Loaded only while the feature is on at all. */ ?>
+    <?php if (soundsEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/js/sounds.js<?= assetVer('assets/js/sounds.js') ?>"></script>
     <?php endif; ?>
     <?php /* The account page's security block: the second factor and the signed-in devices. Only
              on that page — both halves are drawn nowhere else, and there is no reason for every

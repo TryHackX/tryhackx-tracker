@@ -2508,3 +2508,8 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 /* ── reported messages: the answer given and the note kept (1.54.0) ─────────────────────────── */
 .msgrep-answer { font-size: 0.85rem; margin: 0.2rem 0 0; }
 .msgrep-reply-in { margin-top: 0.3rem; }
+
+/* Settings → Sounds (1.56.0) */
+.admin-sound-file { max-width: 22rem; }
+.admin-sound-name { max-width: 16rem; }
+.admin-sounds-table td { vertical-align: middle; }
