@@ -954,6 +954,17 @@ key *name*, so one added later is covered without anybody remembering, and a mat
 "changed" with no value either side. There is no delete and no edit — a log the panel it records can
 rewrite is not evidence. Retention is a setting; the janitor enforces it.
 
+### Emoji, emotes and stickers in the shoutbox (1.59.0)
+
+The composer's picker holds common Unicode emoji (drawn by the device's own font), the site's custom
+emotes as images, and stickers on their own tab; an emoji or emote lands at the caret, a sticker is
+sent at once. The owner manages emotes in Settings → Shoutbox; members with `shout.upload_emote` add
+their own on the Emotes page. Custom emotes are SVG/PNG/GIF/WebP up to 64 KB and 128 px, sniffed by
+their bytes — an SVG with a script or an event attribute is refused, and every emote is served with
+`nosniff` and a policy of its own. Settings → Sounds was tidied in the same release: the uploads are
+a table with rename, names must be unique across the whole library, and the selects group shipped
+clips and your own.
+
 ### A shoutbox (1.58.0)
 
 Off as shipped (`shout_enabled`). A line of talk on the front page (a block of the home layout) and/or

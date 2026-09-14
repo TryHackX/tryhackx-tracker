@@ -344,6 +344,10 @@ function shoutRows(PDO $db, array $cfg, array $me, int $limit, ?int $after = nul
     $known = shoutKnownNames($db, array_column($raw, 'body'));
     $base = function_exists('getBaseUrl') ? getBaseUrl() : '';
     $meName = (string)($me['username'] ?? '');
+    // The emote table, once for the page rather than once per line (1.59.0). Empty when the feature
+    // is off, which is what makes shoutRenderEmotes() a no-op instead of a second switch.
+    $emotes = shoutEmotes($db, $cfg);
+    $stickersOn = shoutStickersEnabled($cfg);
 
     // Which of these lines named me — from the table written when they were said, not from parsing
     // them again now.
@@ -368,7 +372,9 @@ function shoutRows(PDO $db, array $cfg, array $me, int $limit, ?int $after = nul
             'user'        => (string)$r['username'],
             'user_id'     => (int)$r['user_id'],
             'at'          => (string)$r['created_at'],
-            'html'        => shoutLinkMentions($html, $known, $base, $meName),
+            // Mentions first, emotes last: both walk the TEXT of finished html and neither may see
+            // the other's tag as writing. `:code:` inside an href is an address, not an emote.
+            'html'        => shoutRenderEmotes(shoutLinkMentions($html, $known, $base, $meName), $emotes, $base, $stickersOn),
             'own'         => $own,
             'deletable'   => $mayModerate || ($own && $mayDeleteOwn),
             'mentions_me' => isset($mine[(int)$r['id']]),
@@ -536,4 +542,447 @@ function shoutPurge(PDO $db, array $cfg, ?int $olderThanDays): int
     } catch (\Throwable $e) {
         return 0;
     }
+}
+
+/* ── emotes and stickers (1.59.0, schema 64) ───────────────────────────────────────────────────
+ *
+ * Emoji are not here, and that is the decision: a smiley in a shout is a Unicode character, drawn
+ * by whatever emoji font the reader's own device has (Segoe UI Emoji, Noto, Apple's). The site
+ * ships no picture of one, which is why the picker in the browser is plain text and this file
+ * knows nothing about it.
+ *
+ * What IS here is the CUSTOM half: an image somebody uploaded, addressed by a short code and
+ * written as `:code:`. Kept as rows of `shout_emotes` for the same reason the sounds are rows —
+ * the web root is installed read-only and a backup that carries the database carries these. A
+ * STICKER is the same row with one flag: when a whole shout is nothing but its token, it is drawn
+ * big instead of inline, which is the only difference between the two.
+ *
+ * ── the bytes decide, and an SVG is guilty until proven otherwise ──────────────────────────────
+ *
+ * An <img> is not a safe frame for an SVG: an SVG is a document, it can carry a script, event
+ * handlers and references to other origins, and served from this origin it would run with this
+ * origin's rights. So there are three independent walls and any one of them is meant to be enough:
+ *
+ *   1. shoutEmoteSvgIssue() refuses the upload — a script element, on*= handlers, javascript:,
+ *      data:text/html, foreignObject, an embedded frame, an entity declaration, or any href that is
+ *      not a local `#fragment`. Checked on the bytes with entities decoded, so `java&#115;cript:`
+ *      is the same word to this code as it is to a browser.
+ *   2. api/shout_emote.php serves it with the type the sniff CHOSE (never the uploader's), plus
+ *      `X-Content-Type-Options: nosniff`, so nothing can be re-read as HTML.
+ *   3. …and with `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'` on that
+ *      response, so even a trick none of the above spotted has nothing it is allowed to do.
+ */
+
+/** `:code:` — short, lower case, and the same character class a file name may have. */
+const SHOUT_EMOTE_CODE_RE = '/^[a-z0-9_]{2,32}$/';
+/** The token as it appears inside a line of text. Kept beside the code rule so the two agree. */
+const SHOUT_EMOTE_TOKEN_RE = '/:([a-z0-9_]{2,32}):/';
+const SHOUT_EMOTE_MIN_BYTES = 32;
+const SHOUT_EMOTE_NAME_MAX = 60;
+
+/** Where the shipped examples live; the v64 migration seeds the table from this directory. */
+function shoutEmoteSeedDir(): string { return dirname(__DIR__) . '/assets/emotes'; }
+
+/* ── the switches ──────────────────────────────────────────────────────────── */
+
+/** Custom images at all. A room that is off has no emotes either — this is the whole feature. */
+function shoutEmotesEnabled(array $cfg): bool
+{
+    return shoutEnabled($cfg) && (($cfg['shout_emotes_enabled'] ?? '1') === '1');
+}
+
+/** The big ones. A sticker is an emote first, so this cannot be on while emotes are off. */
+function shoutStickersEnabled(array $cfg): bool
+{
+    return shoutEmotesEnabled($cfg) && (($cfg['shout_stickers_enabled'] ?? '1') === '1');
+}
+
+function shoutEmoteMaxKb(array $cfg): int    { return max(8, min(512, (int)($cfg['shout_emote_max_kb'] ?? 64) ?: 64)); }
+function shoutEmoteMaxBytes(array $cfg): int { return shoutEmoteMaxKb($cfg) * 1024; }
+function shoutEmoteMaxPx(array $cfg): int    { return max(32, min(512, (int)($cfg['shout_emote_max_px'] ?? 128) ?: 128)); }
+function shoutEmotePerUser(array $cfg): int  { return max(1, min(200, (int)($cfg['shout_emote_per_user'] ?? 20) ?: 20)); }
+
+function shoutEmoteValidCode(string $code): bool { return (bool)preg_match(SHOUT_EMOTE_CODE_RE, $code); }
+
+/** "thumbs_up" -> "Thumbs up". The fallback name when the uploader gave none. */
+function shoutEmotePrettyName(string $code): string
+{
+    return ucfirst(trim((string)preg_replace('/[-_]+/', ' ', $code)));
+}
+
+/** A display name: printable, trimmed, bounded. '' when nothing usable is left. */
+function shoutEmoteCleanName(string $name): string
+{
+    $name = trim((string)preg_replace('/[\x00-\x1f\x7f]+/', ' ', $name));
+    $name = (string)preg_replace('/\s+/', ' ', $name);
+    return mb_substr($name, 0, SHOUT_EMOTE_NAME_MAX);
+}
+
+/* ── the table ─────────────────────────────────────────────────────────────── */
+
+/** Forget the per-request cache. Called by everything that writes a row. */
+function shoutEmotesInvalidate(): void { shoutEmotes(null, [], true, true); }
+
+/**
+ * The emotes, KEYED BY CODE, without their bytes.
+ *
+ * `$enabledOnly` (the default) is the reader's view and answers NOTHING while the feature is
+ * switched off — which is what makes shoutRenderEmotes() a no-op rather than a second switch to
+ * forget. `false` is the manager's view: the panel has to list what it may switch back on.
+ *
+ * Cached per request, because every rendered line asks for it.
+ */
+function shoutEmotes(?PDO $db, array $cfg, bool $enabledOnly = true, bool $flush = false): array
+{
+    static $cache = [];
+    if ($flush) { $cache = []; return []; }
+    if ($db === null) return [];
+    $on = !$enabledOnly || shoutEmotesEnabled($cfg);
+    $key = ($enabledOnly ? 'on' : 'all') . ':' . ($on ? '1' : '0');
+    if (isset($cache[$key])) return $cache[$key];
+    if (!$on) return $cache[$key] = [];
+
+    $sql = "SELECT id, code, name, mime, bytes, width, height, is_sticker, enabled, uploaded_by, sha1, created_at
+              FROM shout_emotes ";
+    $sql .= $enabledOnly ? "WHERE enabled = 1 ORDER BY code" : "ORDER BY code";
+    try {
+        $rows = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (\Throwable $e) {
+        return $cache[$key] = [];   // the table arrives with schema 64; mid-upgrade there are none
+    }
+    $out = [];
+    foreach ($rows as $r) {
+        $out[(string)$r['code']] = [
+            'id'          => (int)$r['id'],
+            'code'        => (string)$r['code'],
+            'name'        => (string)$r['name'],
+            'mime'        => (string)$r['mime'],
+            'bytes'       => (int)$r['bytes'],
+            'width'       => $r['width'] === null ? null : (int)$r['width'],
+            'height'      => $r['height'] === null ? null : (int)$r['height'],
+            'is_sticker'  => (int)$r['is_sticker'] === 1,
+            'enabled'     => (int)$r['enabled'] === 1,
+            'uploaded_by' => $r['uploaded_by'] === null ? null : (int)$r['uploaded_by'],
+            'sha1'        => (string)$r['sha1'],
+            'created_at'  => (string)$r['created_at'],
+        ];
+    }
+    return $cache[$key] = $out;
+}
+
+/** One emote WITH its bytes, or null. Only api/shout_emote.php needs this shape. */
+function shoutEmoteGet(PDO $db, int $id): ?array
+{
+    if ($id <= 0) return null;
+    try {
+        $st = $db->prepare("SELECT id, code, name, mime, bytes, width, height, is_sticker, enabled, sha1, data FROM shout_emotes WHERE id = ?");
+        $st->execute([$id]);
+    } catch (\Throwable $e) {
+        return null;
+    }
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+/** How many this account has uploaded. NULL asks for the shipped/panel ones. */
+function shoutEmoteCountFor(PDO $db, ?int $uploader): int
+{
+    try {
+        if ($uploader === null) {
+            return (int)$db->query("SELECT COUNT(*) FROM shout_emotes WHERE uploaded_by IS NULL")->fetchColumn();
+        }
+        $st = $db->prepare("SELECT COUNT(*) FROM shout_emotes WHERE uploaded_by = ?");
+        $st->execute([$uploader]);
+        return (int)$st->fetchColumn();
+    } catch (\Throwable $e) {
+        return 0;
+    }
+}
+
+/**
+ * Where the image is. The first eight characters of the sha1 ride along, so replacing an emote is a
+ * new address and the old one may be cached for a month — the trick api/sound.php uses.
+ */
+function shoutEmoteUrl(array $row, string $baseUrl = ''): string
+{
+    return $baseUrl . 'api.php?endpoint=shout_emote&id=' . (int)$row['id'] . '&v=' . substr((string)$row['sha1'], 0, 8);
+}
+
+/** One emote as the browser sees it: no sha1, no uploader, no bytes. */
+function shoutEmoteForClient(array $row, string $baseUrl = ''): array
+{
+    return ['id' => (int)$row['id'], 'code' => (string)$row['code'], 'name' => (string)$row['name'],
+            'url' => shoutEmoteUrl($row, $baseUrl), 'sticker' => !empty($row['is_sticker']),
+            'w' => $row['width'] === null ? null : (int)$row['width'],
+            'h' => $row['height'] === null ? null : (int)$row['height']];
+}
+
+/* ── drawing them ──────────────────────────────────────────────────────────── */
+
+/** The image tag for one emote, inline or as a sticker. Every attribute escaped, nothing trusted. */
+function shoutEmoteImg(array $row, string $baseUrl = '', bool $sticker = false): string
+{
+    $w = (int)($row['width'] ?? 0);
+    $h = (int)($row['height'] ?? 0);
+    $out = '<img class="' . ($sticker ? 'shout-sticker' : 'shout-emote') . '"'
+         . ' src="' . htmlspecialchars(shoutEmoteUrl($row, $baseUrl), ENT_QUOTES, 'UTF-8') . '"'
+         . ' alt="' . htmlspecialchars(':' . (string)$row['code'] . ':', ENT_QUOTES, 'UTF-8') . '"'
+         . ' title="' . htmlspecialchars((string)$row['name'], ENT_QUOTES, 'UTF-8') . '"'
+         . ' loading="lazy" decoding="async"';
+    if ($w > 0 && $h > 0) $out .= ' width="' . $w . '" height="' . $h . '"';
+    return $out . '>';
+}
+
+/**
+ * Replace `:code:` with an image, in the TEXT of already-rendered HTML and nowhere else.
+ *
+ * The split is on tags, exactly as shoutLinkMentions() does it and for the same reason: by this
+ * point richtextRender() has escaped every byte the writer typed, so nothing between '<' and '>'
+ * came from them — and `:code:` inside an href is part of an address, not a token.
+ *
+ * ONE STICKER ON ITS OWN IS THE WHOLE LINE. That is decided on the text content rather than on the
+ * html, because markdown wraps a paragraph and bbcode leaves a line break, and neither of those is
+ * the person saying something besides the sticker. The frontend relies on this: a shout that is one
+ * sticker arrives as a single `<img class="shout-sticker">` and nothing else.
+ */
+function shoutRenderEmotes(string $html, array $emotes, string $baseUrl = '', bool $stickersOn = true): string
+{
+    if ($html === '' || !$emotes || !str_contains($html, ':')) return $html;
+
+    if ($stickersOn) {
+        $text = trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if (preg_match('/^:([a-z0-9_]{2,32}):$/', $text, $m) && !empty($emotes[$m[1]]['is_sticker'])) {
+            return shoutEmoteImg($emotes[$m[1]], $baseUrl, true);
+        }
+    }
+
+    $parts = preg_split('/(<[^>]*>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+    if ($parts === false) return $html;
+    foreach ($parts as $i => $part) {
+        if ($i % 2 === 1 || $part === '' || !str_contains($part, ':')) continue;   // odd entries are the tags
+        $parts[$i] = preg_replace_callback(SHOUT_EMOTE_TOKEN_RE, function ($m) use ($emotes, $baseUrl) {
+            $e = $emotes[$m[1]] ?? null;
+            return $e === null ? $m[0] : shoutEmoteImg($e, $baseUrl, false);
+        }, $part) ?? $part;
+    }
+    return implode('', $parts);
+}
+
+/* ── what an upload is ─────────────────────────────────────────────────────── */
+
+/**
+ * Why these bytes are not an SVG this site will serve — or null when they are.
+ *
+ * Codes: not_svg | script | handler | javascript | data_html | foreign_object | embed | entity |
+ * external_ref. The scheme checks run on the bytes with entities decoded and whitespace removed,
+ * because a browser reads `java&#115;cript&#58;` and `java script :` as the word this refuses.
+ */
+function shoutEmoteSvgIssue(string $b): ?string
+{
+    // A BOM and leading whitespace are packaging, not content.
+    $s = ltrim($b, "\xEF\xBB\xBF \t\r\n");
+    if ($s === '' || !preg_match('/^(<\?xml|<!--|<!DOCTYPE|<svg)/i', substr($s, 0, 64))) return 'not_svg';
+    $low = strtolower($s);
+    if (!str_contains($low, '<svg')) return 'not_svg';
+
+    if (preg_match('/<\s*script/i', $s)) return 'script';
+    if (preg_match('/<\s*foreignobject/i', $s)) return 'foreign_object';
+    if (preg_match('/<\s*(iframe|embed|object|frame|set|animate)\b/i', $s)) return 'embed';
+    if (str_contains($low, '<!entity') || (str_contains($low, '<!doctype') && str_contains($low, 'entity'))) return 'entity';
+    // An event handler is an attribute, so the character before it cannot be a letter: `monitor=`
+    // is somebody's attribute name, `<svg onload=` is not.
+    if (preg_match('/(?<![a-z-])on[a-z]+\s*=/i', $s)) return 'handler';
+
+    // Entities decoded and whitespace gone: the two ways a scheme hides from a literal search.
+    $flat = strtolower((string)preg_replace('/\s+/', '', html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+    if (str_contains($flat, 'javascript:')) return 'javascript';
+    if (str_contains($flat, 'data:text/html')) return 'data_html';
+
+    // A reference that leaves this document is a reference to somebody else's server. `#id` is the
+    // only kind an emote needs, and refusing the rest is cheaper than judging origins.
+    if (preg_match_all('/\b(?:xlink:href|href|src)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))/i', $s, $m, PREG_SET_ORDER)) {
+        foreach ($m as $one) {
+            $raw = ($one[1] ?? '') !== '' ? $one[1] : ((($one[2] ?? '') !== '') ? $one[2] : ($one[3] ?? ''));
+            $v = trim(html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if ($v === '' || $v[0] === '#') continue;
+            return 'external_ref';
+        }
+    }
+    return null;
+}
+
+/** The size an SVG declares: its width/height, or failing that its viewBox. 0 when it says nothing. */
+function shoutEmoteSvgSize(string $b): array
+{
+    if (!preg_match('/<svg\b[^>]*>/i', $b, $m)) return [0, 0];
+    $tag = $m[0];
+    $num = function (string $attr) use ($tag): int {
+        if (!preg_match('/\b' . $attr . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i', $tag, $a)) return 0;
+        $v = ($a[1] ?? '') !== '' ? $a[1] : ($a[2] ?? '');
+        if (str_contains($v, '%')) return 0;                 // a percentage is not a size
+        return preg_match('/^\s*([0-9]+(?:\.[0-9]+)?)/', $v, $d) ? (int)round((float)$d[1]) : 0;
+    };
+    $w = $num('width');
+    $h = $num('height');
+    if (($w <= 0 || $h <= 0)
+        && preg_match('/\bviewBox\s*=\s*["\']\s*[-0-9.]+[\s,]+[-0-9.]+[\s,]+([0-9.]+)[\s,]+([0-9.]+)/i', $tag, $v)) {
+        if ($w <= 0) $w = (int)round((float)$v[1]);
+        if ($h <= 0) $h = (int)round((float)$v[2]);
+    }
+    return [max(0, $w), max(0, $h)];
+}
+
+/**
+ * What these bytes are, decided from the bytes: ['mime', 'ext', 'w', 'h'] or null.
+ *
+ * PNG, GIF and WebP are recognised by their magic bytes AND measured by getimagesizefromstring(),
+ * which has to agree about the type — a GIF header in front of something else is not a GIF. An SVG
+ * has to survive shoutEmoteSvgIssue() before it is a picture at all.
+ */
+function shoutEmoteSniff(string $b): ?array
+{
+    if ($b === '') return null;
+    $png  = str_starts_with($b, "\x89PNG\r\n\x1a\n");
+    $gif  = str_starts_with($b, 'GIF87a') || str_starts_with($b, 'GIF89a');
+    $webp = strlen($b) > 12 && str_starts_with($b, 'RIFF') && substr($b, 8, 4) === 'WEBP';
+    if ($png || $gif || $webp) {
+        $info = @getimagesizefromstring($b);
+        if (!is_array($info) || (int)($info[0] ?? 0) <= 0 || (int)($info[1] ?? 0) <= 0) return null;
+        $want = $png ? IMAGETYPE_PNG : ($gif ? IMAGETYPE_GIF : IMAGETYPE_WEBP);
+        if ((int)($info[2] ?? 0) !== $want) return null;
+        $kind = [IMAGETYPE_PNG => ['image/png', 'png'], IMAGETYPE_GIF => ['image/gif', 'gif'],
+                 IMAGETYPE_WEBP => ['image/webp', 'webp']][$want];
+        return ['mime' => $kind[0], 'ext' => $kind[1], 'w' => (int)$info[0], 'h' => (int)$info[1]];
+    }
+    if (shoutEmoteSvgIssue($b) !== null) return null;
+    [$w, $h] = shoutEmoteSvgSize($b);
+    return ['mime' => 'image/svg+xml', 'ext' => 'svg', 'w' => $w, 'h' => $h];
+}
+
+/** The extension this site serves each type under. Never the uploader's file name. */
+function shoutEmoteExt(string $mime): string
+{
+    return ['image/svg+xml' => 'svg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'][$mime] ?? 'bin';
+}
+
+/**
+ * Keep an upload. ['ok' => true, 'row' => …] or ['ok' => false, 'error' => <lang key>, 'status' => N].
+ *
+ * `$uploader` is the account that asked, or NULL for the panel — and the per-person cap is the one
+ * rule that difference changes, because the owner uploading from Settings is not "a person filling
+ * the room with pictures", which is what that cap is about.
+ *
+ * The order is the order of the questions: is this a code at all, is it a plausible size, is it an
+ * image, is it small enough on screen, has this person had enough, and only then whether anybody
+ * already has these exact bytes or this exact code.
+ */
+function shoutEmoteStore(PDO $db, array $cfg, string $code, string $name, string $bytes, ?int $uploader, bool $sticker): array
+{
+    $code = strtolower(trim($code));
+    if (!shoutEmoteValidCode($code)) return ['ok' => false, 'status' => 400, 'error' => 'api.emote.bad_code'];
+    // A code the rich-text pass already turns into a Unicode emoji (richtextEmoji: fire, heart, star…)
+    // would be replaced before shoutRenderEmotes() ever ran, so the uploaded image would never show.
+    // Refuse it rather than store a picture nobody can see.
+    if (function_exists('richtextEmoji') && isset(richtextEmoji()[$code])) {
+        return ['ok' => false, 'status' => 409, 'error' => 'api.emote.code_reserved'];
+    }
+    $name = shoutEmoteCleanName($name);
+    if ($name === '') $name = shoutEmotePrettyName($code);
+
+    $len = strlen($bytes);
+    if ($len < SHOUT_EMOTE_MIN_BYTES) return ['ok' => false, 'status' => 400, 'error' => 'api.emote.too_small'];
+    $maxKb = shoutEmoteMaxKb($cfg);
+    if ($len > $maxKb * 1024) return ['ok' => false, 'status' => 413, 'error' => 'api.emote.too_large', 'limit' => $maxKb];
+
+    $kind = shoutEmoteSniff($bytes);
+    if ($kind === null) {
+        // "Not an image" and "an SVG this site will not serve" are different answers, and somebody
+        // whose drawing was refused for carrying a script deserves to be told which one it was.
+        $issue = shoutEmoteSvgIssue($bytes);
+        return ['ok' => false, 'status' => 400, 'detail' => (string)$issue,
+                'error' => ($issue !== null && $issue !== 'not_svg') ? 'api.emote.unsafe_svg' : 'api.emote.not_image'];
+    }
+    $px = shoutEmoteMaxPx($cfg);
+    if ($kind['w'] > $px || $kind['h'] > $px) {
+        return ['ok' => false, 'status' => 400, 'error' => 'api.emote.too_big_px', 'limit' => $px,
+                'detail' => $kind['w'] . 'x' . $kind['h']];
+    }
+    if ($uploader !== null) {
+        $cap = shoutEmotePerUser($cfg);
+        if (shoutEmoteCountFor($db, $uploader) >= $cap) {
+            return ['ok' => false, 'status' => 409, 'error' => 'api.emote.too_many', 'limit' => $cap];
+        }
+    }
+
+    $sha = sha1($bytes);
+    $st = $db->prepare("SELECT code FROM shout_emotes WHERE sha1 = ? LIMIT 1");
+    $st->execute([$sha]);
+    $same = $st->fetchColumn();
+    if ($same !== false) return ['ok' => false, 'status' => 409, 'error' => 'api.emote.duplicate', 'detail' => (string)$same];
+    $st = $db->prepare("SELECT id FROM shout_emotes WHERE code = ? LIMIT 1");
+    $st->execute([$code]);
+    if ($st->fetchColumn() !== false) return ['ok' => false, 'status' => 409, 'error' => 'api.emote.code_taken'];
+
+    $st = $db->prepare("INSERT INTO shout_emotes (code, name, mime, bytes, width, height, is_sticker, enabled, uploaded_by, sha1, data)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)");
+    $st->bindValue(1, $code);
+    $st->bindValue(2, $name);
+    $st->bindValue(3, $kind['mime']);
+    $st->bindValue(4, $len, PDO::PARAM_INT);
+    $st->bindValue(5, $kind['w'] > 0 ? $kind['w'] : null, $kind['w'] > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
+    $st->bindValue(6, $kind['h'] > 0 ? $kind['h'] : null, $kind['h'] > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
+    $st->bindValue(7, $sticker ? 1 : 0, PDO::PARAM_INT);
+    $st->bindValue(8, $uploader, $uploader === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+    $st->bindValue(9, $sha);
+    $st->bindValue(10, $bytes, PDO::PARAM_LOB);
+    $st->execute();
+    shoutEmotesInvalidate();
+
+    $id = (int)$db->lastInsertId();
+    return ['ok' => true, 'status' => 200, 'row' => [
+        'id' => $id, 'code' => $code, 'name' => $name, 'mime' => $kind['mime'], 'bytes' => $len,
+        'width' => $kind['w'] > 0 ? $kind['w'] : null, 'height' => $kind['h'] > 0 ? $kind['h'] : null,
+        'is_sticker' => $sticker, 'enabled' => true, 'uploaded_by' => $uploader, 'sha1' => $sha,
+    ]];
+}
+
+/**
+ * Remove one. `$asUser` NULL is the panel; an id means "and it has to be theirs" — a member's own
+ * upload and nothing else, which is why a shipped emote (uploaded_by NULL) can never match one.
+ *
+ * The endpoint is what decides whether a moderator may pass NULL; this only enforces ownership.
+ */
+function shoutEmoteDelete(PDO $db, int $id, ?int $asUser = null): array
+{
+    if ($id <= 0) return ['ok' => false, 'status' => 404, 'error' => 'api.emote.unknown'];
+    $st = $db->prepare("SELECT id, code, name, uploaded_by FROM shout_emotes WHERE id = ?");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return ['ok' => false, 'status' => 404, 'error' => 'api.emote.unknown'];
+    if ($asUser !== null && ($row['uploaded_by'] === null || (int)$row['uploaded_by'] !== $asUser)) {
+        return ['ok' => false, 'status' => 403, 'error' => 'api.emote.not_yours'];
+    }
+    $db->prepare("DELETE FROM shout_emotes WHERE id = ?")->execute([$id]);
+    shoutEmotesInvalidate();
+    return ['ok' => true, 'status' => 200,
+            'row' => ['id' => (int)$row['id'], 'code' => (string)$row['code'], 'name' => (string)$row['name'],
+                      'uploaded_by' => $row['uploaded_by'] === null ? null : (int)$row['uploaded_by']]];
+}
+
+/**
+ * Switch one flag on a row. `$field` is one of two names and each has its own literal statement —
+ * there is no column name built from a string here, and there is not going to be one.
+ */
+function shoutEmoteSetFlag(PDO $db, int $id, string $field, bool $on): bool
+{
+    $sql = match ($field) {
+        'enabled'    => "UPDATE shout_emotes SET enabled = ? WHERE id = ?",
+        'is_sticker' => "UPDATE shout_emotes SET is_sticker = ? WHERE id = ?",
+        default      => '',
+    };
+    if ($sql === '' || $id <= 0) return false;
+    $st = $db->prepare($sql);
+    $st->execute([$on ? 1 : 0, $id]);
+    shoutEmotesInvalidate();
+    return $st->rowCount() > 0;
 }

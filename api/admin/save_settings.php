@@ -48,6 +48,9 @@ $allowed = [
     'shout_enabled', 'shout_placement', 'shout_widget_rows', 'shout_page_rows', 'shout_max_chars',
     'shout_flood_seconds', 'shout_live_seconds', 'shout_keep_rows', 'shout_keep_days',
     'shout_format', 'shout_rules',
+    // its emotes and stickers (1.59.0)
+    'shout_emotes_enabled', 'shout_emote_max_kb', 'shout_emote_max_px', 'shout_emote_per_user',
+    'shout_stickers_enabled',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -332,6 +335,10 @@ $intClamp = [
     'shout_max_chars' => [1, 2000, 500], 'shout_flood_seconds' => [0, 300, 5],
     'shout_live_seconds' => [0, 120, 10],
     'shout_keep_rows' => [100, 100000, 2000], 'shout_keep_days' => [1, 3650, 30],
+    // Its pictures. No 0 anywhere: an emote of no kilobytes, no pixels or a person allowed none of
+    // them is not a setting, it is the feature switch beside it spelled badly.
+    'shout_emote_max_kb' => [8, 512, 64], 'shout_emote_max_px' => [32, 512, 128],
+    'shout_emote_per_user' => [1, 200, 20],
     'digest_hours' => [1, 168, 24], 'digest_min' => [0, 10000, 1],
     'wl_edit_max_pending' => [0, 50, 3],
     'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],
@@ -396,7 +403,8 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled', 'ot_cluster_enabled',
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
-          'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled'] as $k) {
+          'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
+          'shout_emotes_enabled', 'shout_stickers_enabled'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
 // ── The shoutbox ──

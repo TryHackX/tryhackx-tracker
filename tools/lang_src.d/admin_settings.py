@@ -2454,3 +2454,81 @@ add('', {
     'settings.sounds_default_shout': ('Default for a shout from anyone else', 'Domyślny dla shouta od pozostałych'),
     'settings.sounds_default_mention': ('Default for an @-mention in the shoutbox', 'Domyślny dla wzmianki @ w shoutboxie'),
 })
+
+# ── 1.59.0: Settings → Sounds, tidied ─────────────────────────────────────
+# Every select on the page is split in two: what ships with the tracker and what the owner added.
+# The `sounds_ev_*` pair with the labels above them, but SHORT — they are read in a table cell that
+# says which defaults an upload currently answers, not above a control that has room for a sentence.
+add('', {
+    'settings.sounds_group_shipped': ('Shipped with the tracker', 'Dostarczone z trackerem'),
+    'settings.sounds_group_own': ('Your own', 'Własne'),
+    'settings.sounds_add_heading': ('Add a sound', 'Dodaj dźwięk'),
+    'settings.sounds_ev_notification': ('Notifications', 'Powiadomienia'),
+    'settings.sounds_ev_message_friend': ('Message from a friend', 'Wiadomość od znajomego'),
+    'settings.sounds_ev_message': ('Message from anyone else', 'Wiadomość od pozostałych'),
+    'settings.sounds_ev_shout_friend': ('Shout from a friend', 'Shout od znajomego'),
+    'settings.sounds_ev_shout': ('Shout from anyone else', 'Shout od pozostałych'),
+    'settings.sounds_ev_mention': ('@-mention', 'Wzmianka @'),
+})
+
+# ── 1.59.0: the shoutbox's emotes and stickers (Settings → Shoutbox) ────────
+#
+# Emoji are deliberately absent from this card: a smiley in a shout is a Unicode character drawn by
+# the reader's own device font, so there is nothing about them to configure.
+add('', {
+    'settings.shout_emotes_enabled': ('Custom emotes', 'Własne emotki'),
+    'settings.shout_emotes_enabled_hint': ('Pictures somebody uploaded, written as <code>:code:</code> in a shout. Off hides the picker, stops the tokens being drawn and closes the image address. Emoji are not affected — those are ordinary characters and always work.',
+        'Obrazki, które ktoś wgrał, pisane w wypowiedzi jako <code>:code:</code>. Wyłączone chowa wybierak, przestaje rysować tokeny i zamyka adres obrazka. Emoji to nie dotyczy — to zwykłe znaki i działają zawsze.'),
+    'settings.shout_stickers_enabled': ('Stickers', 'Naklejki'),
+    'settings.shout_stickers_enabled_hint': ('A shout that is nothing but one sticker token is drawn big instead of inline. Off, a sticker is just another emote.',
+        'Wypowiedź, która jest tylko tokenem naklejki, rysuje się duża zamiast w linii. Wyłączone — naklejka jest zwykłą emotką.'),
+    'settings.shout_emote_max_kb': ('Largest upload', 'Największy plik'),
+    'settings.shout_emote_max_kb_hint': ('Kilobytes. SVG, PNG, GIF and WebP; the type is decided from the bytes, never from the file name.',
+        'Kilobajty. SVG, PNG, GIF i WebP; typ rozstrzyga się po bajtach, nigdy po nazwie pliku.'),
+    'settings.shout_emote_max_px': ('Largest size', 'Największy rozmiar'),
+    'settings.shout_emote_max_px_hint': ('Pixels, width and height alike. A picture beside a sentence, not a poster.',
+        'Piksele, tak szerokość jak i wysokość. Obrazek przy zdaniu, nie plakat.'),
+    'settings.shout_emote_per_user': ('Per member', 'Na członka'),
+    'settings.shout_emote_per_user_hint': ('How many one account may upload. What you add here does not count against anybody.',
+        'Ile może wgrać jedno konto. To, co dodasz tutaj, nie liczy się nikomu.'),
+    'settings.shout_emotes_manage': ('Emotes and stickers', 'Emotki i naklejki'),
+    'settings.shout_emotes_hint': ('Kept in the database, not as files: a backup that carries the database carries these. An SVG is refused if it contains a script, an event handler or a reference to another server, and every picture is served with a policy that forbids scripts anyway. Members need the <code>shout.upload_emote</code> permission to add their own, which nobody has until you grant it in Users → Groups.',
+        'Trzymane w bazie, nie jako pliki: kopia zapasowa bazy niesie i je. SVG zostaje odrzucony, jeśli zawiera skrypt, obsługę zdarzenia albo odwołanie do cudzego serwera, a każdy obrazek i tak jest serwowany z polityką zabraniającą skryptów. Członkowie, żeby dodawać własne, potrzebują uprawnienia <code>shout.upload_emote</code>, którego nikt nie ma, dopóki go nie nadasz w Użytkownicy → Grupy.'),
+    'settings.shout_emote_drop_aria': ('Choose an image file, or drop one here', 'Wybierz plik obrazka albo upuść go tutaj'),
+    'settings.shout_emote_drop_choose': ('Choose a picture', 'Wybierz obrazek'),
+    'settings.shout_emote_drop_or': ('or drop it here', 'albo upuść go tutaj'),
+    'settings.shout_emote_drop_sub': ('SVG, PNG, GIF or WebP', 'SVG, PNG, GIF albo WebP'),
+    'settings.shout_emote_code_label': ('Code', 'Kod'),
+    'settings.shout_emote_code_ph': ('thumbs_up', 'thumbs_up'),
+    'settings.shout_emote_name_label': ('Name', 'Nazwa'),
+    'settings.shout_emote_name_ph': ('Shown on hover', 'Widoczna po najechaniu'),
+    'settings.shout_emote_sticker_label': ('Sticker', 'Naklejka'),
+    'settings.shout_emote_upload': ('Add', 'Dodaj'),
+})
+
+# The manager's own strings. `js.shoutadmin.` like the Purge button's, and for the same reason: that
+# prefix stays in the panel, while `js.shout.` travels to every public page.
+add('', {
+    'js.shoutadmin.emote_none': ('No emotes yet.', 'Jeszcze nie ma emotek.'),
+    'js.shoutadmin.emote_drop_choose': ('Choose a picture', 'Wybierz obrazek'),
+    'js.shoutadmin.emote_drop_or': ('or drop it here', 'albo upuść go tutaj'),
+    'js.shoutadmin.emote_pick_file': ('Choose a picture first.', 'Najpierw wybierz obrazek.'),
+    'js.shoutadmin.emote_too_large': ('That picture is larger than :kb KB.', 'Ten obrazek jest większy niż :kb KB.'),
+    'js.shoutadmin.emote_bad_code': ('A code is 2 to 32 characters: lower-case letters, digits and underscores.',
+        'Kod ma od 2 do 32 znaków: małe litery, cyfry i podkreślenia.'),
+    'js.shoutadmin.emote_failed': ('That did not work.', 'Nie udało się.'),
+    'js.shoutadmin.emote_added': ('Added.', 'Dodano.'),
+    'js.shoutadmin.emote_saved': ('Saved.', 'Zapisano.'),
+    'js.shoutadmin.emote_deleted': ('Deleted.', 'Usunięto.'),
+    'js.shoutadmin.emote_delete': ('Delete', 'Usuń'),
+    'js.shoutadmin.emote_delete_title': ('Delete this emote', 'Usunięcie emotki'),
+    'js.shoutadmin.emote_delete_confirm': ('This goes for good. Lines that used it will show the text again.',
+        'To znika bezpowrotnie. Linie, które go używały, pokażą znowu sam tekst.'),
+    'js.shoutadmin.emote_enable': ('Switch on', 'Włącz'),
+    'js.shoutadmin.emote_disable': ('Switch off', 'Wyłącz'),
+    'js.shoutadmin.emote_sticker': ('Sticker', 'Naklejka'),
+    'js.shoutadmin.emote_inline': ('Inline', 'W linii'),
+    'js.shoutadmin.emote_sticker_hint': ('A sticker is drawn big when a shout is nothing but its token.',
+        'Naklejka rysuje się duża, gdy wypowiedź to tylko jej token.'),
+    'js.shoutadmin.emote_site': ('the site', 'strona'),
+})

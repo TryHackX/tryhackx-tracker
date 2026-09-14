@@ -829,6 +829,75 @@
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="shout_rules" value="<?= sanitize($cfg['shout_rules'] ?? '') ?>" maxlength="500" placeholder="<?= _h('settings.shout_rules_ph') ?>">
                         <small class="settings-hint"><?= __('settings.shout_rules_hint') ?></small>
                     </div>
+                    <?php /* ── Emotes and stickers (1.59.0) ──────────────────────────────────
+                             Five switches. Emoji are NOT among them: those are Unicode characters
+                             drawn by the reader's own device font, so there is nothing here to
+                             configure about them. */ ?>
+                    <div class="col-md-3" data-setting="shout_emotes_enabled">
+                        <label class="form-label"><?= _h('settings.shout_emotes_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_emotes_enabled">
+                            <option value="1" <?= ($cfg['shout_emotes_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['shout_emotes_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.shout_emotes_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_stickers_enabled">
+                        <label class="form-label"><?= _h('settings.shout_stickers_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_stickers_enabled">
+                            <option value="1" <?= ($cfg['shout_stickers_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['shout_stickers_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.shout_stickers_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_emote_max_kb">
+                        <label class="form-label"><?= _h('settings.shout_emote_max_kb') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_max_kb" value="<?= sanitize($cfg['shout_emote_max_kb'] ?? '64') ?>" min="8" max="512">
+                        <small class="settings-hint"><?= __('settings.shout_emote_max_kb_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_emote_max_px">
+                        <label class="form-label"><?= _h('settings.shout_emote_max_px') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_max_px" value="<?= sanitize($cfg['shout_emote_max_px'] ?? '128') ?>" min="32" max="512">
+                        <small class="settings-hint"><?= __('settings.shout_emote_max_px_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_emote_per_user">
+                        <label class="form-label"><?= _h('settings.shout_emote_per_user') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_per_user" value="<?= sanitize($cfg['shout_emote_per_user'] ?? '20') ?>" min="1" max="200">
+                        <small class="settings-hint"><?= __('settings.shout_emote_per_user_hint') ?></small>
+                    </div>
+                </div>
+                <?php /* The emote manager: drawn and driven by assets/js/admin-shout.js. The file input has
+                         no name on purpose — it is not a setting and never travels with the form; the script
+                         reads the file and posts it to admin/shout_emotes as base64, and the server decides
+                         from the BYTES what it is (and refuses an SVG carrying anything executable). */ ?>
+                <div class="mt-3" id="admin-emotes" data-max-kb="<?= (int)(function_exists('shoutEmoteMaxKb') ? shoutEmoteMaxKb($cfg) : 64) ?>">
+                    <label class="form-label"><?= _h('settings.shout_emotes_manage') ?></label>
+                    <div id="admin-emotes-list" class="mb-2"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-4">
+                            <div class="ipl-drop" id="admin-emote-drop" tabindex="0" role="button" aria-label="<?= _h('settings.shout_emote_drop_aria') ?>">
+                                <i class="bi bi-file-earmark-image ipl-drop-icon"></i>
+                                <span class="ipl-drop-main"><u><?= _h('settings.shout_emote_drop_choose') ?></u> <?= _h('settings.shout_emote_drop_or') ?></span>
+                                <span class="ipl-drop-sub"><?= _h('settings.shout_emote_drop_sub') ?></span>
+                                <input type="file" id="admin-emote-file" class="ipl-drop-input" accept=".svg,.png,.gif,.webp,image/svg+xml,image/png,image/gif,image/webp">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="admin-emote-code"><?= _h('settings.shout_emote_code_label') ?></label>
+                            <input type="text" id="admin-emote-code" class="form-control bg-dark text-light border-secondary" maxlength="32" placeholder="<?= _h('settings.shout_emote_code_ph') ?>">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="admin-emote-name"><?= _h('settings.shout_emote_name_label') ?></label>
+                            <input type="text" id="admin-emote-name" class="form-control bg-dark text-light border-secondary" maxlength="60" placeholder="<?= _h('settings.shout_emote_name_ph') ?>">
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="admin-emote-sticker">
+                                <label class="form-check-label small" for="admin-emote-sticker"><?= _h('settings.shout_emote_sticker_label') ?></label>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-info w-100" id="admin-emote-upload"><i class="bi bi-plus-lg"></i> <?= _h('settings.shout_emote_upload') ?></button>
+                        </div>
+                    </div>
+                    <small class="settings-hint"><?= __('settings.shout_emotes_hint') ?></small>
                 </div>
                 <div class="mt-3" id="admin-shout">
                     <label class="form-label"><?= _h('settings.shout_purge') ?></label>
@@ -1068,7 +1137,26 @@
             <div class="settings-section" id="section-sounds" data-group="users" data-title="<?= _h('settings.sounds_heading') ?>">
                 <h5><i class="bi bi-volume-up"></i> <?= _h('settings.sounds_heading') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.sounds_intro') ?></small>
-                <?php $sndLib = soundLibrary($db, $baseUrl); ?>
+                <?php
+                $sndLib = soundLibrary($db, $baseUrl);
+                // Two groups in every select below: what ships with the tracker, and what the owner
+                // added. Grouped here rather than in the script so the page is already right before
+                // anything runs; assets/js/admin-sounds.js only keeps the second group in step as
+                // sounds are added, renamed and removed — inside the group, by name.
+                $sndShipped = []; $sndOwn = [];
+                foreach ($sndLib as $sndE) { if (!empty($sndE['custom'])) $sndOwn[] = $sndE; else $sndShipped[] = $sndE; }
+                usort($sndOwn, fn(array $a, array $b): int => strcasecmp((string)$a['name'], (string)$b['name']));
+                /** One select's option list: "Nothing", then the two groups. $cur is the stored id. */
+                $sndOptions = function (string $cur) use ($sndShipped, $sndOwn): string {
+                    $opt = fn(array $e): string => '<option value="' . sanitize((string)$e['id']) . '"'
+                        . ($cur === $e['id'] ? ' selected' : '') . '>' . sanitize((string)$e['name']) . '</option>';
+                    $html = '<option value=""' . ($cur === '' ? ' selected' : '') . '>' . _h('settings.sounds_none') . '</option>';
+                    if ($sndShipped) $html .= '<optgroup label="' . _h('settings.sounds_group_shipped') . '">' . implode('', array_map($opt, $sndShipped)) . '</optgroup>';
+                    // data-sound-own is what the script looks for when it has a sound to slot in.
+                    if ($sndOwn) $html .= '<optgroup label="' . _h('settings.sounds_group_own') . '" data-sound-own>' . implode('', array_map($opt, $sndOwn)) . '</optgroup>';
+                    return $html;
+                };
+                ?>
                 <div class="row g-3">
                     <div class="col-md-3" data-setting="sounds_enabled">
                         <label class="form-label"><?= _h('settings.sounds_enabled') ?></label>
@@ -1081,11 +1169,8 @@
                     <div class="col-md-3" data-setting="sound_default_notification">
                         <label class="form-label" for="setting-sound_default_notification"><?= _h('settings.sounds_default_notification') ?></label>
                         <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_notification" id="setting-sound_default_notification">
-                                <option value="" <?= (string)($cfg['sound_default_notification'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
-                                <?php foreach ($sndLib as $sndE): ?>
-                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_notification'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
-                                <?php endforeach; ?>
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_notification" id="setting-sound_default_notification" data-snd-label="<?= _h('settings.sounds_ev_notification') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_notification'] ?? '')) ?>
                             </select>
                             <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_notification" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
                         </div>
@@ -1094,11 +1179,8 @@
                     <div class="col-md-3" data-setting="sound_default_message_friend">
                         <label class="form-label" for="setting-sound_default_message_friend"><?= _h('settings.sounds_default_message_friend') ?></label>
                         <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_message_friend" id="setting-sound_default_message_friend">
-                                <option value="" <?= (string)($cfg['sound_default_message_friend'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
-                                <?php foreach ($sndLib as $sndE): ?>
-                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_message_friend'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
-                                <?php endforeach; ?>
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_message_friend" id="setting-sound_default_message_friend" data-snd-label="<?= _h('settings.sounds_ev_message_friend') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_message_friend'] ?? '')) ?>
                             </select>
                             <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_message_friend" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
                         </div>
@@ -1107,11 +1189,8 @@
                     <div class="col-md-3" data-setting="sound_default_message">
                         <label class="form-label" for="setting-sound_default_message"><?= _h('settings.sounds_default_message') ?></label>
                         <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_message" id="setting-sound_default_message">
-                                <option value="" <?= (string)($cfg['sound_default_message'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
-                                <?php foreach ($sndLib as $sndE): ?>
-                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_message'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
-                                <?php endforeach; ?>
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_message" id="setting-sound_default_message" data-snd-label="<?= _h('settings.sounds_ev_message') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_message'] ?? '')) ?>
                             </select>
                             <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_message" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
                         </div>
@@ -1122,11 +1201,8 @@
                     <div class="col-md-3" data-setting="sound_default_shout_friend">
                         <label class="form-label" for="setting-sound_default_shout_friend"><?= _h('settings.sounds_default_shout_friend') ?></label>
                         <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_shout_friend" id="setting-sound_default_shout_friend">
-                                <option value="" <?= (string)($cfg['sound_default_shout_friend'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
-                                <?php foreach ($sndLib as $sndE): ?>
-                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_shout_friend'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
-                                <?php endforeach; ?>
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_shout_friend" id="setting-sound_default_shout_friend" data-snd-label="<?= _h('settings.sounds_ev_shout_friend') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_shout_friend'] ?? '')) ?>
                             </select>
                             <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_shout_friend" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
                         </div>
@@ -1135,11 +1211,8 @@
                     <div class="col-md-3" data-setting="sound_default_shout">
                         <label class="form-label" for="setting-sound_default_shout"><?= _h('settings.sounds_default_shout') ?></label>
                         <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_shout" id="setting-sound_default_shout">
-                                <option value="" <?= (string)($cfg['sound_default_shout'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
-                                <?php foreach ($sndLib as $sndE): ?>
-                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_shout'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
-                                <?php endforeach; ?>
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_shout" id="setting-sound_default_shout" data-snd-label="<?= _h('settings.sounds_ev_shout') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_shout'] ?? '')) ?>
                             </select>
                             <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_shout" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
                         </div>
@@ -1148,11 +1221,8 @@
                     <div class="col-md-3" data-setting="sound_default_mention">
                         <label class="form-label" for="setting-sound_default_mention"><?= _h('settings.sounds_default_mention') ?></label>
                         <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_mention" id="setting-sound_default_mention">
-                                <option value="" <?= (string)($cfg['sound_default_mention'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
-                                <?php foreach ($sndLib as $sndE): ?>
-                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_mention'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
-                                <?php endforeach; ?>
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_mention" id="setting-sound_default_mention" data-snd-label="<?= _h('settings.sounds_ev_mention') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_mention'] ?? '')) ?>
                             </select>
                             <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_mention" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
                         </div>
@@ -1163,26 +1233,31 @@
                 <?php /* The uploads: drawn and driven by assets/js/admin-sounds.js. The file input has no name on
                          purpose — it is not a setting and never travels with the form; the script reads the file
                          and posts it to admin/sounds as base64. */ ?>
-                <div class="mt-3" id="admin-sounds" data-max-bytes="<?= (int)SOUNDS_MAX_BYTES ?>">
-                    <label class="form-label"><?= _h('settings.sounds_custom') ?></label>
-                    <div id="admin-sounds-list" class="mb-2"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
-                    <?php /* The same drop zone the language install and the address-list import use: the
-                             <input type=file> stays in the DOM, invisible, over a box that also takes a dropped file. */ ?>
-                    <div class="row g-2 align-items-end">
-                        <div class="col-md-6">
-                            <div class="ipl-drop" id="admin-sound-drop" tabindex="0" role="button" aria-label="<?= _h('settings.sounds_drop_aria') ?>">
-                                <i class="bi bi-file-earmark-music ipl-drop-icon"></i>
-                                <span class="ipl-drop-main"><u><?= _h('settings.sounds_drop_choose') ?></u> <?= _h('settings.sounds_drop_or') ?></span>
-                                <span class="ipl-drop-sub"><?= _h('settings.sounds_drop_sub') ?></span>
-                                <input type="file" id="admin-sound-file" class="ipl-drop-input" accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav">
-                            </div>
+                <div class="mt-4" id="admin-sounds" data-max-bytes="<?= (int)SOUNDS_MAX_BYTES ?>" data-max-count="<?= (int)SOUNDS_MAX_CUSTOM ?>">
+                    <div class="admin-sounds-head">
+                        <label class="form-label mb-0"><?= _h('settings.sounds_custom') ?></label>
+                        <?php /* "3 of 40": the cap is the reason an upload can be refused, so it is beside the
+                                 heading rather than only inside the error that says no. Filled by the script. */ ?>
+                        <span class="admin-sounds-count" id="admin-sounds-count" hidden></span>
+                    </div>
+                    <div id="admin-sounds-list" class="mb-3"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
+                    <div class="admin-sound-add">
+                        <h6 class="admin-sound-add-title"><i class="bi bi-plus-circle"></i> <?= _h('settings.sounds_add_heading') ?></h6>
+                        <?php /* The same drop zone the language install and the address-list import use: the
+                                 <input type=file> stays in the DOM, invisible, over a box that also takes a dropped
+                                 file. Full width and shallow, because the name and the button read as one row below
+                                 it rather than as a column beside a tall box. */ ?>
+                        <div class="ipl-drop ipl-drop-wide" id="admin-sound-drop" tabindex="0" role="button" aria-label="<?= _h('settings.sounds_drop_aria') ?>">
+                            <i class="bi bi-file-earmark-music ipl-drop-icon"></i>
+                            <span class="ipl-drop-main"><u><?= _h('settings.sounds_drop_choose') ?></u> <?= _h('settings.sounds_drop_or') ?></span>
+                            <span class="ipl-drop-sub"><?= _h('settings.sounds_drop_sub') ?></span>
+                            <input type="file" id="admin-sound-file" class="ipl-drop-input" accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav">
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label" for="admin-sound-name"><?= _h('settings.sounds_name_label') ?></label>
-                            <input type="text" id="admin-sound-name" class="form-control bg-dark text-light border-secondary" maxlength="60" placeholder="<?= _h('settings.sounds_name_ph') ?>">
-                        </div>
-                        <div class="col-md-2">
-                            <button type="button" class="btn btn-sm btn-info w-100" id="admin-sound-upload"><i class="bi bi-plus-lg"></i> <?= _h('settings.sounds_upload') ?></button>
+                        <div class="admin-sound-add-row">
+                            <input type="text" id="admin-sound-name" class="form-control form-control-sm bg-dark text-light border-secondary"
+                                   maxlength="<?= (int)SOUNDS_NAME_MAX ?>" placeholder="<?= _h('settings.sounds_name_ph') ?>"
+                                   aria-label="<?= _h('settings.sounds_name_label') ?>" autocomplete="off" spellcheck="false">
+                            <button type="button" class="btn btn-sm btn-info" id="admin-sound-upload"><i class="bi bi-plus-lg"></i> <?= _h('settings.sounds_upload') ?></button>
                         </div>
                     </div>
                     <small class="settings-hint"><?= __('settings.sounds_custom_hint') ?></small>

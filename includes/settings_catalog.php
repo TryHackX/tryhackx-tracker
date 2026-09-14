@@ -251,6 +251,12 @@ function settingsCatalogKeywords(): array {
         'shout_keep_days'          => 'shoutbox retention days keep age prune janitor old lines history',
         'shout_format'             => 'shoutbox format bbcode markdown plain text markup formatting default',
         'shout_rules'              => 'shoutbox rules notice line above the box house rules regulamin',
+        // ── Shoutbox emotes and stickers (1.59.0) ──
+        'shout_emotes_enabled'     => 'shoutbox emotes emoticons smileys custom images pictures svg png gif webp emotki obrazki master switch',
+        'shout_emote_max_kb'       => 'shoutbox emote size limit kilobytes kb upload maximum picture file',
+        'shout_emote_max_px'       => 'shoutbox emote pixels width height dimensions limit maximum picture size',
+        'shout_emote_per_user'     => 'shoutbox emote per user cap how many uploads each member limit',
+        'shout_stickers_enabled'   => 'shoutbox stickers big emote whole message naklejki large image sticker',
         'pm_typing_enabled'        => 'typing indicator is writing messages live chat',
         'pm_enabled'               => 'private messages pm inbox conversations members write dm',
         'pm_who'                   => 'private messages who can write default friends everybody nobody',

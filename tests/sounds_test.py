@@ -6,15 +6,17 @@ Sounds (1.56.0) — the four endpoints end to end:
 A visitor gets 401; a member gets the library, their (muted) preferences and the site defaults; the
 account page grows the tab and the badge carries a config only once sounds are on; what is saved is
 clamped and checked against the library; the feature switch and the permission both close it. The
-owner uploads a real file, is refused a PNG, a duplicate and an oversized one, the upload streams
-with an ETag (and a 304), becomes a site default, and deleting it clears that default and a member's
-pick of it.
+owner uploads a real file, is refused a PNG, a duplicate, an oversized one and a name another sound
+already answers to, renames it (the id and the bytes stay, the name every member sees changes), the
+upload streams with an ETag (and a 304), becomes a site default, and deleting it clears that default
+and a member's pick of it.
 """
 import base64
 import http.cookiejar
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import urllib.error
@@ -114,6 +116,16 @@ php("setSetting($db, 'users_enabled', '1'); setSetting($db, 'sounds_enabled', '1
 uid = int(php("echo (int)$db->query(\"SELECT id FROM users WHERE username = '" + USER + "'\")->fetchColumn();") or 0)
 check("the account exists", uid > 0, uid)
 mp3 = open(os.path.join(ROOT, "assets", "sounds", "ding.mp3"), "rb").read()
+
+
+def wav_of(seconds=1):
+    """A second of silence as a real WAV: bytes the sniffer accepts that no other row already holds."""
+    data = b"\0" * (16000 * seconds)                       # 8 kHz, mono, 16-bit
+    return (b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt " + struct.pack("<I", 16)
+            + struct.pack("<HHIIHH", 1, 1, 8000, 16000, 2, 16) + b"data" + struct.pack("<I", len(data)) + data)
+
+
+WAV64 = base64.b64encode(wav_of()).decode()
 sid = None
 
 try:
@@ -190,6 +202,30 @@ try:
     check("an oversized file is refused before it is decoded", s == 400 and "512" in (j.get("error") or ""), (s, j))
     s, j = adm.api("admin/sounds", "POST", {"op": "upload", "name": "Py test bad64", "data": "@@@not base64@@@"}, csrf_header=True)
     check("garbage is refused", s == 400, (s, j))
+
+    # ── a name is a sound's own ──────────────────────────────────────────────
+    # A different file entirely, so what is refused is the NAME and not the bytes.
+    taken = php("echo __('api.sounds.name_taken');")
+    s, j = adm.api("admin/sounds", "POST", {"op": "upload", "name": "  py TEST ding  ", "data": WAV64}, csrf_header=True)
+    check("a name another upload already answers to is refused, whatever its case and spacing, in the dictionary's own words",
+          s == 400 and j.get("error") == taken, (s, j))
+    s, j = adm.api("admin/sounds", "POST", {"op": "upload", "name": "Ding", "data": WAV64}, csrf_header=True)
+    check("… and a shipped clip's name is just as taken", s == 400 and j.get("error") == taken, (s, j))
+    s, j = adm.api("admin/sounds", "POST", {"op": "upload", "name": "x", "data": WAV64}, csrf_header=True)
+    check("one character is not a name", s == 400 and j.get("error") == php("echo __('api.sounds.name_short');"), (s, j))
+
+    # ── renaming: the way out of a clash that keeps every pick of the sound ──
+    s, j = adm.api("admin/sounds", "POST", {"op": "rename", "id": num, "name": "  Py test renamed  "}, csrf_header=True)
+    check("renaming answers with the trimmed name and the listing already says it",
+          s == 200 and j.get("success") and (j.get("renamed") or {}).get("name") == "Py test renamed"
+          and any(x["sid"] == sid and x["name"] == "Py test renamed" for x in j["sounds"]), (s, str(j)[:300]))
+    s, j = me.api("sounds")
+    check("… and so does every member's library, under the very same id",
+          any(e["id"] == sid and e["name"] == "Py test renamed" for e in j["library"]), sid)
+    s, j = adm.api("admin/sounds", "POST", {"op": "rename", "id": num, "name": "Ding"}, csrf_header=True)
+    check("renaming onto a name the library already has is refused", s == 400 and j.get("error") == taken, (s, j))
+    s, j = adm.api("admin/sounds", "POST", {"op": "rename", "id": 999999, "name": "Py test nowhere"}, csrf_header=True)
+    check("renaming an id nobody has is 404, not 400", s == 404, (s, j))
 
     s, h, body = guest.raw("sound&id=" + str(num))
     etag = h.get("ETag") or h.get("Etag")

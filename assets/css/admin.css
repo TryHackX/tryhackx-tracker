@@ -2513,3 +2513,64 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .admin-sound-file { max-width: 22rem; }
 .admin-sound-name { max-width: 16rem; }
 .admin-sounds-table td { vertical-align: middle; }
+
+/* ── Settings → Sounds, tidied (1.59.0) ─────────────────────────────────── */
+/* The heading and how much of the cap is used, on one line. */
+.admin-sounds-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+.admin-sounds-count {
+    padding: 0.05rem 0.45rem;
+    border: 1px solid rgba(77,159,214,0.35);
+    border-radius: 999px;
+    background: rgba(77,159,214,0.12);
+    color: #9fd0ef;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+/* Full is not an error yet — it is the reason the next upload will be refused. */
+.admin-sounds-count.is-full { border-color: rgba(255,152,0,0.5); background: rgba(255,152,0,0.14); color: #ffd9a3; }
+.admin-sounds-table th {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #8a94a2;
+    border-bottom-color: #2a3442;
+}
+.admin-sounds-table td { vertical-align: middle; }
+.admin-sound-cell-name { font-size: 0.88rem; word-break: break-word; }
+.admin-sound-cell-used { min-width: 8rem; }
+/* One chip per site default that currently points here — short labels, so several fit on a line. */
+.admin-sound-used {
+    display: inline-block;
+    margin: 0.05rem 0.2rem 0.05rem 0;
+    padding: 0.02rem 0.4rem;
+    border: 1px solid rgba(108,195,138,0.35);
+    border-radius: 999px;
+    background: rgba(108,195,138,0.12);
+    color: #a7d9b8;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+/* Adding one: the drop zone across the whole panel, the name and the button as one row beneath it. */
+.admin-sound-add {
+    padding: 0.7rem 0.8rem 0.8rem;
+    border: 1px solid #2a3442;
+    border-radius: 8px;
+    background: #10161f;
+}
+.admin-sound-add-title { margin-bottom: 0.5rem; font-size: 0.82rem; color: #c3ccd8; }
+.admin-sound-add-title .bi { color: #4d9fd6; }
+/* Across the whole panel, so it reads as one row rather than as a tall column beside the name box:
+   the icon, what to do and what is accepted on one line, wrapping only when there is no room. */
+.ipl-drop-wide {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.55rem 0.8rem;
+}
+.ipl-drop-wide .ipl-drop-icon { font-size: 1.05rem; }
+.ipl-drop-wide .ipl-drop-sub::before { content: '·'; margin-right: 0.4rem; opacity: 0.6; }
+.admin-sound-add-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+.admin-sound-add-row .form-control { flex: 1 1 auto; min-width: 0; }
+.admin-sound-add-row .btn { flex: 0 0 auto; white-space: nowrap; }

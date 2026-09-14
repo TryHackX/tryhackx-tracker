@@ -337,6 +337,12 @@ check('panel permissions are deliberately ungranted by default',
 
 $ADMIN_ONLY = [
     // permission => why nobody but an admin should ever have it
+    //
+    // Adding a picture to a room everybody reads is not part of writing in it (1.59.0), so no
+    // migration hands this out: the admin group passes every check anyway and the owner uploads
+    // from Settings → Shoutbox. An operator who wants members to add their own ticks the box in
+    // Users → Groups, which is the whole reason the id exists.
+    'shout.upload_emote' => 'granted to nobody on purpose: the owner uploads from Settings, the operator may hand it out',
 ];
 foreach ($PANEL_ONLY as $pp) $ADMIN_ONLY[$pp] = 'panel permission: granted by the operator, never seeded';
 

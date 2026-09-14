@@ -62,6 +62,14 @@ if (empty($shoutPost['ok'])) {
 }
 $shoutRules = shoutRules($cfg);
 $shoutBoth  = shoutPlacement($cfg) === 'both';
+
+// The two F2 switches. Through the helpers where they exist and from the setting where they do not,
+// so this template draws the same either side of the emote half landing: an install that has never
+// seen the setting behaves like one that has it on, which is what the shipped default says.
+$shoutEmotesOn   = function_exists('shoutEmotesEnabled')
+    ? shoutEmotesEnabled($cfg) : ((string)($cfg['shout_emotes_enabled'] ?? '1') === '1');
+$shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
+    ? shoutStickersEnabled($cfg) : ((string)($cfg['shout_stickers_enabled'] ?? '1') === '1'));
 ?>
 <div id="shoutbox" class="shoutbox<?= $shoutOnPage ? ' shoutbox-page' : '' ?>"
      data-newest="<?= $shoutNewest ?>"
@@ -73,6 +81,8 @@ $shoutBoth  = shoutPlacement($cfg) === 'both';
      data-may-moderate="<?= $shoutMod ? '1' : '0' ?>"
      data-me="<?= (int)$shoutMeRow['id'] ?>"
      data-closed="<?= sanitize($shoutWhy) ?>"
+     data-emotes="<?= $shoutEmotesOn ? '1' : '0' ?>"
+     data-stickers="<?= $shoutStickersOn ? '1' : '0' ?>"
      data-page="<?= $shoutOnPage ? '1' : '0' ?>">
     <input type="hidden" id="shout-csrf" value="<?= $shoutCsrf ?>">
     <div class="shout-head">
@@ -82,6 +92,12 @@ $shoutBoth  = shoutPlacement($cfg) === 'both';
         <button type="button" class="btn btn-secondary btn-small shout-older" id="shout-older"<?= $shoutMore ? '' : ' hidden' ?>><?= _h('shout.older') ?></button>
         <?php if ($shoutBoth && !$shoutOnPage): ?>
         <a class="shout-open" href="<?= $baseUrl ?>?action=shoutbox"><?= _h('shout.open_page') ?></a>
+        <?php endif; ?>
+        <?php /* The way to the emotes page for somebody who has no composer: a reader with
+                 shout.view and nothing else never opens the picker, and the codes are no use to
+                 them if there is nowhere that lists them. */ ?>
+        <?php if ($shoutEmotesOn): ?>
+        <a class="shout-emotes-link<?= ($shoutBoth && !$shoutOnPage) ? '' : ' shout-emotes-link-end' ?>" href="<?= $baseUrl ?>?action=emotes"><?= _h('shout.emotes_link') ?></a>
         <?php endif; ?>
     </div>
     <div class="shout-list" id="shout-list">
@@ -141,6 +157,13 @@ $shoutBoth  = shoutPlacement($cfg) === 'both';
         <div class="form-hint" id="shout-body-help"></div>
         <?php endif; ?>
         <div class="shout-acts">
+            <?php /* The picker's handle. One button, whatever the tracker has: the four pages of
+                     Unicode characters are drawn by the device's own emoji font and need nothing
+                     from the server, and the emotes and stickers appear beside them when there are
+                     any. The glyph is written as an entity so this file stays ASCII — the picker's
+                     own contents live in assets/js/shoutbox.js. */ ?>
+            <button type="button" class="shout-emoji-btn" id="shout-emoji" aria-haspopup="dialog" aria-expanded="false"
+                    title="<?= _h('shout.emoji_title') ?>" aria-label="<?= _h('shout.emoji_title') ?>">&#128512;</button>
             <button type="button" class="btn btn-small" id="shout-send"><?= _h('shout.send') ?></button>
             <span class="shout-count text-muted" id="shout-count"></span>
             <span class="shout-note" id="shout-note"></span>

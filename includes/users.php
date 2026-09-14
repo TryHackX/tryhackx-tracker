@@ -116,6 +116,12 @@ function userPermissionList(): array {
         'shout.post'     => 'Write in the shoutbox',
         'shout.delete_own' => 'Delete their own shouts',
         'shout.moderate' => 'Delete anyone\'s shouts, and clear the shoutbox',
+        // Adding a picture to a room everybody reads is not "writing in the shoutbox", so it is not
+        // part of shout.post and no migration hands it to anybody (1.59.0). The admin group passes
+        // every check anyway; the owner uploads from Settings → Shoutbox. Give this to a group and
+        // its members may add emotes and stickers of their own, up to shout_emote_per_user each —
+        // every one of them sniffed, capped and refused unless it is really a picture.
+        'shout.upload_emote' => 'Upload emotes and stickers for the shoutbox',
 
         // ── the admin panel ──
         //

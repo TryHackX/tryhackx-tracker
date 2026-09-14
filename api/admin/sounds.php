@@ -3,13 +3,19 @@
  * GET/POST admin/sounds — the owner's sound uploads (Settings → Sounds).
  *
  * GET   the uploads with their sizes and lengths, the shipped files, and the limits.
- * POST  {"op": "upload", "name": …, "data": <base64>}  |  {"op": "delete", "id": N}
+ * POST  {"op": "upload", "name": …, "data": <base64>}
+ *     | {"op": "rename", "id": N, "name": …}
+ *     | {"op": "delete", "id": N}
  *
  * Not in the permission map, so this is owner-only, like the rest of Settings. The upload travels as
  * base64 inside JSON rather than as a multipart form — the same road every other panel call takes,
  * with the same CSRF header — and lands in includes/sounds.php, which decides from the BYTES whether
  * it is a sound at all (MP3 frames, an Ogg page, a RIFF/WAVE header), how long it is, and refuses
- * anything else. The name is display text and is cleaned, bounded and stored as text.
+ * anything else. The name is display text: cleaned, bounded, and refused when another sound in the
+ * library — a shipped clip included — already answers to it.
+ *
+ * `rename` exists because that last rule can only be met by changing a name, and deleting a sound
+ * to rename it would take every reader's pick of it down with it.
  */
 require_once __DIR__ . '/../../includes/sounds.php';
 
@@ -54,6 +60,14 @@ if ($op === 'upload') {
     if (!$r['ok']) jsonResponse(['error' => __($r['error'])], 400);
     jsonResponse(['success' => true, 'message' => __('api.sounds.uploaded'), 'sounds' => $listing(),
                   'added' => ['id' => $r['row']['id'], 'sid' => 'c:' . $r['row']['id'], 'name' => $r['row']['name']]]);
+}
+
+if ($op === 'rename') {
+    $r = soundRename($db, (int)($input['id'] ?? 0), (string)($input['name'] ?? ''));
+    // A name nobody can have is the owner's mistake (400); an id that is not there is gone (404).
+    if (!$r['ok']) jsonResponse(['error' => __($r['error'])], $r['error'] === 'api.sounds.unknown' ? 404 : 400);
+    jsonResponse(['success' => true, 'message' => __('api.sounds.renamed'), 'sounds' => $listing(),
+                  'renamed' => ['id' => $r['row']['id'], 'sid' => 'c:' . $r['row']['id'], 'name' => $r['row']['name']]]);
 }
 
 if ($op === 'delete') {

@@ -149,6 +149,10 @@ $routes = [
     // not-found page is the template's decision (the setting, the placement, the permission) — the
     // route exists either way, so a link to it never depends on a setting the linker cannot see.
     'shoutbox'     => 'templates/pages/shoutbox.php',
+    // The emotes and stickers the shoutbox understands, with their codes. Same rule as above: the
+    // route exists whatever the settings say, and the template answers with the list or with the
+    // not-found page.
+    'emotes'       => 'templates/pages/emotes.php',
     // A PROFILE'S ADDRESS PUTS THE NAME IN ITS OWN PARAMETER, and the reason is two lines above:
     // $action is lower-cased and stripped of everything but [a-z0-9_-], while userValidUsername()
     // allows a dot and both cases. A name can never be an action, so the collision problem does not

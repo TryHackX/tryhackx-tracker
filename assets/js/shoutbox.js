@@ -1,9 +1,11 @@
 /**
- * The shoutbox, keeping up with itself.
+ * The shoutbox, keeping up with itself — and the picker people say it with.
  *
  * One script for both places the box appears — the block on the front page and ?action=shoutbox —
  * because they are the same markup with a different row count, and two scripts for one set of ids
- * would be two answers to every question about them.
+ * would be two answers to every question about them. ?action=emotes rides along at the bottom of
+ * this file for the same reason: it is the other half of one feature, and the browser already has
+ * this file on every page the shoutbox is switched on for.
  *
  * ── it never redraws ───────────────────────────────────────────────────────────────────────────
  * The starting point comes WITH the first render (`data-newest` on #shoutbox), so the first tick
@@ -19,37 +21,26 @@
  * same thing: skip this tick. The counter on the badge is somebody else's job and comes from the
  * pulse; this only fetches text for a box that is on the screen.
  *
+ * ── the emoji are characters, the emotes are images ────────────────────────────────────────────
+ * The four emoji pages are a fixed list of Unicode characters written into this file, drawn by the
+ * font the device already has — Segoe UI Emoji on Windows, Noto on Android, Apple's on iOS. No
+ * image pack is shipped and none is downloaded, which is why the list is here rather than in the
+ * database: it never changes and it costs nothing. What the OPERATOR adds — the `:code:` emotes and
+ * the stickers — is a short list from `shout_emotes`, asked for once per page, and what lands in
+ * the box is the token, never the image: the server decides what a shout renders as.
+ *
  * Row bodies arrive as HTML the SERVER rendered, through the same richtextRender() every
- * description and message goes through. There is exactly one place in this codebase that decides
- * what may be displayed, and it is not here.
+ * description and message goes through — <img class="shout-emote"> and <img class="shout-sticker">
+ * included. There is exactly one place in this codebase that decides what may be displayed, and it
+ * is not here.
  */
 (function () {
     'use strict';
 
-    var box = document.getElementById('shoutbox');
-    if (!box) return;
-
     var API = (typeof APP_API === 'string') ? APP_API : 'api.php?endpoint=';
     var BASE = (typeof APP_BASE === 'string') ? APP_BASE : '';
 
-    var listEl = document.getElementById('shout-list');
-    var olderBtn = document.getElementById('shout-older');
-    var ta = document.getElementById('shout-body');
-    var sendBtn = document.getElementById('shout-send');
-    var countEl = document.getElementById('shout-count');
-    var noteEl = document.getElementById('shout-note');
-    var fmtEl = document.getElementById('shout-body-format');
-    if (!listEl) return;
-
-    var newest = Number(box.dataset.newest || 0);
-    var oldest = Number(box.dataset.oldest || 0);
-    var live = Number(box.dataset.live || 0);
-    var maxChars = Number(box.dataset.max || 500) || 500;
-    var format = box.dataset.format || 'bbcode';
-    var meId = Number(box.dataset.me || 0);
-    var seen = 0;                 // the highest id this reader has been told about
-    var polling = false;
-    var timer = 0;
+    /* ─────────────────────────── the small shared tools ─────────────────────────── */
 
     function el(tag, attrs, kids) {
         var n = document.createElement(tag);
@@ -95,11 +86,6 @@
         } catch (e) { return null; }
     }
 
-    /** Is this box on the screen of a tab somebody is looking at? */
-    function visible() { return !document.hidden && box.offsetParent !== null; }
-
-    function note(text) { if (noteEl) noteEl.textContent = text || ''; }
-
     /**
      * What went wrong, in this language.
      *
@@ -108,214 +94,696 @@
      * and "something went wrong" is a better answer than an error code nobody can act on.
      */
     var CODES = { flood: 1, too_long: 1, muted: 1, empty: 1, invalid_body: 1, disabled: 1,
-                  no_permission: 1, login_required: 1, not_found: 1, rate_limit: 1 };
-    function errText(r) {
+                  no_permission: 1, login_required: 1, not_found: 1, rate_limit: 1,
+                  too_large: 1, bad_code: 1 };
+    function errText(r, maxChars) {
         var code = (r && r.error) || 'failed';
         if (typeof code !== 'string') code = 'failed';
         if (code === 'flood') return t('js.shout.err_flood', { seconds: Number(r.retry_after || 0) });
-        if (code === 'too_long') return t('js.shout.err_too_long', { limit: Number(r.limit || maxChars) });
+        if (code === 'too_long') return t('js.shout.err_too_long', { limit: Number(r.limit || maxChars || 0) });
         if (code === 'muted') return t('js.shout.err_muted', { until: String(r.until || '') });
+        if (code === 'too_large') return t('js.shout.err_too_large', { kb: Number(r.limit || r.kb || 0) });
         if (CODES[code]) return t('js.shout.err_' + code);
         // Already a sentence rather than a code — show it rather than swallowing it.
         if (/\s/.test(code)) return code;
         return t('js.shout.err_failed');
     }
 
-    /** One shout, exactly as templates/partials/shoutbox_widget.php draws it. */
-    function renderRow(r) {
-        var name = String(r.user || '');
-        var at = String(r.at || '');
-        var row = el('div', { className: 'shout-row' + (r.own ? ' shout-row-own' : '') + (r.mentions_me ? ' shout-row-mention' : '') });
-        row.dataset.id = String(Number(r.id) || 0);
-        row.dataset.user = name;
-        row.appendChild(el('a', { className: 'shout-who', href: BASE + '?action=u&name=' + encodeURIComponent(name), text: name }));
-        row.appendChild(el('span', { className: 'shout-time', title: at, text: at.slice(11, 16) }));
-        row.appendChild(el('span', { className: 'shout-body rt-body', html: r.html || '' }));
-        if (r.deletable) {
-            row.appendChild(el('button', { type: 'button', className: 'shout-del',
-                                           title: t('js.shout.delete'), 'aria-label': t('js.shout.delete'), text: '×' }));
-        }
-        return row;
-    }
-
     /**
-     * Append the rows that are not already there, and follow the list down only if the reader was
-     * already at the bottom of it. Scrolling somebody away from the line they are reading is worse
-     * than a row they have to scroll to.
+     * The upload's refusals come from the server with the sentence already written — in this
+     * reader's language, naming the limit it was judged against. There are eleven of them and they
+     * all know something this side does not (which code was taken, what the file turned out to be),
+     * so the message wins wherever there is one and the dictionary is the fallback.
      */
-    function appendRows(rows) {
-        var atBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 40;
-        var added = [];
-        (rows || []).forEach(function (r) {
-            var id = Number(r && r.id) || 0;
-            if (!id || listEl.querySelector('.shout-row[data-id="' + id + '"]')) return;
-            listEl.appendChild(renderRow(r));
-            if (id > newest) newest = id;
-            if (!oldest || id < oldest) oldest = id;
-            added.push(r);
-        });
-        if (added.length) {
-            var empty = listEl.querySelector('.shout-empty');
-            if (empty) empty.remove();
-            if (atBottom) listEl.scrollTop = listEl.scrollHeight;
-        }
-        return added;
+    function emoteErr(r) {
+        var m = r && typeof r.message === 'string' ? r.message.trim() : '';
+        return m || errText(r);
     }
 
-    function bottom() { listEl.scrollTop = listEl.scrollHeight; }
-
     /**
-     * "I have seen up to here."
+     * "Are you sure?", asked in the place the button was.
      *
-     * One column on the account (`users.shout_seen_id`), so this is the whole of what makes the
-     * badge stop counting. Only while the box is actually on the screen, and never twice for the
-     * same id — a marker that goes backwards or repeats is a write for nothing.
+     * The same shape for a shout and for an uploaded emote — a question with a yes and a no, in the
+     * row it is about. window.confirm() would ask from outside the page, about a row it cannot show.
      */
-    function markSeen(id) {
-        if (!meId || !id || id <= seen || !visible()) return;
-        seen = id;
-        post('shout_seen', { id: id });
-    }
-
-    function stop() { if (timer) { clearInterval(timer); timer = 0; } }
-
-    async function poll() {
-        if (!live || polling || !visible()) return;
-        polling = true;
-        var j = null;
-        try { j = await get('shout_list&after=' + newest); } finally { polling = false; }
-        if (!j) return;
-        if (!j.success) {
-            // Switched off, signed out, or the permission taken away mid-session: stop asking. The
-            // box stays on the screen with what it had, which is honest — those rows were real.
-            if (j.error === 'disabled' || j.error === 'no_permission' || j.error === 'login_required') stop();
-            return;
-        }
-        var added = appendRows(j.rows);
-        if (Number(j.newest) > newest) newest = Number(j.newest);
-        if (!added.length) return;
-        markSeen(newest);
-        // The hook the sound player listens on (and F3's nav counter will). The counts themselves
-        // come from the pulse — this only says that rows landed while somebody was looking.
-        window.dispatchEvent(new CustomEvent('shout:new', { detail: { rows: added } }));
-    }
-
-    /** Older rows, pasted in ABOVE without moving what is being read. */
-    async function older() {
-        if (!olderBtn || olderBtn.disabled || !oldest) return;
-        olderBtn.disabled = true;
-        var j = await get('shout_list&before=' + oldest);
-        olderBtn.disabled = false;
-        if (!j || !j.success) { note(errText(j)); return; }
-        var rows = j.rows || [];
-        if (!rows.length) { olderBtn.hidden = true; note(t('js.shout.no_more')); return; }
-        // Measured before the insert and restored after it: the browser keeps scrollTop where it
-        // was, which means the content under it has moved down by exactly the height added.
-        var wasHeight = listEl.scrollHeight, wasTop = listEl.scrollTop;
-        var frag = document.createDocumentFragment();
-        rows.forEach(function (r) {
-            var id = Number(r && r.id) || 0;
-            if (!id || listEl.querySelector('.shout-row[data-id="' + id + '"]')) return;
-            frag.appendChild(renderRow(r));           // rows arrive newest LAST, so order is kept
-            if (!oldest || id < oldest) oldest = id;
-        });
-        var empty = listEl.querySelector('.shout-empty');
-        if (empty) empty.remove();
-        listEl.insertBefore(frag, listEl.firstChild);
-        listEl.scrollTop = wasTop + (listEl.scrollHeight - wasHeight);
-        olderBtn.hidden = !j.has_more;
-        note('');
-    }
-
-    /**
-     * Deleting a line: the question waits in the place the button was.
-     *
-     * The same shape as the report cards in the panel — a question with a yes and a no, in the row
-     * it is about. window.confirm() would ask from outside the page, about a row it cannot show.
-     */
-    function askDelete(btn) {
-        var row = btn.closest('.shout-row');
-        if (!row) return;
-        var id = Number(row.dataset.id) || 0;
+    function askInPlace(btn, question, onYes) {
         var ask = el('span', { className: 'shout-confirm' });
-        ask.appendChild(el('span', { className: 'shout-confirm-q', text: t('js.shout.delete_q') }));
+        ask.appendChild(el('span', { className: 'shout-confirm-q', text: question }));
         var yes = el('button', { type: 'button', className: 'shout-yes', text: t('js.shout.yes') });
         var no = el('button', { type: 'button', className: 'shout-no', text: t('js.shout.no') });
         yes.addEventListener('click', async function () {
             yes.disabled = true;
-            var r = await post('shout_delete', { id: id });
-            if (r && r.success) { row.remove(); note(''); return; }
-            // A row somebody else already deleted is gone either way: take it off the screen.
-            if (r && r.error === 'not_found') { row.remove(); return; }
-            note(errText(r));
+            var back = await onYes();
+            if (back !== false) return;             // the caller took the row away itself
             ask.replaceWith(btn);
         });
-        no.addEventListener('click', function () { ask.replaceWith(btn); });
+        no.addEventListener('click', function () { ask.replaceWith(btn); btn.focus(); });
         ask.appendChild(yes);
         ask.appendChild(no);
         btn.replaceWith(ask);
+        yes.focus();
+        return ask;
     }
 
-    function countUpdate() {
-        if (!countEl || !ta) return;
-        countEl.textContent = t('js.shout.chars', { n: ta.value.length, max: maxChars });
-    }
+    /* ─────────────────────────── the emoji, and the images beside them ─────────────────────────── */
 
-    async function send() {
-        if (!ta || !sendBtn) return;
-        var body = ta.value.trim();
-        if (!body) { ta.focus(); return; }
-        sendBtn.disabled = true;
-        var r = await post('shout_post', {
-            body: body,
-            // Whichever syntax they picked; the server validates it either way, and where the
-            // tracker's format is 'plain' there is no select and nothing to pick.
-            format: fmtEl && fmtEl.value ? fmtEl.value : format,
+    /**
+     * Four pages of characters, split on the space between them.
+     *
+     * Split on spaces rather than by character, because half of these are more than one code point:
+     * the variation selector that turns ✌ into the emoji ✌️ is its own character and belongs to the
+     * one before it. Array.from() would tear those in half and put a lone modifier in the grid.
+     */
+    var EMOJI = [
+        { id: 'smileys', tab: '😀', chars:
+            '😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😋 😛 😜 '
+          + '🤪 🤗 🤭 🤔 🤨 😐 😑 😶 😏 😒 🙄 😬 😮 😯 😴 😪 😌 😔 🤤 😷 '
+          + '🤒 🤢 🤮 🥵 🥶 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 🙁 😲 🥺 😢 😭 😱 😤 '
+          + '😡 🤬 😈 💀 💩 🤡 👻 👽 🤖' },
+        { id: 'gestures', tab: '👍', chars:
+            '👋 🤚 ✋ 🖖 👌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ 👍 👎 ✊ 👊 '
+          + '🤛 🤜 👏 🙌 👐 🤝 🙏 💪 👀 🧠 🤷 🤦' },
+        { id: 'hearts', tab: '❤️', chars:
+            '❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💔 💕 💞 💖 💘 💝 💯 🔥 ✨ 🌟 ⭐ 💫 '
+          + '⚡ 💥 💦 💨 💤 🎵 🎶 ✅ ❌ ❗ ❓ ⚠️' },
+        { id: 'objects', tab: '🎉', chars:
+            '🎉 🎊 🎁 🎂 🍕 🍔 🍿 🍎 🍓 🍺 🍻 🍷 ☕ 🌍 🌙 ☀️ 🌈 🌊 🌵 🌲 '
+          + '🍀 🌸 🐶 🐱 🐻 🦊 🐸 🐵 🦄 🐝 🐢 🐙 💻 📱 🎮 🚀' },
+    ];
+
+    var emotesPromise = null;
+    /**
+     * The uploaded images, asked for ONCE per page and shared by the picker and the emotes page.
+     *
+     * A failure is an empty list rather than an error: the emoji above do not depend on the server,
+     * and a picker that refuses to open because one request did not come back is a picker that
+     * punishes the reader for the operator's bad afternoon.
+     */
+    function emotesLoad() {
+        if (emotesPromise) return emotesPromise;
+        emotesPromise = get('shout_emotes').then(function (j) {
+            var rows = (j && (j.emotes || j.rows || j.list)) || [];
+            if (!Array.isArray(rows)) rows = [];
+            return rows.filter(function (r) { return r && r.code && r.url; });
         });
-        sendBtn.disabled = false;
-        if (!r || !r.success) { note(errText(r)); return; }
-        ta.value = '';
-        countUpdate();
-        note('');
-        if (r.row) {
-            // Straight from the answer, without waiting for a tick: the line somebody just wrote
-            // appearing a few seconds later reads as a send that did not work.
-            appendRows([r.row]);
-            bottom();
-            markSeen(newest);
-        }
+        return emotesPromise;
     }
 
-    /* ─────────────────────────── wiring ─────────────────────────── */
+    /** One image in a grid, at the size the grid wants rather than the size it was uploaded at. */
+    function emoteImg(row, cls) {
+        return el('img', { className: cls, src: row.url, alt: ':' + row.code + ':',
+                           title: row.name || row.code, loading: 'lazy' });
+    }
 
-    // Delegated, so a row drawn by the server and a row drawn above by this script behave the same.
-    listEl.addEventListener('click', function (e) {
-        var b = e.target.closest ? e.target.closest('.shout-del') : null;
-        if (b && listEl.contains(b)) askDelete(b);
-    });
-    if (olderBtn) olderBtn.addEventListener('click', older);
-    if (sendBtn) sendBtn.addEventListener('click', send);
-    if (ta) {
-        ta.addEventListener('input', countUpdate);
-        ta.addEventListener('keydown', function (e) {
-            // Enter sends, Shift+Enter starts a line. A shoutbox is a conversation, and reaching for
-            // a button after every sentence is what makes one feel like a form.
-            if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.isComposing) return;
+    /**
+     * The picker: a popover over the composer with four pages of characters and, when the tracker
+     * has any, the emotes and the stickers.
+     *
+     * What it puts in the box is always TEXT — the character itself, or `:code:` for an emote —
+     * because the shout that travels is text and the images are the server's rendering of it.
+     * Somebody who types `:fire:` by hand gets exactly what this button gives them.
+     *
+     * opts: { button, host, insert(text), sticker(code)|null, emotes:bool, stickers:bool }
+     */
+    function mountPicker(opts) {
+        var btn = opts.button, host = opts.host;
+        if (!btn || !host) return null;
+
+        var panel = el('div', { className: 'shout-picker', id: 'shout-picker', hidden: true,
+                                role: 'dialog', 'aria-label': t('js.shout.emoji') });
+        var tabsEl = el('div', { className: 'shout-picker-tabs', role: 'tablist' });
+        var gridEl = el('div', { className: 'shout-picker-grid', id: 'shout-picker-grid' });
+        panel.appendChild(tabsEl);
+        panel.appendChild(gridEl);
+        // The way to the page that lists the codes — and only where there is such a page: with
+        // emotes switched off ?action=emotes answers "no such thing", and a link into that is worse
+        // than no link.
+        if (opts.emotes) {
+            panel.appendChild(el('div', { className: 'shout-picker-foot' }, [
+                el('a', { className: 'shout-picker-all', href: BASE + '?action=emotes', text: t('js.shout.all_emotes') }),
+            ]));
+        }
+        host.appendChild(panel);
+
+        var pages = [];                     // {id, label, tab, fill(grid)}
+        var current = '';
+
+        function tabFor(page) {
+            var b = el('button', { type: 'button', className: 'shout-picker-tab', role: 'tab',
+                                   title: page.label, 'aria-label': page.label, dataset: { g: page.id } });
+            if (page.img) b.appendChild(emoteImg(page.img, 'shout-emote'));
+            else b.appendChild(document.createTextNode(page.tab));
+            b.addEventListener('click', function () { show(page.id); });
+            return b;
+        }
+
+        function show(id) {
+            var page = pages.filter(function (p) { return p.id === id; })[0];
+            if (!page) return;
+            current = id;
+            Array.prototype.forEach.call(tabsEl.children, function (b) {
+                var on = b.dataset.g === id;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            gridEl.textContent = '';
+            gridEl.className = 'shout-picker-grid' + (page.wide ? ' shout-picker-grid-wide' : '');
+            page.fill(gridEl);
+        }
+
+        function cell(content, title, onPick) {
+            var b = el('button', { type: 'button', className: 'shout-picker-cell', title: title, 'aria-label': title });
+            b.appendChild(typeof content === 'string' ? document.createTextNode(content) : content);
+            b.addEventListener('click', function () { onPick(); });
+            return b;
+        }
+
+        EMOJI.forEach(function (g) {
+            pages.push({
+                id: g.id, tab: g.tab, label: t('js.shout.tab_' + g.id),
+                fill: function (grid) {
+                    g.chars.split(' ').forEach(function (ch) {
+                        if (!ch) return;
+                        grid.appendChild(cell(ch, ch, function () { opts.insert(ch); }));
+                    });
+                },
+            });
+        });
+        pages.forEach(function (p) { tabsEl.appendChild(tabFor(p)); });
+
+        /**
+         * The images arrive after the panel does, and that is on purpose: the emoji are here the
+         * moment the button is pressed, and the two image tabs appear beside them when the list
+         * comes back. Nothing is asked for at all when the operator has the feature switched off.
+         */
+        if (opts.emotes) {
+            emotesLoad().then(function (rows) {
+                var plain = rows.filter(function (r) { return !r.sticker; });
+                var stick = opts.stickers && opts.sticker ? rows.filter(function (r) { return !!r.sticker; }) : [];
+                if (plain.length) {
+                    pages.push({
+                        id: 'emotes', tab: ':)', label: t('js.shout.tab_emotes'), img: plain[0],
+                        fill: function (grid) {
+                            plain.forEach(function (r) {
+                                grid.appendChild(cell(emoteImg(r, 'shout-emote'), ':' + r.code + ':',
+                                    function () { opts.insert(':' + r.code + ':'); }));
+                            });
+                        },
+                    });
+                    tabsEl.appendChild(tabFor(pages[pages.length - 1]));
+                }
+                if (stick.length) {
+                    pages.push({
+                        id: 'stickers', tab: '⭐', label: t('js.shout.tab_stickers'), img: stick[0], wide: true,
+                        fill: function (grid) {
+                            stick.forEach(function (r) {
+                                grid.appendChild(cell(emoteImg(r, 'shout-picker-sticker'), ':' + r.code + ':',
+                                    function () { close(); opts.sticker(r.code); }));
+                            });
+                            grid.appendChild(el('p', { className: 'shout-picker-note', text: t('js.shout.sticker_hint') }));
+                        },
+                    });
+                    tabsEl.appendChild(tabFor(pages[pages.length - 1]));
+                }
+            });
+        }
+
+        function cells() { return Array.prototype.slice.call(gridEl.querySelectorAll('.shout-picker-cell')); }
+
+        /** Arrows walk the grid; the row width is measured rather than assumed, because it wraps. */
+        function move(from, dx, dy) {
+            var all = cells();
+            var i = all.indexOf(from);
+            if (i < 0) return;
+            var per = 1;
+            for (var k = 1; k < all.length; k++) { if (all[k].offsetTop !== all[0].offsetTop) { per = k; break; } }
+            var j = i + dx + dy * per;
+            if (j < 0) j = 0;
+            if (j >= all.length) j = all.length - 1;
+            all[j].focus();
+        }
+
+        function onKey(e) {
+            if (panel.hidden) return;
+            if (e.key === 'Escape') { e.preventDefault(); close(); btn.focus(); return; }
+            if (!panel.contains(e.target)) return;
+            var d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+            if (!d || !e.target.classList.contains('shout-picker-cell')) return;
             e.preventDefault();
-            send();
-        });
-        countUpdate();
-        // The write/preview tabs, the syntax help and the counter under them, from the editor the
-        // rest of the site writes in. Never in 'plain': there is no syntax to preview.
-        if (format !== 'plain' && window.RichText && typeof window.RichText.mount === 'function') {
-            window.RichText.mount('shout-body', { previewFor: 'shout' });
+            move(e.target, d[0], d[1]);
         }
+        function onOutside(e) {
+            if (panel.contains(e.target) || btn.contains(e.target)) return;
+            close();
+        }
+
+        function open() {
+            if (!current) show(pages[0].id);
+            panel.hidden = false;
+            btn.setAttribute('aria-expanded', 'true');
+            document.addEventListener('click', onOutside, true);
+            document.addEventListener('keydown', onKey, true);
+            var first = gridEl.querySelector('.shout-picker-cell');
+            if (first) first.focus();
+        }
+        function close() {
+            if (panel.hidden) return;
+            panel.hidden = true;
+            btn.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('click', onOutside, true);
+            document.removeEventListener('keydown', onKey, true);
+        }
+        btn.addEventListener('click', function () { panel.hidden ? open() : close(); });
+        return { open: open, close: close, panel: panel };
     }
 
-    // Everything already on the screen has been seen by whoever is looking at it.
-    markSeen(newest);
-    if (live > 0) timer = setInterval(poll, live * 1000);
-    // One tick on demand, for the browser checks and for anything that wants to catch up now.
-    window.ShoutTick = poll;
-    window.Shout = { tick: poll, older: older, newest: function () { return newest; } };
+    /* ─────────────────────────── the box itself ─────────────────────────── */
+
+    function mountShoutbox() {
+        var box = document.getElementById('shoutbox');
+        if (!box) return;
+
+        var listEl = document.getElementById('shout-list');
+        var olderBtn = document.getElementById('shout-older');
+        var ta = document.getElementById('shout-body');
+        var sendBtn = document.getElementById('shout-send');
+        var countEl = document.getElementById('shout-count');
+        var noteEl = document.getElementById('shout-note');
+        var fmtEl = document.getElementById('shout-body-format');
+        var emojiBtn = document.getElementById('shout-emoji');
+        if (!listEl) return;
+
+        var newest = Number(box.dataset.newest || 0);
+        var oldest = Number(box.dataset.oldest || 0);
+        var live = Number(box.dataset.live || 0);
+        var maxChars = Number(box.dataset.max || 500) || 500;
+        var format = box.dataset.format || 'bbcode';
+        var meId = Number(box.dataset.me || 0);
+        var seen = 0;                 // the highest id this reader has been told about
+        var polling = false;
+        var timer = 0;
+
+        /** Is this box on the screen of a tab somebody is looking at? */
+        function visible() { return !document.hidden && box.offsetParent !== null; }
+
+        function note(text) { if (noteEl) noteEl.textContent = text || ''; }
+
+        /** One shout, exactly as templates/partials/shoutbox_widget.php draws it. */
+        function renderRow(r) {
+            var name = String(r.user || '');
+            var at = String(r.at || '');
+            var row = el('div', { className: 'shout-row' + (r.own ? ' shout-row-own' : '') + (r.mentions_me ? ' shout-row-mention' : '') });
+            row.dataset.id = String(Number(r.id) || 0);
+            row.dataset.user = name;
+            row.appendChild(el('a', { className: 'shout-who', href: BASE + '?action=u&name=' + encodeURIComponent(name), text: name }));
+            row.appendChild(el('span', { className: 'shout-time', title: at, text: at.slice(11, 16) }));
+            row.appendChild(el('span', { className: 'shout-body rt-body', html: r.html || '' }));
+            if (r.deletable) {
+                row.appendChild(el('button', { type: 'button', className: 'shout-del',
+                                               title: t('js.shout.delete'), 'aria-label': t('js.shout.delete'), text: '×' }));
+            }
+            return row;
+        }
+
+        /**
+         * Append the rows that are not already there, and follow the list down only if the reader was
+         * already at the bottom of it. Scrolling somebody away from the line they are reading is worse
+         * than a row they have to scroll to.
+         */
+        function appendRows(rows) {
+            var atBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 40;
+            var added = [];
+            (rows || []).forEach(function (r) {
+                var id = Number(r && r.id) || 0;
+                if (!id || listEl.querySelector('.shout-row[data-id="' + id + '"]')) return;
+                listEl.appendChild(renderRow(r));
+                if (id > newest) newest = id;
+                if (!oldest || id < oldest) oldest = id;
+                added.push(r);
+            });
+            if (added.length) {
+                var empty = listEl.querySelector('.shout-empty');
+                if (empty) empty.remove();
+                if (atBottom) listEl.scrollTop = listEl.scrollHeight;
+            }
+            return added;
+        }
+
+        function bottom() { listEl.scrollTop = listEl.scrollHeight; }
+
+        /**
+         * "I have seen up to here."
+         *
+         * One column on the account (`users.shout_seen_id`), so this is the whole of what makes the
+         * badge stop counting. Only while the box is actually on the screen, and never twice for the
+         * same id — a marker that goes backwards or repeats is a write for nothing.
+         */
+        function markSeen(id) {
+            if (!meId || !id || id <= seen || !visible()) return;
+            seen = id;
+            post('shout_seen', { id: id });
+        }
+
+        function stop() { if (timer) { clearInterval(timer); timer = 0; } }
+
+        async function poll() {
+            if (!live || polling || !visible()) return;
+            polling = true;
+            var j = null;
+            try { j = await get('shout_list&after=' + newest); } finally { polling = false; }
+            if (!j) return;
+            if (!j.success) {
+                // Switched off, signed out, or the permission taken away mid-session: stop asking. The
+                // box stays on the screen with what it had, which is honest — those rows were real.
+                if (j.error === 'disabled' || j.error === 'no_permission' || j.error === 'login_required') stop();
+                return;
+            }
+            var added = appendRows(j.rows);
+            if (Number(j.newest) > newest) newest = Number(j.newest);
+            if (!added.length) return;
+            markSeen(newest);
+            // The hook the sound player listens on (and F3's nav counter will). The counts themselves
+            // come from the pulse — this only says that rows landed while somebody was looking.
+            window.dispatchEvent(new CustomEvent('shout:new', { detail: { rows: added } }));
+        }
+
+        /** Older rows, pasted in ABOVE without moving what is being read. */
+        async function older() {
+            if (!olderBtn || olderBtn.disabled || !oldest) return;
+            olderBtn.disabled = true;
+            var j = await get('shout_list&before=' + oldest);
+            olderBtn.disabled = false;
+            if (!j || !j.success) { note(errText(j, maxChars)); return; }
+            var rows = j.rows || [];
+            if (!rows.length) { olderBtn.hidden = true; note(t('js.shout.no_more')); return; }
+            // Measured before the insert and restored after it: the browser keeps scrollTop where it
+            // was, which means the content under it has moved down by exactly the height added.
+            var wasHeight = listEl.scrollHeight, wasTop = listEl.scrollTop;
+            var frag = document.createDocumentFragment();
+            rows.forEach(function (r) {
+                var id = Number(r && r.id) || 0;
+                if (!id || listEl.querySelector('.shout-row[data-id="' + id + '"]')) return;
+                frag.appendChild(renderRow(r));           // rows arrive newest LAST, so order is kept
+                if (!oldest || id < oldest) oldest = id;
+            });
+            var empty = listEl.querySelector('.shout-empty');
+            if (empty) empty.remove();
+            listEl.insertBefore(frag, listEl.firstChild);
+            listEl.scrollTop = wasTop + (listEl.scrollHeight - wasHeight);
+            olderBtn.hidden = !j.has_more;
+            note('');
+        }
+
+        /** Deleting a line: the question waits in the place the button was. */
+        function askDelete(btn) {
+            var row = btn.closest('.shout-row');
+            if (!row) return;
+            var id = Number(row.dataset.id) || 0;
+            askInPlace(btn, t('js.shout.delete_q'), async function () {
+                var r = await post('shout_delete', { id: id });
+                if (r && r.success) { row.remove(); note(''); return true; }
+                // A row somebody else already deleted is gone either way: take it off the screen.
+                if (r && r.error === 'not_found') { row.remove(); return true; }
+                note(errText(r, maxChars));
+                return false;
+            });
+        }
+
+        function countUpdate() {
+            if (!countEl || !ta) return;
+            countEl.textContent = t('js.shout.chars', { n: ta.value.length, max: maxChars });
+        }
+
+        /** The one road out: whatever is said, said the same way. */
+        async function postShout(body, after) {
+            var r = await post('shout_post', {
+                body: body,
+                // Whichever syntax they picked; the server validates it either way, and where the
+                // tracker's format is 'plain' there is no select and nothing to pick.
+                format: fmtEl && fmtEl.value ? fmtEl.value : format,
+            });
+            if (!r || !r.success) { note(errText(r, maxChars)); return false; }
+            note('');
+            if (typeof after === 'function') after();
+            if (r.row) {
+                // Straight from the answer, without waiting for a tick: the line somebody just wrote
+                // appearing a few seconds later reads as a send that did not work.
+                appendRows([r.row]);
+                bottom();
+                markSeen(newest);
+            }
+            return true;
+        }
+
+        async function send() {
+            if (!ta || !sendBtn) return;
+            var body = ta.value.trim();
+            if (!body) { ta.focus(); return; }
+            sendBtn.disabled = true;
+            await postShout(body, function () { ta.value = ''; countUpdate(); });
+            sendBtn.disabled = false;
+        }
+
+        /**
+         * A sticker is not text somebody is writing — it IS the shout.
+         *
+         * So it goes as it is clicked, rather than dropping `:wave:` into a half-written sentence
+         * where the server would render it small and inline. The composer is left alone: whatever
+         * was being typed is still being typed.
+         */
+        async function sendSticker(code) {
+            if (!sendBtn || sendBtn.disabled) return;
+            sendBtn.disabled = true;
+            await postShout(':' + code + ':');
+            sendBtn.disabled = false;
+        }
+
+        /**
+         * The characters land where the caret is, and the box stays exactly as usable as it was:
+         * the counter and the preview both hang off `input`, so the event is dispatched rather than
+         * the two of them called by hand from here.
+         */
+        function insert(text) {
+            if (!ta) return;
+            var s = ta.selectionStart, e = ta.selectionEnd;
+            if (typeof s !== 'number') { s = e = ta.value.length; }
+            var before = ta.value.slice(0, s), after = ta.value.slice(e);
+            // `:code:` glued to a word is not a token any more, so it gets the space it needs — and
+            // only the space it needs. A bare emoji character needs none.
+            var pad = /^:[a-z0-9_]+:$/.test(text);
+            var lead = pad && before !== '' && !/\s$/.test(before) ? ' ' : '';
+            var tail = pad && !/^\s/.test(after) ? ' ' : '';
+            var add = lead + text + tail;
+            if (before.length + after.length + add.length > maxChars) { note(t('js.shout.err_too_long', { limit: maxChars })); return; }
+            ta.value = before + add + after;
+            var pos = s + add.length;
+            try { ta.setSelectionRange(pos, pos); } catch (err) { /* a box that will not be told */ }
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            note('');
+        }
+
+        /* ─────────────────────────── wiring ─────────────────────────── */
+
+        // Delegated, so a row drawn by the server and a row drawn above by this script behave the same.
+        listEl.addEventListener('click', function (e) {
+            var b = e.target.closest ? e.target.closest('.shout-del') : null;
+            if (b && listEl.contains(b)) askDelete(b);
+        });
+        if (olderBtn) olderBtn.addEventListener('click', older);
+        if (sendBtn) sendBtn.addEventListener('click', send);
+        if (ta) {
+            ta.addEventListener('input', countUpdate);
+            ta.addEventListener('keydown', function (e) {
+                // Enter sends, Shift+Enter starts a line. A shoutbox is a conversation, and reaching for
+                // a button after every sentence is what makes one feel like a form.
+                if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.isComposing) return;
+                e.preventDefault();
+                send();
+            });
+            countUpdate();
+            // The write/preview tabs, the syntax help and the counter under them, from the editor the
+            // rest of the site writes in. Never in 'plain': there is no syntax to preview.
+            if (format !== 'plain' && window.RichText && typeof window.RichText.mount === 'function') {
+                window.RichText.mount('shout-body', { previewFor: 'shout' });
+            }
+        }
+        if (emojiBtn && ta) {
+            mountPicker({
+                button: emojiBtn,
+                // The row the button is in, not the whole composer: anchored to the composer the
+                // panel opened from the TOP of it and covered the heading above the box.
+                host: emojiBtn.closest('.shout-acts') || emojiBtn.closest('.shout-compose') || box,
+                insert: insert,
+                sticker: sendSticker,
+                emotes: box.dataset.emotes === '1',
+                stickers: box.dataset.stickers === '1',
+            });
+        }
+
+        // Everything already on the screen has been seen by whoever is looking at it.
+        markSeen(newest);
+        if (live > 0) timer = setInterval(poll, live * 1000);
+        // One tick on demand, for the browser checks and for anything that wants to catch up now.
+        window.ShoutTick = poll;
+        window.Shout = { tick: poll, older: older, newest: function () { return newest; }, insert: insert };
+    }
+
+    /* ─────────────────────────── ?action=emotes ─────────────────────────── */
+
+    /**
+     * The emotes page: what everybody may write, and — for the few who may — one more.
+     *
+     * The LISTS are drawn by the server: they are public, they are the same for every reader, and a
+     * page that paints itself from an endpoint is a page a reader with a slow line sees empty.
+     * This adds only the two things that cannot be server-rendered — the file somebody is about to
+     * upload and the row they are about to take away.
+     */
+    function mountEmotesPage() {
+        var root = document.getElementById('emotes-page');
+        if (!root) return;
+        var noteEl = document.getElementById('emote-note');
+        function note(text, bad) {
+            if (!noteEl) return;
+            noteEl.textContent = text || '';
+            noteEl.classList.toggle('emote-note-bad', !!bad);
+        }
+
+        /* ── taking one away ── */
+        var mine = document.getElementById('emote-mine');
+        if (mine) {
+            mine.addEventListener('click', function (e) {
+                var btn = e.target.closest ? e.target.closest('.emote-del') : null;
+                if (!btn || !mine.contains(btn)) return;
+                var card = btn.closest('.emote-card');
+                var id = Number(btn.dataset.id || (card && card.dataset.id) || 0);
+                askInPlace(btn, t('js.shout.emote_delete_q'), async function () {
+                    var r = await post('shout_emote_delete', { id: id });
+                    if (r && r.success) {
+                        if (card) card.remove();
+                        // The same emote in the list above is gone too — it is the same row.
+                        var twin = document.querySelector('.emote-grid .emote-card[data-id="' + id + '"]');
+                        if (twin) twin.remove();
+                        emotesPromise = null;          // the picker's copy is one emote out of date
+                        note(t('js.shout.emote_deleted'));
+                        return true;
+                    }
+                    if (r && r.error === 'not_found') { if (card) card.remove(); return true; }
+                    note(emoteErr(r), true);
+                    return false;
+                });
+            });
+        }
+
+        /* ── adding one ── */
+        var form = document.getElementById('emote-upload');
+        if (!form) return;
+        var drop = document.getElementById('emote-drop');
+        var fileIn = document.getElementById('emote-file');
+        var codeIn = document.getElementById('emote-code');
+        var nameIn = document.getElementById('emote-name');
+        var stickIn = document.getElementById('emote-sticker');
+        var btn = document.getElementById('emote-send');
+        var maxKb = Number(form.dataset.maxKb) || 64;
+
+        var dropped = null;              // a file that came by drag rather than through the dialog
+        function chosen() { return dropped || (fileIn && fileIn.files && fileIn.files[0]) || null; }
+
+        /** The box says which file it holds — the same zone the panel's uploads use. */
+        function markFile(file) {
+            if (!drop) return;
+            drop.classList.toggle('has-file', !!file);
+            var main = drop.querySelector('.emote-drop-main');
+            if (!main) return;
+            main.textContent = '';
+            if (file) main.appendChild(document.createTextNode(file.name + ' · ' + Math.max(1, Math.round(file.size / 1024)) + ' KB'));
+            else {
+                main.appendChild(el('u', { text: t('js.shout.drop_choose') }));
+                main.appendChild(document.createTextNode(' ' + t('js.shout.drop_or')));
+            }
+            // A code nobody typed yet: the file's own name is very nearly always the right guess.
+            if (file && codeIn && !codeIn.value.trim()) {
+                codeIn.value = file.name.replace(/\.[a-z0-9]+$/i, '').toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32);
+            }
+        }
+        if (drop && fileIn) {
+            // dragover must be cancelled or the browser navigates to the file, losing the page.
+            ['dragenter', 'dragover'].forEach(function (ev) {
+                drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('dragging'); });
+            });
+            ['dragleave', 'drop'].forEach(function (ev) {
+                drop.addEventListener(ev, function () { drop.classList.remove('dragging'); });
+            });
+            drop.addEventListener('drop', function (e) {
+                e.preventDefault();
+                var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+                if (f) { dropped = f; markFile(f); }
+            });
+            drop.addEventListener('keydown', function (e) {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                fileIn.click();
+            });
+            fileIn.addEventListener('change', function () { dropped = null; markFile(chosen()); });
+        }
+
+        /** A card in the reader's own list, built from what the endpoint just accepted. */
+        function myCard(row) {
+            var card = el('div', { className: 'emote-card', dataset: { id: String(row.id || 0), code: String(row.code || '') } });
+            card.appendChild(el('div', { className: 'emote-shot' },
+                [emoteImg(row, row.sticker ? 'shout-sticker' : 'shout-emote')]));
+            card.appendChild(el('code', { className: 'emote-code', text: ':' + row.code + ':' }));
+            card.appendChild(el('span', { className: 'emote-name', text: row.name || row.code }));
+            card.appendChild(el('button', { type: 'button', className: 'emote-del', dataset: { id: String(row.id || 0) },
+                                            text: t('js.shout.delete') }));
+            return card;
+        }
+
+        if (!btn) return;
+        btn.addEventListener('click', function () {
+            var f = chosen();
+            if (!f) { note(t('js.shout.pick_file'), true); return; }
+            if (f.size > maxKb * 1024) { note(t('js.shout.err_too_large', { kb: maxKb }), true); return; }
+            var code = (codeIn ? codeIn.value : '').trim().toLowerCase();
+            if (!/^[a-z0-9_]{2,32}$/.test(code)) { note(t('js.shout.err_bad_code'), true); return; }
+            var reader = new FileReader();
+            reader.onerror = function () { note(t('js.shout.err_failed'), true); };
+            reader.onload = async function () {
+                btn.disabled = true;
+                note(t('js.shout.uploading'));
+                var r = await post('shout_emote_upload', {
+                    code: code,
+                    name: (nameIn ? nameIn.value : '').trim() || code,
+                    sticker: !!(stickIn && stickIn.checked),
+                    data: String(reader.result),
+                });
+                btn.disabled = false;
+                if (!r || !r.success) { note(emoteErr(r), true); return; }
+                var row = r.emote || r.added || r.row || null;
+                if (row && row.code && row.url && mine) {
+                    var empty = mine.querySelector('.emote-empty');
+                    if (empty) empty.remove();
+                    mine.insertBefore(myCard(row), mine.firstChild);
+                } else {
+                    // The endpoint accepted it but did not hand back a row to draw: the server's own
+                    // rendering of the page is the honest answer, so ask for it again.
+                    location.reload();
+                    return;
+                }
+                if (fileIn) fileIn.value = '';
+                if (codeIn) codeIn.value = '';
+                if (nameIn) nameIn.value = '';
+                if (stickIn) stickIn.checked = false;
+                dropped = null;
+                markFile(null);
+                emotesPromise = null;                  // the picker's copy is one emote out of date
+                // The whole token, not the bare code: `:code` is what t() replaces, so a dictionary
+                // string written as `:code:` would have eaten its own opening colon.
+                note(t('js.shout.emote_added', { token: ':' + row.code + ':' }));
+            };
+            reader.readAsDataURL(f);
+        });
+    }
+
+    mountShoutbox();
+    mountEmotesPage();
 })();

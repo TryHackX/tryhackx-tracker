@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 63;  // 63 = the shoutbox (includes/shout.php): `shouts` + `shout_mentions` + users.shout_seen_id, the shout_* settings, and shout.view/post/delete_own to the member group (shout.moderate to the moderator one)
+const TRACKER_SCHEMA_VERSION = 64;  // 64 = shoutbox emotes and stickers (includes/shout.php): `shout_emotes` (images as rows, like `sounds`), the five shout_emote_*/shout_stickers_* settings, the `shout.upload_emote` permission (registered, granted to nobody), and the shipped examples seeded from assets/emotes/*.svg
+                                    // 63 = the shoutbox (includes/shout.php): `shouts` + `shout_mentions` + users.shout_seen_id, the shout_* settings, and shout.view/post/delete_own to the member group (shout.moderate to the moderator one)
                                     // 62 = index_hashes.idx_index_meta_done_fetched (a heavy index, built by the janitor's CLI run) for the bounded protection backfill; the owner's mirror row takes the panel's current password hash (once), csp_report_enabled ships off, the old pm-notification delete runs once instead of at every bump
                                     // 61 = sounds (the owner's uploads, as rows) + users.sound_prefs + sounds.use to the member group + sounds_enabled / sound_default_* settings
                                     // 60 = a setting only: site_live_seconds, so an upgraded install gets the row and its default
@@ -860,6 +861,39 @@ function trackerSchemaStatements(): array {
             KEY `idx_mention_user` (`user_id`, `shout_id`)
         ) $engine",
 
+        // ── Emotes and stickers (v64, includes/shout.php): the pictures `:code:` stands for ─────────
+        //
+        // Rows rather than files, for the reason `sounds` is: the web root is installed read-only on
+        // purpose, and a backup that carries the database carries these. `code` is what somebody
+        // types between colons and is therefore UNIQUE; `sha1` is what stops the same picture being
+        // stored twice and what versions its URL, so a replaced emote is a new address.
+        //
+        // `is_sticker` is the whole difference between the two things this table holds: a sticker is
+        // an emote that is drawn big when a shout is nothing but its token. `uploaded_by` NULL means
+        // the site put it there — the shipped examples and anything the owner adds from Settings —
+        // and is what the per-person cap counts against for everybody else.
+        //
+        // `mime` is the type this code SNIFFED, never the one an uploader declared, and it is what
+        // api/shout_emote.php sends back with nosniff on top.
+        "CREATE TABLE IF NOT EXISTS `shout_emotes` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `code` VARCHAR(32) NOT NULL,
+            `name` VARCHAR(60) NOT NULL,
+            `mime` VARCHAR(32) NOT NULL,
+            `bytes` INT UNSIGNED NOT NULL,
+            `width` SMALLINT UNSIGNED DEFAULT NULL,
+            `height` SMALLINT UNSIGNED DEFAULT NULL,
+            `is_sticker` TINYINT(1) NOT NULL DEFAULT 0,
+            `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            `uploaded_by` INT UNSIGNED DEFAULT NULL,
+            `sha1` CHAR(40) NOT NULL,
+            `data` MEDIUMBLOB NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_emote_code` (`code`),
+            UNIQUE KEY `uq_emote_sha1` (`sha1`),
+            KEY `idx_emote_user` (`uploaded_by`)
+        ) $engine",
+
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         //
         // A THREAD is a pair of accounts, not a subject line. Two people have one conversation here,
@@ -1439,6 +1473,27 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         KEY `idx_mention_user` (`user_id`, `shout_id`)
     ) $engine";
 
+    // v64: the emotes and stickers `:code:` stands for. Same definition as the CREATE above — a
+    // split between the two lists is the bug that once stopped a fresh install at version 0.
+    $out[] = "CREATE TABLE IF NOT EXISTS `shout_emotes` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `code` VARCHAR(32) NOT NULL,
+        `name` VARCHAR(60) NOT NULL,
+        `mime` VARCHAR(32) NOT NULL,
+        `bytes` INT UNSIGNED NOT NULL,
+        `width` SMALLINT UNSIGNED DEFAULT NULL,
+        `height` SMALLINT UNSIGNED DEFAULT NULL,
+        `is_sticker` TINYINT(1) NOT NULL DEFAULT 0,
+        `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+        `uploaded_by` INT UNSIGNED DEFAULT NULL,
+        `sha1` CHAR(40) NOT NULL,
+        `data` MEDIUMBLOB NOT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_emote_code` (`code`),
+        UNIQUE KEY `uq_emote_sha1` (`sha1`),
+        KEY `idx_emote_user` (`uploaded_by`)
+    ) $engine";
+
     // v53: the second factor, and what a remember-me token was handed to. Same definitions as the
     // CREATE above, for the reason the v51 comment gives.
     $out[] = "CREATE TABLE IF NOT EXISTS `user_twofa` (
@@ -1898,6 +1953,49 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
         'member'    => ['shout.view', 'shout.post', 'shout.delete_own'],
         'moderator' => ['shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'],
     ]);
+
+    // v64: the shipped example emotes, read from assets/emotes/*.svg and kept as rows.
+    //
+    // NO GRANT goes with them. `shout.upload_emote` is registered and given to nobody: the admin
+    // group passes every check anyway, and letting members add pictures to a shared room is a
+    // decision an operator makes on purpose, not one they inherit from an upgrade.
+    //
+    // A DATA migration rather than a file list read at render time, because the web root is
+    // installed read-only and a backup that carries the database has to carry the pictures too —
+    // once seeded, assets/emotes/ is documentation. Idempotent on purpose: the local bootstrap
+    // wipes schema_once_* markers, so this runs again on a test database and must not duplicate or
+    // resurrect what somebody deleted (the sha1 and the code are both unique, and a row that is
+    // already there is left exactly as the operator left it).
+    //
+    // shout.php is pulled in HERE rather than assumed: install.php and the janitor reach
+    // ensureSchema() without it, and the marker must not be burned by a run that then found no
+    // sniffer to seed with — so the require comes before schemaOnce(), not after.
+    if (!function_exists('shoutEmoteSniff') && is_file(__DIR__ . '/shout.php')) require_once __DIR__ . '/shout.php';
+    if (function_exists('shoutEmoteSniff') && schemaOnce($db, 'v64_emotes')) {
+        $seedDir = shoutEmoteSeedDir();
+        foreach (is_dir($seedDir) ? (scandir($seedDir) ?: []) : [] as $f) {
+            if (!preg_match('/^([a-z0-9_]{2,32})\.svg$/', $f, $m)) continue;
+            $bytes = @file_get_contents($seedDir . '/' . $f);
+            if ($bytes === false || $bytes === '') continue;
+            $kind = shoutEmoteSniff($bytes);
+            if ($kind === null) continue;   // a shipped file that would be refused from a form is refused here too
+            try {
+                $st = $db->prepare("INSERT IGNORE INTO shout_emotes (code, name, mime, bytes, width, height, is_sticker, enabled, uploaded_by, sha1, data)
+                                    VALUES (?, ?, ?, ?, ?, ?, 0, 1, NULL, ?, ?)");
+                $st->bindValue(1, $m[1]);
+                $st->bindValue(2, shoutEmotePrettyName($m[1]));
+                $st->bindValue(3, $kind['mime']);
+                $st->bindValue(4, strlen($bytes), PDO::PARAM_INT);
+                $st->bindValue(5, $kind['w'] > 0 ? $kind['w'] : null, $kind['w'] > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $st->bindValue(6, $kind['h'] > 0 ? $kind['h'] : null, $kind['h'] > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $st->bindValue(7, sha1($bytes));
+                $st->bindValue(8, $bytes, PDO::PARAM_LOB);
+                $st->execute();
+            } catch (\Throwable $e) {
+                error_log('[tracker schema] v64 emote ' . $f . ': ' . $e->getMessage());
+            }
+        }
+    }
 
     // v62: the owner's mirror row follows the panel password. api/admin/change_password.php kept
     // only config/hash.txt up to date, so an owner who had rotated the panel password could still
@@ -2375,6 +2473,18 @@ function trackerSchemaDefaultSettings(): array {
         'shout_keep_days'             => '30',    // clamped [1, 3650]
         'shout_format'                => 'bbcode', // plain | bbcode | markdown
         'shout_rules'                 => '',      // an optional line of house rules above the box
+        // ── Emotes and stickers (v64) ──────────────────────────────────────────────────────────
+        // ON, unlike the room itself: with the shoutbox switched off none of this is reachable, so
+        // the only thing a default of 0 would buy is an operator who turns the room on and finds the
+        // shipped examples mysteriously absent. The caps are what keep it cheap — 64 KB and 128 px
+        // is a picture beside a sentence, and twenty per person is a vocabulary, not a gallery.
+        // Uploading needs `shout.upload_emote`, which nobody but the admin group has until the
+        // operator hands it out.
+        'shout_emotes_enabled'        => '1',
+        'shout_emote_max_kb'          => '64',    // clamped [8, 512]
+        'shout_emote_max_px'          => '128',   // clamped [32, 512]
+        'shout_emote_per_user'        => '20',    // clamped [1, 200]
+        'shout_stickers_enabled'      => '1',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

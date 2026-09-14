@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.59.0] — 2026-09-14
+
+Schema **64** — `shout_emotes` (custom emotes and stickers, as rows), the `shout.upload_emote`
+permission (nobody's by default), five `shout_emote*` settings, and a few shipped example emotes
+seeded once from `assets/emotes/`.
+
+### Added — emoji, emotes and stickers in the shoutbox
+
+A 😀 in the composer opens a picker: some hundred and fifty common Unicode emoji (drawn by the
+device's own emoji font — Android's on Android, Windows' on Windows), the site's custom emotes as
+images, and stickers on a tab of their own. An emoji or emote lands at the caret (`:code:` typed by
+hand works too); a sticker is sent straight away and shows large on its own line. Custom emotes are
+SVG, PNG, GIF or WebP up to 64 KB and 128 px (the owner may change the caps), kept in the database
+like the sounds are, sniffed by their bytes — an SVG carrying a script, an event attribute, a
+`javascript:` or a foreign object is refused, and every emote is served with `nosniff` and a
+policy of its own so nothing in it could run anyway. The owner manages them in Settings → Shoutbox
+(enable, disable, mark as sticker, delete, upload); members whose group carries
+`shout.upload_emote` add their own (twenty each) on the new **Emotes** page (`?action=emotes`),
+which lists every enabled emote with its code, preview and who uploaded it.
+
+### Changed — Settings → Sounds, after the first day of use
+
+The uploads are a table (name, file, added, which site defaults use it, play / rename / delete),
+with a count of forty; the drop zone spans the block and the name and Add sit on one line beneath
+it; a name is required to be unique across the whole library — shipped clips included — so two
+"Email notification" entries can no longer meet in a select; uploads can be renamed; the selects
+group shipped clips and your own; an empty name falls back to a prettified file name.
+
+### Tests
+
+`tests/shout_emotes_test.php` / `.py` (sniffing, the SVG refusals, caps, per-member cap, dedup,
+rendering outside tags, the sticker rule, the endpoints and the page), the extended
+`scratchpad/shots/shout_check.js`, and the extended `tests/sounds_test.php` / `.py` (name rules,
+rename).
+
 ## [1.58.0] — 2026-09-14
 
 Schema **63** — `shouts`, `shout_mentions`, `users.shout_seen_id`, the `shout.*` permissions (view,

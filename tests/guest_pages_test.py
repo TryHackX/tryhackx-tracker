@@ -19,7 +19,8 @@ BASE = os.environ.get("SMOKE_BASE", "http://127.0.0.1:8089/")
 PAGES = ["", "?action=account", "?action=login", "?action=register", "?action=reset", "?action=search",
          "?action=whitelist", "?action=stats", "?action=status", "?action=info", "?action=terms",
          "?action=transparency", "?action=report", "?action=u&name=smokeuser", "?action=u&name=no-such-user-here",
-         "?action=members", "?action=lists", "?action=apidocs", "?action=shoutbox", "?action=no-such-action"]
+         "?action=members", "?action=lists", "?action=apidocs", "?action=shoutbox", "?action=emotes",
+         "?action=no-such-action"]
 LEAK = re.compile(r"(Warning|Notice|Deprecated|Fatal error)</b>:|PHP (Warning|Notice|Fatal)|Undefined (variable|array key|index)|Stack trace:")
 
 fails = 0

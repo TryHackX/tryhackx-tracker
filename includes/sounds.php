@@ -27,6 +27,10 @@
  * Nothing here trusts a file by its name or its declared type. What the owner uploads is sniffed
  * (MP3 frames, an Ogg page, a RIFF/WAVE header), measured, capped, and stored under a type this code
  * chose — a browser is never handed the uploader's Content-Type back.
+ *
+ * The DISPLAY name is the other half of that care and is checked against the whole library, shipped
+ * clips included (soundNameProblem): two sounds called "Email notification" are two identical lines
+ * in every select on the site, and the reader picking one of them is guessing.
  */
 
 const SOUNDS_MAX_BYTES = 512 * 1024;
@@ -35,6 +39,7 @@ const SOUNDS_MAX_CUSTOM = 40;
 const SOUNDS_MAX_MS = 15000;
 const SOUNDS_PREROLL_MAX_MS = 3000;
 const SOUNDS_NAME_MAX = 60;
+const SOUNDS_NAME_MIN = 2;
 
 /** The feature as a whole: accounts on, and the owner has not switched it off. */
 function soundsEnabled(array $cfg): bool
@@ -288,14 +293,56 @@ function soundCleanName(string $name): string
     return $name;
 }
 
+/** What two names are compared by: cleaned, then case-folded. "Ding" and " ding " are one name. */
+function soundNameKey(string $name): string
+{
+    $name = soundCleanName($name);
+    return function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
+}
+
+/**
+ * Every name the library already answers to, as comparison keys — the SHIPPED clips' pretty names
+ * as well as the uploads, because a select showing "Email notification" twice is a select nobody
+ * can pick from. `$exceptId` is the row being renamed: a name is not taken by itself.
+ */
+function soundNamesTaken(PDO $db, int $exceptId = 0): array
+{
+    $keys = [];
+    foreach (soundBuiltins() as $e) $keys[soundNameKey((string)$e['name'])] = true;
+    foreach (soundCustomList($db) as $r) {
+        if ((int)$r['id'] === $exceptId) continue;
+        $keys[soundNameKey((string)$r['name'])] = true;
+    }
+    return $keys;
+}
+
+/**
+ * The one place the name rules live, so an upload and a rename cannot drift apart: something is
+ * left after cleaning, it is long enough to read, and no other sound in the library answers to it
+ * already. Returns a lang key, or null when the name is fine. (The upper bound is not an error:
+ * soundCleanName() has already cut the name to SOUNDS_NAME_MAX.)
+ */
+function soundNameProblem(PDO $db, string $name, int $exceptId = 0): ?string
+{
+    $name = soundCleanName($name);
+    if ($name === '') return 'api.sounds.name_required';
+    $len = function_exists('mb_strlen') ? mb_strlen($name, 'UTF-8') : strlen($name);
+    if ($len < SOUNDS_NAME_MIN) return 'api.sounds.name_short';
+    if (isset(soundNamesTaken($db, $exceptId)[soundNameKey($name)])) return 'api.sounds.name_taken';
+    return null;
+}
+
 /**
  * Keep an upload. ['ok' => true, 'row' => …] or ['ok' => false, 'error' => <lang key>]. The bytes
  * are already decoded by the caller; this decides whether they are a sound at all.
+ *
+ * The name is judged first: it is the cheapest check of the lot, and a file rejected for its bytes
+ * after its name was already refused would tell the owner the second-best reason.
  */
 function soundStore(PDO $db, string $name, string $bytes): array
 {
     $name = soundCleanName($name);
-    if ($name === '') return ['ok' => false, 'error' => 'api.sounds.name_required'];
+    if (($bad = soundNameProblem($db, $name)) !== null) return ['ok' => false, 'error' => $bad];
     $len = strlen($bytes);
     if ($len < SOUNDS_MIN_BYTES) return ['ok' => false, 'error' => 'api.sounds.too_small'];
     if ($len > SOUNDS_MAX_BYTES) return ['ok' => false, 'error' => 'api.sounds.too_large'];
@@ -318,6 +365,23 @@ function soundStore(PDO $db, string $name, string $bytes): array
     $id = (int)$db->lastInsertId();
     return ['ok' => true, 'row' => ['id' => $id, 'name' => $name, 'mime' => $kind['mime'], 'bytes' => $len,
                                      'duration_ms' => $kind['ms'], 'sha1' => $sha]];
+}
+
+/**
+ * Rename an upload. Only the display text changes: the id, the bytes and the sha1 stay, so every
+ * site default and every reader's pick still points at the same sound and nothing has to be saved
+ * again. ['ok' => true, 'row' => ['id' => …, 'name' => …]] or ['ok' => false, 'error' => <lang key>].
+ */
+function soundRename(PDO $db, int $id, string $name): array
+{
+    $st = $db->prepare("SELECT id FROM sounds WHERE id = ?");
+    $st->execute([$id]);
+    if (!$st->fetchColumn()) return ['ok' => false, 'error' => 'api.sounds.unknown'];
+    $name = soundCleanName($name);
+    if (($bad = soundNameProblem($db, $name, $id)) !== null) return ['ok' => false, 'error' => $bad];
+    $st = $db->prepare("UPDATE sounds SET name = ? WHERE id = ?");
+    $st->execute([$name, $id]);
+    return ['ok' => true, 'row' => ['id' => $id, 'name' => $name]];
 }
 
 /**

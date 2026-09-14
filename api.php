@@ -113,7 +113,7 @@ langInit($cfg, $langUser['language'] ?? null);
 // the stats poller and the admin tracker-service status poll are both hit repeatedly and have
 // nothing to do with the report/appeal janitors, so running them there is pure overhead. They
 // still run everywhere else. S2S calls never run them either.
-if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'sound', 'shout_list', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status'], true)) {
+if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'sound', 'shout_emote', 'shout_list', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status'], true)) {
     autoArchiveOldReports($db, $cfg);
     autoArchiveOldAppeals($db, $cfg);
     pruneOldSentEmails($db, $cfg);
@@ -274,6 +274,15 @@ $apiRoutes = [
     'shout_delete'               => 'api/shout_delete.php',
     'shout_seen'                 => 'api/shout_seen.php',
     'admin/shout_purge'          => 'api/admin/shout_purge.php',
+    // Emotes and stickers (1.59.0). `shout_emote` streams one picture and is PUBLIC, like `sound`:
+    // it is referenced from every rendered line. `admin/shout_emotes` is the manager and is
+    // owner-only (absent from adminEndpointPermission), while taking one down is a moderator's act
+    // through the public endpoint.
+    'shout_emote'                => 'api/shout_emote.php',
+    'shout_emotes'               => 'api/shout_emotes.php',
+    'shout_emote_upload'         => 'api/shout_emote_upload.php',
+    'shout_emote_delete'         => 'api/shout_emote_delete.php',
+    'admin/shout_emotes'         => 'api/admin/shout_emotes.php',
     'richtext_preview'           => 'api/richtext_preview.php',
     'rate_hash'                  => 'api/rate_hash.php',
     // ── People reaching each other (includes/people.php) ──

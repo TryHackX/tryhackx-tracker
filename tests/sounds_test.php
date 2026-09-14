@@ -4,8 +4,9 @@
  *     php tests/sounds_test.php
  *
  * The schema and the grant (asked of the migration itself, not of what the previous suite left),
- * the shipped library, sniffing real and fake files, the caps, storing and deleting an upload, the
- * clamps on a reader's preferences, how an event resolves, and the config a page is handed.
+ * the shipped library, sniffing real and fake files, the caps, storing, renaming and deleting an
+ * upload, the rule that no two sounds share a name (1.59.0), the clamps on a reader's preferences,
+ * how an event resolves, and the config a page is handed.
  */
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 $root = dirname(__DIR__);
@@ -122,6 +123,35 @@ $forClient = soundLibraryForClient($lib);
 check('the client list carries no internals', !isset($forClient[0]['bytes']) && !isset($forClient[0]['num']) && isset($forClient[0]['url']));
 $ids = array_keys($lib);
 
+// ── the name has to be the sound's own ──────────────────────────────────────
+// "Email notification" uploaded beside the shipped clip of that name is two identical lines in
+// every select on the site, and the reader choosing between them is guessing.
+check('a name a shipped clip already answers to is refused', (soundStore($db, 'Ding', $wavOf(1))['error'] ?? '') === 'api.sounds.name_taken');
+check('… whatever its case and its spacing', (soundStore($db, "  dInG  ", $wavOf(1))['error'] ?? '') === 'api.sounds.name_taken');
+check('a name an upload already answers to is refused too', (soundStore($db, 'ST-OK', $wavOf(1))['error'] ?? '') === 'api.sounds.name_taken');
+check('one character is not a name', (soundStore($db, 'x', $wavOf(1))['error'] ?? '') === 'api.sounds.name_short');
+check('… and neither is punctuation and a space', (soundStore($db, ' - ', $wavOf(1))['error'] ?? '') === 'api.sounds.name_short');
+check('the name is judged before the bytes are', (soundStore($db, 'Ding', "\x89PNG" . str_repeat("\0", 3000))['error'] ?? '') === 'api.sounds.name_taken');
+check('a free name still stores', !empty(($r2 = soundStore($db, 'st-two', $wavOf(1)))['ok']), json_encode($r2));
+check('… as a row of its own, beside the first', ($id2 = (int)($r2['row']['id'] ?? 0)) > 0 && $id2 !== $id, (string)$id2);
+
+// ── renaming ────────────────────────────────────────────────────────────────
+// The way OUT of a clash. Deleting and re-uploading would be the other way, and it would take every
+// reader's pick of the sound down with it.
+$rn = soundRename($db, $id, ' st-renamed ');
+check('renaming keeps the id and trims the name',
+      !empty($rn['ok']) && $rn['row'] === ['id' => $id, 'name' => 'st-renamed'] && (soundLibrary($db)['c:' . $id]['name'] ?? '') === 'st-renamed', json_encode($rn));
+check('… and not one byte of the sound moves', (soundCustomGet($db, $id)['sha1'] ?? '') === sha1($mp3));
+check('renaming to a shipped clip\'s name is refused', (soundRename($db, $id, 'Ding')['error'] ?? '') === 'api.sounds.name_taken');
+check('renaming to another upload\'s name is refused', (soundRename($db, $id, 'ST-TWO')['error'] ?? '') === 'api.sounds.name_taken');
+check('renaming to what it is already called is fine — a name is not taken by itself', !empty(soundRename($db, $id, 'st-renamed')['ok']));
+check('a name of one character is refused here too', (soundRename($db, $id, 'q')['error'] ?? '') === 'api.sounds.name_short');
+check('an empty name is refused here too', (soundRename($db, $id, '   ')['error'] ?? '') === 'api.sounds.name_required');
+check('renaming an id that is not there says so, before the name is judged at all',
+      (soundRename($db, 424242, 'Ding')['error'] ?? '') === 'api.sounds.unknown');
+check('the names in use are the shipped ones and the uploads, and a row may be excluded',
+      isset(soundNamesTaken($db)['ding'], soundNamesTaken($db)['st-renamed']) && !isset(soundNamesTaken($db, $id)['st-renamed']));
+
 // ── a reader's preferences ───────────────────────────────────────────────────
 check('nothing stored = muted, 60%, a second of silence first, every event on the site default', soundPrefsValidate(null, $ids) === soundPrefsDefault() && soundPrefsDefault()['pre_kind'] === 'silence');
 $p = soundPrefsValidate(['on' => 1, 'vol' => 150, 'pre' => 9999, 'pre_kind' => 'x', 'ev' => ['notification' => 'c:' . $id, 'message' => '', 'shout' => 'b:ding']], $ids);
@@ -207,7 +237,21 @@ $ep = (string)file_get_contents($root . '/api/sound.php');
 check('the stream releases the session first, sends nosniff and the sniffed type, answers 304',
       str_contains($ep, 'session_write_close') && str_contains($ep, 'nosniff') && str_contains($ep, "header('Content-Type: ' . \$row['mime'])") && str_contains($ep, '304'));
 check('… and honours the feature switch', str_contains($ep, 'soundsEnabled($cfg)'));
-check('the upload refuses an oversized body before reading it', str_contains((string)file_get_contents($root . '/api/admin/sounds.php'), "CONTENT_LENGTH"));
+$adm = (string)file_get_contents($root . '/api/admin/sounds.php');
+check('the upload refuses an oversized body before reading it', str_contains($adm, "CONTENT_LENGTH"));
+check('a rename is an op of its own, and an id nobody has is a 404 rather than a 400',
+      str_contains($adm, "\$op === 'rename'") && str_contains($adm, "'api.sounds.unknown' ? 404 : 400"));
+$tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
+check('the site-default selects are two groups, and each says which event it answers',
+      str_contains($tpl, 'data-sound-own') && substr_count($tpl, 'data-snd-label="') === 6 && str_contains($tpl, "settings.sounds_group_shipped"));
+$adminJs = (string)file_get_contents($root . '/assets/js/admin-sounds.js');
+check('the panel draws a table, keeps "Used as" honest from the selects themselves, and slots an option into the right group',
+      str_contains($adminJs, 'admin-sounds-table') && str_contains($adminJs, "s.addEventListener('change', paintUsed)")
+      && str_contains($adminJs, "optgroup[data-sound-own]") && str_contains($adminJs, "op: 'rename'"));
+// The panel's own strings live under a prefix LANG_JS_PUBLIC does not carry, so none of this rides
+// along on every public page — the reason js.shoutadmin. exists, for the same reason.
+check('… and asks for its own strings, not from a prefix every public page carries',
+      str_contains($adminJs, "t('js.sndadmin.") && !str_contains((string)file_get_contents($root . '/includes/lang.php'), "'js.sndadmin.'"));
 $js = (string)file_get_contents($root . '/assets/js/sounds.js');
 check('the script has the pre-roll, the hum, the idle suspend and the honest note',
       str_contains($js, 'createOscillator') && str_contains($js, 'suspend()') && str_contains($js, 'sound-chip') && str_contains($js, "'blocked'"));

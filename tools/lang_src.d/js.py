@@ -4607,3 +4607,57 @@ add('js.shout', {
     'err_rate_limit': ('Too many requests — try again in a moment.', 'Za dużo żądań — spróbuj za chwilę.'),
     'err_failed': ('Something went wrong.', 'Coś poszło nie tak.'),
 })
+
+# ── 1.59.0: Settings → Sounds, the uploads table ────────────────────────────
+# `js.sndadmin.` and not `js.sounds.`, for the reason `js.shoutadmin.` exists: `js.sounds.` is in
+# LANG_JS_PUBLIC and travels to every public page, and nothing here is read anywhere but the panel.
+add('js.sndadmin', {
+    'col_name': ('Name', 'Nazwa'),
+    'col_file': ('File', 'Plik'),
+    'col_added': ('Added', 'Dodano'),
+    'col_used': ('Used as', 'Używany jako'),
+    'col_actions': ('Actions', 'Akcje'),
+    'count': (':n of :max', ':n z :max'),
+    'group_own': ('Your own', 'Własne'),
+    'adding': ('Adding…', 'Dodawanie…'),
+    'rename': ('Rename', 'Zmień nazwę'),
+    'rename_title': ('Rename the sound', 'Zmiana nazwy dźwięku'),
+    'rename_label': ('Name', 'Nazwa'),
+    'rename_hint': ('Every member picks from this name. Two sounds cannot share one — shipped ones included.',
+        'Po tej nazwie wybiera każdy członek. Dwa dźwięki nie mogą mieć jednej — wliczając wbudowane.'),
+    'name_short': ('A name needs at least 2 characters.', 'Nazwa musi mieć co najmniej 2 znaki.'),
+    'name_taken': ('Another sound is already called “:name”.', 'Inny dźwięk już nazywa się „:name”.'),
+    'delete_clears': ('It is the site default for :what — that will be cleared too.',
+        'Jest domyślnym dźwiękiem strony dla :what — to też zostanie wyczyszczone.'),
+})
+
+# ── 1.59.0: the picker, and the emotes page ─────────────────────────────────
+# The emoji themselves are characters written into assets/js/shoutbox.js, so nothing here names
+# one: these are the four tab labels, the two the server fills, and everything the upload form on
+# ?action=emotes has to say. Same `js.shout.` area as the box, because it is the same script and
+# the same bundle (LANG_JS_PUBLIC in includes/lang.php carries that prefix and no other).
+add('js.shout', {
+    'emoji':          ('Emoji, emotes and stickers', 'Emotki, emote i naklejki'),
+    'all_emotes':     ('All emotes', 'Wszystkie emote'),
+    'tab_smileys':    ('Smileys', 'Buźki'),
+    'tab_gestures':   ('People', 'Ludzie'),
+    'tab_hearts':     ('Hearts and symbols', 'Serca i symbole'),
+    'tab_objects':    ('Things', 'Rzeczy'),
+    'tab_emotes':     ('Emotes', 'Emote'),
+    'tab_stickers':   ('Stickers', 'Naklejki'),
+    'sticker_hint':   ('A sticker is sent on its own, the moment you pick it.',
+                       'Naklejkę wysyła się samą, w chwili wybrania.'),
+    'drop_choose':    ('Choose a file', 'Wybierz plik'),
+    'drop_or':        ('or drop it here', 'albo upuść go tutaj'),
+    'pick_file':      ('Pick a file first.', 'Najpierw wybierz plik.'),
+    'uploading':      ('Uploading…', 'Wysyłanie…'),
+    'emote_added':    ('Added — write :token to use it.', 'Dodano — wpisz :token, aby jej użyć.'),
+    'emote_delete_q': ('Delete this emote?', 'Usunąć tę emote?'),
+    'emote_deleted':  ('Deleted.', 'Usunięto.'),
+    'err_too_large':  ('Too large — :kb KB at most.', 'Za duży — najwyżej :kb KB.'),
+    'err_bad_code':   ('A code is 2 to 32 lowercase letters, digits or underscores.',
+                       'Kod to od 2 do 32 małych liter, cyfr lub podkreśleń.'),
+    # Every other refusal the upload can meet arrives from the server with its sentence already
+    # written (api.emote.*), naming the limit it was judged against -- assets/js/shoutbox.js
+    # shows that rather than a second, vaguer copy of it kept here.
+})

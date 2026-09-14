@@ -1702,3 +1702,47 @@ add('', {
         'Wypowiedź może mieć najwyżej :limit znaków.'),
     'api.shout.purged': ('Cleared :n shouts.', 'Usunięto :n wypowiedzi.'),
 })
+
+# ── 1.59.0: a sound's name has to be its own ─────────────────────────────────
+add('', {
+    'api.sounds.name_short': ('A name needs at least 2 characters.', 'Nazwa musi mieć co najmniej 2 znaki.'),
+    'api.sounds.name_taken': ('Another sound in the library is already called that. Two identical lines in a select are two lines nobody can choose between.',
+        'Inny dźwięk w bibliotece już się tak nazywa. Dwie identyczne pozycje na liście to dwie pozycje, między którymi nikt nie wybierze.'),
+    'api.sounds.renamed': ('Renamed.', 'Zmieniono nazwę.'),
+})
+
+# ── 1.59.0: the shoutbox's emotes and stickers ──────────────────────────────
+#
+# Every one of these is an answer to "why was my picture refused", so each says which rule and
+# which number rather than "invalid". `unsafe_svg` is the one that matters: an SVG is a document,
+# and the site will not serve one that can act like one.
+add('', {
+    'api.emote.bad_code': ('A code is 2 to 32 characters: lower-case letters, digits and underscores.',
+        'Kod ma od 2 do 32 znaków: małe litery, cyfry i podkreślenia.'),
+    'api.emote.too_small': ('That is too small to be a picture.', 'To za mało, by było obrazkiem.'),
+    'api.emote.too_large': ('The picture is larger than :kb KB.', 'Obrazek jest większy niż :kb KB.'),
+    'api.emote.not_image': ('That is not an SVG, PNG, GIF or WebP — decided from its bytes, not its name.',
+        'To nie jest SVG, PNG, GIF ani WebP — rozstrzygnięto po bajtach, nie po nazwie.'),
+    'api.emote.unsafe_svg': ('That SVG carries something a picture does not need — a script, an event handler or a reference to another server — so it will not be served here.',
+        'Ten SVG niesie coś, czego obrazek nie potrzebuje — skrypt, obsługę zdarzenia albo odwołanie do cudzego serwera — więc nie będzie tu serwowany.'),
+    'api.emote.too_big_px': ('An emote may be at most :px pixels each way.',
+        'Emotka może mieć najwyżej :px pikseli w każdą stronę.'),
+    'api.emote.too_many': ('You already have :n of your own; delete one first.',
+        'Masz już :n własnych; najpierw usuń którąś.'),
+    'api.emote.duplicate': ('That exact picture is already here as :code.',
+        'Dokładnie ten obrazek już tu jest jako :code.'),
+    'api.emote.code_taken': ('Something else already uses that code.', 'Ten kod jest już zajęty przez coś innego.'),
+    'api.emote.no_permission': ('Your group cannot add emotes.', 'Twoja grupa nie może dodawać emotek.'),
+    'api.emote.not_yours': ('That one is not yours to remove.', 'Tej nie możesz usunąć — nie jest Twoja.'),
+    'api.emote.unknown': ('No such emote.', 'Nie ma takiej emotki.'),
+    'api.emote.unknown_op': ('Unknown operation.', 'Nieznana operacja.'),
+    'api.emote.added': ('Added. Everybody can write it now.', 'Dodano. Każdy może już tego użyć.'),
+    'api.emote.saved': ('Saved.', 'Zapisano.'),
+    'api.emote.deleted': ('Deleted.', 'Usunięto.'),
+})
+
+# ── 1.59.0: a code a built-in shortcode already owns ────────────────────────
+add('', {
+    'api.emote.code_reserved': ('That code already stands for a built-in emoji — pick another.',
+        'Ten kod już oznacza wbudowaną emoji — wybierz inny.'),
+})
