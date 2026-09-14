@@ -89,6 +89,33 @@ if (empty($shoutPost['ok'])) {
 $shoutRules = shoutRules($cfg);
 $shoutBoth  = shoutPlacement($cfg) === 'both';
 
+/**
+ * The two controls that live INSIDE the text field (1.61.0), built once and drawn in whichever box
+ * this reader gets.
+ *
+ * With `shout_format` on 'plain' there is no editor around the textarea, so the markup below has two
+ * branches — and two copies of these would be two elements carrying one id each, which is the kind
+ * of thing that works until somebody switches a setting.
+ *
+ * PINNED TO THE TOP RIGHT OF THE FIELD, emoji first and then Send, small and quiet. Nothing loose
+ * is left in a row under the box: what used to be down there was a button, a picker handle, a count
+ * and a sentence about the Enter key, which is four things competing to be the thing you look at
+ * after writing one line. They are semi-transparent until the pointer or the keyboard reaches them,
+ * and assets/js/shoutbox.js keeps the field's right padding equal to their real width — measured
+ * rather than guessed, because "Send" and "Wyślij" are not the same number of pixels and a phone is
+ * not a desktop.
+ *
+ * Both are real buttons with a title and a label, so Tab still reaches them; Enter in the field
+ * still sends and Shift+Enter still starts a line.
+ */
+$shoutInActs = '<div class="shout-in-acts">'
+    . '<button type="button" class="shout-emoji-btn" id="shout-emoji" aria-haspopup="dialog"'
+    . ' aria-expanded="false" title="' . _h('shout.emoji_title') . '"'
+    . ' aria-label="' . _h('shout.emoji_title') . '">&#128512;</button>'
+    . '<button type="button" class="shout-send-btn" id="shout-send" title="' . _h('shout.send') . '">'
+    . _h('shout.send') . '</button>'
+    . '</div>';
+
 // The two F2 switches. Through the helpers where they exist and from the setting where they do not,
 // so this template draws the same either side of the emote half landing: an install that has never
 // seen the setting behaves like one that has it on, which is what the shipped default says.
@@ -132,7 +159,7 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
         <a class="shout-emotes-link" href="<?= $baseUrl ?>?action=emotes"><?= _h('shout.emotes_link') ?></a>
         <?php endif; ?>
         <?php if ($shoutBoth && !$shoutOnPage): ?>
-        <a class="shout-open" href="<?= $baseUrl ?>?action=shoutbox"><?= _h('shout.open_page') ?></a>
+        <a class="shout-open" href="<?= sanitize(shoutNavUrl($cfg, $baseUrl)) ?>"><?= _h('shout.open_page') ?></a>
         <?php endif; ?>
         <?php /* Above the list, not inside it: prepending older rows into the list would otherwise
                  have to step over this button every time, and the button would scroll away just as
@@ -143,12 +170,14 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
                  reader coming back to a window that has been behind another one has no way to ask
                  except reloading the page, which throws away whatever they were typing. It runs the
                  SAME fetch the poll runs (assets/js/shoutbox.js, window.Shout.refresh). */ ?>
+        <?php /* A bare glyph from the icon font the page already carries (Bootstrap Icons, pulled in
+                 by templates/layout.php for the pages that draw a box). No circle and no border: it
+                 acts on the whole block and sits at the end of a row of words, and a ring around it
+                 made it the loudest thing in the head. It darkens on hover and spins while it waits,
+                 and there is nothing else to it. */ ?>
         <button type="button" class="shout-refresh" id="shout-refresh"
                 title="<?= _h('shout.refresh') ?>" aria-label="<?= _h('shout.refresh') ?>">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"
-                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-                <path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/>
-            </svg>
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
         </button>
     </div>
     <?php /* ── the pinned line ──────────────────────────────────────────────────────────────────
@@ -208,7 +237,10 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
         <?php /* No formatting means no formatting: no tabs, no rail, no preview and no syntax to
                  explain. A composer that offers a Preview tab for text that is escaped verbatim is
                  a composer telling a lie about what will happen. */ ?>
-        <textarea id="shout-body" class="pm-input shout-input" rows="2" maxlength="<?= $shoutMax ?>" placeholder="<?= _h('shout.write_ph') ?>"></textarea>
+        <div class="shout-input-wrap">
+            <textarea id="shout-body" class="pm-input shout-input" rows="2" maxlength="<?= $shoutMax ?>" placeholder="<?= _h('shout.write_ph') ?>"></textarea>
+            <?= $shoutInActs ?>
+        </div>
         <?php else: ?>
         <div class="rt-editor pm-editor shout-editor">
             <div class="rt-tabs">
@@ -248,31 +280,47 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
                         <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>">&#128065;</button>
                     </span>
                 </div>
+                <?php /* The count belongs on THIS line, at its right-hand end (1.61.0): it is a fact
+                         about what is in the box, and under the box it was a third row of small grey
+                         text arguing with the status line beside it for the same corner. */ ?>
+                <span class="shout-count text-muted" id="shout-count"></span>
             </div>
-            <textarea id="shout-body" class="pm-input shout-input" rows="2" maxlength="<?= $shoutMax ?>" placeholder="<?= _h('shout.write_ph') ?>"></textarea>
+            <div class="shout-input-wrap">
+                <textarea id="shout-body" class="pm-input shout-input" rows="2" maxlength="<?= $shoutMax ?>" placeholder="<?= _h('shout.write_ph') ?>"></textarea>
+                <?= $shoutInActs ?>
+            </div>
             <div class="rt-preview rt-body" id="shout-body-preview" hidden></div>
         </div>
-        <?php /* Folded, like the message composer's: the wall of brackets is needed once, by the
-                 person who goes looking for it. */ ?>
-        <details class="rt-syntax-fold">
-            <summary><?= _h('rt.syntax_help') ?></summary>
-            <div class="form-hint" id="shout-body-syntax"></div>
-        </details>
-        <div class="form-hint" id="shout-body-help"></div>
         <?php endif; ?>
+        <?php /* ── what is left under the box ───────────────────────────────────────────────────
+                 The folded syntax help, and nothing else that can be pressed. Send and the picker
+                 handle are inside the field now, so there is no row of loose controls down here for
+                 the eye to sort through after writing one line.
+
+                 The fold's label carries the Enter/Shift+Enter sentence in brackets. It used to have
+                 a line of its own, which is a whole row of the block spent on one fact about the
+                 keyboard that somebody needs exactly once. */ ?>
         <div class="shout-acts">
-            <?php /* The picker's handle. One button, whatever the tracker has: the four pages of
-                     Unicode characters are drawn by the device's own emoji font and need nothing
-                     from the server, and the emotes and stickers appear beside them when there are
-                     any. The glyph is written as an entity so this file stays ASCII — the picker's
-                     own contents live in assets/js/shoutbox.js. */ ?>
-            <button type="button" class="shout-emoji-btn" id="shout-emoji" aria-haspopup="dialog" aria-expanded="false"
-                    title="<?= _h('shout.emoji_title') ?>" aria-label="<?= _h('shout.emoji_title') ?>">&#128512;</button>
-            <button type="button" class="btn btn-small" id="shout-send"><?= _h('shout.send') ?></button>
+            <?php if ($shoutFmt !== 'plain'): ?>
+            <details class="rt-syntax-fold">
+                <summary><?= _h('shout.syntax_help') ?></summary>
+                <div class="form-hint" id="shout-body-syntax"></div>
+            </details>
+            <?php else: ?>
+            <?php /* With formatting off there is no fold to hang it on, so the sentence keeps a place
+                     of its own — it is the only thing left that says what Enter does. The count comes
+                     with it, because there is no tabs row up there to hold it either. */ ?>
+            <span class="shout-hint text-muted"><?= _h('shout.enter_hint') ?></span>
             <span class="shout-count text-muted" id="shout-count"></span>
+            <?php endif; ?>
+            <?php /* Kept: this is where a refusal from the server lands (flood, too long, muted).
+                     What left it in 1.61.0 is "nothing new", which is an answer to pressing the
+                     refresh button and now appears on that button as a tooltip. */ ?>
             <span class="shout-note" id="shout-note"></span>
         </div>
-        <p class="shout-hint text-muted"><?= _h('shout.enter_hint') ?></p>
+        <?php if ($shoutFmt !== 'plain'): ?>
+        <div class="form-hint" id="shout-body-help"></div>
+        <?php endif; ?>
     </div>
     <?php endif; ?>
 </div>

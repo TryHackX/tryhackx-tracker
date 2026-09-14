@@ -290,6 +290,8 @@ function settingsCatalogKeywords(): array {
         'shout_nav'                => 'shoutbox navigation link menu counter badge unread number beside account nav',
         'shout_live_seconds_guest' => 'shoutbox guest visitor anonymous refresh poll seconds cadence not logged in cheaper',
         'shout_system_lines'       => 'shoutbox system lines announcements automatic site says registered torrent whitelist bot notices',
+        // ── Shoutbox: the address the room answers on (1.61.0) ──
+        'shout_page_action'        => 'shoutbox address action name url link route chat czat adres nazwa strony rename where it lives',
 
         // ── Tracker & whitelist ──
         'tracker_mode'             => 'blacklist whitelist open closed accesslist which torrents served',

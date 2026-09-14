@@ -2317,7 +2317,7 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 /* The format select is a real control, not a hint: it decides how everything typed above it will be
    read, and it was a grey word on a grey strip. */
 .pm-editor .rt-format { background: var(--bg); color: var(--text); border: 1px solid var(--control-border);
-    border-radius: 4px; padding: 0.1rem 0.3rem; font-family: inherit; }
+    border-radius: 4px; padding: 0.15rem 0.35rem; font-family: inherit; }
 .pm-editor .rt-tabs { flex-wrap: wrap; }
 .pm-editor textarea:focus { outline: none; box-shadow: none; border-color: transparent; }
 .pm-editor .rt-preview { min-height: 6rem; max-height: 18rem; }
@@ -2644,23 +2644,31 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shout-head .shout-open, .shout-head .shout-emotes-link { font-size: 0.8rem; }
 .shout-head .shout-refresh { margin-left: auto; }
 .shout-older[hidden] { display: none; }
-/* A round icon button, because it acts on the whole block rather than on anything in particular —
-   the one control here that is a symbol and not a word. */
+/* A BARE ICON (1.61.0), not a button-shaped thing. It ends a row of words, and a ring around it made
+   it the loudest element in the head — louder than the title beside it. What it has instead is the
+   two states that matter: it darkens under the pointer and it spins while it is waiting. */
 .shout-refresh {
     display: inline-flex; align-items: center; justify-content: center;
-    flex: 0 0 auto; width: 1.7rem; height: 1.7rem; padding: 0;
-    background: none; border: 1px solid var(--control-border); border-radius: 50%;
-    color: var(--text-muted); cursor: pointer; transition: color 0.15s, border-color 0.15s, opacity 0.15s;
+    flex: 0 0 auto; padding: 0.1rem; background: none; border: 0; border-radius: 4px;
+    color: var(--text-muted); font-size: 1rem; line-height: 1; cursor: pointer;
+    transition: color 0.15s, opacity 0.15s;
 }
-.shout-refresh:hover { color: var(--text); border-color: var(--accent); }
+.shout-refresh:hover { color: var(--text); }
 .shout-refresh:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Disabled is the two seconds after a fetch, not an error: dimmed, not greyed out of the layout. */
 .shout-refresh:disabled { opacity: 0.45; cursor: default; }
-.shout-refresh.is-spinning svg { animation: rotate-cw 0.8s linear infinite; }
+.shout-refresh .bi { display: block; }
+/* "Nothing new", against the button that was pressed. It opens UPWARDS, over the head row, so it
+   can never come down over a line somebody is reading — and it hangs from the right rather than
+   being centred on a control that is already at the edge of the block, which would have put half
+   of it outside the box. */
+.shout-refresh .pub-tip { left: auto; right: 0; transform: translateY(3px); }
+.shout-refresh .pub-tip.show { transform: translateY(0); }
+.shout-refresh.is-spinning .bi { animation: rotate-cw 0.8s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
     /* Somebody who has asked for no motion still has to be able to tell that it is working, so the
        spin becomes a fade rather than nothing at all. */
-    .shout-refresh.is-spinning svg { animation: none; }
+    .shout-refresh.is-spinning .bi { animation: none; }
     .shout-refresh.is-spinning { opacity: 0.45; }
 }
 /* The pinned line (1.60.0): above the list and OUTSIDE its scroll, which is the whole point of it —
@@ -2684,8 +2692,13 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 /* A dashed rule between the lines, on the ROW rather than as an element of its own, so a row that is
    appended brings its own separator and the list never has to be walked to fix them up. Dashed and
    dark: a solid rule at this spacing reads as a table, and twenty-five of them is a fence. */
+/* EVERY row carries the left padding, not only the ones with a bar down them. `.shout-row-mention`
+   and `.shout-row-system` draw theirs with an inset box-shadow, which takes no space — so at
+   0.3rem the bar sat hard against the name, and an ordinary line and a mention started their text
+   at two different places. One padding for all of them: the bar now has room after it, and nothing
+   on the screen shifts sideways when a line turns out to be about you. */
 .shout-row { position: relative; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem;
-             padding: 0.34rem 1.3rem 0.34rem 0.3rem; border-bottom: 1px dashed #23233a;
+             padding: 0.34rem 1.3rem 0.34rem 0.6rem; border-bottom: 1px dashed #23233a;
              border-radius: 4px; font-size: 0.88rem; line-height: 1.5; }
 /* Nothing under the last one: a rule there is a promise of a row that is not coming. */
 .shout-row:last-child { border-bottom: 0; }
@@ -2755,8 +2768,8 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    already makes: a pointer leaves no ring, a Tab still does, and it is drawn in the accent. */
 .rt-format:focus { outline: none; }
 .rt-format:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.shout-acts .btn:focus, .shout-older:focus, .shout-yes:focus, .shout-no:focus, .shout-del:focus { outline: none; }
-.shout-acts .btn:focus-visible, .shout-older:focus-visible,
+.shout-older:focus, .shout-yes:focus, .shout-no:focus, .shout-del:focus { outline: none; }
+.shout-older:focus-visible,
 .shout-yes:focus-visible, .shout-no:focus-visible, .shout-del:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px;
 }
@@ -2770,11 +2783,79 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .rt-tools.shout-tools .rt-tool-group { margin-right: 0.35rem; }
 .rt-tools.shout-tools button:focus { outline: none; }
 .rt-tools.shout-tools button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* ── the composer's one row of controls (1.61.0) ──
+   Send first because it is what the row is for, the folded syntax help beside it, and the status
+   line on a line of its own underneath. What used to be here as well — the emoji handle, the count
+   and a paragraph about the Enter key — moved to the two places those things are actually about. */
 .shout-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.45rem; }
+/* The fold is a flex item here, so the top margin it carries as a block would push the row apart. */
+.shout-acts .rt-syntax-fold { margin-top: 0; }
 .shout-count { font-size: 0.75rem; font-variant-numeric: tabular-nums; margin-left: auto; }
 .shout-note { font-size: 0.8rem; color: #e0b15a; flex: 1 1 100%; }
 .shout-note:empty { display: none; }
-.shout-hint { margin: 0.35rem 0 0; font-size: 0.75rem; }
+.shout-hint { margin: 0; font-size: 0.75rem; }
+
+/* ── the text area, and the one control that sits ON it ──
+   `.rt-editor` clips its children (it is what rounds the textarea's corners inside the bordered
+   box), so the shoutbox's editor has to stop doing that or both popovers below would be cut off at
+   the top edge of the composer. The radius the clip was providing is given back to the two elements
+   that were relying on it — the textarea and the preview, exactly one of which is ever visible. */
+.shout-editor { overflow: visible; }
+.shout-editor .shout-input,
+.shout-editor .rt-preview { border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius); }
+.shout-input-wrap { position: relative; display: block; }
+/* The two controls that sit ON the field, pinned to its top right: the picker handle and Send.
+   Semi-transparent at rest so they are part of the box rather than a thing shouting off it, and
+   fully opaque the moment a pointer or the keyboard reaches them — `:focus-within` is what makes
+   the second half true for somebody who never touches a mouse. */
+.shout-in-acts {
+    position: absolute; top: 0.35rem; right: 0.4rem; z-index: 2;
+    display: flex; align-items: center; gap: 0.3rem;
+    opacity: 0.6; transition: opacity 0.15s;
+}
+.shout-in-acts:hover, .shout-in-acts:focus-within { opacity: 1; }
+/* A FALLBACK width only. assets/js/shoutbox.js measures what these two actually take and sets the
+   padding from that, because "Send" and "Wyślij" are not the same number of pixels and neither is a
+   phone and a desktop — but the first paint happens before any script runs, and a line of text
+   under the buttons for one frame is still a line of text under the buttons. */
+.shout-input-wrap .shout-input { padding-right: 5.6rem; }
+.shout-emoji-btn {
+    background: none; border: 1px solid transparent; border-radius: var(--radius);
+    padding: 0.05rem 0.2rem; font-size: 1rem; line-height: 1.2; cursor: pointer;
+    color: inherit; transition: border-color 0.15s;
+}
+/* Quiet: it is a button on top of somebody's sentence, so it reads as a small label with an edge
+   rather than as the filled, accented thing a form's submit button is. */
+.shout-send-btn {
+    background: var(--control-bg); border: 1px solid var(--control-border); border-radius: 4px;
+    padding: 0.1rem 0.45rem; font: inherit; font-size: 0.72rem; line-height: 1.5;
+    color: var(--text); cursor: pointer; white-space: nowrap;
+    transition: border-color 0.15s, color 0.15s;
+}
+.shout-send-btn:hover { border-color: var(--accent); color: var(--accent); }
+.shout-send-btn:disabled { opacity: 0.5; cursor: default; }
+.shout-send-btn:focus { outline: none; }
+.shout-send-btn:focus-visible, .shout-emoji-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ── the names `@` offers ──
+   Above the box rather than below it: the composer is the last thing in the block, and a list that
+   opened downwards would hang off the bottom of the page on a phone — the same reason the emoji
+   picker opens upwards. */
+.shout-mention-pop {
+    position: absolute; left: 0; bottom: 100%; z-index: 45;
+    width: min(16rem, 100%); margin-bottom: 0.3rem; padding: 0.2rem;
+    display: flex; flex-direction: column; max-height: 12rem; overflow-y: auto;
+    background: var(--bg-card); border: 1px solid var(--control-border); border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+.shout-mention-item {
+    background: none; border: 1px solid transparent; border-radius: 4px;
+    padding: 0.2rem 0.45rem; text-align: left; font: inherit; font-size: 0.85rem;
+    color: var(--text); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.shout-mention-item:hover, .shout-mention-item.active {
+    background: var(--control-bg); border-color: var(--control-border);
+}
 @media (max-width: 640px) {
     .shout-list { max-height: 16rem; }
     .shoutbox-page .shout-list { max-height: 22rem; }
@@ -2787,6 +2868,13 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
        rather than being pushed onto one of its own by the margin. */
     .shout-head { gap: 0.45rem; }
     .rt-tools.shout-tools { margin-left: 0; flex-basis: 100%; }
+    /* Touch has no hover, so controls that only come up to full strength on one are controls
+       somebody has to guess at. */
+    .shout-in-acts { opacity: 0.9; }
+    /* The tools have taken the whole second line by here, so the count keeps the end of the first
+       one beside the format select rather than being pushed onto a line of its own. */
+    .shout-editor .rt-tabs .shout-count { order: -1; }
+    .shout-mention-pop { width: 100%; }
 }
 
 /* ── emoji, emotes and stickers (1.59.0) ─────────────────────────────────────
@@ -2814,13 +2902,8 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 }
 .shout-emotes-link { font-size: 0.8rem; }
 
-/* The handle. A button that is one character wide and looks like the character, not like a button —
-   it sits in a row with Send and must not compete with it. */
-.shout-emoji-btn {
-    background: none; border: 1px solid transparent; border-radius: var(--radius);
-    padding: 0.1rem 0.3rem; font-size: 1.05rem; line-height: 1.3; cursor: pointer;
-    color: inherit; opacity: 0.8; transition: opacity 0.15s, border-color 0.15s;
-}
+/* The handle's own states. Where it SITS is up with the composer rules (.shout-input-wrap): from
+   1.61.0 it is in the bottom right of the text area rather than in the row with Send. */
 .shout-emoji-btn:hover, .shout-emoji-btn:focus-visible { opacity: 1; border-color: var(--control-border); outline: none; }
 .shout-emoji-btn[aria-expanded="true"] { opacity: 1; border-color: var(--accent); }
 
@@ -2936,8 +3019,10 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 /* The upload: the drop zone the panel's imports use, in the colours of the public side. The real
    file input stays in the DOM (it is what opens the picker and what carries the file) and a
    label-shaped box is laid over it, rather than a button that fakes one. */
+/* No max-width: the card grids above it use the whole page, and a 44rem column under them left the
+   Add-one box looking like something that had been left behind by a narrower layout. */
 .emote-upload {
-    max-width: 44rem; margin-bottom: 0.4rem; padding: 0.9rem;
+    margin-bottom: 0.4rem; padding: 0.9rem;
     background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
 }
 .emote-drop {
@@ -2951,6 +3036,10 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .emote-drop.has-file { border-style: solid; border-color: var(--success); }
 .emote-drop-icon { font-size: 1.4rem; opacity: 0.7; }
 .emote-drop-main { font-size: 0.84rem; color: var(--text); }
+/* The same fix the panel's drop zones got: the word that opens the picker keeps the colour that
+   says it is clickable and loses the underline. The <u> is in the markup here and is also what
+   assets/js/shoutbox.js puts back when a chosen file is cleared, so the rule covers both. */
+.emote-drop-main u { text-decoration: none; color: var(--accent); }
 .emote-drop-sub { font-size: 0.73rem; }
 .emote-drop-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .emote-fields { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-top: 0.7rem; }

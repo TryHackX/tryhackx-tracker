@@ -858,6 +858,15 @@
                         </select>
                         <small class="settings-hint"><?= __('settings.shout_system_lines_hint') ?></small>
                     </div>
+                    <?php /* 1.61.0. Beside the three above because it is the fourth answer to the same
+                             question — where the room is and how somebody reaches it. A name another
+                             page already owns is refused on save and again on read, so the worst an
+                             operator can do here is fail to rename anything. */ ?>
+                    <div class="col-md-4" data-setting="shout_page_action">
+                        <label class="form-label"><?= _h('settings.shout_page_action') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="shout_page_action" value="<?= sanitize($cfg['shout_page_action'] ?? 'shoutbox') ?>" maxlength="32" placeholder="shoutbox" autocomplete="off" spellcheck="false">
+                        <small class="settings-hint"><?= __('settings.shout_page_action_hint') ?></small>
+                    </div>
                 </div>
                 <?php /* Who may read and who may write, per group: the same read-only matrix
                          Users → Groups draws (renderMatrix in assets/js/admin-users.js), scoped to
@@ -984,7 +993,10 @@
                             <input type="number" class="form-control bg-dark text-light border-secondary" id="shout-purge-days" min="0" max="3650" placeholder="<?= _h('settings.shout_purge_days_ph') ?>">
                         </div>
                         <div class="col-md-3">
-                            <button type="button" class="btn btn-sm btn-outline-danger w-100" id="shout-purge-run"><i class="bi bi-trash"></i> <?= _h('settings.shout_purge_run') ?></button>
+                            <?php /* Not `btn-sm`: it stands beside a full-height number box in a row
+                                     aligned on its bottom edge, and a small button there was visibly
+                                     shorter than the thing it acts on. */ ?>
+                            <button type="button" class="btn btn-outline-danger w-100" id="shout-purge-run"><i class="bi bi-trash"></i> <?= _h('settings.shout_purge_run') ?></button>
                         </div>
                     </div>
                     <small class="settings-hint"><?= __('settings.shout_purge_hint') ?></small>

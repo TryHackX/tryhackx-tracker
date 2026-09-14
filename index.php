@@ -128,47 +128,25 @@ langInit($cfg, $langUser['language'] ?? null);
 $action = $_GET['action'] ?? 'home';
 $action = preg_replace('/[^a-z0-9_-]/', '', strtolower($action));
 
-$routes = [
-    'home'         => 'templates/pages/home.php',
-    'info'         => 'templates/pages/info.php',
-    'tos'          => 'templates/pages/tos.php',
-    'report'       => 'templates/pages/report.php',
-    'status'       => 'templates/pages/status.php',
-    'transparency' => 'templates/pages/transparency.php',
-    'unsubscribe'  => 'templates/pages/unsubscribe.php',
-    'stats'        => 'templates/pages/stats.php',
-    'whitelist'    => 'templates/pages/whitelist.php',
-    'login'        => 'templates/pages/login.php',
-    'register'     => 'templates/pages/register.php',
-    'account'      => 'templates/pages/account.php',
-    'reset'        => 'templates/pages/reset.php',
-    'verify'       => 'templates/pages/verify.php',
-    'emailchange'  => 'templates/pages/emailchange.php',
-    'search'       => 'templates/pages/search.php',
-    // The shoutbox as a page of its own. Whether this address answers with the box or with the
-    // not-found page is the template's decision (the setting, the placement, the permission) — the
-    // route exists either way, so a link to it never depends on a setting the linker cannot see.
-    'shoutbox'     => 'templates/pages/shoutbox.php',
-    // The emotes and stickers the shoutbox understands, with their codes. Same rule as above: the
-    // route exists whatever the settings say, and the template answers with the list or with the
-    // not-found page.
-    'emotes'       => 'templates/pages/emotes.php',
-    // A PROFILE'S ADDRESS PUTS THE NAME IN ITS OWN PARAMETER, and the reason is two lines above:
-    // $action is lower-cased and stripped of everything but [a-z0-9_-], while userValidUsername()
-    // allows a dot and both cases. A name can never be an action, so the collision problem does not
-    // arise — 'Bob.Smith' would have become 'bobsmith', a different person or nobody.
-    'u'            => 'templates/pages/profile.php',
-    // The member directory — a tab of the account page now (see the redirect below), kept as an
-    // action so that links to it, and the nav entries of installs that were upgraded, still land
-    // somewhere. It was its own page first, on the reasoning that it is about other people; it sits
-    // better beside the reader's own friends and blocks, which are about other people too.
-    'members'      => 'templates/pages/members.php',
-    // The partner integration guide. Unlisted rather than locked: nothing on it is secret — it is
-    // the shape of a public API — and the key it documents travels separately, from a person. It
-    // reads its own configuration out of the query string, so the operator hands a partner an
-    // address that describes THEIR key rather than one page covering every combination.
-    'apidocs'      => 'templates/pages/apidocs.php',
-];
+// The map moved to includes/functions.php in 1.61.0 (siteRoutes) so that the validator behind
+// `shout_page_action` can read it: an operator renaming the room must not be able to take
+// `?action=login` away from the site, and the only list that cannot rot is this one.
+$routes = siteRoutes();
+
+// ── the room's own address ──
+// `shout_page_action` is the action name the shoutbox answers on, so an operator who calls the
+// thing a chat can have `?action=chat`. The chosen name is ADDED to the map rather than swapped in:
+// `?action=shoutbox` has been a real address for three releases and is sitting in people's
+// bookmarks, and a settings change that quietly 404s those is a worse trade than one extra key.
+//
+// The alias is then folded back to the canonical action, because everything downstream asks
+// `$action === 'shoutbox'` — the page title, the navigation's active link, the icon font — and a
+// second name for one page would be a second answer to every one of those questions.
+$shoutAlias = function_exists('shoutPageAction') ? shoutPageAction($cfg) : 'shoutbox';
+if ($shoutAlias !== 'shoutbox' && isset($routes['shoutbox'])) {
+    $routes[$shoutAlias] = $routes['shoutbox'];
+    if ($action === $shoutAlias) $action = 'shoutbox';
+}
 
 $baseUrl = getBaseUrl();
 

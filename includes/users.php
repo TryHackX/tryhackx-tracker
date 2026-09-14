@@ -122,6 +122,14 @@ function userPermissionList(): array {
         // its members may add emotes and stickers of their own, up to shout_emote_per_user each —
         // every one of them sniffed, capped and refused unless it is really a picture.
         'shout.upload_emote' => 'Upload emotes and stickers for the shoutbox',
+        // …and the trust to skip the queue (1.61.0). Only meaningful beside the one above, and only
+        // while `shout_emote_approval` is on: it says this group's uploads go straight into the room
+        // instead of waiting for somebody with `shout.moderate`. A SECOND id rather than a second
+        // meaning for the first, because "may add pictures" and "is trusted not to be checked" are
+        // different decisions about different people — a new member gets the first, and the person
+        // who has been drawing the tracker's emotes for a year gets both. Granted to nobody by the
+        // migration, exactly like shout.upload_emote.
+        'shout.emote_auto' => 'Add emotes that are visible at once, without a moderator',
 
         // ── the admin panel ──
         //

@@ -22,7 +22,7 @@ require_once __DIR__ . '/csp.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.60.0';
+const TRACKER_VERSION = '1.61.0';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.
@@ -1054,6 +1054,66 @@ function base32ToHex(string $base32): ?string {
 function getBaseUrl(): string {
     $script = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME']));
     return rtrim($script, '/') . '/';
+}
+
+/**
+ * Every `?action=` the site answers on, and the template behind each one.
+ *
+ * It was written inline in index.php until 1.61.0 and moved here for one reason: `shout_page_action`
+ * lets an operator put the shoutbox at `?action=chat`, and a name they pick has to be refused when
+ * it already belongs to another page. A hand-written list of forbidden names inside that validator
+ * would be a second copy of this map — out of date the first time somebody adds a page, and wrong
+ * in the direction that hurts, because the room would quietly swallow an address the site needs.
+ * So the validator reads THIS, and a route added tomorrow protects itself without anybody
+ * remembering to go and say so.
+ *
+ * The room's chosen name is deliberately NOT in here: index.php adds it after asking the settings.
+ * This function knows nothing about $cfg, which is exactly what lets a settings validator ask it
+ * without asking itself.
+ */
+function siteRoutes(): array {
+    return [
+        'home'         => 'templates/pages/home.php',
+        'info'         => 'templates/pages/info.php',
+        'tos'          => 'templates/pages/tos.php',
+        'report'       => 'templates/pages/report.php',
+        'status'       => 'templates/pages/status.php',
+        'transparency' => 'templates/pages/transparency.php',
+        'unsubscribe'  => 'templates/pages/unsubscribe.php',
+        'stats'        => 'templates/pages/stats.php',
+        'whitelist'    => 'templates/pages/whitelist.php',
+        'login'        => 'templates/pages/login.php',
+        'register'     => 'templates/pages/register.php',
+        'account'      => 'templates/pages/account.php',
+        'reset'        => 'templates/pages/reset.php',
+        'verify'       => 'templates/pages/verify.php',
+        'emailchange'  => 'templates/pages/emailchange.php',
+        'search'       => 'templates/pages/search.php',
+        // The shoutbox as a page of its own. Whether this address answers with the box or with the
+        // not-found page is the template's decision (the setting, the placement, the permission) — the
+        // route exists either way, so a link to it never depends on a setting the linker cannot see.
+        'shoutbox'     => 'templates/pages/shoutbox.php',
+        // The emotes and stickers the shoutbox understands, with their codes. Same rule as above: the
+        // route exists whatever the settings say, and the template answers with the list or with the
+        // not-found page.
+        'emotes'       => 'templates/pages/emotes.php',
+        // A PROFILE'S ADDRESS PUTS THE NAME IN ITS OWN PARAMETER, and the reason is in index.php
+        // where $action is built: it is lower-cased and stripped of everything but [a-z0-9_-], while
+        // userValidUsername() allows a dot and both cases. A name can never be an action, so the
+        // collision problem does not arise — 'Bob.Smith' would have become 'bobsmith', a different
+        // person or nobody.
+        'u'            => 'templates/pages/profile.php',
+        // The member directory — a tab of the account page now (see the redirect in index.php), kept
+        // as an action so that links to it, and the nav entries of installs that were upgraded, still
+        // land somewhere. It was its own page first, on the reasoning that it is about other people;
+        // it sits better beside the reader's own friends and blocks, which are about other people too.
+        'members'      => 'templates/pages/members.php',
+        // The partner integration guide. Unlisted rather than locked: nothing on it is secret — it is
+        // the shape of a public API — and the key it documents travels separately, from a person. It
+        // reads its own configuration out of the query string, so the operator hands a partner an
+        // address that describes THEIR key rather than one page covering every combination.
+        'apidocs'      => 'templates/pages/apidocs.php',
+    ];
 }
 
 function checkBlacklistPermissions(string $path): array {

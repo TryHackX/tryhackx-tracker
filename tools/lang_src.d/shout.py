@@ -128,6 +128,22 @@ add('shout', {
     'sys_wl_anon_many':  ('New torrents registered: :n.', 'Zarejestrowano nowe torrenty: :n.'),
 })
 
+# ── 1.61.0: the composer rearranged, and the upload that does not wait ─────
+add('shout', {
+    # The fold's own label carries the sentence that used to sit under the box on a line of its own.
+    # In brackets after it, because it is a second and smaller fact about the same box -- and the
+    # standalone line it replaces was one more thing between the composer and the edge of the block.
+    # A key of the shoutbox's own rather than a change to `rt.syntax_help`: that one is the label on
+    # the description and message editors too, and neither of those sends on Enter.
+    'syntax_help': ('Formatting help (Enter sends it, Shift+Enter starts a new line.)',
+                    'Pomoc do formatowania (Enter wysyła, Shift+Enter zaczyna nową linię.)'),
+    # What the upload box says to somebody the queue does not apply to (`shout.emote_auto`). Drawn
+    # INSTEAD of `emote_approval_note`, never beside it: telling a person their picture waits for a
+    # moderator when it does not is the one thing that sentence must not do.
+    'emote_approval_skip': ('What you add is visible at once — you do not wait for a moderator.',
+                            'To, co dodasz, widać od razu — nie czekasz na moderatora.'),
+})
+
 # The browser tab. The key is the action, exactly as templates/layout.php looks it up.
 add('', {
     'title.shoutbox': ('Shoutbox', 'Shoutbox'),

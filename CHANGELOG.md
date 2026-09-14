@@ -4,6 +4,75 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.61.0] — 2026-09-15
+
+Schema **67** — no tables, one setting and one permission. `shout_page_action` is the action name
+the room answers on, so an operator who calls the thing a chat can have `?action=chat`; the name is
+refused when it already belongs to another page, and the list it is checked against is the router's
+own map rather than a copy that would rot. `shout.emote_auto` lets a trusted member's emote go
+straight into the room instead of into the approval queue. Like `shout.upload_emote` before it, the
+migration grants it to nobody.
+
+### Fixed — the shoutbox made no sound, and the reason was structural
+
+`assets/js/shoutbox.js` has dispatched a `shout:new` event since the room landed, and nothing has
+ever listened to it. `assets/js/sounds.js` watches the pulse counts instead, and for a reader with
+the box actually on screen those counts can never rise: the widget stamps `users.shout_seen_id` the
+moment it draws. So the one reader most likely to want a chime — the person sitting and watching the
+room — was the one reader who could never get one. The player listens for the event now and picks
+the strongest kind in the batch (a mention of me, else a friend's line, else anybody's), once per
+batch rather than once per row, never for a line I just sent myself. The pulse path is untouched for
+readers who are not looking at the room, and a batch that arrives through both paths sounds once.
+
+Telling a friend's line from a stranger's is a fact only the server has, so `shoutShape()` now says
+so per row — one query for the batch, beside the mentions query that was already there, and only
+while friends are switched on at all.
+
+### Fixed — "Open the shoutbox" pointed at a page that need not exist
+
+`?action=shoutbox` was hardcoded on the Emotes page. With `shout_placement` on the home block there
+is nothing at that address, so the button at the bottom of the page a reader was sent to in order to
+find emote codes led to "there is no shoutbox here". `shoutNavUrl()` has answered this correctly
+since 1.60.0 and every link is built from it now — which is also what makes the renaming above one
+string rather than a hunt.
+
+### Fixed — six things the owner listed after using the room
+
+The "Choose a picture" label in every drop zone was underlined by a literal `<u>`; the underline is
+gone and the colour cue stays, in one rule for all three. The Sticker checkbox in Settings → Shoutbox
+was Bootstrap's light default on a dark panel and now matches the controls beside it. The Purge
+button was `btn-sm` next to a full-height day box and the two now share a height and a baseline. The
+Add-one box on the Emotes page was pinned to `44rem` in a wide page and now uses the width it has,
+like the card grid above it. `.pm-editor .rt-format` is less cramped. And a mention's blue bar sat
+against the name: every row carries the left padding now, so an ordinary line and a mention start at
+the same place and nothing shifts when a line turns out to be about you.
+
+### Added — `@` suggests names as you type
+
+Two characters after an `@` and the composer offers matching account names. The guards are the
+feature: nothing before two characters, a 250 ms debounce, one request in the air at a time, at most
+eight names, an answer cached for the life of the page so backspacing re-asks nothing, and a flight
+abandoned the moment the caret leaves the token. The endpoint answers only signed-in readers holding
+`shout.post`, matches a prefix so the index is usable, limits to eight, returns names and nothing
+else, and sits behind its own rate limit. Hidden profiles and banned accounts do not appear.
+
+### Changed — the composer, rearranged
+
+The refresh control is a plain icon that darkens on hover and spins while it waits, rather than a
+circled button. "Nothing new" stopped being a line of text pasted under the box and became a tooltip
+on the refresh button itself, in the shape the rest of the site already uses. The character count
+moved up onto the tabs row. The emoji button sits at the bottom right of the text area, raised and
+semi-transparent, clear of typed text at every width. Send moved to the left of the formatting fold,
+and the sentence about Enter and Shift+Enter now rides in brackets after "Formatting help" instead
+of taking a line of its own.
+
+### Fixed — an icon font the public pages never loaded
+
+Bootstrap Icons was pulled in for `?action=transparency` and `?action=stats` and nowhere else, so the
+`bi bi-file-earmark-image` on the Emotes drop zone has been drawing an empty box since 1.59.0. The
+stylesheet is now requested by the pages that actually use an icon, the front page included whenever
+the shoutbox is really drawn on it for that reader.
+
 ## [1.60.0] — 2026-09-14
 
 Schema **66** — the shoutbox grows a pinned line (`shouts.pinned_at` / `pinned_by`, at most one of

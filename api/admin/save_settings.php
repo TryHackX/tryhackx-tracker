@@ -53,6 +53,8 @@ $allowed = [
     'shout_stickers_enabled', 'shout_emote_approval',
     // in the navigation, a cadence of its own for guests, and the site's own lines (1.60.0)
     'shout_nav', 'shout_live_seconds_guest', 'shout_system_lines',
+    // the action name the room answers on (1.61.0)
+    'shout_page_action',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -421,6 +423,19 @@ if (isset($data['shout_placement']) && !in_array($data['shout_placement'], ['hom
 }
 if (isset($data['shout_format']) && !in_array($data['shout_format'], ['plain', 'bbcode', 'markdown'], true)) {
     $data['shout_format'] = 'bbcode';
+}
+// The address the room answers on. Coerced to the literal when it is not a legal action name, or
+// when it is already another page's — asked of siteRoutes() rather than of a list written out here,
+// so a route added next year defends itself. shoutPageAction() asks the same question on read; this
+// asks it once more on the way in, so a value that could take `?action=login` off the site is never
+// stored rather than merely never obeyed.
+if (isset($data['shout_page_action'])) {
+    $v = strtolower(trim((string)$data['shout_page_action']));
+    if (!preg_match('/^[a-z0-9_-]{2,32}$/', $v)
+        || ($v !== 'shoutbox' && function_exists('siteRoutes') && isset(siteRoutes()[$v]))) {
+        $v = 'shoutbox';
+    }
+    $data['shout_page_action'] = $v;
 }
 // House rules are a line of TEXT above the box — no markup is rendered from it, so it is only
 // bounded and stripped of control characters.

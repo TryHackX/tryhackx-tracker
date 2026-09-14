@@ -4683,3 +4683,11 @@ add('js.shout', {
     'pin':   ('Pin this line', 'Przypnij ten wpis'),
     'unpin': ('Unpin', 'Odepnij'),
 })
+
+# ── 1.61.0: the names `@` offers while somebody types ──────────────────────
+# One string: the list needs a name for a screen reader, and everything in it is an account name
+# the server just sent. "Nothing new" is `nothing_new` above -- it says the same thing it always
+# did, in a tooltip on the refresh button now instead of on a line under the box.
+add('js.shout', {
+    'mention_list': ('Matching names', 'Pasujące nazwy'),
+})

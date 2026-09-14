@@ -1983,7 +1983,10 @@ input[type="number"] {
 .ipl-drop.has-file { border-style: solid; border-color: #3f5c48; }
 .ipl-drop-icon { font-size: 1.4rem; opacity: 0.7; }
 .ipl-drop-main { font-size: 0.84rem; color: #c3ccd8; }
-.ipl-drop-main u { text-decoration-color: #4d9fd6; }
+/* The word that opens the file picker is a <u> in the markup of all three drop zones (emotes,
+   sounds, the language install). It keeps the COLOUR that says it is the thing you click and loses
+   the underline, which at this size read as a stray link in the middle of a sentence. */
+.ipl-drop-main u { text-decoration: none; color: #4d9fd6; }
 .ipl-drop-sub { font-size: 0.73rem; }
 /* The real input, still clickable, still keyboard-reachable, just invisible. */
 .ipl-drop-input {
@@ -2654,5 +2657,12 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .admin-emote-add-row .form-control { flex: 1 1 10rem; min-width: 0; }
 /* The code is the short one of the two boxes: it is at most 32 characters and never a sentence. */
 .admin-emote-add-row .admin-emote-code-in { flex: 0 1 11rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.admin-emote-add-row .admin-emote-stick-check { flex: 0 0 auto; white-space: nowrap; }
+.admin-emote-add-row .admin-emote-stick-check { flex: 0 0 auto; white-space: nowrap; display: flex; align-items: center; gap: 0.4rem; }
+/* The box itself, in the panel's own colours. Bootstrap's default is a white square, which on this
+   background was the brightest thing in the row and read as a control that was already switched on —
+   beside two dark inputs and a dark button it was the one element that did not belong to the page. */
+.admin-emote-add-row .form-check-input { float: none; margin: 0; background-color: #131b25; border-color: #3a4657; }
+.admin-emote-add-row .form-check-input:checked { background-color: #4d9fd6; border-color: #4d9fd6; }
+.admin-emote-add-row .form-check-input:focus { border-color: #4d9fd6; box-shadow: 0 0 0 0.15rem rgba(77, 159, 214, 0.25); }
+.admin-emote-add-row .form-check-label { margin: 0; cursor: pointer; }
 .admin-emote-add-row .btn { flex: 0 0 auto; white-space: nowrap; }

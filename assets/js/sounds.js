@@ -33,6 +33,13 @@
     // events: the callers hand over the total and the friends' share, and the difference is the rest.
     const KEYS = { unread: 'notification', unread_pm_friend: 'message_friend', unread_pm_other: 'message',
                    unread_shout_friend: 'shout_friend', unread_shout_other: 'shout', unread_shout_mention: 'mention' };
+    // The three of those that the room can ALSO announce by itself (1.61.0, `shout:new`). One batch
+    // of lines can reach this file down either road, and it has to be heard once.
+    const SHOUT_KEYS = { unread_shout_friend: 1, unread_shout_other: 1, unread_shout_mention: 1 };
+    // How long after a `shout:new` the pulse's version of the same news is swallowed. Comfortably
+    // longer than a poll's round trip and far shorter than somebody stepping away from the room.
+    const PATH_OVERLAP_MS = 8000;
+    let quietUntil = 0;
     const PENDING_MAX_MS = 300000;
     let ctx = null;
     let idleTimer = 0;
@@ -139,9 +146,58 @@
             const n = Math.max(0, Number(c[key]) || 0);
             const prev = last[key];
             last[key] = n;
-            if (prev !== undefined && n > prev && cfg && cfg.ev && cfg.ev[KEYS[key]]) play(KEYS[key]);
+            if (prev === undefined || n <= prev) return;
+            // Just heard through `shout:new`, from the tab that was looking at the room: the pulse is
+            // now reporting the same rows, and two chimes for one batch is worse than none. The
+            // baseline above has already moved — the point is to swallow a sound, not to lose count.
+            if (SHOUT_KEYS[key] && Date.now() < quietUntil) return;
+            if (cfg && cfg.ev && cfg.ev[KEYS[key]]) play(KEYS[key]);
         });
     }
+
+    /**
+     * Which sound a batch of shouts deserves, or null for silence. Pure, so the decision can be
+     * read back and tested without a speaker.
+     *
+     * ONE sound per batch and the strongest kind wins: three lines landing together is one thing
+     * happening, and three chimes on top of each other is a noise nobody asked for. A mention beats
+     * a friend and a friend beats anybody else, which is the order the three events are worth
+     * interrupting somebody for.
+     *
+     * MY OWN LINE IS NEVER NEWS. Neither is a line the site said — an announcement is nobody's
+     * unread (includes/shout.php agrees) and a room that pinged every time a torrent was registered
+     * is the thing `shout_system_lines` must never turn into.
+     */
+    function shoutKind(rows) {
+        if (!Array.isArray(rows)) return null;
+        let kind = null;
+        for (const r of rows) {
+            if (!r || r.own || r.system) continue;
+            if (r.mentions_me) return 'mention';        // nothing beats it: stop looking
+            if (r.friend) kind = 'shout_friend';
+            else if (kind === null) kind = 'shout';
+        }
+        return kind;
+    }
+
+    /**
+     * Rows landed while somebody was LOOKING at the room (1.61.0).
+     *
+     * The pulse cannot answer this one, and that is the whole reason this exists: a reader with the
+     * widget on screen has `users.shout_seen_id` stamped the moment it draws, so their unread counts
+     * never rise — which made the reader most likely to want a chime the one reader who could never
+     * get one. assets/js/shoutbox.js dispatches the rows it has just appended; the mute, the
+     * reader's per-kind choices and `sounds.use` all still decide, exactly as they do for the pulse,
+     * because every one of those lives inside play().
+     */
+    function onShoutRows(rows) {
+        const kind = shoutKind(rows);
+        if (!kind) return null;
+        quietUntil = Date.now() + PATH_OVERLAP_MS;
+        play(kind);
+        return kind;
+    }
+    window.addEventListener('shout:new', (e) => { onShoutRows(e && e.detail ? e.detail.rows : null); });
 
     // The gesture that lifts the gate. Listened for only until the browser has let the page play
     // once: afterwards a click must NOT wake the context again, or the device the idle-suspend
@@ -247,7 +303,7 @@
     else initPane();
 
     window.Sounds = {
-        play, observe,
+        play, observe, shoutKind, onShoutRows,
         wants: () => !!cfg,
         config: () => cfg,
         state: () => (ctx ? ctx.state : 'none'),

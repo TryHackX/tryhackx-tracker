@@ -2519,8 +2519,8 @@ add('', {
     'settings.shout_emotes_list': ('In the room', 'W pokoju'),
     'settings.shout_emotes_add_heading': ('Add one', 'Dodaj nową'),
     'settings.shout_emote_approval': ('A member\'s upload waits', 'Wgranie od członka czeka'),
-    'settings.shout_emote_approval_hint': ('On, a picture uploaded by an ACCOUNT is stored switched off and waits for you above the table — nobody else sees it anywhere until you approve it. What you add here never waits. Uploading at all needs <code>shout.upload_emote</code>, which nobody has until you grant it in Users → Groups.',
-        'Włączone: obrazek wgrany przez KONTO zapisuje się wyłączony i czeka na Ciebie nad tabelą — nikt inny nigdzie go nie widzi, dopóki go nie zatwierdzisz. To, co dodasz tutaj, nie czeka nigdy. Żeby w ogóle wgrywać, trzeba mieć <code>shout.upload_emote</code>, którego nikt nie ma, dopóki go nie nadasz w Użytkownicy → Grupy.'),
+    'settings.shout_emote_approval_hint': ('On, a picture uploaded by an ACCOUNT is stored switched off and waits for you above the table — nobody else sees it anywhere until you approve it. What you add here never waits. Uploading at all needs <code>shout.upload_emote</code>, which nobody has until you grant it in Users → Groups; a group that also holds <code>shout.emote_auto</code> skips this queue and its uploads are visible the moment they land.',
+        'Włączone: obrazek wgrany przez KONTO zapisuje się wyłączony i czeka na Ciebie nad tabelą — nikt inny nigdzie go nie widzi, dopóki go nie zatwierdzisz. To, co dodasz tutaj, nie czeka nigdy. Żeby w ogóle wgrywać, trzeba mieć <code>shout.upload_emote</code>, którego nikt nie ma, dopóki go nie nadasz w Użytkownicy → Grupy; grupa, która ma też <code>shout.emote_auto</code>, omija tę kolejkę i jej obrazki widać od razu po wgraniu.'),
 })
 
 # The manager's own strings. `js.shoutadmin.` like the Purge button's, and for the same reason: that
@@ -2604,8 +2604,18 @@ add('', {
     'settings.shout_system_lines_hint': ('The tracker says so in the room when a torrent is registered — one line per batch, never one per hash. It names the submitter only where that submitter is public; otherwise it says a torrent arrived without naming anybody. These lines belong to nobody: members cannot delete them, they are nobody\'s unread and they make no sound.',
         'Tracker pisze w pokoju, gdy ktoś zarejestruje torrent — jedna linia na paczkę, nigdy jedna na hash. Nazywa zgłaszającego tylko tam, gdzie jest on publiczny; inaczej pisze, że torrent się pojawił, nie wymieniając nikogo. Te wpisy nie należą do nikogo: członkowie ich nie skasują, nikomu nie liczą się jako nieprzeczytane i nie wydają dźwięku.'),
     'settings.shout_matrix_title': ('Who may read and who may write', 'Kto może czytać, a kto pisać'),
-    'settings.shout_matrix_hint': ('The five shoutbox permissions across your groups, as they stand right now. Read-only here: grants are made in Users → Groups, where every other permission is, so there is one place that decides and one place that shows.',
-        'Pięć uprawnień shoutboksa we wszystkich grupach, tak jak wyglądają w tej chwili. Tutaj tylko do odczytu: nadaje się je w Użytkownicy → Grupy, tam gdzie wszystkie pozostałe — jedno miejsce decyduje, jedno pokazuje.'),
+    'settings.shout_matrix_hint': ('The six shoutbox permissions across your groups, as they stand right now. Read-only here: grants are made in Users → Groups, where every other permission is, so there is one place that decides and one place that shows.',
+        'Sześć uprawnień shoutboksa we wszystkich grupach, tak jak wyglądają w tej chwili. Tutaj tylko do odczytu: nadaje się je w Użytkownicy → Grupy, tam gdzie wszystkie pozostałe — jedno miejsce decyduje, jedno pokazuje.'),
+})
+
+# ── 1.61.0: the address the room answers on ────────────────────────────────
+# One more answer to "where is the room", beside the three from 1.60.0. The refusal is worth saying
+# out loud in the hint: an operator who types `login` here has not broken their site, and knowing
+# that before they press Save is the difference between trying it and not.
+add('', {
+    'settings.shout_page_action': ('The room\'s address', 'Adres pokoju'),
+    'settings.shout_page_action_hint': ('The <code>?action=</code> name the shoutbox answers on. Put <code>chat</code> here and the room is at <code>?action=chat</code>, and every link on the site follows it. Lower-case letters, digits, <code>-</code> and <code>_</code>, 2 to 32 characters. A name that already belongs to another page is refused and this falls back to <code>shoutbox</code> — which goes on answering either way, so addresses people have already saved keep working.',
+        'Nazwa <code>?action=</code>, pod którą odpowiada shoutbox. Wpisz tu <code>chat</code>, a pokój będzie pod <code>?action=chat</code> i wszystkie linki na stronie pójdą za tym. Małe litery, cyfry, <code>-</code> i <code>_</code>, od 2 do 32 znaków. Nazwa należąca już do innej strony zostaje odrzucona i wraca <code>shoutbox</code> — który i tak dalej odpowiada, więc zapisane wcześniej adresy nadal działają.'),
 })
 
 # The matrix's own two strings, `js.shoutadmin.` like the rest of the panel's.

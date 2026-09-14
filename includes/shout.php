@@ -135,7 +135,34 @@ function shoutNav(array $cfg): bool
  */
 function shoutNavUrl(array $cfg, string $baseUrl): string
 {
-    return shoutPlacement($cfg) === 'home' ? $baseUrl : $baseUrl . '?action=shoutbox';
+    return shoutPlacement($cfg) === 'home' ? $baseUrl : $baseUrl . '?action=' . shoutPageAction($cfg);
+}
+
+/**
+ * The action name the room answers on: 'shoutbox', unless the operator renamed it (1.61.0).
+ *
+ * An operator whose site calls this a chat wants `?action=chat`, and the whole cost of that is one
+ * string — every link is built from here rather than from the literal, and index.php teaches the
+ * router the name on the way past.
+ *
+ * REFUSED WHEN THE NAME IS ALREADY SOMEBODY ELSE'S PAGE, and the list of those is siteRoutes()
+ * rather than a list written out here. A hand-written one would be wrong the first time anybody
+ * added a page, and wrong in the direction that hurts: the room would quietly swallow
+ * `?action=login` and the operator's next problem would be that nobody can sign in. 'shoutbox' is
+ * the one name in that map this may legally be, because it is the room's own.
+ *
+ * Anything invalid falls back rather than breaking the route. A settings row can arrive from a
+ * restored backup or from a MySQL client on a database three applications share, and the answer to
+ * a bad one is the address the site has always had — not a site with no shoutbox anywhere on it.
+ */
+function shoutPageAction(array $cfg): string
+{
+    $v = strtolower(trim((string)($cfg['shout_page_action'] ?? '')));
+    // The same character class index.php reduces $action to, so a name that survives here is a name
+    // the router can actually be asked for.
+    if (!preg_match('/^[a-z0-9_-]{2,32}$/', $v)) return 'shoutbox';
+    if ($v !== 'shoutbox' && function_exists('siteRoutes') && isset(siteRoutes()[$v])) return 'shoutbox';
+    return $v;
 }
 
 /** Does the site write its own lines into the room ("a torrent was registered")? (v66) */
@@ -504,6 +531,31 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
         foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $sid) $mine[(int)$sid] = true;
     }
 
+    // …and which of them a FRIEND said. One query for the batch, exactly like the mentions above,
+    // and only while the feature that defines a friend is switched on at all. It exists so the sound
+    // player can tell a friend's line from a stranger's (1.61.0) without asking the server a second
+    // question about rows it has already been handed — the three sounds are three events, and two of
+    // them are indistinguishable in the browser.
+    $pals = [];
+    if ($meId > 0 && function_exists('friendsEnabled') && friendsEnabled($cfg)) {
+        $authors = [];
+        foreach ($raw as $r) {
+            $a = $r['user_id'] === null ? 0 : (int)$r['user_id'];
+            if ($a > 0 && $a !== $meId) $authors[$a] = true;
+        }
+        if ($authors) {
+            $ids = array_keys($authors);
+            $in = implode(',', array_fill(0, count($ids), '?'));
+            $st = $db->prepare("SELECT user_id, friend_id FROM user_friends
+                                 WHERE status = 'accepted'
+                                   AND ((user_id = ? AND friend_id IN ($in)) OR (friend_id = ? AND user_id IN ($in)))");
+            $st->execute(array_merge([$meId], $ids, [$meId], $ids));
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $f) {
+                $pals[(int)$f['user_id'] === $meId ? (int)$f['friend_id'] : (int)$f['user_id']] = true;
+            }
+        }
+    }
+
     $out = [];
     foreach ($raw as $r) {
         $system = !empty($r['is_system']);
@@ -531,6 +583,10 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
             'pinned'      => ($r['pinned_at'] ?? null) !== null,
             'deletable'   => $mayModerate || ($own && $mayDeleteOwn),
             'mentions_me' => isset($mine[(int)$r['id']]),
+            // Never true for a line the SITE said, whoever it happens to be signed with: an
+            // announcement is nobody's unread (shoutUnreadCounts agrees) and must not be the reason
+            // a friend's chime plays.
+            'friend'      => !$system && $authorId > 0 && isset($pals[$authorId]),
         ];
     }
     return $out;
@@ -1227,7 +1283,16 @@ function shoutEmoteStore(PDO $db, array $cfg, string $code, string $name, string
     // Anything that does not wait is STAMPED here rather than merely switched on. The stamp is what
     // lets somebody switch this emote off tomorrow without it queueing up to be approved again: a
     // row with no stamp is a question nobody has answered, and that is the only thing a queue is.
-    $approved = $uploader === null || !shoutEmoteApproval($cfg);
+    //
+    // `shout.emote_auto` is the third way past the gate (1.61.0), and it is about the PERSON rather
+    // than about the site's mood: an operator who has been letting the same member's drawings
+    // through for a year can stop being asked. Held by nobody until it is granted, so this changes
+    // nothing on an install that has not gone looking for it — and it is asked of the uploading
+    // ACCOUNT (userIdHasPermission, not userCan), because the panel has no account and a test has no
+    // session, which is the same reason shoutMayPost() asks that way.
+    $auto = $uploader !== null && function_exists('userIdHasPermission')
+            && userIdHasPermission($db, $cfg, $uploader, 'shout.emote_auto');
+    $approved = $uploader === null || !shoutEmoteApproval($cfg) || $auto;
     $enabled = $approved ? 1 : 0;
     $approvedAt = $approved ? date('Y-m-d H:i:s') : null;
 

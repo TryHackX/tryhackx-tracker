@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 66;  // 66 = the shoutbox's pinned line (shouts.pinned_at/pinned_by, at most one of them at a time) and the lines the SITE says (shouts.is_system) — which is why user_id is nullable from here on: an announcement has no author, and a row pointing at account 0 would be a lie rather than an absence
+const TRACKER_SCHEMA_VERSION = 67;  // 67 = one setting and one permission, no tables: `shout_page_action` (the action name the room answers on, so an operator can have ?action=chat) and `shout.emote_auto` (an upload that skips the approval queue) — registered and, like shout.upload_emote before it, granted to nobody
+                                    // 66 = the shoutbox's pinned line (shouts.pinned_at/pinned_by, at most one of them at a time) and the lines the SITE says (shouts.is_system) — which is why user_id is nullable from here on: an announcement has no author, and a row pointing at account 0 would be a lie rather than an absence
                                     // 65 = shout_emote_approval and the approved_at stamp beside it: a member's uploaded emote waits for the operator instead of being everybody's the moment it lands, and the stamp is what keeps "waiting to be let in" apart from "switched off afterwards"
                                     // 64 = shoutbox emotes and stickers (includes/shout.php): `shout_emotes` (images as rows, like `sounds`), the five shout_emote_*/shout_stickers_* settings, the `shout.upload_emote` permission (registered, granted to nobody), and the shipped examples seeded from assets/emotes/*.svg
                                     // 63 = the shoutbox (includes/shout.php): `shouts` + `shout_mentions` + users.shout_seen_id, the shout_* settings, and shout.view/post/delete_own to the member group (shout.moderate to the moderator one)
@@ -2577,6 +2578,13 @@ function trackerSchemaDefaultSettings(): array {
         'shout_nav'                   => '0',
         'shout_live_seconds_guest'    => '30',  // clamped [0, 300], read as 0 or 3..300
         'shout_system_lines'          => '0',
+        // ── The address the room answers on (v67) ───────────────────────────────────────────────
+        // The action name, so an operator who calls the thing a chat can have `?action=chat`. It
+        // ships as the literal it has always been, which is what makes this setting invisible until
+        // somebody wants it. shoutPageAction() refuses a name that is already another page's
+        // (siteRoutes() is what it asks) and falls back to this, because a bad row here would
+        // otherwise take an address off the site rather than merely rename one.
+        'shout_page_action'           => 'shoutbox',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

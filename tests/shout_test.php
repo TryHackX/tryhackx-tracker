@@ -121,6 +121,50 @@ check('the nav link goes wherever the box actually is',
       shoutNavUrl(['shout_placement' => 'home'], '/') === '/'
       && shoutNavUrl(['shout_placement' => 'page'], '/') === '/?action=shoutbox'
       && shoutNavUrl(['shout_placement' => 'both'], '/') === '/?action=shoutbox');
+// ── 1.61.0: the address the room answers on ──────────────────────────────────
+// The validator reads the ROUTER'S OWN MAP, which is the whole point of it: a hand-written list of
+// forbidden names would be wrong the first time somebody added a page, and wrong in the direction
+// that costs an operator their sign-in page.
+check('the room answers on `shoutbox` unless somebody says otherwise',
+      shoutPageAction([]) === 'shoutbox' && shoutPageAction(['shout_page_action' => '']) === 'shoutbox'
+      && shoutPageAction(['shout_page_action' => 'shoutbox']) === 'shoutbox');
+check('… and on whatever legal name the operator chose',
+      shoutPageAction(['shout_page_action' => 'chat']) === 'chat'
+      && shoutPageAction(['shout_page_action' => 'CZAT']) === 'czat'          // folded, like $action is
+      && shoutPageAction(['shout_page_action' => ' talk_2-0 ']) === 'talk_2-0');
+check('a name that is already another page\'s is refused, read from siteRoutes() rather than a list here',
+      shoutPageAction(['shout_page_action' => 'login']) === 'shoutbox'
+      && shoutPageAction(['shout_page_action' => 'account']) === 'shoutbox'
+      && shoutPageAction(['shout_page_action' => 'emotes']) === 'shoutbox'
+      && shoutPageAction(['shout_page_action' => 'u']) === 'shoutbox');
+check('… and so is anything that could not be an action at all',
+      shoutPageAction(['shout_page_action' => 'a']) === 'shoutbox'                  // too short
+      && shoutPageAction(['shout_page_action' => str_repeat('x', 33)]) === 'shoutbox'
+      && shoutPageAction(['shout_page_action' => 'ch at']) === 'shoutbox'
+      && shoutPageAction(['shout_page_action' => 'chat!']) === 'shoutbox'
+      && shoutPageAction(['shout_page_action' => 'Chat.Room']) === 'shoutbox');
+check('the map the validator asks is the one the router uses',
+      isset(siteRoutes()['shoutbox']) && isset(siteRoutes()['login']) && isset(siteRoutes()['home'])
+      && !isset(siteRoutes()['chat']));
+check('the default ships as the literal it has always been',
+      ($defaults['shout_page_action'] ?? null) === 'shoutbox', var_export($defaults['shout_page_action'] ?? null, true));
+// The link follows the setting, which is what makes renaming the room one string rather than a hunt.
+check('every link is built from the setting, never from the literal',
+      shoutNavUrl(['shout_placement' => 'page', 'shout_page_action' => 'chat'], '/') === '/?action=chat'
+      && shoutNavUrl(['shout_placement' => 'both', 'shout_page_action' => 'chat'], '/') === '/?action=chat'
+      // …and the placement still wins: with the box on the front page there is no page to send anybody to.
+      && shoutNavUrl(['shout_placement' => 'home', 'shout_page_action' => 'chat'], '/') === '/');
+check('… and an invalid name leaves the address the site has always had',
+      shoutNavUrl(['shout_placement' => 'page', 'shout_page_action' => 'login'], '/') === '/?action=shoutbox');
+
+// ── 1.61.0: the permission that skips the approval queue ─────────────────────
+foreach (['shout.upload_emote', 'shout.emote_auto'] as $p) {
+    check("$p is in the registry", isset(userPermissionList()[$p]));
+}
+check('shout.emote_auto is granted to NOBODY by any preset',
+      !in_array('shout.emote_auto', userGroupPresets()['member']['perms'], true)
+      && !in_array('shout.emote_auto', userGroupPresets()['moderator']['perms'], true));
+
 check('the row and length limits are clamped on read',
       shoutMaxChars(['shout_max_chars' => '99999']) === 2000 && shoutMaxChars(['shout_max_chars' => '0']) === 500
       && shoutWidgetRows(['shout_widget_rows' => '1']) === 5 && shoutPageRows(['shout_page_rows' => '99999']) === 500
@@ -132,7 +176,7 @@ check('the row and length limits are clamped on read',
 // Each account's groups are final BEFORE anything asks what it may do: userEffectivePermissions()
 // caches per account for the life of the process, so a group changed halfway through a test is a
 // test that reads its own stale answer.
-$names = ['shtuser', 'shtmod', 'shtmute', 'shtnone', 'shtfriend'];
+$names = ['shtuser', 'shtmod', 'shtmute', 'shtnone', 'shtfriend', 'shtauto'];
 $in = implode(',', array_fill(0, count($names), '?'));
 $db->prepare("DELETE FROM users WHERE username IN ($in)")->execute($names);
 $cfgOn = array_merge($cfg, ['users_enabled' => '1', 'shout_enabled' => '1', 'users_require_email_verify' => '0',
@@ -146,13 +190,23 @@ foreach ($names as $name) {
     $uid[$name] = (int)($st->fetchColumn() ?: 0);
 }
 $db->prepare("UPDATE users SET email_verified = 1 WHERE username IN ($in)")->execute($names);
-check('the five test accounts exist', count(array_filter($uid)) === 5, json_encode($uid));
+check('the six test accounts exist', count(array_filter($uid)) === 6, json_encode($uid));
 
 $modGroup = (int)($db->query("SELECT id FROM user_groups WHERE slug = 'moderator'")->fetchColumn() ?: 0);
 userGrantGroup($db, $uid['shtmod'], $modGroup, null, 'shout_test', '', false);
 // shtnone keeps no group at all: the closest thing to "a member whose group carries nothing".
 $db->prepare("DELETE FROM user_group_members WHERE user_id = ?")->execute([$uid['shtnone']]);
 $db->prepare("UPDATE users SET pm_muted_until = NOW() + INTERVAL 1 DAY WHERE id = ?")->execute([$uid['shtmute']]);
+// A group of this run's own carrying the two 1.61.0 uploading ids, because no preset hands either of
+// them out — which is the thing being checked a few lines above. Made BEFORE anything asks what
+// shtauto may do: userEffectivePermissions() caches per account for the life of the process.
+$db->prepare("INSERT INTO user_groups (slug, name, description, priority, is_default, is_system, permissions)
+              VALUES ('shtautog', 'Shout auto (test)', '', 50, 0, 0, ?)
+              ON DUPLICATE KEY UPDATE permissions = VALUES(permissions)")
+   ->execute([json_encode(['shout.view' => true, 'shout.post' => true,
+                           'shout.upload_emote' => true, 'shout.emote_auto' => true], JSON_UNESCAPED_SLASHES)]);
+$autoGroup = (int)($db->query("SELECT id FROM user_groups WHERE slug = 'shtautog'")->fetchColumn() ?: 0);
+if ($autoGroup > 0) userGrantGroup($db, $uid['shtauto'], $autoGroup, null, 'shout_test', '', false);
 
 $row = function (string $name) use ($db): array {
     $st = $db->prepare("SELECT * FROM users WHERE username = ?");
@@ -165,7 +219,10 @@ $cleanup = function () use ($db, $uid, $in, $names) {
     $db->prepare("DELETE m FROM shout_mentions m JOIN shouts s ON s.id = m.shout_id WHERE s.user_id IN ($q)")->execute($ids);
     $db->prepare("DELETE FROM shouts WHERE user_id IN ($q)")->execute($ids);
     $db->prepare("DELETE FROM user_friends WHERE user_id IN ($q) OR friend_id IN ($q)")->execute(array_merge($ids, $ids));
+    // The pictures and the group this run made, so a second run starts where the first one did.
+    $db->prepare("DELETE FROM shout_emotes WHERE uploaded_by IN ($q) OR code LIKE 'zzauto%'")->execute($ids);
     $db->prepare("DELETE FROM users WHERE username IN ($in)")->execute($names);
+    $db->exec("DELETE FROM user_groups WHERE slug = 'shtautog'");
 };
 
 try {
@@ -297,6 +354,24 @@ try {
     $c = shoutUnreadCounts($db, $cfgOn, $me);
     check('a mention is its own number as well as part of the total',
           $c['shout'] === 7 && $c['shout_friend'] === 7 && $c['mention'] === 1, json_encode($c));
+    // 1.61.0: the ROW says whether a friend said it, because the browser cannot work that out and
+    // the sound player has to tell a friend's line from a stranger's. One query per batch, beside
+    // the mentions one, and only while the feature that defines a friend is switched on.
+    $cfgPals = array_merge($cfgOn, ['friends_enabled' => '1']);
+    $palRows = shoutRows($db, $cfgPals, $me, 50, 0);
+    $palOne = array_values(array_filter($palRows, fn($r) => ($r['user'] ?? '') === 'shtfriend'));
+    check('a row says whether a friend said it',
+          $palOne !== [] && ($palOne[0]['friend'] ?? null) === true, json_encode($palOne[0] ?? null));
+    check('… a reader who is nobody\'s friend is told so about the same line',
+          (shoutRows($db, $cfgPals, $none, 1, 0)[0]['friend'] ?? null) === false);
+    // $cfgOn is merged from the LIVE settings of whatever database this runs against, and this one
+    // has friends switched on — so asking $cfgOn for the switched-off behaviour asked for the exact
+    // opposite of what the name says, and the newest row happens to be the friend's line. Say it
+    // explicitly, the way $cfgPals above says the other half explicitly.
+    $cfgNoPals = array_merge($cfgOn, ['friends_enabled' => '0']);
+    check('… and with friends switched off the question is never asked',
+          (shoutRows($db, $cfgNoPals, $me, 1, 0)[0]['friend'] ?? null) === false);
+
     $mine = $mk((int)$me['id'], 'my own line');
     $c = shoutUnreadCounts($db, $cfgOn, $me);
     check('my own line is never new to me', $c['shout'] === 7, json_encode($c));
@@ -410,10 +485,60 @@ try {
     check('… nor does it count as that person having just spoken',
           shoutPost($db, array_merge($cfgSys, ['shout_flood_seconds' => '60']), $friend, 'still allowed', 'bbcode', '')['ok'] === true);
     $sysBefore = (int)$db->query("SELECT COUNT(*) FROM shouts WHERE is_system = 1")->fetchColumn();
-    shoutSystemWhitelistAdded($db, $cfgOn, 5, (int)$friend['id']);
+    // Off because this says so, not because this database happens to have it off: $cfgOn is merged
+    // from the LIVE settings, and inheriting the very switch under test is what made two other
+    // checks in this file accuse working code.
+    $cfgNoSys = array_merge($cfgOn, ['shout_system_lines' => '0']);
+    shoutSystemWhitelistAdded($db, $cfgNoSys, 5, (int)$friend['id']);
     check('with the switch off again nothing is written, whoever it would have been about',
           (int)$db->query("SELECT COUNT(*) FROM shouts WHERE is_system = 1")->fetchColumn() === $sysBefore,
           (string)$sysBefore);
+
+    // ── 1.61.0: an upload that does not wait ─────────────────────────────────
+    // A 16×16 SVG with nothing executable in it — shoutEmoteSniff() decides from the bytes, so the
+    // picture has to be real rather than a string that looks like one.
+    $svg = fn(string $tag) => '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+                            . $tag . '<rect width="16" height="16" fill="#4a9eff"/></svg>';
+    $db->exec("DELETE FROM shout_emotes WHERE code LIKE 'zzauto%'");
+    $cfgGate = array_merge($cfgOn, ['shout_emote_approval' => '1']);
+    $held = shoutEmoteStore($db, $cfgGate, 'zzautoheld', 'Zz auto held', $svg('<title>held</title>'), (int)$me['id'], false);
+    check('with the gate on, an ordinary member\'s upload still waits',
+          // `?? 'x'` cannot ask this question: the coalescing operator answers with the fallback for
+          // a key that exists and holds null, which is the exact state being asserted. Ask whether
+          // the key is there, then whether it is empty.
+          !empty($held['ok']) && ($held['pending'] ?? null) === true
+          && ($held['row']['enabled'] ?? null) === false
+          && array_key_exists('approved_at', $held['row'] ?? []) && $held['row']['approved_at'] === null,
+          json_encode($held));
+    $free = shoutEmoteStore($db, $cfgGate, 'zzautofree', 'Zz auto free', $svg('<title>free</title>'), $uid['shtauto'], false);
+    check('… while somebody holding shout.emote_auto goes straight into the room, stamped',
+          !empty($free['ok']) && ($free['pending'] ?? null) === false
+          && ($free['row']['enabled'] ?? null) === true && ($free['row']['approved_at'] ?? null) !== null,
+          json_encode($free));
+    // The stamp is the load-bearing half: a row with no date is a question nobody has answered, and
+    // without it this emote would queue up again the first time somebody switched it off.
+    check('… which is what the table itself says',
+          (int)$db->query("SELECT enabled FROM shout_emotes WHERE code = 'zzautofree'")->fetchColumn() === 1
+          && $db->query("SELECT approved_at FROM shout_emotes WHERE code = 'zzautofree'")->fetchColumn() !== null);
+    check('with the gate off the permission changes nothing — everything goes in either way',
+          (shoutEmoteStore($db, array_merge($cfgOn, ['shout_emote_approval' => '0']), 'zzautooff', 'Zz auto off',
+                           $svg('<title>off</title>'), (int)$me['id'], false)['pending'] ?? null) === false);
+    check('… and the panel\'s own upload never waits, with the gate on or off',
+          (shoutEmoteStore($db, $cfgGate, 'zzautopanel', 'Zz auto panel', $svg('<title>panel</title>'), null, false)['pending'] ?? null) === false);
+
+    // ── 1.61.0: the shape the `@` suggestions are matched with ───────────────
+    // The endpoint's own query, run against this run's accounts: a PREFIX matches and the middle of
+    // a name does not, which is the difference between an index range and a scan of `users`.
+    $mq = $db->prepare("SELECT u.username FROM users u WHERE u.status = 'active' AND u.username LIKE ?
+                         ORDER BY u.username ASC LIMIT 8");
+    $mq->execute(['sht%']);
+    $mNames = $mq->fetchAll(PDO::FETCH_COLUMN);
+    check('a prefix finds the accounts that start with it', count($mNames) >= 5 && in_array('shtuser', $mNames, true),
+          json_encode($mNames));
+    $mq->execute(['htuse%']);
+    check('… and the middle of a name is not a prefix', $mq->fetchAll(PDO::FETCH_COLUMN) === []);
+    $mq->execute(['%']);
+    check('… and eight is the ceiling however much matches', count($mq->fetchAll(PDO::FETCH_COLUMN)) <= 8);
 
     // ── retention ────────────────────────────────────────────────────────────
     // A room of exactly known size, so both halves can be measured rather than estimated.
@@ -525,6 +650,93 @@ check('Shoutbox and Sounds are chips of their own',
 check('… and the two sections moved into them, keeping the ids every bookmark uses',
       str_contains($tpl, 'id="section-shout" data-group="shoutbox"')
       && str_contains($tpl, 'id="section-sounds" data-group="sounds"'));
+
+// ── 1.61.0, by reading the wiring ────────────────────────────────────────────
+$idx = (string)file_get_contents($root . '/index.php');
+check('the map the router uses is the one the validator reads',
+      str_contains($idx, 'siteRoutes()') && !str_contains($idx, "'home'         => 'templates/pages/home.php'"));
+check('index.php teaches the router the chosen name and then folds it back to the canonical action',
+      str_contains($idx, 'shoutPageAction($cfg)') && str_contains($idx, '$routes[$shoutAlias]')
+      && str_contains($idx, "\$action = 'shoutbox'"));
+check('the new setting is saveable, and coerced against the router\'s map rather than a list',
+      str_contains($save, "'shout_page_action'") && str_contains($save, 'siteRoutes()'));
+$missingNew = [];
+foreach (['shout_page_action'] as $k) {
+    if (!isset($kw[$k]) || !str_contains($tpl, 'name="' . $k . '"')) $missingNew[] = $k;
+}
+check('… and is on the Settings page and in the search catalogue', $missingNew === [], implode(', ', $missingNew));
+
+check('the mention endpoint is routed', str_contains($api, "'shout_mentions'"));
+$men = (string)file_get_contents($root . '/api/shout_mentions.php');
+check('it answers only a signed-in reader who may WRITE here',
+      str_contains($men, "userCan(\$db, \$cfg, 'shout.post')") && str_contains($men, "'login_required'"));
+check('… matches a PREFIX, never a leading wildcard, so the index stays usable',
+      str_contains($men, 'u.username LIKE ?') && str_contains($men, "\$q) . '%'")
+      && !str_contains($men, "'%' . ") && !str_contains($men, "'%' ."));
+check('… hands back eight names at most, and nothing but names',
+      str_contains($men, 'LIMIT 8') && str_contains($men, 'SELECT u.username FROM users u')
+      && !str_contains($men, 'u.created_at'));
+check('… is rate limited, and lets go of the session before it reads',
+      str_contains($men, "rateLimitAllow('shoutmention'") && str_contains($men, 'session_write_close()')
+      && strpos($men, 'session_write_close()') < strpos($men, '$db->prepare'));
+check('… refuses a one-character box outright rather than answering with the first eight accounts',
+      str_contains($men, 'mb_strlen($q) < 2'));
+check('… and leaves out banned accounts and profiles hidden from the reader',
+      str_contains($men, "u.status = 'active'") && str_contains($men, 'hide_profile'));
+
+$sndJs = (string)file_get_contents($root . '/assets/js/sounds.js');
+check('the player listens for the event the box has always dispatched',
+      str_contains($sndJs, "'shout:new'") && str_contains($sndJs, 'function shoutKind')
+      && str_contains($boxJs, "new CustomEvent('shout:new'"));
+check('… one sound per batch, strongest kind first, never for my own line or the site\'s',
+      str_contains($sndJs, "return 'mention'") && str_contains($sndJs, 'r.own || r.system'));
+check('… and a batch arriving down both roads is heard once',
+      str_contains($sndJs, 'quietUntil') && str_contains($sndJs, 'SHOUT_KEYS[key]'));
+check('the rows carry what the player needs, decided by the server',
+      str_contains((string)file_get_contents($root . '/includes/shout.php'), "'friend'      => !\$system"));
+
+$css = (string)file_get_contents($root . '/assets/css/style.css');
+check('every shout row has the gutter a mention\'s bar needs, so nothing shifts when a line is one',
+      str_contains($css, 'padding: 0.34rem 1.3rem 0.34rem 0.6rem'));
+check('the Add-one box is no longer pinned to a narrow column', !str_contains($css, 'max-width: 44rem'));
+check('the drop zones\' "choose" word keeps its colour and loses its underline',
+      str_contains((string)file_get_contents($root . '/assets/css/admin.css'), '.ipl-drop-main u { text-decoration: none;')
+      && str_contains($css, '.emote-drop-main u { text-decoration: none;'));
+check('the Purge button is no longer the small one beside a full-height box',
+      str_contains($tpl, '<button type="button" class="btn btn-outline-danger w-100" id="shout-purge-run"'));
+check('the format select is less cramped', str_contains($css, 'padding: 0.15rem 0.35rem'));
+
+check('the refresh button is the icon font\'s glyph with no box around it',
+      str_contains($widget, 'bi bi-arrow-clockwise') && !str_contains($widget, '<svg viewBox="0 0 24 24"'));
+check('… and answers in a tooltip on itself rather than a line under the box',
+      str_contains($boxJs, "tip(refreshBtn, t('js.shout.nothing_new')")
+      && str_contains($appJs, 'window.pubTip = pubTip'));
+$tabsAt  = strpos($widget, '<div class="rt-tabs">');
+$countAt = $tabsAt === false ? false : strpos($widget, 'id="shout-count"', $tabsAt);
+$wrapAt  = $tabsAt === false ? false : strpos($widget, 'class="shout-input-wrap"', $tabsAt);
+check('the character count rides on the tabs row rather than under the box',
+      $tabsAt !== false && $countAt !== false && $wrapAt !== false && $countAt < $wrapAt);
+check('Send and the picker handle are inside the field',
+      str_contains($widget, 'class="shout-in-acts"') && str_contains($widget, 'id="shout-send"')
+      && str_contains($widget, 'id="shout-emoji"')
+      && str_contains($boxJs, 'function fitComposer'));
+$actsAt = strpos($widget, '<div class="shout-acts">');
+$actsBlock = $actsAt === false ? '' : substr($widget, $actsAt, 1200);
+check('… so nothing that can be pressed is left loose under the box',
+      $actsAt !== false && !str_contains($actsBlock, 'shout-send') && !str_contains($actsBlock, 'shout-emoji')
+      && str_contains($actsBlock, 'rt-syntax-fold'));
+check('the fold carries the sentence that used to have a line of its own',
+      str_contains($widget, "_h('shout.syntax_help')") && !str_contains($widget, '<p class="shout-hint'));
+
+$emTpl = (string)file_get_contents($root . '/templates/pages/emotes.php');
+check('the Emotes page sends people wherever the box really is',
+      str_contains($emTpl, 'shoutNavUrl($cfg, $baseUrl)'));
+check('… and no template builds that address out of the literal any more',
+      !str_contains($emTpl, '?action=shoutbox"') && !str_contains($widget, '?action=shoutbox"'));
+check('… nor tells somebody holding shout.emote_auto that they will be waiting',
+      str_contains($emTpl, 'shout.emote_auto') && str_contains($emTpl, '$emApproval && !$emAuto'));
+check('the permission matrix in Settings lists the new id too',
+      str_contains($adminJs, "'shout.emote_auto'"));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

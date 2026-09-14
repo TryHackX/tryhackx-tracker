@@ -273,6 +273,10 @@ $apiRoutes = [
     'shout_post'                 => 'api/shout_post.php',
     'shout_delete'               => 'api/shout_delete.php',
     'shout_seen'                 => 'api/shout_seen.php',
+    // Who the composer's `@` is offering (1.61.0): a PREFIX match over `users`, at most eight names
+    // and nothing but names, behind a rate limit of its own. It lets go of the session before the
+    // read like `shout_list` does — somebody typing is making one of these every few keystrokes.
+    'shout_mentions'             => 'api/shout_mentions.php',
     // Pinning is a moderator's act through the public endpoint, like taking a line down: it is not
     // an `admin/` road, because the person doing it need never see the panel.
     'shout_pin'                  => 'api/shout_pin.php',

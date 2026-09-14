@@ -12,6 +12,16 @@ $timelineNeeded = ($action === 'stats' && ($cfg['tracker_stats_enabled'] ?? '0')
     && userCan($db, $cfg, 'stats.timeline'));
 // the logged-in user (null when the account system is off or nobody is signed in) — nav + pages use it
 $navUser = usersEnabled($cfg) ? currentUser($db) : null;
+// Bootstrap Icons, the CDN stylesheet. The two data pages have always asked for it; from 1.61.0 the
+// shoutbox does too — the refresh button in the widget's head is `bi bi-arrow-clockwise`, and the
+// drop zone on ?action=emotes has carried `bi bi-file-earmark-image` since 1.59.0 with no font on
+// the page to draw it, which is why that icon has been an empty box all along. The widget is drawn
+// on the FRONT PAGE as well as at its own address, so `home` counts whenever the room is really
+// drawn there for this reader — the same three questions includes/homeblocks.php asks, so a page
+// that has no box never pays for the font.
+$iconsNeeded = in_array($action, ['transparency', 'stats', 'shoutbox', 'emotes'], true)
+    || ($action === 'home' && function_exists('shoutEnabled') && shoutEnabled($cfg)
+        && shoutPlacement($cfg) !== 'page' && shoutMayView($db, $cfg));
 ?>
 <!DOCTYPE html>
 <html lang="<?= sanitize(langCurrent()) ?>">
@@ -32,7 +42,7 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
     <!-- shared with the admin whitelist / index pages so the three "everything about one hash"
          panels look like each other (assets/css/detail-panel.css) -->
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/detail-panel.css<?= assetVer('assets/css/detail-panel.css') ?>">
-    <?php if ($action === 'transparency' || $action === 'stats'): ?>
+    <?php if ($iconsNeeded): ?>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <?php endif; ?>
     <?php if ($timelineNeeded): ?>

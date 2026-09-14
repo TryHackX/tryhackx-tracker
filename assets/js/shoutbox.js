@@ -121,6 +121,18 @@
     }
 
     /**
+     * The site's own little tooltip, where the page has it.
+     *
+     * assets/js/app.js exports pubTip() and is loaded before this file on every public page, so the
+     * fallback is for the one case that is left: a page carrying the shoutbox and not app.js. It
+     * hands the sentence to the caller's own status line rather than inventing a second tooltip.
+     */
+    function tip(target, text, fallback) {
+        if (typeof window.pubTip === 'function') { window.pubTip(target, text); return; }
+        if (typeof fallback === 'function') fallback(text);
+    }
+
+    /**
      * "Are you sure?", asked in the place the button was.
      *
      * The same shape for a shout and for an uploaded emote — a question with a yes and a no, in the
@@ -562,9 +574,11 @@
             note('');
             var n = 0;
             try { n = await fetchNew(true); } finally { refreshBtn.classList.remove('is-spinning'); }
-            // The same line that answers "older" when there is nothing above: one status line, one
-            // place to look, whichever of the two buttons was pressed.
-            if (!n) note(t('js.shout.nothing_new'));
+            // ON THE BUTTON, not on a line under the box (1.61.0). "Nothing new" is an answer to the
+            // press — true for about a second and then merely a sentence sitting under the composer
+            // reading like a state the room is in. pubTip() is the tooltip the rest of the site
+            // already uses (assets/js/app.js) and it takes itself away after a moment.
+            if (!n) tip(refreshBtn, t('js.shout.nothing_new'), note);
             clearTimeout(refreshCool);
             refreshCool = setTimeout(function () { refreshBtn.disabled = false; }, 2000);
         }
@@ -613,6 +627,26 @@
                 note(errText(r, maxChars));
                 return false;
             });
+        }
+
+        /**
+         * Keep the field's right padding equal to what the two controls on it actually occupy.
+         *
+         * MEASURED, not guessed. The pair is the picker handle and Send, and Send is a word: "Send"
+         * and "Wyślij" are different widths, an operator's language pack could be wider than either,
+         * and a phone's font metrics are not a desktop's. A number written into the stylesheet is
+         * right in one language on one machine and wrong everywhere else — and being wrong here
+         * means somebody's sentence disappearing underneath a button as they type it.
+         *
+         * The stylesheet still carries a sensible fallback for the frames before this runs.
+         */
+        function fitComposer() {
+            if (!ta) return;
+            var acts = box.querySelector('.shout-in-acts');
+            if (!acts) return;
+            var w = acts.getBoundingClientRect().width;
+            // 0 while the box is in a hidden ancestor (the account page's tabs); leave the fallback.
+            if (w > 0) ta.style.paddingRight = Math.ceil(w + 14) + 'px';
         }
 
         function countUpdate() {
@@ -688,6 +722,139 @@
             note('');
         }
 
+        /* ─────────────────────────── `@` suggests names ───────────────────────────
+         *
+         * Typing `@ab` offers the accounts whose names start that way. The guards are the feature
+         * rather than a refinement of it: `users` is the one table on a tracker that grows without
+         * anybody deciding it should, and a suggestion box is a thing that fires on every keystroke.
+         *
+         *   · nothing at all before two characters — "@a" is not somebody looking for a name
+         *   · 250 ms of quiet before a request goes, so a word typed straight through costs one
+         *   · ONE flight at a time
+         *   · at most eight names, which is what the endpoint returns and what this shows
+         *   · every prefix already asked about is kept for the life of the page, so backspacing
+         *     through a name re-asks nothing — including the empty answers, because "nobody is
+         *     called that" is an answer
+         *   · an answer that arrives after the caret has left the token is filed and shown to nobody
+         *
+         * api/shout_mentions.php enforces the floor and the limit again at its end. A guard that
+         * lives only in a browser is not a guard.
+         */
+        var MENTION_MIN = 2;
+        var MENTION_WAIT = 250;
+        var mentionPop = null, mentionNames = [], mentionAt = -1, mentionQ = '', mentionSel = 0;
+        var mentionTimer = 0, mentionFlight = false;
+        var mentionCache = {};
+
+        /**
+         * The token the caret is sitting in, or null.
+         *
+         * The same shape includes/shout.php calls a mention (shoutMentionTokens): an `@` not preceded
+         * by a word character — so `bob@example` is not one here either — and the name characters
+         * after it up to the caret. A selection is not a caret, so it offers nothing.
+         */
+        function mentionToken() {
+            if (!ta || typeof ta.selectionStart !== 'number' || ta.selectionStart !== ta.selectionEnd) return null;
+            var m = /(?:^|[^\w@])@([A-Za-z0-9_.-]{0,32})$/.exec(ta.value.slice(0, ta.selectionStart));
+            return m ? { q: m[1], at: ta.selectionStart - m[1].length } : null;
+        }
+
+        function mentionClose() {
+            clearTimeout(mentionTimer);
+            if (mentionPop) { mentionPop.remove(); mentionPop = null; }
+            mentionNames = [];
+            mentionAt = -1;
+        }
+
+        function mentionMark() {
+            if (!mentionPop) return;
+            Array.prototype.forEach.call(mentionPop.children, function (b, i) {
+                var on = i === mentionSel;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+        }
+
+        /** The chosen name replaces the token, and the list closes. */
+        function mentionPick(name) {
+            if (!ta || mentionAt < 0) return;
+            var at = mentionAt, len = mentionQ.length;
+            var before = ta.value.slice(0, at), after = ta.value.slice(at + len);
+            // The space a name needs after it, and only when there is not one already.
+            var add = String(name) + (/^\s/.test(after) ? '' : ' ');
+            mentionClose();
+            if (before.length + add.length + after.length > maxChars) return;
+            ta.value = before + add + after;
+            var pos = at + add.length;
+            try { ta.setSelectionRange(pos, pos); } catch (err) { /* a box that will not be told */ }
+            ta.focus();
+            // The counter and the preview hang off `input`, and the caret is past a space now, so
+            // this is also what closes the list for good rather than a second call to do it.
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        function mentionShow(names, tok) {
+            if (mentionPop) { mentionPop.remove(); mentionPop = null; }
+            mentionNames = names || [];
+            if (!mentionNames.length) { mentionAt = -1; return; }
+            mentionAt = tok.at;
+            mentionQ = tok.q;
+            if (mentionSel >= mentionNames.length) mentionSel = 0;
+            mentionPop = el('div', { className: 'shout-mention-pop', id: 'shout-mention-pop',
+                                     role: 'listbox', 'aria-label': t('js.shout.mention_list') });
+            mentionNames.forEach(function (n) {
+                var b = el('button', { type: 'button', className: 'shout-mention-item', role: 'option', text: n });
+                // mousedown rather than click: the textarea losing focus is what closes this list,
+                // and a click would arrive after the thing it was aimed at had already gone.
+                b.addEventListener('mousedown', function (ev) { ev.preventDefault(); mentionPick(n); });
+                mentionPop.appendChild(b);
+            });
+            (ta.closest('.shout-input-wrap') || ta.parentNode).appendChild(mentionPop);
+            mentionMark();
+        }
+
+        async function mentionFetch(tok) {
+            var key = tok.q.toLowerCase();
+            if (Object.prototype.hasOwnProperty.call(mentionCache, key)) { mentionShow(mentionCache[key], tok); return; }
+            if (mentionFlight) return;
+            mentionFlight = true;
+            var j = null;
+            try { j = await get('shout_mentions&q=' + encodeURIComponent(tok.q)); } finally { mentionFlight = false; }
+            var names = (j && j.success && Array.isArray(j.names)) ? j.names.slice(0, 8) : [];
+            mentionCache[key] = names;
+            var now = mentionToken();
+            if (!now || now.q !== tok.q || now.at !== tok.at) return;   // the caret moved on
+            mentionShow(names, tok);
+        }
+
+        function mentionInput() {
+            clearTimeout(mentionTimer);
+            var tok = mentionToken();
+            if (!tok || tok.q.length < MENTION_MIN) { mentionClose(); return; }
+            mentionSel = 0;
+            mentionTimer = setTimeout(function () { mentionFetch(tok); }, MENTION_WAIT);
+        }
+
+        /** The keys the list owns while it is open. Returns true when it has dealt with one. */
+        function mentionKey(e) {
+            if (!mentionPop || !mentionNames.length) return false;
+            if (e.key === 'Escape') { e.preventDefault(); mentionClose(); return true; }
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                mentionSel = (mentionSel + (e.key === 'ArrowDown' ? 1 : mentionNames.length - 1)) % mentionNames.length;
+                mentionMark();
+                return true;
+            }
+            // Enter picks a name here instead of sending: somebody halfway through writing somebody
+            // else's name has not finished their sentence.
+            if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing) {
+                e.preventDefault();
+                mentionPick(mentionNames[mentionSel]);
+                return true;
+            }
+            return false;
+        }
+
         /* ─────────────────────────── wiring ─────────────────────────── */
 
         // Delegated, so a row drawn by the server and a row drawn above by this script behave the same.
@@ -714,7 +881,13 @@
         if (sendBtn) sendBtn.addEventListener('click', send);
         if (ta) {
             ta.addEventListener('input', countUpdate);
+            ta.addEventListener('input', mentionInput);
+            // A click elsewhere takes the focus and the list with it. Deferred, because the pick
+            // itself runs on mousedown and would otherwise be cancelled by its own blur.
+            ta.addEventListener('blur', function () { setTimeout(mentionClose, 150); });
             ta.addEventListener('keydown', function (e) {
+                // While the `@` list is open it owns the arrows, Enter, Tab and Escape.
+                if (mentionKey(e)) return;
                 // Enter sends, Shift+Enter starts a line. A shoutbox is a conversation, and reaching for
                 // a button after every sentence is what makes one feel like a form.
                 if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.isComposing) return;
@@ -722,6 +895,12 @@
                 send();
             });
             countUpdate();
+            fitComposer();
+            // The width of "Send" changes with the language, and the language can change without a
+            // reload (assets/js/lang-swap.js dispatches `langswap` on the document once it has
+            // rewritten the page); the width of the box changes with the window.
+            window.addEventListener('resize', fitComposer);
+            document.addEventListener('langswap', fitComposer);
             // The write/preview tabs, the syntax help and the counter under them, from the editor the
             // rest of the site writes in. Never in 'plain': there is no syntax to preview.
             if (format !== 'plain' && window.RichText && typeof window.RichText.mount === 'function') {
@@ -731,9 +910,10 @@
         if (emojiBtn && ta) {
             mountPicker({
                 button: emojiBtn,
-                // The row the button is in, not the whole composer: anchored to the composer the
-                // panel opened from the TOP of it and covered the heading above the box.
-                host: emojiBtn.closest('.shout-acts') || emojiBtn.closest('.shout-compose') || box,
+                // The box the button now sits in (1.61.0), not the whole composer: anchored to the
+                // composer the panel opened from the TOP of it and covered the heading above the box.
+                host: emojiBtn.closest('.shout-input-wrap') || emojiBtn.closest('.shout-acts')
+                      || emojiBtn.closest('.shout-compose') || box,
                 insert: insert,
                 sticker: sendSticker,
                 emotes: box.dataset.emotes === '1',
@@ -747,7 +927,13 @@
         // One tick on demand, for the browser checks and for anything that wants to catch up now.
         window.ShoutTick = poll;
         window.Shout = { tick: poll, refresh: refresh, older: older, pin: pin,
-                         newest: function () { return newest; }, insert: insert };
+                         newest: function () { return newest; }, insert: insert, fit: fitComposer,
+                         // The `@` list, for the browser check: whether it is open, what is in it,
+                         // and the two steps that would otherwise need a real keyboard.
+                         mention: { token: mentionToken, fetch: mentionFetch, pick: mentionPick,
+                                    close: mentionClose, names: function () { return mentionNames.slice(); },
+                                    open: function () { return !!mentionPop; },
+                                    asked: function () { return Object.keys(mentionCache); } } };
     }
 
     /* ─────────────────────────── ?action=emotes ─────────────────────────── */

@@ -343,6 +343,12 @@ $ADMIN_ONLY = [
     // from Settings → Shoutbox. An operator who wants members to add their own ticks the box in
     // Users → Groups, which is the whole reason the id exists.
     'shout.upload_emote' => 'granted to nobody on purpose: the owner uploads from Settings, the operator may hand it out',
+    //
+    // And skipping the queue is a second decision on top of that one (1.61.0). `shout_emote_approval`
+    // ships ON, so a member's picture waits for a moderator; an id that walks past that is worth
+    // exactly as much as the queue it bypasses, and seeding it to anybody would quietly hand the
+    // room back to whoever uploads fastest. The operator grants it to people they already trust.
+    'shout.emote_auto' => 'granted to nobody on purpose: it walks past the approval queue, which is the point of the queue',
 ];
 foreach ($PANEL_ONLY as $pp) $ADMIN_ONLY[$pp] = 'panel permission: granted by the operator, never seeded';
 

@@ -1951,6 +1951,10 @@ const getJson = async (endpoint) => {
         requestAnimationFrame(() => tip.classList.add('show'));
         setTimeout(() => { tip.classList.remove('show'); setTimeout(() => tip.remove(), 250); }, 1800);
     }
+    // Exported in 1.61.0: the shoutbox's refresh button says "Nothing new" in exactly this shape,
+    // and a tooltip written a second time in assets/js/shoutbox.js would be a second set of timings,
+    // a second class name and a second thing to notice when this one changes.
+    window.pubTip = pubTip;
     /** Accelerating "held backspace" clear (same effect as the admin toolbars). */
     function animatedClearPub(input, done) {
         if (!input) { if (done) done(); return; }

@@ -51,6 +51,10 @@ $emStickersOn = function_exists('shoutStickersEnabled')
 // not quietly turn somebody's unanswered upload into an ordinary switched-off one.
 $emApproval = function_exists('shoutEmoteApproval')
     ? shoutEmoteApproval($cfg) : ((string)($cfg['shout_emote_approval'] ?? '1') === '1');
+// …and whether THIS reader is one of the few the gate does not apply to (1.61.0). The sentence under
+// the upload box says "what you add waits for a moderator", and saying that to somebody holding
+// `shout.emote_auto` would be telling them the opposite of what is about to happen.
+$emAuto = userCan($db, $cfg, 'shout.emote_auto');
 
 // The reader, and whether they are one of the few who may add to this.
 $emMe    = usersEnabled($cfg) ? currentUser($db) : null;
@@ -201,7 +205,8 @@ $emPer   = max(1, min(200, (int)($cfg['shout_emote_per_user'] ?? 20) ?: 20));
             <span class="emote-note" id="emote-note"></span>
         </div>
         <p class="form-hint emote-limits"><?= __('shout.emote_limits', ['kb' => $emMaxKb, 'px' => $emMaxPx, 'n' => $emPer]) ?><?php
-            if ($emApproval): ?> <?= _h('shout.emote_approval_note') ?><?php endif; ?></p>
+            if ($emApproval && !$emAuto): ?> <?= _h('shout.emote_approval_note') ?><?php
+            elseif ($emApproval): ?> <?= _h('shout.emote_approval_skip') ?><?php endif; ?></p>
     </div>
 
     <h2 class="section-heading-spaced"><?= _h('shout.emote_mine_head') ?> <span class="text-muted emote-count">(<?= count($emMine) ?>/<?= $emPer ?>)</span></h2>
@@ -233,5 +238,10 @@ $emPer   = max(1, min(200, (int)($cfg['shout_emote_per_user'] ?? 20) ?: 20));
     </div>
     <?php endif; ?>
 
-    <p class="emote-back"><a class="btn btn-secondary btn-small" href="<?= $baseUrl ?>?action=shoutbox"><?= _h('shout.open_page') ?></a></p>
+    <?php /* Through the helper, never the literal: with `shout_placement` on the home block there is
+             nothing at ?action=shoutbox, so this button — on the page a reader was sent to in order
+             to find the codes — used to land them on "there is no shoutbox here". shoutNavUrl() has
+             known where the box really is since 1.60.0, and from 1.61.0 it also knows what the
+             operator renamed the address to. */ ?>
+    <p class="emote-back"><a class="btn btn-secondary btn-small" href="<?= sanitize(shoutNavUrl($cfg, $baseUrl)) ?>"><?= _h('shout.open_page') ?></a></p>
 </div>
