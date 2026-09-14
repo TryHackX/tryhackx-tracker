@@ -43,6 +43,11 @@ $allowed = [
     'user_2fa_enabled', 'user_2fa_required',
     'pm_live_seconds', 'pm_typing_enabled', 'site_live_seconds',
     'sounds_enabled', 'sound_default_notification', 'sound_default_message_friend', 'sound_default_message',
+    'sound_default_shout_friend', 'sound_default_shout', 'sound_default_mention',
+    // the shoutbox (1.58.0, includes/shout.php)
+    'shout_enabled', 'shout_placement', 'shout_widget_rows', 'shout_page_rows', 'shout_max_chars',
+    'shout_flood_seconds', 'shout_live_seconds', 'shout_keep_rows', 'shout_keep_days',
+    'shout_format', 'shout_rules',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -321,6 +326,12 @@ $intClamp = [
     // pmLiveSeconds() is what raises anything between 1 and 2 to the two-second floor on read.
     'pm_live_seconds' => [0, 60, 0],
     'site_live_seconds' => [0, 300, 60],
+    // The shoutbox. 0 is a real answer for the two cadences — "do not poll", "no flood interval" —
+    // so the floor is 0 and shoutLiveSeconds() is what raises anything between 1 and 3 on read.
+    'shout_widget_rows' => [5, 100, 25], 'shout_page_rows' => [20, 500, 100],
+    'shout_max_chars' => [1, 2000, 500], 'shout_flood_seconds' => [0, 300, 5],
+    'shout_live_seconds' => [0, 120, 10],
+    'shout_keep_rows' => [100, 100000, 2000], 'shout_keep_days' => [1, 3650, 30],
     'digest_hours' => [1, 168, 24], 'digest_min' => [0, 10000, 1],
     'wl_edit_max_pending' => [0, 50, 3],
     'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],
@@ -385,8 +396,22 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled', 'ot_cluster_enabled',
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
-          'backup_enabled', 'backup_verify_after', 'sounds_enabled'] as $k) {
+          'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
+}
+// ── The shoutbox ──
+// Coerced rather than refused, like every other closed set on this page: an unknown value is a bug
+// in the form, and the answer to a bug in the form is the setting that cannot break a page.
+if (isset($data['shout_placement']) && !in_array($data['shout_placement'], ['home', 'page', 'both'], true)) {
+    $data['shout_placement'] = 'home';
+}
+if (isset($data['shout_format']) && !in_array($data['shout_format'], ['plain', 'bbcode', 'markdown'], true)) {
+    $data['shout_format'] = 'bbcode';
+}
+// House rules are a line of TEXT above the box — no markup is rendered from it, so it is only
+// bounded and stripped of control characters.
+if (isset($data['shout_rules'])) {
+    $data['shout_rules'] = mb_substr(trim(preg_replace('/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+/u', ' ', $data['shout_rules']) ?? ''), 0, 500);
 }
 // A site-default sound must be one the library has; anything else is "nothing" (includes/sounds.php).
 foreach (soundEventKinds() as $k) {

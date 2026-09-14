@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.58.0] — 2026-09-14
+
+Schema **63** — `shouts`, `shout_mentions`, `users.shout_seen_id`, the `shout.*` permissions (view,
+post, delete_own to the member group; moderate to the moderator group), eleven `shout_*` settings and
+three more sound defaults. **Off as shipped** (`shout_enabled = 0`).
+
+### Added — a shoutbox
+
+A line of talk on the front page (a block of the home layout, `{{block:shoutbox}}`) and/or its own
+page (`?action=shoutbox`; Settings → Shoutbox picks home, page or both). Members with `shout.view`
+read, `shout.post` write, `shout.delete_own` take their own line back; a moderator (`shout.moderate`)
+removes anyone's line — the row keeps who removed it and when for the retention period, and the audit
+log a line — and the owner purges from Settings (everything, or older than N days, behind the owner
+password). Guests read nothing unless the operator grants `shout.view` to their group. A silenced
+account (`pm_muted_until`) reads and cannot write, and is told until when.
+
+The widget is drawn by the server with the newest rows and a `data-newest` mark, then asks only for
+what is newer (`shout_list&after=…`, every `shout_live_seconds`, never from a hidden tab or an
+off-screen box, one flight at a time), appends without redrawing — a half-typed line survives — and
+scrolls only when the reader was already at the bottom; "older" prepends without moving what is on
+screen. Enter sends, Shift+Enter breaks a line; the format is BBCode by default with Markdown a
+switch away (or plain text when the operator says so), through the same renderer, validator and
+preview every description and message uses. Flood (`shout_flood_seconds`) and length
+(`shout_max_chars`) are refused with a sentence, and the reply to a send carries the new row so it
+appears at once. `@name` in a shout links the profile and counts as a mention for that person.
+
+How many shouts are new to a reader is one column (`users.shout_seen_id`) and travels with the
+pulse — `unread_shout`, the friends' share and the mentions — so the sounds have three more events
+(a shout from a friend, a shout from anyone else, an @-mention), offered only while the shoutbox is
+on. Retention by count and by age (`shout_keep_rows`, `shout_keep_days`) runs in the janitor's
+minute tick, in batches by id.
+
+Emoji and stickers (an emoji picker, custom images uploaded in the panel) and the navigation
+counter are the next two releases, as the design document says.
+
+### Tests
+
+`tests/shout_test.php`, `tests/shout_test.py` and `scratchpad/shots/shout_check.js` (the widget
+in a real browser: a shout that arrives while the box holds a half-typed line, "older", Enter,
+delete with its question, a hidden tab that asks nothing).
+
 ## [1.57.1] — 2026-09-14
 
 No schema change (one new optional setting, `sound_default_message_friend`, read with a fallback).

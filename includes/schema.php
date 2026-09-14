@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 62;  // 62 = index_hashes.idx_index_meta_done_fetched (a heavy index, built by the janitor's CLI run) for the bounded protection backfill; the owner's mirror row takes the panel's current password hash (once), csp_report_enabled ships off, the old pm-notification delete runs once instead of at every bump
+const TRACKER_SCHEMA_VERSION = 63;  // 63 = the shoutbox (includes/shout.php): `shouts` + `shout_mentions` + users.shout_seen_id, the shout_* settings, and shout.view/post/delete_own to the member group (shout.moderate to the moderator one)
+                                    // 62 = index_hashes.idx_index_meta_done_fetched (a heavy index, built by the janitor's CLI run) for the bounded protection backfill; the owner's mirror row takes the panel's current password hash (once), csp_report_enabled ships off, the old pm-notification delete runs once instead of at every bump
                                     // 61 = sounds (the owner's uploads, as rows) + users.sound_prefs + sounds.use to the member group + sounds_enabled / sound_default_* settings
                                     // 60 = a setting only: site_live_seconds, so an upgraded install gets the row and its default
                                     // 59 = message_reports.reply — what the moderator answered the reporter, kept beside the log note
@@ -505,6 +506,10 @@ function trackerSchemaStatements(): array {
             `banned_until` DATETIME DEFAULT NULL,
             -- v61: what this reader chose to hear (includes/sounds.php): a JSON blob, NULL = never asked = muted
             `sound_prefs` VARCHAR(600) DEFAULT NULL,
+            -- v63: how far this reader has read the shoutbox. One column instead of a table of read
+            -- marks: how many since this id is a walk down the primary key, and nothing has to be
+            -- pruned afterwards. 0 = has never looked, which is what every existing account gets.
+            `shout_seen_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
             -- v53. The instant every OTHER session of this account stopped counting: a unix time,
             -- stamped by 'sign out everywhere else' and by a password change. A UNIX TIMESTAMP and
             -- not a DATETIME on purpose — it is compared against the session login time, which
@@ -819,6 +824,40 @@ function trackerSchemaStatements(): array {
             `until` DATETIME NOT NULL,
             PRIMARY KEY (`thread_id`, `user_id`),
             KEY `idx_typing_until` (`until`)
+        ) $engine",
+
+        // ── The shoutbox (v63, includes/shout.php): one room, and nothing kept for long ─────────────
+        //
+        // No thread, no subject, no edit: a shout is a sentence. `deleted_at`/`deleted_by` are a SOFT
+        // delete, so a moderator's decision leaves a trace for as long as anything here lasts — which
+        // is not long, because retention (shout_keep_rows / shout_keep_days) removes rows for good.
+        // `ip_bucket` is the same bucket the rate limiter uses (IPv4 exact, IPv6 /64), kept only as
+        // long as the row is.
+        //
+        // The two indexes answer the only two questions asked: "what is newer/older than this id"
+        // walks the primary key, `idx_shouts_created` is what retention sweeps by, and
+        // `idx_shouts_user` is the flood check ("when did this account last speak").
+        "CREATE TABLE IF NOT EXISTS `shouts` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `body` VARCHAR(2000) NOT NULL,
+            `body_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+            `ip_bucket` VARCHAR(45) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `deleted_by` INT UNSIGNED DEFAULT NULL,
+            `deleted_at` DATETIME DEFAULT NULL,
+            KEY `idx_shouts_created` (`created_at`),
+            KEY `idx_shouts_user` (`user_id`)
+        ) $engine",
+
+        // Who a shout named, decided ONCE when it was written. Parsing every body on every read
+        // would mean a rename retro-mentions somebody, which is not what "did this line mean me"
+        // asks. The pair is the primary key, so saying a name twice in one line is one mention.
+        "CREATE TABLE IF NOT EXISTS `shout_mentions` (
+            `shout_id` BIGINT UNSIGNED NOT NULL,
+            `user_id` INT UNSIGNED NOT NULL,
+            PRIMARY KEY (`shout_id`, `user_id`),
+            KEY `idx_mention_user` (`user_id`, `shout_id`)
         ) $engine",
 
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
@@ -1207,6 +1246,9 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'users', 'banned_until')) $uparts[] = "ADD COLUMN `banned_until` DATETIME DEFAULT NULL";
     // v61: what this reader chose to hear — see the CREATE above.
     if (!schemaColumnExists($db, 'users', 'sound_prefs')) $uparts[] = "ADD COLUMN `sound_prefs` VARCHAR(600) DEFAULT NULL";
+    // v63: how far this reader has read the shoutbox — see the CREATE above. 0 for every existing
+    // account, which means "everything in the room is new" until they open it once.
+    if (!schemaColumnExists($db, 'users', 'shout_seen_id')) $uparts[] = "ADD COLUMN `shout_seen_id` BIGINT UNSIGNED NOT NULL DEFAULT 0";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
 
     // v56: a message no longer leaves a notification behind.
@@ -1374,6 +1416,27 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `until` DATETIME NOT NULL,
         PRIMARY KEY (`thread_id`, `user_id`),
         KEY `idx_typing_until` (`until`)
+    ) $engine";
+
+    // v63: the shoutbox. Same definitions as the CREATEs above — a split between the two lists is
+    // the bug that once stopped a fresh install at version 0 (see the note on `fav_public`).
+    $out[] = "CREATE TABLE IF NOT EXISTS `shouts` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `body` VARCHAR(2000) NOT NULL,
+        `body_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+        `ip_bucket` VARCHAR(45) DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `deleted_by` INT UNSIGNED DEFAULT NULL,
+        `deleted_at` DATETIME DEFAULT NULL,
+        KEY `idx_shouts_created` (`created_at`),
+        KEY `idx_shouts_user` (`user_id`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `shout_mentions` (
+        `shout_id` BIGINT UNSIGNED NOT NULL,
+        `user_id` INT UNSIGNED NOT NULL,
+        PRIMARY KEY (`shout_id`, `user_id`),
+        KEY `idx_mention_user` (`user_id`, `shout_id`)
     ) $engine";
 
     // v53: the second factor, and what a remember-me token was handed to. Same definitions as the
@@ -1825,6 +1888,15 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // has nowhere to keep them, and there is nothing to grant a guest.
     schemaGrantOnce($db, 'v61_sounds', [
         'member' => ['sounds.use'],
+    ]);
+
+    // v63: the shoutbox. GUEST GETS NOTHING — the operator's own answer to "does a visitor read the
+    // room": no, and `shout.view` is a grant they can hand out if they change their mind. The seeded
+    // moderator group gets the reading and writing ids as well as `shout.moderate`: a permission to
+    // delete somebody's line in a room you cannot see is not a permission, it is a dead checkbox.
+    schemaGrantOnce($db, 'v63_shout', [
+        'member'    => ['shout.view', 'shout.post', 'shout.delete_own'],
+        'moderator' => ['shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'],
     ]);
 
     // v62: the owner's mirror row follows the panel password. api/admin/change_password.php kept
@@ -2282,6 +2354,27 @@ function trackerSchemaDefaultSettings(): array {
         'sound_default_notification'  => '',
         'sound_default_message_friend' => '',
         'sound_default_message'       => '',
+        'sound_default_shout_friend'  => '',
+        'sound_default_shout'         => '',
+        'sound_default_mention'       => '',
+        // ── The shoutbox (v63, includes/shout.php) ─────────────────────────────────────────────
+        // OFF, like every new feature here. `shout_placement` decides where the box is drawn; the
+        // two row counts are how much history the widget and the page start with. `shout_format` is
+        // the DEFAULT markup — 'plain' means no formatting at all and no choice in the composer.
+        // Retention is both halves at once: two thousand lines or thirty days, whichever bites first.
+        'shout_enabled'               => '0',
+        'shout_placement'             => 'home',  // home | page | both
+        'shout_widget_rows'           => '25',    // clamped [5, 100]
+        'shout_page_rows'             => '100',   // clamped [20, 500]
+        'shout_max_chars'             => '500',   // clamped [1, 2000]
+        'shout_flood_seconds'         => '5',     // clamped [0, 300]
+        // 0 = do not poll at all; anything above is floored at three seconds on read, the same way
+        // pm_live_seconds is floored at two.
+        'shout_live_seconds'          => '10',    // clamped [0, 120], read as 0 or 3..120
+        'shout_keep_rows'             => '2000',  // clamped [100, 100000]
+        'shout_keep_days'             => '30',    // clamped [1, 3650]
+        'shout_format'                => 'bbcode', // plain | bbcode | markdown
+        'shout_rules'                 => '',      // an optional line of house rules above the box
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

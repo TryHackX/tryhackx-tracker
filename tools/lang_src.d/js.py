@@ -4583,3 +4583,27 @@ add('', {
     'js.sounds.drop_choose': ('Choose a file', 'Wybierz plik'),
     'js.sounds.drop_or': ('or drop it here', 'albo upuść go tutaj'),
 })
+
+# ── 1.58.0: the shoutbox ────────────────────────────────────────────────────
+add('js.shout', {
+    'send': ('Send', 'Wyślij'),
+    'older': ('Older', 'Starsze'),
+    'no_more': ('That is the whole shoutbox.', 'To już cały shoutbox.'),
+    'delete': ('Delete', 'Usuń'),
+    'delete_q': ('Delete this shout?', 'Usunąć ten wpis?'),
+    'yes': ('Yes', 'Tak'),
+    'no': ('No', 'Nie'),
+    'chars': (':n/:max', ':n/:max'),
+    'sent': ('Sent.', 'Wysłano.'),
+    'err_flood': ('Wait :seconds s before writing again.', 'Poczekaj :seconds s przed kolejnym wpisem.'),
+    'err_too_long': ('Too long — :limit characters at most.', 'Za długie — najwyżej :limit znaków.'),
+    'err_muted': ('You are muted until :until.', 'Masz wyciszenie do :until.'),
+    'err_empty': ('Write something first.', 'Najpierw coś napisz.'),
+    'err_invalid_body': ('That cannot be written like this.', 'Tego nie da się tak zapisać.'),
+    'err_disabled': ('The shoutbox has been switched off.', 'Shoutbox został wyłączony.'),
+    'err_no_permission': ('You may not write here.', 'Nie możesz tu pisać.'),
+    'err_login_required': ('Sign in first.', 'Najpierw się zaloguj.'),
+    'err_not_found': ('That shout is already gone.', 'Tego wpisu już nie ma.'),
+    'err_rate_limit': ('Too many requests — try again in a moment.', 'Za dużo żądań — spróbuj za chwilę.'),
+    'err_failed': ('Something went wrong.', 'Coś poszło nie tak.'),
+})

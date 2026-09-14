@@ -85,6 +85,12 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
     <?php if (soundsEnabled($cfg)): ?>
     <script src="<?= $baseUrl ?>assets/js/sounds.js<?= assetVer('assets/js/sounds.js') ?>"></script>
     <?php endif; ?>
+    <?php /* The shoutbox: the widget on the front page and the page of its own are one script, and
+             it begins by asking whether #shoutbox is on this page at all. function_exists() as well
+             as the setting, so the page still renders while the feature's own half is landing. */ ?>
+    <?php if (function_exists('shoutEnabled') && shoutEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/js/shoutbox.js<?= assetVer('assets/js/shoutbox.js') ?>"></script>
+    <?php endif; ?>
     <?php /* The account page's security block: the second factor and the signed-in devices. Only
              on that page — both halves are drawn nowhere else, and there is no reason for every
              visitor to carry them. */ ?>

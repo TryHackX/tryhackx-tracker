@@ -752,6 +752,98 @@
                 ?>
             </div>
 
+            <?php /* ── The shoutbox (1.58.0, includes/shout.php) ────────────────────────────────
+                     Everything the room needs, and one control that is not a setting: Purge, which
+                     deletes rows and therefore asks for the owner's password (assets/js/admin-shout.js
+                     → admin/shout_purge). Its day box has an id and no name, so it never travels with
+                     the form. */ ?>
+            <div class="settings-section" id="section-shout" data-group="content" data-title="<?= _h('settings.shout_title') ?>">
+                <h5><i class="bi bi-chat-left-dots"></i> <?= _h('settings.shout_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.shout_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="shout_enabled">
+                        <label class="form-label"><?= _h('settings.shout_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_enabled">
+                            <option value="0" <?= ($cfg['shout_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            <option value="1" <?= ($cfg['shout_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.shout_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_placement">
+                        <label class="form-label"><?= _h('settings.shout_placement') ?></label>
+                        <?php $shPlace = function_exists('shoutPlacement') ? shoutPlacement($cfg) : 'home'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_placement">
+                            <option value="home" <?= $shPlace === 'home' ? 'selected' : '' ?>><?= _h('settings.shout_placement_home') ?></option>
+                            <option value="page" <?= $shPlace === 'page' ? 'selected' : '' ?>><?= _h('settings.shout_placement_page') ?></option>
+                            <option value="both" <?= $shPlace === 'both' ? 'selected' : '' ?>><?= _h('settings.shout_placement_both') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.shout_placement_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_format">
+                        <label class="form-label"><?= _h('settings.shout_format') ?></label>
+                        <?php $shFmt = function_exists('shoutFormat') ? shoutFormat($cfg) : 'bbcode'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_format">
+                            <option value="plain" <?= $shFmt === 'plain' ? 'selected' : '' ?>><?= _h('settings.shout_format_plain') ?></option>
+                            <option value="bbcode" <?= $shFmt === 'bbcode' ? 'selected' : '' ?>><?= _h('settings.shout_format_bbcode') ?></option>
+                            <option value="markdown" <?= $shFmt === 'markdown' ? 'selected' : '' ?>><?= _h('settings.shout_format_markdown') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.shout_format_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_live_seconds">
+                        <label class="form-label"><?= _h('settings.shout_live_seconds') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_live_seconds" value="<?= sanitize($cfg['shout_live_seconds'] ?? '10') ?>" min="0" max="120">
+                        <small class="settings-hint"><?= __('settings.shout_live_seconds_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_widget_rows">
+                        <label class="form-label"><?= _h('settings.shout_widget_rows') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_widget_rows" value="<?= sanitize($cfg['shout_widget_rows'] ?? '25') ?>" min="5" max="100">
+                        <small class="settings-hint"><?= __('settings.shout_widget_rows_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_page_rows">
+                        <label class="form-label"><?= _h('settings.shout_page_rows') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_page_rows" value="<?= sanitize($cfg['shout_page_rows'] ?? '100') ?>" min="20" max="500">
+                        <small class="settings-hint"><?= __('settings.shout_page_rows_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_max_chars">
+                        <label class="form-label"><?= _h('settings.shout_max_chars') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_max_chars" value="<?= sanitize($cfg['shout_max_chars'] ?? '500') ?>" min="1" max="2000">
+                        <small class="settings-hint"><?= __('settings.shout_max_chars_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_flood_seconds">
+                        <label class="form-label"><?= _h('settings.shout_flood_seconds') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_flood_seconds" value="<?= sanitize($cfg['shout_flood_seconds'] ?? '5') ?>" min="0" max="300">
+                        <small class="settings-hint"><?= __('settings.shout_flood_seconds_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_keep_rows">
+                        <label class="form-label"><?= _h('settings.shout_keep_rows') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_keep_rows" value="<?= sanitize($cfg['shout_keep_rows'] ?? '2000') ?>" min="100" max="100000">
+                        <small class="settings-hint"><?= __('settings.shout_keep_rows_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_keep_days">
+                        <label class="form-label"><?= _h('settings.shout_keep_days') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_keep_days" value="<?= sanitize($cfg['shout_keep_days'] ?? '30') ?>" min="1" max="3650">
+                        <small class="settings-hint"><?= __('settings.shout_keep_days_hint') ?></small>
+                    </div>
+                    <div class="col-md-6" data-setting="shout_rules">
+                        <label class="form-label"><?= _h('settings.shout_rules') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="shout_rules" value="<?= sanitize($cfg['shout_rules'] ?? '') ?>" maxlength="500" placeholder="<?= _h('settings.shout_rules_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.shout_rules_hint') ?></small>
+                    </div>
+                </div>
+                <div class="mt-3" id="admin-shout">
+                    <label class="form-label"><?= _h('settings.shout_purge') ?></label>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <input type="number" class="form-control bg-dark text-light border-secondary" id="shout-purge-days" min="0" max="3650" placeholder="<?= _h('settings.shout_purge_days_ph') ?>">
+                        </div>
+                        <div class="col-md-3">
+                            <button type="button" class="btn btn-sm btn-outline-danger w-100" id="shout-purge-run"><i class="bi bi-trash"></i> <?= _h('settings.shout_purge_run') ?></button>
+                        </div>
+                    </div>
+                    <small class="settings-hint"><?= __('settings.shout_purge_hint') ?></small>
+                </div>
+            </div>
+
             <div class="settings-section" id="section-schedule" data-group="tracker" data-title="<?= _h('settings.schedule_title') ?>">
                 <h5><?= _h('settings.schedule_title') ?></h5>
                 <p class="settings-hint mb-2"><?= _h('settings.schedule_subtitle') ?></p>
@@ -1025,6 +1117,48 @@
                         </div>
                         <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
                     </div>
+                    <?php /* The shoutbox's three: offered only while the shoutbox is on, like the events themselves. */ ?>
+                    <?php if (function_exists('shoutEnabled') && shoutEnabled($cfg)): ?>
+                    <div class="col-md-3" data-setting="sound_default_shout_friend">
+                        <label class="form-label" for="setting-sound_default_shout_friend"><?= _h('settings.sounds_default_shout_friend') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_shout_friend" id="setting-sound_default_shout_friend">
+                                <option value="" <?= (string)($cfg['sound_default_shout_friend'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
+                                <?php foreach ($sndLib as $sndE): ?>
+                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_shout_friend'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_shout_friend" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_shout">
+                        <label class="form-label" for="setting-sound_default_shout"><?= _h('settings.sounds_default_shout') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_shout" id="setting-sound_default_shout">
+                                <option value="" <?= (string)($cfg['sound_default_shout'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
+                                <?php foreach ($sndLib as $sndE): ?>
+                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_shout'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_shout" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_mention">
+                        <label class="form-label" for="setting-sound_default_mention"><?= _h('settings.sounds_default_mention') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_mention" id="setting-sound_default_mention">
+                                <option value="" <?= (string)($cfg['sound_default_mention'] ?? '') === '' ? 'selected' : '' ?>><?= _h('settings.sounds_none') ?></option>
+                                <?php foreach ($sndLib as $sndE): ?>
+                                <option value="<?= sanitize($sndE['id']) ?>" <?= (string)($cfg['sound_default_mention'] ?? '') === $sndE['id'] ? 'selected' : '' ?>><?= sanitize($sndE['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_mention" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <?php endif; ?>
                 </div>
                 <?php /* The uploads: drawn and driven by assets/js/admin-sounds.js. The file input has no name on
                          purpose — it is not a setting and never travels with the form; the script reads the file
@@ -3493,6 +3627,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-twofa.js<?= assetVer('assets/js/admin-twofa.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-sounds.js<?= assetVer('assets/js/admin-sounds.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-shout.js<?= assetVer('assets/js/admin-shout.js') ?>"></script>
     <!-- AFTER admin-common.js, which on this page is loaded below admin-settings.js: the editor
          needs window.AdminCommon and returned early without it, so the dialog never opened. -->
     <script src="<?= $baseUrl ?>assets/js/admin-languages.js<?= assetVer('assets/js/admin-languages.js') ?>"></script>

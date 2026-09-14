@@ -36,6 +36,7 @@ require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/favourites.php';
 require_once __DIR__ . '/includes/sounds.php';
+require_once __DIR__ . '/includes/shout.php';
 require_once __DIR__ . '/includes/lists.php';
 require_once __DIR__ . '/includes/people.php';
 require_once __DIR__ . '/includes/user2fa.php';
@@ -83,6 +84,7 @@ if (PHP_SAPI !== 'cli') {
 }
 
 $cfg = getSettings($db);
+$GLOBALS['cfg'] = $cfg;   // for the helpers that have no $cfg of their own (soundEventKinds, userRememberIssue): the janitor does the same
 ensureSchema($db, $cfg);
 
 // THE SESSION STARTS HERE, and nothing above it may read $_SESSION (the CSRF check is at the
@@ -111,7 +113,7 @@ langInit($cfg, $langUser['language'] ?? null);
 // the stats poller and the admin tracker-service status poll are both hit repeatedly and have
 // nothing to do with the report/appeal janitors, so running them there is pure overhead. They
 // still run everywhere else. S2S calls never run them either.
-if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'sound', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status'], true)) {
+if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'sound', 'shout_list', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status'], true)) {
     autoArchiveOldReports($db, $cfg);
     autoArchiveOldAppeals($db, $cfg);
     pruneOldSentEmails($db, $cfg);
@@ -265,6 +267,13 @@ $apiRoutes = [
     'sounds'                     => 'api/sounds.php',
     'sound'                      => 'api/sound.php',
     'user_sound_prefs'           => 'api/user_sound_prefs.php',
+    // The shoutbox (1.58.0, includes/shout.php). `shout_list` is the polled one and lets go of the
+    // session before it reads; `admin/shout_purge` is owner-only (absent from adminEndpointPermission).
+    'shout_list'                 => 'api/shout_list.php',
+    'shout_post'                 => 'api/shout_post.php',
+    'shout_delete'               => 'api/shout_delete.php',
+    'shout_seen'                 => 'api/shout_seen.php',
+    'admin/shout_purge'          => 'api/admin/shout_purge.php',
     'richtext_preview'           => 'api/richtext_preview.php',
     'rate_hash'                  => 'api/rate_hash.php',
     // ── People reaching each other (includes/people.php) ──

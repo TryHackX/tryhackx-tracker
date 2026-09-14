@@ -31,7 +31,8 @@
     const AC = window.AudioContext || window.webkitAudioContext;
     // Which count plays which event. A message from a friend and one from anyone else are two
     // events: the callers hand over the total and the friends' share, and the difference is the rest.
-    const KEYS = { unread: 'notification', unread_pm_friend: 'message_friend', unread_pm_other: 'message' };
+    const KEYS = { unread: 'notification', unread_pm_friend: 'message_friend', unread_pm_other: 'message',
+                   unread_shout_friend: 'shout_friend', unread_shout_other: 'shout', unread_shout_mention: 'mention' };
     const PENDING_MAX_MS = 300000;
     let ctx = null;
     let idleTimer = 0;
@@ -126,6 +127,12 @@
             // "anyone else" and leaves the friends' baseline alone — nothing false plays either way.
             if (c.unread_pm_friend === undefined || c.unread_pm_friend === null) { c.unread_pm_other = total; delete c.unread_pm_friend; }
             else c.unread_pm_other = Math.max(0, total - Math.max(0, Number(c.unread_pm_friend) || 0));
+        }
+        // The shoutbox's counts arrive the same way: a total, the friends' share, and the mentions.
+        if (c.unread_shout !== undefined && c.unread_shout !== null) {
+            const total = Math.max(0, Number(c.unread_shout) || 0);
+            if (c.unread_shout_friend === undefined || c.unread_shout_friend === null) { c.unread_shout_other = total; delete c.unread_shout_friend; }
+            else c.unread_shout_other = Math.max(0, total - Math.max(0, Number(c.unread_shout_friend) || 0));
         }
         Object.keys(KEYS).forEach((key) => {
             if (c[key] === undefined || c[key] === null) return;

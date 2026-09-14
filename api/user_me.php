@@ -16,7 +16,12 @@ foreach (userGroups($db, (int)$u['id']) as $g) {
 }
 $verifyGate = userEmailVerifyRequired($cfg);
 $trusted = userIsEmailTrusted($db, (int)$u['id']);
-jsonResponse([
+// The shoutbox's three counts travel with the account for the same reason the message ones do: a
+// page that loads this once should not have to ask a second endpoint what the badge says. Absent
+// when the room is off or this reader may not read it — see api/user_pulse.php.
+$shout = (function_exists('shoutEnabled') && shoutEnabled($cfg) && userCan($db, $cfg, 'shout.view'))
+    ? shoutUnreadCounts($db, $cfg, $u) : null;
+$out = [
     'success' => true,
     'user' => [
         'id' => (int)$u['id'], 'username' => $u['username'], 'email' => $u['email'],
@@ -34,4 +39,10 @@ jsonResponse([
     // different place. The navigation adds them up; the Notifications tab shows only its own.
     'unread_pm' => pmEnabled($cfg) ? pmUnreadCount($db, (int)$u['id']) : 0,
     'unread_pm_friend' => pmEnabled($cfg) ? pmUnreadCountFriends($db, (int)$u['id']) : 0,
-]);
+];
+if ($shout !== null) {
+    $out['unread_shout'] = $shout['shout'];
+    $out['unread_shout_friend'] = $shout['shout_friend'];
+    $out['unread_shout_mention'] = $shout['mention'];
+}
+jsonResponse($out);

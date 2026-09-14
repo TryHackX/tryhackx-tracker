@@ -28,6 +28,7 @@ require_once __DIR__ . '/includes/mail.php';
 require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/favourites.php';
 require_once __DIR__ . '/includes/sounds.php';
+require_once __DIR__ . '/includes/shout.php';
 require_once __DIR__ . '/includes/lists.php';
 require_once __DIR__ . '/includes/people.php';
 require_once __DIR__ . '/includes/user2fa.php';
@@ -88,6 +89,7 @@ if (PHP_SAPI !== 'cli') {
 }
 
 $cfg = getSettings($db);
+$GLOBALS['cfg'] = $cfg;   // for the helpers that have no $cfg of their own (soundEventKinds, userRememberIssue): the janitor does the same
 ensureSchema($db, $cfg);
 
 // THE SESSION STARTS HERE, and nothing above it may read $_SESSION.
@@ -143,6 +145,10 @@ $routes = [
     'verify'       => 'templates/pages/verify.php',
     'emailchange'  => 'templates/pages/emailchange.php',
     'search'       => 'templates/pages/search.php',
+    // The shoutbox as a page of its own. Whether this address answers with the box or with the
+    // not-found page is the template's decision (the setting, the placement, the permission) — the
+    // route exists either way, so a link to it never depends on a setting the linker cannot see.
+    'shoutbox'     => 'templates/pages/shoutbox.php',
     // A PROFILE'S ADDRESS PUTS THE NAME IN ITS OWN PARAMETER, and the reason is two lines above:
     // $action is lower-cased and stripped of everything but [a-z0-9_-], while userValidUsername()
     // allows a dot and both cases. A name can never be an action, so the collision problem does not

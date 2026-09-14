@@ -106,7 +106,12 @@ try:
     check("the member signs in", s == 200 and j.get("success"), (s, j))
     s, j = me.api("user_pulse")
     check("a member gets the two counts and the cadence", s == 200 and j.get("success") and j.get("unread") == 0 and j.get("unread_pm") == 0 and j.get("live") == 45, (s, j))
-    check("… and nothing else — numbers, never content", set(j.keys()) <= {"success", "unread", "unread_pm", "unread_pm_friend", "live"}, list(j.keys()))
+    # The shoutbox adds three more numbers (1.58.0) and only when the room exists and this reader may
+    # read it, so they are allowed here rather than required — the rule under test is that the pulse
+    # carries NUMBERS and never a line of anybody's text.
+    check("… and nothing else — numbers, never content",
+          set(j.keys()) <= {"success", "unread", "unread_pm", "unread_pm_friend", "live",
+                            "unread_shout", "unread_shout_friend", "unread_shout_mention"}, list(j.keys()))
     php("userNotify($db, " + str(uid) + ", 'account', 'Pulse fixture', 'a line');")
     s, j = me.api("user_pulse")
     check("a notification that landed is counted on the next pulse", j.get("unread") == 1, j)

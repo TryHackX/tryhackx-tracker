@@ -51,6 +51,16 @@ function homeSectionCatalog(): array {
             'gate' => 'tracker_stats_show_home',
             'about' => 'Torrents, seeds, peers, leechers, completed and uptime, refreshed in place.',
         ],
+        // The shoutbox (1.58.0). Its own switch decides whether it exists at all, its PLACEMENT
+        // decides whether it belongs on this page, and shout.view decides whether this reader may
+        // read it — three separate noes, all of which this block answers by rendering nothing.
+        // Hiding it here is a fourth: "the feature is on, but not on the front page".
+        'shoutbox' => [
+            'label' => 'Shoutbox',
+            'heading' => 'shout.heading',
+            'gate' => 'shout_enabled',
+            'about' => 'The last lines people said, and the box to say another one in.',
+        ],
         'announce' => [
             'label' => 'Announce URL',
             'heading' => 'home.announce_head',

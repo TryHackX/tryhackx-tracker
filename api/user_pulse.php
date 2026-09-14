@@ -18,11 +18,22 @@ if (!$u) jsonResponse(['error' => 'not_logged_in', 'live' => 0], 401);
 // this browser makes behind a poll that has nothing to write.
 if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 
-jsonResponse([
+$out = [
     'success'   => true,
     'unread'    => userUnreadCount($db, (int)$u['id']),
     'unread_pm' => pmEnabled($cfg) ? pmUnreadCount($db, (int)$u['id']) : 0,
     // … of which from friends: the sounds tell a friend's message from a stranger's
     'unread_pm_friend' => pmEnabled($cfg) ? pmUnreadCountFriends($db, (int)$u['id']) : 0,
     'live'      => siteLiveSeconds($cfg),
-]);
+];
+// The shoutbox, when there is one and this reader may see it. THREE numbers because the sounds
+// answer three events — a friend said something, somebody else said something, somebody said my
+// name — and `unread_shout` is the total the other two are subsets of. Absent entirely when the
+// feature is off, so a site without a shoutbox pays nothing and its pulse reply is what it was.
+if (function_exists('shoutEnabled') && shoutEnabled($cfg) && userCan($db, $cfg, 'shout.view')) {
+    $sc = shoutUnreadCounts($db, $cfg, $u);
+    $out['unread_shout'] = $sc['shout'];
+    $out['unread_shout_friend'] = $sc['shout_friend'];
+    $out['unread_shout_mention'] = $sc['mention'];
+}
+jsonResponse($out);

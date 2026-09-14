@@ -15,6 +15,11 @@
  */
 
 require_once __DIR__ . '/homelayout.php';
+// The shoutbox's own half. index.php loads it for the page; the editor's preview reaches this file
+// by another road (api/admin/page_content.php), and a block that renders nothing because its
+// functions were not loaded would be a preview that lies about the page. Guarded on the file so
+// this still parses while the feature is landing.
+if (!function_exists('shoutEnabled') && is_file(__DIR__ . '/shout.php')) require_once __DIR__ . '/shout.php';
 
 /** The built-in bodies, keyed by section. A gated section that is off comes back as ''. */
 function homeBlocks(PDO $db, array $cfg, string $baseUrl): array {
@@ -105,6 +110,20 @@ function homeBlocks(PDO $db, array $cfg, string $baseUrl): array {
 </div>
 <?php endif; ?>
 <?php $homeBlocks['stats'] = ob_get_clean(); ?>
+
+<?php ob_start(); /* ── shoutbox ─────────────────────────────────────────── */ ?>
+<?php /* Three noes, and each one draws NOTHING — not even the heading, which the assembly in
+         templates/pages/home.php only prints over a body that is not empty. The feature is off;
+         the operator put it on its own page instead of here; this reader may not read it. A
+         heading over an empty space would be a promise the page cannot keep. */ ?>
+<?php if (function_exists('shoutEnabled') && shoutEnabled($cfg) && shoutPlacement($cfg) !== 'page' && shoutMayView($db, $cfg)): ?>
+<?php
+    $shoutLimit = shoutWidgetRows($cfg);
+    $shoutOnPage = false;
+    include __DIR__ . '/../templates/partials/shoutbox_widget.php';
+?>
+<?php endif; ?>
+<?php $homeBlocks['shoutbox'] = ob_get_clean(); ?>
 
 <?php ob_start(); /* ── announce ─────────────────────────────────────────── */ ?>
 <?php if (!empty($cfg['announce_url']) || !empty($cfg['announce_url_https'])): ?>

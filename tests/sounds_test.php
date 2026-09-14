@@ -56,6 +56,8 @@ check('the feature needs accounts and its own switch',
       !soundsEnabled(['users_enabled' => '0', 'sounds_enabled' => '1']) && soundsEnabled(['users_enabled' => '1'])
       && !soundsEnabled(['users_enabled' => '1', 'sounds_enabled' => '0']));
 check('three events: a notification, a message from a friend, a message from anyone else', soundEventKinds() === ['notification', 'message_friend', 'message']);
+check('… and six with the shoutbox on: a shout from a friend, a shout from anyone else, an @-mention',
+      !function_exists('shoutEnabled') || soundEventKinds(array_merge($cfg, ['users_enabled' => '1', 'shout_enabled' => '1'])) === ['notification', 'message_friend', 'message', 'shout_friend', 'shout', 'mention']);
 
 // ── the shipped library ──────────────────────────────────────────────────────
 $b = soundBuiltins('/x/');

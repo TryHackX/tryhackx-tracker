@@ -1688,3 +1688,17 @@ add('', {
     'api.sounds.unknown': ('No such sound.', 'Nie ma takiego dźwięku.'),
     'api.sounds.unknown_op': ('Unknown operation.', 'Nieznana operacja.'),
 })
+
+# ── 1.58.0: the shoutbox ────────────────────────────────────────────────────
+add('', {
+    'api.shout.disabled': ('The shoutbox is switched off.', 'Shoutbox jest wyłączony.'),
+    'api.shout.no_permission': ('Your group cannot write in the shoutbox.',
+        'Twoja grupa nie może pisać w shoutboksie.'),
+    'api.shout.muted': ('You are silenced until :until, so you cannot write here. You can still read.',
+        'Masz wyciszenie do :until, więc nie możesz tu pisać. Czytać możesz nadal.'),
+    'api.shout.flood': ('Wait :seconds s before saying something else.',
+        'Odczekaj :seconds s przed kolejną wypowiedzią.'),
+    'api.shout.too_long': ('A shout is at most :limit characters.',
+        'Wypowiedź może mieć najwyżej :limit znaków.'),
+    'api.shout.purged': ('Cleared :n shouts.', 'Usunięto :n wypowiedzi.'),
+})

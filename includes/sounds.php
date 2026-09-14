@@ -47,9 +47,19 @@ function soundsEnabled(array $cfg): bool
  * poll say how many of the waiting messages are from friends — includes/people.php,
  * pmUnreadCountFriends); 'message' is everyone else. The shoutbox adds its own kinds when it arrives.
  */
-function soundEventKinds(): array
+function soundEventKinds(?array $cfg = null): array
 {
-    return ['notification', 'message_friend', 'message'];
+    $kinds = ['notification', 'message_friend', 'message'];
+    // The shoutbox's three exist only while the shoutbox does: a shout from a friend, a shout from
+    // anyone else, and an @-mention of me. Off, they are not offered anywhere — not in Settings, not
+    // on the account's tab — and a stored choice for them is simply not resolved.
+    $cfg = $cfg ?? (is_array($GLOBALS['cfg'] ?? null) ? $GLOBALS['cfg'] : null);
+    if ($cfg !== null && function_exists('shoutEnabled') && shoutEnabled($cfg)) {
+        $kinds[] = 'shout_friend';
+        $kinds[] = 'shout';
+        $kinds[] = 'mention';
+    }
+    return $kinds;
 }
 
 function soundBuiltinDir(): string

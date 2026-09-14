@@ -954,6 +954,17 @@ key *name*, so one added later is covered without anybody remembering, and a mat
 "changed" with no value either side. There is no delete and no edit — a log the panel it records can
 rewrite is not evidence. Retention is a setting; the janitor enforces it.
 
+### A shoutbox (1.58.0)
+
+Off as shipped (`shout_enabled`). A line of talk on the front page (a block of the home layout) and/or
+its own page, for members with `shout.view` / `shout.post` / `shout.delete_own`; moderators
+(`shout.moderate`) remove anyone's line, the owner purges from Settings behind the panel password. The
+widget asks only for what is newer, appends without redrawing, and scrolls only when you were at the
+bottom; Enter sends, Shift+Enter breaks a line; BBCode by default with Markdown a switch away; `@name`
+mentions link the profile and count for that person; retention by count and by age. The pulse carries
+how many shouts are new (and how many from friends, and how many mention you) so the sounds have three
+more events while the shoutbox is on. Emoji, stickers and the navigation counter follow.
+
 ### The audit of 1.45–1.56 closed, and the charts without gaps (1.57.0)
 
 Every finding of the audit in `deploy/AUDIT-1.45-1.56.md` is fixed (see CHANGELOG 1.57.0). The

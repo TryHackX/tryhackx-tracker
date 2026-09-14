@@ -184,3 +184,10 @@ add('', {
         'Przeglądarki pozwalają stronie wydać dźwięk dopiero po tym, jak na niej klikniesz albo coś wpiszesz. Do tego czasu przy twoim imieniu u góry pojawia się mała notka &#128263;, a pierwsze kliknięcie gdziekolwiek odtwarza to, co czekało.'),
     'account.snd_save': ('Save', 'Zapisz'),
 })
+
+# ── 1.58.0: the shoutbox's three sounds ─────────────────────────────────────
+add('', {
+    'account.snd_ev_shout_friend': ('A shout from a friend', 'Shout od znajomego'),
+    'account.snd_ev_shout': ('A shout from anyone else', 'Shout od pozostałych'),
+    'account.snd_ev_mention': ('Somebody mentions me (@name) in the shoutbox', 'Ktoś wspomina mnie (@nazwa) w shoutboxie'),
+})

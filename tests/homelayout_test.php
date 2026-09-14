@@ -33,7 +33,8 @@ function cfgOf(array $stored): array { return ['home_layout' => json_encode($sto
 $keys = homeSectionKeys();
 
 // ── the shipped state ───────────────────────────────────────────────────────
-check('the catalogue has the seven sections the page is built from', count($keys) === 7, implode(',', $keys));
+// Eight since 1.58.0: the shoutbox joined the seven the page shipped with.
+check('the catalogue has the eight sections the page is built from', count($keys) === 8, implode(',', $keys));
 check('no stored layout means the shipped order', homeLayoutOrder([]) === $keys);
 check('… and nothing hidden', homeLayout([])['hidden'] === []);
 check('… and it reports itself as the built-in layout', homeLayoutIsDefault([]));
@@ -121,7 +122,7 @@ check('a section with no heading cannot be given one',
       json_decode($r['json'], true)['headings'] === [], $r['json']);
 
 // ── round trip ──────────────────────────────────────────────────────────────
-$order = ['header', 'announce', 'stats', 'features', 'about', 'contact', 'donations'];
+$order = ['header', 'announce', 'stats', 'shoutbox', 'features', 'about', 'contact', 'donations'];
 $r = homeLayoutValidate($order, ['donations'], ['features' => 'What you get'], 'A tracker');
 check('a rearranged layout validates', isset($r['ok']), json_encode($r));
 $c = ['home_layout' => $r['json']];

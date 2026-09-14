@@ -48,6 +48,7 @@ require_once $root . '/includes/wlmaint.php';
 require_once $root . '/includes/wlprobe.php';
 require_once $root . '/includes/digest.php';
 require_once $root . '/includes/people.php';
+require_once $root . '/includes/shout.php';
 
 /**
  * The slow half. The index poll walks a scrape of a million and a half torrents (a hundred seconds
@@ -289,6 +290,16 @@ try {
     if (function_exists('pmTypingPrune')) {
         $tp = pmTypingPrune($db);
         if ($tp > 0 && in_array('-v', $argv ?? [], true)) echo "[pm] pruned $tp stale typing rows\n";
+    }
+
+    // The shoutbox's retention, both halves at once: older than shout_keep_days, and beyond
+    // shout_keep_rows. A thousand rows a tick by primary key — the room is small and this is the
+    // only thing that keeps it that way. A no-op (one indexed lookup) while the feature is off.
+    if (function_exists('shoutPrune')) {
+        $sh = shoutPrune($db, $cfg);
+        if ($sh['by_age'] || $sh['by_count'] || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[shout] pruned=%d/%d', (int)$sh['by_age'], (int)$sh['by_count']), "\n";
+        }
     }
 
     // The operator's digest, LAST of the queue-changing work above so the numbers it reports are the

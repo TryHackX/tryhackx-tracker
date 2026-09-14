@@ -107,6 +107,15 @@ function userPermissionList(): array {
         'pm.report'      => 'Report a message to the moderators',
         'friends.use'    => 'Follow other members and accept friend requests',
         'directory.view' => 'Browse the member directory',
+        // ── the shoutbox (v63, includes/shout.php) ──
+        // Reading is its own id and is NOT given to guests by the migration: the operator's answer to
+        // "does a passer-by read the room" is no, and this is the grant that changes it. Deleting your
+        // own line and deleting somebody else's are two different authorities, so they are two ids —
+        // the second one also opens the Purge button in Settings.
+        'shout.view'     => 'Read the shoutbox',
+        'shout.post'     => 'Write in the shoutbox',
+        'shout.delete_own' => 'Delete their own shouts',
+        'shout.moderate' => 'Delete anyone\'s shouts, and clear the shoutbox',
 
         // ── the admin panel ──
         //
@@ -174,7 +183,10 @@ function userGroupPresets(): array {
             'perms' => ['panel.access', 'panel.reports.view', 'panel.reports.status', 'panel.reports.block',
                         'panel.reports.email', 'panel.reports.archive', 'panel.appeals.resolve',
                         'panel.whitelist.view', 'panel.whitelist.add', 'panel.whitelist.delete',
-                        'panel.whitelist.ban', 'panel.whitelist.meta', 'panel.whitelist.content'],
+                        'panel.whitelist.ban', 'panel.whitelist.meta', 'panel.whitelist.content',
+                        // The room is moderated from the room, not from a panel page (1.58.0), so the
+                        // reading ids come with it — see the v63 grant in includes/schema.php.
+                        'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'],
         ],
         'reviewer' => [
             'label' => 'Content reviewer',
@@ -200,7 +212,8 @@ function userGroupPresets(): array {
                         'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose', 'content.view',
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         'lists.use', 'lists.public',
-                        'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check', 'sounds.use'],
+                        'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check', 'sounds.use',
+                        'shout.view', 'shout.post', 'shout.delete_own'],
         ],
     ];
 }
@@ -232,8 +245,12 @@ function userLegacyDefault(string $perm): bool {
     // check is a free oracle over the catalogue (includes/hashcheck.php), granted to members and
     // withheld from guests by default — with accounts off there is no "member", so opening it would
     // hand every passer-by the one thing the grant exists to hold back.
+    // shout.* is here for the first reason: a shout is signed with an account name, and a room where
+    // everybody is "nobody" is not a room. With the user system off there is no account to sign one
+    // with, so the whole feature is closed rather than thrown open.
     if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.')
-        || str_starts_with($perm, 'sounds.') || str_starts_with($perm, 'status.')) return false;
+        || str_starts_with($perm, 'sounds.') || str_starts_with($perm, 'status.')
+        || str_starts_with($perm, 'shout.')) return false;
     return !str_starts_with($perm, 'index.');
 }
 
@@ -761,6 +778,10 @@ function userDeleteCascade(PDO $db, int $userId): array {
         } catch (\Throwable $e) { /* a table this install does not have yet is not a failure */ }
     };
     $del("DELETE FROM user_group_members WHERE user_id = ?", [$userId], 'groups');
+    // the shoutbox (v63): the mentions of others in this account's lines, this account's own mentions, the lines
+    $del("DELETE FROM shout_mentions WHERE shout_id IN (SELECT id FROM shouts WHERE user_id = ?)", [$userId], 'shout mentions');
+    $del("DELETE FROM shout_mentions WHERE user_id = ?", [$userId], 'mentions');
+    $del("DELETE FROM shouts WHERE user_id = ?", [$userId], 'shouts');
     $del("DELETE FROM user_notifications WHERE user_id = ?", [$userId], 'notifications');
     $del("DELETE FROM user_tokens WHERE user_id = ?", [$userId], 'tokens');
     $del("DELETE FROM user_favourites WHERE user_id = ?", [$userId], 'favourites');

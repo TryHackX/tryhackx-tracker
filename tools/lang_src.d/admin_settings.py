@@ -2381,3 +2381,76 @@ add('', {
     'settings.sounds_drop_sub': ('MP3, Ogg or WAV · up to 512 KB and 15 s', 'MP3, Ogg lub WAV · do 512 KB i 15 s'),
     'settings.sounds_name_label': ('Name', 'Nazwa'),
 })
+
+# ── 1.58.0: the shoutbox (Settings → Descriptions & review → Shoutbox) ──────
+add('', {
+    'settings.shout_title': ('Shoutbox', 'Shoutbox'),
+    'settings.shout_intro': ('One room, one line each: members say something short and it scrolls away. Nothing is kept for long — retention is both a number of lines and a number of days, swept by the janitor. Who may read, write, delete their own and delete anyone\'s are four permissions (<code>shout.view</code>, <code>shout.post</code>, <code>shout.delete_own</code>, <code>shout.moderate</code>) in Users → Groups; a visitor reads nothing unless you grant it. Somebody silenced in private messages is silenced here too.',
+        'Jeden pokój, po jednej linijce: członkowie mówią coś krótkiego i to odpływa. Nic nie zostaje na długo — retencja to i liczba linii, i liczba dni, sprząta janitor. Kto może czytać, pisać, kasować swoje i kasować cudze, to cztery uprawnienia (<code>shout.view</code>, <code>shout.post</code>, <code>shout.delete_own</code>, <code>shout.moderate</code>) w Użytkownicy → Grupy; gość nie czyta nic, dopóki mu tego nie nadasz. Kto ma wyciszenie w wiadomościach, ma je i tutaj.'),
+    'settings.shout_enabled': ('Shoutbox', 'Shoutbox'),
+    'settings.shout_enabled_hint': ('Off draws nothing anywhere and every endpoint answers 403.',
+        'Wyłączony nie rysuje nic i każdy endpoint odpowiada 403.'),
+    'settings.shout_placement': ('Where it is drawn', 'Gdzie się rysuje'),
+    'settings.shout_placement_home': ('Home page block', 'Blok na stronie głównej'),
+    'settings.shout_placement_page': ('Its own page', 'Własna strona'),
+    'settings.shout_placement_both': ('Both', 'Obie'),
+    'settings.shout_placement_hint': ('The home block sits in the front-page layout (Site pages → Home layout); the page is <code>?action=shoutbox</code>.',
+        'Blok strony głównej siedzi w układzie strony głównej (Strony → Układ strony głównej); strona to <code>?action=shoutbox</code>.'),
+    'settings.shout_format': ('Markup', 'Formatowanie'),
+    'settings.shout_format_plain': ('None (plain text)', 'Żadne (zwykły tekst)'),
+    'settings.shout_format_bbcode': ('BBCode', 'BBCode'),
+    'settings.shout_format_markdown': ('Markdown', 'Markdown'),
+    'settings.shout_format_hint': ('The format the box starts on. With BBCode or Markdown the writer can switch between the two per shout; "None" means no formatting at all and no switch.',
+        'Format, od którego zaczyna pole. Przy BBCode albo Markdownie piszący może przełączać między nimi przy każdej wypowiedzi; „Żadne” to brak formatowania i brak przełącznika.'),
+    'settings.shout_live_seconds': ('Ask for new lines every', 'Pytaj o nowe linie co'),
+    'settings.shout_live_seconds_hint': ('Seconds. 0 = never (the box only fills on a page load). Below three is raised to three. A hidden tab and a box nobody can see never ask.',
+        'Sekundy. 0 = wcale (pole zapełnia się tylko przy wczytaniu strony). Poniżej trzech podnosi się do trzech. Ukryta karta i niewidoczne pole nie pytają wcale.'),
+    'settings.shout_widget_rows': ('Lines in the widget', 'Linii w widżecie'),
+    'settings.shout_widget_rows_hint': ('How much history the home block starts with. "Older" loads more, upwards.',
+        'Ile historii pokazuje na starcie blok strony głównej. „Starsze” doczytuje w górę.'),
+    'settings.shout_page_rows': ('Lines on the page', 'Linii na stronie'),
+    'settings.shout_page_rows_hint': ('The same, for <code>?action=shoutbox</code>.', 'To samo dla <code>?action=shoutbox</code>.'),
+    'settings.shout_max_chars': ('Length limit', 'Limit długości'),
+    'settings.shout_max_chars_hint': ('Characters per shout. A shout is a sentence, not a post.',
+        'Znaków na wypowiedź. Wypowiedź to zdanie, nie post.'),
+    'settings.shout_flood_seconds': ('Interval between shouts', 'Odstęp między wypowiedziami'),
+    'settings.shout_flood_seconds_hint': ('Seconds one account has to wait before saying something else. 0 = no interval.',
+        'Sekundy, które jedno konto musi odczekać przed kolejną wypowiedzią. 0 = bez odstępu.'),
+    'settings.shout_keep_rows': ('Keep this many lines', 'Trzymaj tyle linii'),
+    'settings.shout_keep_rows_hint': ('Anything older than the newest N is deleted for good by the janitor.',
+        'Wszystko starsze niż najnowsze N kasuje janitor na dobre.'),
+    'settings.shout_keep_days': ('Keep this many days', 'Trzymaj tyle dni'),
+    'settings.shout_keep_days_hint': ('The other half of retention; whichever bites first wins.',
+        'Druga połowa retencji; wygrywa ta, która zadziała pierwsza.'),
+    'settings.shout_rules': ('House rules', 'Regulamin pokoju'),
+    'settings.shout_rules_ph': ('One line shown above the box (optional)', 'Jedna linia nad polem (opcjonalnie)'),
+    'settings.shout_rules_hint': ('Plain text, at most 500 characters. Left empty, nothing is drawn.',
+        'Zwykły tekst, najwyżej 500 znaków. Puste — nic się nie rysuje.'),
+    'settings.shout_purge': ('Clear the shoutbox', 'Wyczyść shoutbox'),
+    'settings.shout_purge_days_ph': ('Days (empty = all)', 'Dni (puste = wszystko)'),
+    'settings.shout_purge_run': ('Purge', 'Wyczyść'),
+    'settings.shout_purge_hint': ('Deletes rows for good and asks for your password. Leave the box empty to remove everything, or give a number of days to remove only what is older than that. A moderator removing one line uses the button on the line itself.',
+        'Kasuje wiersze bezpowrotnie i pyta o Twoje hasło. Zostaw pole puste, aby usunąć wszystko, albo podaj liczbę dni, aby usunąć tylko starsze. Moderator kasujący jedną linię używa przycisku przy tej linii.'),
+})
+
+# The Purge button's own strings. `js.shoutadmin.` and not `js.shout.` on purpose: that prefix
+# travels to every public page (LANG_JS_PUBLIC), and these are read only by the panel.
+add('', {
+    'js.shoutadmin.purge_title': ('Clear the shoutbox', 'Wyczyszczenie shoutboksa'),
+    'js.shoutadmin.purge_all': ('Every shout will be deleted for good. This cannot be undone.',
+        'Wszystkie wypowiedzi zostaną skasowane bezpowrotnie. Tego nie da się cofnąć.'),
+    'js.shoutadmin.purge_older': ('Shouts older than :days days will be deleted for good. This cannot be undone.',
+        'Wypowiedzi starsze niż :days dni zostaną skasowane bezpowrotnie. Tego nie da się cofnąć.'),
+    'js.shoutadmin.purge_ok': ('Purge', 'Wyczyść'),
+    'js.shoutadmin.purge_password': ('Deleting rows needs the owner password.',
+        'Kasowanie wierszy wymaga hasła właściciela.'),
+    'js.shoutadmin.purge_done': ('Cleared :n shouts.', 'Usunięto :n wypowiedzi.'),
+    'js.shoutadmin.purge_failed': ('The shoutbox could not be cleared.', 'Nie udało się wyczyścić shoutboksa.'),
+})
+
+# ── 1.58.0: the shoutbox's three sounds ─────────────────────────────────────
+add('', {
+    'settings.sounds_default_shout_friend': ('Default for a shout from a friend', 'Domyślny dla shouta od znajomego'),
+    'settings.sounds_default_shout': ('Default for a shout from anyone else', 'Domyślny dla shouta od pozostałych'),
+    'settings.sounds_default_mention': ('Default for an @-mention in the shoutbox', 'Domyślny dla wzmianki @ w shoutboxie'),
+})

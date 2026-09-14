@@ -26,10 +26,15 @@ if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
  * on the whitelist's description switch answered 404 on a tracker that has descriptions off and
  * messages on. One renderer, one rate limit, and the gate that matches the text.
  */
-$for = ($input['for'] ?? '') === 'message' ? 'message' : 'description';
+$for = in_array($input['for'] ?? '', ['message', 'shout'], true) ? (string)$input['for'] : 'description';
 if ($for === 'message') {
     if (!pmEnabled($cfg)) jsonResponse(['error' => 'pm_disabled'], 404);
     if (!userCan($db, $cfg, 'pm.send')) jsonResponse(['error' => __('api.content.access_required')], 403);
+} elseif ($for === 'shout') {
+    // A third writer, a third gate (1.58.0). Same reasoning as the message one: the permission that
+    // matches the text, not the one that happens to be nearby.
+    if (!function_exists('shoutEnabled') || !shoutEnabled($cfg)) jsonResponse(['error' => 'disabled'], 404);
+    if (!userCan($db, $cfg, 'shout.post')) jsonResponse(['error' => __('api.content.access_required')], 403);
 } else {
     if (($cfg['wl_allow_description'] ?? '0') !== '1') {
         jsonResponse(['error' => __('api.content.descriptions_disabled')], 404);
@@ -54,7 +59,8 @@ if (!in_array($fmt, richtextFormats($cfg), true)) $fmt = richtextFormats($cfg)[0
 // cheaper than rendering it and then deciding it was too long.
 // A message is capped by the message setting, a description by the description one — the counter
 // under the box has to say the number the send would actually be judged against.
-$max = $for === 'message' ? pmMaxChars($cfg) : richtextMaxChars($cfg);
+$max = $for === 'message' ? pmMaxChars($cfg)
+     : ($for === 'shout' ? shoutMaxChars($cfg) : richtextMaxChars($cfg));
 if ($max > 0 && mb_strlen($text) > $max) {
     jsonResponse(['error' => __('api.content.description_too_long', ['length' => mb_strlen($text), 'limit' => $max]),
                   'too_long' => true, 'length' => mb_strlen($text), 'limit' => $max], 400);
