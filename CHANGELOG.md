@@ -4,6 +4,91 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.60.0] — 2026-09-14
+
+Schema **66** — the shoutbox grows a pinned line (`shouts.pinned_at` / `pinned_by`, at most one of
+them at a time) and lines the site says itself (`shouts.is_system`), which is why `shouts.user_id`
+is nullable from here on: an announcement has no author, and a row pointing at account 0 would be a
+lie rather than an absence. Three settings arrive with it, every one of them off or conservative.
+
+A correction to 1.59.1 while this is being written. That entry said an emote's response leaves with
+exactly one policy; measured on the live site, it does not. PHP sends one and takes its own
+report-only header off, which is real and visible — an ordinary page carries that header and an
+emote no longer does. Apache then appends the site-wide fallback from `.htaccess`, after PHP has
+finished and where no PHP code can reach it. A client handed both enforces the intersection, and
+nothing intersected with `default-src 'none'` is permission to load anything, so the guarantee was
+never in doubt and only the sentence was wrong. The fallback stays exactly where it is: it is the
+last line of defence for every page on the site, and tidiness on one endpoint is not worth spending
+it.
+
+### Fixed — a counter that filled and then blanked, and it is older than the room
+
+Building the third badge found the other two lying. The pulse keeps to one request per reader by
+leaving its answer in the browser's storage, and any tab whose turn comes inside that window uses
+the stored answer instead of asking again. That storage survives a reload — so the first tick after
+a page load adopted the numbers the SAME tab had left behind *before* the reload, and the badge
+showed what the page had just fetched and then went blank, staying blank until the lease aged out.
+Notifications and messages have done this since the counter left the account page in 1.55.0; a third
+number beside them only made it easy to see. A stored answer is now taken only when it is newer than
+what this tab has already heard from the server, and an answer straight from the server marks the
+moment it arrived.
+
+A reader the operator granted `shout.view` without an account is served properly too. The Shoutbox
+badge now carries the cadence and the account id the way the account badge does, and the page asks
+for a baseline when either badge is present rather than only the account one — that reader used to
+get a counter that could never fill, and then, once it could, one that never moved again.
+
+### Added — the shoutbox in the navigation, with a number of its own
+
+`shout_nav` puts a **Shoutbox** link in the bar, carrying its own counter, for anybody who may read
+the room. It is deliberately NOT folded into the badge beside the account name: that one counts
+notifications and waiting messages, both of which are read on the account page, and a reader who
+sees 5 on it has two tabs to go and look in — a third meaning would leave it answering nothing. The
+numbers were already on the wire (`api/user_pulse.php` has sent `unread_shout` since 1.58.0), so
+nothing new is asked of the server. The badge clears when the reader opens the room, because opening
+it is what moves `users.shout_seen_id`, and the link's title says exactly that.
+
+### Added — one pinned line
+
+A moderator pins a line from the row itself (`shout.moderate` — no new permission: it already means
+room-wide authority), and it is drawn as a strip above the list and outside its scroll, so it cannot
+slide away just as somebody needs it. **At most one is ever pinned**: pinning a second unpins the
+first, in one transaction, because two announcements is nobody reading either. The pinned row rides
+with the first fill and with the "older" button and never with the poll — that path appends, and a
+pinned row handed to it would be appended to the bottom of the room every few seconds for ever.
+
+### Added — a separate refresh interval for guests
+
+`shout_live_seconds_guest` (30 s) is the cadence for a reader with no account, and 0 means a guest
+does not poll at all and reads whatever the page was drawn with. A guest reads and never writes, and
+on a public tracker there are far more of them than there are members, so the number that is right
+for somebody waiting for an answer to what they just said buys nothing at all here.
+
+### Added — optional lines from the site
+
+`shout_system_lines` (off) lets the tracker say so in the room when a torrent is registered: **one
+line per batch**, never one per hash, because somebody registering forty torrents is one thing that
+happened and forty lines is the room emptied of everything people said. It respects
+`wl_submitter_public` — a submitter who is not public is named nowhere else on the site and is not
+named here either, and the line then says a torrent arrived without naming anybody. The name rides
+as the row's author rather than as a word inside the sentence, which also settles a grammar problem:
+a name dropped into a Polish sentence has to agree with the verb after it. These lines belong to
+nobody — members cannot delete them, a moderator can, they are nobody's unread and they make no
+sound. A room that pinged every reader each time a torrent was registered is the one thing an
+announcement must not turn into.
+
+### Added — who may read and who may write, in one view
+
+Settings → Shoutbox grows a folded, read-only matrix of the five `shout.*` permissions across your
+groups: the same one Users → Groups draws, scoped, and fed by the same endpoint. Granting is still
+done where every other grant is made, so one place decides and one place shows.
+
+### Changed — Settings has two more chips
+
+**Shoutbox** and **Sounds** are groups of their own rather than sections buried inside "Descriptions
+& review" and "User accounts", which is where they had landed rather than where anybody would look
+for them. The section ids are untouched, so every bookmark and deep link into them still opens.
+
 ## [1.59.1] — 2026-09-14
 
 Schema **65** — the `shout_emote_approval` setting and an `approved_at` stamp on `shout_emotes`,

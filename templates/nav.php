@@ -25,6 +25,15 @@
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=search" class="<?= $action === 'search' ? 'active' : '' ?>"><?= _h('nav.search') ?></a>
         <?php endif; ?>
+        <?php /* The shoutbox, with a number of its own (1.60.0). A feature-gated link like Stats and
+                 Search above it — and the number deliberately does NOT join the badge beside the
+                 account name: that one counts notifications and waiting messages, a reader who sees
+                 5 on it has two tabs to go and look in, and a third meaning would leave it answering
+                 nothing. assets/js/app.js fills this one from the same pulse. */ ?>
+        <?php if (function_exists('shoutNav') && shoutNav($cfg) && shoutMayView($db, $cfg)): ?>
+        <span class="sep">|</span>
+        <a href="<?= sanitize(shoutNavUrl($cfg, $baseUrl)) ?>" class="<?= $action === 'shoutbox' ? 'active' : '' ?>"><?= _h('nav.shoutbox') ?><span class="nav-unread nav-shout-unread" id="nav-shout-unread" hidden data-uid="<?= (int)($navUser['id'] ?? 0) ?>" data-pulse="<?= (int)siteLiveSeconds($cfg) ?>" title="<?= _h('nav.shoutbox_unread_title') ?>"></span></a>
+        <?php endif; ?>
         <?php $navUser = $navUser ?? (usersEnabled($cfg) ? currentUser($db) : null); ?>
         <?php /* The member directory used to be a nav entry of its own. It is a tab of the account
                  page now, and the account is already in this bar — a second link to the same page,

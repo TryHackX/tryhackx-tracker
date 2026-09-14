@@ -388,3 +388,70 @@
 
     load();
 })();
+
+/**
+ * Settings → Shoutbox → who may read and who may write (1.60.0).
+ *
+ * The SAME read-only matrix Users → Groups draws (renderMatrix in assets/js/admin-users.js), scoped
+ * to the five `shout.*` ids and fed by the same endpoint — no new payload, and no second idea of
+ * what a permission is. It is here because this is where somebody is standing when the question
+ * comes up: they have just switched the room on and want to know who can actually use it.
+ *
+ * READ-ONLY on purpose. Granting is one page away and belongs where every other grant is made; a
+ * second editor for the same rows would be a second thing to keep honest, and the answer to "why
+ * can this person not write?" is a thing to SEE, not a thing to fix from here.
+ *
+ * Its own IIFE, like the two above: a page that is missing one of the three must still get the
+ * others, and this one is the only one that does nothing at all until it is opened.
+ */
+(function () {
+    'use strict';
+    const wrap = document.getElementById('shout-matrix-wrap');
+    const tbl = document.getElementById('shout-matrix');
+    if (!wrap || !tbl || !window.AdminCommon || typeof window.t !== 'function') return;
+    const { apiCall, el } = window.AdminCommon;
+    const t = window.t;
+    // Written out rather than filtered on the `shout.` prefix, so a permission added to the registry
+    // later shows up here because somebody decided it should and not because it was named alike.
+    const IDS = ['shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate', 'shout.upload_emote'];
+    let asked = false;
+
+    function render(groups, permList) {
+        tbl.textContent = '';
+        // Only the ids the registry actually knows: a row for a permission nothing can grant would
+        // be a column of dots that never changes.
+        const keys = IDS.filter((k) => permList[k] !== undefined);
+        if (!groups.length || !keys.length) return;
+        const hr = el('tr', {}, [el('th', { text: t('js.shoutadmin.matrix_permission') })]);
+        groups.forEach((g) => {
+            const th = el('th', { className: 'gr-matrix-g', title: g.slug }, [g.name]);
+            if (g.color && /^#[0-9a-fA-F]{3,8}$/.test(g.color)) th.style.color = g.color;
+            hr.appendChild(th);
+        });
+        tbl.appendChild(el('thead', {}, [hr]));
+        const tbody = el('tbody', {});
+        keys.forEach((key) => {
+            const tr = el('tr', {}, [el('td', { title: permList[key] || '' }, [el('code', { text: key })])]);
+            groups.forEach((g) => {
+                const on = !!(g.permissions && g.permissions[key]);
+                tr.appendChild(el('td', { className: 'gr-matrix-c' + (on ? ' on' : '') }, [
+                    on ? el('i', { className: 'bi bi-check-lg', title: t('js.shoutadmin.matrix_has', { group: g.name, key: key }) })
+                       : el('span', { className: 'gr-matrix-off', text: '·' })]));
+            });
+            tbody.appendChild(tr);
+        });
+        tbl.appendChild(tbody);
+    }
+
+    // Fetched when the fold is opened and not before: Settings already makes a dozen calls on
+    // arrival, and this one answers a question most visits to the page never ask. `asked` is put
+    // back on a failure so closing and opening it again is a retry rather than a dead box.
+    wrap.addEventListener('toggle', async () => {
+        if (!wrap.open || asked) return;
+        asked = true;
+        let j;
+        try { j = await apiCall('admin/fetch_groups'); } catch (e) { asked = false; return; }
+        if (!j || j.error) { asked = false; return; }
+        render(j.groups || [], j.permission_list || {});
+    });
+})();

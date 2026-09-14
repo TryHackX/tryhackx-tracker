@@ -1654,6 +1654,11 @@ footer p { margin: 0.25rem 0; }
 .user-remember input { margin-right: 0.4rem; vertical-align: -0.1em; }
 .user-links { text-align: center; color: var(--text-muted); margin-top: 1rem; }
 .nav-unread { display: inline-block; min-width: 1.2em; margin-left: 0.35em; padding: 0 0.35em; border-radius: 999px; background: var(--accent); color: #fff; font-size: 0.72rem; line-height: 1.5; text-align: center; vertical-align: 0.1em; }
+/* The shoutbox's own number (1.60.0). It wears the badge shape and not the badge COLOUR: two solid
+   pills in one bar read as one thing counted twice, and these two count different things — that one
+   is notifications and messages, this one is lines in a room. Outlined, so it is legibly a second
+   number. Declared after .nav-unread because both are one class deep and the later rule wins. */
+.nav-shout-unread { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
 .account-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .account-head h1 { margin: 0; }
 .account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin: 1.25rem 0; }
@@ -2658,6 +2663,18 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     .shout-refresh.is-spinning svg { animation: none; }
     .shout-refresh.is-spinning { opacity: 0.45; }
 }
+/* The pinned line (1.60.0): above the list and OUTSIDE its scroll, which is the whole point of it —
+   a line that scrolls away with everything else is not an announcement. The same parts as a row,
+   because it is one; what makes it different is where it is drawn, not what it is. */
+.shout-pinned { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem;
+                margin-bottom: 0.5rem; padding: 0.35rem 0.5rem; border: 1px dashed var(--accent);
+                border-radius: var(--radius); background: rgba(74, 158, 255, 0.07);
+                font-size: 0.88rem; line-height: 1.5; }
+.shout-pin-icon { flex: 0 0 auto; font-size: 0.78rem; }
+.shout-pinned .shout-body { flex: 1 1 10rem; min-width: 0; }
+.shout-unpin { flex: 0 0 auto; margin-left: auto; background: none; border: 0; padding: 0 0.25rem;
+               color: var(--text-muted); font: inherit; line-height: 1; cursor: pointer; }
+.shout-unpin:hover { color: var(--error); }
 .shout-list { display: flex; flex-direction: column; max-height: 22rem; overflow-y: auto;
               padding-right: 0.2rem; overscroll-behavior: contain; }
 .shoutbox-page .shout-list { max-height: 34rem; }
@@ -2703,6 +2720,18 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
              color: var(--text-muted); font: inherit; line-height: 1; cursor: pointer; opacity: 0; }
 .shout-row:hover .shout-del, .shout-del:focus { opacity: 1; }
 .shout-del:hover { color: var(--error); }
+/* The pin, beside the delete cross and hidden until the row is hovered for the same reason it is: a
+   control only a moderator has is noise on all twenty-five lines until somebody wants it. */
+.shout-pin { position: absolute; top: 0.18rem; right: 1.35rem; background: none; border: 0; padding: 0 0.2rem;
+             color: var(--text-muted); font: inherit; font-size: 0.68rem; line-height: 1; cursor: pointer; opacity: 0; }
+.shout-row:hover .shout-pin, .shout-pin:focus { opacity: 1; }
+.shout-pin:hover { color: var(--accent); }
+/* A line the SITE said, not a person (1.60.0): muted, italic where the name would be, and marked
+   down the left — so it reads as an announcement at a glance rather than as somebody with an odd
+   name saying something odd. The bar is the border colour, not the accent: a mention of me is the
+   thing in this list that gets the loud one. */
+.shout-row-system { color: var(--text-muted); box-shadow: inset 3px 0 0 var(--border); }
+.shout-row-system .shout-who { color: var(--text-muted); font-style: italic; }
 .shout-confirm { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem; margin-left: auto; flex: 0 0 auto; }
 .shout-confirm-q { font-size: 0.78rem; color: var(--text-muted); }
 .shout-yes, .shout-no { background: none; border: 1px solid var(--border); border-radius: 4px;

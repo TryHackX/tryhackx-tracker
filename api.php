@@ -273,6 +273,9 @@ $apiRoutes = [
     'shout_post'                 => 'api/shout_post.php',
     'shout_delete'               => 'api/shout_delete.php',
     'shout_seen'                 => 'api/shout_seen.php',
+    // Pinning is a moderator's act through the public endpoint, like taking a line down: it is not
+    // an `admin/` road, because the person doing it need never see the panel.
+    'shout_pin'                  => 'api/shout_pin.php',
     'admin/shout_purge'          => 'api/admin/shout_purge.php',
     // Emotes and stickers (1.59.0). `shout_emote` streams one picture and is PUBLIC, like `sound`:
     // it is referenced from every rendered line. `admin/shout_emotes` is the manager and is

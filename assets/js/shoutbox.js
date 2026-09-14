@@ -372,6 +372,7 @@
         var fmtEl = document.getElementById('shout-body-format');
         var emojiBtn = document.getElementById('shout-emoji');
         var refreshBtn = document.getElementById('shout-refresh');
+        var pinnedEl = document.getElementById('shout-pinned');
         if (!listEl) return;
 
         var newest = Number(box.dataset.newest || 0);
@@ -380,6 +381,7 @@
         var maxChars = Number(box.dataset.max || 500) || 500;
         var format = box.dataset.format || 'bbcode';
         var meId = Number(box.dataset.me || 0);
+        var mayModerate = box.dataset.mayModerate === '1';
         var seen = 0;                 // the highest id this reader has been told about
         var polling = false;
         var timer = 0;
@@ -389,24 +391,81 @@
 
         function note(text) { if (noteEl) noteEl.textContent = text || ''; }
 
+        /**
+         * The name a line is signed with — a link to the profile, or plain text when nobody wrote
+         * it. A line the SITE said has no profile to open, and neither has a row whose account has
+         * since gone; `user_id` 0 is how the server says so, for both.
+         *
+         * `title` because the column is a fixed width: a name longer than it is cut with an
+         * ellipsis so it cannot push the words out of line, and a cut name with no way to read the
+         * whole of it is a worse trade than the ragged column it replaced.
+         */
+        function who(r) {
+            var name = String(r.user || '');
+            return (Number(r.user_id) || 0) > 0
+                ? el('a', { className: 'shout-who', title: name, href: BASE + '?action=u&name=' + encodeURIComponent(name), text: name })
+                : el('span', { className: 'shout-who', title: name, text: name });
+        }
+
         /** One shout, exactly as templates/partials/shoutbox_widget.php draws it. */
         function renderRow(r) {
             var name = String(r.user || '');
             var at = String(r.at || '');
-            var row = el('div', { className: 'shout-row' + (r.own ? ' shout-row-own' : '') + (r.mentions_me ? ' shout-row-mention' : '') });
+            var row = el('div', { className: 'shout-row' + (r.own ? ' shout-row-own' : '') + (r.mentions_me ? ' shout-row-mention' : '') + (r.system ? ' shout-row-system' : '') });
             row.dataset.id = String(Number(r.id) || 0);
             row.dataset.user = name;
-            // `title` because the column is a fixed width: a name longer than it is cut with an
-            // ellipsis so it cannot push the words out of line, and a cut name with no way to read
-            // the whole of it is a worse trade than the ragged column it replaced.
-            row.appendChild(el('a', { className: 'shout-who', title: name, href: BASE + '?action=u&name=' + encodeURIComponent(name), text: name }));
+            row.appendChild(who(r));
             row.appendChild(el('span', { className: 'shout-time', title: at, text: at.slice(11, 16) }));
             row.appendChild(el('span', { className: 'shout-body rt-body', html: r.html || '' }));
+            // From the box's own permission rather than from anything per row: pinning is
+            // `shout.moderate` and that answer is the same for every line on the page.
+            if (mayModerate) {
+                row.appendChild(el('button', { type: 'button', className: 'shout-pin',
+                                               title: t('js.shout.pin'), 'aria-label': t('js.shout.pin'), text: '📌' }));
+            }
             if (r.deletable) {
                 row.appendChild(el('button', { type: 'button', className: 'shout-del',
                                                title: t('js.shout.delete'), 'aria-label': t('js.shout.delete'), text: '×' }));
             }
             return row;
+        }
+
+        /**
+         * The pinned strip, redrawn from what the server just said — the same node the first render
+         * filled, and the same shape, so there is one description of a pinned line rather than two.
+         *
+         * `null` empties it and hides it again: unpinning has to leave the room looking like a room
+         * with nothing pinned, not like one with an empty box at the top.
+         */
+        function renderPinned(row) {
+            if (!pinnedEl) return;
+            pinnedEl.textContent = '';
+            if (!row) { pinnedEl.hidden = true; delete pinnedEl.dataset.id; return; }
+            pinnedEl.dataset.id = String(Number(row.id) || 0);
+            pinnedEl.hidden = false;
+            pinnedEl.appendChild(el('span', { className: 'shout-pin-icon', 'aria-hidden': 'true', text: '📌' }));
+            pinnedEl.appendChild(who(row));
+            pinnedEl.appendChild(el('span', { className: 'shout-body rt-body', html: row.html || '' }));
+            if (mayModerate) {
+                pinnedEl.appendChild(el('button', { type: 'button', className: 'shout-unpin',
+                                                    title: t('js.shout.unpin'), 'aria-label': t('js.shout.unpin'), text: '×' }));
+            }
+        }
+
+        /**
+         * Pin a line, or take the pinned one down.
+         *
+         * The answer carries the pinned row as the server would hand it to anybody else, so the
+         * strip is drawn from that rather than from whatever this browser happened to have — which
+         * is also how pinning a second line makes the first one disappear from it without this
+         * side having to know that rule.
+         */
+        async function pin(id, on) {
+            if (!id) return;
+            var r = await post('shout_pin', { id: id, pin: !!on });
+            if (!r || !r.success) { note(errText(r, maxChars)); return; }
+            note('');
+            renderPinned(r.pinned || null);
         }
 
         /**
@@ -534,6 +593,10 @@
             listEl.insertBefore(frag, listEl.firstChild);
             listEl.scrollTop = wasTop + (listEl.scrollHeight - wasHeight);
             olderBtn.hidden = !j.has_more;
+            // This answer carries the pinned line and the poll's does not (the poll appends, and a
+            // pinned row handed to it would be appended for ever), so a strip that was pinned or
+            // unpinned by somebody else since the page loaded catches up here.
+            if (Object.prototype.hasOwnProperty.call(j, 'pinned')) renderPinned(j.pinned || null);
             note('');
         }
 
@@ -629,9 +692,23 @@
 
         // Delegated, so a row drawn by the server and a row drawn above by this script behave the same.
         listEl.addEventListener('click', function (e) {
-            var b = e.target.closest ? e.target.closest('.shout-del') : null;
-            if (b && listEl.contains(b)) askDelete(b);
+            if (!e.target.closest) return;
+            var del = e.target.closest('.shout-del');
+            if (del && listEl.contains(del)) { askDelete(del); return; }
+            // Pinning asks nothing first: it is one line moving to the top of a room, and the strip
+            // it lands in has an unpin beside it. Deleting is the one that cannot be taken back.
+            var p = e.target.closest('.shout-pin');
+            if (p && listEl.contains(p)) {
+                var row = p.closest('.shout-row');
+                if (row) pin(Number(row.dataset.id) || 0, true);
+            }
         });
+        if (pinnedEl) {
+            pinnedEl.addEventListener('click', function (e) {
+                var b = e.target.closest ? e.target.closest('.shout-unpin') : null;
+                if (b) pin(Number(pinnedEl.dataset.id) || 0, false);
+            });
+        }
         if (olderBtn) olderBtn.addEventListener('click', older);
         if (refreshBtn) refreshBtn.addEventListener('click', refresh);
         if (sendBtn) sendBtn.addEventListener('click', send);
@@ -669,7 +746,7 @@
         if (live > 0) timer = setInterval(poll, live * 1000);
         // One tick on demand, for the browser checks and for anything that wants to catch up now.
         window.ShoutTick = poll;
-        window.Shout = { tick: poll, refresh: refresh, older: older,
+        window.Shout = { tick: poll, refresh: refresh, older: older, pin: pin,
                          newest: function () { return newest; }, insert: insert };
     }
 

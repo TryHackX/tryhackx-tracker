@@ -79,6 +79,30 @@ function shoutLiveSeconds(array $cfg): int
     return $v <= 0 ? 0 : max(3, min(120, $v));
 }
 
+/**
+ * The same cadence, asked about a reader with no account (v66).
+ *
+ * A guest the operator handed `shout.view` reads and never writes, and on a public tracker there
+ * are far more of them than there are members — so the number that is right for somebody waiting
+ * for an answer to what they just said is, for a guest, a request every ten seconds that buys
+ * nothing. 0 means a guest does not poll at all and reads whatever the page was drawn with.
+ *
+ * The ceiling is wider than the member one (five minutes rather than two) because "every few
+ * minutes" is a sensible answer for somebody who is only reading; the floor is the same three
+ * seconds, because below that this stops being a refresh whoever is asking.
+ */
+function shoutLiveSecondsGuest(array $cfg): int
+{
+    $v = (int)($cfg['shout_live_seconds_guest'] ?? 30);
+    return $v <= 0 ? 0 : max(3, min(300, $v));
+}
+
+/** Which of the two this reader gets, so the widget and the endpoint cannot disagree about it. */
+function shoutLiveSecondsFor(array $cfg, bool $isGuest): int
+{
+    return $isGuest ? shoutLiveSecondsGuest($cfg) : shoutLiveSeconds($cfg);
+}
+
 function shoutMaxChars(array $cfg): int   { return max(1, min(2000, (int)($cfg['shout_max_chars'] ?? 500) ?: 500)); }
 function shoutWidgetRows(array $cfg): int { return max(5, min(100, (int)($cfg['shout_widget_rows'] ?? 25) ?: 25)); }
 function shoutPageRows(array $cfg): int   { return max(20, min(500, (int)($cfg['shout_page_rows'] ?? 100) ?: 100)); }
@@ -88,6 +112,37 @@ function shoutKeepDays(array $cfg): int   { return max(1, min(3650, (int)($cfg['
 
 /** The optional house rules printed above the box. Plain text, bounded where it is saved. */
 function shoutRules(array $cfg): string { return trim((string)($cfg['shout_rules'] ?? '')); }
+
+/**
+ * Is the room in the navigation, with a number of its own? (v66)
+ *
+ * The number is NOT folded into the account badge, and that is the whole decision here: that badge
+ * means "notifications and messages waiting", a reader who sees 5 on it has two tabs to look in,
+ * and a third meaning would leave it answering nothing. So this is a second element beside it, the
+ * way the sounds note already is.
+ */
+function shoutNav(array $cfg): bool
+{
+    return shoutEnabled($cfg) && (($cfg['shout_nav'] ?? '0') === '1');
+}
+
+/**
+ * Where that link goes — which is wherever the box actually is.
+ *
+ * With `shout_placement` on 'home' there is nothing at ?action=shoutbox to send anybody to (that
+ * address answers "there is no shoutbox here"), and the badge is cleared by a widget being on the
+ * screen, so the link has to land on a page that draws one or the number never clears.
+ */
+function shoutNavUrl(array $cfg, string $baseUrl): string
+{
+    return shoutPlacement($cfg) === 'home' ? $baseUrl : $baseUrl . '?action=shoutbox';
+}
+
+/** Does the site write its own lines into the room ("a torrent was registered")? (v66) */
+function shoutSystemLines(array $cfg): bool
+{
+    return shoutEnabled($cfg) && (($cfg['shout_system_lines'] ?? '0') === '1');
+}
 
 /* ── who may read, who may write ───────────────────────────────────────────── */
 
@@ -237,7 +292,10 @@ function shoutPost(PDO $db, array $cfg, array $user, string $body, string $forma
     // whose clock drifts from MariaDB's cannot let a burst through (or refuse an honest shout).
     $wait = shoutFloodSeconds($cfg);
     if ($wait > 0) {
-        $st = $db->prepare("SELECT TIMESTAMPDIFF(SECOND, created_at, NOW()) FROM shouts WHERE user_id = ? ORDER BY id DESC LIMIT 1");
+        // `is_system = 0`: a line the SITE said about this account (v66 — "a torrent was
+        // registered", signed with the submitter) is not this account typing, and counting it here
+        // would mean registering a torrent silently gagged the person for the flood interval.
+        $st = $db->prepare("SELECT TIMESTAMPDIFF(SECOND, created_at, NOW()) FROM shouts WHERE user_id = ? AND is_system = 0 ORDER BY id DESC LIMIT 1");
         $st->execute([$uid]);
         $since = $st->fetchColumn();
         if ($since !== false && $since !== null && (int)$since < $wait) {
@@ -278,7 +336,80 @@ function shoutPost(PDO $db, array $cfg, array $user, string $body, string $forma
     return ['ok' => true, 'error' => '', 'row' => $row, 'id' => $id];
 }
 
+/* ── lines the site says (v66) ─────────────────────────────────────────────── */
+
+/**
+ * Write a line the SITE said. Returns the new id, or 0 when there was nothing to write.
+ *
+ * Not shoutPost() with a flag, because shoutPost() is about a PERSON: it asks whether they may
+ * write here, how fast they are typing and whether what they typed survives richtextValidate(),
+ * and not one of those questions has an answer when the writer is the tracker. The body is composed
+ * by this file out of a dictionary string and a number, so there is nothing somebody typed to
+ * validate — and `plain` is the format for the same reason, since markup nobody asked for is markup
+ * nobody is responsible for.
+ *
+ * `$userId` is who the line is ABOUT, and becomes the name it is signed with: the submitter, when
+ * they asked to be named. NULL signs it with the site. Either way the row is `is_system`, which is
+ * what keeps it out of everybody's unread counts (so registering a torrent never makes the room
+ * ping) and out of "own" (so the person it names cannot delete it, and nor can anybody but a
+ * moderator).
+ */
+function shoutSystemPost(PDO $db, array $cfg, string $body, ?int $userId = null): int
+{
+    $body = trim($body);
+    if (!shoutSystemLines($cfg) || $body === '') return 0;
+    $author = ($userId !== null && $userId > 0) ? $userId : null;
+    try {
+        $st = $db->prepare("INSERT INTO shouts (user_id, body, body_format, is_system) VALUES (?, ?, 'plain', 1)");
+        $st->bindValue(1, $author, $author === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+        // Bounded by the COLUMN's sense of a sentence, not by `shout_max_chars`: that number is how
+        // much a member may say, and an operator who sets it to ten has not asked for the site's own
+        // announcements to be cut in half.
+        $st->bindValue(2, mb_substr($body, 0, 500));
+        $st->execute();
+        return (int)$db->lastInsertId();
+    } catch (\Throwable $e) {
+        return 0;   // the columns arrive with schema 66, and a batch of hashes has to land either way
+    }
+}
+
+/**
+ * "A torrent was registered", once per batch.
+ *
+ * ONE line for the batch rather than one per hash: somebody registering forty torrents is one thing
+ * that happened, and forty lines is the room emptied of everything anybody said.
+ *
+ * WHO IT NAMES is `wl_submitter_public`'s decision and not this function's — a submitter who is not
+ * public is named nowhere else on the site and must not be named here either, so the line becomes
+ * the site saying that a torrent arrived. The name rides as the row's AUTHOR rather than as a word
+ * inside the sentence, because a name dropped into a sentence has to agree with a verb, and this
+ * sentence is written once per language and then read by everybody.
+ *
+ * In the site's OWN language (`default_language`), not the visitor's: the row is written once and
+ * read by every reader afterwards, so the language of whoever happened to press the button is the
+ * one thing it must not be.
+ */
+function shoutSystemWhitelistAdded(PDO $db, array $cfg, int $count, ?int $submitterId): void
+{
+    if ($count <= 0 || !shoutSystemLines($cfg) || !function_exists('langFor')) return;
+    $named = $submitterId !== null && $submitterId > 0;
+    $key = 'shout.sys_wl_' . ($named ? 'named' : 'anon') . ($count === 1 ? '_one' : '_many');
+    shoutSystemPost($db, $cfg, langFor((string)($cfg['default_language'] ?? ''), $key, ['n' => $count]),
+                    $named ? $submitterId : null);
+}
+
 /* ── reading them ──────────────────────────────────────────────────────────── */
+
+/**
+ * What a shout IS, as far as every read path is concerned. One string, so the list, the "older"
+ * button and the pinned line cannot drift apart about which columns a row carries.
+ *
+ * A LEFT join from v66: `shouts.user_id` is nullable now, because a line the SITE said has no
+ * author. An inner join would have silently dropped exactly those rows from every list.
+ */
+const SHOUT_ROW_SELECT = "SELECT s.id, s.user_id, s.body, s.body_format, s.created_at, s.is_system,
+                                 s.pinned_at, u.username
+                            FROM shouts s LEFT JOIN users u ON u.id = s.user_id";
 
 /** The newest id in the room — the baseline a freshly drawn widget starts polling from. */
 function shoutNewestId(PDO $db): int
@@ -318,25 +449,33 @@ function shoutHasOlder(PDO $db, int $oldestId): bool
 function shoutRows(PDO $db, array $cfg, array $me, int $limit, ?int $after = null, ?int $before = null): array
 {
     $limit = max(1, min(500, $limit));
-    $meId = (int)($me['id'] ?? 0);
     if ($after !== null) {
-        $st = $db->prepare("SELECT s.id, s.user_id, s.body, s.body_format, s.created_at, u.username
-                              FROM shouts s JOIN users u ON u.id = s.user_id
-                             WHERE s.deleted_at IS NULL AND s.id > ? ORDER BY s.id ASC LIMIT $limit");
+        $st = $db->prepare(SHOUT_ROW_SELECT . " WHERE s.deleted_at IS NULL AND s.id > ? ORDER BY s.id ASC LIMIT $limit");
         $st->execute([(int)$after]);
         $raw = $st->fetchAll(PDO::FETCH_ASSOC);
     } else {
         // Newest first for the query (that is what the index answers from the end), reversed below.
-        $sql = "SELECT s.id, s.user_id, s.body, s.body_format, s.created_at, u.username
-                  FROM shouts s JOIN users u ON u.id = s.user_id
-                 WHERE s.deleted_at IS NULL";
+        $sql = SHOUT_ROW_SELECT . " WHERE s.deleted_at IS NULL";
         $args = [];
         if ($before !== null) { $sql .= " AND s.id < ?"; $args[] = (int)$before; }
         $st = $db->prepare($sql . " ORDER BY s.id DESC LIMIT $limit");
         $st->execute($args);
         $raw = array_reverse($st->fetchAll(PDO::FETCH_ASSOC));
     }
+    return shoutShape($db, $cfg, $me, $raw);
+}
+
+/**
+ * Raw rows -> the rows the browser is handed. The ONE place a shout becomes something to display.
+ *
+ * Split out of shoutRows() in v66 because there are two ways to ask for a shout now — the list and
+ * the pinned line — and a second copy of "what may this reader do with it, and what does the body
+ * render as" is a second answer waiting to disagree with the first.
+ */
+function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
+{
     if (!$raw) return [];
+    $meId = (int)($me['id'] ?? 0);
 
     // Two permissions, asked once for the reader rather than once per row.
     $mayModerate = $meId > 0 && userIdHasPermission($db, $cfg, $meId, 'shout.moderate');
@@ -348,6 +487,11 @@ function shoutRows(PDO $db, array $cfg, array $me, int $limit, ?int $after = nul
     // is off, which is what makes shoutRenderEmotes() a no-op instead of a second switch.
     $emotes = shoutEmotes($db, $cfg);
     $stickersOn = shoutStickersEnabled($cfg);
+    // What a line with no author is signed with. `user_id` is nullable from v66, so a row can
+    // honestly have nobody behind it — and a blank name column reads as a bug rather than as the
+    // site saying something.
+    $siteName = trim((string)($cfg['site_name'] ?? ''));
+    if ($siteName === '') $siteName = __('shout.system_who');
 
     // Which of these lines named me — from the table written when they were said, not from parsing
     // them again now.
@@ -362,25 +506,99 @@ function shoutRows(PDO $db, array $cfg, array $me, int $limit, ?int $after = nul
 
     $out = [];
     foreach ($raw as $r) {
-        $own = $meId > 0 && (int)$r['user_id'] === $meId;
+        $system = !empty($r['is_system']);
+        // An author this site can still name. A row whose account has gone (or which never had
+        // one) is the site speaking, and `user_id` 0 is what tells both renderers not to link it.
+        $authorId = $r['user_id'] === null ? 0 : (int)$r['user_id'];
+        $authorName = ($authorId > 0 && $r['username'] !== null) ? (string)$r['username'] : '';
+        // A system line is never MINE, whoever it happens to be about: "own" is what lets somebody
+        // take back their own sentence, and nobody wrote this one.
+        $own = !$system && $meId > 0 && $authorId === $meId;
         $fmt = (string)$r['body_format'];
         $html = $fmt === 'plain'
             ? nl2br(htmlspecialchars((string)$r['body'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false)
             : richtextRender((string)$r['body'], $fmt, $cfg, true);
         $out[] = [
             'id'          => (int)$r['id'],
-            'user'        => (string)$r['username'],
-            'user_id'     => (int)$r['user_id'],
+            'user'        => $authorName !== '' ? $authorName : $siteName,
+            'user_id'     => $authorName !== '' ? $authorId : 0,
             'at'          => (string)$r['created_at'],
             // Mentions first, emotes last: both walk the TEXT of finished html and neither may see
             // the other's tag as writing. `:code:` inside an href is an address, not an emote.
             'html'        => shoutRenderEmotes(shoutLinkMentions($html, $known, $base, $meName), $emotes, $base, $stickersOn),
             'own'         => $own,
+            'system'      => $system,
+            'pinned'      => ($r['pinned_at'] ?? null) !== null,
             'deletable'   => $mayModerate || ($own && $mayDeleteOwn),
             'mentions_me' => isset($mine[(int)$r['id']]),
         ];
     }
     return $out;
+}
+
+/* ── the one pinned line (v66) ─────────────────────────────────────────────── */
+
+/**
+ * The pinned announcement, shaped exactly like any other row, or null when there is none.
+ *
+ * At most one row ever carries `pinned_at` — shoutPin() is what keeps that true — so this is one
+ * indexed lookup and not a sort. It is deliberately NOT part of the `after=` answer: that path
+ * appends at the bottom of the list, and a pinned row handed to it would be appended again on
+ * every tick until the room was nothing else.
+ */
+function shoutPinned(PDO $db, array $cfg, ?array $me): ?array
+{
+    try {
+        $st = $db->prepare(SHOUT_ROW_SELECT . " WHERE s.deleted_at IS NULL AND s.pinned_at IS NOT NULL
+                                                ORDER BY s.pinned_at DESC LIMIT 1");
+        $st->execute();
+        $raw = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        return null;   // the columns arrive with schema 66; mid-upgrade nothing is pinned
+    }
+    $rows = shoutShape($db, $cfg, is_array($me) ? $me : [], $raw);
+    return $rows ? $rows[0] : null;
+}
+
+/**
+ * Pin a line, or unpin it. ['ok' => true, 'id' => n] or ['ok' => false, 'error' => …] with
+ * not_found | no_permission | failed.
+ *
+ * ONE AT A TIME, and that is the whole rule: pinning is a moderator saying "this is the thing
+ * everybody should read", and two of them is nobody reading either. So the unpin of whatever was
+ * there and the pin of this one are a single transaction — half of that pair is a room with two
+ * announcements, or with none where a moment ago there was one.
+ *
+ * `shout.moderate` and no new permission: it already means room-wide authority, it is already what
+ * takes somebody else's line down, and a grant nobody has been given yet is a feature nobody can
+ * use until the operator goes looking for it.
+ */
+function shoutPin(PDO $db, array $cfg, array $me, int $id, bool $on): array
+{
+    $meId = (int)($me['id'] ?? 0);
+    if ($meId <= 0 || !userIdHasPermission($db, $cfg, $meId, 'shout.moderate')) {
+        return ['ok' => false, 'error' => 'no_permission'];
+    }
+    $st = $db->prepare("SELECT id FROM shouts WHERE id = ? AND deleted_at IS NULL LIMIT 1");
+    $st->execute([$id]);
+    if (!$st->fetchColumn()) return ['ok' => false, 'error' => 'not_found'];
+
+    try {
+        $db->beginTransaction();
+        $db->prepare("UPDATE shouts SET pinned_at = NULL, pinned_by = NULL WHERE pinned_at IS NOT NULL")->execute();
+        if ($on) {
+            $db->prepare("UPDATE shouts SET pinned_at = NOW(), pinned_by = ? WHERE id = ?")->execute([$meId, $id]);
+        }
+        $db->commit();
+    } catch (\Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        return ['ok' => false, 'error' => 'failed'];
+    }
+    if (function_exists('auditLog')) {
+        auditLog($db, 'shout.pin', ['target_type' => 'shout', 'target_id' => $id,
+            'summary' => (string)($me['username'] ?? '#' . $meId) . ($on ? ' → pinned shout #' : ' → unpinned shout #') . $id]);
+    }
+    return ['ok' => true, 'error' => '', 'id' => $on ? $id : 0];
 }
 
 /* ── removing one ──────────────────────────────────────────────────────────── */
@@ -398,13 +616,15 @@ function shoutDelete(PDO $db, array $cfg, array $me, int $id): array
 {
     $meId = (int)($me['id'] ?? 0);
     if ($meId <= 0) return ['ok' => false, 'error' => 'no_permission'];
-    $st = $db->prepare("SELECT s.id, s.user_id, u.username FROM shouts s JOIN users u ON u.id = s.user_id
+    $st = $db->prepare("SELECT s.id, s.user_id, s.is_system, u.username FROM shouts s LEFT JOIN users u ON u.id = s.user_id
                          WHERE s.id = ? AND s.deleted_at IS NULL LIMIT 1");
     $st->execute([$id]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
     if (!$row) return ['ok' => false, 'error' => 'not_found'];
 
-    $own = (int)$row['user_id'] === $meId;
+    // Nobody owns a line the site said, not even the account it names — so taking one down is a
+    // moderator's act and `shout.delete_own` never reaches it.
+    $own = empty($row['is_system']) && $row['user_id'] !== null && (int)$row['user_id'] === $meId;
     $mayModerate = userIdHasPermission($db, $cfg, $meId, 'shout.moderate');
     if (!$mayModerate && !($own && userIdHasPermission($db, $cfg, $meId, 'shout.delete_own'))) {
         return ['ok' => false, 'error' => 'no_permission'];
@@ -434,7 +654,10 @@ function shoutSeen(PDO $db, int $userId, int $id): void
  * all three). The sounds want "a friend", "anybody else" and "me by name" as three events, and
  * anybody else is the subtraction the client does — the same shape as the message counts.
  *
- * My own lines are never new to me, and a deleted one is not new to anybody.
+ * My own lines are never new to me, a deleted one is not new to anybody, and a line the SITE said
+ * (v66) is new to nobody at all: an announcement that made every reader's badge count up — and, on
+ * the readers who asked for one, made a sound — every time somebody registered a torrent is the one
+ * thing "the site says something occasionally" must not turn into.
  */
 function shoutUnreadCounts(PDO $db, array $cfg, array $me): array
 {
@@ -457,7 +680,7 @@ function shoutUnreadCounts(PDO $db, array $cfg, array $me): array
                                             OR (f.user_id = s.user_id AND f.friend_id = ?)))), 0) AS friends,
                     COALESCE(SUM(EXISTS(SELECT 1 FROM shout_mentions m WHERE m.shout_id = s.id AND m.user_id = ?)), 0) AS mentions
                FROM shouts s
-              WHERE s.id > ? AND s.deleted_at IS NULL AND s.user_id <> ?");
+              WHERE s.id > ? AND s.deleted_at IS NULL AND s.is_system = 0 AND s.user_id <> ?");
         $st->execute([$meId, $meId, $meId, $seen, $meId]);
         $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
         return ['shout' => (int)($r['total'] ?? 0), 'shout_friend' => (int)($r['friends'] ?? 0),

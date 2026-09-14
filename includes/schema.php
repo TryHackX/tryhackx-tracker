@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 65;  // 65 = shout_emote_approval and the approved_at stamp beside it: a member's uploaded emote waits for the operator instead of being everybody's the moment it lands, and the stamp is what keeps "waiting to be let in" apart from "switched off afterwards"
+const TRACKER_SCHEMA_VERSION = 66;  // 66 = the shoutbox's pinned line (shouts.pinned_at/pinned_by, at most one of them at a time) and the lines the SITE says (shouts.is_system) — which is why user_id is nullable from here on: an announcement has no author, and a row pointing at account 0 would be a lie rather than an absence
+                                    // 65 = shout_emote_approval and the approved_at stamp beside it: a member's uploaded emote waits for the operator instead of being everybody's the moment it lands, and the stamp is what keeps "waiting to be let in" apart from "switched off afterwards"
                                     // 64 = shoutbox emotes and stickers (includes/shout.php): `shout_emotes` (images as rows, like `sounds`), the five shout_emote_*/shout_stickers_* settings, the `shout.upload_emote` permission (registered, granted to nobody), and the shipped examples seeded from assets/emotes/*.svg
                                     // 63 = the shoutbox (includes/shout.php): `shouts` + `shout_mentions` + users.shout_seen_id, the shout_* settings, and shout.view/post/delete_own to the member group (shout.moderate to the moderator one)
                                     // 62 = index_hashes.idx_index_meta_done_fetched (a heavy index, built by the janitor's CLI run) for the bounded protection backfill; the owner's mirror row takes the panel's current password hash (once), csp_report_enabled ships off, the old pm-notification delete runs once instead of at every bump
@@ -836,20 +837,31 @@ function trackerSchemaStatements(): array {
         // `ip_bucket` is the same bucket the rate limiter uses (IPv4 exact, IPv6 /64), kept only as
         // long as the row is.
         //
-        // The two indexes answer the only two questions asked: "what is newer/older than this id"
-        // walks the primary key, `idx_shouts_created` is what retention sweeps by, and
-        // `idx_shouts_user` is the flood check ("when did this account last speak").
+        // The indexes answer the only questions asked: "what is newer/older than this id" walks the
+        // primary key, `idx_shouts_created` is what retention sweeps by, `idx_shouts_user` is the
+        // flood check ("when did this account last speak"), and `idx_shouts_pinned` is the one
+        // pinned line — a column that is NULL on all but one row, looked up on every render.
+        //
+        // v66: `user_id` is NULLABLE and `is_system` says why. A line the site says ("a torrent was
+        // registered") has no author, and `user_id = 0` would be a row pointing at an account that
+        // does not exist — an absence written as a lie. A system line MAY still carry an author, the
+        // submitter it is about, when that submitter asked to be named; what `is_system` decides is
+        // that nobody owns it, it is nobody's unread and it makes no sound.
         "CREATE TABLE IF NOT EXISTS `shouts` (
             `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            `user_id` INT UNSIGNED NOT NULL,
+            `user_id` INT UNSIGNED DEFAULT NULL,
             `body` VARCHAR(2000) NOT NULL,
             `body_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+            `is_system` TINYINT(1) NOT NULL DEFAULT 0,
             `ip_bucket` VARCHAR(45) DEFAULT NULL,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `pinned_at` DATETIME DEFAULT NULL,
+            `pinned_by` INT UNSIGNED DEFAULT NULL,
             `deleted_by` INT UNSIGNED DEFAULT NULL,
             `deleted_at` DATETIME DEFAULT NULL,
             KEY `idx_shouts_created` (`created_at`),
-            KEY `idx_shouts_user` (`user_id`)
+            KEY `idx_shouts_user` (`user_id`),
+            KEY `idx_shouts_pinned` (`pinned_at`)
         ) $engine",
 
         // Who a shout named, decided ONCE when it was written. Parsing every body on every read
@@ -1464,15 +1476,19 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // the bug that once stopped a fresh install at version 0 (see the note on `fav_public`).
     $out[] = "CREATE TABLE IF NOT EXISTS `shouts` (
         `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-        `user_id` INT UNSIGNED NOT NULL,
+        `user_id` INT UNSIGNED DEFAULT NULL,
         `body` VARCHAR(2000) NOT NULL,
         `body_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+        `is_system` TINYINT(1) NOT NULL DEFAULT 0,
         `ip_bucket` VARCHAR(45) DEFAULT NULL,
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `pinned_at` DATETIME DEFAULT NULL,
+        `pinned_by` INT UNSIGNED DEFAULT NULL,
         `deleted_by` INT UNSIGNED DEFAULT NULL,
         `deleted_at` DATETIME DEFAULT NULL,
         KEY `idx_shouts_created` (`created_at`),
-        KEY `idx_shouts_user` (`user_id`)
+        KEY `idx_shouts_user` (`user_id`),
+        KEY `idx_shouts_pinned` (`pinned_at`)
     ) $engine";
     $out[] = "CREATE TABLE IF NOT EXISTS `shout_mentions` (
         `shout_id` BIGINT UNSIGNED NOT NULL,
@@ -1509,6 +1525,24 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'shout_emotes', 'approved_at')) {
         $out[] = "ALTER TABLE `shout_emotes` ADD COLUMN `approved_at` DATETIME DEFAULT NULL";
     }
+
+    // v66: the pinned announcement and the lines the site says. One ALTER rather than four, because
+    // each one of them rebuilds the table and the room is read on every front page.
+    //
+    // The `user_id` change is the interesting half: it goes from NOT NULL to nullable because an
+    // announcement has no author. Guarded on the column's own nullability (schemaColumnNullable)
+    // rather than on a marker, so it runs exactly once and a database that already answers "yes" is
+    // never rebuilt again — and behind schemaTableExists(), because a MODIFY against a table that is
+    // not there throws, and a throw here stops every migration after it.
+    $sparts = [];
+    if (schemaTableExists($db, 'shouts')) {
+        if (!schemaColumnExists($db, 'shouts', 'is_system')) $sparts[] = "ADD COLUMN `is_system` TINYINT(1) NOT NULL DEFAULT 0";
+        if (!schemaColumnExists($db, 'shouts', 'pinned_at')) $sparts[] = "ADD COLUMN `pinned_at` DATETIME DEFAULT NULL";
+        if (!schemaColumnExists($db, 'shouts', 'pinned_by')) $sparts[] = "ADD COLUMN `pinned_by` INT UNSIGNED DEFAULT NULL";
+        if (!schemaColumnNullable($db, 'shouts', 'user_id')) $sparts[] = "MODIFY COLUMN `user_id` INT UNSIGNED DEFAULT NULL";
+        if (!schemaIndexExists($db, 'shouts', 'idx_shouts_pinned')) $sparts[] = "ADD KEY `idx_shouts_pinned` (`pinned_at`)";
+    }
+    if ($sparts) $out[] = "ALTER TABLE `shouts` " . implode(', ', $sparts);
 
     // v53: the second factor, and what a remember-me token was handed to. Same definitions as the
     // CREATE above, for the reason the v51 comment gives.
@@ -2527,6 +2561,22 @@ function trackerSchemaDefaultSettings(): array {
         // switched off and shows in the manager's waiting queue; the panel's own never waits, and
         // with this off the behaviour is what it was in 1.59.0 — visible to everybody at once.
         'shout_emote_approval'        => '1',
+        // ── The room in the navigation, a guest's own cadence, and the site's own lines (v66) ──
+        // All three off or conservative, like everything new here. `shout_nav` puts a Shoutbox link
+        // in the bar with a counter of its OWN — never folded into the account badge, which means
+        // notifications and messages and has to go on meaning exactly that.
+        //
+        // `shout_live_seconds_guest` is the cadence for a reader with no account: they read and
+        // never write, and on a public tracker there are far more of them, so the number that is
+        // right for somebody waiting for an answer is wrong for somebody who is only watching. 0
+        // means a guest does not poll at all.
+        //
+        // `shout_system_lines` lets the SITE say something in the room ("a torrent was registered"),
+        // one line per batch, naming the submitter only where the submitter is public. Off, because
+        // a room that fills with the tracker talking to itself is a room people stop reading.
+        'shout_nav'                   => '0',
+        'shout_live_seconds_guest'    => '30',  // clamped [0, 300], read as 0 or 3..300
+        'shout_system_lines'          => '0',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

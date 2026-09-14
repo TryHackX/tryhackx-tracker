@@ -757,7 +757,7 @@
                      deletes rows and therefore asks for the owner's password (assets/js/admin-shout.js
                      → admin/shout_purge). Its day box has an id and no name, so it never travels with
                      the form. */ ?>
-            <div class="settings-section" id="section-shout" data-group="content" data-title="<?= _h('settings.shout_title') ?>">
+            <div class="settings-section" id="section-shout" data-group="shoutbox" data-title="<?= _h('settings.shout_title') ?>">
                 <h5><i class="bi bi-chat-left-dots"></i> <?= _h('settings.shout_title') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.shout_intro') ?></small>
                 <div class="row g-3">
@@ -830,6 +830,46 @@
                         <small class="settings-hint"><?= __('settings.shout_rules_hint') ?></small>
                     </div>
                 </div>
+                <?php /* ── Where it is seen, and who says what (1.60.0) ────────────────────────
+                         An h6 sub-head rather than a section of its own, the way Settings → Network
+                         & limits splits its throttle off: these are three more answers about the
+                         same room, and a second "Shoutbox" chip would be two places to look for one
+                         subject. */ ?>
+                <h6 class="mt-4 mb-1" id="section-shout-nav"><?= _h('settings.shout_nav_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.shout_nav_heading_sub') ?></small></h6>
+                <div class="row g-3">
+                    <div class="col-md-4" data-setting="shout_nav">
+                        <label class="form-label"><?= _h('settings.shout_nav') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_nav">
+                            <option value="0" <?= ($cfg['shout_nav'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            <option value="1" <?= ($cfg['shout_nav'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.shout_nav_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="shout_live_seconds_guest">
+                        <label class="form-label"><?= _h('settings.shout_live_seconds_guest') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_live_seconds_guest" value="<?= sanitize($cfg['shout_live_seconds_guest'] ?? '30') ?>" min="0" max="300">
+                        <small class="settings-hint"><?= __('settings.shout_live_seconds_guest_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="shout_system_lines">
+                        <label class="form-label"><?= _h('settings.shout_system_lines') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_system_lines">
+                            <option value="0" <?= ($cfg['shout_system_lines'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            <option value="1" <?= ($cfg['shout_system_lines'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.shout_system_lines_hint') ?></small>
+                    </div>
+                </div>
+                <?php /* Who may read and who may write, per group: the same read-only matrix
+                         Users → Groups draws (renderMatrix in assets/js/admin-users.js), scoped to
+                         the five shout.* ids and fed by the same endpoint — no second idea of what a
+                         permission is, and no new payload. Folded, and filled only when it is
+                         opened: it answers a question that is asked once, usually right after the
+                         room is switched on for the first time. */ ?>
+                <details class="gr-matrix-wrap mt-3" id="shout-matrix-wrap">
+                    <summary class="wl-small text-muted"><?= _h('settings.shout_matrix_title') ?></summary>
+                    <small class="settings-hint d-block mt-2"><?= __('settings.shout_matrix_hint') ?></small>
+                    <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="shout-matrix"></table></div>
+                </details>
                 <?php /* ── Emotes and stickers (1.59.0, rebuilt in 1.59.1) ──────────────────────
                          Its own block rather than six more cells in the grid above: the switches, the
                          table and the form that adds one are three parts of a single subject, and in
@@ -1172,7 +1212,7 @@
                 </div>
             </div>
 
-            <div class="settings-section" id="section-sounds" data-group="users" data-title="<?= _h('settings.sounds_heading') ?>">
+            <div class="settings-section" id="section-sounds" data-group="sounds" data-title="<?= _h('settings.sounds_heading') ?>">
                 <h5><i class="bi bi-volume-up"></i> <?= _h('settings.sounds_heading') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.sounds_intro') ?></small>
                 <?php

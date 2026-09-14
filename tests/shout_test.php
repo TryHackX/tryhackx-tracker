@@ -45,10 +45,20 @@ check('schema version is at least 63', (int)($cfg['schema_version'] ?? 0) >= 63,
 check('the shouts table exists', (bool)$db->query("SHOW TABLES LIKE 'shouts'")->fetchColumn());
 check('the shout_mentions table exists', (bool)$db->query("SHOW TABLES LIKE 'shout_mentions'")->fetchColumn());
 check('users.shout_seen_id exists', schemaColumnExists($db, 'users', 'shout_seen_id'));
+// v66. `user_id` being nullable is the load-bearing one: a line the SITE said has no author, and an
+// inner join in any read path would have dropped exactly those rows out of every list in silence.
+check('schema version is at least 66', (int)($cfg['schema_version'] ?? 0) >= 66, (string)($cfg['schema_version'] ?? '?'));
+foreach (['is_system', 'pinned_at', 'pinned_by'] as $col) {
+    check("shouts.$col exists", schemaColumnExists($db, 'shouts', $col));
+}
+check('shouts.user_id is nullable, because an announcement has nobody behind it',
+      schemaColumnNullable($db, 'shouts', 'user_id'));
+check('the pinned lookup has an index to answer from', schemaIndexExists($db, 'shouts', 'idx_shouts_pinned'));
 $defaults = trackerSchemaDefaultSettings();
 foreach (['shout_enabled' => '0', 'shout_placement' => 'home', 'shout_widget_rows' => '25', 'shout_page_rows' => '100',
           'shout_max_chars' => '500', 'shout_flood_seconds' => '5', 'shout_live_seconds' => '10',
-          'shout_keep_rows' => '2000', 'shout_keep_days' => '30', 'shout_format' => 'bbcode', 'shout_rules' => ''] as $k => $v) {
+          'shout_keep_rows' => '2000', 'shout_keep_days' => '30', 'shout_format' => 'bbcode', 'shout_rules' => '',
+          'shout_nav' => '0', 'shout_live_seconds_guest' => '30', 'shout_system_lines' => '0'] as $k => $v) {
     check("the default for $k ships as '$v'", ($defaults[$k] ?? null) === $v, var_export($defaults[$k] ?? null, true));
 }
 foreach (['shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'] as $p) {
@@ -91,6 +101,26 @@ check('plain offers no choice of format; the others offer two',
 check('0 seconds means no polling, 1 and 2 are raised to 3, and 9999 is lowered to 120',
       shoutLiveSeconds(['shout_live_seconds' => '0']) === 0 && shoutLiveSeconds(['shout_live_seconds' => '1']) === 3
       && shoutLiveSeconds(['shout_live_seconds' => '9999']) === 120 && shoutLiveSeconds([]) === 10);
+// v66: a guest is a different reader, so they get a different number — with a wider ceiling, because
+// "every few minutes" is a sensible answer for somebody who is only watching.
+check('the guest cadence is its own number, clamped on its own terms',
+      shoutLiveSecondsGuest([]) === 30 && shoutLiveSecondsGuest(['shout_live_seconds_guest' => '0']) === 0
+      && shoutLiveSecondsGuest(['shout_live_seconds_guest' => '1']) === 3
+      && shoutLiveSecondsGuest(['shout_live_seconds_guest' => '9999']) === 300);
+check('… and one function decides which of the two a reader is on',
+      shoutLiveSecondsFor(['shout_live_seconds' => '10', 'shout_live_seconds_guest' => '0'], false) === 10
+      && shoutLiveSecondsFor(['shout_live_seconds' => '10', 'shout_live_seconds_guest' => '0'], true) === 0
+      && shoutLiveSecondsFor(['shout_live_seconds' => '0', 'shout_live_seconds_guest' => '60'], true) === 60);
+check('the navigation link and the site\'s own lines both need the room to be on first',
+      !shoutNav(['shout_nav' => '1']) && !shoutSystemLines(['shout_system_lines' => '1'])
+      && shoutNav(['users_enabled' => '1', 'shout_enabled' => '1', 'shout_nav' => '1'])
+      && shoutSystemLines(['users_enabled' => '1', 'shout_enabled' => '1', 'shout_system_lines' => '1']));
+// The link has to land on a page that DRAWS a box, or the badge it carries can never be cleared:
+// ?action=shoutbox answers "there is no shoutbox here" while the placement is the home block.
+check('the nav link goes wherever the box actually is',
+      shoutNavUrl(['shout_placement' => 'home'], '/') === '/'
+      && shoutNavUrl(['shout_placement' => 'page'], '/') === '/?action=shoutbox'
+      && shoutNavUrl(['shout_placement' => 'both'], '/') === '/?action=shoutbox');
 check('the row and length limits are clamped on read',
       shoutMaxChars(['shout_max_chars' => '99999']) === 2000 && shoutMaxChars(['shout_max_chars' => '0']) === 500
       && shoutWidgetRows(['shout_widget_rows' => '1']) === 5 && shoutPageRows(['shout_page_rows' => '99999']) === 500
@@ -298,6 +328,93 @@ try {
           shoutUnreadCounts($db, $cfgOn, ['id' => (int)$friend['id'], 'shout_seen_id' => 0])['shout']
           === (int)$db->query("SELECT COUNT(*) FROM shouts WHERE deleted_at IS NULL AND user_id <> " . (int)$friend['id'])->fetchColumn());
 
+    // ── the pinned line ──────────────────────────────────────────────────────
+    $p1 = $ids[2];
+    $p2 = $ids[3];
+    check('nothing is pinned to begin with', shoutPinned($db, $cfgOn, $me) === null);
+    check('a member may not pin', shoutPin($db, $cfgOn, $me, $p1, true)['error'] === 'no_permission');
+    check('a visitor may not pin', shoutPin($db, $cfgOn, [], $p1, true)['error'] === 'no_permission');
+    check('… and neither of them moved anything',
+          (int)$db->query("SELECT COUNT(*) FROM shouts WHERE pinned_at IS NOT NULL")->fetchColumn() === 0);
+    check('a moderator pins one', shoutPin($db, $cfgOn, $mod, $p1, true)['ok'] === true);
+    $pinned = shoutPinned($db, $cfgOn, $me);
+    check('… and it comes back shaped exactly like any other row',
+          $pinned !== null && (int)$pinned['id'] === $p1 && ($pinned['pinned'] ?? null) === true
+          && ($pinned['user'] ?? '') === 'shtfriend' && isset($pinned['html']), json_encode($pinned));
+    // The whole rule: two announcements is nobody reading either.
+    check('pinning a second one unpins the first — there is only ever one',
+          shoutPin($db, $cfgOn, $mod, $p2, true)['ok'] === true
+          && (int)$db->query("SELECT COUNT(*) FROM shouts WHERE pinned_at IS NOT NULL")->fetchColumn() === 1
+          && (int)shoutPinned($db, $cfgOn, $me)['id'] === $p2);
+    check('… and the row remembers who pinned it',
+          (int)$db->query("SELECT pinned_by FROM shouts WHERE id = $p2")->fetchColumn() === (int)$mod['id']);
+    check('pinning is written to the audit log',
+          (int)$db->query("SELECT COUNT(*) FROM audit_log WHERE action = 'shout.pin'")->fetchColumn() > 0);
+    check('a pinned line is still an ordinary line in the list',
+          in_array($p2, array_column(shoutRows($db, $cfgOn, $me, 50, 0), 'id'), true));
+    // The reason it is not in the `after=` answer: that path APPENDS, so a pinned row handed to it
+    // would land at the bottom of the room again on every tick until it was the only thing in it.
+    check('… and the append path never hands it over a second time',
+          !in_array($p2, array_column(shoutRows($db, $cfgOn, $me, 50, $p2), 'id'), true));
+    check('an id that is not there cannot be pinned',
+          shoutPin($db, $cfgOn, $mod, 999999999, true)['error'] === 'not_found');
+    check('unpinning leaves nothing pinned',
+          shoutPin($db, $cfgOn, $mod, $p2, false)['ok'] === true && shoutPinned($db, $cfgOn, $me) === null);
+    shoutPin($db, $cfgOn, $mod, $p1, true);
+    shoutDelete($db, $cfgOn, $mod, $p1);
+    check('deleting the pinned line takes the strip with it', shoutPinned($db, $cfgOn, $me) === null);
+
+    // ── the lines the site says ──────────────────────────────────────────────
+    // An empty room again: every count below is an exact number rather than a difference.
+    $db->exec("DELETE FROM shout_mentions");
+    $db->exec("DELETE FROM shouts");
+    $cfgSys = array_merge($cfgOn, ['shout_system_lines' => '1', 'site_name' => 'TestTracker',
+                                   'default_language' => 'en', 'shout_flood_seconds' => '0']);
+    check('off as shipped, the site says nothing at all',
+          shoutSystemPost($db, $cfgOn, 'should not appear', null) === 0
+          && (int)$db->query("SELECT COUNT(*) FROM shouts")->fetchColumn() === 0);
+    $sysId = shoutSystemPost($db, $cfgSys, 'A new torrent has been registered.', null);
+    check('switched on, it writes one', $sysId > 0, (string)$sysId);
+    $sysRow = shoutRows($db, $cfgSys, $me, 1, $sysId - 1)[0] ?? [];
+    check('… signed with the site, pointing at no profile, owned by nobody',
+          ($sysRow['system'] ?? null) === true && ($sysRow['user'] ?? '') === 'TestTracker'
+          && ($sysRow['user_id'] ?? null) === 0 && ($sysRow['own'] ?? null) === false, json_encode($sysRow));
+    check('… stored as plain text, whatever the room\'s format is',
+          (string)$db->query("SELECT body_format FROM shouts WHERE id = $sysId")->fetchColumn() === 'plain'
+          && $db->query("SELECT user_id FROM shouts WHERE id = $sysId")->fetchColumn() === null);
+    check('… and a member cannot delete it', shoutDelete($db, $cfgSys, $me, $sysId)['error'] === 'no_permission');
+    // The one that matters for the sounds: an announcement must not make the room ping.
+    $db->prepare("UPDATE users SET shout_seen_id = 0 WHERE id = ?")->execute([(int)$me['id']]);
+    check('a line the site said is nobody\'s unread',
+          shoutUnreadCounts($db, $cfgSys, $row('shtuser')) === ['shout' => 0, 'shout_friend' => 0, 'mention' => 0],
+          json_encode(shoutUnreadCounts($db, $cfgSys, $row('shtuser'))));
+    check('a moderator can still take it down', shoutDelete($db, $cfgSys, $mod, $sysId)['ok'] === true);
+
+    // Composed server-side, in the SITE's language, with the count for the batch — and the submitter
+    // named only where the caller says they are public (includes/whitelist.php passes NULL when
+    // `wl_submitter_public` and the person's own choice do not both say yes).
+    shoutSystemWhitelistAdded($db, $cfgSys, 3, null);
+    $anon = shoutRows($db, $cfgSys, $me, 1)[0] ?? [];
+    check('a batch nobody is named for is signed by the site and still counts what arrived',
+          ($anon['user_id'] ?? null) === 0 && ($anon['system'] ?? null) === true
+          && str_contains((string)$anon['html'], '3'), json_encode($anon));
+    shoutSystemWhitelistAdded($db, $cfgSys, 1, (int)$friend['id']);
+    $named = shoutRows($db, $cfgSys, $me, 1)[0] ?? [];
+    check('a public submitter SIGNS the line, and their name is not inside the sentence',
+          ($named['user'] ?? '') === 'shtfriend' && ($named['user_id'] ?? 0) === (int)$friend['id']
+          && ($named['system'] ?? null) === true && !str_contains((string)$named['html'], 'shtfriend'),
+          json_encode($named));
+    check('… and it is still nobody\'s own: the person it names cannot delete it either',
+          ($named['own'] ?? null) === false
+          && shoutDelete($db, $cfgSys, $friend, (int)$named['id'])['error'] === 'no_permission');
+    check('… nor does it count as that person having just spoken',
+          shoutPost($db, array_merge($cfgSys, ['shout_flood_seconds' => '60']), $friend, 'still allowed', 'bbcode', '')['ok'] === true);
+    $sysBefore = (int)$db->query("SELECT COUNT(*) FROM shouts WHERE is_system = 1")->fetchColumn();
+    shoutSystemWhitelistAdded($db, $cfgOn, 5, (int)$friend['id']);
+    check('with the switch off again nothing is written, whoever it would have been about',
+          (int)$db->query("SELECT COUNT(*) FROM shouts WHERE is_system = 1")->fetchColumn() === $sysBefore,
+          (string)$sysBefore);
+
     // ── retention ────────────────────────────────────────────────────────────
     // A room of exactly known size, so both halves can be measured rather than estimated.
     $db->exec("DELETE m FROM shout_mentions m JOIN shouts s ON s.id = m.shout_id");
@@ -365,10 +482,49 @@ $kw = settingsCatalogKeywords();
 $tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
 $missing = [];
 foreach (['shout_enabled', 'shout_placement', 'shout_widget_rows', 'shout_page_rows', 'shout_max_chars',
-          'shout_flood_seconds', 'shout_live_seconds', 'shout_keep_rows', 'shout_keep_days', 'shout_format', 'shout_rules'] as $k) {
+          'shout_flood_seconds', 'shout_live_seconds', 'shout_keep_rows', 'shout_keep_days', 'shout_format', 'shout_rules',
+          'shout_nav', 'shout_live_seconds_guest', 'shout_system_lines'] as $k) {
     if (!isset($kw[$k]) || !str_contains($tpl, 'name="' . $k . '"')) $missing[] = $k;
 }
 check('every setting is on the Settings page and in the search catalogue', $missing === [], implode(', ', $missing));
+
+// ── 1.60.0, by reading the wiring ────────────────────────────────────────────
+check('the pin endpoint is routed', str_contains($api, "'shout_pin'"));
+$pinSrc = (string)file_get_contents($root . '/api/shout_pin.php');
+check('pinning checks the CSRF token and answers with the finished row',
+      str_contains($pinSrc, 'verifyCsrfToken') && str_contains($pinSrc, 'shoutPinned($db, $cfg, $me)'));
+check('the pinned line rides with the first fill and never with the poll',
+      str_contains($list, "if (\$after <= 0) \$out['pinned']"));
+check('… and the endpoint answers each reader with their own cadence',
+      str_contains($list, 'shoutLiveSecondsFor($cfg, $me === null)'));
+$wl = (string)file_get_contents($root . '/includes/whitelist.php');
+check('the whitelist says so once per batch, naming nobody unless the submitter is public',
+      str_contains($wl, 'shoutSystemWhitelistAdded($db, $cfg, count($addedHashes), $submitterPublic === 1 ? $submitterId : null)'));
+$navSrc = (string)file_get_contents($root . '/templates/nav.php');
+check('the navigation carries a shoutbox link with a badge of its own',
+      str_contains($navSrc, 'id="nav-shout-unread"') && str_contains($navSrc, 'shoutNav($cfg)')
+      && str_contains($navSrc, 'shoutNavUrl($cfg, $baseUrl)'));
+$appJs = (string)file_get_contents($root . '/assets/js/app.js');
+check('… filled from the pulse, and kept OUT of the account badge\'s total',
+      str_contains($appJs, "getElementById('nav-shout-unread')") && str_contains($appJs, 'unread_shout')
+      && str_contains($appJs, 'var total = this.notif + this.pm;'));
+$widget = (string)file_get_contents($root . '/templates/partials/shoutbox_widget.php');
+$boxJs = (string)file_get_contents($root . '/assets/js/shoutbox.js');
+check('the widget draws the pinned strip and asks for the reader\'s own cadence',
+      str_contains($widget, 'id="shout-pinned"') && str_contains($widget, 'shoutLiveSecondsFor($cfg,'));
+check('… and the script fills the same node rather than inventing a second shape of one',
+      str_contains($boxJs, 'function renderPinned') && str_contains($boxJs, "getElementById('shout-pinned')")
+      && str_contains($boxJs, 'function who(') && str_contains($boxJs, 'shout-row-system'));
+$adminJs = (string)file_get_contents($root . '/assets/js/admin-shout.js');
+check('Settings → Shoutbox shows who may read and who may write, from the groups endpoint',
+      str_contains($tpl, 'id="shout-matrix"') && str_contains($adminJs, "apiCall('admin/fetch_groups')")
+      && str_contains($adminJs, "'shout.upload_emote'"));
+$gids = array_column(settingsCatalogGroups(), 'id');
+check('Shoutbox and Sounds are chips of their own',
+      in_array('shoutbox', $gids, true) && in_array('sounds', $gids, true), implode(',', $gids));
+check('… and the two sections moved into them, keeping the ids every bookmark uses',
+      str_contains($tpl, 'id="section-shout" data-group="shoutbox"')
+      && str_contains($tpl, 'id="section-sounds" data-group="sounds"'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

@@ -954,6 +954,20 @@ key *name*, so one added later is covered without anybody remembering, and a mat
 "changed" with no value either side. There is no delete and no edit — a log the panel it records can
 rewrite is not evidence. Retention is a setting; the janitor enforces it.
 
+### The shoutbox in the bar, a pinned line, and lines from the site (1.60.0)
+
+`shout_nav` adds a **Shoutbox** link to the navigation with a counter of its own — separate from the
+badge beside the account name, which counts notifications and messages and goes on meaning only
+that; it clears when the reader opens the room. A moderator pins one line (`shout.moderate`) and it
+sits above the list, outside its scroll: **at most one at a time**, pinning a second unpins the
+first. `shout_live_seconds_guest` gives readers with no account their own refresh interval, 0 being
+"do not poll at all" — most of a public tracker's traffic reads and never writes.
+`shout_system_lines` (off) lets the tracker announce a registration itself, one line per batch,
+naming the submitter only where `wl_submitter_public` says they are public; those lines belong to
+nobody, count as nobody's unread and make no sound. Settings → Shoutbox also shows a read-only
+matrix of the five `shout.*` permissions across your groups, and **Shoutbox** and **Sounds** are now
+chips of their own on the settings page.
+
 ### Emoji, emotes and stickers in the shoutbox (1.59.0)
 
 The composer's picker holds common Unicode emoji (drawn by the device's own font), the site's custom

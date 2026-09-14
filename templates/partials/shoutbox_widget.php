@@ -33,7 +33,6 @@ $shoutLimit  = isset($shoutLimit) ? max(1, min(500, (int)$shoutLimit)) : shoutWi
 $shoutOnPage = !empty($shoutOnPage);
 $shoutFmt    = shoutFormat($cfg);
 $shoutMax    = shoutMaxChars($cfg);
-$shoutLive   = shoutLiveSeconds($cfg);
 $shoutMod    = userCan($db, $cfg, 'shout.moderate');
 // A page template has $csrfToken; homeBlocks() is a function and does not, so ask the session
 // directly — it is the same token either way (see generateCsrfToken()).
@@ -43,6 +42,30 @@ $shoutMe = usersEnabled($cfg) ? currentUser($db) : null;
 $shoutMeRow = is_array($shoutMe) ? $shoutMe : [];
 if (!isset($shoutMeRow['id'])) $shoutMeRow['id'] = 0;    // a guest who was granted shout.view
 
+// The cadence THIS reader is on (1.60.0). A guest reads and never writes, and on a public tracker
+// there are far more of them than there are members, so they have a number of their own — which may
+// be 0, meaning "do not poll at all, read what the page was drawn with".
+$shoutLive   = shoutLiveSecondsFor($cfg, (int)$shoutMeRow['id'] <= 0);
+
+/**
+ * The name a line is signed with: a link to the profile, or plain text when nobody wrote it.
+ *
+ * A line the SITE said (1.60.0) has no profile to open, and a row whose account has since been
+ * deleted is the same case — `user_id` 0 is how shoutShape() says so. renderRow() in
+ * assets/js/shoutbox.js builds exactly this, and the two being identical is the contract that lets
+ * the list be appended to instead of redrawn.
+ */
+$shoutWho = function (array $s) use ($baseUrl): string {
+    $name = (string)($s['user'] ?? '');
+    // `title` because the name column is a fixed width from 1.59.1: a name longer than it is cut
+    // with an ellipsis rather than pushing the words out of line, and a cut name with no way to
+    // read the whole of it would be the worse of the two.
+    $attrs = 'class="shout-who" title="' . sanitize($name) . '"';
+    return (int)($s['user_id'] ?? 0) > 0
+        ? '<a ' . $attrs . ' href="' . $baseUrl . '?action=u&amp;name=' . urlencode($name) . '">' . sanitize($name) . '</a>'
+        : '<span ' . $attrs . '>' . sanitize($name) . '</span>';
+};
+
 // One row MORE than is drawn. It is the whole of "is there anything older?", and it costs a row
 // rather than a second query — which is what an extra COUNT over this table would be.
 $shoutList = shoutRows($db, $cfg, $shoutMeRow, $shoutLimit + 1);
@@ -50,6 +73,9 @@ $shoutMore = count($shoutList) > $shoutLimit;
 if ($shoutMore) array_shift($shoutList);                 // rows arrive newest LAST: the spare is the oldest
 $shoutNewest = $shoutList ? (int)$shoutList[count($shoutList) - 1]['id'] : shoutNewestId($db);
 $shoutOldest = $shoutList ? (int)$shoutList[0]['id'] : 0;
+// The one pinned announcement, or null. Fetched with the first draw and never by the poll — see
+// shoutPinned(), and api/shout_list.php, which carries it on every answer except the append one.
+$shoutPin = shoutPinned($db, $cfg, $shoutMeRow);
 
 $shoutPost = shoutMayPost($db, $cfg, $shoutMe);
 $shoutWhy  = '';
@@ -125,6 +151,25 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
             </svg>
         </button>
     </div>
+    <?php /* ── the pinned line ──────────────────────────────────────────────────────────────────
+             One announcement, above the list rather than inside it: the rows the poll appends never
+             have to step over it, and it cannot scroll away just as somebody needs it. At most one
+             row is ever pinned — shoutPin() keeps that true in a transaction — which is why this is
+             a strip and not a second list.
+
+             The element is always drawn and carries `hidden` when there is nothing pinned, because
+             assets/js/shoutbox.js refills this same node after a moderator pins something. One
+             shape, whichever side built it, so one stylesheet rule describes both. */ ?>
+    <div class="shout-pinned" id="shout-pinned"<?= $shoutPin ? ' data-id="' . (int)$shoutPin['id'] . '"' : ' hidden' ?>>
+        <?php if ($shoutPin): ?>
+        <span class="shout-pin-icon" aria-hidden="true">&#128204;</span>
+        <?= $shoutWho($shoutPin) ?>
+        <span class="shout-body rt-body"><?= $shoutPin['html'] ?? '' ?></span>
+        <?php if ($shoutMod): ?>
+        <button type="button" class="shout-unpin" title="<?= _h('shout.unpin_title') ?>" aria-label="<?= _h('shout.unpin') ?>">&times;</button>
+        <?php endif; ?>
+        <?php endif; ?>
+    </div>
     <div class="shout-list" id="shout-list">
         <?php if (!$shoutList): ?>
         <div class="shout-empty text-muted"><?= _h('shout.empty') ?></div>
@@ -133,14 +178,17 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
         <?php /* The body is HTML the SERVER rendered, through the same richtextRender() every
                  description and message goes through. There is exactly one place in this codebase
                  that decides what may be displayed, and it is not this template. */ ?>
-        <div class="shout-row<?= !empty($s['own']) ? ' shout-row-own' : '' ?><?= !empty($s['mentions_me']) ? ' shout-row-mention' : '' ?>"
+        <div class="shout-row<?= !empty($s['own']) ? ' shout-row-own' : '' ?><?= !empty($s['mentions_me']) ? ' shout-row-mention' : '' ?><?= !empty($s['system']) ? ' shout-row-system' : '' ?>"
              data-id="<?= (int)$s['id'] ?>" data-user="<?= sanitize((string)($s['user'] ?? '')) ?>">
-            <?php /* `title` because the name column is a fixed width from 1.59.1: a name longer than
-                     it is cut with an ellipsis rather than pushing the words out of line, and a cut
-                     name with no way to read the whole of it would be the worse of the two. */ ?>
-            <a class="shout-who" title="<?= sanitize((string)($s['user'] ?? '')) ?>" href="<?= $baseUrl ?>?action=u&amp;name=<?= urlencode((string)($s['user'] ?? '')) ?>"><?= sanitize((string)($s['user'] ?? '')) ?></a>
+            <?= $shoutWho($s) ?>
             <span class="shout-time" title="<?= sanitize((string)($s['at'] ?? '')) ?>"><?= sanitize(substr((string)($s['at'] ?? ''), 11, 5)) ?></span>
             <span class="shout-body rt-body"><?= $s['html'] ?? '' ?></span>
+            <?php /* Pinning is `shout.moderate`, which the box already knows about — so the button
+                     is drawn from that and needs nothing per row. Hidden until the line is hovered,
+                     like the delete cross beside it. */ ?>
+            <?php if ($shoutMod): ?>
+            <button type="button" class="shout-pin" title="<?= _h('shout.pin_title') ?>" aria-label="<?= _h('shout.pin') ?>">&#128204;</button>
+            <?php endif; ?>
             <?php if (!empty($s['deletable'])): ?>
             <button type="button" class="shout-del" title="<?= _h('shout.delete_title') ?>" aria-label="<?= _h('shout.delete') ?>">&times;</button>
             <?php endif; ?>

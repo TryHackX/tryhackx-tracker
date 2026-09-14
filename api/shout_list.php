@@ -47,10 +47,17 @@ if ($after > 0) {
     $hasMore = shoutHasOlder($db, $rows ? (int)$rows[0]['id'] : 0);
 }
 
-jsonResponse([
+$out = [
     'success'  => true,
     'rows'     => $rows,
     'newest'   => shoutNewestId($db),
     'has_more' => $hasMore,
-    'live'     => shoutLiveSeconds($cfg),
-]);
+    // The cadence this reader is on, which is not the same number for everybody from 1.60.0: a
+    // guest reads and never writes, so `shout_live_seconds_guest` is what answers them.
+    'live'     => shoutLiveSecondsFor($cfg, $me === null),
+];
+// The pinned line rides with the two answers that FILL the list — the first draw and the "older"
+// button — and never with the poll. `after=` is the append path: a pinned row handed to it would be
+// appended to the bottom of the room again every few seconds until it was the only thing in it.
+if ($after <= 0) $out['pinned'] = shoutPinned($db, $cfg, $me);
+jsonResponse($out);

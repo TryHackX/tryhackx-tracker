@@ -4677,3 +4677,9 @@ add('js.shout', {
     'emote_pending':  ('Added — a moderator has to let it through before anybody else sees it.',
                        'Dodano — moderator musi ją przepuścić, zanim zobaczy ją ktokolwiek inny.'),
 })
+
+# ── 1.60.0: pinning, from the row and from the strip above the list ─────────
+add('js.shout', {
+    'pin':   ('Pin this line', 'Przypnij ten wpis'),
+    'unpin': ('Unpin', 'Odepnij'),
+})

@@ -10,16 +10,29 @@
 window.NavUnread = {
     notif: 0,
     pm: 0,
+    // The shoutbox's own number (1.60.0), and it is deliberately NOT part of the total below: that
+    // total means "notifications and messages waiting", both of which are read on the account page,
+    // and lines in a room people are talking in are neither. Its own element beside the account
+    // badge, the way the sounds note already is.
+    shout: 0,
     set: function (kind, n) {
         this[kind] = Math.max(0, Number(n) || 0);
         this.render();
     },
     render: function () {
         var b = document.getElementById('nav-unread');
-        if (!b) return;
-        var total = this.notif + this.pm;
-        b.textContent = total ? String(total) : '';
-        b.hidden = total <= 0;
+        if (b) {
+            var total = this.notif + this.pm;
+            b.textContent = total ? String(total) : '';
+            b.hidden = total <= 0;
+        }
+        // Looked up even when the account badge is not on the page at all: a guest the operator
+        // granted `shout.view` has a Shoutbox link and no account link to hang anything on.
+        var s = document.getElementById('nav-shout-unread');
+        if (s) {
+            s.textContent = this.shout ? String(this.shout) : '';
+            s.hidden = this.shout <= 0;
+        }
     },
 };
 
@@ -2113,7 +2126,9 @@ const getJson = async (endpoint) => {
                 groupsBox.appendChild(div);
             });
         }
+        pulseFreshAt = Date.now();   // straight from the server, so no older lease may undo it
         window.NavUnread.notif = Math.max(0, Number(me.unread) || 0);
+        window.NavUnread.shout = Math.max(0, Number(me.unread_shout) || 0);
         window.NavUnread.set('pm', me.unread_pm);
         if (window.Sounds) window.Sounds.observe(me);
         const accBadge = $id('acc-unread-badge');
@@ -2214,8 +2229,16 @@ const getJson = async (endpoint) => {
      *     stored answer instead of asking again. A `storage` event carries a fresh answer to the
      *     other tabs at once.
      */
+    // When this reader last heard a number from the SERVER, shared by the pulse and by the baseline
+    // below. A stored lease older than this is another tab's memory of a world that has since moved,
+    // and adopting it would undo what we just learned — see the guard in tick().
+    let pulseFreshAt = 0;
+
     function initPulse() {
-        const badge = $id('nav-unread');
+        // Either badge carries the cadence and the account id. A guest the operator granted
+        // `shout.view` has the Shoutbox one and no account link at all, and gating on the account
+        // badge alone left their counter fetched once on load and then still for ever.
+        const badge = $id('nav-unread') || $id('nav-shout-unread');
         if (!badge) return;
         const every = Math.max(0, parseInt(badge.dataset.pulse || '0', 10) || 0);
         if (every <= 0) return;
@@ -2226,6 +2249,9 @@ const getJson = async (endpoint) => {
         const apply = (v) => {
             if (!v) return;
             window.NavUnread.notif = Math.max(0, Number(v.unread) || 0);
+            // Absent from the answer when the room is off or this reader may not read it, which
+            // Number(undefined) turns into 0 — a badge that stays hidden rather than a stale one.
+            window.NavUnread.shout = Math.max(0, Number(v.unread_shout) || 0);
             window.NavUnread.set('pm', v.unread_pm);
         };
         const stored = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { return null; } };
@@ -2236,20 +2262,35 @@ const getJson = async (endpoint) => {
             // once a minute, so the cadence is a ceiling there, never a cost.)
             if (document.hidden && !(window.Sounds && window.Sounds.wants())) return;
             const s = stored();
-            // another tab asked recently enough: its answer is this tab's answer
-            if (s && typeof s.at === 'number' && Date.now() - s.at < every * 1000 * 0.8) { apply(s); return; }
+            // Another tab asked recently enough: its answer is this tab's answer — but only if it is
+            // NEWER than what this tab already heard. localStorage survives a reload, so without the
+            // second half the first tick after a page load adopted the lease this same tab wrote
+            // BEFORE the reload and put the pre-reload numbers back: the badge showed what the page
+            // had just fetched, then blanked a moment later and stayed blank until the lease aged
+            // out. Still skip the flight either way — the point of the lease is one request per
+            // reader, and a stale answer is a reason to keep ours, not a reason to ask again.
+            if (s && typeof s.at === 'number' && Date.now() - s.at < every * 1000 * 0.8) {
+                if (s.at > pulseFreshAt) apply(s);
+                return;
+            }
             inFlight = true;
             try {
                 const r = await getJson('user_pulse');
                 if (!r) return;
                 if (!r.success) { stopped = true; return; }          // signed out meanwhile: stop asking
+                pulseFreshAt = Date.now();
                 apply(r);
                 if (window.Sounds) window.Sounds.observe(r);   // this tab fetched it: this tab may play
-                try { localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), unread: r.unread, unread_pm: r.unread_pm })); } catch (e) { /* private mode */ }
+                try { localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), unread: r.unread, unread_pm: r.unread_pm, unread_shout: r.unread_shout })); } catch (e) { /* private mode */ }
                 if (Number(r.live) <= 0) stopped = true;             // switched off in Settings since the page loaded
             } finally { inFlight = false; }
         };
-        window.addEventListener('storage', (e) => { if (e.key === KEY && e.newValue) { try { apply(JSON.parse(e.newValue)); } catch (err) { /* ignore */ } } });
+        // A write by another tab is by definition newer than anything this one knows, so it is
+        // adopted and becomes the new mark — the same rule the lease follows, from the other side.
+        window.addEventListener('storage', (e) => {
+            if (e.key !== KEY || !e.newValue) return;
+            try { const v = JSON.parse(e.newValue); pulseFreshAt = Date.now(); apply(v); } catch (err) { /* ignore */ }
+        });
         document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
         setInterval(tick, every * 1000);
         window.PulseTick = tick;   // the browser check pokes it rather than waiting a minute
@@ -2258,10 +2299,16 @@ const getJson = async (endpoint) => {
     function initAccount() {
         if (!$id('account-form')) {
             // not on the account page — still light up the nav badge for signed-in users
-            if ($id('nav-unread')) {
+            // Either badge is reason enough to ask. A guest the operator granted `shout.view` has a
+            // Shoutbox link and no account link at all, and NavUnread.render() was written for
+            // exactly that reader — gating the fetch on the account badge alone left them with a
+            // counter that could never fill.
+            if ($id('nav-unread') || $id('nav-shout-unread')) {
                 getJson('user_me').then(me => {
                     if (!me || !me.success) return;
+                    pulseFreshAt = Date.now();   // fresher than any lease written before this page load
                     window.NavUnread.notif = Math.max(0, Number(me.unread) || 0);
+                    window.NavUnread.shout = Math.max(0, Number(me.unread_shout) || 0);
                     window.NavUnread.set('pm', me.unread_pm);
                     if (window.Sounds) window.Sounds.observe(me);   // the baseline: what was already waiting is not news
                 });

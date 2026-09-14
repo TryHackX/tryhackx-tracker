@@ -47,3 +47,13 @@ add('nav', {
     'sounds_locked_title': ('This browser lets the page play a sound only after a click. Click anywhere.',
         'Ta przeglądarka pozwala stronie zagrać dopiero po kliknięciu. Kliknij gdziekolwiek.'),
 })
+
+# ── 1.60.0: the shoutbox in the bar, with a counter of its own ──────────────
+# The title says where the number goes when you press it, because there is nowhere else it clears
+# from: the mark moves when a widget is actually on the screen, so a reader on any other page can
+# watch it climb and have no way to answer it except by opening the room.
+add('nav', {
+    'shoutbox': ('Shoutbox', 'Shoutbox'),
+    'shoutbox_unread_title': ('New lines in the shoutbox — open it to clear this.',
+        'Nowe wpisy w shoutboksie — otwórz go, żeby to wyzerować.'),
+})

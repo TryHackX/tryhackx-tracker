@@ -40,6 +40,14 @@ function settingsCatalogGroups(): array {
          'keywords' => 'statistics stats numbers chart graph timeline history samples roll-up retention peers seeds leechers uptime live refresh ranges'],
         ['id' => 'content',      'title' => 'Descriptions & review', 'icon' => 'bi-card-text',
          'keywords' => 'description source link bbcode markdown review moderation queue rewrite proposal images links preview submitter words text'],
+        // The shoutbox and the sounds were a section each inside "Descriptions & review" and "User
+        // accounts", which is where they landed rather than where anybody would look for them: one
+        // is a room people talk in and the other is what the whole site plays. Two chips of their
+        // own, and the sections keep their ids so every bookmark into them still opens.
+        ['id' => 'shoutbox',     'title' => 'Shoutbox',           'icon' => 'bi-chat-left-dots',
+         'keywords' => 'shoutbox shout chat chatbox room talk tagboard cbox czat emotes stickers emoji rules flood retention pinned announcement'],
+        ['id' => 'sounds',       'title' => 'Sounds',             'icon' => 'bi-volume-up',
+         'keywords' => 'sound sounds audio chime notification alert ping mute volume upload library dzwieki'],
         ['id' => 'index',        'title' => 'Index',              'icon' => 'bi-collection',
          'keywords' => 'index observed hashes catalogue metadata worker poll scrape names files search seeders prune'],
         ['id' => 'integrations', 'title' => 'API & federation',   'icon' => 'bi-plug',
@@ -232,6 +240,25 @@ function settingsCatalogKeywords(): array {
         'user_2fa_required'        => 'two factor required force 2fa panel access moderators admins',
         'pm_live_seconds'          => 'messages live refresh poll seconds chat realtime conversation updates',
         'site_live_seconds'        => 'navigation badge unread count refresh pulse poll seconds notifications live site wide',
+        'pm_typing_enabled'        => 'typing indicator is writing messages live chat',
+        'pm_enabled'               => 'private messages pm inbox conversations members write dm',
+        'pm_who'                   => 'private messages who can write default friends everybody nobody',
+        'pm_max_per_day'           => 'private messages limit per day spam flood cap',
+        'pm_max_chars'             => 'private message length limit characters maximum',
+        'friends_enabled'          => 'friends following follow requests accept members contacts',
+        'directory_enabled'        => 'member directory list of users browse people search members',
+        'auth_bridge_enabled'      => 'bridge sso single sign on forum flarum login register external account link',
+        'auth_bridge_create'       => 'bridge sso register create account forum new user automatic',
+        'auth_bridge_merge'        => 'bridge sso merge link existing account email match takeover',
+        'auth_bridge_ttl'          => 'bridge sso ticket token handoff expiry seconds timeout',
+        'auth_bridge_return_url'   => 'bridge sso forum url return continue redirect outbound',
+        'auth_bridge_login_url'    => 'bridge sso forum url sign in login button',
+        'auth_bridge_logout'       => 'bridge sso logout sign out both sides two-way',
+        'wl_submitter_public'      => 'submitter uploader attribution my torrents uploads credit profile who registered',
+        'search_time_budget'       => 'search timeout time limit budget seconds slow query 500 execution',
+        'index_search_include_whitelist' => 'search whitelist rows included results registered torrents',
+
+        // ── Sounds (includes/sounds.php) ──
         'sounds_enabled'           => 'sounds sound audio chime notification noise play mute alert ping wake pre-roll',
         'sound_default_notification' => 'sound default notification chime audio play alert',
         'sound_default_message'    => 'sound default message chime audio play ping inbox stranger',
@@ -239,6 +266,7 @@ function settingsCatalogKeywords(): array {
         'sound_default_shout_friend' => 'sound default shout shoutbox friend chime audio play',
         'sound_default_shout'      => 'sound default shout shoutbox chime audio play stranger',
         'sound_default_mention'    => 'sound default mention @ shoutbox chime audio play',
+
         // ── Shoutbox (includes/shout.php) ──
         'shout_enabled'            => 'shoutbox shout chat chatbox room talk live wall tagboard cbox czat wolacz gadanie master switch',
         'shout_placement'          => 'shoutbox where home page front page widget own page both placement block',
@@ -258,23 +286,10 @@ function settingsCatalogKeywords(): array {
         'shout_emote_per_user'     => 'shoutbox emote per user cap how many uploads each member limit',
         'shout_stickers_enabled'   => 'shoutbox stickers big emote whole message naklejki large image sticker',
         'shout_emote_approval'     => 'shoutbox emote approval approve waiting queue moderation review member upload hold pending zatwierdzanie kolejka',
-        'pm_typing_enabled'        => 'typing indicator is writing messages live chat',
-        'pm_enabled'               => 'private messages pm inbox conversations members write dm',
-        'pm_who'                   => 'private messages who can write default friends everybody nobody',
-        'pm_max_per_day'           => 'private messages limit per day spam flood cap',
-        'pm_max_chars'             => 'private message length limit characters maximum',
-        'friends_enabled'          => 'friends following follow requests accept members contacts',
-        'directory_enabled'        => 'member directory list of users browse people search members',
-        'auth_bridge_enabled'      => 'bridge sso single sign on forum flarum login register external account link',
-        'auth_bridge_create'       => 'bridge sso register create account forum new user automatic',
-        'auth_bridge_merge'        => 'bridge sso merge link existing account email match takeover',
-        'auth_bridge_ttl'          => 'bridge sso ticket token handoff expiry seconds timeout',
-        'auth_bridge_return_url'   => 'bridge sso forum url return continue redirect outbound',
-        'auth_bridge_login_url'    => 'bridge sso forum url sign in login button',
-        'auth_bridge_logout'       => 'bridge sso logout sign out both sides two-way',
-        'wl_submitter_public'      => 'submitter uploader attribution my torrents uploads credit profile who registered',
-        'search_time_budget'       => 'search timeout time limit budget seconds slow query 500 execution',
-        'index_search_include_whitelist' => 'search whitelist rows included results registered torrents',
+        // ── Shoutbox: the navigation counter, the guest cadence and the site's own lines (1.60.0) ──
+        'shout_nav'                => 'shoutbox navigation link menu counter badge unread number beside account nav',
+        'shout_live_seconds_guest' => 'shoutbox guest visitor anonymous refresh poll seconds cadence not logged in cheaper',
+        'shout_system_lines'       => 'shoutbox system lines announcements automatic site says registered torrent whitelist bot notices',
 
         // ── Tracker & whitelist ──
         'tracker_mode'             => 'blacklist whitelist open closed accesslist which torrents served',

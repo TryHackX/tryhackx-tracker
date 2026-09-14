@@ -2009,6 +2009,10 @@ add('', {
     'settings.group_network': ('Network & limits', 'Sieć i limity'),
     'settings.group_stats': ('Statistics', 'Statystyki'),
     'settings.group_content': ('Descriptions & review', 'Opisy i recenzja'),
+    # 1.60.0: two chips of their own. The shoutbox was filed under "Descriptions & review" and the
+    # sounds under "User accounts", which is where they landed rather than where anybody looks.
+    'settings.group_shoutbox': ('Shoutbox', 'Shoutbox'),
+    'settings.group_sounds': ('Sounds', 'Dźwięki'),
     'settings.group_index': ('Index', 'Indeks'),
     'settings.group_integrations': ('API & federation', 'API i federacja'),
     'settings.group_maintenance': ('Backups', 'Kopie zapasowe'),
@@ -2579,4 +2583,33 @@ add('', {
         'Wgrane przez członka. Nikt inny nigdzie tego nie widzi — ani w wybieraku, ani na stronie Emotki, ani w wypowiedzi — dopóki tego nie zatwierdzisz.'),
     'js.shoutadmin.emote_approve': ('Approve', 'Zatwierdź'),
     'js.shoutadmin.emote_approved': ('Approved — everybody can write it now.', 'Zatwierdzono — każdy może już jej użyć.'),
+})
+
+# ── 1.60.0: where the room is seen, and who says what in it ─────────────────
+# An h6 sub-head inside Settings → Shoutbox rather than a section of its own: three more answers
+# about the same room, and a second chip would be two places to look for one subject.
+add('', {
+    'settings.shout_nav_heading': ('Where it is seen, and who says what',
+        'Gdzie go widać i kto co w nim mówi'),
+    'settings.shout_nav_heading_sub': ('three more answers about the same room',
+        'trzy kolejne odpowiedzi o tym samym pokoju'),
+    'settings.shout_nav': ('Link in the navigation', 'Link w nawigacji'),
+    'settings.shout_nav_hint': ('Puts a Shoutbox link in the bar, with a counter of its own, for anybody who may read the room. It is a SEPARATE number from the one beside the account name — that one counts notifications and waiting messages, which are read somewhere else. It clears when the reader opens the shoutbox, because that is the moment the site learns how far they have read.',
+        'Wstawia do paska link Shoutbox z własnym licznikiem, dla każdego, kto może czytać pokój. To OSOBNA liczba niż ta przy nazwie konta — tamta liczy powiadomienia i czekające wiadomości, które czyta się gdzie indziej. Zeruje się, gdy czytelnik otworzy shoutbox, bo właśnie wtedy strona dowiaduje się, dokąd doczytał.'),
+    'settings.shout_live_seconds_guest': ('Ask for new lines every (guests)',
+        'Pytaj o nowe wpisy co (goście)'),
+    'settings.shout_live_seconds_guest_hint': ('Seconds, for a reader with no account. 0 = never, and that is what most public trackers want: a guest reads and never writes, and there are far more of them than there are members. Below three is raised to three, like the setting above.',
+        'Sekundy, dla czytelnika bez konta. 0 = nigdy, i tego zwykle chce publiczny tracker: gość czyta i nigdy nie pisze, a jest ich znacznie więcej niż członków. Poniżej trzech podnosi się do trzech, tak jak wyżej.'),
+    'settings.shout_system_lines': ('Lines from the site itself', 'Wpisy od samej strony'),
+    'settings.shout_system_lines_hint': ('The tracker says so in the room when a torrent is registered — one line per batch, never one per hash. It names the submitter only where that submitter is public; otherwise it says a torrent arrived without naming anybody. These lines belong to nobody: members cannot delete them, they are nobody\'s unread and they make no sound.',
+        'Tracker pisze w pokoju, gdy ktoś zarejestruje torrent — jedna linia na paczkę, nigdy jedna na hash. Nazywa zgłaszającego tylko tam, gdzie jest on publiczny; inaczej pisze, że torrent się pojawił, nie wymieniając nikogo. Te wpisy nie należą do nikogo: członkowie ich nie skasują, nikomu nie liczą się jako nieprzeczytane i nie wydają dźwięku.'),
+    'settings.shout_matrix_title': ('Who may read and who may write', 'Kto może czytać, a kto pisać'),
+    'settings.shout_matrix_hint': ('The five shoutbox permissions across your groups, as they stand right now. Read-only here: grants are made in Users → Groups, where every other permission is, so there is one place that decides and one place that shows.',
+        'Pięć uprawnień shoutboksa we wszystkich grupach, tak jak wyglądają w tej chwili. Tutaj tylko do odczytu: nadaje się je w Użytkownicy → Grupy, tam gdzie wszystkie pozostałe — jedno miejsce decyduje, jedno pokazuje.'),
+})
+
+# The matrix's own two strings, `js.shoutadmin.` like the rest of the panel's.
+add('', {
+    'js.shoutadmin.matrix_permission': ('Permission', 'Uprawnienie'),
+    'js.shoutadmin.matrix_has': (':group has :key', ':group ma :key'),
 })

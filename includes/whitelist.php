@@ -746,6 +746,17 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
             $reload = whitelistMaybeReload($cfg);
         }
     }
+    // v66: one line in the shoutbox per batch that actually registered something, when the operator
+    // asked for the site's own lines (`shout_system_lines`, off as shipped). ONE for the batch and
+    // not one per hash — somebody registering forty torrents is one thing that happened.
+    //
+    // It names the submitter only where the submitter is PUBLIC, and `$submitterPublic` above is
+    // already exactly that decision (`wl_submitter_public`, the grant and the person's own choice,
+    // all three). Guarded on the function because the CLI and the metadata worker reach this file
+    // without loading includes/shout.php, and a batch of hashes has to land either way.
+    if ($addedHashes && function_exists('shoutSystemWhitelistAdded')) {
+        shoutSystemWhitelistAdded($db, $cfg, count($addedHashes), $submitterPublic === 1 ? $submitterId : null);
+    }
     return [
         'results' => array_values($results),
         'summary' => $summary,

@@ -42,9 +42,15 @@ header('Cache-Control: public, max-age=2592000, immutable');
 header('X-Content-Type-Options: nosniff');
 // header() replaces a header of the same name, so an enforcing site policy sent by
 // sendSecurityHeaders() is swapped for this stricter one rather than added to. The REPORT-ONLY one
-// is a different header name and would have survived, and so would an enforcing policy the web
-// server itself added — a client handed two of them enforces the intersection, which is safe and
-// untidy. Both are taken off first, so what leaves here is exactly one policy: this one.
+// is a different header name and would have survived, which is why both are taken off: everything
+// PHP contributes to this response is the single policy below.
+//
+// The web server's own is another matter, and measuring beats assuming. Production is Apache, the
+// fallback in .htaccess is appended after PHP has finished, and nothing here can reach it: the live
+// response carries this policy AND that one. That is safe rather than merely tidy — a client handed
+// two enforces the intersection, and nothing intersected with `default-src 'none'` is permission to
+// load anything. Do not "fix" it by unsetting the fallback for this path; it is the last line of
+// defence for every page on the site, and it is worth more there than neatness is worth here.
 header_remove('Content-Security-Policy');
 header_remove('Content-Security-Policy-Report-Only');
 header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'");

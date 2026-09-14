@@ -107,6 +107,27 @@ add('shout', {
                             'To, co dodasz, czeka na moderatora, zanim zobaczy to ktokolwiek inny.'),
 })
 
+# ── 1.60.0: the pinned line, and the lines the site says itself ─────────────
+add('shout', {
+    'pin':         ('Pin', 'Przypnij'),
+    'pin_title':   ('Pin this line at the top of the room', 'Przypnij ten wpis na górze pokoju'),
+    'unpin':       ('Unpin', 'Odepnij'),
+    'unpin_title': ('Take the pinned line down', 'Zdejmij przypięty wpis'),
+    # Who a line with no author is signed with, and only where the operator has left the site name
+    # empty -- normally it is the site's own name, which is what a room would show.
+    'system_who':  ('the site', 'strona'),
+    # What the tracker itself says in the room. The submitter's name is the row's AUTHOR rather than
+    # a word inside the sentence, which is why the named pair begins in lower case: it is read after
+    # "name:", exactly like a line somebody wrote. It also dodges a real problem -- a name dropped
+    # into a Polish sentence has to agree with the verb after it, and "zarejestrował(a)" in the
+    # middle of a room is a form nobody says out loud. The anonymous pair uses the impersonal
+    # "zarejestrowano", which needs no gender and no number.
+    'sys_wl_named_one':  ('a new torrent on the whitelist.', 'nowy torrent na whiteliście.'),
+    'sys_wl_named_many': ('new torrents on the whitelist: :n.', 'nowe torrenty na whiteliście: :n.'),
+    'sys_wl_anon_one':   ('A new torrent has been registered.', 'Zarejestrowano nowy torrent.'),
+    'sys_wl_anon_many':  ('New torrents registered: :n.', 'Zarejestrowano nowe torrenty: :n.'),
+})
+
 # The browser tab. The key is the action, exactly as templates/layout.php looks it up.
 add('', {
     'title.shoutbox': ('Shoutbox', 'Shoutbox'),

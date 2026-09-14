@@ -51,6 +51,8 @@ $allowed = [
     // its emotes and stickers (1.59.0)
     'shout_emotes_enabled', 'shout_emote_max_kb', 'shout_emote_max_px', 'shout_emote_per_user',
     'shout_stickers_enabled', 'shout_emote_approval',
+    // in the navigation, a cadence of its own for guests, and the site's own lines (1.60.0)
+    'shout_nav', 'shout_live_seconds_guest', 'shout_system_lines',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -334,6 +336,9 @@ $intClamp = [
     'shout_widget_rows' => [5, 100, 25], 'shout_page_rows' => [20, 500, 100],
     'shout_max_chars' => [1, 2000, 500], 'shout_flood_seconds' => [0, 300, 5],
     'shout_live_seconds' => [0, 120, 10],
+    // A guest reads and never writes, so their cadence is its own number — and 0 there means a
+    // visitor does not poll at all, which on a public tracker is most of the traffic.
+    'shout_live_seconds_guest' => [0, 300, 30],
     'shout_keep_rows' => [100, 100000, 2000], 'shout_keep_days' => [1, 3650, 30],
     // Its pictures. No 0 anywhere: an emote of no kilobytes, no pixels or a person allowed none of
     // them is not a setting, it is the feature switch beside it spelled badly.
@@ -404,7 +409,8 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
-          'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval'] as $k) {
+          'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval',
+          'shout_nav', 'shout_system_lines'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
 // ── The shoutbox ──
