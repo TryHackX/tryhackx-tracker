@@ -25,7 +25,10 @@
     if (!site || !site.avatar) return;
     const API = () => document.body.dataset.apiBase || '';
     const CSRF = () => document.body.dataset.csrf || '';
-    const BUTTONS = { primary: 'btn btn-sm btn-primary', secondary: 'btn btn-sm btn-outline-secondary' };
+    // The panel's own buttons for the editor, at the size this page's Adjust and Remove use — all
+    // three kinds, Discard's `danger` included: whatever is left out falls back to the account page's
+    // classes, which mean nothing in the panel (it does not load style.css).
+    const BUTTONS = { primary: 'btn btn-sm btn-primary', secondary: 'btn btn-sm btn-outline-secondary', danger: 'btn btn-sm btn-outline-danger' };
 
     async function upload(kind, file, st) {
         const fd = new FormData();
@@ -76,7 +79,7 @@
         }
 
         const edit = (src, fresh, file) => window.MediaEditor.open({
-            mode: kind, src: src, fresh: fresh, buttons: BUTTONS,
+            mode: kind, src: src, file: fresh ? file : null, fresh: fresh, buttons: BUTTONS,
             title: t(kind === 'cover' ? 'js.mediaadmin.title_cover' : 'js.mediaadmin.title_avatar'),
             x: fresh ? 50 : site[kind].x, y: fresh ? 50 : site[kind].y, zoom: fresh ? 1 : site[kind].zoom,
             coverH: site.cover_h, coverHm: site.cover_hm, desktopW: site.desk_w, phoneW: site.phone_w,
@@ -98,8 +101,10 @@
             if (input) input.value = '';
             const bad = window.MediaEditor.preflight(file, Number(site.max_bytes) || 0);
             if (bad) { showToast(bad, 'warning'); return; }
-            const url = URL.createObjectURL(file);
-            edit(url, true, file).finally(() => URL.revokeObjectURL(url));
+            // Handed to the editor as the File: it reads it into a data: URL (readLocal() in
+            // media-editor.js). 1.63.0 made a blob: URL here, which the policy production enforces
+            // refuses, so no default picture or cover could be set on the live site.
+            edit(null, true, file);
         }
         if (drop && input) {
             input.setAttribute('tabindex', '-1');

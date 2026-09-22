@@ -687,5 +687,47 @@ foreach (['user_avatar', 'user_cover', 'user_media', 'user_avatar_default', 'adm
 check('the two streams skip the janitors, like sound and shout_emote', (bool)preg_match("/in_array\(\\\$endpoint, \[[^\]]*'user_media'[^\]]*'user_avatar_default'/", $api));
 check('the panel endpoint is gated like editing a user', (bool)preg_match("#'admin/user_media'\s*=>\s*'panel\.users\.edit'#", $api));
 
+// ── 14. the preview, against the policy production enforces (1.63.1) ─────────────────────────
+// 1.63.0 previewed a picked file through URL.createObjectURL(): a blob: address. The policy the
+// live site ENFORCES — the .htaccess fallback, which Apache adds while PHP's own policy only
+// reports — allows images from 'self' data: https: and not from blob:, so no picture or cover could
+// be chosen there, on the account page or in Settings → Profiles. Nothing local showed it: php -S
+// reads no .htaccess and csp_mode ships as report. So: the scripts may not make one, the reader
+// must be the data: one, and both policies are read to say why.
+$jsCode = static function (string $src): string {
+    // Only code counts: a comment is allowed to explain why there is no object URL.
+    $src = (string)preg_replace('#/\*.*?\*/#s', '', $src);
+    return (string)preg_replace('#(^|[^:\\\\])//[^\n]*#', '$1', $src);
+};
+foreach (['assets/js/media-editor.js', 'assets/js/admin-profiles.js'] as $f) {
+    $code = $jsCode((string)@file_get_contents($root . '/' . $f));
+    check("$f feeds no image from an object URL (no createObjectURL, no blob: address)",
+          $code !== '' && !preg_match('/\bcreateObjectURL\b|[\'"`]blob:/', $code));
+}
+$meCode = $jsCode((string)@file_get_contents($root . '/assets/js/media-editor.js'));
+check('… the editor reads a picked file with FileReader.readAsDataURL(), into the data: URL the policy allows',
+      str_contains($meCode, 'new FileReader()') && str_contains($meCode, '.readAsDataURL('));
+check('… and both callers hand it the File to read, rather than an address of their own',
+      substr_count($meCode . $jsCode((string)@file_get_contents($root . '/assets/js/admin-profiles.js')), 'file: fresh ? file : null') === 2);
+$blobJs = [];
+foreach (glob($root . '/assets/js/*.js') ?: [] as $f) {
+    if (preg_match('/\bcreateObjectURL\b/', $jsCode((string)file_get_contents($f)))) $blobJs[] = basename($f);
+}
+// A download link is a navigation, which no fetch directive governs; an <img>, <audio> or worker
+// from a blob: address is a load, and the fallback refuses every one of those (default-src 'self').
+check('the only object URL left in assets/js is the language export\'s download link',
+      $blobJs === ['admin-languages.js'], implode(', ', $blobJs));
+$imgSrc = static function (string $policy): array {
+    return preg_match('/(?:^|;)\s*img-src\s+([^;]*)/i', $policy, $m) ? preg_split('/\s+/', trim($m[1])) : [];
+};
+preg_match('/^\s*Header\s+setifempty\s+Content-Security-Policy\s+"([^"]+)"/mi', (string)@file_get_contents($root . '/.htaccess'), $hm);
+$htImg = $imgSrc($hm[1] ?? '');
+$cfgEnf = array_merge($cfgOn, ['csp_mode' => 'enforce']);
+$appImg = array_merge($imgSrc(cspPolicy($cfgEnf, 'public')), $imgSrc(cspPolicy($cfgEnf, 'panel')));
+check('the .htaccess fallback (what production enforces) and this application\'s policy both allow data: images',
+      in_array('data:', $htImg, true) && in_array('data:', $appImg, true), json_encode([$htImg, $appImg]));
+check('… and neither allows blob: ones — the reason for the checks above',
+      $htImg !== [] && !in_array('blob:', $htImg, true) && !in_array('blob:', $appImg, true), json_encode([$htImg, $appImg]));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

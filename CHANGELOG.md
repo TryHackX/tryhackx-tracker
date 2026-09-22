@@ -4,6 +4,80 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.63.1] — 2026-09-22
+
+No schema change.
+
+### Fixed — a new picture or cover could not be chosen on the live site
+
+* **The editor showed "The image could not be loaded" for every picked file**, on the account page
+  and in Settings → Profiles alike, and its preview circles were broken images. The preview was an
+  object URL (`URL.createObjectURL`, a `blob:` address), and the policy production *enforces* — the
+  fallback header in `.htaccess`, which Apache adds while the application's own policy only reports
+  — allows images from `'self' data: https:` and not from `blob:`. Locally it worked, because
+  `php -S` reads no `.htaccess` and `includes/csp.php` runs in report-only mode, which blocks
+  nothing. A picked file is now read with `FileReader.readAsDataURL()` into a `data:` URL, which the
+  policy already allows; the policy itself is not widened. The file is handed to the editor and read
+  there, once for both sides, while the frame shows its spinner — and a file that cannot be read ends
+  in the same message as one that cannot be decoded. Framing, zoom, the three live sizes and the one
+  multipart Save are unchanged.
+* The editor's buttons are each side's standard ones at one size: on the account page Save was the
+  full-size button between two small ones, and the "Discard the changes?" and "Remove?" questions
+  used the shoutbox's own tiny buttons. The desktop/phone switch, the zoom readout and Re-centre are
+  standard buttons too, and Adjust position and Remove on the account page carry the same icons as in
+  the panel.
+* `scratchpad/shots/media_check.js` now runs the editor under an ENFORCED policy with production's
+  `img-src`, and fails on any policy message: run against the old preview it failed exactly as the live
+  site did, which is the point — the check that let this through could not have caught it.
+
+### Fixed — two tests that could not fail
+
+Both had an escape turned into a control byte by a patch that went through a shell here-document,
+which eats backslashes.
+
+* `tests/lang_test.php`: the `<html lang>` check matched `\blang=` with a BACKSPACE byte where `\b` was
+  meant, found no template, and skipped every one of them while reporting a pass. It visits all of them
+  now, and they all pass.
+* `tests/announce_multiport_test.py`: the CSRF-masking substitution put the byte 0x01 where the
+  back-reference `\1` was meant, so it replaced the whole attribute instead of masking only its value.
+
+A scan of every tracked source for control bytes finds none left. The same fault in a browser check
+that is not under version control — its "no real API key is printed" assertion could never fail — is
+repaired too.
+
+### Fixed — the panel
+
+* **Whitelist: newer forum entries read "FORUM …" in the Source column.** The cell drew a link to the
+  forum post and "via <partner>" after the badge — and a review badge when there was one — in a
+  column 84–96 px wide whose cells are one line that ellipsises, so on every row the forum bridge sent
+  through its key only the badge and three dots could be seen. The cell holds the badge alone now,
+  and the partner who sent the row is a small line under its name, where the column has room — a
+  moderator going through the waiting queue reads it at a glance instead of hovering every row. The
+  review state and the discussion and post numbers are the badge's tooltip, and the details panel
+  still shows all of it, the post link included.
+* **Users → Groups: "Permission matrix — who holds what" had a missing-glyph box and "B8" in front of
+  it** (and so did "Who may read and who may write" in Settings → Shoutbox). The marker was a CSS
+  escape for ▸ that had lost its backslash, which left the control character U+0015 — no font draws
+  one — followed by the letters. It is a Bootstrap Icons chevron in the markup now, turned when the
+  section opens. The panel's other collapsibles carry the real character and were not affected.
+* **Users → Groups: the explanation above the groups table touched the edges of its box** — it sat in
+  the frame of a search field, which has no padding of its own. It is drawn as the page's other note
+  is (Write to members).
+
+### Tests
+
+* `scratchpad/shots/media_check.js` switches `csp_mode` to **enforce** for its run and puts it back,
+  so the page it drives refuses what production refuses; it checks the header it was served, that a
+  picked file's preview is a `data:` URL that really loaded (on the account page and in Settings →
+  Profiles), and that no page it visited reported a policy violation. Run against 1.63.0's
+  `blob:` preview it fails exactly where the live site failed. The account and panel halves no longer
+  stop each other, and the panel half stores its own cover instead of relying on the first half.
+* `tests/usermedia_test.php`: neither editor script may create an object URL or name a `blob:`
+  address, the editor must read the file with `readAsDataURL` and both callers must hand it the file,
+  the only object URL left in `assets/js` is the language export's download link (a download is not
+  an image load), and it reads both policies — the application's and the `.htaccess` fallback — to
+  confirm neither allows `blob:` images, which is the reason for the rest.
+
 ## [1.63.0] — 2026-09-22
 
 Schema **69** — a picture and a profile cover for every account: the core. The images live in a

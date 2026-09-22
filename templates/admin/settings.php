@@ -899,7 +899,7 @@
                          opened: it answers a question that is asked once, usually right after the
                          room is switched on for the first time. */ ?>
                 <details class="gr-matrix-wrap mt-3" id="shout-matrix-wrap">
-                    <summary class="wl-small text-muted"><?= _h('settings.shout_matrix_title') ?></summary>
+                    <summary class="wl-small text-muted"><i class="bi bi-chevron-right gr-matrix-chev" aria-hidden="true"></i><?= _h('settings.shout_matrix_title') ?></summary>
                     <small class="settings-hint d-block mt-2"><?= __('settings.shout_matrix_hint') ?></small>
                     <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="shout-matrix"></table></div>
                 </details>

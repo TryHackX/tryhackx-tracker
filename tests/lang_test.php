@@ -325,7 +325,7 @@ foreach (['enabled_languages', 'switcher_languages', 'user_languages'] as $k) {
 $badLang = [];
 foreach (glob($root . '/templates/*.php') + glob($root . '/templates/admin/*.php') + glob($root . '/templates/pages/*.php') as $f) {
     $src = (string)@file_get_contents($f);
-    if (!preg_match('/<html[^>]*lang="([^"]*)"/i', $src, $m)) continue;
+    if (!preg_match('/<html[^>]*\blang="([^"]*)"/i', $src, $m)) continue;
     if (str_contains($m[1], 'langCurrent()')) continue;
     if (basename($f) === 'maintenance.php') continue;   // deliberate: it prints both languages, English first
     $badLang[] = basename($f) . ' -> ' . $m[1];

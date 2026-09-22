@@ -3,9 +3,10 @@
  *
  * ── the idea (the owner's own flarum-cover-studio, rebuilt) ─────────────────────────────────────
  * Nothing is cropped in the browser and nothing is uploaded until Save. A chosen file opens as a
- * LOCAL preview (an object URL); the owner drags a focal point and sets a zoom; Save sends the file
- * and the three numbers in ONE multipart request, and the server cuts the picture's squares with the
- * very formula this frame draws (CSS object-position semantics). A cover is never cut at all — the
+ * LOCAL preview (a data: URL — readLocal() below says why never an object URL); the owner drags a
+ * focal point and sets a zoom; Save sends the file and the three numbers in ONE multipart request,
+ * and the server cuts the picture's squares with the very formula this frame draws (CSS
+ * object-position semantics). A cover is never cut at all — the
  * profile page paints the same three numbers with the same CSS — so what is framed here is, to the
  * pixel, what everybody sees.
  *
@@ -25,8 +26,11 @@
  * every listener is added here.
  *
  * window.MediaEditor = { open(options) } is what the account page below and Settings → Profiles
- * (assets/js/admin-profiles.js) both call. Strings are `js.media.*`, which the public pages carry
- * (LANG_JS_PUBLIC) and the panel carries with everything else.
+ * (assets/js/admin-profiles.js) both call; a picked file is handed over as `file` and read in here,
+ * so there is one reader for both sides and one place that decides what kind of URL it becomes.
+ * Strings are `js.media.*`, which the public pages carry (LANG_JS_PUBLIC) and the panel carries
+ * with everything else. The buttons take each side's own standard classes (`buttons`), so the
+ * editor is drawn in the account page's buttons on the account page and in Bootstrap's in the panel.
  */
 (function () {
     'use strict';
@@ -56,6 +60,36 @@
             n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
         });
         return n;
+    }
+
+    /**
+     * A picked file as a data: URL, for the preview. Resolves to the URL; rejects when the file
+     * cannot be read (gone from the disk since it was picked, a permission, a cloud placeholder).
+     *
+     * NEVER URL.createObjectURL(). That makes a blob: URL, and the policy production ENFORCES — the
+     * fallback header in .htaccess, which Apache adds whenever PHP sends no enforcing policy of its
+     * own, and production's csp_mode is 'report' — says img-src 'self' data: https:, with no blob:. So in 1.63.0 every new picture and cover
+     * failed on the live site with "The image could not be loaded", while locally it worked: php -S
+     * reads no .htaccess, and includes/csp.php runs in report-only mode, which blocks nothing.
+     * data: is already allowed. Adding blob: to the policy instead would widen it for every page of
+     * the site to spare one editor a FileReader.
+     *
+     * The size is bounded before this is reached (preflight(), from avatar_max_kb, at most 20 MB —
+     * USER_MEDIA_KB_MAX): about 27 MB as base64, under the smallest ceiling a browser puts on a data:
+     * URL (Firefox, 32 MB). tests/usermedia_test.php fails if either editor script creates an object
+     * URL, and scratchpad/shots/media_check.js runs under an ENFORCED policy so it fails the way the
+     * live site did.
+     */
+    function readLocal(file) {
+        return new Promise((resolve, reject) => {
+            const fr = new FileReader();
+            fr.addEventListener('load', () => {
+                const url = typeof fr.result === 'string' ? fr.result : '';
+                if (url.indexOf('data:') === 0) resolve(url); else reject(new Error('unreadable'));
+            });
+            fr.addEventListener('error', () => reject(fr.error || new Error('unreadable')));
+            fr.readAsDataURL(file);
+        });
     }
 
     /* ─────────────────────────────── the frame ─────────────────────────────── */
@@ -208,26 +242,33 @@
         });
         frame.addEventListener('dragstart', (e) => e.preventDefault());
 
-        /** Show an image. Resolves true once it has drawn, false if it could not be loaded. */
+        /**
+         * Show an image: an address, or a promise of one (a file still being read). Resolves true
+         * once it has drawn, false if it could not be read or loaded — one error either way, since
+         * to the person both mean "choose it again, or another one".
+         */
         function load(src) {
             ready = false;
             loading.hidden = false;
             error.hidden = true;
-            return new Promise((resolve) => {
+            const draw = (url) => new Promise((resolve) => {
                 const done = (ok) => {
                     img.removeEventListener('load', onLoad);
                     img.removeEventListener('error', onErr);
-                    loading.hidden = true;
-                    error.hidden = ok;
-                    ready = ok;
                     resolve(ok);
                 };
                 const onLoad = () => { nat.w = img.naturalWidth || 1; nat.h = img.naturalHeight || 1; done(true); };
                 const onErr = () => done(false);
                 img.addEventListener('load', onLoad);
                 img.addEventListener('error', onErr);
-                img.src = src;
-                blur.src = src;
+                img.src = url;
+                blur.src = url;
+            });
+            return Promise.resolve(src).then(draw, () => false).then((ok) => {
+                loading.hidden = true;
+                error.hidden = ok;
+                ready = ok;
+                return ok;
             });
         }
         return { frame, load, set, get, isReady: () => ready };
@@ -240,20 +281,26 @@
     /**
      * Open the editor. Resolves to true when saved, false when closed without saving.
      *   mode      'avatar' | 'cover'
-     *   src       the image: an object URL for a file just picked, or the stored one
+     *   file      a File just picked: read here into a data: URL (readLocal) while the frame spins
+     *   src       …or the address of the stored image (Adjust)
      *   fresh     true for a new file (it is a change by itself, so Save starts enabled)
      *   x, y, zoom  where to start
      *   coverH, coverHm  the header's height on a desktop and on a phone (covers)
      *   desktopW, phoneW the header's width on each, in CSS px (covers)
      *   note      the sentence under the frame
      *   save(state) → Promise<{ok, message}>
-     *   buttons   {primary, secondary} class lists for this side of the site
+     *   buttons   {primary, secondary, danger} class lists for this side of the site
      */
     function open(o) {
         if (openNow) openNow.force();
         return new Promise((resolve) => {
             const mode = o.mode === 'cover' ? 'cover' : 'avatar';
-            const btn = Object.assign({ primary: 'btn', secondary: 'btn btn-secondary btn-small' }, o.buttons || {});
+            // The account page's own standard buttons, all at one size: 1.63.0 drew Save at the full
+            // .btn size between two .btn-small ones, so the footer's buttons did not line up. The panel
+            // passes Bootstrap's. `danger` is what throws work away (Discard); on the account page it
+            // is the secondary button that turns red on hover, the way the site's other "delete?" reads.
+            const btn = Object.assign({ primary: 'btn btn-small fe-btn-primary', secondary: 'btn btn-secondary btn-small',
+                                        danger: 'btn btn-secondary btn-small fe-btn-danger' }, o.buttons || {});
             const num = (v, d) => (v === null || v === undefined || v === '' || !isFinite(Number(v))) ? d : Number(v);
             const start = { x: r2(clamp(num(o.x, 50), 0, 100)), y: r2(clamp(num(o.y, 50), 0, 100)),
                             zoom: r2(clamp(num(o.zoom, 1), ZMIN, ZMAX)) };
@@ -262,12 +309,13 @@
             const stage = el('div', { className: 'fe-stage' });
             const msg = el('p', { className: 'fe-msg', role: 'status', 'aria-live': 'polite' });
             const zoomIn = el('input', { type: 'range', min: String(ZMIN), max: String(ZMAX), step: '0.01', list: titleId + '-ticks', 'aria-label': T('js.media.zoom') });
-            const readout = el('button', { type: 'button', className: 'fe-readout', title: T('js.media.zoom_reset'), 'aria-label': T('js.media.zoom_reset') });
+            const readout = el('button', { type: 'button', className: btn.secondary + ' fe-readout', title: T('js.media.zoom_reset'), 'aria-label': T('js.media.zoom_reset') });
             const save = el('button', { type: 'button', className: btn.primary + ' fe-save', disabled: true, text: T('js.media.save') });
             const cancel = el('button', { type: 'button', className: btn.secondary + ' fe-cancel', text: T('js.media.cancel') });
-            const recentre = el('button', { type: 'button', className: btn.secondary + ' fe-recentre', text: T('js.media.recentre') });
-            const discard = el('button', { type: 'button', className: 'shout-yes fe-discard', text: T('js.media.discard') });
-            const keep = el('button', { type: 'button', className: 'shout-no fe-keep', text: T('js.media.keep') });
+            const recentre = el('button', { type: 'button', className: btn.secondary + ' fe-recentre' },
+                [el('i', { className: 'bi bi-crosshair', 'aria-hidden': 'true' }), ' ' + T('js.media.recentre')]);
+            const discard = el('button', { type: 'button', className: btn.danger + ' fe-discard', text: T('js.media.discard') });
+            const keep = el('button', { type: 'button', className: btn.secondary + ' fe-keep', text: T('js.media.keep') });
             const ask = el('span', { className: 'fe-ask', hidden: true }, [el('span', { text: T('js.media.discard_q') }), discard, keep]);
             const close = el('button', { type: 'button', className: 'fe-close', 'aria-label': T('js.media.close'), title: T('js.media.close'), text: '×' });
             const box = el('div', { className: 'fe-box fe-box-' + mode, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId }, [
@@ -290,7 +338,8 @@
             if (mode === 'cover') {
                 shapeDesc = el('span', { className: 'fe-shape-desc' });
                 const mk = (id, label) => {
-                    const b = el('button', { type: 'button', 'data-shape': id, 'aria-pressed': 'false', text: label });
+                    const b = el('button', { type: 'button', className: btn.secondary, 'data-shape': id, 'aria-pressed': 'false' },
+                        [el('i', { className: 'bi ' + (id === 'phone' ? 'bi-phone' : 'bi-display'), 'aria-hidden': 'true' }), ' ' + label]);
                     b.addEventListener('click', () => setShape(id === 'phone'));
                     return b;
                 };
@@ -389,8 +438,17 @@
 
             openNow = { force: () => finish(false) };
             document.body.appendChild(overlay);
-            minis.forEach((m) => { m.src = o.src; });
-            fe.load(o.src).then((ok) => {
+            // A picked file is read HERE, not by the caller: the dialog is on screen at once with its
+            // spinner, a file that cannot be read ends in the same error as one that cannot be decoded,
+            // and a slow read of an earlier pick cannot open over a newer one — the newer open() has
+            // already closed this dialog (openNow.force above), and a closed dialog draws nothing.
+            const src = (o.file ? readLocal(o.file) : Promise.resolve(o.src)).then((url) => {
+                if (done) throw new Error('closed');
+                minis.forEach((m) => { m.src = url; });
+                return url;
+            });
+            fe.load(src).then((ok) => {
+                if (done) return;
                 loaded = ok;
                 onChange(fe.get());
                 if (ok) { try { fe.frame.focus({ preventScroll: true }); } catch (x) { fe.frame.focus(); } }
@@ -437,10 +495,14 @@
         return { ok: true, message: j.message || T('js.media.saved'), state: j[kind], firstFrame: !!j.first_frame };
     }
 
-    /** "Are you sure?", in the place the button was — the same shape the shoutbox asks in. */
+    /**
+     * "Are you sure?", in the place the button was — the shoutbox's in-place shape, but with the
+     * page's standard small buttons: the shoutbox's own are sized for a two-line shout, and beside
+     * the Adjust and Remove they replace they read as a different control.
+     */
     function askInPlace(btn, question, yesLabel, onYes) {
-        const yes = el('button', { type: 'button', className: 'shout-yes', text: yesLabel });
-        const no = el('button', { type: 'button', className: 'shout-no', text: T('js.media.no') });
+        const yes = el('button', { type: 'button', className: 'btn btn-secondary btn-small fe-btn-danger acc-media-yes', text: yesLabel });
+        const no = el('button', { type: 'button', className: 'btn btn-secondary btn-small acc-media-no', text: T('js.media.no') });
         const box = el('span', { className: 'shout-confirm acc-media-ask', role: 'group' }, [el('span', { className: 'shout-confirm-q', text: question }), yes, no]);
         yes.addEventListener('click', async () => { yes.disabled = no.disabled = true; await onYes(); box.replaceWith(btn); btn.focus(); });
         no.addEventListener('click', () => { box.replaceWith(btn); btn.focus(); });
@@ -498,7 +560,7 @@
 
         const note = T(kind === 'cover' ? 'js.media.note_cover' : 'js.media.note_avatar');
         const edit = (src, fresh, file) => window.MediaEditor.open({
-            mode: kind, src: src, fresh: fresh, x: fresh ? 50 : st.x, y: fresh ? 50 : st.y, zoom: fresh ? 1 : st.zoom,
+            mode: kind, src: src, file: fresh ? file : null, fresh: fresh, x: fresh ? 50 : st.x, y: fresh ? 50 : st.y, zoom: fresh ? 1 : st.zoom,
             coverH: data.cover_h, coverHm: data.cover_hm, desktopW: data.desk_w, phoneW: data.phone_w,
             note: note, returnFocus: fresh ? drop : adjust,
             save: async (s) => {
@@ -513,8 +575,7 @@
             const bad = preflight(file, Number(data.max_bytes) || 0);
             if (bad) { say(bad, true); return; }
             say('');
-            const url = URL.createObjectURL(file);
-            edit(url, true, file).finally(() => URL.revokeObjectURL(url));
+            edit(null, true, file);             // the editor reads it (readLocal): see there for why
         }
         if (drop && input) {
             input.setAttribute('tabindex', '-1');   // the box is the keyboard's way in, not a second stop

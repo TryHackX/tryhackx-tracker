@@ -145,7 +145,7 @@ def stable(html):
     for a reason that has nothing to do with settings. CSRF tokens have the same property."""
     import re as _re
     html = _re.sub(r'nonce="[^"]*"', 'nonce="_"', html)
-    html = _re.sub(r'(name="csrf_token"[^>]*value=")[^"]*"', r'_"', html)
+    html = _re.sub(r'(name="csrf_token"[^>]*value=")[^"]*"', r'\1_"', html)
     return html
 
 

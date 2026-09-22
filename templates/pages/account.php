@@ -176,11 +176,12 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
                         <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif">
                     </div>
                     <?php endif; ?>
+                    <?php /* The same two buttons, with the same icons, as Settings → Profiles in the panel. */ ?>
                     <div class="acc-media-acts">
                         <?php if ($accMayAv): ?>
-                        <button type="button" class="btn btn-secondary btn-small acc-media-adjust"<?= $accMedia['avatar']['has'] ? '' : ' hidden' ?>><?= _h('account.media_adjust') ?></button>
+                        <button type="button" class="btn btn-secondary btn-small acc-media-adjust"<?= $accMedia['avatar']['has'] ? '' : ' hidden' ?>><i class="bi bi-arrows-move" aria-hidden="true"></i> <?= _h('account.media_adjust') ?></button>
                         <?php endif; ?>
-                        <button type="button" class="btn btn-secondary btn-small acc-media-remove"<?= $accMedia['avatar']['has'] ? '' : ' hidden' ?>><?= _h('account.media_remove') ?></button>
+                        <button type="button" class="btn btn-secondary btn-small acc-media-remove"<?= $accMedia['avatar']['has'] ? '' : ' hidden' ?>><i class="bi bi-trash" aria-hidden="true"></i> <?= _h('account.media_remove') ?></button>
                         <span class="acc-media-status" role="status" aria-live="polite"></span>
                     </div>
                 </div>
@@ -214,9 +215,9 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
                 <?php endif; ?>
                 <div class="acc-media-acts">
                     <?php if ($accMayCv): ?>
-                    <button type="button" class="btn btn-secondary btn-small acc-media-adjust"<?= $accMedia['cover']['has'] ? '' : ' hidden' ?>><?= _h('account.media_adjust') ?></button>
+                    <button type="button" class="btn btn-secondary btn-small acc-media-adjust"<?= $accMedia['cover']['has'] ? '' : ' hidden' ?>><i class="bi bi-arrows-move" aria-hidden="true"></i> <?= _h('account.media_adjust') ?></button>
                     <?php endif; ?>
-                    <button type="button" class="btn btn-secondary btn-small acc-media-remove"<?= $accMedia['cover']['has'] ? '' : ' hidden' ?>><?= _h('account.media_remove') ?></button>
+                    <button type="button" class="btn btn-secondary btn-small acc-media-remove"<?= $accMedia['cover']['has'] ? '' : ' hidden' ?>><i class="bi bi-trash" aria-hidden="true"></i> <?= _h('account.media_remove') ?></button>
                     <span class="acc-media-status" role="status" aria-live="polite"></span>
                 </div>
             </div>

@@ -27,22 +27,32 @@
 
     // ───────────────────────── helpers ─────────────────────────
     function badge(text, cls) { return el('span', { className: 'wl-badge ' + (cls || ''), text }); }
-    // Who sent it and whether a person has looked at it yet. Both answers hang off the same row and
-    // both are about the SUBMISSION rather than the torrent, so they are drawn together — a queue that
-    // says "waiting" without saying who is waiting cannot be worked through.
+    // What the main table's Source cell knows beyond the source itself — who sent it, whether a person
+    // has looked at it yet, which forum post it came from — as the badge's tooltip, one fact a line.
     //
-    // 'approved' and 'none' draw nothing on purpose: they are the resting state of every row in the
-    // table, and a badge that is on every row is a badge nobody reads.
-    function reviewNodes(row) {
+    // These used to be DRAWN after the badge: a link to the post, a review badge, "via <partner>".
+    // The column is 84–96 px wide and every cell of this table is one line that ellipsises (admin.css,
+    // "Whitelist tables"), so every row the forum bridge sent through its key read "FORUM …" and none
+    // of it could ever be read — the review badge alone is wider than the column. The cell holds the
+    // badge and nothing else now; the details panel (a click on the row) still has all of it, with the
+    // post link and the review note, in rows of their own.
+    //
+    // 'approved' and 'none' say nothing on purpose: they are the resting state of every row in the
+    // table, and a line that is on every row is a line nobody reads.
+    function sourceNote(row) {
         const out = [];
-        const st = row.review_status || 'none';
-        if (st === 'pending' || st === 'rejected') {
-            out.push(badge(t(st === 'pending' ? 'js.wl.review_pending' : 'js.wl.review_rejected'),
-                           st === 'pending' ? 'wl-b-pending' : 'wl-b-bad'));
-        }
         const who = row.api_client_label || (row.api_client && row.api_client.label) || '';
-        if (who) out.push(el('span', { className: 'text-muted wl-small wl-via', text: t('js.wl.partner', { name: who }) }));
-        return out;
+        if (who) out.push(t('js.wl.partner', { name: who }));
+        const st = row.review_status || 'none';
+        if (st === 'pending' || st === 'rejected') out.push(t(st === 'pending' ? 'js.wl.review_pending' : 'js.wl.review_rejected'));
+        const ref = row.source_ref || null;
+        if (ref) {
+            const parts = [];
+            if (ref.discussion_id) parts.push(t('js.wl.discussion_ref', { id: ref.discussion_id }));
+            if (ref.post_id) parts.push(t('js.wl.post_ref', { id: ref.post_id }));
+            if (parts.length) out.push(parts.join(', '));
+        }
+        return out.join('\n');
     }
 
     function sourceBadge(src) {
@@ -680,16 +690,19 @@
             tr.appendChild(hashCell);
             const nameTd = el('td', { className: 'wl-name', title: row.name || '' });
             nameTd.appendChild(el('span', { text: row.name || '—' }));
+            // WHO sent it stays readable at a glance, under the name where the column has room — the
+            // narrow Source column could not hold it and ellipsised to "…" (1.63.1), and a moderator
+            // going through the waiting queue should not have to hover every row to learn the partner.
+            const partner = row.api_client_label || (row.api_client && row.api_client.label) || '';
+            if (partner) nameTd.appendChild(el('div', { className: 'wl-small', text: t('js.wl.partner', { name: partner }) }));
             tr.appendChild(nameTd);
             tr.appendChild(el('td', { className: 'wl-size', text: row.total_size ? fmtBytes(row.total_size) : '—' }));
             tr.appendChild(el('td', { className: 'wl-files-col', text: row.files_count != null ? String(row.files_count) : '—' }));
-            const srcTd = el('td', { className: 'wl-source' }, sourceBadge(row.source));
-            if (row.source_ref && isHttpUrl(row.source_ref.url)) {
-                srcTd.appendChild(document.createTextNode(' '));
-                srcTd.appendChild(el('a', { href: row.source_ref.url, target: '_blank', rel: 'noopener noreferrer', title: t('js.wl.open_source_post'), className: 'wl-ref-link' }, el('i', { className: 'bi bi-box-arrow-up-right' })));
-            }
-            reviewNodes(row).forEach(n => { srcTd.appendChild(document.createTextNode(' ')); srcTd.appendChild(n); });
-            tr.appendChild(srcTd);
+            // The badge alone: it fits the column for every source (sourceNote() says what went where).
+            const srcBadge = sourceBadge(row.source);
+            const srcNote = sourceNote(row);
+            if (srcNote) srcBadge.title = srcNote;
+            tr.appendChild(el('td', { className: 'wl-source' }, srcBadge));
             const ipTd = el('td', { className: 'wl-ip', title: row.ip || '' });
             if (row.ip) {
                 const a = el('a', { href: '#', title: t('js.wl.filter_by_ip', {ip: row.ip}), text: row.ip });

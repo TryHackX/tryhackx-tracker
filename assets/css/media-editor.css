@@ -33,11 +33,23 @@
 .fe-head h3 { margin: 0; font-size: 1rem; color: #4a9eff; }
 .fe-close { background: transparent; border: 0; color: #888; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 0.25rem; }
 .fe-close:hover { color: #f44336; }
-.fe-close:focus-visible, .fe-readout:focus-visible, .fe-shape button:focus-visible { outline: 2px solid #4a9eff; outline-offset: 2px; }
+.fe-close:focus-visible { outline: 2px solid #4a9eff; outline-offset: 2px; }
 .fe-body { padding: 0.9rem 1rem 0.6rem; }
 .fe-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.7rem 1rem 0.9rem;
            border-top: 1px solid #222; }
 .fe-spacer { flex: 1 1 auto; }
+
+/* ── the buttons ─────────────────────────────────────────────────────────────────────────────
+   Every button here is the side's own standard one, passed in through `buttons` (media-editor.js):
+   .btn-small on the account page, Bootstrap's .btn-sm in the panel (1.63.0 drew the account page's
+   Save at the full .btn size between two small ones). Two things the account page's classes do not
+   do by themselves. Its primary .btn has NO border and its .btn-secondary a 1 px one, so even at the
+   same size Save would stand 2 px shorter than Cancel beside it; a transparent border evens them
+   out. And it has no red button, so the one that throws work away (Discard, "Yes, remove") is the
+   secondary one turning red under the pointer, the way the shoutbox's in-place "delete?" reads.
+   The panel passes Bootstrap's btn-outline-danger for that, and neither class is used there. */
+.fe-box .fe-btn-primary { border: 1px solid transparent; }
+.fe-btn-danger:hover, .fe-btn-danger:focus-visible { border-color: #f44336; color: #f44336; background: rgba(244, 67, 54, 0.10); }
 
 /* ── the frame ───────────────────────────────────────────────────────────────────────────── */
 .fe-stage { display: flex; justify-content: center; }
@@ -107,20 +119,16 @@
 
 /* ── below the frame ─────────────────────────────────────────────────────────────────────── */
 .fe-shape { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0 0 0.6rem; font-size: 0.82rem; }
-.fe-shape button {
-    background: rgba(255, 255, 255, 0.045); border: 1px solid #39405a; border-radius: 999px;
-    color: #cdd1da; padding: 0.15rem 0.8rem; font: inherit; cursor: pointer;
-}
-.fe-shape button[aria-pressed="true"] { border-color: #4a9eff; color: #fff; background: rgba(74, 158, 255, 0.18); }
+/* The pressed shape is a STATE, so it looks the same on both sides whatever the button class; the
+   :hover is listed because both sides' hover rules would otherwise repaint it under the pointer. */
+.fe-shape button[aria-pressed="true"],
+.fe-shape button[aria-pressed="true"]:hover { border-color: #4a9eff; color: #fff; background: rgba(74, 158, 255, 0.18); }
 .fe-shape-desc { color: #888; font-size: 0.78rem; }
 .fe-zoomrow { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.7rem; }
 .fe-zoomrow label { font-size: 0.82rem; color: #888; margin: 0; }
 .fe-zoomrow input[type="range"] { flex: 1 1 auto; min-width: 6rem; accent-color: #4a9eff; }
-.fe-readout {
-    min-width: 4.2rem; background: rgba(255, 255, 255, 0.045); border: 1px solid #39405a; border-radius: 4px;
-    color: #cdd1da; padding: 0.1rem 0.45rem; font: inherit; font-size: 0.82rem; cursor: pointer; font-variant-numeric: tabular-nums;
-}
-.fe-readout:hover { border-color: #4a9eff; }
+/* A standard button that shows a number: wide enough for "4.00×", so it does not jump as it changes. */
+.fe-readout { min-width: 4.2rem; font-variant-numeric: tabular-nums; }
 /* The three sizes a picture is really drawn at, live while it is framed. */
 .fe-sizes { display: flex; align-items: flex-end; gap: 1rem; margin-top: 0.8rem; flex-wrap: wrap; }
 .fe-sizes-label { font-size: 0.78rem; color: #888; margin-right: 0.2rem; align-self: center; }
@@ -137,11 +145,3 @@
     .fe-body { padding: 0.7rem 0.7rem 0.5rem; }
     .fe-foot { padding: 0.6rem 0.7rem 0.8rem; }
 }
-/* The "discard the changes?" question borrows the public site's in-place confirm classes; spelled
-   out here as well so it looks the same inside the panel, which does not load style.css. */
-.fe-ask button {
-    background: none; border: 1px solid #39405a; border-radius: 4px; padding: 0.05rem 0.5rem;
-    color: #cdd1da; font: inherit; font-size: 0.8rem; cursor: pointer;
-}
-.fe-ask .shout-yes:hover { border-color: #f44336; color: #f44336; }
-.fe-ask .shout-no:hover { border-color: #4a9eff; }

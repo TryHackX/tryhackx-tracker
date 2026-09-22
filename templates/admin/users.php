@@ -183,7 +183,11 @@
         <div class="wl-view d-hidden" id="view-groups">
             <div class="admin-toolbar-card">
                 <div class="toolbar-row">
-                    <div class="toolbar-search"><span class="text-muted wl-small"><?= __('a.users.groups_note') ?></span></div>
+                    <?php /* A note, so it is drawn as one: it sat in .toolbar-search, which is the frame of a
+                             search field — bordered and unpadded, because the field inside brings its own
+                             padding — so the text touched that frame on every side. .nl-note is the box
+                             this page's other note (Write to members, #bm-preview) is drawn in. */ ?>
+                    <p class="nl-note gr-note"><span class="text-muted"><?= __('a.users.groups_note') ?></span></p>
                     <div class="toolbar-right">
                         <button type="button" class="btn btn-sm btn-primary" id="btn-group-new"><i class="bi bi-plus-lg"></i> <?= _h('a.users.new_group') ?></button>
                     </div>
@@ -200,7 +204,7 @@
             <?php // Groups across, permissions down. Fifteen ids over five groups is a table a person reads
                   // in one glance; the comma-separated key list in the table above is not. ?>
             <details class="gr-matrix-wrap mt-2">
-                <summary class="wl-small text-muted"><?= _h('a.users.matrix_title') ?></summary>
+                <summary class="wl-small text-muted"><i class="bi bi-chevron-right gr-matrix-chev" aria-hidden="true"></i><?= _h('a.users.matrix_title') ?></summary>
                 <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="gr-matrix"></table></div>
             </details>
         </div>

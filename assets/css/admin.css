@@ -2311,11 +2311,22 @@ textarea.pc-text {
 .admin-lang-opt.active { color: #9ecbff; border-color: #4a9eff; background: rgba(74, 158, 255, 0.12); }
 
 /* ── Group presets and the permission matrix ────────────────────────────────── */
+/* The Groups tab's explanation beside "New group", in .nl-note's box; in a toolbar row it takes the
+   free width and loses the top margin a note stacked under something else needs. */
+.gr-note { flex: 1 1 24rem; margin: 0; }
 .ge-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin-bottom: 0.5rem; }
 .ge-preset { --bs-btn-padding-y: 0.15rem; --bs-btn-padding-x: 0.5rem; font-size: 0.78rem; }
-.gr-matrix-wrap summary { cursor: pointer; list-style: none; }
-.gr-matrix-wrap summary::before { content: 'B8  '; }
-.gr-matrix-wrap[open] summary::before { content: 'BE  '; }
+/* The matrix's disclosure marker is a Bootstrap Icons chevron IN THE MARKUP (templates/admin/users.php,
+   templates/admin/settings.php), turned a quarter when open. It used to be a CSS escape for U+25B8 in
+   `content:` that lost its backslash on the way into this file, and what was left was U+0015 — a
+   control character no font can draw, so every browser showed a missing-glyph box — with the letters
+   "B8" after it. An element with a class has no escape to lose. The panel's other collapsibles
+   (.rt-collapse, .au-detail, .settings-more) carry the real U+25B8 and were never affected. */
+.gr-matrix-wrap > summary { cursor: pointer; list-style: none; }
+.gr-matrix-wrap > summary::-webkit-details-marker { display: none; }
+.gr-matrix-chev { display: inline-block; margin-right: 0.35rem; font-size: 0.85em; transition: transform 0.15s ease; }
+.gr-matrix-wrap[open] > summary .gr-matrix-chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .gr-matrix-chev { transition: none; } }
 .gr-matrix { --bs-table-bg: transparent; font-size: 0.8rem; }
 .gr-matrix th, .gr-matrix td { border-color: #1b232d; vertical-align: middle; }
 .gr-matrix-g { text-align: center; white-space: nowrap; font-weight: 500; }
@@ -2400,9 +2411,6 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .admin-footer svg { vertical-align: -2px; }
 .footer-version { opacity: 0.75; font-variant-numeric: tabular-nums; }
 
-/* The partner a submission came through, beside the source badge. Muted: it answers "who", and the
-   badge next to it answers the more urgent "does this still need me". */
-.wl-via { margin-left: 0.25rem; white-space: nowrap; }
 #clOptsModal .wl-copybox-code { word-break: break-all; }
 #clOptsModal .form-check-label code { font-size: 0.8em; }
 #tokenModal .wl-copybox-code { word-break: break-all; }
