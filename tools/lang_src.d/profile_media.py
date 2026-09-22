@@ -81,6 +81,15 @@ add('settings', {
         'Inicjał to pierwsza litera nazwy na jednym z dwunastu kolorów, wybranym na podstawie nazwy, więc każdy '
         'zachowuje swój. Domyślne zdjęcie poniżej jest używane dopiero wtedy, gdy jest ustawione; do tego czasu '
         'każdy dostaje swój inicjał.'),
+    # 1.64.0: which card of the account page holds Picture and Cover.
+    'account_media_side': ('Picture and cover on the account page', 'Zdjęcie i okładka na stronie konta'),
+    'account_media_side_right': ('In the right-hand card', 'W prawej karcie'),
+    'account_media_side_left': ('In the left-hand card', 'W lewej karcie'),
+    'account_media_side_hint': (
+        'The right-hand card holds what a member can change about themselves; the left one holds the facts about '
+        'their account. Nothing else moves, and neither does anything on the profile page.',
+        'Prawa karta trzyma to, co członek może o sobie zmienić; lewa — fakty o koncie. Nic poza tym się nie '
+        'przesuwa i nic nie zmienia się na stronie profilu.'),
     'profiles_default_avatar': ('Default picture', 'Domyślne zdjęcie profilowe'),
     'profiles_default_avatar_hint': (
         'Shown for everybody without a picture of their own when the setting above says so. Framed with the same '
@@ -200,6 +209,10 @@ add('js.media', {
     'save': ('Save', 'Zapisz'),
     'saving': ('Saving…', 'Zapisywanie…'),
     'close': ('Close', 'Zamknij'),
+    # 1.64.0: the cross keeps meaning "gone, now" and asks for a second press instead of opening
+    # the footer's question. Said beside the cross, and taken back after a moment.
+    'close_again': ('Click again to close without saving',
+                    'Kliknij jeszcze raz, aby zamknąć bez zapisania'),
     'discard_q': ('Discard the changes?', 'Porzucić zmiany?'),
     'discard': ('Discard', 'Porzuć'),
     'keep': ('Keep editing', 'Edytuj dalej'),

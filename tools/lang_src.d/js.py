@@ -4343,6 +4343,13 @@ add('', {
         'Wróć'),
     'js.pm.hide': ('Clear from my inbox',
         'Usuń ze skrzynki'),
+    # 1.64.0 (schema 70): deleting a conversation, which can only ever mean "for me" — the other
+    # person's copy is theirs. The question says so, because "delete" on its own would be a promise
+    # this cannot keep.
+    'js.pm.del_title': ('Delete this conversation with :user, for you',
+        'Usuń tę rozmowę z :user — u siebie'),
+    'js.pm.del_q': ('Delete it for you? They keep their copy.',
+        'Usunąć u ciebie? Druga osoba zachowa swoją kopię.'),
     'js.pm.message': ('Message',
         'Napisz'),
     'js.pm.no_match': ('Nothing matched.',
@@ -4716,4 +4723,12 @@ add('js.app', {
         'Pliki pasujące do wyszukiwania, które leżą poza wczytaną częścią listy (:n), są pokazane w swoich folderach; „…” oznacza miejsca, gdzie pominięto pliki obok nich.'),
     'files_matches_more': ('More files match than the first :n shown here.',
         'Pasujących plików jest więcej niż pierwsze :n pokazane tutaj.'),
+})
+
+# ── 1.64.0: the dot on a folder that holds a match ──
+# On the SUMMARY of a folder, so it is readable with the folder shut -- which is the one moment the
+# highlight on the file itself cannot say anything.
+add('js.app', {
+    'files_folder_hit': ('A file matching your search is in this folder',
+        'W tym folderze jest plik pasujący do wyszukiwania'),
 })

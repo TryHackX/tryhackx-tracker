@@ -4,6 +4,79 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.64.0] — 2026-09-22
+
+Schema 70: two columns on `message_threads` (`u_low_cleared_id`, `u_high_cleared_id`) and two
+settings (`shout_order`, `account_media_side`).
+
+### Fixed — three faults nobody had reported yet
+
+* **A shout row could end up wearing another row's words.** The live language switch
+  (`assets/js/lang-swap.js`) walks the page against a fresh render of it and pairs children up by
+  `id` first and by POSITION second. Shout rows carried a `data-id` and no `id`, so the moment the
+  live list stopped being the list the server would draw right now — a line polled in, or "Older"
+  pressed — the rows were paired off by their places in two lists of different lengths and a row was
+  given a different row's text while keeping its own `data-id`. The delete cross beside it deletes by
+  `data-id`, so the line that went was not the line on the screen. Both renderers now write
+  `id="shout-<id>"`; the polled lists a script builds (the inbox, an open conversation, the friends
+  list, the directory) carry stable ids too.
+* **An overlay closed when a press that began inside it was released on the backdrop.** A `click`
+  goes to the nearest common ancestor of the press and the release, so dragging a long file list's
+  own scrollbar and letting go past the edge of the window closed the window — after thirty pages of
+  loading. Every overlay now closes on the backdrop only when the press ALSO started there: the file
+  list, the Info panel, the "who has this" and list overlays, the two people dialogs, the picture
+  lightbox, the terms box, the leaving-the-site box and the panel's confirm box.
+* **The search file list folded the reader's folders back up, and stopped loading by itself.** The
+  tree was rebuilt with `replaceChildren` on every page AND at the start of every load — the second
+  one only to write "Loading…" on a button — and a `<details>` remembered nothing, so a folder could
+  be open for about a second. Each folder now carries a `data-path` and the open/closed answers are
+  carried across the rebuilds; the chrome and the tree are drawn separately, and a load start no
+  longer touches the tree. The loader watches the window's own scrolling body instead of the page
+  (and re-checks after every page: an observer reports changes, so a page that landed with the end of
+  the list still on screen ended the chain). The Info panel's own file tree gets the same treatment.
+  A reply for a list that has been closed can no longer draw itself into the one opened since, and
+  opening the list adds a history entry, so Back closes it instead of re-running the search behind it.
+
+### Added
+
+* **Delete a conversation.** Each side of a thread now has a watermark (`u_*_cleared_id`): deleting
+  moves your own to the last message there is, and every read path — the open conversation, the poll,
+  the inbox and its previews, the deep search and both unread counts — shows only what is above it.
+  Nothing is removed: the other person's copy is untouched, a new message brings the thread back
+  showing only what arrived after you deleted it, and a reported message stays readable to the panel.
+  The cross sits on the inbox row and asks the same in-place question the shoutbox asks — which is now
+  one helper in `assets/js/app.js` rather than a copy per file.
+* **Newest lines at the top** (`shout_order`, Settings → Shoutbox, the new default). The room used to
+  be drawn oldest-first with nothing ever scrolling it, so opening it put the reader in front of its
+  oldest lines. At the top, the composer sits above the list and "Older" below it; the chat order is
+  still there, and now scrolls to the end when it opens — including when a hidden tab or a collapsed
+  account tab first becomes visible, where a box with no height could not be scrolled at all.
+* **Picture and cover on either side of the account page** (`account_media_side`, Settings →
+  Profiles). The same markup, rendered once, at one of two positions.
+* A folder that holds a search match is marked with a dot in the file tree, so a reader can steer
+  towards it with the folder shut.
+
+### Changed
+
+* The picture lightbox keeps its controls INSIDE the picture: the close in the top right corner, the
+  link to the original centred along the bottom, both on a dark pill, out of the way until the
+  picture is hovered or something in it has the focus — and always on where there is no hover to
+  have. The bar under the picture is gone, and the picture has its height back.
+* The question in a shout row hides the row's other controls while it is open (the pin button was
+  drawn exactly where "No" lands, so declining to delete a line pinned it), and takes itself away
+  after five seconds, on a press outside it, on Esc, or when the language starts changing.
+* The media editor's × has its own behaviour: nothing unsaved and it closes at once; something
+  unsaved and it says what a second press will do, beside itself, for three seconds. Cancel, Esc and
+  the backdrop still ask the footer's question.
+* The time zone list is written without the region each zone is already filed under and without the
+  underscores ("Argentina / Buenos Aires (UTC-03:00)"), which is six characters off the longest line
+  in a list no stylesheet can narrow; the Time zone block moved to the card that holds Interface
+  language, outside that block's own condition.
+* Names in the friends list, the directory, the "who has this" overlay and a conversation's head no
+  longer turn purple once they have been opened.
+* The copyable short hash is a pill the size of its own words in the site's own font, instead of a
+  bordered box stretched across its whole column with the text pushed to the right of it.
+
 ## [1.63.1] — 2026-09-22
 
 No schema change.

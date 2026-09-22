@@ -139,24 +139,17 @@
      * The same shape for a shout and for an uploaded emote — a question with a yes and a no, in the
      * row it is about. window.confirm() would ask from outside the page, about a row it cannot show.
      */
-    function askInPlace(btn, question, onYes) {
-        var ask = el('span', { className: 'shout-confirm' });
-        ask.appendChild(el('span', { className: 'shout-confirm-q', text: question }));
-        var yes = el('button', { type: 'button', className: 'shout-yes', text: t('js.shout.yes') });
-        var no = el('button', { type: 'button', className: 'shout-no', text: t('js.shout.no') });
-        yes.addEventListener('click', async function () {
-            yes.disabled = true;
-            var back = await onYes();
-            if (back !== false) return;             // the caller took the row away itself
-            ask.replaceWith(btn);
-        });
-        no.addEventListener('click', function () { ask.replaceWith(btn); btn.focus(); });
-        ask.appendChild(yes);
-        ask.appendChild(no);
-        btn.replaceWith(ask);
-        yes.focus();
-        return ask;
-    }
+    /**
+     * "Are you sure?", asked in the place the button was.
+     *
+     * Written here in 1.58.0 and MOVED to assets/js/app.js in 1.64.0, when the inbox wanted the
+     * same question: three copies of a dialog would be three answers to "how does this site ask".
+     * app.js is on every public page this file is on (templates/layout.php loads it first and
+     * without a condition), and the whole of what it does — the row's other controls hidden while
+     * it is open, the five-second life, Esc, a press outside, standing down when the language
+     * starts changing — is written over there, once.
+     */
+    var askInPlace = window.askInPlace;
 
     /* ─────────────────────────── the emoji, and the images beside them ─────────────────────────── */
 
@@ -448,12 +441,15 @@
         var shut = el('button', { type: 'button', className: 'shout-lb-close', title: t('js.shout.lb_close'),
                                   'aria-label': t('js.shout.lb_close') },
                       el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' }));
+        // 1.64.0: the two controls are INSIDE the picture, not on a bar under it — the close as an
+        // icon in the top right corner, the link to the original centred along the bottom edge,
+        // both on a dark pill and both invisible until the picture is hovered or something inside
+        // it has the focus. A bar under the picture is a strip of furniture in the way of the one
+        // thing the window is for, and it took 3.5rem off the height the picture could use. Where
+        // there is no hover to have — a phone — the stylesheet leaves them on.
         var root = el('div', { className: 'shout-lightbox', hidden: true, role: 'dialog', 'aria-modal': 'true',
                                'aria-label': t('js.shout.lb_label') }, [
-            el('div', { className: 'shout-lb-frame' }, [
-                img,
-                el('div', { className: 'shout-lb-bar' }, [orig, shut]),
-            ]),
+            el('div', { className: 'shout-lb-frame' }, [img, shut, orig]),
         ]);
         var from = null;              // the link that opened it: the focus goes back there
         function close() {
@@ -475,9 +471,16 @@
             e.preventDefault();
             stops[(i + (e.shiftKey ? stops.length - 1 : 1) + stops.length) % stops.length].focus();
         }
-        // The backdrop is everything that is not the picture or its bar.
+        // The backdrop is everything that is not the picture or the controls over it — and it
+        // closes only when the press STARTED there (1.64.0). A `click` goes to the common ancestor
+        // of the press and the release, so somebody who presses on the picture and lets go beside
+        // it was shutting the lightbox they were looking at. This file also runs on pages that do
+        // not carry app.js, so it keeps its own copy of the two lines rather than that one's.
+        var lbFromBackdrop = false;
+        var onBackdrop = function (n) { return n === root || (n.classList && n.classList.contains('shout-lb-frame')); };
+        root.addEventListener('pointerdown', function (e) { lbFromBackdrop = onBackdrop(e.target); });
         root.addEventListener('click', function (e) {
-            if (e.target === root || e.target.classList.contains('shout-lb-frame')) close();
+            if (onBackdrop(e.target) && lbFromBackdrop) close();
         });
         shut.addEventListener('click', close);
         document.body.appendChild(root);
@@ -520,6 +523,10 @@
         var pinnedEl = document.getElementById('shout-pinned');
         if (!listEl) return;
 
+        // Which end the newest line is at (1.64.0). The template has already drawn the room this
+        // way round and moved the composer and "Older" with it; what is left for this side is where
+        // a line that lands goes, and which way "keep the reader's place" points.
+        var newestTop = box.dataset.order === 'top';
         var newest = Number(box.dataset.newest || 0);
         var oldest = Number(box.dataset.oldest || 0);
         var live = Number(box.dataset.live || 0);
@@ -570,6 +577,13 @@
         function renderRow(r) {
             var name = String(r.user || '');
             var row = el('div', { className: 'shout-row' + (r.own ? ' shout-row-own' : '') + (r.mentions_me ? ' shout-row-mention' : '') + (r.system ? ' shout-row-system' : '') });
+            // The same id templates/partials/shoutbox_widget.php writes, and for the same reason
+            // (1.64.0): the live language switch pairs a live node with the freshly rendered one by
+            // `id` first and by POSITION second, and a room with polled or "older" rows in it is
+            // not the room the server would draw right now. Without this, a row was handed another
+            // row's words while keeping its own data-id — and the cross beside it deletes by
+            // data-id, so the line that went was not the line on the screen.
+            row.id = 'shout-' + (Number(r.id) || 0);
             row.dataset.id = String(Number(r.id) || 0);
             row.dataset.user = name;
             row.appendChild(who(r));
@@ -632,12 +646,23 @@
          * than a row they have to scroll to.
          */
         function appendRows(rows) {
-            var atBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 40;
+            // "Am I standing where the new lines arrive?" — the bottom of the list with the newest
+            // at the bottom, the top of it with the newest at the top (1.64.0). Either way: follow
+            // only if they were already there, and otherwise give back exactly the height that was
+            // added so the line being read does not move under them.
+            var wasHeight = listEl.scrollHeight, wasTop = listEl.scrollTop;
+            var atEnd = newestTop
+                ? wasTop < 40
+                : wasHeight - wasTop - listEl.clientHeight < 40;
             var added = [];
             (rows || []).forEach(function (r) {
                 var id = Number(r && r.id) || 0;
                 if (!id || listEl.querySelector('.shout-row[data-id="' + id + '"]')) return;
-                listEl.appendChild(renderRow(r));
+                var row = renderRow(r);
+                // Rows arrive newest LAST, so with the newest at the top each one goes in front of
+                // the one before it and the batch keeps its order.
+                if (newestTop) listEl.insertBefore(row, listEl.firstChild);
+                else listEl.appendChild(row);
                 if (id > newest) newest = id;
                 if (!oldest || id < oldest) oldest = id;
                 added.push(r);
@@ -645,12 +670,15 @@
             if (added.length) {
                 var empty = listEl.querySelector('.shout-empty');
                 if (empty) empty.remove();
-                if (atBottom) listEl.scrollTop = listEl.scrollHeight;
+                if (atEnd) listEl.scrollTop = newestTop ? 0 : listEl.scrollHeight;
+                else if (newestTop) listEl.scrollTop = wasTop + (listEl.scrollHeight - wasHeight);
             }
             return added;
         }
 
-        function bottom() { listEl.scrollTop = listEl.scrollHeight; }
+        /** Where the newest line is: the top of the list, or the bottom of it. */
+        function toEnd() { listEl.scrollTop = newestTop ? 0 : listEl.scrollHeight; }
+        function bottom() { toEnd(); }
 
         /**
          * "I have seen up to here."
@@ -740,18 +768,27 @@
             if (!rows.length) { olderBtn.hidden = true; note(t('js.shout.no_more')); return; }
             // Measured before the insert and restored after it: the browser keeps scrollTop where it
             // was, which means the content under it has moved down by exactly the height added.
+            // Only when the older rows go in ABOVE what is on the screen — with the newest at the
+            // top they go on the END of the list, where nothing above them moves and there is
+            // nothing to give back (1.64.0).
             var wasHeight = listEl.scrollHeight, wasTop = listEl.scrollTop;
             var frag = document.createDocumentFragment();
-            rows.forEach(function (r) {
+            // Rows arrive newest LAST. With the newest at the top the whole batch is turned round,
+            // so the row after the last one on the screen is the one that follows it.
+            (newestTop ? rows.slice().reverse() : rows).forEach(function (r) {
                 var id = Number(r && r.id) || 0;
                 if (!id || listEl.querySelector('.shout-row[data-id="' + id + '"]')) return;
-                frag.appendChild(renderRow(r));           // rows arrive newest LAST, so order is kept
+                frag.appendChild(renderRow(r));
                 if (!oldest || id < oldest) oldest = id;
             });
             var empty = listEl.querySelector('.shout-empty');
             if (empty) empty.remove();
-            listEl.insertBefore(frag, listEl.firstChild);
-            listEl.scrollTop = wasTop + (listEl.scrollHeight - wasHeight);
+            if (newestTop) {
+                listEl.appendChild(frag);
+            } else {
+                listEl.insertBefore(frag, listEl.firstChild);
+                listEl.scrollTop = wasTop + (listEl.scrollHeight - wasHeight);
+            }
             olderBtn.hidden = !j.has_more;
             // This answer carries the pinned line and the poll's does not (the poll appends, and a
             // pinned row handed to it would be appended for ever), so a strip that was pinned or
@@ -772,6 +809,15 @@
                 if (r && r.error === 'not_found') { row.remove(); return true; }
                 note(errText(r, maxChars));
                 return false;
+            }, {
+                // The pin button is absolutely positioned over the end of the row and shown on
+                // hover — which puts it exactly on "No" (1.64.0). It goes away while the question
+                // is up and comes back on every way out of it.
+                host: row,
+                relabel: function (b) {
+                    b.title = t('js.shout.delete_title');
+                    b.setAttribute('aria-label', t('js.shout.delete'));
+                },
             });
         }
 
@@ -1081,6 +1127,36 @@
             });
         }
 
+        /**
+         * Start the reader at the end the newest line is at (1.64.0).
+         *
+         * With the newest at the TOP that is where a list starts anyway, so this is about the other
+         * arm: chat order puts the newest line at the bottom of a box nothing ever scrolled, and
+         * the reader opened the room looking at its oldest lines. One line of scroll fixes it —
+         * except that a box inside a hidden ancestor has height 0, and scrolling something with no
+         * height does nothing at all. That is every account-page tab that is not the open one, and
+         * a background tab restored on startup. So it is tried once now, and again the first time
+         * the box actually has a height.
+         */
+        toEnd();
+        if (listEl.clientHeight <= 0) {
+            if (window.ResizeObserver) {
+                // A pane that is unhidden takes the list from a height of nothing to a real one,
+                // which is a resize — so this fires exactly once, when there is finally something
+                // to scroll.
+                var firstPaint = new ResizeObserver(function () {
+                    if (listEl.clientHeight <= 0) return;
+                    firstPaint.disconnect();
+                    toEnd();
+                });
+                firstPaint.observe(listEl);
+            }
+            // A tab restored in the background is laid out but never painted; this is the moment
+            // somebody looks at it.
+            var onShown = function () { if (listEl.clientHeight > 0) { toEnd(); document.removeEventListener('visibilitychange', onShown); } };
+            document.addEventListener('visibilitychange', onShown);
+        }
+
         // Everything already on the screen has been seen by whoever is looking at it.
         markSeen(newest);
         if (live > 0) timer = setInterval(poll, live * 1000);
@@ -1088,6 +1164,8 @@
         window.ShoutTick = poll;
         window.Shout = { tick: poll, refresh: refresh, older: older, pin: pin,
                          newest: function () { return newest; }, insert: insert, fit: fitComposer,
+                         // Which end the newest line is at, and a way to go there (1.64.0).
+                         order: function () { return newestTop ? 'top' : 'bottom'; }, toEnd: toEnd,
                          // The lightbox, for the browser check: open or not, and a way to shut it.
                          lightbox: { open: function () { return !!lb && lb.isOpen(); },
                                      close: function () { if (lb) lb.close(); } },
@@ -1167,6 +1245,9 @@
                     if (r && r.error === 'not_found') { if (card) card.remove(); return true; }
                     note(emoteErr(r), true);
                     return false;
+                }, {
+                    host: card,
+                    relabel: function (b) { b.textContent = t('js.shout.delete'); },
                 });
             });
         }

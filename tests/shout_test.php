@@ -26,6 +26,7 @@ require_once $root . '/includes/users.php';
 require_once $root . '/includes/people.php';
 require_once $root . '/includes/audit.php';
 require_once $root . '/includes/settings_catalog.php';
+require_once $root . '/includes/db_clock.php';
 require_once $root . '/includes/shout.php';
 
 $fails = 0; $n = 0;
@@ -899,12 +900,94 @@ check('the account saves its zone through the account update path, with no passw
 $accTpl = (string)file_get_contents($root . '/templates/pages/account.php');
 check('the account page offers "Site default (zone, offset)" first, then every zone',
       str_contains($accTpl, 'id="acc-timezone"') && str_contains($accTpl, "_h('account.tz_site', ['zone' =>")
-      && str_contains($accTpl, 'tzChoices()'));
+      && str_contains($accTpl, 'tzChoices(null, true)'));
+// 1.64.0: the list is written short, and the block sits with the interface language rather than
+// among the facts about the account — outside the language block's `if`, which only renders at all
+// where the site has more than one language.
+$tzShort = tzChoices(null, true);
+check('a zone is written without the region it is already filed under, and without underscores',
+      ($tzShort['America']['America/Argentina/Buenos_Aires'] ?? '') === 'Argentina / Buenos Aires (UTC-03:00)'
+      && str_starts_with(($tzShort['Europe']['Europe/Warsaw'] ?? ''), 'Warsaw (UTC')
+      && str_starts_with((tzChoices()['Europe']['Europe/Warsaw'] ?? ''), 'Europe/Warsaw (UTC'));
+check('… and the panel\'s Site select reads from the same short list',
+      str_contains($tpl, 'tzChoices(null, true)') && !str_contains($tpl, 'foreach (tzChoices() as'));
+check('the Time zone block is in the card with Interface language, and not inside its `if`',
+      strpos($accTpl, 'acc-tz-block') > strpos($accTpl, 'acc-lang-block')
+      && strpos($accTpl, 'acc-tz-block') > strpos($accTpl, '<?php endif; ?>', (int)strpos($accTpl, 'acc-lang-block')));
 check('the volume slider moves in ones', str_contains($accTpl, 'id="snd-vol" min="0" max="100" step="1"') && !str_contains($accTpl, 'step="5"'));
 $favJs = (string)file_get_contents($root . '/assets/js/favourites.js');
 check('the favourites hash is a chip, and says "Copied!" in the site\'s tooltip over itself',
       !str_contains($css, 'text-decoration: underline dotted') && str_contains($css, '.pf-hash-copy.is-copied')
       && str_contains($favJs, "window.pubTip(hs, t('js.common.copied'))"));
+
+$peopleJs = (string)file_get_contents($root . '/assets/js/people.js');
+// ── 1.64.0 ───────────────────────────────────────────────────────────────────
+check('the hash chip is the size of its own words, in the site\'s font, in the site\'s standard pill',
+      str_contains($css, 'justify-self: end') && str_contains($css, '.pf-hash { font-family: inherit; }')
+      && str_contains($css, '.pf-hash-copy:hover { border-color: var(--accent); color: var(--accent); }'));
+check('both renderers give a row an id, which is what the live language switch matches on first',
+      str_contains($widget, 'id="shout-<?= (int)$s[\'id\'] ?>"')
+      && str_contains($boxJs, "row.id = 'shout-' + (Number(r.id) || 0);"));
+check('the question in a row hides the row\'s other controls and takes itself away again',
+      str_contains($css, '.shout-asking .shout-pin { display: none; }')
+      && str_contains($appJs, "opts.host.classList.add('shout-asking')")
+      && str_contains($appJs, "document.addEventListener('langswap:begin', onSwap)")
+      && str_contains($appJs, 'timer = setTimeout(() => finish(true), Number(opts.life) > 0 ? Number(opts.life) : 5000);'));
+check('… and every way out of it goes through the one finish() that clears the timer and the listeners',
+      str_contains($appJs, "document.removeEventListener('pointerdown', onOutside, true);")
+      && str_contains($appJs, "document.removeEventListener('keydown', onEsc, true);")
+      && str_contains($appJs, "document.removeEventListener('langswap:begin', onSwap);"));
+check('… and there is ONE of it: the shoutbox, the emote cards and the inbox all call app.js\'s',
+      str_contains($appJs, 'window.askInPlace = askInPlace;')
+      && str_contains($boxJs, 'var askInPlace = window.askInPlace;')
+      && substr_count($boxJs, 'function askInPlace') === 0
+      && str_contains($peopleJs, 'window.askInPlace'));
+check('the lightbox\'s controls are inside the picture, revealed on hover, and always on without one',
+      !str_contains($boxJs, 'shout-lb-bar') && !str_contains($css, '.shout-lb-bar')
+      && str_contains($boxJs, "el('div', { className: 'shout-lb-frame' }, [img, shut, orig])")
+      && str_contains($css, '.shout-lb-frame:focus-within .shout-lb-orig, .shout-lb-frame:focus-within .shout-lb-close')
+      && str_contains($css, "@media (hover: none) {\n    .shout-lb-orig, .shout-lb-close { opacity: 1; pointer-events: auto; }"));
+check('every overlay closes on the backdrop only when the press STARTED there',
+      substr_count($appJs, 'closeOnBackdrop(') === 5
+      && str_contains($appJs, "box.addEventListener('pointerdown', (e) => { fromBackdrop = e.target === box; });")
+      && substr_count($favJs, 'closeOnBackdrop(') === 3
+      && substr_count($peopleJs, 'box.onpointerdown = function (e) { fromBackdrop = e.target === box; };') === 2
+      && str_contains($boxJs, 'root.addEventListener(\'pointerdown\', function (e) { lbFromBackdrop = onBackdrop(e.target); });')
+      && str_contains((string)file_get_contents($root . '/assets/js/admin-common.js'), 'fromBackdrop = e.target === box;'));
+check('the file tree carries the reader\'s open folders across a rebuild, and marks the ones holding a match',
+      str_contains($appJs, 'function treeOpenState(holder)')
+      && str_contains($appJs, "holder.addEventListener('toggle', (e) => {")
+      && str_contains($appJs, 'det.dataset.path = here;')
+      && str_contains($appJs, "dot.className = 'ftree-dot';")
+      && str_contains($css, '.ftree-dot { animation: none;'));
+check('… and the loader watches the window\'s own scrolling body, and looks again after every page',
+      str_contains($appJs, '}, { root: body, rootMargin: \'200px\' });')
+      && str_contains($appJs, 'filesObserver.unobserve(sentinel);')
+      && str_contains($appJs, 'const infoScroller = holder.closest(\'.files-body\') || null;'));
+check('… a reply for a window that was closed is dropped, and Back closes the window',
+      str_contains($appJs, 'const mine = ++filesSeq;')
+      && str_contains($appJs, 'const ours = () => mine === filesSeq && !overlay.hidden;')
+      && str_contains($appJs, "history.pushState({ filesModal: 1 }, '', location.href); filesOwned++;")
+      && str_contains($appJs, 'if (overlay && !overlay.hidden) { filesOwned = Math.max(0, filesOwned - 1); closeFiles(true); return; }'));
+check('a name in the people lists does not go purple once it has been opened',
+      str_contains($css, '#pe-list a.pf-name:visited, #dir-list a.pf-name:visited')
+      && str_contains($css, '#who-overlay .who-name:visited, #who-overlay .who-list:visited')
+      && str_contains($css, 'a.pm-head-name:visited, a.av-who:visited, .av-who a:visited { color: var(--link); }')
+      && str_contains($css, 'a:visited { color: var(--link-visited); }'));
+check('the polled lists a script builds carry stable ids too',
+      str_contains($peopleJs, "row.id = 'pm-th-' + x.with;")
+      && str_contains($peopleJs, "wrap.id = 'pm-msg-' + (Number(m.id) || 0);")
+      && str_contains($peopleJs, "row.id = 'pe-row-' + p.username;")
+      && str_contains($peopleJs, "row.id = 'dir-row-' + p.username;"));
+$medJs = (string)file_get_contents($root . '/assets/js/media-editor.js');
+check('the media editor\'s × arms itself instead of opening the footer\'s question',
+      str_contains($medJs, "closeHint.textContent = T('js.media.close_again');")
+      && str_contains($medJs, "close.addEventListener('click', closeX);")
+      && str_contains($medJs, "cancel.addEventListener('click', tryClose);")
+      && str_contains($medJs, 'closeArmed = setTimeout(disarmClose, 3000);')
+      // The hint is built inside the dialog, because the panel runs this editor without app.js.
+      && str_contains($medJs, "className: 'fe-close-hint', role: 'status', 'aria-live': 'polite'")
+      && str_contains((string)file_get_contents($root . '/assets/css/media-editor.css'), '.fe-close-hint'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

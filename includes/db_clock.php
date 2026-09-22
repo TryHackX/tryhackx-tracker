@@ -136,14 +136,25 @@ function tzOffsetLabel(DateTimeZone $tz, ?int $at = null): string {
  * never disagree about which zones exist or how an offset is written. "Current" because that is what
  * a person choosing is asking ("which of these is my clock right now"); the name is what is stored,
  * so a zone that changes its offset in winter still means the right thing in winter.
+ *
+ * `$short` (1.64.0) writes the label WITHOUT the region it is already filed under, because a native
+ * select's open list is as wide as its longest option and nothing in CSS can narrow it: one
+ * "America/Argentina/Buenos_Aires (UTC-03:00)" made the whole list wider than the control it drops
+ * out of, on every screen, for every reader. The prefix is not information at that point — the
+ * optgroup above the option is already saying "America" — and the underscores are a filename
+ * convention rather than a place name. So: "Argentina / Buenos Aires (UTC-03:00)", filed under
+ * America. A zone with no region ("UTC") has nothing to strip and is written as it is.
  */
-function tzChoices(?int $at = null): array {
+function tzChoices(?int $at = null, bool $short = false): array {
     $at = $at ?? time();
     $out = [];
     foreach (DateTimeZone::listIdentifiers() as $id) {
         $slash = strpos($id, '/');
         $region = $slash === false ? 'Other' : substr($id, 0, $slash);
-        $out[$region][$id] = $id . ' (' . tzOffsetLabel(new DateTimeZone($id), $at) . ')';
+        $name = ($short && $slash !== false)
+            ? str_replace('_', ' ', str_replace('/', ' / ', substr($id, $slash + 1)))
+            : $id;
+        $out[$region][$id] = $name . ' (' . tzOffsetLabel(new DateTimeZone($id), $at) . ')';
     }
     return $out;
 }

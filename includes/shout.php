@@ -51,6 +51,20 @@ function shoutPlacement(array $cfg): string
 }
 
 /**
+ * Which end of the room the newest line is at (1.64.0): 'top' (newest first) or 'bottom' (chat).
+ *
+ * The room used to be drawn oldest-to-newest with nothing ever scrolling the list, so a reader
+ * opening it was looking at its OLDEST lines and had to scroll to find out what had been said. The
+ * two arms fix that differently: 'top' puts the newest line where the eye already is and 'bottom'
+ * keeps chat order and scrolls to the end on mount. 'top' is the shipped answer.
+ */
+function shoutOrder(array $cfg): string
+{
+    $v = (string)($cfg['shout_order'] ?? 'top');
+    return $v === 'bottom' ? 'bottom' : 'top';
+}
+
+/**
  * The DEFAULT markup of a shout: plain | bbcode | markdown.
  *
  * 'plain' is not merely a third syntax — it switches formatting off entirely, composer included.

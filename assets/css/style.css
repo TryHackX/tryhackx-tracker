@@ -2018,6 +2018,18 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
    line in the shoutbox that names you, and a "…" row stands where the folder's other files were cut
    — so a folder showing one file never reads as a folder holding one. */
 .ftree-hit { box-shadow: inset 3px 0 0 var(--accent); padding-left: 0.5rem; }
+/* A match is somewhere under this folder (1.64.0). The site's own .pulse-dot, in the accent blue
+   instead of the success green and a little smaller, because it sits on a line of text rather than
+   beside a heading — the shape is the site's way of saying "look here", and a second shape for the
+   same sentence would be a second thing to learn. The reduced-motion block below stops the beat. */
+.ftree-dot { display: inline-block; width: 7px; height: 7px; margin-left: 0.4rem;
+             vertical-align: 0.05em; border-radius: 50%; background-color: var(--accent);
+             animation: pulse-accent 2s infinite; }
+@keyframes pulse-accent {
+    0%   { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(74, 158, 255, 0.7); }
+    70%  { transform: scale(1);    box-shadow: 0 0 0 6px rgba(74, 158, 255, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(74, 158, 255, 0); }
+}
 .ftree-cut { color: var(--text-muted); letter-spacing: 0.15em; cursor: default; }
 .files-match-note { margin-top: 0.5rem; }
 
@@ -2360,7 +2372,11 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .pf-meta { display: grid; grid-template-columns: 6em 7.5em 9.5em; gap: 0.8rem;
     color: var(--text-muted); font-size: 0.8rem; white-space: nowrap;
     text-align: right; font-variant-numeric: tabular-nums; }
-.pf-hash { font-family: var(--mono, monospace); }
+/* The site's own font (1.64.0). This said `var(--mono, monospace)` and `--mono` is defined nowhere
+   in this stylesheet, so every one of these chips was drawn in whatever the browser calls monospace
+   — a second typeface on the page, chosen by the machine rather than by the site. Twelve characters
+   and an ellipsis do not need a fixed pitch; they need to look like the rest of the row. */
+.pf-hash { font-family: inherit; }
 /* min-width, not width: the favourites list carries Magnet and a star, the uploads list carries
    Magnet and the visibility toggle, and only the first two have to line up with each other. */
 .pf-acts { display: flex; gap: 0.35rem; align-items: center; margin-left: auto;
@@ -2392,6 +2408,31 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
     padding: 0.5rem 0.6rem; text-align: left; cursor: pointer; font: inherit; color: var(--text);
 }
 .pm-row:hover { border-color: var(--accent); }
+/* Taking a conversation away, for me (1.64.0). The row IS a button, and a button cannot hold
+   another one — so the cross is its SIBLING inside a wrapper, laid over the row's top right corner.
+   Out of the way until the row is hovered or something in it has the focus, and always there where
+   there is no hover to have. `.shout-asking` is what the shared question sets on the wrapper while
+   it is open (assets/js/app.js): the cross itself has been replaced by the question at that point,
+   so what this hides is the row's own hover highlight fighting with it. */
+.pm-row-wrap { position: relative; display: flex; }
+.pm-row-wrap > .pm-row { flex: 1 1 auto; min-width: 0; }
+.pm-del {
+    position: absolute; top: 0.3rem; right: 0.35rem;
+    background: none; border: 0; padding: 0 0.2rem; line-height: 1;
+    color: var(--text-muted); font: inherit; font-size: 0.85rem; cursor: pointer;
+    opacity: 0; transition: opacity 0.15s, color 0.15s;
+}
+.pm-row-wrap:hover .pm-del, .pm-del:focus-visible { opacity: 1; }
+.pm-del:hover { color: var(--error); }
+.pm-row-wrap .shout-confirm {
+    position: absolute; top: 0.2rem; right: 0.35rem; z-index: 2;
+    background: var(--bg-card); border: 1px solid var(--accent); border-radius: var(--radius);
+    padding: 0.15rem 0.4rem;
+}
+.pm-row-wrap.shout-asking > .pm-row { pointer-events: none; }
+@media (hover: none) {
+    .pm-del { opacity: 1; }
+}
 .pm-row-unread { border-color: var(--accent); }
 /* Which conversation the pane beside this list is showing. */
 .pm-row-open { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
@@ -2620,6 +2661,19 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
     font-size: 0.82rem; text-decoration: none; }
 .who-name:hover, .who-list:hover { border-color: var(--accent); }
 
+/* A NAME does not go purple once it has been clicked (1.64.0).
+   The site-wide a:visited rule is right for a document — it says which of these you have already
+   read — and wrong for a person: the same account appearing in a friends list and in the directory
+   came out in two colours, which reads as two different kinds of thing rather than as one somebody
+   had opened. The same reasoning as the shoutbox's exemption in 1.59.1, and the same shape: scoped
+   to the lists that draw people, with the global rule left exactly as it is. Scoped by their
+   containers on purpose — `.pf-name` is also the torrent-name class on the favourites and uploads
+   lists, and those are spans, but a rule that would have reached them if they ever became links is
+   a rule that would be wrong later. */
+#pe-list a.pf-name:visited, #dir-list a.pf-name:visited,
+#who-overlay .who-name:visited, #who-overlay .who-list:visited,
+a.pm-head-name:visited, a.av-who:visited, .av-who a:visited { color: var(--link); }
+
 .acc-tabs { margin-bottom: 1rem; }
 /* The same checkbox the mail preferences above it use, for the same reason those carry the extra
    class: .search-check is an inline-flex nowrap toolbar control, and a privacy sentence is two lines
@@ -2752,13 +2806,22 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    is the one thing it is not. "Copied!" is the site's tooltip now, centred over the chip, instead of
    the chip's own label swapped in place — in a right-aligned column the shorter word sat against the
    right edge rather than over what was clicked. */
+/* 1.64.0: a pill the size of its own words, and the site's standard one.
+   It is a grid item in a 9.5em column, and a grid item is STRETCHED to its column by default — so
+   the chip's border ran the whole width of the column with the twelve characters pushed to the
+   right end of it, which is the "odd space on the left" the owner measured. `justify-self: end`
+   makes it as wide as what is written in it and leaves the rest of the column as plain gap, so the
+   column still lines the rows up without drawing an empty box to do it. The dress is
+   `.search-files-chip`'s, the pill this site already uses beside a torrent's name: no fill, a
+   hairline edge, muted until the pointer is on it. */
 .pf-hash-copy {
-    display: inline-block; max-width: 100%; box-sizing: border-box; padding: 0 0.45em;
-    background: var(--bg-code); border: 1px solid var(--control-border); border-radius: 999px;
-    color: var(--accent); line-height: 1.5; cursor: pointer;
+    display: inline-block; justify-self: end; max-width: 100%; box-sizing: border-box;
+    padding: 0 0.5em;
+    background: transparent; border: 1px solid var(--border); border-radius: 999px;
+    color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; cursor: pointer;
     transition: border-color 0.15s, color 0.15s;
 }
-.pf-hash-copy:hover { border-color: var(--accent); color: var(--text); }
+.pf-hash-copy:hover { border-color: var(--accent); color: var(--accent); }
 .pf-hash-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .pf-hash-copy.is-copied { border-color: var(--success); color: var(--success); }
 
@@ -2804,6 +2867,9 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
        spin becomes a fade rather than nothing at all. */
     .shout-refresh.is-spinning .bi { animation: none; }
     .shout-refresh.is-spinning { opacity: 0.45; }
+    /* The same rule for the dot on a folder holding a match (1.64.0): it still has to be there,
+       and a ring of colour says as much as a beating one. */
+    .ftree-dot { animation: none; box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.35); }
 }
 /* The pinned line (1.60.0): above the list and OUTSIDE its scroll, which is the whole point of it —
    a line that scrolls away with everything else is not an announcement. The same parts as a row,
@@ -2878,6 +2944,9 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    links, links inside a body, picture links, the picker's "All emotes", and the lightbox's "Open the
    original" — which lives on <body>, outside the box, so it is named on its own. */
 .shoutbox a:visited, .shout-body a:visited, .shout-picker a:visited, .shout-lightbox a:visited { color: var(--link); }
+/* …except the one on the pill over the picture itself (1.64.0), which is white on a dark pill in
+   both states for the same reason the rest of this block exists: it must not change colour. */
+.shout-lightbox .shout-lb-orig:visited { color: #fff; }
 .shoutbox .shout-who:visited, .shoutbox .shout-mention:visited { color: var(--accent); }
 .shoutbox .shout-row-system .shout-who:visited { color: var(--text-muted); }
 .shout-mention { color: var(--accent); }
@@ -2898,6 +2967,11 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    thing in this list that gets the loud one. */
 .shout-row-system { color: var(--text-muted); box-shadow: inset 3px 0 0 var(--border); }
 .shout-row-system .shout-who { color: var(--text-muted); font-style: italic; }
+/* While a row is asking "delete this shout?", the row's other controls are not there (1.64.0). The
+   pin is absolutely positioned at the end of the row and drawn on hover — which put it exactly on
+   top of "No", so declining to delete a line pinned it to the top of the room instead. The class
+   goes on when the question opens and comes off on every way out of it. */
+.shout-asking .shout-pin { display: none; }
 .shout-confirm { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem; margin-left: auto; flex: 0 0 auto; }
 .shout-confirm-q { font-size: 0.78rem; color: var(--text-muted); }
 .shout-yes, .shout-no { background: none; border: 1px solid var(--border); border-radius: 4px;
@@ -3126,37 +3200,65 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shout-img-link:focus { outline: none; }
 .shout-img-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .shout-body.rt-body .shout-img-link .rt-img { vertical-align: bottom; }
-/* The backdrop is the whole window, the picture is fitted INSIDE it (never cropped, never scaled
-   past its own size), and the bar under it carries the two things somebody wants next: the
-   original, and a way out. Above every overlay the site has, because it is opened from the page. */
+/* The backdrop is the whole window and the picture is fitted INSIDE it, never cropped and never
+   scaled past its own size. Above every overlay the site has, because it is opened from the page.
+
+   1.64.0: the two controls moved INTO the picture. They used to sit on a bar under it, which is a
+   strip of furniture standing in front of the one thing the window exists to show — and it cost
+   the picture 3.5rem of the height it could have used. Now: the close in the top right corner, the
+   link to the original centred along the bottom edge, both on a dark pill so they read over a
+   light picture as well as a dark one, and both invisible until the pointer is on the picture or
+   something inside it has the focus. A device with no hover to give (see the media query below)
+   keeps them on — an invisible control on a phone is no control. */
 .shout-lightbox {
     position: fixed; inset: 0; z-index: 2500;
     display: flex; align-items: center; justify-content: center;
     padding: 1rem; background: rgba(0, 0, 0, 0.86);
 }
+/* The frame shrinks to the picture, which is what lets the controls be positioned against the
+   picture's own edges rather than the window's. The minimum box is for a picture too small to hold
+   them: a 48px emote would have had a close button hanging off both of its corners, so below that
+   size the frame stays this big and the picture sits in the middle of it. */
 .shout-lb-frame {
-    display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    line-height: 0; min-width: 14rem; min-height: 8rem;
     max-width: 100%; max-height: 100%;
 }
 .shout-lb-img {
-    display: block; max-width: calc(100vw - 2rem); max-height: calc(100vh - 5.5rem);
+    display: block; max-width: calc(100vw - 2rem); max-height: calc(100vh - 2rem);
     width: auto; height: auto; object-fit: contain;
     border-radius: 4px; background: var(--bg-code); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
 }
-.shout-lb-bar { display: flex; align-items: center; gap: 0.8rem; font-size: 0.85rem; }
-.shout-lb-orig { color: var(--link); }
+.shout-lb-orig, .shout-lb-close {
+    position: absolute; opacity: 0; pointer-events: none;
+    background: rgba(0, 0, 0, 0.62); border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 999px; color: #fff; line-height: 1;
+    transition: opacity 0.15s, border-color 0.15s, color 0.15s;
+}
+.shout-lb-frame:hover .shout-lb-orig, .shout-lb-frame:hover .shout-lb-close,
+.shout-lb-frame:focus-within .shout-lb-orig, .shout-lb-frame:focus-within .shout-lb-close {
+    opacity: 1; pointer-events: auto;
+}
+.shout-lb-orig {
+    left: 50%; bottom: 0.7rem; transform: translateX(-50%);
+    padding: 0.3rem 0.8rem; font-size: 0.82rem; white-space: nowrap; text-decoration: none;
+}
+.shout-lb-orig:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
 .shout-lb-orig:focus { outline: none; }
-.shout-lb-orig:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.shout-lb-orig:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .shout-lb-close {
+    top: 0.5rem; right: 0.5rem;
     display: inline-flex; align-items: center; justify-content: center;
-    background: var(--bg-card); border: 1px solid var(--control-border); border-radius: 999px;
-    color: var(--text); font: inherit; font-size: 0.95rem; line-height: 1; width: 2rem; height: 2rem;
-    cursor: pointer; transition: border-color 0.15s, color 0.15s;
+    font: inherit; font-size: 0.95rem; width: 2rem; height: 2rem; padding: 0; cursor: pointer;
 }
 .shout-lb-close .bi, .shout-lb-orig .bi { display: inline-block; line-height: 1; }
 .shout-lb-close:hover { border-color: var(--accent); color: var(--accent); }
 .shout-lb-close:focus { outline: none; }
 .shout-lb-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* No hover on this device, so "on hover" would mean "never". */
+@media (hover: none) {
+    .shout-lb-orig, .shout-lb-close { opacity: 1; pointer-events: auto; }
+}
 
 /* ── ?action=emotes ──────────────────────────────────────────────────────────
    A GRID rather than a wrapped row of fixed-width boxes: with `flex-wrap` the last line of tiles sat

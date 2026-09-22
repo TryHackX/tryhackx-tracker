@@ -47,7 +47,7 @@ $allowed = [
     'sounds_enabled', 'sound_default_notification', 'sound_default_message_friend', 'sound_default_message',
     'sound_default_shout_friend', 'sound_default_shout', 'sound_default_mention',
     // the shoutbox (1.58.0, includes/shout.php)
-    'shout_enabled', 'shout_placement', 'shout_widget_rows', 'shout_page_rows', 'shout_max_chars',
+    'shout_enabled', 'shout_placement', 'shout_order', 'shout_widget_rows', 'shout_page_rows', 'shout_max_chars',
     'shout_flood_seconds', 'shout_live_seconds', 'shout_keep_rows', 'shout_keep_days',
     'shout_format', 'shout_rules',
     // its emotes and stickers (1.59.0)
@@ -60,7 +60,7 @@ $allowed = [
     // pictures and profile covers (1.63.0, includes/usermedia.php). The default picture and cover
     // themselves are NOT here: they are stored bytes, written by admin/user_media, never typed.
     'avatars_enabled', 'covers_enabled', 'avatar_max_kb', 'avatar_max_mp',
-    'cover_height', 'cover_height_mobile', 'cover_overlay', 'avatar_default',
+    'cover_height', 'cover_height_mobile', 'cover_overlay', 'avatar_default', 'account_media_side',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -436,6 +436,11 @@ if (isset($data['shout_placement']) && !in_array($data['shout_placement'], ['hom
 if (isset($data['shout_format']) && !in_array($data['shout_format'], ['plain', 'bbcode', 'markdown'], true)) {
     $data['shout_format'] = 'bbcode';
 }
+// Which end of the room the newest line is at (1.64.0). 'top' is the shipped answer, so it is also
+// what an unknown value becomes.
+if (isset($data['shout_order']) && !in_array($data['shout_order'], ['top', 'bottom'], true)) {
+    $data['shout_order'] = 'top';
+}
 // The address the room answers on. Coerced to the literal when it is not a legal action name, or
 // when it is already another page's — asked of siteRoutes() rather than of a list written out here,
 // so a route added next year defends itself. shoutPageAction() asks the same question on read; this
@@ -457,6 +462,10 @@ if (isset($data['cover_overlay']) && !in_array($data['cover_overlay'], ['gradien
 }
 if (isset($data['avatar_default']) && !in_array($data['avatar_default'], ['generated', 'image'], true)) {
     $data['avatar_default'] = 'generated';
+}
+// Which card of the account page the Picture and Cover blocks are drawn in (1.64.0).
+if (isset($data['account_media_side']) && !in_array($data['account_media_side'], ['left', 'right'], true)) {
+    $data['account_media_side'] = 'right';
 }
 // House rules are a line of TEXT above the box — no markup is rendered from it, so it is only
 // bounded and stripped of control characters.

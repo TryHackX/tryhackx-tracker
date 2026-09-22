@@ -2398,6 +2398,13 @@ add('', {
     'settings.shout_placement_home': ('Home page block', 'Blok na stronie głównej'),
     'settings.shout_placement_page': ('Its own page', 'Własna strona'),
     'settings.shout_placement_both': ('Both', 'Obie'),
+    # 1.64.0: which end of the room the newest line is at. The default is newest-first, because the
+    # list never scrolled itself and a reader opening the room was looking at its oldest lines.
+    'settings.shout_order': ('Newest lines', 'Najnowsze wpisy'),
+    'settings.shout_order_top': ('At the top', 'Na górze'),
+    'settings.shout_order_bottom': ('At the bottom (chat)', 'Na dole (jak czat)'),
+    'settings.shout_order_hint': ('At the top, the room opens on what was said last and the composer sits above the list. At the bottom is chat order, and the list scrolls to the end when it opens.',
+        'Na górze: pokój otwiera się na tym, co powiedziano ostatnio, a pole pisania jest nad listą. Na dole to kolejność jak w czacie — lista przewija się wtedy na koniec przy otwarciu.'),
     'settings.shout_placement_hint': ('The home block sits in the front-page layout (Site pages → Home layout); the page is <code>?action=shoutbox</code>.',
         'Blok strony głównej siedzi w układzie strony głównej (Strony → Układ strony głównej); strona to <code>?action=shoutbox</code>.'),
     'settings.shout_format': ('Markup', 'Formatowanie'),

@@ -272,7 +272,8 @@ function settingsCatalogKeywords(): array {
         'cover_height'             => 'cover height pixels desktop profile band banner header tall',
         'cover_height_mobile'      => 'cover height pixels mobile phone profile band banner header small screen',
         'cover_overlay'            => 'cover overlay readability gradient darken shade dim text contrast name legible',
-        'avatar_default'           => 'default avatar picture letter initials generated fallback no picture placeholder image',
+        'account_media_side'       => 'account page picture cover block side left right column card position where drawn strona konta zdjecie okladka lewa prawa',
+        'avatar_default'           =>'default avatar picture letter initials generated fallback no picture placeholder image',
         'avatar_default_image'     => 'default avatar picture image upload site fallback everybody without a picture position',
         'cover_default_image'      => 'default cover banner header image upload site fallback everybody without a cover position',
 
@@ -288,6 +289,7 @@ function settingsCatalogKeywords(): array {
         // ── Shoutbox (includes/shout.php) ──
         'shout_enabled'            => 'shoutbox shout chat chatbox room talk live wall tagboard cbox czat wolacz gadanie master switch',
         'shout_placement'          => 'shoutbox where home page front page widget own page both placement block',
+        'shout_order'              => 'shoutbox order newest first top bottom chat oldest direction sort kolejnosc najnowsze na gorze',
         'shout_widget_rows'        => 'shoutbox widget rows how many lines shown home block history',
         'shout_page_rows'          => 'shoutbox page rows how many lines shown own page history',
         'shout_max_chars'          => 'shoutbox length limit characters maximum one line shout',

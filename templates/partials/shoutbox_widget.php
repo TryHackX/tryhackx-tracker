@@ -96,6 +96,15 @@ if (empty($shoutPost['ok'])) {
 }
 $shoutRules = shoutRules($cfg);
 $shoutBoth  = shoutPlacement($cfg) === 'both';
+// WHICH END THE NEWEST LINE IS AT (1.64.0). The rows come out of shoutRows() oldest-first and were
+// printed that way with nothing ever scrolling the list — so opening the room put the reader in
+// front of its OLDEST lines. 'top' turns the list round and moves two things with it: the composer
+// goes ABOVE the list (a reader writing is at the end the new lines arrive at) and "Older" goes
+// BELOW it (the direction older lines are now in). 'bottom' is chat order, unchanged, and
+// assets/js/shoutbox.js scrolls it to the end on mount. NOT `flex-direction: column-reverse`: that
+// makes scrollTop negative and breaks both of the calculations the script does with it.
+$shoutOrder = function_exists('shoutOrder') ? shoutOrder($cfg) : 'top';
+$shoutTop   = $shoutOrder === 'top';
 
 /**
  * The two controls that live INSIDE the text field (1.61.0), built once and drawn in whichever box
@@ -144,6 +153,7 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
      data-closed="<?= sanitize($shoutWhy) ?>"
      data-emotes="<?= $shoutEmotesOn ? '1' : '0' ?>"
      data-stickers="<?= $shoutStickersOn ? '1' : '0' ?>"
+     data-order="<?= sanitize($shoutOrder) ?>"
      data-page="<?= $shoutOnPage ? '1' : '0' ?>">
     <input type="hidden" id="shout-csrf" value="<?= $shoutCsrf ?>">
     <?php /* ── the head: one line, in reading order ──────────────────────────────────────────────
@@ -169,10 +179,18 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
         <?php if ($shoutBoth && !$shoutOnPage): ?>
         <a class="shout-open" href="<?= sanitize(shoutNavUrl($cfg, $baseUrl)) ?>"><?= _h('shout.open_page') ?></a>
         <?php endif; ?>
-        <?php /* Above the list, not inside it: prepending older rows into the list would otherwise
+        <?php /* Outside the list, not inside it: prepending older rows into the list would otherwise
                  have to step over this button every time, and the button would scroll away just as
-                 somebody reached the place they need it. */ ?>
+                 somebody reached the place they need it. In the head with the newest at the bottom;
+                 under the list with the newest at the top (1.64.0), because that is the direction
+                 the older lines are in. Built once, printed in one of the two places. */ ?>
+        <?php
+        ob_start(); ?>
         <button type="button" class="btn btn-secondary btn-small shout-older" id="shout-older"<?= $shoutMore ? '' : ' hidden' ?>><?= _h('shout.older') ?></button>
+        <?php
+        $shoutOlderHtml = (string)ob_get_clean();
+        if (!$shoutTop) echo $shoutOlderHtml;
+        ?>
         <?php /* "Is there anything I have not seen?", asked on demand. The poll answers that every
                  few seconds, but only while the tab is in front and the box is on the screen — so a
                  reader coming back to a window that has been behind another one has no way to ask
@@ -207,15 +225,33 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
         <?php endif; ?>
         <?php endif; ?>
     </div>
+    <?php /* THE LIST, built into a buffer and printed on the side the setting says (1.64.0): after
+             the composer when the newest line is at the top, before it otherwise. Identical markup
+             either way — one description of a room, printed in one of two places. */ ?>
+    <?php ob_start(); ?>
     <div class="shout-list" id="shout-list">
         <?php if (!$shoutList): ?>
         <div class="shout-empty text-muted"><?= _h('shout.empty') ?></div>
         <?php endif; ?>
-        <?php foreach ($shoutList as $s): ?>
+        <?php /* Newest FIRST when the setting says so. The rows arrive oldest-first from
+                 shoutRows(); turning the array round here rather than in the query keeps one
+                 ordering in the API (ascending, which the poll and "older" both rely on) and puts
+                 the decision about what a reader sees in the one place that draws it. */ ?>
+        <?php foreach ($shoutTop ? array_reverse($shoutList) : $shoutList as $s): ?>
         <?php /* The body is HTML the SERVER rendered, through the same richtextRender() every
                  description and message goes through. There is exactly one place in this codebase
                  that decides what may be displayed, and it is not this template. */ ?>
+        <?php /* The `id` is not decoration and it is not for the stylesheet (1.64.0). The live
+                 language switch (assets/js/lang-swap.js) walks this page against a fresh render of
+                 it and pairs children up by `id` first and by POSITION second — and a room that has
+                 had "older" pressed, or a line polled into it, is no longer the room the server
+                 would draw right now. Without an id the rows were paired off by their places in two
+                 lists of different lengths, and a row ended up wearing another row's words while
+                 keeping its own data-id; the delete cross beside it would then have taken away a
+                 line nobody was looking at. assets/js/shoutbox.js writes the same id on every row
+                 it appends. */ ?>
         <div class="shout-row<?= !empty($s['own']) ? ' shout-row-own' : '' ?><?= !empty($s['mentions_me']) ? ' shout-row-mention' : '' ?><?= !empty($s['system']) ? ' shout-row-system' : '' ?>"
+             id="shout-<?= (int)$s['id'] ?>"
              data-id="<?= (int)$s['id'] ?>" data-user="<?= sanitize((string)($s['user'] ?? '')) ?>">
             <?= $shoutWho($s) ?>
             <?php /* The hour in the READER's zone, formatted by the server (1.62.0) — the same
@@ -236,6 +272,13 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
         </div>
         <?php endforeach; ?>
     </div>
+    <?php
+    $shoutListHtml = (string)ob_get_clean();
+    // Newest at the bottom: the list, then the house rules, then the composer — chat order, and
+    // where it has always been. Newest at the top: the composer first and the list under it, with
+    // "Older" at the far end. One statement each way, and the markup is the same markup.
+    if (!$shoutTop) echo $shoutListHtml;
+    ?>
 
     <?php if ($shoutRules !== ''): ?>
     <p class="shout-rules text-muted"><?= sanitize($shoutRules) ?></p>
@@ -335,4 +378,6 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
         <?php endif; ?>
     </div>
     <?php endif; ?>
+    <?php /* Newest at the top: the list follows the composer, and "Older" follows the list. */ ?>
+    <?php if ($shoutTop) { echo $shoutListHtml; echo $shoutOlderHtml; } ?>
 </div>

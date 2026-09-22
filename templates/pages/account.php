@@ -133,15 +133,24 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
         <p class="text-muted acc-verify-note"><?= _h('account.verify_note') ?></p>
         <?php endif; ?>
         <?php
-        // THE PICTURE AND THE COVER (1.63.0, includes/usermedia.php). Right under the facts about the
-        // account, as two sub-sections in the shape the zone, mail and language preferences use: they
-        // are how this account looks to everybody else. The drop zone is the Emotes page's own; a
-        // chosen file opens as a LOCAL preview in the editor (assets/js/media-editor.js) and nothing
-        // leaves the browser until Save, which sends the file and its framing in one request.
-        // Remove is drawn even without the permission: taking your own picture down is never
-        // something to be allowed to do.
+        // THE PICTURE AND THE COVER (1.63.0, includes/usermedia.php). Two sub-sections in the shape
+        // the mail and language preferences use: they are how this account looks to everybody else.
+        // The drop zone is the Emotes page's own; a chosen file opens as a LOCAL preview in the
+        // editor (assets/js/media-editor.js) and nothing leaves the browser until Save, which sends
+        // the file and its framing in one request. Remove is drawn even without the permission:
+        // taking your own picture down is never something to be allowed to do.
+        //
+        // 1.64.0: WHICH CARD it lands in is `account_media_side`. The markup is built once, into a
+        // buffer, and echoed at one of two places — the ids and the classes are identical either
+        // way, so media-editor.js finds exactly what it found before and nothing else on the page
+        // has to know the setting exists. An output buffer rather than a closure because this is a
+        // template: the block is written as markup, and a closure would have turned fifty lines of
+        // it into a string built with echo.
         $accAvOn = function_exists('userAvatarsEnabled') && userAvatarsEnabled($cfg);
         $accCvOn = function_exists('userCoversEnabled') && userCoversEnabled($cfg);
+        $accMediaHtml = '';
+        $accMediaSide = function_exists('accountMediaSide') ? accountMediaSide($cfg) : 'right';
+        ob_start();
         if ($accAvOn || $accCvOn):
             $accMedia = userMediaEditorState($db, $cfg, $meUser, $baseUrl);
             $accMayAv = $accAvOn && userIdHasPermission($db, $cfg, (int)$meUser['id'], 'profile.avatar');
@@ -230,34 +239,9 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
         </div><?php /* /#acc-media */ ?>
         <?php endif; ?>
         <?php
-        // THE ZONE THIS READER SEES TIMES IN (v68). In the Profile card, under the facts about the
-        // account, as a sub-section in the shape the mail and language preferences use. "Site
-        // default" first and named with the zone it stands for right now, because a bare "default"
-        // is a promise nobody can check; then every zone, from the same list Settings → Site offers.
-        // A stored name PHP no longer knows reads as the default here, which is what every page
-        // already treats it as (userDisplayTimezone()).
-        $accTzOwn  = trim((string)($meUser['timezone'] ?? ''));
-        if (!tzValidName($accTzOwn)) $accTzOwn = '';
-        $accTzSite = new DateTimeZone(siteTimezone($cfg));
+        $accMediaHtml = (string)ob_get_clean();
+        if ($accMediaSide === 'left') echo $accMediaHtml;
         ?>
-        <div class="acc-mail-prefs acc-tz-block" id="acc-tz">
-            <h3 class="acc-sub"><label for="acc-timezone"><?= _h('account.tz_head') ?></label></h3>
-            <p class="text-muted acc-verify-note acc-lang-note"><?= _h('account.tz_note') ?></p>
-            <?php /* A wrapper, because the "Saved" tooltip is drawn against an element and a <select>
-                     cannot hold one — it is the wrapper pubTip() measures. */ ?>
-            <span class="acc-tz-wrap" id="acc-timezone-wrap">
-                <select id="acc-timezone" class="acc-language acc-timezone">
-                    <option value=""<?= $accTzOwn === '' ? ' selected' : '' ?>><?= _h('account.tz_site', ['zone' => $accTzSite->getName(), 'offset' => tzOffsetLabel($accTzSite)]) ?></option>
-                    <?php foreach (tzChoices() as $accTzGrp => $accTzIds): ?>
-                    <optgroup label="<?= sanitize($accTzGrp) ?>">
-                        <?php foreach ($accTzIds as $accTzId => $accTzLabel): ?>
-                        <option value="<?= sanitize($accTzId) ?>"<?= $accTzOwn === $accTzId ? ' selected' : '' ?>><?= sanitize($accTzLabel) ?></option>
-                        <?php endforeach; ?>
-                    </optgroup>
-                    <?php endforeach; ?>
-                </select>
-            </span>
-        </div>
         <?php if ($accHasEmail): ?>
         <div class="acc-mail-prefs">
             <h3 class="acc-sub"><?= _h('account.mail_prefs') ?></h3>
@@ -348,6 +332,41 @@ if (count($accLangs) > 1):
             </select>
         </div>
 <?php endif; ?>
+<?php
+// THE ZONE THIS READER SEES TIMES IN (v68). Moved here in 1.64.0, under Interface language, because
+// that is what it is: another answer about how this reader wants the site written for them, and it
+// sat in the Profile card among the facts about the account. OUTSIDE the language block's `if` —
+// that one only renders where the site has more than one language, and a site with one language
+// still has readers in more than one zone.
+//
+// "Site default" first and named with the zone it stands for right now, because a bare "default" is
+// a promise nobody can check; then every zone, from the same list Settings → Site offers, written
+// SHORT (tzChoices(null, true)): a native select's open list is as wide as its longest option and
+// no stylesheet can narrow it, and the region is already written on the group above the option.
+// A stored name PHP no longer knows reads as the default here, which is what every page already
+// treats it as (userDisplayTimezone()).
+$accTzOwn  = trim((string)($meUser['timezone'] ?? ''));
+if (!tzValidName($accTzOwn)) $accTzOwn = '';
+$accTzSite = new DateTimeZone(siteTimezone($cfg));
+?>
+        <div class="acc-mail-prefs acc-tz-block" id="acc-tz">
+            <h3 class="acc-sub"><label for="acc-timezone"><?= _h('account.tz_head') ?></label></h3>
+            <p class="text-muted acc-verify-note acc-lang-note"><?= _h('account.tz_note') ?></p>
+            <?php /* A wrapper, because the "Saved" tooltip is drawn against an element and a <select>
+                     cannot hold one — it is the wrapper pubTip() measures. */ ?>
+            <span class="acc-tz-wrap" id="acc-timezone-wrap">
+                <select id="acc-timezone" class="acc-language acc-timezone">
+                    <option value=""<?= $accTzOwn === '' ? ' selected' : '' ?>><?= _h('account.tz_site', ['zone' => $accTzSite->getName(), 'offset' => tzOffsetLabel($accTzSite)]) ?></option>
+                    <?php foreach (tzChoices(null, true) as $accTzGrp => $accTzIds): ?>
+                    <optgroup label="<?= sanitize($accTzGrp) ?>">
+                        <?php foreach ($accTzIds as $accTzId => $accTzLabel): ?>
+                        <option value="<?= sanitize($accTzId) ?>"<?= $accTzOwn === $accTzId ? ' selected' : '' ?>><?= sanitize($accTzLabel) ?></option>
+                        <?php endforeach; ?>
+                    </optgroup>
+                    <?php endforeach; ?>
+                </select>
+            </span>
+        </div>
 <?php /* The privacy block belongs to whichever of these features is on: favourites, lists, or both.
          Gating it on favourites alone hid the lists switch on an install that runs lists without
          them. */ ?>
@@ -399,6 +418,10 @@ if (count($accLangs) > 1):
             <?php endif; ?>
         </div>
 <?php endif; ?>
+<?php /* The picture and the cover, when `account_media_side` says the right-hand card (1.64.0, the
+         shipped answer): under the privacy answers, at the end of the things a member can change
+         about themselves. Exactly the markup built above — one block, two possible places. */ ?>
+<?php if ($accMediaSide !== 'left') echo $accMediaHtml; ?>
 <?php
 // WHERE THIS ACCOUNT SIGNS IN FROM. Shown to the person holding it, not only to the operator: an
 // account that a forum created on somebody's behalf should say so to them, and the sentence about

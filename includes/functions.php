@@ -28,7 +28,7 @@ require_once __DIR__ . '/db_clock.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.63.1';
+const TRACKER_VERSION = '1.64.0';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.

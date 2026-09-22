@@ -1869,6 +1869,102 @@ const getJson = async (endpoint) => {
     catch { return null; }
 };
 
+/**
+ * Close on the backdrop — but only when the press STARTED on the backdrop (1.64.0).
+ *
+ * A `click` is delivered to the nearest common ancestor of the press and the release, so a press
+ * that begins INSIDE the dialog and ends anywhere outside it raises a click on the BACKDROP. Every
+ * overlay on this site used to read that as "the reader clicked away" and shut — which is how
+ * dragging a long file list's own scrollbar and letting go past the edge of the window closed the
+ * window, losing a list that had taken thirty pages to load. The two-step is the one
+ * assets/js/media-editor.js has used since 1.63.0. Top level rather than inside one of the blocks
+ * below, because four of them have an overlay; the scripts that do not load this file
+ * (shoutbox.js, admin-common.js) carry their own four lines.
+ */
+const closeOnBackdrop = (box, close) => {
+    let fromBackdrop = false;
+    box.addEventListener('pointerdown', (e) => { fromBackdrop = e.target === box; });
+    box.addEventListener('click', (e) => { if (e.target === box && fromBackdrop) close(); });
+};
+
+/**
+ * "Are you sure?", asked in the place the button was.
+ *
+ * A question with a yes and a no, IN the row it is about. window.confirm() would ask from outside
+ * the page, about a row it cannot show. Written for the shoutbox in 1.58.0, copied to the emote
+ * cards, and moved here in 1.64.0 when the inbox wanted it too: three copies of a dialog is three
+ * answers to "how does this site ask".
+ *
+ * Everything it learned in the shoutbox comes with it:
+ *   · WHILE IT IS OPEN the row's other controls are hidden (`opts.host` gets `shout-asking`) —
+ *     the shoutbox's pin button is drawn on hover exactly where "No" lands, so declining to delete
+ *     a line pinned it instead.
+ *   · IT EXPIRES: after `opts.life` (five seconds by default), on a press anywhere outside it, on
+ *     Esc, and when the language starts changing — the question is built by a script and the live
+ *     switch has no counterpart for it in the fetched page, so it would sit there in the old
+ *     language. Closing it puts the button back BEFORE the walk, where the walk translates it.
+ *   · ONE WAY OUT. finish() takes down the timer and all three listeners whichever exit was taken.
+ *
+ * `onYes()` returns false to say "put the button back" — anything else means the caller has taken
+ * the row away itself. The timer stops the moment Yes is pressed; the request is asynchronous and
+ * nothing may pull the question out from under it.
+ *
+ * opts: { host, relabel(btn), life }
+ */
+const askInPlace = (btn, question, onYes, opts) => {
+    opts = opts || {};
+    const mk = (tag, cls, text) => { const n = document.createElement(tag); n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+    const ask = mk('span', 'shout-confirm');
+    ask.appendChild(mk('span', 'shout-confirm-q', question));
+    const yes = mk('button', 'shout-yes', t('js.shout.yes'));
+    const no = mk('button', 'shout-no', t('js.shout.no'));
+    yes.type = 'button'; no.type = 'button';
+    let timer = 0, open = true;
+
+    const finish = (putBack) => {
+        if (!open) return;
+        open = false;
+        clearTimeout(timer);
+        document.removeEventListener('pointerdown', onOutside, true);
+        document.removeEventListener('keydown', onEsc, true);
+        document.removeEventListener('langswap:begin', onSwap);
+        if (opts.host) opts.host.classList.remove('shout-asking');
+        if (putBack && ask.parentNode) {
+            // The button has been out of the page while the language may have changed under it, so
+            // its words are re-read from the dictionary on the way back in.
+            if (typeof opts.relabel === 'function') opts.relabel(btn);
+            ask.replaceWith(btn);
+        }
+    };
+    function onOutside(e) { if (!ask.contains(e.target)) finish(true); }
+    function onEsc(e) { if (e.key === 'Escape') { e.preventDefault(); finish(true); btn.focus(); } }
+    function onSwap() { finish(true); }
+
+    yes.addEventListener('click', async () => {
+        yes.disabled = true;
+        clearTimeout(timer);
+        timer = 0;
+        document.removeEventListener('pointerdown', onOutside, true);
+        const back = await onYes();
+        finish(back === false);
+    });
+    no.addEventListener('click', () => { finish(true); btn.focus(); });
+    ask.appendChild(yes);
+    ask.appendChild(no);
+    if (opts.host) opts.host.classList.add('shout-asking');
+    btn.replaceWith(ask);
+    yes.focus();
+    // Capture, so a control that stops the press from travelling still closes the question.
+    document.addEventListener('pointerdown', onOutside, true);
+    document.addEventListener('keydown', onEsc, true);
+    document.addEventListener('langswap:begin', onSwap);
+    timer = setTimeout(() => finish(true), Number(opts.life) > 0 ? Number(opts.life) : 5000);
+    return ask;
+};
+// On window as well as in scope: assets/js/shoutbox.js and assets/js/people.js are separate files
+// and a named dependency reads better in them than a bare identifier from somewhere else.
+window.askInPlace = askInPlace;
+
 // === User accounts (?action=login / register / account / reset) + index search (?action=search) ===
 // All rendering uses textContent — usernames, group names, notification titles and torrent names
 // are untrusted. Endpoints: user_login/user_register/user_logout/user_me/user_update/
@@ -1893,6 +1989,7 @@ const getJson = async (endpoint) => {
     const EMAIL_RE = new RegExp('^' + EMAIL_LOCAL + '@' + EMAIL_LABEL
                                 + '(?:\\.' + EMAIL_LABEL + ')*\\.' + EMAIL_TLD + '$');
     const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
 
     function showAlert(el, msg, ok) {
         el.className = 'alert show ' + (ok ? 'alert-success' : 'alert-error');
@@ -2140,7 +2237,7 @@ const getJson = async (endpoint) => {
             const close = () => { overlay.hidden = true; };
             $id('reg-terms-link').addEventListener('click', (e) => { e.preventDefault(); overlay.hidden = false; });
             $id('terms-close').addEventListener('click', close);
-            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+            closeOnBackdrop(overlay, close);
         }
         p1.addEventListener('input', () => p2.dispatchEvent(new Event('input')));   // re-check the repeat too
         form.addEventListener('submit', async (e) => {
@@ -3154,8 +3251,14 @@ const getJson = async (endpoint) => {
             const sentinel = document.createElement('div');
             sentinel.className = 'files-sentinel';
             foot.appendChild(btn); foot.appendChild(sentinel);
-            const render = () => {
-                tree.replaceChildren(buildTreePub(allFiles, []));
+            // The folders this reader has opened, kept across the rebuilds (1.64.0).
+            const opened = treeOpenState(tree);
+            // Split in two (1.64.0): the HEADING and the button are cheap and change on every
+            // state, the TREE is thousands of nodes and must only be rebuilt when the files it is
+            // drawn from have actually changed. Relabelling the button to "Loading…" used to
+            // rebuild the whole tree — so a folder the reader opened was folded again at the START
+            // of every page as well as at the end of it.
+            const chrome = () => {
                 sum.textContent = (totalFiles && allFiles.length < totalFiles)
                     ? t('js.app.files_count_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
                     : t('js.app.files_count', {n: (totalFiles || allFiles.length).toLocaleString()});
@@ -3163,9 +3266,13 @@ const getJson = async (endpoint) => {
                 btn.disabled = loading;
                 foot.hidden = !more;
             };
+            const render = () => {
+                tree.replaceChildren(buildTreePub(allFiles, [], undefined, opened));
+                chrome();
+            };
             const loadMore = async () => {
                 if (loading || (!more && next > 0)) return false;
-                loading = true; if (next > 0) render();
+                loading = true; if (next > 0) chrome();
                 const fj = await getJson('index_files&hash=' + encodeURIComponent(hash) + '&offset=' + next);
                 loading = false;
                 if (infoOverlay.hidden || infoHash !== hash) return false;
@@ -3174,7 +3281,7 @@ const getJson = async (endpoint) => {
                     // Leave `more` alone: the reader may still press the button. It is the
                     // unattended asking that stops, and render() puts the button back to
                     // "Load more" instead of leaving it stuck on "Loading…" for ever.
-                    stalled = true; render();
+                    stalled = true; chrome();
                     return false;
                 }
                 stalled = false;
@@ -3205,8 +3312,19 @@ const getJson = async (endpoint) => {
             btn.addEventListener('click', loadMore);
             if (infoFilesMode === 'scroll' && 'IntersectionObserver' in window) {
                 if (infoFilesObserver) infoFilesObserver.disconnect();
-                infoFilesObserver = new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore(); },
-                                                             { root: null, rootMargin: '200px' });
+                // The panel is what scrolls, not the window, so IT is the root (1.64.0) — and an
+                // observer only ever reports a CHANGE, so a page that lands with the end of the
+                // list still on the screen raises nothing and the chain stops there. Asking to
+                // watch the same element again is what makes it say where the sentinel is NOW.
+                const infoScroller = holder.closest('.files-body') || null;
+                const again = () => {
+                    if (!infoFilesObserver || !more || stalled) return;
+                    infoFilesObserver.unobserve(sentinel);
+                    infoFilesObserver.observe(sentinel);
+                };
+                infoFilesObserver = new IntersectionObserver((entries) => {
+                    if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore().then((got) => { if (got) again(); });
+                }, { root: infoScroller, rootMargin: '200px' });
                 infoFilesObserver.observe(sentinel);
             }
             await loadMore();
@@ -3215,7 +3333,7 @@ const getJson = async (endpoint) => {
     }
 
     if (infoOverlay) {
-        infoOverlay.addEventListener('click', (e) => { if (e.target === infoOverlay) closeInfo(); });
+        closeOnBackdrop(infoOverlay, closeInfo);
         const ic = $id('info-close');
         if (ic) ic.addEventListener('click', closeInfo);
     }
@@ -3233,7 +3351,7 @@ const getJson = async (endpoint) => {
      *
      * The tree says how many it added (`dataset.extra`) so the list can say so in words.
      */
-    function buildTreePub(files, tokens, extra) {
+    function buildTreePub(files, tokens, extra, openMap) {
         const newDir = () => ({ dirs: new Map(), files: [], hit: false, cut: false, skipped: false });
         const root = newDir();
         const put = (f, mark) => {
@@ -3291,22 +3409,40 @@ const getJson = async (endpoint) => {
             d.textContent = '…';
             return d;
         };
-        (function render(node, parent, depth) {
+        (function render(node, parent, depth, path) {
             [...node.dirs.keys()].sort().forEach(name => {
                 const subNode = node.dirs.get(name);
                 const det = document.createElement('details');
-                // Open at the top, and all the way down to anything the search matched.
-                if (depth === 0 || subNode.hit) det.open = true;
+                // The folder's own address inside this torrent, so the reader's open folders can be
+                // carried from one render to the next (1.64.0). A tree that is rebuilt every time a
+                // page of files lands is a tree nobody can open a folder in.
+                const here = path ? path + '/' + name : name;
+                det.dataset.path = here;
+                // What the reader did with THIS folder wins over what the tree would have guessed.
+                // Otherwise: open at the top, and all the way down to anything the search matched.
+                const said = openMap && typeof openMap.get === 'function' ? openMap.get(here) : undefined;
+                if (said === undefined) { if (depth === 0 || subNode.hit) det.open = true; }
+                else det.open = !!said;
                 const sum = document.createElement('summary');
                 sum.appendChild(nameEl('ftree-dir', name));
                 const cnt = document.createElement('span');
                 cnt.className = 'text-muted ftree-count';
                 cnt.textContent = ' (' + countFiles(subNode) + (subNode.cut ? '+' : '') + ')';
                 sum.appendChild(cnt);
+                // A match is somewhere below this folder: a dot the reader can steer by, in the
+                // manner of the site's .pulse-dot and in the accent blue. It matters most on the
+                // folder the reader has just shut, which is the one thing the highlight cannot say.
+                if (subNode.hit) {
+                    const dot = document.createElement('span');
+                    dot.className = 'ftree-dot';
+                    dot.title = t('js.app.files_folder_hit');
+                    dot.setAttribute('aria-hidden', 'true');
+                    sum.appendChild(dot);
+                }
                 det.appendChild(sum);
                 const inner = document.createElement('div');
                 inner.className = 'ftree-children';
-                render(subNode, inner, depth + 1);
+                render(subNode, inner, depth + 1, here);
                 det.appendChild(inner);
                 parent.appendChild(det);
             });
@@ -3325,7 +3461,7 @@ const getJson = async (endpoint) => {
             });
             // Where siblings were cut around a match, say so in the place they would have been.
             if (node.cut || (node.hit && node.skipped)) parent.appendChild(cutRow());
-        })(root, container, 0);
+        })(root, container, 0, '');
         if (skipped) {
             const cut = document.createElement('p');
             cut.className = 'text-muted';
@@ -3337,6 +3473,27 @@ const getJson = async (endpoint) => {
     // For the browser check: the tree a list would draw, without having to seed a torrent with
     // twenty thousand files to get one.
     window.FileTreePub = { build: buildTreePub };
+
+    /**
+     * Which folders of a file tree the reader has open, kept across renders (1.64.0).
+     *
+     * A tree of thousands of paths is still rebuilt when a page of files lands — the folder
+     * structure is worked out from everything loaded so far and a `<details>` cannot be moved into
+     * a tree it was not built in. What CAN be carried is the answer to "was this folder open", and
+     * this is where that answer is kept: the map buildTreePub() reads back.
+     *
+     * `toggle` does not bubble, so the listener is a capture-phase one on the holder — which sees
+     * the event on its way down whatever the element is. One listener for a whole tree, and it
+     * survives the tree being replaced underneath it because it is bound to the holder.
+     */
+    function treeOpenState(holder) {
+        const map = new Map();
+        holder.addEventListener('toggle', (e) => {
+            const d = e.target;
+            if (d && d.tagName === 'DETAILS' && typeof d.dataset.path === 'string') map.set(d.dataset.path, d.open);
+        }, true);
+        return map;
+    }
 
     const PUB_TREE_LEAVES = 5000;
     // The query parameters the search page owns. Named here rather than inside initSearch()
@@ -3448,7 +3605,7 @@ const getJson = async (endpoint) => {
         infoFilesMode = ['scroll', 'button', 'all'].includes(d.filesMode) ? d.filesMode : 'scroll';
         infoCanFav = d.fav === '1';
         infoCanFavWho = d.favWho === '1';
-        infoOverlay.addEventListener('click', (e) => { if (e.target === infoOverlay) closeInfo(); });
+        closeOnBackdrop(infoOverlay, closeInfo);
         const ic = $id('info-close');
         if (ic) ic.addEventListener('click', closeInfo);
         const shareOneBtn = $id('info-share');
@@ -3690,6 +3847,11 @@ const getJson = async (endpoint) => {
         // Back and Forward move between views, because pushState was used for the moves that are
         // worth going back from: turning a page, changing the sort, opening and closing Info.
         window.addEventListener('popstate', () => {
+            // Our own history.back(), taking back the entry the file list added when it opened
+            // (1.64.0). Nothing about the view has changed, so there is nothing to re-run.
+            if (filesPopping) { filesPopping = false; return; }
+            // Back, with the file list open: it is the list that goes, not the view behind it.
+            if (overlay && !overlay.hidden) { filesOwned = Math.max(0, filesOwned - 1); closeFiles(true); return; }
             const st = readUrl();
             // Back and Forward move the address without going through writeUrl(), so the box that
             // writeUrl() would have cleared has to be cleared here as well. Its lifetime is tied to
@@ -3928,7 +4090,29 @@ const getJson = async (endpoint) => {
         }
         // ── file-list modal: collapsible folder tree; matches marked when searching file names ──
         const overlay = $id('files-overlay');
-        function closeFiles() { if (overlay) { overlay.hidden = true; document.removeEventListener('keydown', escFiles); } }
+        // One number per opening (1.64.0). `overlay.hidden` was the only guard on a reply, and it
+        // says nothing about WHICH list is open: closing a slow list and opening another straight
+        // away let the first one's answer draw its tree into the second one's window. Every await
+        // below is followed by "is this still my opening", the way run() does it for the search.
+        let filesSeq = 0;
+        let filesObserver = null;
+        // The list adds a history entry when it opens, so Back closes it instead of re-running the
+        // search behind it (which is what "closing it refreshes the list" turned out to be). This
+        // counts the entries we own; `filesPopping` keeps our own history.back() from being read
+        // as the reader pressing Back.
+        let filesOwned = 0, filesPopping = false;
+        function closeFiles(fromHistory) {
+            if (!overlay || overlay.hidden) return;
+            overlay.hidden = true;
+            filesSeq++;                                  // an answer still in the air is not ours
+            if (filesObserver) { filesObserver.disconnect(); filesObserver = null; }
+            document.removeEventListener('keydown', escFiles);
+            if (!fromHistory && filesOwned > 0) {
+                filesOwned--;
+                filesPopping = true;
+                try { history.back(); } catch (e) { filesPopping = false; }
+            }
+        }
         function escFiles(e) { if (e.key === 'Escape') closeFiles(); }
         // One DOM node per file, and this tree is rebuilt from scratch on every page that arrives —
         // so ten pages of 2 000 is ten rebuilds of a tree growing to 20 000 lines. The panel's tree
@@ -3964,17 +4148,26 @@ const getJson = async (endpoint) => {
         async function openFiles(hash, name) {
             if (!overlay) return;
             const body = $id('files-body'), title = $id('files-title');
+            const mine = ++filesSeq;
+            const ours = () => mine === filesSeq && !overlay.hidden;
+            if (filesObserver) { filesObserver.disconnect(); filesObserver = null; }
             title.textContent = name || t('js.app.files');
             body.textContent = t('js.common.loading');
             overlay.hidden = false;
             document.addEventListener('keydown', escFiles);
+            // An entry of its own, so Back shuts the list (1.64.0). The address does not change —
+            // the list is not a view of this page, it is a window over it — and popstate below
+            // takes it away again. Without this, Back went to the search's previous view and ran
+            // it, with the window still sitting on top: "closing it refreshes the list".
+            try { history.pushState({ filesModal: 1 }, '', location.href); filesOwned++; }
+            catch (e) { /* opaque origin: Esc and the cross still close it */ }
             // Opened from a hit of a search that looked inside file names: the first page names the
             // term, and the server answers with the matching files beside the ordinary page (1.62.0).
             // Captured NOW, because the reader can type a new search while this list is open.
             const term = lastFilesSearch ? lastQuery : '';
             const json = await getJson('index_files&hash=' + encodeURIComponent(hash)
                                        + (term ? '&search=' + encodeURIComponent(term) : ''));
-            if (overlay.hidden) return;
+            if (!ours()) return;
             body.textContent = '';
             if (!json || !json.success) {
                 body.textContent = (json && json.error) || t('js.app.files_load_failed');
@@ -4007,14 +4200,18 @@ const getJson = async (endpoint) => {
             const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-secondary btn-small';
             const sentinel = document.createElement('div'); sentinel.className = 'files-sentinel';
             foot.appendChild(btn); foot.appendChild(sentinel);
-            const render = () => {
+            // The folders this reader has opened, kept across the rebuilds (1.64.0).
+            const opened = treeOpenState(tree);
+            let beyond = 0;
+            // Split in two (1.64.0). The chrome is a heading and a button; the tree is up to five
+            // thousand lines. render() used to be both, and was called at the START of a load as
+            // well — only to put the word "Loading…" on the button — so on a torrent of any size
+            // the folder somebody had just opened folded itself twice per page.
+            const chrome = () => {
                 const head = (totalFiles && allFiles.length < totalFiles)
                     ? t('js.app.files_n_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
                     : t('js.app.files_n', {n: allFiles.length.toLocaleString() + (more || (json.truncated && !json.can_more) ? '+' : '')});
                 title.textContent = (json.name || name || t('js.app.files')) + ' — ' + head;
-                const built = buildTreePub(allFiles, tokens, { matches, total: totalFiles });
-                tree.replaceChildren(built);
-                const beyond = Number(built.dataset.extra || 0);
                 matchNote.hidden = !beyond && !json.matches_more;
                 matchNote.textContent = [
                     beyond ? t('js.app.files_matches_beyond', {n: beyond.toLocaleString()}) : '',
@@ -4023,16 +4220,22 @@ const getJson = async (endpoint) => {
                 btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
                 btn.disabled = loading; foot.hidden = !more;
             };
+            const render = () => {
+                const built = buildTreePub(allFiles, tokens, { matches, total: totalFiles }, opened);
+                tree.replaceChildren(built);
+                beyond = Number(built.dataset.extra || 0);
+                chrome();
+            };
             const loadMore = async () => {
                 if (loading || !more) return false;
-                loading = true; render();
+                loading = true; chrome();
                 const fj = await getJson('index_files&hash=' + encodeURIComponent(hash) + '&offset=' + next);
                 loading = false;
-                if (overlay.hidden) return false;
+                if (!ours()) return false;
                 if (!fj || !fj.success) {
                     // The button stays live; only the observer and the 'all' chain give up. This
                     // used to set more=false, which removed the reader's only way to try again.
-                    stalled = true; render();
+                    stalled = true; chrome();
                     return false;
                 }
                 stalled = false;
@@ -4045,7 +4248,21 @@ const getJson = async (endpoint) => {
             const loadAll = async () => { while (more && !stalled) { if (!await loadMore()) break; } };
             btn.addEventListener('click', loadMore);
             if (filesMode === 'scroll' && 'IntersectionObserver' in window) {
-                new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore(); }, { root: null, rootMargin: '200px' }).observe(sentinel);
+                // THE WINDOW'S OWN BODY is what scrolls, not the page, so it is the root (1.64.0).
+                // And an observer only ever reports a CHANGE: with a page of two thousand files
+                // landing under a sentinel that was already on the screen, nothing changed, nothing
+                // fired, and the loading stopped with a "Load more" button in the middle of a list
+                // the reader thought was still coming. Asking to watch the same element again is
+                // what makes it say where the sentinel is NOW.
+                const again = () => {
+                    if (!filesObserver || !more || stalled) return;
+                    filesObserver.unobserve(sentinel);
+                    filesObserver.observe(sentinel);
+                };
+                filesObserver = new IntersectionObserver((entries) => {
+                    if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore().then((got) => { if (got) again(); });
+                }, { root: body, rootMargin: '200px' });
+                filesObserver.observe(sentinel);
             }
             body.appendChild(tree); body.appendChild(foot); body.appendChild(matchNote); body.appendChild(notes);
             if (json.truncated && !json.can_more) note(t('js.app.files_truncated'));
@@ -4058,8 +4275,8 @@ const getJson = async (endpoint) => {
             if (filesMode === 'all') await loadAll();
         }
         if (overlay) {
-            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeFiles(); });
-            $id('files-close').addEventListener('click', closeFiles);
+            closeOnBackdrop(overlay, closeFiles);
+            $id('files-close').addEventListener('click', () => closeFiles());
         }
         // ── wiring: live search (debounced), accelerating clear-X, checkboxes, Enter = immediate ──
         // The same two waits as the panel's lists (AdminCommon.DEBOUNCE in admin-common.js, which the
@@ -4203,7 +4420,7 @@ const getJson = async (endpoint) => {
         inner.appendChild(acts);
 
         box.appendChild(inner);
-        box.addEventListener('click', (e) => { if (e.target === box) { closeLeave(box); openBox = null; } });
+        closeOnBackdrop(box, () => { closeLeave(box); openBox = null; });
         document.body.appendChild(box);
         document.addEventListener('keydown', onEsc, true);
         openBox = box;

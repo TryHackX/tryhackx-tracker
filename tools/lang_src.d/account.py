@@ -199,5 +199,7 @@ add('', {
     'account.tz_head': ('Time zone', 'Strefa czasowa'),
     'account.tz_note': ('The shoutbox shows its times in this zone. The site default follows whatever zone the site is set to, so it moves when that does.',
         'W tej strefie shoutbox pokazuje godziny. Domyślna strefa serwisu idzie za ustawieniem strony, więc zmienia się razem z nim.'),
-    'account.tz_site': ('Site default (:zone, :offset)', 'Domyślna strefa serwisu (:zone, :offset)'),
+    # 1.64.0: shortened. This is the first line of a list whose width is decided by its longest
+    # line, and it WAS that line — longer than every zone in it once those lost their region prefix.
+    'account.tz_site': ('Default: :zone (:offset)', 'Domyślna: :zone (:offset)'),
 })

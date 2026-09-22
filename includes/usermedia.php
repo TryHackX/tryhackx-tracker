@@ -146,6 +146,19 @@ function userCoverOverlay(array $cfg): string
 }
 
 /**
+ * Which card of the account page holds the Picture and Cover blocks (1.64.0): 'left' | 'right'.
+ *
+ * The blocks are rendered ONCE, into a buffer, and echoed at whichever position this names — so the
+ * ids and the classes are the same either way and assets/js/media-editor.js does not know or care
+ * which card it is working in. 'right' is the shipped answer: the left card is the facts about the
+ * account and these are two things to DO, which is what the right card already holds.
+ */
+function accountMediaSide(array $cfg): string
+{
+    return (string)($cfg['account_media_side'] ?? 'right') === 'left' ? 'left' : 'right';
+}
+
+/**
  * 'image' only when the owner chose it AND there is a default picture to show; otherwise the
  * generated letter. A choice that points at nothing must not draw a broken image beside every name.
  */

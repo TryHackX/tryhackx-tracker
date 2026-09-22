@@ -676,7 +676,13 @@
         acts.appendChild(cancel); acts.appendChild(go);
         inner.appendChild(acts);
         box.appendChild(inner);
-        box.addEventListener('click', (e) => { if (e.target === box) close(); });
+        // The backdrop closes it only when the press STARTED on the backdrop (1.64.0). A `click` is
+        // delivered to the common ancestor of the press and the release, so a press inside the box
+        // that is let go outside it raises one here — and the answer somebody was typing goes with
+        // the box. The panel does not load app.js, which is why these three lines are here too.
+        let fromBackdrop = false;
+        box.addEventListener('pointerdown', (e) => { fromBackdrop = e.target === box; });
+        box.addEventListener('click', (e) => { if (e.target === box && fromBackdrop) close(); });
         document.body.appendChild(box);
         document.addEventListener('keydown', onEsc, true);
         cancel.focus();

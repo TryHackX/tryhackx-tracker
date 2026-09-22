@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 69;  // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
+const TRACKER_SCHEMA_VERSION = 70;  // 70 = "delete this conversation, for me" and two settings: `message_threads`.u_low_cleared_id / u_high_cleared_id (BIGINT UNSIGNED, 0 = nothing deleted — every read path filters `m.id >` the reader's own, so a thread goes for one side and stays whole for the other, and a new message brings it back showing only what came after), plus `shout_order` (top | bottom — which end of the room the newest line is at) and `account_media_side` (left | right — which card of the account page holds Picture and Cover)
+                                    // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
                                     // 68 = one setting and one column: `site_timezone` (the zone this site shows times in; empty = follow tracker_schedule_tz, then PHP's own) and users.timezone (NULL = the site's) — the shoutbox is the first reader of both
                                     // 67 = one setting and one permission, no tables: `shout_page_action` (the action name the room answers on, so an operator can have ?action=chat) and `shout.emote_auto` (an upload that skips the approval queue) — registered and, like shout.upload_emote before it, granted to nobody
                                     // 66 = the shoutbox's pinned line (shouts.pinned_at/pinned_by, at most one of them at a time) and the lines the SITE says (shouts.is_system) — which is why user_id is nullable from here on: an announcement has no author, and a row pointing at account 0 would be a lie rather than an absence
@@ -980,6 +981,11 @@ function trackerSchemaStatements(): array {
         // that one person cleared out of their inbox still exists for the other, and a message that
         // has been REPORTED must still be readable by the moderator who has to decide about it —
         // letting either side erase evidence of what they sent is a feature nobody asked for.
+        // v70: `u_*_cleared_id` is "delete this conversation, for me". It holds the id of the last
+        // message this side had when they deleted it, and every read path filters `m.id >` their
+        // own watermark — so the thread disappears for them and stays whole for the other person,
+        // and a NEW message (a higher id) brings it back showing only what has arrived since.
+        // Nothing is deleted: a reported message has to stay readable to the panel.
         "CREATE TABLE IF NOT EXISTS `message_threads` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             `u_low` INT UNSIGNED NOT NULL,
@@ -988,6 +994,8 @@ function trackerSchemaStatements(): array {
             `last_message_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `u_low_hidden` TINYINT(1) NOT NULL DEFAULT 0,
             `u_high_hidden` TINYINT(1) NOT NULL DEFAULT 0,
+            `u_low_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `u_high_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
             UNIQUE KEY `uq_thread_pair` (`u_low`, `u_high`),
             KEY `idx_thread_low` (`u_low`, `last_message_at`),
             KEY `idx_thread_high` (`u_high`, `last_message_at`)
@@ -1438,10 +1446,21 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `last_message_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         `u_low_hidden` TINYINT(1) NOT NULL DEFAULT 0,
         `u_high_hidden` TINYINT(1) NOT NULL DEFAULT 0,
+        `u_low_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `u_high_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
         UNIQUE KEY `uq_thread_pair` (`u_low`, `u_high`),
         KEY `idx_thread_low` (`u_low`, `last_message_at`),
         KEY `idx_thread_high` (`u_high`, `last_message_at`)
     ) $engine";
+    // v70: "delete this conversation, for me" — see the CREATE above. 0 for every existing row,
+    // which is "I have deleted nothing", so an upgrade hides nothing from anybody.
+    $mtParts = [];
+    foreach (['u_low_cleared_id', 'u_high_cleared_id'] as $mtCol) {
+        if (!schemaColumnExists($db, 'message_threads', $mtCol)) {
+            $mtParts[] = "ADD COLUMN `$mtCol` BIGINT UNSIGNED NOT NULL DEFAULT 0";
+        }
+    }
+    if ($mtParts) $out[] = "ALTER TABLE `message_threads` " . implode(', ', $mtParts);
     $out[] = "CREATE TABLE IF NOT EXISTS `user_messages` (
         `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         `thread_id` INT UNSIGNED NOT NULL,
@@ -2632,6 +2651,11 @@ function trackerSchemaDefaultSettings(): array {
         // Retention is both halves at once: two thousand lines or thirty days, whichever bites first.
         'shout_enabled'               => '0',
         'shout_placement'             => 'home',  // home | page | both
+        // Which end of the room the newest line is at (1.64.0). 'top' is newest first — what the
+        // owner asked for, and what a reader opening a room expects to see without scrolling,
+        // because nothing ever scrolled the list for them. 'bottom' is chat order, and that arm
+        // scrolls to the end on mount instead.
+        'shout_order'                 => 'top',   // top | bottom
         'shout_widget_rows'           => '25',    // clamped [5, 100]
         'shout_page_rows'             => '100',   // clamped [20, 500]
         'shout_max_chars'             => '500',   // clamped [1, 2000]
@@ -2710,6 +2734,9 @@ function trackerSchemaDefaultSettings(): array {
         // from their name ('generated'), or the site's own picture ('image') once the owner has set
         // one in Settings -> Profiles — until then 'image' falls back to the letter.
         'avatar_default'              => 'generated', // generated | image
+        // Which card of the account page the Picture and Cover blocks are drawn in (1.64.0): the
+        // left one, among the facts about the account, or the right one under the privacy answers.
+        'account_media_side'          => 'right',    // left | right
         // The site's default picture and default cover, as the rows they point at (user_media,
         // user_id NULL) and the framing chosen for them. Written by admin/user_media, never by the
         // settings form: the id is a fact about stored bytes, not something to type.

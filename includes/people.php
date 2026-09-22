@@ -274,6 +274,39 @@ function pmOtherId(array $thread, int $userId): int
     return (int)$thread['u_low'] === $userId ? (int)$thread['u_high'] : (int)$thread['u_low'];
 }
 
+/* ── "delete this conversation", which means FOR ME (v70) ─────────────────────────────────────
+ *
+ * `message_threads` has one row per pair, so a conversation cannot be deleted without deleting
+ * somebody else's copy of it. What each side gets instead is a WATERMARK: the id of the last
+ * message they had when they pressed delete. Every read path filters `m.id > ` their own — the
+ * open conversation, the poll, the inbox list and its preview subqueries, the deep search and both
+ * unread counts — so the thread disappears for them and stays whole for the other person, and a
+ * new message (a higher id) brings it back showing only what has arrived since.
+ *
+ * Nothing is removed from `user_messages`: a reported message has to stay readable to the panel.
+ */
+
+/** The column holding this reader's watermark in this thread. */
+function pmClearedCol(array $thread, int $userId): string
+{
+    return (int)$thread['u_low'] === $userId ? 'u_low_cleared_id' : 'u_high_cleared_id';
+}
+
+/** The id below which this reader has deleted their side of this thread. 0 = nothing deleted. */
+function pmClearedId(array $thread, int $userId): int
+{
+    return (int)($thread[pmClearedCol($thread, $userId)] ?? 0);
+}
+
+/**
+ * The same question as SQL, for a query that has `t` in scope and one `?` to spend on the reader's
+ * id: "which watermark is mine in this row". Written once so seven queries cannot disagree.
+ */
+function pmClearedSql(string $t = 't'): string
+{
+    return "IF($t.u_low = ?, $t.u_low_cleared_id, $t.u_high_cleared_id)";
+}
+
 /** How many messages are waiting for this account, across every thread. */
 function pmUnreadCount(PDO $db, int $userId): int
 {
@@ -284,8 +317,11 @@ function pmUnreadCount(PDO $db, int $userId): int
                           JOIN message_threads t ON t.id = m.thread_id
                           JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
                          WHERE m.sender_id <> ? AND m.read_at IS NULL AND u.status = 'active'
-                           AND ((t.u_low = ? AND t.u_low_hidden = 0) OR (t.u_high = ? AND t.u_high_hidden = 0))");
-    $st->execute([$userId, $userId, $userId, $userId]);
+                           AND ((t.u_low = ? AND t.u_low_hidden = 0) OR (t.u_high = ? AND t.u_high_hidden = 0))
+                           AND m.id > " . pmClearedSql() . "");
+    // v70: a message below my own watermark is one I deleted, and a badge that counts what nothing
+    // on the page can open is the bug 1.50.0 was written to remove.
+    $st->execute([$userId, $userId, $userId, $userId, $userId]);
     return (int)$st->fetchColumn();
 }
 
@@ -301,9 +337,10 @@ function pmUnreadCountFriends(PDO $db, int $userId): int
                           JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
                          WHERE m.sender_id <> ? AND m.read_at IS NULL AND u.status = 'active'
                            AND ((t.u_low = ? AND t.u_low_hidden = 0) OR (t.u_high = ? AND t.u_high_hidden = 0))
+                           AND m.id > " . pmClearedSql() . "
                            AND EXISTS (SELECT 1 FROM user_friends f WHERE f.status = 'accepted'
                                           AND ((f.user_id = ? AND f.friend_id = u.id) OR (f.user_id = u.id AND f.friend_id = ?)))");
-    $st->execute([$userId, $userId, $userId, $userId, $userId, $userId]);
+    $st->execute([$userId, $userId, $userId, $userId, $userId, $userId, $userId]);
     return (int)$st->fetchColumn();
 }
 

@@ -744,7 +744,9 @@
     function initListOverlay() {
         var box = document.getElementById('list-overlay');
         if (!box) return;
-        box.addEventListener('click', function (e) { if (e.target === box) closeListOverlay(); });
+        // Only when the press began on the backdrop (1.64.0, assets/js/app.js): a click goes to the
+        // common ancestor of the press and the release, so a drag off the dialog raises one here.
+        closeOnBackdrop(box, closeListOverlay);
         var x = document.getElementById('lo-close');
         if (x) x.addEventListener('click', closeListOverlay);
     }
@@ -848,7 +850,7 @@
 
         function close() { box.hidden = true; document.removeEventListener('keydown', esc); }
         function esc(e) { if (e.key === 'Escape') close(); }
-        box.addEventListener('click', function (e) { if (e.target === box) close(); });
+        closeOnBackdrop(box, close);        // the press has to have STARTED on the backdrop (1.64.0)
         var x = document.getElementById('lp-close');
         if (x) x.addEventListener('click', close);
 
@@ -1046,7 +1048,7 @@
 
         function close() { box.hidden = true; document.removeEventListener('keydown', esc); }
         function esc(e) { if (e.key === 'Escape') close(); }
-        box.addEventListener('click', function (e) { if (e.target === box) close(); });
+        closeOnBackdrop(box, close);        // the press has to have STARTED on the backdrop (1.64.0)
         var x = document.getElementById('who-close');
         if (x) x.addEventListener('click', close);
 

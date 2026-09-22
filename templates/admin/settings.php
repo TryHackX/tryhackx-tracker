@@ -91,7 +91,10 @@
                     <div class="col-md-6">
                         <label class="form-label" for="site-timezone"><?= _h('settings.site_timezone') ?></label>
                         <select class="form-select bg-dark text-light border-secondary" name="site_timezone" id="site-timezone">
-                            <?php foreach (tzChoices() as $tzGrp => $tzIds): ?>
+                            <?php /* Short labels (1.64.0): the region is written on the optgroup, so
+                                     repeating it inside every option only made the open list wider
+                                     than the control it drops out of. */ ?>
+                            <?php foreach (tzChoices(null, true) as $tzGrp => $tzIds): ?>
                             <optgroup label="<?= sanitize($tzGrp) ?>">
                                 <?php foreach ($tzIds as $tzId => $tzLabel): ?>
                                 <option value="<?= sanitize($tzId) ?>"<?= $tzId === $siteTzNow ? ' selected' : '' ?>><?= sanitize($tzLabel) ?></option>
@@ -802,6 +805,15 @@
                             <option value="both" <?= $shPlace === 'both' ? 'selected' : '' ?>><?= _h('settings.shout_placement_both') ?></option>
                         </select>
                         <small class="settings-hint"><?= __('settings.shout_placement_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_order">
+                        <label class="form-label" for="setting-shout_order"><?= _h('settings.shout_order') ?></label>
+                        <?php $shOrder = function_exists('shoutOrder') ? shoutOrder($cfg) : 'top'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_order" id="setting-shout_order">
+                            <option value="top" <?= $shOrder === 'top' ? 'selected' : '' ?>><?= _h('settings.shout_order_top') ?></option>
+                            <option value="bottom" <?= $shOrder === 'bottom' ? 'selected' : '' ?>><?= _h('settings.shout_order_bottom') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.shout_order_hint') ?></small>
                     </div>
                     <div class="col-md-3" data-setting="shout_format">
                         <label class="form-label"><?= _h('settings.shout_format') ?></label>
@@ -1616,6 +1628,15 @@
                             <option value="image" <?= ($cfg['avatar_default'] ?? 'generated') === 'image' ? 'selected' : '' ?>><?= _h('settings.profiles_default_image') ?></option>
                         </select>
                         <small class="settings-hint"><?= __('settings.profiles_default_mode_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="account_media_side">
+                        <label class="form-label" for="setting-account_media_side"><?= _h('settings.account_media_side') ?></label>
+                        <?php $pmSide = function_exists('accountMediaSide') ? accountMediaSide($cfg) : 'right'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="account_media_side" id="setting-account_media_side">
+                            <option value="right" <?= $pmSide === 'right' ? 'selected' : '' ?>><?= _h('settings.account_media_side_right') ?></option>
+                            <option value="left" <?= $pmSide === 'left' ? 'selected' : '' ?>><?= _h('settings.account_media_side_left') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.account_media_side_hint') ?></small>
                     </div>
                 </div>
                 <?php /* The two stored images. No name="" anywhere in here on purpose: none of this is a

@@ -83,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         jsonResponse(['success' => true, 'thread' => (int)$thread['id']]);
     }
 
-    if ($op === 'read' || $op === 'hide') {
+    if ($op === 'read' || $op === 'hide' || $op === 'delete') {
         $name = trim((string)($input['with'] ?? ''));
         $them = userValidUsername($name) ? userFindByLogin($db, $name) : null;
         if (!$them) jsonResponse(['error' => 'not_found'], 404);
@@ -92,6 +92,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($op === 'read') {
             $db->prepare("UPDATE user_messages SET read_at = NOW() WHERE thread_id = ? AND sender_id <> ? AND read_at IS NULL")
                ->execute([(int)$thread['id'], $uid]);
+        } elseif ($op === 'delete') {
+            /* ── "delete this conversation", which means FOR ME (v70) ──────────────────────────
+             *
+             * Nothing is removed. My own watermark moves to the last id the thread holds, and
+             * every read path filters `m.id > ` that number — so the conversation disappears from
+             * my inbox and my window, the other person's copy is untouched, and a message that
+             * arrives later (a higher id) brings the thread back showing only what came after I
+             * deleted it. `hide` as well, because a thread with nothing left to show me should not
+             * be listed until it has something.
+             *
+             * Not a DELETE, on purpose: a reported message has to stay readable to the panel, and
+             * a conversation one side chose to keep is not the other side's to destroy.
+             */
+            $mx = $db->prepare("SELECT COALESCE(MAX(id), 0) FROM user_messages WHERE thread_id = ?");
+            $mx->execute([(int)$thread['id']]);
+            $upto = (int)$mx->fetchColumn();
+            $cleared = pmClearedCol($thread, $uid);
+            $hidden = (int)$thread['u_low'] === $uid ? 'u_low_hidden' : 'u_high_hidden';
+            // GREATEST, so a second delete cannot walk the watermark backwards over a message that
+            // arrived between the read above and this write.
+            $db->prepare("UPDATE message_threads SET `$cleared` = GREATEST(`$cleared`, ?), `$hidden` = 1 WHERE id = ?")
+               ->execute([$upto, (int)$thread['id']]);
         } else {
             $col = (int)$thread['u_low'] === $uid ? 'u_low_hidden' : 'u_high_hidden';
             $db->prepare("UPDATE message_threads SET `$col` = 1 WHERE id = ?")->execute([(int)$thread['id']]);
@@ -196,6 +218,9 @@ if ((string)($_GET['poll'] ?? '') === '1') {
     $thread = pmThreadFor($db, $uid, (int)$them['id'], false);
     if (!$thread) jsonResponse(['success' => true, 'rows' => [], 'typing' => false, 'unread' => 0, 'read_upto' => 0]);
 
+    // v70: never below MY watermark — whatever `after` says, a conversation I deleted starts again
+    // at the first message that arrived after I deleted it.
+    $after = max($after, pmClearedId($thread, $uid));
     $st = $db->prepare("SELECT id, sender_id, body, body_format, created_at, read_at, reported
                           FROM user_messages WHERE thread_id = ? AND id > ? ORDER BY id ASC LIMIT 50");
     $st->execute([(int)$thread['id'], $after]);
@@ -254,9 +279,11 @@ if ($with !== '') {
     }
     $db->prepare("UPDATE user_messages SET read_at = NOW() WHERE thread_id = ? AND sender_id <> ? AND read_at IS NULL")
        ->execute([(int)$thread['id'], $uid]);
+    // v70: only what is above MY watermark. A conversation this reader deleted opens empty until
+    // something new arrives in it, and opens showing only that afterwards.
     $st = $db->prepare("SELECT m.id, m.sender_id, m.body, m.body_format, m.created_at, m.read_at, m.reported
-                          FROM user_messages m WHERE m.thread_id = ? ORDER BY m.id ASC LIMIT 500");
-    $st->execute([(int)$thread['id']]);
+                          FROM user_messages m WHERE m.thread_id = ? AND m.id > ? ORDER BY m.id ASC LIMIT 500");
+    $st->execute([(int)$thread['id'], pmClearedId($thread, $uid)]);
     $rows = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $m) {
         $rows[] = [
@@ -295,11 +322,14 @@ if ($deep) {
         jsonResponse(['error' => 'rate_limit', 'retry_after' => 60], 429);
     }
     $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
+    // v70: a word in a message this reader deleted is not a hit. Their own watermark, the same one
+    // every other read path here applies.
     $q = $db->prepare("SELECT DISTINCT m.thread_id FROM user_messages m
                          JOIN message_threads t ON t.id = m.thread_id
                         WHERE (t.u_low = ? OR t.u_high = ?) AND m.body LIKE ?
+                          AND m.id > " . pmClearedSql() . "
                         LIMIT 200");
-    $q->execute([$uid, $uid, $like]);
+    $q->execute([$uid, $uid, $like, $uid]);
     $deepIds = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
 }
 
@@ -311,19 +341,26 @@ if ($deepIds !== null) {
     $deepWhere = $deepIds ? ' AND t.id IN (' . implode(',', array_fill(0, count($deepIds), '?')) . ')' : ' AND 1 = 0';
     $deepParams = $deepIds;
 }
+// v70: `cleared` is this reader's own watermark in each row (pmClearedSql) — the id below which
+// they have deleted this conversation for themselves. The unread count and BOTH preview subqueries
+// look only above it, and a thread with nothing above it at all is not listed: the newest thing in
+// it is something this reader has thrown away, so there is no line to draw for them.
+$cleared = pmClearedSql();
 $st = $db->prepare(
     "SELECT t.id, t.last_message_at,
             IF(t.u_low = ?, t.u_high, t.u_low) AS other_id,
             u.username AS other_name, u.avatar_sha AS other_avatar_sha,
-            (SELECT COUNT(*) FROM user_messages m WHERE m.thread_id = t.id AND m.sender_id <> ? AND m.read_at IS NULL) AS unread,
-            (SELECT m2.body FROM user_messages m2 WHERE m2.thread_id = t.id ORDER BY m2.id DESC LIMIT 1) AS last_body,
-            (SELECT m3.sender_id FROM user_messages m3 WHERE m3.thread_id = t.id ORDER BY m3.id DESC LIMIT 1) AS last_sender
+            (SELECT COUNT(*) FROM user_messages m WHERE m.thread_id = t.id AND m.sender_id <> ? AND m.read_at IS NULL
+                                                    AND m.id > $cleared) AS unread,
+            (SELECT m2.body FROM user_messages m2 WHERE m2.thread_id = t.id AND m2.id > $cleared ORDER BY m2.id DESC LIMIT 1) AS last_body,
+            (SELECT m3.sender_id FROM user_messages m3 WHERE m3.thread_id = t.id AND m3.id > $cleared ORDER BY m3.id DESC LIMIT 1) AS last_sender
        FROM message_threads t
        JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
       WHERE ((t.u_low = ? AND t.u_low_hidden = 0) OR (t.u_high = ? AND t.u_high_hidden = 0))
-        AND u.status = 'active'" . $deepWhere . "
+        AND u.status = 'active'
+        AND EXISTS (SELECT 1 FROM user_messages m4 WHERE m4.thread_id = t.id AND m4.id > $cleared)" . $deepWhere . "
       ORDER BY t.last_message_at DESC LIMIT 200");
-$st->execute(array_merge([$uid, $uid, $uid, $uid, $uid], $deepParams));
+$st->execute(array_merge([$uid, $uid, $uid, $uid, $uid, $uid, $uid, $uid, $uid], $deepParams));
 $threads = [];
 foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $t) {
     // A PREVIEW, not the message: the markup is rendered when a conversation is opened, and an

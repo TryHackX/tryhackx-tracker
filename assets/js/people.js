@@ -186,6 +186,14 @@
             if (!rows.length) { list.appendChild(el('div', { className: 'pf-empty', text: t(q ? 'js.pm.no_match' : 'js.pm.no_threads') })); return; }
             rows.forEach(function (x) {
                 var row = el('button', { type: 'button', className: 'pm-row' + (x.unread ? ' pm-row-unread' : '') });
+                // A stable id, the way every polled row on this site carries one since 1.64.0 (see
+                // templates/partials/shoutbox_widget.php): the live language switch pairs a living
+                // node with the freshly rendered one by `id` first and by POSITION second, and a
+                // list a script filled after the page was drawn is never the list a fresh render
+                // holds. The inbox is written into an empty container, so nothing can be paired
+                // with it today — the id is what keeps that true if the container is ever given a
+                // line of its own. One thread per person, so the name IS the key.
+                row.id = 'pm-th-' + x.with;
                 // The picture takes a column of its own, beside both lines of the row: a person to the
                 // left of what they last said, the way every inbox reads.
                 var pic = face(x.with, x.avatar, 32, 'pm-av');
@@ -210,7 +218,42 @@
                     row.classList.add('pm-row-open');
                     openThread(x.with);
                 });
-                list.appendChild(row);
+                /* ── taking a conversation away, for me (1.64.0, schema 70) ──────────────────────
+                   The row IS a button, so the cross cannot be inside it — a button inside a button
+                   is not markup a browser will keep. The pair goes in a wrapper instead, and the
+                   cross is its sibling: drawn on hover on a machine with a pointer, always on a
+                   touch screen (the stylesheet's `@media (hover: none)` arm).
+
+                   It asks the same in-place question the shoutbox asks, from the same helper in
+                   assets/js/app.js. Nothing is destroyed: the endpoint moves THIS reader's
+                   watermark and the other person's copy is untouched — which is why the question
+                   says "for you". */
+                var wrap = el('div', { className: 'pm-row-wrap' });
+                wrap.appendChild(row);
+                var del = el('button', { type: 'button', className: 'pm-del',
+                                         title: t('js.pm.del_title', { user: x.with }),
+                                         'aria-label': t('js.pm.del_title', { user: x.with }) },
+                              el('i', { className: 'bi bi-trash', 'aria-hidden': 'true' }));
+                del.addEventListener('click', function () {
+                    if (typeof window.askInPlace !== 'function') return;
+                    window.askInPlace(del, t('js.pm.del_q'), async function () {
+                        var r = await post('user_messages', { op: 'delete', with: x.with });
+                        if (!r || !r.success) return false;
+                        // The conversation that was open is the one that has just gone.
+                        if (openWith === x.with) { stopPoll(); openWith = null; pane.textContent = ''; }
+                        badge(Number(r.unread) || 0);
+                        loadInbox();
+                        return true;
+                    }, {
+                        host: wrap,
+                        relabel: function (b) {
+                            b.title = t('js.pm.del_title', { user: x.with });
+                            b.setAttribute('aria-label', t('js.pm.del_title', { user: x.with }));
+                        },
+                    });
+                });
+                wrap.appendChild(del);
+                list.appendChild(wrap);
             });
         }
 
@@ -219,6 +262,7 @@
         /** One message, as a row. The first draw and every later arrival go through here. */
         function renderMsg(m) {
             var wrap = el('div', { className: 'pm-msg' + (m.mine ? ' pm-msg-mine' : '') });
+            wrap.id = 'pm-msg-' + (Number(m.id) || 0);     // 1.64.0 — see the inbox rows above
             wrap.dataset.id = String(m.id || 0);
             if (m.mine) wrap.dataset.mine = '1';
             wrap.appendChild(el('div', { className: 'pm-body richtext', html: m.html }));
@@ -371,7 +415,13 @@
             var close = function () { box.hidden = true; document.removeEventListener('keydown', esc); };
             var esc = function (e) { if (e.key === 'Escape') close(); };
             document.addEventListener('keydown', esc);
-            box.onclick = function (e) { if (e.target === box) close(); };
+            // The backdrop closes it only when the press STARTED there (1.64.0): a `click` is
+            // delivered to the common ancestor of the press and the release, so a press inside the
+            // dialog that is let go outside it raised one on the backdrop and shut the dialog.
+            // Assigned rather than added, because this whole block runs again on every open.
+            var fromBackdrop = false;
+            box.onpointerdown = function (e) { fromBackdrop = e.target === box; };
+            box.onclick = function (e) { if (e.target === box && fromBackdrop) close(); };
             var x = document.getElementById('pmreport-close');
             if (x) x.onclick = close;
             go.onclick = async function () {
@@ -556,6 +606,7 @@
 
         function personRow(p, kind, reload, mayMessage) {
             var row = el('div', { className: 'pf-row pe-row' });
+            row.id = 'pe-row-' + p.username;              // 1.64.0 — see the inbox rows above
             var main = el('div', { className: 'pf-main' });
             var pic = face(p.username, p.avatar, 32, 'pe-av');
             if (pic) main.appendChild(pic);
@@ -641,6 +692,7 @@
             if (!j.rows.length) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.people.dir_empty') })); return; }
             j.rows.forEach(function (p) {
                 var row = el('div', { className: 'pf-row pe-row' });
+                row.id = 'dir-row-' + p.username;         // 1.64.0 — see the inbox rows above
                 var main = el('div', { className: 'pf-main' });
                 var pic = face(p.username, p.avatar, 32, 'pe-av');
                 if (pic) main.appendChild(pic);
@@ -772,7 +824,10 @@
         document.addEventListener('keydown', esc);
         var x = document.getElementById('bk-close');
         if (x) x.onclick = close;
-        box.onclick = function (e) { if (e.target === box) close(); };
+        // See the report dialog above: the press has to have STARTED on the backdrop (1.64.0).
+        var fromBackdrop = false;
+        box.onpointerdown = function (e) { fromBackdrop = e.target === box; };
+        box.onclick = function (e) { if (e.target === box && fromBackdrop) close(); };
         if (go) go.onclick = async function () {
             go.disabled = true;
             var r = await post('user_people', { op: 'block', user: name, hide_profile: hide && hide.checked ? 1 : 0 });

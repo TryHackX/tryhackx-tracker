@@ -182,6 +182,13 @@ $REVIEWED = [
     // '?' placeholders whose values are bound.
     'api/user_directory.php:$order'            => 'one of four literal ORDER BY strings from a fixed map; the key is looked up, not spliced',
     'api/user_messages.php:$deepWhere'         => 'literal SQL: empty, an impossible condition, or a run of bound placeholders',
+    // v70, "delete this conversation for me". $cleared is pmClearedSql() — a fixed string this
+    // codebase writes ("IF(t.u_low = ?, t.u_low_cleared_id, t.u_high_cleared_id)"), whose only
+    // value is a bound placeholder; it is one function so seven queries cannot disagree about it.
+    // $cleared/$hidden in the POST are COLUMN NAMES chosen by a two-way comparison of the reader's
+    // id against the thread's own two columns — one of two literals each, never anything carried in.
+    'api/user_messages.php:$cleared'           => 'pmClearedSql(): a literal fragment whose only value is a bound placeholder — or one of two literal column names',
+    'api/user_messages.php:$hidden'            => "one of two literal column names, picked by comparing the reader's id with the thread's",
     'includes/index.php:$keepGrace'            => 'from indexKeepSavedClause(): literal SQL, the only number an int from a clamped helper',
     'includes/index.php:$keepProtect'          => 'from indexKeepSavedClause(): literal SQL, the only number an int from a clamped helper',
     'includes/index.php:$clA'                  => 'literal conditions from $where plus one clause built with placeholders; values bound',

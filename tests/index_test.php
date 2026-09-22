@@ -617,7 +617,7 @@ check('the endpoint asks only on the first page, only with a term, and only adds
       && str_contains($filesEp, "\$matchTerm !== '' && \$offset === 0") && str_contains($filesEp, "\$out['matches'] = \$matches['rows'];"));
 $appJs = (string)@file_get_contents($root . '/assets/js/app.js');
 check('the list opened from a hit names the term, and merges the answer into the tree it already draws',
-      str_contains($appJs, "'&search=' + encodeURIComponent(term)") && str_contains($appJs, 'buildTreePub(allFiles, tokens, { matches, total: totalFiles })')
+      str_contains($appJs, "'&search=' + encodeURIComponent(term)") && str_contains($appJs, 'buildTreePub(allFiles, tokens, { matches, total: totalFiles }, opened)')
       && str_contains($appJs, "if (!loaded.has(p)) beyond.push(m);"));
 
 // ── 14. counting the catalogue is a decision, not a habit ─────────────────────

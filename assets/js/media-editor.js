@@ -318,8 +318,12 @@
             const keep = el('button', { type: 'button', className: btn.secondary + ' fe-keep', text: T('js.media.keep') });
             const ask = el('span', { className: 'fe-ask', hidden: true }, [el('span', { text: T('js.media.discard_q') }), discard, keep]);
             const close = el('button', { type: 'button', className: 'fe-close', 'aria-label': T('js.media.close'), title: T('js.media.close'), text: '×' });
+            // The × asks its question BESIDE ITSELF (1.64.0), not in the footer. Built here rather
+            // than through window.pubTip(): this editor also runs in the panel, which does not load
+            // app.js, and a hint that exists on one side of the site only is not a hint.
+            const closeHint = el('span', { className: 'fe-close-hint', role: 'status', 'aria-live': 'polite', hidden: true });
             const box = el('div', { className: 'fe-box fe-box-' + mode, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId }, [
-                el('div', { className: 'fe-head' }, [el('h3', { id: titleId, text: o.title || T(mode === 'cover' ? 'js.media.title_cover' : 'js.media.title_avatar') }), close]),
+                el('div', { className: 'fe-head' }, [el('h3', { id: titleId, text: o.title || T(mode === 'cover' ? 'js.media.title_cover' : 'js.media.title_avatar') }), closeHint, close]),
                 body,
                 el('div', { className: 'fe-foot' }, [recentre, el('span', { className: 'fe-spacer' }), ask, cancel, save]),
             ]);
@@ -387,9 +391,35 @@
 
             const guard = (e) => { if (dirty && !done) { e.preventDefault(); e.returnValue = ''; } };
             window.addEventListener('beforeunload', guard);
+            /**
+             * The × arms itself, and a second press closes (1.64.0).
+             *
+             * It used to open the footer's "Discard your changes? Discard / Keep editing" — which is
+             * the right question for Cancel, a button that says "I have finished with this dialog",
+             * and the wrong one for a cross in the corner, which everywhere else on the web means
+             * "gone, now". So the cross keeps its meaning and pays for it with one more press:
+             * nothing unsaved and it closes at once; something unsaved and it says what a second
+             * press will do, beside itself, for three seconds. Anything else the reader does takes
+             * the arming away — an armed control that is still armed a minute later is a trap.
+             */
+            let closeArmed = 0;
+            const disarmClose = () => {
+                if (!closeArmed) return;
+                clearTimeout(closeArmed);
+                closeArmed = 0;
+                closeHint.hidden = true;
+                closeHint.textContent = '';
+            };
+            const onDisarmDown = (e) => { if (closeArmed && e.target !== close && !close.contains(e.target)) disarmClose(); };
+            // Enter and Space are how the × is pressed from the keyboard; everything else, Esc
+            // included, is the reader doing something other than closing.
+            const onDisarmKey = (e) => { if (closeArmed && e.key !== 'Enter' && e.key !== ' ') disarmClose(); };
             const finish = (saved) => {
                 if (done) return;
                 done = true;
+                disarmClose();
+                document.removeEventListener('pointerdown', onDisarmDown, true);
+                document.removeEventListener('keydown', onDisarmKey, true);
                 window.removeEventListener('beforeunload', guard);
                 document.removeEventListener('keydown', onKey, true);
                 overlay.remove();
@@ -397,15 +427,28 @@
                 if (o.returnFocus && o.returnFocus.isConnected) { try { o.returnFocus.focus(); } catch (x) { /* gone */ } }
                 resolve(saved);
             };
+            // Cancel, Esc and the backdrop keep the footer's question: each of those is somebody
+            // saying they have finished with the dialog, which is a thing worth being asked about.
             const tryClose = () => {
                 if (saving) return;
+                disarmClose();
                 if (dirty) { ask.hidden = false; cancel.hidden = true; save.hidden = true; keep.focus(); return; }
                 finish(false);
             };
+            const closeX = () => {
+                if (saving) return;
+                if (!dirty) { finish(false); return; }
+                if (closeArmed) { finish(false); return; }
+                closeHint.textContent = T('js.media.close_again');
+                closeHint.hidden = false;
+                closeArmed = setTimeout(disarmClose, 3000);
+            };
+            document.addEventListener('pointerdown', onDisarmDown, true);
+            document.addEventListener('keydown', onDisarmKey, true);
             discard.addEventListener('click', () => finish(false));
             keep.addEventListener('click', () => { ask.hidden = true; cancel.hidden = false; save.hidden = false; fe.frame.focus(); });
             cancel.addEventListener('click', tryClose);
-            close.addEventListener('click', tryClose);
+            close.addEventListener('click', closeX);
             // A press that starts AND ends on the backdrop; a drag that strays off the frame is not a click away.
             let downOnBackdrop = false;
             overlay.addEventListener('pointerdown', (e) => { downOnBackdrop = e.target === overlay; });
