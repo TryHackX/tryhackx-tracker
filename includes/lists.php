@@ -246,7 +246,7 @@ function listsContainingHash(PDO $db, array $cfg, string $hash, int $limit = 20,
     $groupIds = userGroupIdsWithPermission($db, 'lists.public');
     if (!$groupIds) return [];
     $in = implode(',', array_map('intval', $groupIds));
-    $sql = "SELECT l.id, l.name, l.slug, u.username,
+    $sql = "SELECT l.id, l.name, l.slug, u.username, u.avatar_sha,
                    (SELECT COUNT(*) FROM user_list_items x WHERE x.list_id = l.id) AS items
               FROM user_list_items i
               JOIN user_lists l ON l.id = i.list_id
@@ -267,9 +267,13 @@ function listsContainingHash(PDO $db, array $cfg, string $hash, int $limit = 20,
     try {
         $st = $db->prepare($sql);
         $st->execute($params);
+        // The owner's picture beside their name (1.63.0), as an ADDRESS built from the same join —
+        // never the owner's id, which this list has never carried.
+        $base = function_exists('getBaseUrl') ? getBaseUrl() : '/';
         return array_map(static fn($r) => [
             'name' => (string)$r['name'], 'slug' => (string)$r['slug'],
             'username' => (string)$r['username'], 'items' => (int)$r['items'],
+            'avatar' => function_exists('userAvatarField') ? userAvatarField($r, 20, $base, $cfg) : '',
         ], $st->fetchAll(PDO::FETCH_ASSOC));
     } catch (\Throwable $e) { return []; }
 }

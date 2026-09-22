@@ -385,6 +385,19 @@
     }
 
     /** The state of one submission, as an icon and a word rather than a colour alone. */
+    /**
+     * "by <author>" on a card, with the author's picture right before the name wherever the language
+     * put it (1.63.0) — assets/js/avatar.js, from the ADDRESS the server built; the plain sentence
+     * where that file is not on the page, and no picture while pictures are switched off.
+     */
+    function rvBy(row) {
+        const span = el('span', { className: 'wl-small text-muted' });
+        if (typeof window.userAvatarPhrase !== 'function') { span.textContent = t('js.wl.rv_by', {user: row.author}); return span; }
+        const pic = window.userAvatarImg({ username: row.author, avatar: String(row.author_avatar || '') }, 20, 'avatar rv-av');
+        span.appendChild(window.userAvatarPhrase(t('js.wl.rv_by', {user: window.userAvatarSlot(0)}), [[pic, row.author]]));
+        return span;
+    }
+
     const RV_STATE = {
         pending:  { icon: 'bi-hourglass-split', cls: 'rv-st-wait', text: t('js.wl.rv_waiting') },
         approved: { icon: 'bi-check-circle',    cls: 'rv-st-ok',   text: t('js.wl.rv_published') },
@@ -408,7 +421,7 @@
         ]);
         // Which home (a torrent the tracker has only seen has no whitelist row), and who wrote it.
         if (row.kind === 'idx') meta.appendChild(el('span', { className: 'wl-badge wl-b-warn', title: t('js.wl.rv_index_only_title'), text: t('js.wl.rv_index_only') }));
-        if (row.author) meta.appendChild(el('span', { className: 'wl-small text-muted', text: t('js.wl.rv_by', {user: row.author}) }));
+        if (row.author) meta.appendChild(rvBy(row));
         // Ratings decide the order of this queue, so the number that did the deciding is on the card.
         // A moderator who cannot see why something is at the top is being asked to trust a sort.
         if (row.votes_count) {
@@ -518,7 +531,7 @@
                 el('code', { className: 'rv-hash', text: row.info_hash }),
                 el('span', { className: 'wl-small text-muted', text: fmtDate(String(row.created_at).replace(' ', 'T')) }),
                 el('span', { className: 'wl-small text-muted', text: row.ip ? t('js.wl.from_ip', {ip: row.ip}) : '' }),
-                row.author ? el('span', { className: 'wl-small text-muted', text: t('js.wl.rv_by', {user: row.author}) }) : '',
+                row.author ? rvBy(row) : '',
                 row.kind === 'idx' ? el('span', { className: 'wl-badge wl-b-warn', text: t('js.wl.rv_index_only') }) : '',
             ]),
         ]));

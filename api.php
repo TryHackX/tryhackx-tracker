@@ -37,6 +37,8 @@ require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/favourites.php';
 require_once __DIR__ . '/includes/sounds.php';
 require_once __DIR__ . '/includes/shout.php';
+// Pictures and profile covers (v69): the pipeline, the stream and userAvatarUrl()/userAvatarHtml().
+require_once __DIR__ . '/includes/usermedia.php';
 require_once __DIR__ . '/includes/lists.php';
 require_once __DIR__ . '/includes/people.php';
 require_once __DIR__ . '/includes/user2fa.php';
@@ -113,7 +115,7 @@ langInit($cfg, $langUser['language'] ?? null);
 // the stats poller and the admin tracker-service status poll are both hit repeatedly and have
 // nothing to do with the report/appeal janitors, so running them there is pure overhead. They
 // still run everywhere else. S2S calls never run them either.
-if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'sound', 'shout_emote', 'shout_list', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status'], true)) {
+if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'sound', 'shout_emote', 'user_media', 'user_avatar_default', 'shout_list', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status'], true)) {
     autoArchiveOldReports($db, $cfg);
     autoArchiveOldAppeals($db, $cfg);
     pruneOldSentEmails($db, $cfg);
@@ -290,6 +292,16 @@ $apiRoutes = [
     'shout_emote_upload'         => 'api/shout_emote_upload.php',
     'shout_emote_delete'         => 'api/shout_emote_delete.php',
     'admin/shout_emotes'         => 'api/admin/shout_emotes.php',
+    // Pictures and profile covers (1.63.0, includes/usermedia.php). `user_avatar` / `user_cover` are a
+    // member's own (upload + framing in one multipart request, reframe, remove); `user_media` streams
+    // one stored image by a hash prefix and a size, and `user_avatar_default` the generated letter —
+    // both PUBLIC and cached for a year, like `sound` and `shout_emote`. `admin/user_media` is the
+    // panel's: removing a member's picture (panel.users.edit) and the site's own defaults (owner).
+    'user_avatar'                => 'api/user_avatar.php',
+    'user_cover'                 => 'api/user_cover.php',
+    'user_media'                 => 'api/user_media.php',
+    'user_avatar_default'        => 'api/user_avatar_default.php',
+    'admin/user_media'           => 'api/admin/user_media.php',
     'richtext_preview'           => 'api/richtext_preview.php',
     'rate_hash'                  => 'api/rate_hash.php',
     // ── People reaching each other (includes/people.php) ──
@@ -427,6 +439,10 @@ function adminEndpointPermission(string $endpoint): ?string {
         'admin/fetch_groups'       => 'panel.users.view',
         'admin/user_create'        => 'panel.users.edit',
         'admin/user_update'        => 'panel.users.edit',
+        // Taking a member's picture or cover down is the same authority as editing them. The site's
+        // own default images live on the same endpoint and are Settings, so the endpoint asks the
+        // owner question itself for those operations (api/admin/user_media.php).
+        'admin/user_media'         => 'panel.users.edit',
         'admin/user_notify'        => 'panel.users.notify',
         'admin/user_grant'         => 'panel.users.groups',
         'admin/audit_log'          => 'panel.audit.view',
@@ -494,7 +510,7 @@ if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login' && $endp
             'admin/fetch_index', 'admin/fetch_whitelist', 'admin/fetch_banned',
             'admin/fetch_reports', 'admin/fetch_appeals', 'admin/fetch_users',
             'admin/fetch_groups', 'admin/fetch_api_clients', 'admin/fetch_api_bans',
-            'admin/fetch_fed_peers'], true)) {
+            'admin/fetch_fed_peers', 'admin/user_media'], true)) {
         session_write_close();
     }
 }

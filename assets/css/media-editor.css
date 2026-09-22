@@ -1,0 +1,147 @@
+/* ============================================================================================
+   The picture and cover editor (1.63.0, assets/js/media-editor.js)
+
+   One stylesheet for one component, loaded by the account page and by Settings -> Profiles: the
+   two sides of the site have different frameworks and the same dark ground, and an editor drawn
+   twice would be two editors to keep in step. Every colour here is a literal or inherited, never a
+   variable only one side defines.
+
+   The frame draws with EXACTLY the CSS the profile page paints with — object-fit: cover, a focal
+   point as object-position, the zoom as scale() around that same point — so the preview is not an
+   approximation of the result, it is the result. The server cuts a picture's squares with the same
+   formula (includes/usermedia.php, userAvatarWindow). The three numbers arrive as custom properties
+   (--fe-x, --fe-y, --fe-z) set through the CSSOM on .fe-body, which no Content-Security-Policy
+   governs; nothing here is ever a style="" attribute.
+   ============================================================================================ */
+
+.fe-overlay {
+    position: fixed; inset: 0; z-index: 1300;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 3rem 1rem 2rem; overflow-y: auto;
+    background: rgba(0, 0, 17, 0.86);
+}
+.fe-overlay[hidden] { display: none !important; }
+.fe-box {
+    width: 100%; max-width: 62em;
+    background: #0a0a1a; color: #cdd1da;
+    border: 1px solid #2a2f45; border-radius: 6px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+.fe-box.fe-box-avatar { max-width: 34em; }
+.fe-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+           padding: 0.75rem 1rem; border-bottom: 1px solid #222; }
+.fe-head h3 { margin: 0; font-size: 1rem; color: #4a9eff; }
+.fe-close { background: transparent; border: 0; color: #888; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 0.25rem; }
+.fe-close:hover { color: #f44336; }
+.fe-close:focus-visible, .fe-readout:focus-visible, .fe-shape button:focus-visible { outline: 2px solid #4a9eff; outline-offset: 2px; }
+.fe-body { padding: 0.9rem 1rem 0.6rem; }
+.fe-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.7rem 1rem 0.9rem;
+           border-top: 1px solid #222; }
+.fe-spacer { flex: 1 1 auto; }
+
+/* ── the frame ───────────────────────────────────────────────────────────────────────────── */
+.fe-stage { display: flex; justify-content: center; }
+.fe-frame {
+    position: relative; overflow: hidden; width: 100%;
+    background: #05050c; border-radius: 4px;
+    cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+    aspect-ratio: var(--fe-ar, 976 / 220);
+}
+.fe-mode-avatar .fe-frame { width: min(100%, 340px); aspect-ratio: 1 / 1; }
+.fe-shape-phone .fe-frame { width: min(100%, 30rem); }
+.fe-frame:focus { outline: none; }
+.fe-frame:focus-visible { outline: 2px solid #4a9eff; outline-offset: 3px; }
+.fe-dragging .fe-frame { cursor: grabbing; }
+.fe-img, .fe-blur, .fe-mini img {
+    position: absolute; inset: 0; width: 100%; height: 100%; max-width: none;
+    object-fit: cover; object-position: var(--fe-x, 50%) var(--fe-y, 50%);
+    pointer-events: none; -webkit-user-drag: none;
+}
+.fe-img, .fe-mini .fe-mini-img { transform: scale(var(--fe-z, 1)); transform-origin: var(--fe-x, 50%) var(--fe-y, 50%); }
+/* Below 1× the picture is smaller than the frame; what shows around it is the same picture,
+   blurred and darkened — never black bars. Scaled a little so the blur's soft edge stays outside. */
+.fe-blur, .fe-mini .fe-mini-blur { display: none; filter: blur(16px) brightness(0.85); transform: scale(1.12); }
+.fe-mini .fe-mini-blur { filter: blur(3px) brightness(0.85); }
+.fe-zoomout .fe-blur, .fe-zoomout .fe-mini .fe-mini-blur { display: block; }
+/* The circle a picture is shown in, everything outside it dimmed. */
+.fe-mask { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55); pointer-events: none; }
+/* Thirds: faint while looking, bright while moving. */
+.fe-grid {
+    position: absolute; inset: 0; pointer-events: none; opacity: 0.3; transition: opacity 0.15s;
+    background:
+        linear-gradient(to right, transparent calc(33.333% - 0.5px), rgba(255, 255, 255, 0.8) calc(33.333% - 0.5px), rgba(255, 255, 255, 0.8) calc(33.333% + 0.5px), transparent calc(33.333% + 0.5px)),
+        linear-gradient(to right, transparent calc(66.666% - 0.5px), rgba(255, 255, 255, 0.8) calc(66.666% - 0.5px), rgba(255, 255, 255, 0.8) calc(66.666% + 0.5px), transparent calc(66.666% + 0.5px)),
+        linear-gradient(to bottom, transparent calc(33.333% - 0.5px), rgba(255, 255, 255, 0.8) calc(33.333% - 0.5px), rgba(255, 255, 255, 0.8) calc(33.333% + 0.5px), transparent calc(33.333% + 0.5px)),
+        linear-gradient(to bottom, transparent calc(66.666% - 0.5px), rgba(255, 255, 255, 0.8) calc(66.666% - 0.5px), rgba(255, 255, 255, 0.8) calc(66.666% + 0.5px), transparent calc(66.666% + 0.5px));
+}
+.fe-dragging .fe-grid { opacity: 0.9; }
+/* The focal point of a cover: the one spot every screen keeps in view. */
+.fe-cross {
+    position: absolute; left: var(--fe-x, 50%); top: var(--fe-y, 50%); width: 22px; height: 22px;
+    margin: -11px 0 0 -11px; border: 2px solid #fff; border-radius: 50%; pointer-events: none;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+.fe-cross::after {
+    content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px;
+    background: #fff; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+.fe-hint {
+    position: absolute; left: 50%; bottom: 0.6rem; transform: translateX(-50%);
+    padding: 0.2rem 0.65rem; border-radius: 999px; white-space: nowrap; max-width: calc(100% - 1rem);
+    overflow: hidden; text-overflow: ellipsis;
+    background: rgba(0, 0, 0, 0.62); color: #fff; font-size: 0.75rem; line-height: 1.5;
+    pointer-events: none; transition: opacity 0.2s;
+}
+.fe-dragging .fe-hint { opacity: 0; }
+.fe-state {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    padding: 1rem; text-align: center; font-size: 0.85rem; background: rgba(5, 5, 12, 0.82); color: #cdd1da;
+}
+.fe-state[hidden] { display: none !important; }
+.fe-error { color: #e0b15a; }
+.fe-spin {
+    width: 1.2rem; height: 1.2rem; border: 2px solid rgba(255, 255, 255, 0.25); border-top-color: #4a9eff;
+    border-radius: 50%; animation: fe-spin 0.8s linear infinite;
+}
+@keyframes fe-spin { to { transform: rotate(360deg); } }
+
+/* ── below the frame ─────────────────────────────────────────────────────────────────────── */
+.fe-shape { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0 0 0.6rem; font-size: 0.82rem; }
+.fe-shape button {
+    background: rgba(255, 255, 255, 0.045); border: 1px solid #39405a; border-radius: 999px;
+    color: #cdd1da; padding: 0.15rem 0.8rem; font: inherit; cursor: pointer;
+}
+.fe-shape button[aria-pressed="true"] { border-color: #4a9eff; color: #fff; background: rgba(74, 158, 255, 0.18); }
+.fe-shape-desc { color: #888; font-size: 0.78rem; }
+.fe-zoomrow { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.7rem; }
+.fe-zoomrow label { font-size: 0.82rem; color: #888; margin: 0; }
+.fe-zoomrow input[type="range"] { flex: 1 1 auto; min-width: 6rem; accent-color: #4a9eff; }
+.fe-readout {
+    min-width: 4.2rem; background: rgba(255, 255, 255, 0.045); border: 1px solid #39405a; border-radius: 4px;
+    color: #cdd1da; padding: 0.1rem 0.45rem; font: inherit; font-size: 0.82rem; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.fe-readout:hover { border-color: #4a9eff; }
+/* The three sizes a picture is really drawn at, live while it is framed. */
+.fe-sizes { display: flex; align-items: flex-end; gap: 1rem; margin-top: 0.8rem; flex-wrap: wrap; }
+.fe-sizes-label { font-size: 0.78rem; color: #888; margin-right: 0.2rem; align-self: center; }
+.fe-mini { position: relative; overflow: hidden; border-radius: 50%; background: #05050c; flex: 0 0 auto; }
+.fe-mini-cap { display: block; text-align: center; font-size: 0.68rem; color: #888; margin-top: 0.2rem; }
+.fe-note { margin: 0.8rem 0 0; font-size: 0.78rem; color: #888; line-height: 1.5; }
+.fe-msg { margin: 0.5rem 0 0; font-size: 0.82rem; min-height: 1.2em; }
+.fe-msg.is-bad { color: #e0b15a; }
+.fe-msg.is-ok { color: #4caf50; }
+.fe-ask { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.82rem; }
+.fe-ask[hidden] { display: none !important; }
+@media (max-width: 640px) {
+    .fe-overlay { padding: 1rem 0.4rem; }
+    .fe-body { padding: 0.7rem 0.7rem 0.5rem; }
+    .fe-foot { padding: 0.6rem 0.7rem 0.8rem; }
+}
+/* The "discard the changes?" question borrows the public site's in-place confirm classes; spelled
+   out here as well so it looks the same inside the panel, which does not load style.css. */
+.fe-ask button {
+    background: none; border: 1px solid #39405a; border-radius: 4px; padding: 0.05rem 0.5rem;
+    color: #cdd1da; font: inherit; font-size: 0.8rem; cursor: pointer;
+}
+.fe-ask .shout-yes:hover { border-color: #f44336; color: #f44336; }
+.fe-ask .shout-no:hover { border-color: #4a9eff; }

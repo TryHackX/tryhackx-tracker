@@ -227,6 +227,15 @@ if ((string)($_GET['poll'] ?? '') === '1') {
     ]);
 }
 
+/**
+ * The picture beside a name (1.63.0): an ADDRESS built here from the row already read — the inbox's
+ * join, or the account the conversation is with — never the id this endpoint deliberately keeps to
+ * itself. '' while pictures are switched off, which the page reads as "draw nothing".
+ */
+$pmFace = static fn(array $u): string => function_exists('userAvatarField')
+    ? userAvatarField(['username' => (string)($u['username'] ?? ''), 'avatar_sha' => $u['avatar_sha'] ?? null], 32, getBaseUrl(), $cfg)
+    : '';
+
 $with = trim((string)($_GET['with'] ?? ''));
 if ($with !== '') {
     $them = userValidUsername($with) ? userFindByLogin($db, $with) : null;
@@ -240,7 +249,7 @@ if ($with !== '') {
         // No conversation yet is not an error: it is an empty one, and the page needs to know
         // whether it may start it.
         $gate = pmCanWrite($db, $cfg, $me, $them);
-        jsonResponse(['success' => true, 'with' => (string)$them['username'], 'rows' => [],
+        jsonResponse(['success' => true, 'with' => (string)$them['username'], 'with_avatar' => $pmFace($them), 'rows' => [],
                       'can_write' => $gate['ok'], 'reason' => $gate['reason'], 'unread' => pmUnreadCount($db, $uid)]);
     }
     $db->prepare("UPDATE user_messages SET read_at = NOW() WHERE thread_id = ? AND sender_id <> ? AND read_at IS NULL")
@@ -260,7 +269,7 @@ if ($with !== '') {
         ];
     }
     $gate = pmCanWrite($db, $cfg, $me, $them);
-    jsonResponse(['success' => true, 'with' => (string)$them['username'], 'rows' => $rows,
+    jsonResponse(['success' => true, 'with' => (string)$them['username'], 'with_avatar' => $pmFace($them), 'rows' => $rows,
                   'can_write' => $gate['ok'], 'reason' => $gate['reason'],
                   'may_report' => userCan($db, $cfg, 'pm.report'),
                   'live' => pmLiveSeconds($cfg), 'typing_on' => pmTypingEnabled($cfg),
@@ -305,7 +314,7 @@ if ($deepIds !== null) {
 $st = $db->prepare(
     "SELECT t.id, t.last_message_at,
             IF(t.u_low = ?, t.u_high, t.u_low) AS other_id,
-            u.username AS other_name,
+            u.username AS other_name, u.avatar_sha AS other_avatar_sha,
             (SELECT COUNT(*) FROM user_messages m WHERE m.thread_id = t.id AND m.sender_id <> ? AND m.read_at IS NULL) AS unread,
             (SELECT m2.body FROM user_messages m2 WHERE m2.thread_id = t.id ORDER BY m2.id DESC LIMIT 1) AS last_body,
             (SELECT m3.sender_id FROM user_messages m3 WHERE m3.thread_id = t.id ORDER BY m3.id DESC LIMIT 1) AS last_sender
@@ -322,6 +331,7 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $t) {
     $preview = trim(preg_replace('/\s+/u', ' ', strip_tags((string)($t['last_body'] ?? '')))) ?: '';
     $threads[] = [
         'with'    => (string)$t['other_name'],
+        'avatar'  => $pmFace(['username' => $t['other_name'], 'avatar_sha' => $t['other_avatar_sha']]),
         'unread'  => (int)$t['unread'],
         'last_at' => (string)$t['last_message_at'],
         'mine'    => (int)$t['last_sender'] === $uid,

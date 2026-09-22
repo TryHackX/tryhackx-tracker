@@ -80,7 +80,7 @@ $total = (int)$cnt->fetchColumn();
 
 // username ASC, and NO timestamp in the reply. `created_at DESC` over the people who favourited one
 // hash is a timeline of who got interested when, which is a fact about them and not about the hash.
-$st = $db->prepare("SELECT u.username FROM user_favourites f JOIN users u ON u.id = f.user_id
+$st = $db->prepare("SELECT u.username, u.avatar_sha FROM user_favourites f JOIN users u ON u.id = f.user_id
                     $w ORDER BY u.username ASC LIMIT ? OFFSET ?");
 $i = 1;
 foreach ($params as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
@@ -97,7 +97,12 @@ $lists = $page === 1 && function_exists('listsContainingHash')
 jsonResponse([
     'success'  => true,
     'lists'    => $lists,
-    'rows'     => array_map(static fn($r) => ['username' => $r['username']], $st->fetchAll(PDO::FETCH_ASSOC)),
+    // A name and the picture beside it (1.63.0) — as an ADDRESS built here from the join above. Still
+    // no id, and still no timestamp: what this reply says about a person is that they agreed to be
+    // named, and nothing else.
+    'rows'     => array_map(static fn($r) => ['username' => $r['username'],
+                                              'avatar' => function_exists('userAvatarField') ? userAvatarField($r, 20, getBaseUrl(), $cfg) : ''],
+                            $st->fetchAll(PDO::FETCH_ASSOC)),
     'total'    => $total,
     'page'     => $page,
     'pages'    => max(1, (int)ceil($total / $perPage)),

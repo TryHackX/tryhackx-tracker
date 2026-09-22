@@ -43,7 +43,12 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
         || $accPeople['may_message'] || $accPeople['may_friend'] || $accSounds;
 ?>
 <div class="account-head">
-    <h1><?= __('account.h1_named', ['user' => sanitize($meUser['username'])]) ?></h1>
+    <?php /* The picture goes where the NAME goes inside the sentence (1.63.0), whichever end of it the
+             language puts the name at — so it is part of the name the heading substitutes, not a
+             prefix to the whole line. The row is the reader's own, already read: no query. */ ?>
+    <h1><?= __('account.h1_named', ['user' => '<span class="av-who">'
+        . (function_exists('userAvatarHtml') ? userAvatarHtml($meUser, 32, $baseUrl, 'avatar acc-h1-av js-avatar-me', $cfg) : '')
+        . sanitize($meUser['username']) . '</span>']) ?></h1>
     <?php /* The two things somebody does with their own profile, where they can see them: at the top
              of the page, beside the one button that was already there. Down in Privacy they were a
              quiet grey pair under a paragraph, and the first person to look for them missed them. */ ?>
@@ -126,6 +131,102 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
         </table>
         <?php if ($accHasEmail && !$accVerified): ?>
         <p class="text-muted acc-verify-note"><?= _h('account.verify_note') ?></p>
+        <?php endif; ?>
+        <?php
+        // THE PICTURE AND THE COVER (1.63.0, includes/usermedia.php). Right under the facts about the
+        // account, as two sub-sections in the shape the zone, mail and language preferences use: they
+        // are how this account looks to everybody else. The drop zone is the Emotes page's own; a
+        // chosen file opens as a LOCAL preview in the editor (assets/js/media-editor.js) and nothing
+        // leaves the browser until Save, which sends the file and its framing in one request.
+        // Remove is drawn even without the permission: taking your own picture down is never
+        // something to be allowed to do.
+        $accAvOn = function_exists('userAvatarsEnabled') && userAvatarsEnabled($cfg);
+        $accCvOn = function_exists('userCoversEnabled') && userCoversEnabled($cfg);
+        if ($accAvOn || $accCvOn):
+            $accMedia = userMediaEditorState($db, $cfg, $meUser, $baseUrl);
+            $accMayAv = $accAvOn && userIdHasPermission($db, $cfg, (int)$meUser['id'], 'profile.avatar');
+            $accMayCv = $accCvOn && userIdHasPermission($db, $cfg, (int)$meUser['id'], 'profile.cover');
+            $accCover = $accCvOn ? userCoverFor($meUser, $baseUrl, $cfg) : null;
+            $accMaxKb = (int)floor(userMediaMaxBytes($cfg) / 1024);
+            $accMedia['avatar'] += ['url64' => userAvatarUrl($meUser, 32, $baseUrl, $cfg), 'url128' => userAvatarUrl($meUser, 64, $baseUrl, $cfg)];
+            $accMedia['cover'] += ['css' => $accCover !== null ? userCoverCssVars($accCover) : '', 'is_default' => $accCover !== null && !empty($accCover['default'])];
+        ?>
+        <div id="acc-media">
+        <script type="application/json" id="acc-media-data"<?= nonceAttr() ?>><?= json_encode($accMedia + [
+            'max_bytes' => userMediaMaxBytes($cfg), 'cover_h' => userCoverHeight($cfg), 'cover_hm' => userCoverHeightMobile($cfg),
+            'desk_w' => USER_COVER_DESKTOP_W, 'phone_w' => USER_COVER_PHONE_W,
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES) ?></script>
+        <?php if ($accAvOn): ?>
+        <div class="acc-mail-prefs acc-media" id="acc-avatar">
+            <h3 class="acc-sub"><?= _h('account.media_avatar_head') ?></h3>
+            <div class="acc-media-row">
+                <?php /* The three sizes it is really drawn at — beside names in lists, in the shoutbox, on
+                         the profile — so nobody has to guess what a crop will look like small. */ ?>
+                <div class="acc-media-now" aria-hidden="true">
+                    <?= userAvatarHtml($meUser, 64, $baseUrl, 'acc-av', $cfg) ?>
+                    <?= userAvatarHtml($meUser, 32, $baseUrl, 'acc-av', $cfg) ?>
+                    <?= userAvatarHtml($meUser, 24, $baseUrl, 'acc-av', $cfg) ?>
+                </div>
+                <div class="acc-media-side">
+                    <?php if ($accMayAv): ?>
+                    <div class="emote-drop acc-media-drop" tabindex="0" role="button" aria-label="<?= _h('account.media_drop_aria_avatar') ?>">
+                        <i class="bi bi-person-square emote-drop-icon" aria-hidden="true"></i>
+                        <span class="emote-drop-main"><u><?= _h('account.media_drop_choose') ?></u> <?= _h('account.media_drop_or') ?></span>
+                        <span class="emote-drop-sub"><?= _h('account.media_drop_sub', ['kb' => number_format($accMaxKb, 0, '.', ' ')]) ?></span>
+                        <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif">
+                    </div>
+                    <?php endif; ?>
+                    <div class="acc-media-acts">
+                        <?php if ($accMayAv): ?>
+                        <button type="button" class="btn btn-secondary btn-small acc-media-adjust"<?= $accMedia['avatar']['has'] ? '' : ' hidden' ?>><?= _h('account.media_adjust') ?></button>
+                        <?php endif; ?>
+                        <button type="button" class="btn btn-secondary btn-small acc-media-remove"<?= $accMedia['avatar']['has'] ? '' : ' hidden' ?>><?= _h('account.media_remove') ?></button>
+                        <span class="acc-media-status" role="status" aria-live="polite"></span>
+                    </div>
+                </div>
+            </div>
+            <p class="text-muted acc-verify-note"><?= _h('account.media_avatar_note') ?></p>
+            <?php if (!$accMayAv): ?>
+            <p class="acc-perm-warn"><?= __('account.media_no_grant', ['perm' => 'profile.avatar']) ?></p>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
+        <?php if ($accCvOn): ?>
+        <div class="acc-mail-prefs acc-media" id="acc-cover">
+            <h3 class="acc-sub"><?= _h('account.media_cover_head') ?></h3>
+            <?php /* A miniature of the real header: the same shape and the same painting as the band on
+                     the profile page (.cv-paint), with the site's default cover when this account has
+                     none of its own. */ ?>
+            <div class="acc-cover-now<?= $accCover !== null ? ' has-cover' : '' ?><?= $accCover !== null && $accCover['zoom'] < 1 ? ' cv-zoomout' : '' ?> cv-overlay-<?= sanitize(userCoverOverlay($cfg)) ?>" id="acc-cover-now">
+                <div class="cv-paint" aria-hidden="true"><div class="cv-shade"></div></div>
+                <span class="acc-cover-empty"><?= _h('account.media_cover_none') ?></span>
+                <span class="acc-cover-default"<?= $accCover !== null && !empty($accCover['default']) ? '' : ' hidden' ?>><?= _h('account.media_cover_default') ?></span>
+            </div>
+            <?= userCoverStyleBlock('#acc-cover-now', $accCover, $cfg) ?>
+            <div class="acc-media-side acc-media-side-wide">
+                <?php if ($accMayCv): ?>
+                <div class="emote-drop acc-media-drop" tabindex="0" role="button" aria-label="<?= _h('account.media_drop_aria_cover') ?>">
+                    <i class="bi bi-image emote-drop-icon" aria-hidden="true"></i>
+                    <span class="emote-drop-main"><u><?= _h('account.media_drop_choose') ?></u> <?= _h('account.media_drop_or') ?></span>
+                    <span class="emote-drop-sub"><?= _h('account.media_drop_sub', ['kb' => number_format($accMaxKb, 0, '.', ' ')]) ?></span>
+                    <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif">
+                </div>
+                <?php endif; ?>
+                <div class="acc-media-acts">
+                    <?php if ($accMayCv): ?>
+                    <button type="button" class="btn btn-secondary btn-small acc-media-adjust"<?= $accMedia['cover']['has'] ? '' : ' hidden' ?>><?= _h('account.media_adjust') ?></button>
+                    <?php endif; ?>
+                    <button type="button" class="btn btn-secondary btn-small acc-media-remove"<?= $accMedia['cover']['has'] ? '' : ' hidden' ?>><?= _h('account.media_remove') ?></button>
+                    <span class="acc-media-status" role="status" aria-live="polite"></span>
+                </div>
+            </div>
+            <p class="text-muted acc-verify-note"><?= _h('account.media_cover_note') ?></p>
+            <?php if (!$accMayCv): ?>
+            <p class="acc-perm-warn"><?= __('account.media_no_grant', ['perm' => 'profile.cover']) ?></p>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
+        </div><?php /* /#acc-media */ ?>
         <?php endif; ?>
         <?php
         // THE ZONE THIS READER SEES TIMES IN (v68). In the Profile card, under the facts about the

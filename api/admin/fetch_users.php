@@ -36,7 +36,8 @@ $count = $db->prepare("SELECT COUNT(*) FROM users $whereClause");
 $count->execute($params);
 $total = (int)$count->fetchColumn();
 
-$stmt = $db->prepare("SELECT id, username, email, status, email_verified, created_at, created_ip, last_login_at, last_login_ip
+$stmt = $db->prepare("SELECT id, username, email, status, email_verified, created_at, created_ip, last_login_at, last_login_ip,
+                             avatar_sha, cover_sha
                       FROM users $whereClause ORDER BY " . implode(', ', $orderParts) . " LIMIT ? OFFSET ?");
 $i = 1;
 foreach ($params as $v) $stmt->bindValue($i++, $v, PDO::PARAM_STR);
@@ -86,6 +87,17 @@ foreach ($rows as &$r) {
     $r['identities'] = $bridgeBy[$r['id']] ?? [];
     // the mirrored panel admin — the UI greys out delete/ban/revoke-admin for this row
     $r['root_admin'] = userIsRootAdmin($r, $cfg);
+    // The picture and the cover (1.63.0): whether there is one to take down in the edit modal, and
+    // the picture's own square to show beside the button. The hashes themselves stay here.
+    $r['has_avatar'] = function_exists('userMediaValidSha') && userMediaValidSha((string)($r['avatar_sha'] ?? ''));
+    $r['has_cover'] = function_exists('userMediaValidSha') && userMediaValidSha((string)($r['cover_sha'] ?? ''));
+    $r['avatar'] = $r['has_avatar'] ? userMediaUrl((string)$r['avatar_sha'], 128, getBaseUrl()) : '';
+    // What is drawn beside the NAME (1.63.0 phase B) — in the list, and in the edit, grant and notify
+    // windows: the account's own square, the site's default or the letter, and '' while pictures are
+    // switched off. Not the same thing as `avatar` above, which is the account's own picture for the
+    // remove button and is there whatever the switch says.
+    $r['name_avatar'] = function_exists('userAvatarField') ? userAvatarField($r, 24, getBaseUrl(), $cfg) : '';
+    unset($r['avatar_sha'], $r['cover_sha']);
 }
 unset($r);
 

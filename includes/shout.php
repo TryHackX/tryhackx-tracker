@@ -475,9 +475,11 @@ function shoutSystemWhitelistAdded(PDO $db, array $cfg, int $count, ?int $submit
  * author. An inner join would have silently dropped exactly those rows from every list.
  */
 const SHOUT_ROW_SELECT = "SELECT s.id, s.user_id, s.body, s.body_format, s.created_at, s.is_system,
-                                 s.pinned_at, u.username,
+                                 s.pinned_at, u.username, u.avatar_sha,
                                  UNIX_TIMESTAMP(s.created_at) AS created_ts
                             FROM shouts s LEFT JOIN users u ON u.id = s.user_id";
+// `avatar_sha` (1.63.0) is the picture beside the name, from the same join that brings the name: a
+// room of twenty-five lines is one query, not twenty-six.
 // `created_ts` (1.62.0) is the moment as an INSTANT, converted by the database from its own session
 // zone — the zone that DATETIME was written in. PHP reading `created_at` as a string would assume its
 // own zone instead, which is right on a machine where the two agree and hours off on one where they do
@@ -587,6 +589,9 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
     // site saying something.
     $siteName = trim((string)($cfg['site_name'] ?? ''));
     if ($siteName === '') $siteName = __('shout.system_who');
+    // …and the picture beside it (1.63.0): the site's own mark, once for the batch. '' while pictures
+    // are switched off, which both renderers read as "draw nothing".
+    $siteMark = function_exists('userAvatarSiteField') ? userAvatarSiteField($base, $cfg) : '';
 
     // THE READER'S CLOCK (1.62.0), once for the batch. Every row this function shapes — the first
     // page the server draws and every row a poll appends — gets its time from here, so the two can
@@ -664,6 +669,16 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
             'id'          => (int)$r['id'],
             'user'        => $authorName !== '' ? $authorName : $siteName,
             'user_id'     => $authorName !== '' ? $authorId : 0,
+            // The picture beside the name, as an ADDRESS built here (1.63.0): the author's own, the
+            // site's default or their letter — and for a line the SITE said, the site's mark, even when
+            // it is signed with the name of the person it is about: it is still the site talking. The
+            // same field reaches templates/partials/shoutbox_widget.php and assets/js/shoutbox.js, so
+            // the first page and a polled row draw one element from one input.
+            'avatar'      => ($system || $authorName === '')
+                ? $siteMark
+                : (function_exists('userAvatarField')
+                    ? userAvatarField(['username' => $authorName, 'avatar_sha' => $r['avatar_sha'] ?? null], 20, $base, $cfg)
+                    : ''),
             // The moment, three ways, all in the READER's zone: `time` is what the list prints,
             // `at` is the title over it — the full date with its offset, so nobody has to guess
             // which clock "14:05" was on — and `ts` is the instant itself for anything that has to

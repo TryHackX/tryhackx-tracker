@@ -66,7 +66,7 @@ $ORDER = [
 ];
 $order = $ORDER[$sortKey] ?? $ORDER['name:asc'];
 
-$st = $db->prepare("SELECT u.id, u.username, u.created_at FROM users u $w
+$st = $db->prepare("SELECT u.id, u.username, u.avatar_sha, u.created_at FROM users u $w
                      ORDER BY $order LIMIT ? OFFSET ?");
 $i = 1;
 foreach ($params as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
@@ -90,10 +90,13 @@ if ($rows && friendsEnabled($cfg)) {
     }
 }
 
+// The picture beside each name (1.63.0): an ADDRESS built from the row above, never the id.
+$base = getBaseUrl();
 jsonResponse([
     'success'  => true,
     'rows'     => array_map(static fn($r) => [
         'username' => (string)$r['username'],
+        'avatar'   => function_exists('userAvatarField') ? userAvatarField($r, 32, $base, $cfg) : '',
         'since'    => substr((string)$r['created_at'], 0, 10),
         'state'    => $states[(int)$r['id']] ?? 'none',
         // The reader is in their own directory — they asked to be listed, and hiding them from it

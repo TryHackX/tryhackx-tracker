@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 68;  // 68 = one setting and one column: `site_timezone` (the zone this site shows times in; empty = follow tracker_schedule_tz, then PHP's own) and users.timezone (NULL = the site's) — the shoutbox is the first reader of both
+const TRACKER_SCHEMA_VERSION = 69;  // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
+                                    // 68 = one setting and one column: `site_timezone` (the zone this site shows times in; empty = follow tracker_schedule_tz, then PHP's own) and users.timezone (NULL = the site's) — the shoutbox is the first reader of both
                                     // 67 = one setting and one permission, no tables: `shout_page_action` (the action name the room answers on, so an operator can have ?action=chat) and `shout.emote_auto` (an upload that skips the approval queue) — registered and, like shout.upload_emote before it, granted to nobody
                                     // 66 = the shoutbox's pinned line (shouts.pinned_at/pinned_by, at most one of them at a time) and the lines the SITE says (shouts.is_system) — which is why user_id is nullable from here on: an announcement has no author, and a row pointing at account 0 would be a lie rather than an absence
                                     // 65 = shout_emote_approval and the approved_at stamp beside it: a member's uploaded emote waits for the operator instead of being everybody's the moment it lands, and the stamp is what keeps "waiting to be let in" apart from "switched off afterwards"
@@ -520,6 +521,21 @@ function trackerSchemaStatements(): array {
             -- never chose and nobody who did. Validated against the zones PHP knows wherever it is
             -- written (userSetTimezone), and read as NULL wherever PHP does not know it.
             `timezone` VARCHAR(64) DEFAULT NULL,
+            -- v69: the picture and the profile cover (includes/usermedia.php). SMALL COLUMNS ONLY:
+            -- this row is read with SELECT * on nearly every request, so the images themselves live
+            -- in `user_media` and what rides along here is just enough to build their addresses
+            -- without another query. `avatar_sha` names one CROP (every size of it shares the id),
+            -- `cover_sha` names the stored cover; NULL is 'none of my own'. The focus is a percentage
+            -- of the image (0-100, CSS object-position semantics) and the zoom a factor (0.5-4) — the
+            -- numbers the editor, the profile page and the server-side crop all read the same way.
+            `avatar_sha` CHAR(40) DEFAULT NULL,
+            `avatar_x` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+            `avatar_y` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+            `avatar_zoom` DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+            `cover_sha` CHAR(40) DEFAULT NULL,
+            `cover_x` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+            `cover_y` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+            `cover_zoom` DECIMAL(4,2) NOT NULL DEFAULT 1.00,
             -- v53. The instant every OTHER session of this account stopped counting: a unix time,
             -- stamped by 'sign out everywhere else' and by a password change. A UNIX TIMESTAMP and
             -- not a DATETIME on purpose — it is compared against the session login time, which
@@ -921,6 +937,39 @@ function trackerSchemaStatements(): array {
             KEY `idx_emote_user` (`uploaded_by`)
         ) $engine",
 
+        // ── Pictures and profile covers (v69, includes/usermedia.php) ──────────────────────────
+        //
+        // Rows rather than files, for the reason `sounds` and `shout_emotes` are: the web root is
+        // installed read-only, and a backup that carries the database carries these. And NOT on
+        // `users`, which is read with SELECT * on almost every request — megabytes of image riding
+        // along with every currentUser() would be the most expensive column in the schema.
+        //
+        // Every byte in here was decoded, turned upright, stripped and re-encoded to WebP by the one
+        // door that writes it (userMediaPrepare), so nothing an uploader sent survives verbatim.
+        //
+        // `kind` says what the row is: `avatar_src` is the uncropped picture the avatar is cut from
+        // (streamed to its owner and the panel only — it may show what somebody cropped away on
+        // purpose), `avatar` one cut square with its edge in `size`, `cover` the cover and
+        // `cover_thumb` its small copy. `sha1` is what the public address carries: the crop id for
+        // the squares (all three sizes of one crop share it, which is what KEY(sha1, size) finds),
+        // the bytes' own hash for everything else — a thumb shares its cover's, so one address
+        // prefix reaches both. `user_id` NULL is the SITE's: the default picture and default cover.
+        "CREATE TABLE IF NOT EXISTS `user_media` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `kind` ENUM('avatar_src','avatar','cover','cover_thumb') NOT NULL,
+            `size` SMALLINT UNSIGNED DEFAULT NULL,
+            `sha1` CHAR(40) NOT NULL,
+            `mime` VARCHAR(32) NOT NULL,
+            `bytes` INT UNSIGNED NOT NULL,
+            `width` SMALLINT UNSIGNED NOT NULL,
+            `height` SMALLINT UNSIGNED NOT NULL,
+            `data` MEDIUMBLOB NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY `idx_media_user` (`user_id`, `kind`),
+            KEY `idx_media_sha` (`sha1`, `size`)
+        ) $engine",
+
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         //
         // A THREAD is a pair of accounts, not a subject line. Two people have one conversation here,
@@ -1313,6 +1362,21 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // v68: the zone this reader sees times in — see the CREATE above. NULL for every existing
     // account, which is "the site's zone": an upgrade moves nobody's clock except to the site's.
     if (!schemaColumnExists($db, 'users', 'timezone')) $uparts[] = "ADD COLUMN `timezone` VARCHAR(64) DEFAULT NULL";
+    // v69: the picture and the cover — see the CREATE above. The images are in `user_media`; these
+    // are the eight small columns every SELECT * may carry for free. NULL / 50 / 50 / 1 for every
+    // existing account, which is "nothing of my own", so an upgrade changes nobody's page.
+    foreach ([
+        'avatar_sha'  => "ADD COLUMN `avatar_sha` CHAR(40) DEFAULT NULL",
+        'avatar_x'    => "ADD COLUMN `avatar_x` DECIMAL(5,2) NOT NULL DEFAULT 50.00",
+        'avatar_y'    => "ADD COLUMN `avatar_y` DECIMAL(5,2) NOT NULL DEFAULT 50.00",
+        'avatar_zoom' => "ADD COLUMN `avatar_zoom` DECIMAL(4,2) NOT NULL DEFAULT 1.00",
+        'cover_sha'   => "ADD COLUMN `cover_sha` CHAR(40) DEFAULT NULL",
+        'cover_x'     => "ADD COLUMN `cover_x` DECIMAL(5,2) NOT NULL DEFAULT 50.00",
+        'cover_y'     => "ADD COLUMN `cover_y` DECIMAL(5,2) NOT NULL DEFAULT 50.00",
+        'cover_zoom'  => "ADD COLUMN `cover_zoom` DECIMAL(4,2) NOT NULL DEFAULT 1.00",
+    ] as $mcol => $msql) {
+        if (!schemaColumnExists($db, 'users', $mcol)) $uparts[] = $msql;
+    }
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
 
     // v56: a message no longer leaves a notification behind.
@@ -1535,6 +1599,24 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'shout_emotes', 'approved_at')) {
         $out[] = "ALTER TABLE `shout_emotes` ADD COLUMN `approved_at` DATETIME DEFAULT NULL";
     }
+
+    // v69: pictures and covers. Same definition as the CREATE above — a split between the two lists
+    // is the bug that once stopped a fresh install at version 0 (see the note on `fav_public`).
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_media` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED DEFAULT NULL,
+        `kind` ENUM('avatar_src','avatar','cover','cover_thumb') NOT NULL,
+        `size` SMALLINT UNSIGNED DEFAULT NULL,
+        `sha1` CHAR(40) NOT NULL,
+        `mime` VARCHAR(32) NOT NULL,
+        `bytes` INT UNSIGNED NOT NULL,
+        `width` SMALLINT UNSIGNED NOT NULL,
+        `height` SMALLINT UNSIGNED NOT NULL,
+        `data` MEDIUMBLOB NOT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY `idx_media_user` (`user_id`, `kind`),
+        KEY `idx_media_sha` (`sha1`, `size`)
+    ) $engine";
 
     // v66: the pinned announcement and the lines the site says. One ALTER rather than four, because
     // each one of them rebuilds the table and the room is read on every front page.
@@ -2012,6 +2094,14 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     schemaGrantOnce($db, 'v63_shout', [
         'member'    => ['shout.view', 'shout.post', 'shout.delete_own'],
         'moderator' => ['shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'],
+    ]);
+
+    // v69: a picture and a profile cover of their own, to members — the owner's own answer to "who
+    // may": the people with accounts, from the day it ships. GUEST GETS NOTHING: a picture belongs to
+    // an account, and an unverified account sits at guest level until its address is confirmed, so
+    // this is also what keeps a throwaway registration from putting an image on the site.
+    schemaGrantOnce($db, 'v69_profile_media', [
+        'member' => ['profile.avatar', 'profile.cover'],
     ]);
 
     // v64: the shipped example emotes, read from assets/emotes/*.svg and kept as rows.
@@ -2601,6 +2691,36 @@ function trackerSchemaDefaultSettings(): array {
         // the operator has actually told the panel rather than a guess frozen at upgrade time. Every
         // account without a zone of its own (users.timezone NULL) reads the room in this one.
         'site_timezone'               => '',
+        // ── Pictures and profile covers (v69, includes/usermedia.php) ──────────────────────────
+        // ON, both of them: the owner wants members to have these from the day it ships, and the
+        // permissions (profile.avatar / profile.cover, granted to members) are what an operator
+        // narrows. `avatar_max_kb` is the ceiling for EVERY upload of either kind and is checked
+        // before a byte is decoded; `avatar_max_mp` is the pixel count read from the header, also
+        // before the decode — 24 MP of RGBA is about 96 MB of memory, well inside php-fpm's 512 MB,
+        // and 40 would be about 160. The two heights are the profile band on a desktop and on a
+        // phone; `cover_overlay` is the layer that keeps a name readable over a bright photo.
+        'avatars_enabled'             => '1',
+        'covers_enabled'              => '1',
+        'avatar_max_kb'               => '8192',   // clamped [256, 20480]
+        'avatar_max_mp'               => '24',     // clamped [4, 40]
+        'cover_height'                => '220',    // clamped [96, 600]
+        'cover_height_mobile'         => '160',    // clamped [96, 600]
+        'cover_overlay'               => 'gradient', // gradient | darken | none
+        // What somebody without a picture of their own is drawn with: a letter on a colour taken
+        // from their name ('generated'), or the site's own picture ('image') once the owner has set
+        // one in Settings -> Profiles — until then 'image' falls back to the letter.
+        'avatar_default'              => 'generated', // generated | image
+        // The site's default picture and default cover, as the rows they point at (user_media,
+        // user_id NULL) and the framing chosen for them. Written by admin/user_media, never by the
+        // settings form: the id is a fact about stored bytes, not something to type.
+        'avatar_default_sha'          => '',
+        'avatar_default_x'            => '50',
+        'avatar_default_y'            => '50',
+        'avatar_default_zoom'         => '1',
+        'cover_default_sha'           => '',
+        'cover_default_x'             => '50',
+        'cover_default_y'             => '50',
+        'cover_default_zoom'          => '1',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

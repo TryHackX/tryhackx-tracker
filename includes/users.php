@@ -130,6 +130,14 @@ function userPermissionList(): array {
         // who has been drawing the tracker's emotes for a year gets both. Granted to nobody by the
         // migration, exactly like shout.upload_emote.
         'shout.emote_auto' => 'Add emotes that are visible at once, without a moderator',
+        // ── pictures and profile covers (v69, includes/usermedia.php) ──
+        // Two ids, because a small square beside a name and a wide photograph across the top of a
+        // profile are different amounts of the site's face, and an operator may want to hand out the
+        // first long before the second. Both go to members by migration. They are about SETTING one:
+        // removing your own is never behind a permission, because taking your own face off a site is
+        // not something anybody should have to be allowed to do.
+        'profile.avatar' => 'Set their own picture',
+        'profile.cover'  => 'Set their own profile cover',
 
         // ── the admin panel ──
         //
@@ -227,7 +235,7 @@ function userGroupPresets(): array {
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         'lists.use', 'lists.public',
                         'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check', 'sounds.use',
-                        'shout.view', 'shout.post', 'shout.delete_own'],
+                        'shout.view', 'shout.post', 'shout.delete_own', 'profile.avatar', 'profile.cover'],
         ],
     ];
 }
@@ -261,10 +269,12 @@ function userLegacyDefault(string $perm): bool {
     // hand every passer-by the one thing the grant exists to hold back.
     // shout.* is here for the first reason: a shout is signed with an account name, and a room where
     // everybody is "nobody" is not a room. With the user system off there is no account to sign one
-    // with, so the whole feature is closed rather than thrown open.
+    // with, so the whole feature is closed rather than thrown open. profile.* (v69) for the same
+    // reason: a picture and a cover belong to an account, and without accounts there is none to
+    // hang one on.
     if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.')
         || str_starts_with($perm, 'sounds.') || str_starts_with($perm, 'status.')
-        || str_starts_with($perm, 'shout.')) return false;
+        || str_starts_with($perm, 'shout.') || str_starts_with($perm, 'profile.')) return false;
     return !str_starts_with($perm, 'index.');
 }
 
@@ -824,6 +834,10 @@ function userDeleteCascade(PDO $db, int $userId): array {
     // rather than making the person a new account.
     $del("DELETE FROM user_identities WHERE user_id = ?", [$userId], 'bridge_links');
     $del("DELETE FROM auth_handoffs WHERE user_id = ?", [$userId], 'bridge_tickets');
+    // The picture (source and every cut size) and the cover (v69). Their addresses carry no account
+    // id, so a row left behind would go on answering at an address somebody may still have — the
+    // image of a person who asked to be removed, served by a site that says they are gone.
+    $del("DELETE FROM user_media WHERE user_id = ?", [$userId], 'pictures');
     // Submissions are NOT deleted — a whitelist row is a torrent the tracker serves, and deleting an
     // account is not a reason to stop serving it. The attribution goes, so it stops appearing on a
     // profile that no longer exists.

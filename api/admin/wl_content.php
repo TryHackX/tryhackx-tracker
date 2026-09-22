@@ -26,6 +26,14 @@ if (!in_array($op, ['list', 'approve', 'reject', 'clear', 'edits', 'edit_apply',
     jsonResponse(['error' => __('api.content.unknown_op')], 400);
 }
 
+/**
+ * The picture beside the author's name on a card (1.63.0): an ADDRESS built from the columns the
+ * card's own join picked (`author`, `author_avatar_sha`), '' with no author or with pictures off.
+ */
+$wlcFace = static fn(array $r): string => (($r['author'] ?? null) !== null && function_exists('userAvatarField'))
+    ? userAvatarField(['username' => (string)$r['author'], 'avatar_sha' => $r['author_avatar_sha'] ?? null], 20, getBaseUrl(), $cfg)
+    : '';
+
 if ($op === 'list') {
     $page = max(1, (int)($input['page'] ?? 1));
     $per  = 25;
@@ -69,11 +77,12 @@ if ($op === 'list') {
         "SELECT * FROM (
             SELECT 'wl' AS kind, w.id, w.info_hash, w.name, w.source, w.source_url, w.description, w.description_format,
                    w.content_status, w.content_rejected_note, w.created_at, w.votes_up, w.votes_down,
-                   w.votes_count, w.score_x100, w.content_user_id, u.username AS author
+                   w.votes_count, w.score_x100, w.content_user_id, u.username AS author, u.avatar_sha AS author_avatar_sha
               FROM whitelist w LEFT JOIN users u ON u.id = w.content_user_id WHERE $whereW
             UNION ALL
             SELECT 'idx' AS kind, c.id, c.info_hash, i.name, 'index' AS source, c.source_url, c.description, c.description_format,
-                   c.content_status, c.content_rejected_note, c.created_at, 0, 0, 0, 0, c.content_user_id, u.username AS author
+                   c.content_status, c.content_rejected_note, c.created_at, 0, 0, 0, 0, c.content_user_id, u.username AS author,
+                   u.avatar_sha AS author_avatar_sha
               FROM hash_content c LEFT JOIN index_hashes i ON i.info_hash = c.info_hash
                                   LEFT JOIN users u ON u.id = c.content_user_id WHERE $whereC
          ) q
@@ -90,6 +99,8 @@ if ($op === 'list') {
         $r['description_html'] = richtextRender($r['description'] ?? '', (string)$r['description_format'], $cfg, true);
         $r['source_trusted'] = $r['source_url'] ? richtextIsTrusted((string)$r['source_url'], $cfg) : false;
         $r['id'] = (int)$r['id'];
+        $r['author_avatar'] = $wlcFace($r);
+        unset($r['author_avatar_sha']);
     }
     unset($r);
     $edits = (int)$db->query("SELECT COUNT(*) FROM wl_content_edits WHERE status = 'pending'")->fetchColumn();
@@ -106,7 +117,7 @@ if ($op === 'list') {
 if ($op === 'edits') {
     $st = $db->query(
         "SELECT e.id, e.whitelist_id, e.hash_content_id, e.info_hash, e.source_url, e.description, e.description_format,
-                e.created_at, e.ip, e.user_id, u.username AS author,
+                e.created_at, e.ip, e.user_id, u.username AS author, u.avatar_sha AS author_avatar_sha,
                 COALESCE(w.name, i.name) AS name,
                 COALESCE(w.source_url, c.source_url) AS cur_source_url,
                 COALESCE(w.description, c.description) AS cur_description,
@@ -125,6 +136,8 @@ if ($op === 'edits') {
         $r['new_html'] = richtextRender($r['description'] ?? '', (string)$r['description_format'], $cfg, true);
         $r['cur_html'] = richtextRender($r['cur_description'] ?? '', (string)$r['cur_format'], $cfg, true);
         $r['new_trusted'] = $r['source_url'] ? richtextIsTrusted((string)$r['source_url'], $cfg) : false;
+        $r['author_avatar'] = $wlcFace($r);
+        unset($r['author_avatar_sha']);
     }
     unset($r);
     jsonResponse(['success' => true, 'rows' => $rows, 'total' => count($rows)]);

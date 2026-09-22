@@ -54,16 +54,24 @@ $shoutLive   = shoutLiveSecondsFor($cfg, (int)$shoutMeRow['id'] <= 0);
  * deleted is the same case — `user_id` 0 is how shoutShape() says so. renderRow() in
  * assets/js/shoutbox.js builds exactly this, and the two being identical is the contract that lets
  * the list be appended to instead of redrawn.
+ *
+ * The picture (1.63.0) goes INSIDE the name's element, before the name: it is part of the same link,
+ * and the fixed-width column keeps its ellipsis for the text after it. It is drawn from the row's
+ * `avatar` — the address shoutShape() built — through the same element window.userAvatarImg() draws
+ * for a polled row, and nothing at all while pictures are switched off.
  */
-$shoutWho = function (array $s) use ($baseUrl): string {
+$shoutWho = function (array $s) use ($baseUrl, $cfg): string {
     $name = (string)($s['user'] ?? '');
     // `title` because the name column is a fixed width from 1.59.1: a name longer than it is cut
     // with an ellipsis rather than pushing the words out of line, and a cut name with no way to
     // read the whole of it would be the worse of the two.
     $attrs = 'class="shout-who" title="' . sanitize($name) . '"';
+    $pic = function_exists('userAvatarHtml')
+        ? userAvatarHtml(['username' => $name, 'avatar' => (string)($s['avatar'] ?? '')], 20, $baseUrl, 'avatar shout-av', $cfg)
+        : '';
     return (int)($s['user_id'] ?? 0) > 0
-        ? '<a ' . $attrs . ' href="' . $baseUrl . '?action=u&amp;name=' . urlencode($name) . '">' . sanitize($name) . '</a>'
-        : '<span ' . $attrs . '>' . sanitize($name) . '</span>';
+        ? '<a ' . $attrs . ' href="' . $baseUrl . '?action=u&amp;name=' . urlencode($name) . '">' . $pic . sanitize($name) . '</a>'
+        : '<span ' . $attrs . '>' . $pic . sanitize($name) . '</span>';
 };
 
 // One row MORE than is drawn. It is the whole of "is there anything older?", and it costs a row

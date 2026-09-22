@@ -8,6 +8,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
+    <?php /* The picture and cover editor Settings → Profiles opens: the same component, and so the same
+             stylesheet, as the account page's. */ ?>
+    <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/media-editor.css<?= assetVer('assets/css/media-editor.css') ?>">
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
     <?= langJsBridge($baseUrl) ?>
@@ -1519,6 +1522,143 @@
                         </select>
                         <small class="settings-hint"><?= _h('settings.users_search_whitelist_hint') ?></small>
                         <small class="settings-hint"><?= __('settings.users_search_note') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <?php
+            // Pictures and profile covers (1.63.0, includes/usermedia.php). The eight settings are
+            // ordinary fields; the site's default picture and default cover are stored images, so
+            // they are two blocks drawn by assets/js/admin-profiles.js from the JSON below — the
+            // upload, the position editor (assets/js/media-editor.js, the same one the account page
+            // uses) and Remove all go through admin/user_media, never through this form.
+            $pmAvSrc = function_exists('userAvatarSourceRow') ? userAvatarSourceRow($db, null) : null;
+            $pmAvSha = strtolower((string)($cfg['avatar_default_sha'] ?? ''));
+            $pmCvSha = strtolower((string)($cfg['cover_default_sha'] ?? ''));
+            $pmState = function_exists('userMediaUrl') ? [
+                'avatar' => ['has' => $pmAvSrc !== null && userMediaValidSha($pmAvSha),
+                             'src' => $pmAvSrc !== null ? userMediaUrl((string)$pmAvSrc['sha1'], 0, $baseUrl) : '',
+                             'preview' => userMediaValidSha($pmAvSha) ? userMediaUrl($pmAvSha, 128, $baseUrl) : '',
+                             'x' => (float)($cfg['avatar_default_x'] ?? 50), 'y' => (float)($cfg['avatar_default_y'] ?? 50),
+                             'zoom' => (float)($cfg['avatar_default_zoom'] ?? 1)],
+                'cover'  => ['has' => userMediaValidSha($pmCvSha),
+                             'src' => userMediaValidSha($pmCvSha) ? userMediaUrl($pmCvSha, 0, $baseUrl) : '',
+                             'x' => (float)($cfg['cover_default_x'] ?? 50), 'y' => (float)($cfg['cover_default_y'] ?? 50),
+                             'zoom' => (float)($cfg['cover_default_zoom'] ?? 1)],
+                'max_bytes' => userMediaMaxBytes($cfg), 'max_mp' => userMediaMaxMp($cfg),
+                'cover_h' => userCoverHeight($cfg), 'cover_hm' => userCoverHeightMobile($cfg),
+                'desk_w' => USER_COVER_DESKTOP_W, 'phone_w' => USER_COVER_PHONE_W,
+            ] : [];
+            ?>
+            <div class="settings-section" id="section-profiles" data-group="profiles" data-title="<?= _h('settings.profiles_heading') ?>">
+                <h5><i class="bi bi-person-badge"></i> <?= _h('settings.profiles_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.profiles_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="avatars_enabled">
+                        <label class="form-label"><?= _h('settings.profiles_avatars') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="avatars_enabled">
+                            <option value="1" <?= ($cfg['avatars_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['avatars_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profiles_avatars_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="covers_enabled">
+                        <label class="form-label"><?= _h('settings.profiles_covers') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="covers_enabled">
+                            <option value="1" <?= ($cfg['covers_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['covers_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profiles_covers_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="avatar_max_kb">
+                        <label class="form-label" for="setting-avatar_max_kb"><?= _h('settings.profiles_max_kb') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="avatar_max_kb" id="setting-avatar_max_kb"
+                               value="<?= sanitize($cfg['avatar_max_kb'] ?? (string)USER_MEDIA_KB_DEFAULT) ?>" min="<?= USER_MEDIA_KB_MIN ?>" max="<?= USER_MEDIA_KB_MAX ?>">
+                        <?php /* The number PHP will actually take, beside the one the owner typed: the lower
+                                 of the two is what every form on the site quotes (userMediaMaxBytes()). */ ?>
+                        <small class="settings-hint"><?= __('settings.profiles_max_kb_hint', [
+                            'min' => USER_MEDIA_KB_MIN, 'max' => USER_MEDIA_KB_MAX,
+                            'eff' => number_format(function_exists('userMediaMaxBytes') ? userMediaMaxBytes($cfg) / 1024 : 0, 0, '.', ' '),
+                            'php' => sanitize((string)ini_get('upload_max_filesize'))]) ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="avatar_max_mp">
+                        <label class="form-label" for="setting-avatar_max_mp"><?= _h('settings.profiles_max_mp') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="avatar_max_mp" id="setting-avatar_max_mp"
+                               value="<?= sanitize($cfg['avatar_max_mp'] ?? (string)USER_MEDIA_MP_DEFAULT) ?>" min="<?= USER_MEDIA_MP_MIN ?>" max="<?= USER_MEDIA_MP_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.profiles_max_mp_hint', ['min' => USER_MEDIA_MP_MIN, 'max' => USER_MEDIA_MP_MAX]) ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="cover_height">
+                        <label class="form-label" for="setting-cover_height"><?= _h('settings.profiles_cover_height') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="cover_height" id="setting-cover_height"
+                               value="<?= sanitize($cfg['cover_height'] ?? '220') ?>" min="<?= USER_COVER_H_MIN ?>" max="<?= USER_COVER_H_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.profiles_cover_height_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="cover_height_mobile">
+                        <label class="form-label" for="setting-cover_height_mobile"><?= _h('settings.profiles_cover_height_mobile') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="cover_height_mobile" id="setting-cover_height_mobile"
+                               value="<?= sanitize($cfg['cover_height_mobile'] ?? '160') ?>" min="<?= USER_COVER_H_MIN ?>" max="<?= USER_COVER_H_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.profiles_cover_height_mobile_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="cover_overlay">
+                        <label class="form-label" for="setting-cover_overlay"><?= _h('settings.profiles_overlay') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="cover_overlay" id="setting-cover_overlay">
+                            <?php $pmOv = function_exists('userCoverOverlay') ? userCoverOverlay($cfg) : 'gradient'; ?>
+                            <option value="gradient" <?= $pmOv === 'gradient' ? 'selected' : '' ?>><?= _h('settings.profiles_overlay_gradient') ?></option>
+                            <option value="darken" <?= $pmOv === 'darken' ? 'selected' : '' ?>><?= _h('settings.profiles_overlay_darken') ?></option>
+                            <option value="none" <?= $pmOv === 'none' ? 'selected' : '' ?>><?= _h('settings.profiles_overlay_none') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profiles_overlay_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="avatar_default">
+                        <label class="form-label" for="setting-avatar_default"><?= _h('settings.profiles_default_mode') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="avatar_default" id="setting-avatar_default">
+                            <option value="generated" <?= ($cfg['avatar_default'] ?? 'generated') !== 'image' ? 'selected' : '' ?>><?= _h('settings.profiles_default_generated') ?></option>
+                            <option value="image" <?= ($cfg['avatar_default'] ?? 'generated') === 'image' ? 'selected' : '' ?>><?= _h('settings.profiles_default_image') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profiles_default_mode_hint') ?></small>
+                    </div>
+                </div>
+                <?php /* The two stored images. No name="" anywhere in here on purpose: none of this is a
+                         form setting, and the file inputs must never travel with a Settings save. */ ?>
+                <script type="application/json" id="adm-media-data"<?= nonceAttr() ?>><?= json_encode($pmState, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES) ?></script>
+                <div class="row g-3 mt-1">
+                    <div class="col-md-6" data-setting="avatar_default_image">
+                        <label class="form-label"><?= _h('settings.profiles_default_avatar') ?></label>
+                        <div class="adm-media" id="adm-media-avatar" data-kind="avatar">
+                            <div class="adm-media-preview adm-media-preview-avatar" id="adm-media-avatar-preview" aria-hidden="true"></div>
+                            <div class="adm-media-side">
+                                <div class="ipl-drop ipl-drop-wide" id="adm-media-avatar-drop" tabindex="0" role="button" aria-label="<?= _h('settings.profiles_drop_aria') ?>">
+                                    <i class="bi bi-image ipl-drop-icon"></i>
+                                    <span class="ipl-drop-main"><u><?= _h('settings.profiles_drop_choose') ?></u> <?= _h('settings.profiles_drop_or') ?></span>
+                                    <span class="ipl-drop-sub"><?= _h('settings.profiles_drop_sub') ?></span>
+                                    <input type="file" class="ipl-drop-input" id="adm-media-avatar-file" accept="image/jpeg,image/png,image/webp,image/gif">
+                                </div>
+                                <div class="adm-media-acts">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="adm-media-avatar-adjust" hidden><i class="bi bi-arrows-move"></i> <?= _h('settings.profiles_adjust') ?></button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" id="adm-media-avatar-remove" hidden><i class="bi bi-trash"></i> <?= _h('settings.profiles_remove') ?></button>
+                                </div>
+                            </div>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.profiles_default_avatar_hint') ?></small>
+                    </div>
+                    <div class="col-md-6" data-setting="cover_default_image">
+                        <label class="form-label"><?= _h('settings.profiles_default_cover') ?></label>
+                        <div class="adm-media" id="adm-media-cover" data-kind="cover">
+                            <div class="adm-media-preview adm-media-preview-cover" id="adm-media-cover-preview" aria-hidden="true"></div>
+                            <div class="adm-media-side">
+                                <div class="ipl-drop ipl-drop-wide" id="adm-media-cover-drop" tabindex="0" role="button" aria-label="<?= _h('settings.profiles_drop_aria') ?>">
+                                    <i class="bi bi-image ipl-drop-icon"></i>
+                                    <span class="ipl-drop-main"><u><?= _h('settings.profiles_drop_choose') ?></u> <?= _h('settings.profiles_drop_or') ?></span>
+                                    <span class="ipl-drop-sub"><?= _h('settings.profiles_drop_sub') ?></span>
+                                    <input type="file" class="ipl-drop-input" id="adm-media-cover-file" accept="image/jpeg,image/png,image/webp,image/gif">
+                                </div>
+                                <div class="adm-media-acts">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="adm-media-cover-adjust" hidden><i class="bi bi-arrows-move"></i> <?= _h('settings.profiles_adjust') ?></button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" id="adm-media-cover-remove" hidden><i class="bi bi-trash"></i> <?= _h('settings.profiles_remove') ?></button>
+                                </div>
+                            </div>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.profiles_default_cover_hint') ?></small>
                     </div>
                 </div>
             </div>
@@ -3813,6 +3953,10 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-twofa.js<?= assetVer('assets/js/admin-twofa.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-sounds.js<?= assetVer('assets/js/admin-sounds.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/media-editor.js<?= assetVer('assets/js/media-editor.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-profiles.js<?= assetVer('assets/js/admin-profiles.js') ?>"></script>
+    <?php /* The picture beside an uploader's name in the emote manager (1.63.0). */ ?>
+    <?= function_exists('userAvatarScriptTag') ? userAvatarScriptTag($baseUrl, $cfg) : '' ?>
     <script src="<?= $baseUrl ?>assets/js/admin-shout.js<?= assetVer('assets/js/admin-shout.js') ?>"></script>
     <!-- AFTER admin-common.js, which on this page is loaded below admin-settings.js: the editor
          needs window.AdminCommon and returned early without it, so the dialog never opened. -->

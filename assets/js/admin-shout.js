@@ -197,8 +197,12 @@
         const base = document.body.dataset.apiBase || '';
         // apiBase is "<base>api.php?endpoint=" — the site root is everything before the file name.
         const site = base.replace(/api\.php.*$/, '');
+        // The uploader's picture first inside the link (1.63.0), from the ADDRESS the server built —
+        // assets/js/avatar.js, which answers null while pictures are switched off.
+        const pic = typeof window.userAvatarImg === 'function'
+            ? window.userAvatarImg({ username: r.uploader, avatar: String(r.uploader_avatar || '') }, 20, 'avatar emote-av-admin') : null;
         return el('td', { className: 'small' }, [
-            el('a', { href: site + '?action=u&name=' + encodeURIComponent(r.uploader), target: '_blank', rel: 'noopener' }, '@' + r.uploader),
+            el('a', { className: 'av-who', href: site + '?action=u&name=' + encodeURIComponent(r.uploader), target: '_blank', rel: 'noopener' }, [pic, '@' + r.uploader]),
         ]);
     }
 

@@ -25,6 +25,26 @@
         return el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: label }), el('div', { className: 'wl-kv-value' }, value)]);
     }
     function badge(text, cls) { return el('span', { className: 'wl-badge ' + (cls || ''), text }); }
+
+    /**
+     * The picture beside a member's name (1.63.0 phase B): assets/js/avatar.js, drawn from
+     * `name_avatar` — the address the server built — and null while pictures are switched off.
+     */
+    function face(u, size, cls) {
+        return typeof window.userAvatarImg === 'function'
+            ? window.userAvatarImg({ username: u.username, avatar: String(u.name_avatar || '') }, size, 'avatar ' + cls) : null;
+    }
+    /**
+     * A window's title: the picture at 48, then the name, inside the span the template gave the name
+     * — one unit (`.av-who`) that a long name can never wrap away from its picture.
+     */
+    function titleName(id, u) {
+        const span = $(id);
+        span.classList.add('av-who');
+        span.textContent = u.username;
+        const pic = face(u, 48, 'us-title-av');
+        if (pic) span.prepend(pic);
+    }
     function renderStatus(counts, enabled) {
         const grid = $('us-status-grid');
         grid.textContent = '';
@@ -91,7 +111,8 @@
             tr.appendChild(el('td', { className: 'us-c-pick' },
                 el('label', { className: 'search-check' }, [pick, el('span', { className: 'search-check-box' })])));
             tr.appendChild(el('td', { className: 'wl-id', text: String(u.id) }));
-            const nameTd = el('td', {}, [el('strong', { text: u.username }), u.root_admin ? el('i', { className: 'bi bi-shield-lock-fill text-warning ms-1', title: t('js.users.owner_protected') }) : null]);
+            const nameTd = el('td', {}, [el('span', { className: 'av-who' }, [face(u, 24, 'us-row-av'), el('strong', { text: u.username })]),
+                                         u.root_admin ? el('i', { className: 'bi bi-shield-lock-fill text-warning ms-1', title: t('js.users.owner_protected') }) : null]);
             // WHERE THIS ACCOUNT CAN SIGN IN FROM. Beside the name because that is the question it
             // qualifies: this row is not only a member here, somebody else can also sign in as them.
             (u.identities || []).forEach(idt => {
@@ -185,7 +206,7 @@
     }
     function openEdit(u) {
         editUser = u;
-        $('ue-name').textContent = u.username;
+        titleName('ue-name', u);
         $('ue-status').value = u.status;
         // the site owner cannot be banned — grey the option out
         const bannedOpt = $('ue-status').querySelector('option[value="banned"]');
@@ -197,7 +218,37 @@
         ['ue-email', 'ue-email2', 'ue-password', 'ue-password2'].forEach(id => $(id).classList.remove('is-invalid'));
         ueSyncRepeats();
         $('ue-alert').textContent = '';
+        ueMedia(u);
         bootstrap.Modal.getOrCreateInstance($('usEditModal')).show();
+    }
+    /**
+     * The picture and the cover (1.63.0): the pair of buttons appears only for what the account has.
+     * Taking one down happens at once (admin/user_media), not on Save — the member is told in a
+     * notification and the server keeps nothing — so it asks first, and says both of those things.
+     */
+    function ueMedia(u) {
+        const box = $('ue-media');
+        if (!box) return;
+        const thumb = $('ue-media-avatar');
+        box.hidden = !(u.has_avatar || u.has_cover);
+        $('ue-remove-avatar').hidden = !u.has_avatar;
+        $('ue-remove-cover').hidden = !u.has_cover;
+        thumb.hidden = !u.has_avatar;
+        if (u.has_avatar && u.avatar) thumb.src = u.avatar; else thumb.removeAttribute('src');
+    }
+    async function ueRemoveMedia(what) {
+        if (!editUser) return;
+        const q = t(what === 'cover' ? 'js.mediaadmin.user_remove_cover_q' : 'js.mediaadmin.user_remove_avatar_q', { user: editUser.username });
+        if (!(await confirmAction(t('js.mediaadmin.remove_title'), q))) return;
+        const r = await apiCall('admin/user_media', 'POST', { op: what === 'cover' ? 'remove_cover' : 'remove_avatar', id: editUser.id });
+        if (!r.success) { showToast(r.error || t('js.mediaadmin.failed'), 'danger'); return; }
+        if (r.user) {
+            editUser.has_avatar = r.user.has_avatar; editUser.has_cover = r.user.has_cover; editUser.avatar = r.user.avatar;
+            if (typeof r.user.name_avatar === 'string') { editUser.name_avatar = r.user.name_avatar; titleName('ue-name', editUser); }
+        }
+        ueMedia(editUser);
+        showToast(r.message || t('js.mediaadmin.removed'));
+        loadUsers();
     }
     async function saveEdit() {
         if (!ueValidate()) return;
@@ -351,7 +402,7 @@
     // ── grant modal ─────────────────────────────────────────────────────────
     function openGrant(u) {
         grantUser = u;
-        $('ug-name').textContent = u.username;
+        titleName('ug-name', u);
         const sel = $('ug-group');
         sel.textContent = '';
         state.groups.filter(g => g.slug !== 'guest').forEach(g => sel.appendChild(el('option', { value: String(g.id), text: g.name + ' (' + g.slug + ')' })));
@@ -407,7 +458,7 @@
     // ── notify modal ────────────────────────────────────────────────────────
     function openNotify(u) {
         notifyUser = u;
-        $('un-name').textContent = u.username;
+        titleName('un-name', u);
         $('un-title').value = ''; $('un-body').value = '';
         $('un-email').checked = false;
         $('un-alert').textContent = '';
@@ -852,6 +903,8 @@
         $('us-filter-status').addEventListener('change', () => { state.us.status = $('us-filter-status').value; state.us.page = 1; loadUsers(); });
         $('us-filter-group').addEventListener('change', () => { state.us.group = $('us-filter-group').value; state.us.page = 1; loadUsers(); });
         $('ue-save').addEventListener('click', saveEdit);
+        if ($('ue-remove-avatar')) $('ue-remove-avatar').addEventListener('click', () => ueRemoveMedia('avatar'));
+        if ($('ue-remove-cover')) $('ue-remove-cover').addEventListener('click', () => ueRemoveMedia('cover'));
         $('ue-email').addEventListener('input', () => { ueSyncRepeats(); ueValidate(); });
         $('ue-email2').addEventListener('input', ueValidate);
         $('ue-password').addEventListener('input', () => { ueSyncRepeats(); ueValidate(); });

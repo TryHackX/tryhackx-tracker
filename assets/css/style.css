@@ -2198,7 +2198,9 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .fav-star[disabled] { opacity: 0.5; cursor: default; }
 .info-acts { display: inline-flex; gap: 0.4rem; align-items: center; margin-left: auto; }
 
-.profile-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem; margin-bottom: 1rem; }
+/* `center`, not `baseline` (1.63.0): a 64 px picture now sits at the start of this row, and a
+   baseline row hangs everything else off the bottom of the picture. */
+.profile-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
 .profile-name { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
 .profile-since, .profile-you { color: var(--text-muted); font-size: 0.82rem; }
 /* Beside the name, NOT pinned to the right edge. With `margin-left: auto` it ended up a thousand
@@ -2207,6 +2209,104 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
    so it is given the whole next line rather than being squeezed in beside the name. */
 .profile-share { align-self: center; }
 .profile-head .share-url { flex: 1 0 100%; margin-top: 0; }
+
+/* === Pictures and profile covers (1.63.0, includes/usermedia.php) ===========
+   A picture is round everywhere and never stretched; the element is userAvatarHtml()'s (and
+   window.userAvatarImg()'s), so every surface that draws one draws this. */
+img.js-avatar { border-radius: 50%; object-fit: cover; background: var(--control-bg); flex: 0 0 auto; vertical-align: middle; }
+/* The hairline round every picture (1.63.0 phase B): a dark photo on this near-black page has no
+   edge of its own. An OUTLINE drawn one pixel inside the circle rather than a border or a shadow: it
+   follows the radius, costs no layout (the explicit width and height stay the box), and cannot be
+   clipped by a name column with overflow: hidden, which is where half of these sit. */
+img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1px; }
+/* Beside a name, surface by surface (1.63.0 phase B). Each picture carries its surface's own class,
+   so none of these reaches a picture drawn anywhere else — and none is written against `.pf-name`,
+   which is also what a torrent's name is called in the lists beside these. Inside a line of small
+   text (a chip, "by …") the picture gives the same few pixels back above and below with a negative
+   margin, so a 20 px picture never makes that line taller than it was — and, being the same on both
+   sides, leaves `vertical-align: middle` centring the picture where it would anyway. The shoutbox has
+   its own rule further down, beside its column. */
+/* A picture and its name are one unit wherever text can wrap: a narrow line must never leave the
+   picture at the end of one line and the name at the start of the next. */
+.av-who { white-space: nowrap; }
+.nav-user .nav-av { margin-right: 0.4em; }
+.account-head h1 .acc-h1-av { margin-right: 0.35em; }
+.who-name .who-av, .who-list-by .who-av, .emote-by .emote-av, .info-desc-by .info-av { margin: -3px 0.3em -3px 0; }
+
+/* THE COVER, painted the one way every surface paints it: a clipped child layer (so no menu in the
+   head is ever clipped — the head itself never gets overflow: hidden), `::before` the blurred fill
+   that shows only below 1x, `::after` the image at the focal point and zoom, and the readability
+   shade over the full height. The numbers arrive as custom properties (--cv-img/x/y/z) from a
+   nonce'd <style> on first paint and from the CSSOM afterwards — never from a style="" attribute.
+   The layer isolates itself, so the z-indexes that order its three parts cannot reach outside it,
+   and nothing that holds the content has one (the research's lesson: a z-index on the content
+   wrapper trapped a dropdown under a phone's fixed navigation bar). */
+.cv-paint { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; isolation: isolate; }
+.cv-paint::before, .cv-paint::after {
+    content: ''; position: absolute; inset: 0;
+    background-image: var(--cv-img, none); background-repeat: no-repeat; background-size: cover;
+    background-position: var(--cv-x, 50%) var(--cv-y, 50%);
+}
+.cv-paint::before { z-index: 0; display: none; filter: blur(16px) brightness(0.85); transform: scale(1.12); }
+.cv-zoomout .cv-paint::before { display: block; }
+.cv-paint::after { z-index: 1; transform: scale(var(--cv-z, 1)); transform-origin: var(--cv-x, 50%) var(--cv-y, 50%); }
+.cv-shade { position: absolute; inset: 0; z-index: 2; }
+.cv-overlay-gradient .cv-shade { background: linear-gradient(to bottom, rgba(0, 0, 0, 0.08) 0%, rgba(0, 0, 0, 0.28) 55%, rgba(0, 0, 0, 0.62) 100%); }
+.cv-overlay-darken .cv-shade { background: rgba(0, 0, 0, 0.45); }
+
+/* The profile page: the band behind the head, as tall as Settings says, and the head pinned to its
+   bottom edge. The head is positioned (so it paints above the layer, in DOM order) and carries no
+   z-index. The picture hangs half over the band's lower edge, ringed in the page's own colour. */
+.profile-top { position: relative; margin-bottom: 1rem; }
+.profile-top > .profile-head { margin-bottom: 0; }
+.profile-top.has-cover {
+    display: flex; flex-direction: column; justify-content: flex-end;
+    min-height: var(--cv-h, 220px); border-radius: var(--radius); background: var(--bg-card);
+    margin-bottom: calc(1.2rem + 32px);
+}
+.profile-top.has-cover > .profile-head {
+    position: relative; padding: 0.55rem 1rem 0.6rem calc(1rem + 64px + 0.75rem);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.profile-top.has-cover .profile-since, .profile-top.has-cover .profile-you { color: #c4c8d2; }
+.profile-avatar { width: 64px; height: 64px; }
+.profile-top.has-cover .profile-avatar {
+    position: absolute; left: 1rem; bottom: -32px;
+    box-shadow: 0 0 0 3px var(--bg), 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+@media (max-width: 640px) {
+    .profile-top.has-cover { min-height: var(--cv-hm, 160px); }
+    .profile-top.has-cover > .profile-head { padding-left: calc(0.75rem + 64px + 0.6rem); padding-right: 0.75rem; }
+    .profile-top.has-cover .profile-avatar { left: 0.75rem; }
+}
+
+/* The account page: the Picture and Cover sub-sections of the Profile card. The drop zone is the
+   Emotes page's own (.emote-drop), a little shallower here beside the three preview sizes. */
+.acc-media-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.9rem; }
+.acc-media-now { display: flex; align-items: flex-end; gap: 0.7rem; flex: 0 0 auto; }
+.acc-media-side { flex: 1 1 13rem; min-width: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.acc-media-side-wide { margin-top: 0.6rem; }
+.acc-media-drop { padding: 0.65rem 0.6rem; }
+.acc-media-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+/* The shoutbox's in-place question, which is `flex: 0 0 auto` in a room's wide row. Here the card is
+   narrow: unshrinkable, the sentence ran out of the card and under the next one, which then painted
+   over its buttons. So it takes a line of its own and wraps inside it. */
+.acc-media-acts .shout-confirm { margin-left: 0; flex: 1 1 100%; min-width: 0; }
+.acc-media-status { font-size: 0.8rem; color: var(--success); }
+.acc-media-status.is-bad { color: #e0b15a; }
+.acc-media-status:empty { display: none; }
+.acc-cover-now {
+    position: relative; width: 100%; aspect-ratio: var(--cv-ar, 976 / 220);
+    display: flex; align-items: center; justify-content: center;
+    border: 1px dashed var(--control-border); border-radius: var(--radius); background: var(--control-bg);
+}
+.acc-cover-now.has-cover { border-style: solid; border-color: var(--border); }
+.acc-cover-now:not(.has-cover) .cv-paint, .acc-cover-now.has-cover .acc-cover-empty { display: none; }
+.acc-cover-empty { color: var(--text-muted); font-size: 0.8rem; }
+.acc-cover-default {
+    position: absolute; right: 0.4rem; bottom: 0.35rem; padding: 0 0.5rem; border-radius: 999px;
+    background: rgba(0, 0, 0, 0.62); color: #fff; font-size: 0.7rem; line-height: 1.6;
+}
 /* Share, open, sign out — one group at the top of the account page. The fallback box the Share
    button reveals on plain HTTP takes the whole next line rather than squeezing in between them. */
 .account-head-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
@@ -2297,12 +2397,19 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .pm-row-open { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .pm-meta { display: flex; align-items: center; justify-content: flex-end; gap: 0.4rem; }
 .pm-who { font-weight: 600; color: var(--accent); }
+/* The picture (1.63.0) takes a column of its own to the left of BOTH lines — the name and what was
+   last said — rather than a place in the first: a person beside their conversation. The class comes
+   from assets/js/people.js with the picture, so a row without one keeps the two-column grid above. */
+.pm-row-av { grid-template-columns: auto minmax(0, 1fr) auto; }
+.pm-row-av .pm-av { grid-row: 1 / span 2; align-self: center; }
+.pm-row-av .pm-preview { grid-column: 2 / -1; }
 .pm-preview { grid-column: 1 / -1; font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pm-when { font-size: 0.75rem; }
 .pm-count { flex: 0 0 auto; background: var(--accent); color: #000; border-radius: 999px;
             padding: 0 0.45em; font-size: 0.75rem; }
 .pm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
-.pm-head-name { font-weight: 600; margin-right: auto; }
+/* The picture sits inside the name's link (1.63.0), centred on it rather than on the text's baseline. */
+.pm-head-name { font-weight: 600; margin-right: auto; display: inline-flex; align-items: center; gap: 0.5rem; }
 .pm-msgs { display: flex; flex-direction: column; gap: 0.5rem; max-height: 26rem; overflow-y: auto; padding-right: 0.2rem; }
 .pm-msg { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem 0.6rem; background: var(--bg); }
 /* Mine sit to the right and carry the accent border: whose line is whose has to be readable at a
@@ -2737,6 +2844,15 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    with an ellipsis; the anchor carries the full name as its title. */
 .shout-who { flex: 0 0 8rem; min-width: 0; font-weight: 600; color: var(--accent);
              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The picture (1.63.0) is the first thing INSIDE the name's element, so it is part of the link and
+   the ellipsis still cuts the text after it. The column grows by exactly the picture and its gap, so
+   a name keeps the 8rem it had — and every row grows by the same amount, because every row has one:
+   a person's, or the site's mark on a line the site said. Top-aligned in the line rather than
+   centred on the text: the line box is 1.32rem (21 px) and the picture 20, so `top` can never make a
+   row taller or push the picture past the element's overflow edge, whatever the font's metrics — and
+   the name's baseline, which the time and the words are lined up on, does not move. */
+.shout-who .shout-av { width: 20px; height: 20px; margin-right: 0.4rem; vertical-align: top; }
+.shout-who:has(> .shout-av) { flex-basis: calc(8rem + 20px + 0.4rem); }
 /* No colon after the name (1.62.0). It was a ::after here rather than a character in either
    renderer, so taking it off is this line and nothing else: the name is a column of its own and
    the time sits between it and the words, which already says where one ends and the other starts. */
@@ -2906,6 +3022,7 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     .shout-del { opacity: 1; }
     /* A narrower name column, because the words matter more than the column does at this width. */
     .shout-who { flex-basis: 5.5rem; }
+    .shout-who:has(> .shout-av) { flex-basis: calc(5.5rem + 20px + 0.4rem); }
     .shout-title { font-size: 1.05rem; }
     /* The head has already wrapped by here; the refresh button keeps the right of its own line
        rather than being pushed onto one of its own by the margin. */

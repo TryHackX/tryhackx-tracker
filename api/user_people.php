@@ -138,19 +138,19 @@ $sql = '';
 $params = [];
 switch ($view) {
     case 'pending':     // I asked, they have not answered
-        $sql = "SELECT u.id, u.username, u.created_at, f.created_at AS since FROM user_friends f
+        $sql = "SELECT u.id, u.username, u.avatar_sha, u.created_at, f.created_at AS since FROM user_friends f
                   JOIN users u ON u.id = f.friend_id
                  WHERE f.user_id = ? AND f.status = 'pending' AND u.status = 'active'";
         $params = [$uid];
         break;
     case 'incoming':    // they asked me — the rows this page exists to let somebody answer
-        $sql = "SELECT u.id, u.username, u.created_at, f.created_at AS since FROM user_friends f
+        $sql = "SELECT u.id, u.username, u.avatar_sha, u.created_at, f.created_at AS since FROM user_friends f
                   JOIN users u ON u.id = f.user_id
                  WHERE f.friend_id = ? AND f.status = 'pending' AND u.status = 'active'";
         $params = [$uid];
         break;
     case 'blocks':
-        $sql = "SELECT u.id, u.username, u.created_at, b.created_at AS since, b.hide_profile, b.note
+        $sql = "SELECT u.id, u.username, u.avatar_sha, u.created_at, b.created_at AS since, b.hide_profile, b.note
                   FROM user_blocks b JOIN users u ON u.id = b.blocked_id
                  WHERE b.user_id = ? AND u.status = 'active'";
         $params = [$uid];
@@ -158,7 +158,7 @@ switch ($view) {
     case 'friends':
     default:
         $view = 'friends';
-        $sql = "SELECT u.id, u.username, u.created_at, f.accepted_at AS since FROM user_friends f
+        $sql = "SELECT u.id, u.username, u.avatar_sha, u.created_at, f.accepted_at AS since FROM user_friends f
                   JOIN users u ON u.id = IF(f.user_id = ?, f.friend_id, f.user_id)
                  WHERE (f.user_id = ? OR f.friend_id = ?) AND f.status = 'accepted' AND u.status = 'active'";
         $params = [$uid, $uid, $uid];
@@ -169,8 +169,12 @@ $sql .= " ORDER BY u.username ASC LIMIT 500";
 $st = $db->prepare($sql);
 $st->execute($params);
 
+// The picture beside each name (1.63.0) is an ADDRESS built here from the join above — the rows never
+// carry the account id, and they do not start now.
+$base = getBaseUrl();
 $rows = array_map(static fn($r) => [
     'username'     => (string)$r['username'],
+    'avatar'       => function_exists('userAvatarField') ? userAvatarField($r, 32, $base, $cfg) : '',
     'since'        => (string)($r['since'] ?? ''),
     'hide_profile' => isset($r['hide_profile']) ? ((int)$r['hide_profile'] === 1) : null,
     'note'         => isset($r['note']) ? (string)$r['note'] : null,

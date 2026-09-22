@@ -62,6 +62,17 @@
     function when(s) { return String(s || '').replace('T', ' ').slice(0, 16); }
 
     /**
+     * The picture beside a person's name (1.63.0), from the ADDRESS the server put in the row — these
+     * endpoints send a name and never the account id behind it. window.userAvatarImg() lives in
+     * assets/js/avatar.js and answers null while pictures are switched off, so every caller simply
+     * skips a null. The class is the surface's own, never `.pf-name`'s: that one is also a torrent's.
+     */
+    function face(name, address, size, cls) {
+        return typeof window.userAvatarImg === 'function'
+            ? window.userAvatarImg({ username: name, avatar: String(address || '') }, size, 'avatar ' + cls) : null;
+    }
+
+    /**
      * Whether this tracker has the "…is writing" line switched on, and who to say it to.
      *
      * Module-level because the composer is built outside the inbox that knows the answer, and
@@ -175,6 +186,10 @@
             if (!rows.length) { list.appendChild(el('div', { className: 'pf-empty', text: t(q ? 'js.pm.no_match' : 'js.pm.no_threads') })); return; }
             rows.forEach(function (x) {
                 var row = el('button', { type: 'button', className: 'pm-row' + (x.unread ? ' pm-row-unread' : '') });
+                // The picture takes a column of its own, beside both lines of the row: a person to the
+                // left of what they last said, the way every inbox reads.
+                var pic = face(x.with, x.avatar, 32, 'pm-av');
+                if (pic) { row.classList.add('pm-row-av'); row.appendChild(pic); }
                 row.appendChild(el('span', { className: 'pm-who', text: x.with }));
                 // The count and the time are one cell, on the right of the name. Appended as two
                 // children of the row they were two grid items, and the count — landing in the
@@ -290,7 +305,10 @@
             badge(j.unread, j.unread_friend);
 
             var head = el('div', { className: 'pm-head' });
-            head.appendChild(el('a', { className: 'pm-head-name', href: BASE + '?action=u&name=' + encodeURIComponent(name), text: name }));
+            // The picture inside the name's link: one unit the head's wrapping can never split, and
+            // one more place to click through to the profile.
+            head.appendChild(el('a', { className: 'pm-head-name', href: BASE + '?action=u&name=' + encodeURIComponent(name) },
+                                [face(j.with || name, j.with_avatar, 32, 'pm-head-av'), name]));
             var back = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t('js.pm.back') });
             back.addEventListener('click', function () { stopPoll(); pane.hidden = true; openWith = null; loadInbox(); });
             head.appendChild(back);
@@ -539,6 +557,8 @@
         function personRow(p, kind, reload, mayMessage) {
             var row = el('div', { className: 'pf-row pe-row' });
             var main = el('div', { className: 'pf-main' });
+            var pic = face(p.username, p.avatar, 32, 'pe-av');
+            if (pic) main.appendChild(pic);
             main.appendChild(el('a', { className: 'pf-name', href: BASE + '?action=u&name=' + encodeURIComponent(p.username), text: p.username }));
             if (p.since) main.appendChild(el('span', { className: 'text-muted pe-since', text: when(p.since) }));
             if (kind === 'blocks' && p.hide_profile) main.appendChild(el('span', { className: 'pf-badge', text: t('js.people.hidden') }));
@@ -622,6 +642,8 @@
             j.rows.forEach(function (p) {
                 var row = el('div', { className: 'pf-row pe-row' });
                 var main = el('div', { className: 'pf-main' });
+                var pic = face(p.username, p.avatar, 32, 'pe-av');
+                if (pic) main.appendChild(pic);
                 main.appendChild(el('a', { className: 'pf-name', href: BASE + '?action=u&name=' + encodeURIComponent(p.username), text: p.username }));
                 main.appendChild(el('span', { className: 'text-muted pe-since', text: t('js.people.since', { date: p.since }) }));
                 if (p.state !== 'none') main.appendChild(el('span', { className: 'pf-badge', text: t('js.people.state_' + p.state) }));

@@ -90,17 +90,22 @@ $emUrl = function (array $e) use ($baseUrl): string {
 };
 
 // Who uploaded what, asked once per PERSON rather than once per row: a set of emotes is very often
-// one enthusiast's afternoon, and that would otherwise be twenty queries for one name.
+// one enthusiast's afternoon, and that would otherwise be twenty queries for one name. The row that
+// question already reads is the whole account, so the picture beside the name (1.63.0) comes with it:
+// kept here as the drawn element, and no second question is asked for it.
 $emNames = [];
-$emWho = function (array $e) use ($db, &$emNames): string {
+$emPics = [];
+$emWho = function (array $e) use ($db, $cfg, $baseUrl, &$emNames, &$emPics): string {
     $uid = (int)($e['uploaded_by'] ?? 0);
     if ($uid <= 0) return '';
     if (!array_key_exists($uid, $emNames)) {
         $u = function_exists('userFindById') ? userFindById($db, $uid) : null;
         $emNames[$uid] = (string)($u['username'] ?? '');
+        $emPics[$uid] = ($u && function_exists('userAvatarHtml')) ? userAvatarHtml($u, 20, $baseUrl, 'avatar emote-av', $cfg) : '';
     }
     return $emNames[$uid];
 };
+$emPic = function (array $e) use (&$emPics): string { return $emPics[(int)($e['uploaded_by'] ?? 0)] ?? ''; };
 
 /**
  * The `:code:` under a picture, as a chip somebody can click.
@@ -115,7 +120,7 @@ $emChip = function (string $code) : void {
 };
 
 /** One tile: the picture on its panel, the code to copy, the name, and where it came from. */
-$emCard = function (array $e, bool $sticker) use ($baseUrl, $emUrl, $emWho, $emChip): void {
+$emCard = function (array $e, bool $sticker) use ($baseUrl, $emUrl, $emWho, $emPic, $emChip): void {
     $code = (string)($e['code'] ?? '');
     $name = (string)($e['name'] ?? $code);
     $who  = $emWho($e);
@@ -127,7 +132,7 @@ $emCard = function (array $e, bool $sticker) use ($baseUrl, $emUrl, $emWho, $emC
         <span class="emote-name"><?= sanitize($name) ?></span>
         <?php if ($who !== ''): ?>
         <span class="emote-by text-muted"><?= __('shout.emote_by', ['name' =>
-            '<a href="' . $baseUrl . '?action=u&amp;name=' . urlencode($who) . '">' . sanitize($who) . '</a>']) ?></span>
+            '<a class="av-who" href="' . $baseUrl . '?action=u&amp;name=' . urlencode($who) . '">' . $emPic($e) . sanitize($who) . '</a>']) ?></span>
         <?php else: ?>
         <span class="emote-by text-muted"><?= _h('shout.emote_shipped') ?></span>
         <?php endif; ?>

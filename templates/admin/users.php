@@ -301,6 +301,18 @@
                         <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ue-password2" maxlength="200" autocomplete="new-password">
                         <div class="invalid-feedback"><?= _h('a.users.pass2_err') ?></div>
                     </div>
+                    <?php /* The picture and the cover (1.63.0): shown only when the account has one, and taken
+                             down at once — not part of Save, because deleting an image is not an edit that
+                             waits for the rest of the form. admin/user_media, gated like this whole modal. */ ?>
+                    <div class="mb-2" id="ue-media" hidden>
+                        <label class="form-label wl-label"><?= _h('a.users.media_label') ?></label>
+                        <div class="ue-media-row">
+                            <img class="ue-media-thumb" id="ue-media-avatar" alt="" width="40" height="40" hidden>
+                            <button type="button" class="btn btn-sm btn-outline-danger" id="ue-remove-avatar" hidden><i class="bi bi-person-x"></i> <?= _h('a.users.media_remove_avatar') ?></button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" id="ue-remove-cover" hidden><i class="bi bi-image"></i> <?= _h('a.users.media_remove_cover') ?></button>
+                        </div>
+                        <small class="text-muted"><?= _h('a.users.media_note') ?></small>
+                    </div>
                     <div id="ue-alert"></div>
                     <div class="d-flex justify-content-end gap-2 mt-3">
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
@@ -436,6 +448,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
+    <?php /* The picture beside every member's name (1.63.0), the same file the public pages draw with. */ ?>
+    <?= function_exists('userAvatarScriptTag') ? userAvatarScriptTag($baseUrl, $cfg) : '' ?>
     <script src="<?= $baseUrl ?>assets/js/admin-users.js<?= assetVer('assets/js/admin-users.js') ?>"></script>
 </body>
 </html>

@@ -1068,9 +1068,17 @@
                 body.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.who_none') }));
                 body.appendChild(el('p', { className: 'text-muted who-why', text: t('js.fav.who_why') }));
             }
+            // The picture beside each name (1.63.0) is the first thing inside its chip, from the ADDRESS
+            // the server built (these rows never carry an id); window.userAvatarImg() is
+            // assets/js/avatar.js, and answers null while pictures are switched off.
+            var face = function (name, address) {
+                return typeof window.userAvatarImg === 'function'
+                    ? window.userAvatarImg({ username: name, avatar: String(address || '') }, 20, 'avatar who-av') : null;
+            };
             var ul = el('div', { className: 'who-names' });
             j.rows.forEach(function (r) {
-                ul.appendChild(el('a', { className: 'who-name', href: BASE + '?action=u&name=' + encodeURIComponent(r.username), text: r.username }));
+                ul.appendChild(el('a', { className: 'who-name', href: BASE + '?action=u&name=' + encodeURIComponent(r.username) },
+                                  [face(r.username, r.avatar), r.username]));
             });
             body.appendChild(ul);
             // The public LISTS it is on. A different answer to the same question, and often the
@@ -1089,7 +1097,17 @@
                                       href: BASE + '?action=u&name=' + encodeURIComponent(l.username)
                                           + '#list:' + encodeURIComponent(l.slug || '') });
                     a.appendChild(el('span', { className: 'who-list-name', text: l.name }));
-                    a.appendChild(el('span', { className: 'who-list-by text-muted', text: t('js.lists.who_by', { user: l.username }) }));
+                    // The owner's picture right before their NAME inside "by <name>" — wherever the
+                    // language puts the name — not at the start of the chip: the chip is the LIST, and
+                    // the face belongs to the person who keeps it.
+                    var by = el('span', { className: 'who-list-by text-muted' });
+                    if (typeof window.userAvatarPhrase === 'function') {
+                        by.appendChild(window.userAvatarPhrase(t('js.lists.who_by', { user: window.userAvatarSlot(0) }),
+                                                               [[face(l.username, l.avatar), l.username]]));
+                    } else {
+                        by.textContent = t('js.lists.who_by', { user: l.username });
+                    }
+                    a.appendChild(by);
                     lb.appendChild(a);
                 });
                 body.appendChild(lb);

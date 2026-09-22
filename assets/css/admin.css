@@ -2666,3 +2666,43 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .admin-emote-add-row .form-check-input:focus { border-color: #4d9fd6; box-shadow: 0 0 0 0.15rem rgba(77, 159, 214, 0.25); }
 .admin-emote-add-row .form-check-label { margin: 0; cursor: pointer; }
 .admin-emote-add-row .btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* ── Settings → Profiles: the site's default picture and default cover (1.63.0) ─────────────────
+   A preview beside the drop zone the Sounds section already uses. The picture's preview is its own
+   128 square, round; the cover's is the stored image painted with its focal point and zoom, the way
+   the profile page paints it (object-position semantics, numbers set through the CSSOM). */
+.adm-media { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.75rem; }
+.adm-media-preview {
+    position: relative; overflow: hidden; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255, 255, 255, 0.04); border: 1px solid #2a2f45; color: #8a93a6; font-size: 0.78rem;
+}
+.adm-media-preview-avatar { width: 90px; height: 90px; border-radius: 50%; }
+.adm-media-preview-cover { width: 220px; aspect-ratio: 976 / 220; border-radius: 4px; }
+.adm-media-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.adm-media-preview img.adm-media-framed {
+    object-position: var(--fe-x, 50%) var(--fe-y, 50%);
+    transform: scale(var(--fe-z, 1)); transform-origin: var(--fe-x, 50%) var(--fe-y, 50%);
+}
+.adm-media-side { flex: 1 1 14rem; min-width: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.adm-media-acts { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.adm-media-acts [hidden] { display: none !important; }
+/* The user edit modal's pair: what the account has, and the two ways to take it down. */
+.ue-media-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.ue-media-thumb { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: rgba(255, 255, 255, 0.04); }
+.ue-media-thumb[hidden] { display: none !important; }
+
+/* ── The picture beside a name in the panel (1.63.0 phase B) ───────────────────────────────────
+   The element assets/js/avatar.js draws on the public pages too, with the look it has there: round,
+   never stretched, and the hairline one pixel inside the circle that a dark photo on a dark page
+   needs to have an edge at all (an outline, so it costs no layout and follows the radius). */
+img.js-avatar { border-radius: 50%; object-fit: cover; background: rgba(255, 255, 255, 0.04); flex: 0 0 auto;
+    vertical-align: middle; outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1px; }
+/* A picture and its name are one unit: a narrow line never wraps between them. */
+.av-who { white-space: nowrap; }
+/* The user list's name cell, and the edit / grant / notify windows' titles. */
+.us-row-av { margin-right: 0.45rem; }
+.modal-title .us-title-av { margin: -0.4rem 0.45rem -0.4rem 0.15rem; }
+/* The reported-message card, the content review cards and the emote manager: beside a name inside a
+   sentence or a link, so it sits on the text rather than stretching the line. */
+.msgrep-av, .rv-av, .emote-av-admin { margin: -0.2rem 0.3rem -0.1rem 0; }

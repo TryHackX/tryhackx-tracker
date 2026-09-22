@@ -36,6 +36,10 @@ window.NavUnread = {
     },
 };
 
+// The picture beside a name — window.userAvatarUrl(), window.userAvatarImg() and window.userAvatarSet(),
+// and the letter an unloadable one falls back to — lives in assets/js/avatar.js (1.63.0 phase B), which
+// templates/layout.php loads before this file: the panel draws pictures too, and never loads this one.
+
 // === CAPTCHA ===
 // The modal itself lives in assets/js/captcha.js (window.showCaptchaModal / window.captchaReset),
 // shared with the admin panel and provider-agnostic (reCAPTCHA v2 / v3, Turnstile, hCaptcha).
@@ -3357,16 +3361,22 @@ const getJson = async (endpoint) => {
             const by = document.createElement('p');
             by.className = 'info-desc-by text-muted info-section';
             by.appendChild(document.createTextNode(t('js.app.desc_by') + ' '));
+            // The author's picture right before their name (1.63.0), from the ADDRESS the server
+            // built — this answer carries the name and never the author's id. Null while pictures
+            // are switched off (assets/js/avatar.js).
+            const pic = typeof window.userAvatarImg === 'function'
+                ? window.userAvatarImg({ username: json.content_author, avatar: String(json.content_author_avatar || '') }, 20, 'avatar info-av') : null;
+            // `.av-who`: the picture and the name are one unit that a line never breaks inside.
+            const who = document.createElement(json.content_author_profile ? 'a' : 'span');
+            who.className = 'av-who';
             if (json.content_author_profile) {
-                const a = document.createElement('a');
                 let u = null;
                 try { u = new URL(location.href); u.search = ''; u.hash = ''; u.searchParams.set('action', 'u'); u.searchParams.set('name', json.content_author); } catch (e) { u = null; }
-                a.href = u ? u.href : '#';
-                a.textContent = json.content_author;
-                by.appendChild(a);
-            } else {
-                by.appendChild(document.createTextNode(json.content_author));
+                who.href = u ? u.href : '#';
             }
+            if (pic) who.appendChild(pic);
+            who.appendChild(document.createTextNode(json.content_author));
+            by.appendChild(who);
             body.appendChild(by);
         }
         const note = (key, vars, cls) => {

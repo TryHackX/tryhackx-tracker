@@ -29,6 +29,8 @@ require_once __DIR__ . '/includes/users.php';
 require_once __DIR__ . '/includes/favourites.php';
 require_once __DIR__ . '/includes/sounds.php';
 require_once __DIR__ . '/includes/shout.php';
+// Pictures and profile covers (v69): the pipeline, the stream and userAvatarUrl()/userAvatarHtml().
+require_once __DIR__ . '/includes/usermedia.php';
 require_once __DIR__ . '/includes/lists.php';
 require_once __DIR__ . '/includes/people.php';
 require_once __DIR__ . '/includes/user2fa.php';

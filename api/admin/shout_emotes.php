@@ -36,7 +36,7 @@ $listing = function () use ($db, $cfg, $base): array {
             'bytes' => $e['bytes'], 'w' => $e['width'], 'h' => $e['height'],
             'sticker' => $e['is_sticker'], 'enabled' => $e['enabled'],
             'url' => shoutEmoteUrl($e, $base), 'created_at' => $e['created_at'],
-            'uploaded_by' => $e['uploaded_by'], 'uploader' => null,
+            'uploaded_by' => $e['uploaded_by'], 'uploader' => null, 'uploader_avatar' => '',
             // Waiting, rather than merely off: an ACCOUNT's picture nobody has let through YET.
             // `approved_at` is what makes that a fact about the ROW instead of a guess from
             // `enabled`. An emote a moderator switched off has been answered for and stays out of
@@ -51,12 +51,21 @@ $listing = function () use ($db, $cfg, $base): array {
     $ids = array_values(array_unique(array_filter(array_column($rows, 'uploaded_by'), fn($v) => $v !== null)));
     if ($ids) {
         $in = implode(',', array_fill(0, count($ids), '?'));
-        $st = $db->prepare("SELECT id, username FROM users WHERE id IN ($in)");
+        // …and the picture beside each name (1.63.0) in the same query: an ADDRESS, '' while pictures
+        // are switched off.
+        $st = $db->prepare("SELECT id, username, avatar_sha FROM users WHERE id IN ($in)");
         $st->execute($ids);
         $names = [];
-        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $u) $names[(int)$u['id']] = (string)$u['username'];
+        $faces = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $u) {
+            $names[(int)$u['id']] = (string)$u['username'];
+            $faces[(int)$u['id']] = function_exists('userAvatarField') ? userAvatarField($u, 20, $base, $cfg) : '';
+        }
         foreach ($rows as $i => $r) {
-            if ($r['uploaded_by'] !== null) $rows[$i]['uploader'] = $names[(int)$r['uploaded_by']] ?? null;
+            if ($r['uploaded_by'] !== null) {
+                $rows[$i]['uploader'] = $names[(int)$r['uploaded_by']] ?? null;
+                $rows[$i]['uploader_avatar'] = $faces[(int)$r['uploaded_by']] ?? '';
+            }
         }
     }
     return $rows;

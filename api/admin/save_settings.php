@@ -57,6 +57,10 @@ $allowed = [
     'shout_nav', 'shout_live_seconds_guest', 'shout_system_lines',
     // the action name the room answers on (1.61.0)
     'shout_page_action',
+    // pictures and profile covers (1.63.0, includes/usermedia.php). The default picture and cover
+    // themselves are NOT here: they are stored bytes, written by admin/user_media, never typed.
+    'avatars_enabled', 'covers_enabled', 'avatar_max_kb', 'avatar_max_mp',
+    'cover_height', 'cover_height_mobile', 'cover_overlay', 'avatar_default',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -348,6 +352,12 @@ $intClamp = [
     // them is not a setting, it is the feature switch beside it spelled badly.
     'shout_emote_max_kb' => [8, 512, 64], 'shout_emote_max_px' => [32, 512, 128],
     'shout_emote_per_user' => [1, 200, 20],
+    // Pictures and covers: the ceilings are read from includes/usermedia.php, never retyped. No 0:
+    // an upload of no kilobytes or a band no pixels tall is the feature switch spelled badly.
+    'avatar_max_kb' => [USER_MEDIA_KB_MIN, USER_MEDIA_KB_MAX, USER_MEDIA_KB_DEFAULT],
+    'avatar_max_mp' => [USER_MEDIA_MP_MIN, USER_MEDIA_MP_MAX, USER_MEDIA_MP_DEFAULT],
+    'cover_height' => [USER_COVER_H_MIN, USER_COVER_H_MAX, 220],
+    'cover_height_mobile' => [USER_COVER_H_MIN, USER_COVER_H_MAX, 160],
     'digest_hours' => [1, 168, 24], 'digest_min' => [0, 10000, 1],
     'wl_edit_max_pending' => [0, 50, 3],
     'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],
@@ -414,7 +424,7 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
           'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval',
-          'shout_nav', 'shout_system_lines'] as $k) {
+          'shout_nav', 'shout_system_lines', 'avatars_enabled', 'covers_enabled'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
 // ── The shoutbox ──
@@ -438,6 +448,15 @@ if (isset($data['shout_page_action'])) {
         $v = 'shoutbox';
     }
     $data['shout_page_action'] = $v;
+}
+// ── Pictures and covers ──
+// Closed sets, coerced like the shoutbox's: 'gradient' is the overlay that keeps a name readable, and
+// 'generated' is the default that can never point at a picture that is not there.
+if (isset($data['cover_overlay']) && !in_array($data['cover_overlay'], ['gradient', 'darken', 'none'], true)) {
+    $data['cover_overlay'] = 'gradient';
+}
+if (isset($data['avatar_default']) && !in_array($data['avatar_default'], ['generated', 'image'], true)) {
+    $data['avatar_default'] = 'generated';
 }
 // House rules are a line of TEXT above the box — no markup is rendered from it, so it is only
 // bounded and stripped of control characters.

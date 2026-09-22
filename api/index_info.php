@@ -126,7 +126,7 @@ $canContent = userCan($db, $cfg, 'content.view');
 $content = richtextContentFor($db, $cfg, $hash);
 if (($content['kind'] ?? null) === 'wl' && !$wl) {
     $content = ['source_url' => null, 'source_trusted' => false, 'description_html' => '', 'content_status' => 'none',
-                'kind' => null, 'author' => null, 'author_id' => null];
+                'kind' => null, 'author' => null, 'author_id' => null, 'author_avatar' => ''];
 }
 $hasWords = ($content['content_status'] ?? 'none') === 'approved'
          && (($content['description_html'] ?? '') !== '' || ($content['source_url'] ?? null) !== null);
@@ -188,6 +188,9 @@ jsonResponse([
     // 1.53.0: who wrote it, whether the reader is being kept from it, what they may do, and what became
     // of their own words. The editor's limits ride along so the panel does not have to ask again.
     'content_author'    => $canContent ? ($content['author'] ?? null) : null,
+    // The picture beside that name (1.63.0) — an address, not the author's id, which this answer has
+    // never carried; shown exactly where the name is and nowhere else.
+    'content_author_avatar' => ($canContent && ($content['author'] ?? null) !== null) ? (string)($content['author_avatar'] ?? '') : '',
     'content_author_profile' => function_exists('profilesEnabled') && profilesEnabled($cfg),
     'content_hidden'    => !$canContent && $hasWords,
     'content_mine'      => $mine,

@@ -980,7 +980,7 @@ function richtextExcerpt(?string $text, int $len = 160): string {
 function richtextContentFor(PDO $db, array $cfg, string $hash, bool $asAdmin = false): array {
     $out = ['source_url' => null, 'source_trusted' => false, 'description_html' => '',
             'content_status' => 'none', 'format' => 'bbcode', 'rejected_note' => null,
-            'kind' => null, 'author' => null, 'author_id' => null];
+            'kind' => null, 'author' => null, 'author_id' => null, 'author_avatar' => ''];
     // Both homes (includes/content.php): the whitelist row of a registered torrent, or the
     // hash_content row of one the tracker has only seen.
     $rec = contentRecordFor($db, $hash);
@@ -1002,6 +1002,11 @@ function richtextContentFor(PDO $db, array $cfg, string $hash, bool $asAdmin = f
     $out['description_html'] = richtextRender($rec['description'] ?? '', $out['format'], $cfg,
                                               richtextViewerSignedIn($db));
     $out['author_id'] = $rec['content_user_id'];
-    $out['author'] = contentAuthorName($db, $rec['content_user_id']);
+    $author = contentAuthorRow($db, $rec['content_user_id']);
+    $out['author'] = $author !== null ? $author['username'] : null;
+    // The picture beside the author's name (1.63.0), as an ADDRESS: the public Info panel sends the
+    // name and never this id, so this is what it sends instead. '' while pictures are switched off.
+    $out['author_avatar'] = ($author !== null && function_exists('userAvatarField'))
+        ? userAvatarField($author, 20, function_exists('getBaseUrl') ? getBaseUrl() : '/', $cfg) : '';
     return $out;
 }

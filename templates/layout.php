@@ -19,7 +19,11 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
 // on the FRONT PAGE as well as at its own address, so `home` counts whenever the room is really
 // drawn there for this reader — the same three questions includes/homeblocks.php asks, so a page
 // that has no box never pays for the font.
-$iconsNeeded = in_array($action, ['transparency', 'stats', 'shoutbox', 'emotes'], true)
+// The account page's Picture and Cover drop zones (1.63.0) are the Emotes page's own and carry its
+// icon, so the font comes with them — only while either feature is on, so an account page without
+// them costs nothing.
+$mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') && (userAvatarsEnabled($cfg) || userCoversEnabled($cfg));
+$iconsNeeded = in_array($action, ['transparency', 'stats', 'shoutbox', 'emotes'], true) || $mediaEditor
     || ($action === 'home' && function_exists('shoutEnabled') && shoutEnabled($cfg)
         && shoutPlacement($cfg) !== 'page' && shoutMayView($db, $cfg));
 ?>
@@ -48,6 +52,9 @@ $iconsNeeded = in_array($action, ['transparency', 'stats', 'shoutbox', 'emotes']
     <?php if ($timelineNeeded): ?>
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/vendor/uplot/uPlot.min.css<?= assetVer('assets/vendor/uplot/uPlot.min.css') ?>">
     <?php endif; ?>
+    <?php if ($mediaEditor): ?>
+    <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/media-editor.css<?= assetVer('assets/css/media-editor.css') ?>">
+    <?php endif; ?>
     <?php if ($recaptchaNeeded): ?>
     <?= captchaHeadTags($cfg) ?>
     <?php endif; ?>
@@ -72,11 +79,20 @@ $iconsNeeded = in_array($action, ['transparency', 'stats', 'shoutbox', 'emotes']
     <script<?= nonceAttr() ?>>
     const APP_BASE = '<?= $baseUrl ?>';
     const APP_API = '<?= $baseUrl ?>api.php?endpoint=';
+    <?php /* The two facts window.userAvatarUrl() needs to build the same address userAvatarUrl() does:
+             whether pictures exist at all, and the site's default picture (its address prefix) when the
+             owner chose one. Nothing about any account — those ride along with each row. */ ?>
+    const APP_MEDIA = <?= json_encode(function_exists('userAvatarsEnabled')
+        ? ['avatars' => userAvatarsEnabled($cfg),
+           'def' => userAvatarDefaultMode($cfg) === 'image' ? substr(strtolower((string)$cfg['avatar_default_sha']), 0, 16) : '']
+        : ['avatars' => false, 'def' => '']) ?>;
     <?php if (($cfg['contact_obfuscate'] ?? '0') === '1' && !empty($cfg['site_email'])): ?>
     const OBF_EMAIL = <?= obfuscateEmail($cfg['site_email']) ?>;
     <?php endif; ?>
     </script>
     <script src="<?= $baseUrl ?>assets/js/captcha.js<?= assetVer('assets/js/captcha.js') ?>"></script>
+    <?php /* The picture beside every name (1.63.0), before everything that draws a row of people. */ ?>
+    <script src="<?= $baseUrl ?>assets/js/avatar.js<?= assetVer('assets/js/avatar.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/app.js<?= assetVer('assets/js/app.js') ?>"></script>
     <?php /* The star, the profile lists and the "who has this" overlay. Loaded on every public page
              for the same reason app.js is: the star is delegated from `document` and has to be there
@@ -106,6 +122,10 @@ $iconsNeeded = in_array($action, ['transparency', 'stats', 'shoutbox', 'emotes']
              visitor to carry them. */ ?>
     <?php if ($action === 'account'): ?>
     <script src="<?= $baseUrl ?>assets/js/account-security.js<?= assetVer('assets/js/account-security.js') ?>"></script>
+    <?php endif; ?>
+    <?php /* The picture and cover editor: the account page only, and only while either feature is on. */ ?>
+    <?php if ($mediaEditor): ?>
+    <script src="<?= $baseUrl ?>assets/js/media-editor.js<?= assetVer('assets/js/media-editor.js') ?>"></script>
     <?php endif; ?>
     <?php if ($timelineNeeded): ?>
     <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>

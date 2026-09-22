@@ -544,12 +544,19 @@
          * `title` because the column is a fixed width: a name longer than it is cut with an
          * ellipsis so it cannot push the words out of line, and a cut name with no way to read the
          * whole of it is a worse trade than the ragged column it replaced.
+         *
+         * The picture (1.63.0) is the first thing inside it, from the row's `avatar` — the address
+         * the server built — through window.userAvatarImg() (assets/js/avatar.js), which draws the
+         * element userAvatarHtml() draws in the template. Null while pictures are off: the name alone.
          */
         function who(r) {
             var name = String(r.user || '');
+            var pic = typeof window.userAvatarImg === 'function'
+                ? window.userAvatarImg({ username: name, avatar: String(r.avatar || '') }, 20, 'avatar shout-av') : null;
+            var kids = pic ? [pic, name] : [name];
             return (Number(r.user_id) || 0) > 0
-                ? el('a', { className: 'shout-who', title: name, href: BASE + '?action=u&name=' + encodeURIComponent(name), text: name })
-                : el('span', { className: 'shout-who', title: name, text: name });
+                ? el('a', { className: 'shout-who', title: name, href: BASE + '?action=u&name=' + encodeURIComponent(name) }, kids)
+                : el('span', { className: 'shout-who', title: name }, kids);
         }
 
         /**
@@ -572,11 +579,11 @@
             // `shout.moderate` and that answer is the same for every line on the page.
             if (mayModerate) {
                 row.appendChild(el('button', { type: 'button', className: 'shout-pin',
-                                               title: t('js.shout.pin'), 'aria-label': t('js.shout.pin'), text: '📌' }));
+                                               title: t('js.shout.pin_title'), 'aria-label': t('js.shout.pin'), text: '📌' }));
             }
             if (r.deletable) {
                 row.appendChild(el('button', { type: 'button', className: 'shout-del',
-                                               title: t('js.shout.delete'), 'aria-label': t('js.shout.delete'), text: '×' }));
+                                               title: t('js.shout.delete_title'), 'aria-label': t('js.shout.delete'), text: '×' }));
             }
             return row;
         }
@@ -599,7 +606,7 @@
             pinnedEl.appendChild(el('span', { className: 'shout-body rt-body', html: row.html || '' }));
             if (mayModerate) {
                 pinnedEl.appendChild(el('button', { type: 'button', className: 'shout-unpin',
-                                                    title: t('js.shout.unpin'), 'aria-label': t('js.shout.unpin'), text: '×' }));
+                                                    title: t('js.shout.unpin_title'), 'aria-label': t('js.shout.unpin'), text: '×' }));
             }
         }
 

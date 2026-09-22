@@ -26,6 +26,11 @@ function settingsCatalogGroups(): array {
          'keywords' => 'security captcha recaptcha hcaptcha turnstile bot spam abuse rate limit throttle lockout brute force proxy ip admin session timeout hardening panel address hidden url'],
         ['id' => 'users',        'title' => 'User accounts',      'icon' => 'bi-people',
          'keywords' => 'users accounts registration login members groups permissions verification terms email change cooldown search'],
+        // Pictures and covers (1.63.0) got a chip of their own beside the accounts, the way Sounds
+        // did: they are about how a person LOOKS on the site, and "User accounts" is already a long
+        // list about how they sign in.
+        ['id' => 'profiles',     'title' => 'Profiles',           'icon' => 'bi-person-badge',
+         'keywords' => 'profile profiles avatar avatars picture photo portrait image cover banner header background hero awatar zdjecie okladka tlo'],
         // "Tracker & whitelist" had grown to fourteen sections -- half of them about the machine
         // rather than about the whitelist. Split three ways: what the tracker SERVES (here), the
         // SERVICE that runs it, and the NETWORK it runs on. The keywords are split with it, so a
@@ -258,6 +263,18 @@ function settingsCatalogKeywords(): array {
         'wl_submitter_public'      => 'submitter uploader attribution my torrents uploads credit profile who registered',
         'search_time_budget'       => 'search timeout time limit budget seconds slow query 500 execution',
         'index_search_include_whitelist' => 'search whitelist rows included results registered torrents',
+
+        // ── Profiles: pictures and covers (includes/usermedia.php) ──
+        'avatars_enabled'          => 'avatar avatars picture profile photo portrait upload member face awatar zdjecie master switch',
+        'covers_enabled'           => 'cover covers banner header background profile hero image photo okladka tlo master switch',
+        'avatar_max_kb'            => 'avatar cover upload size limit kilobytes kb megabytes mb maximum file photo too large',
+        'avatar_max_mp'            => 'avatar cover megapixels pixels resolution dimensions limit decode memory bomb header check',
+        'cover_height'             => 'cover height pixels desktop profile band banner header tall',
+        'cover_height_mobile'      => 'cover height pixels mobile phone profile band banner header small screen',
+        'cover_overlay'            => 'cover overlay readability gradient darken shade dim text contrast name legible',
+        'avatar_default'           => 'default avatar picture letter initials generated fallback no picture placeholder image',
+        'avatar_default_image'     => 'default avatar picture image upload site fallback everybody without a picture position',
+        'cover_default_image'      => 'default cover banner header image upload site fallback everybody without a cover position',
 
         // ── Sounds (includes/sounds.php) ──
         'sounds_enabled'           => 'sounds sound audio chime notification noise play mute alert ping wake pre-roll',

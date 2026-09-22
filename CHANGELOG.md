@@ -4,6 +4,129 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.63.0] — 2026-09-22
+
+Schema **69** — a picture and a profile cover for every account: the core. The images live in a
+table of their own, `user_media`, and never on `users`, which is read with `SELECT *` on almost every
+request; what `users` gains is eight small columns (the picture's crop id, the cover's hash and each
+one's focal point and zoom), which is enough to build their addresses without another query.
+`profile.avatar` and `profile.cover` go to the member group; both features ship on. The standard to
+meet was the owner's own Flarum extension, flarum-cover-studio — its experience, without the things
+it got wrong. And then the picture beside every name across the site — the shoutbox, messages,
+the people lists, the navigation, the panel.
+
+### Added — one door for every image
+
+`includes/usermedia.php` is the only way an image gets in, and it asks its questions in the order
+that keeps the server alive. The size first (the setting, or what PHP will really take, whichever is
+lower — the forms quote that number rather than promising 8 MB on a PHP that stops at 2), then the
+magic bytes (JPEG, PNG, WebP or GIF; an SVG, a BMP, a phone's HEIC are refused by name), then the
+header: its type has to agree with the magic bytes and width × height has to fit
+`avatar_max_mp` — a 50 000 × 50 000 PNG is sixty bytes on the wire and ten gigabytes decoded, and it is
+refused here in a third of a millisecond. Only then is anything decoded. JPEGs are turned upright from
+their EXIF orientation, everything is bounded (1 600 px for a picture's source, 2 400 for a cover
+plus a 1 000 px copy for small surfaces), and everything is saved again as WebP with its alpha — which
+drops every byte of EXIF and GPS and leaves nothing of a file that was also something else. An
+animated GIF keeps its first frame, and the account page says so. The extension checked the size
+after decoding and stored WebP uploads byte for byte, location and all.
+
+A picture keeps its uncropped source and is cut into 64, 128 and 256 px squares on the server with
+the extension's own formula — CSS object-position semantics, so the saved picture matches what the
+editor showed to the pixel, which the tests prove by reading the pixels. Nothing is enlarged: a
+window too small for the larger sizes simply does not have them, and the stream answers with the next
+size down. Below 1× the picture floats on a blurred, darkened copy of itself. The first crop is cut
+from the stored source, the same bytes every later reframe reads, so the first and the tenth agree.
+
+Replacing or removing deletes the old rows in the same transaction. Nothing a member replaced or a
+moderator took down is left answering at an old address — the extension never deleted a file.
+
+### Added — the streams
+
+`api.php?endpoint=user_media&h=…&s=…` is content-addressed: sixteen characters of a hash and a size,
+no account id and no file name in it, so a new picture, a new framing or a new cover is a new address
+and every address may be cached for a year (`immutable`, an ETag, nosniff, a policy that forbids
+everything). The uncropped source is its owner's and the panel's alone — it may show exactly what
+somebody cropped away — and is never stored by a browser. `user_avatar_default&l=…&c=…` is the
+picture somebody without one gets: their initial on one of twelve colours taken from a hash of their
+name, so a person keeps theirs; thirty-six letters by twelve colours is the whole space.
+
+### Added — the editor on the account page
+
+The Profile card has a Picture and a Cover. A picked or dropped file opens as a local preview in the
+position editor, and nothing is sent until Save, which carries the file and its framing in one
+multipart request — the extension uploaded the moment a file was picked, centred and public. The
+editor is the extension's drag surface rebuilt: the image under the pointer stays under it, the
+thirds brighten while dragging, the arrows move the focus by 2 % (Shift 10 %), plus and minus zoom,
+the zoom readout resets to 1×, and there is a Re-centre. What is new: two fingers pinch-zoom, the
+wheel zooms in proportion to how far it turned, the slider runs the whole 0.5–4, the hint speaks of
+pinching on a touch screen, an image that will not load says so, Save waits for a change, and closing
+or leaving the page with one asks first. A cover is framed in the header's real shape — 976 × 220 on
+a wide screen, and one click shows the 342 × 160 band a phone keeps. A picture shows itself live at
+the three sizes it is really drawn at. Remove asks in place and says the image is deleted for good.
+Uploads are limited to six a minute per account and per address, reframes to twenty.
+
+### Added — the profile page
+
+A cover fills a band behind the head, painted the way the extension paints it — a clipped layer of
+its own (so no menu in the head is ever cut off), the blurred fill below 1×, the image at its focal
+point and zoom, and the readability overlay Settings chooses over the full height — with no z-index on
+anything that holds the content. The picture sits left of the name at 64 px, over the band's lower
+edge. With no cover of their own a profile gets the site's default cover, and without that the plain
+head it always had. The per-profile numbers arrive in a `<style>` that carries the request's nonce —
+on the first frame, before any script, and never as a `style=""` attribute — and the editor updates
+them through the CSSOM.
+
+### Added — the panel
+
+Settings has a Profiles chip: both switches, the upload ceiling, the megapixel ceiling, the two band
+heights, the overlay, and what somebody without a picture gets — their initial, or the site's default
+picture, set, framed and removed in the same editor, beside the default cover. The user edit modal
+offers Remove picture and Remove cover when there is one; it deletes, the member gets a notification,
+and it is in the audit log.
+
+### Added — the picture beside every name
+
+Wherever a person's name is drawn, their picture is drawn beside it now, on its left: the shoutbox
+(its rows and the pinned line, 20 px), the inbox and the head of a conversation (32), friends, requests
+and blocks and the member directory (32), the reader's own name in the navigation (20) and at the top
+of the account page (32), the "who has this" overlay — the people and the owners of the lists (20) —
+the "by …" under an emote, the author under a description in the Info panel (20), and in the panel the
+user list (24), the edit, grant and notify windows (48), the reported-message cards, the content
+review cards and the emote manager (20). A line the site said itself carries the site's own mark
+instead of a person's picture, even when it is signed with the name of the person it is about.
+
+It is one element everywhere — `userAvatarHtml()` on the server and `window.userAvatarImg()` in the
+browser, which moved out of `assets/js/app.js` into `assets/js/avatar.js` so the panel can load it
+too: round, with a hairline drawn one pixel inside the circle so a dark photo has an edge on a dark
+page, an explicit width and height so nothing moves while it loads, `alt=""` because the name beside
+it is the text, lazy, and a `srcset` naming the square each screen density should take where they
+differ (the 20 px pictures are the 64 square on every screen). A picture that fails to load becomes
+the person's initial.
+
+**No endpoint that withheld an account id sends one now.** The inbox, the people lists, the
+directory, "who has this" and the Info panel always sent a name and deliberately not the id behind
+it, even where their SQL had it; what they send beside the name now is the picture's address, built on
+the server from one more column of the join each of them already made — `avatar_sha` — so no list
+costs a query per row, and the address names a picture rather than a person. The browser draws only
+addresses of the three shapes the server writes. The shoutbox's first page and every row the poll
+appends are drawn from the same field by the two renderers and serialise to the same markup; the
+picture sits inside the fixed-width name column, which grows by exactly its width so a name keeps the
+8 rem it had and a long one still ends in an ellipsis, top-aligned in the line so no row is a pixel
+taller and the name, the time and the words stay on one baseline. A picture and its name are one unit
+wherever a line can wrap, so a narrow line never leaves a picture behind.
+
+Where the name is shown today the picture is shown too, and nowhere else: a hidden profile or a
+blocked person is exactly as visible as before. With pictures switched off (`avatars_enabled`) nothing
+is drawn anywhere — not a column of initials nobody asked for — and every surface is the one it was
+before this release, pixel for pixel. The account page's picture editor now also updates the
+reader's own picture in the navigation and the heading the moment a new one is saved.
+
+### Not in this release — notifications
+
+A notification's name is part of its sentence, written once into the title when it was sent, and
+`user_notifications` has no column that says who it was about. A picture there needs that column
+first, and a schema change of its own; it is not guessed from the text.
+
 ## [1.62.0] — 2026-09-22
 
 Schema **68** — one setting and one column. `site_timezone` is the zone this site shows times in,

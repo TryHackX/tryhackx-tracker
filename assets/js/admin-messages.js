@@ -54,10 +54,37 @@
         } catch (e) { return null; }
     }
 
+    /**
+     * A sentence with people in it (1.63.0): each person's picture right before their name, wherever
+     * the language put the name — through assets/js/avatar.js, from the ADDRESSES the server built,
+     * and the plain sentence where that file is not on the page or pictures are switched off.
+     */
+    function withFaces(tag, cls, key, slots) {
+        var span = el(tag, cls);
+        var names = Object.keys(slots);
+        if (typeof window.userAvatarPhrase !== 'function') {
+            var plain = {};
+            names.forEach(function (k) { plain[k] = slots[k].name; });
+            span.textContent = t(key, plain);
+            return span;
+        }
+        var vars = {}, people = [];
+        names.forEach(function (k, i) {
+            vars[k] = window.userAvatarSlot(i);
+            people.push([window.userAvatarImg({ username: slots[k].name, avatar: String(slots[k].avatar || '') }, 20, 'avatar msgrep-av'),
+                         slots[k].name]);
+        });
+        span.appendChild(window.userAvatarPhrase(t(key, vars), people));
+        return span;
+    }
+
     function card(rep) {
         var c = el('div', 'msgrep-card' + (rep.status === 'closed' ? ' msgrep-closed' : ''));
         var head = el('div', 'msgrep-head');
-        head.appendChild(el('span', 'msgrep-who', t('js.msgrep.head', { reporter: rep.reporter, reported: rep.reported })));
+        head.appendChild(withFaces('span', 'msgrep-who', 'js.msgrep.head', {
+            reporter: { name: rep.reporter, avatar: rep.reporter_avatar },
+            reported: { name: rep.reported, avatar: rep.reported_avatar },
+        }));
         head.appendChild(el('span', 'msgrep-when text-muted', rep.created_at));
         if (rep.status === 'closed') head.appendChild(el('span', 'badge-table badge-reviewed', t('js.msgrep.closed')));
         c.appendChild(head);
@@ -82,7 +109,8 @@
         // only order in which two lines can be read as an exchange.
         if (rep.context) {
             var ctx = el('div', 'msgrep-msg msgrep-ctx');
-            ctx.appendChild(el('div', 'msgrep-label text-muted', t('js.msgrep.context', { user: rep.context.from })));
+            ctx.appendChild(withFaces('div', 'msgrep-label text-muted', 'js.msgrep.context',
+                                      { user: { name: rep.context.from, avatar: rep.context.from_avatar } }));
             var cb = el('div', 'msgrep-body richtext');
             cb.innerHTML = rep.context.html;          // server-rendered through the shared sanitizer
             ctx.appendChild(cb);

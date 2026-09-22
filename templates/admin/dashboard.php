@@ -307,6 +307,8 @@
     <?php /* The reported-messages view. Loaded only where the permission is held, because the tab
              that opens it is not drawn otherwise and the endpoint behind it answers 403. */ ?>
     <?php if (pmEnabled($cfg) && panelCan($db, $cfg, 'panel.messages.view')): ?>
+    <?php /* …and the picture beside the two names on each card (1.63.0). */ ?>
+    <?= function_exists('userAvatarScriptTag') ? userAvatarScriptTag($baseUrl, $cfg) : '' ?>
     <script src="<?= $baseUrl ?>assets/js/admin-messages.js<?= assetVer('assets/js/admin-messages.js') ?>"></script>
     <?php endif; ?>
 </body>

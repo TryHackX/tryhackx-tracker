@@ -4590,6 +4590,9 @@ add('js.shout', {
     'older': ('Older', 'Starsze'),
     'no_more': ('That is the whole shoutbox.', 'To już cały shoutbox.'),
     'delete': ('Delete', 'Usuń'),
+    # The tooltip the page template gives the same button (shout.delete_title), so a row drawn by
+    # the server and a row appended by the poll are the same element down to the hover text.
+    'delete_title': ('Delete this shout', 'Usuń ten wpis'),
     'delete_q': ('Delete this shout?', 'Usunąć ten wpis?'),
     'yes': ('Yes', 'Tak'),
     'no': ('No', 'Nie'),
@@ -4680,8 +4683,12 @@ add('js.shout', {
 
 # ── 1.60.0: pinning, from the row and from the strip above the list ─────────
 add('js.shout', {
-    'pin':   ('Pin this line', 'Przypnij ten wpis'),
+    # Label and tooltip exactly as templates/partials/shoutbox_widget.php has them (shout.pin,
+    # shout.pin_title, shout.unpin_title): the two renderers must draw identical rows.
+    'pin':   ('Pin', 'Przypnij'),
+    'pin_title':   ('Pin this line at the top of the room', 'Przypnij ten wpis na górze pokoju'),
     'unpin': ('Unpin', 'Odepnij'),
+    'unpin_title': ('Take the pinned line down', 'Zdejmij przypięty wpis'),
 })
 
 # ── 1.61.0: the names `@` offers while somebody types ──────────────────────

@@ -48,6 +48,7 @@ $page  = min($page, $pages);
 // The two message rows come with the report, by id, and no query here can widen that: `m` is the
 // reported message and `c` is its context, both LEFT JOINed by the ids the report itself carries.
 $sql = "SELECT r.*, reporter.username AS reporter_name, reported.username AS reported_name,
+               reporter.avatar_sha AS reporter_avatar_sha, reported.avatar_sha AS reported_avatar_sha,
                m.body AS msg_body, m.body_format AS msg_format, m.created_at AS msg_at, m.id AS msg_id,
                c.body AS ctx_body, c.body_format AS ctx_format, c.created_at AS ctx_at,
                c.sender_id AS ctx_sender
@@ -63,7 +64,15 @@ $st->bindValue($i, ($page - 1) * $perPage, PDO::PARAM_INT);
 $st->execute();
 
 $rows = [];
+// The picture beside each of the two names (1.63.0), from the two joins above: an ADDRESS, and '' while
+// pictures are switched off.
+$base = getBaseUrl();
+$face = static fn(string $name, $sha): string => function_exists('userAvatarField')
+    ? userAvatarField(['username' => $name, 'avatar_sha' => $sha], 20, $base, $cfg) : '';
 foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+    $reporterAv = $face((string)$r['reporter_name'], $r['reporter_avatar_sha']);
+    $reportedAv = $face((string)$r['reported_name'], $r['reported_avatar_sha']);
+    $ctxMine = (int)$r['ctx_sender'] === (int)$r['reported_user_id'];
     $rows[] = [
         'id'         => (int)$r['id'],
         'status'     => (string)$r['status'],
@@ -72,6 +81,8 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         'reply'      => (string)($r['reply'] ?? ''),
         'reporter'   => (string)$r['reporter_name'],
         'reported'   => (string)$r['reported_name'],
+        'reporter_avatar' => $reporterAv,
+        'reported_avatar' => $reportedAv,
         'created_at' => (string)$r['created_at'],
         'handled_by' => (string)$r['handled_by'],
         'handled_at' => $r['handled_at'] ? (string)$r['handled_at'] : null,
@@ -87,7 +98,8 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             'at'   => (string)$r['ctx_at'],
             // Whose line the context was, by NAME — a moderator reading two lines needs to know
             // which of the two people said which, and nothing else about either of them.
-            'from' => (int)$r['ctx_sender'] === (int)$r['reported_user_id'] ? (string)$r['reported_name'] : (string)$r['reporter_name'],
+            'from' => $ctxMine ? (string)$r['reported_name'] : (string)$r['reporter_name'],
+            'from_avatar' => $ctxMine ? $reportedAv : $reporterAv,
         ] : null,
     ];
 }

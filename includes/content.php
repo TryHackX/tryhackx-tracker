@@ -90,12 +90,18 @@ function contentNameFor(PDO $db, string $hash): string {
     return is_string($name) && $name !== '' ? $name : strtolower($hash);
 }
 
-function contentAuthorName(PDO $db, ?int $userId): ?string {
+/**
+ * Who wrote the words, as the Info panel draws them: ['username', 'avatar_sha'] or null. The one
+ * query the name always cost (it was contentAuthorName() until 1.63.0) — the picture beside the name
+ * rides along in it rather than being asked for a second time.
+ */
+function contentAuthorRow(PDO $db, ?int $userId): ?array {
     if ($userId === null || $userId < 1) return null;
-    $st = $db->prepare("SELECT username FROM users WHERE id = ? LIMIT 1");
+    $st = $db->prepare("SELECT username, avatar_sha FROM users WHERE id = ? LIMIT 1");
     $st->execute([$userId]);
-    $u = $st->fetchColumn();
-    return is_string($u) && $u !== '' ? $u : null;
+    $u = $st->fetch(PDO::FETCH_ASSOC);
+    return (is_array($u) && is_string($u['username'] ?? null) && $u['username'] !== '')
+        ? ['username' => (string)$u['username'], 'avatar_sha' => $u['avatar_sha'] ?? null] : null;
 }
 
 /** What the digest and the tab badge count: everything waiting, in both homes. */

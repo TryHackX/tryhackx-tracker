@@ -86,7 +86,27 @@ $showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profL
          answered 403, which reads exactly like a permission problem and is not one. */ ?>
 <input type="hidden" id="account-csrf" value="<?= $csrfToken ?>">
 
+<?php
+// The picture and the cover (1.63.0, includes/usermedia.php). Their own cover, else the site's default
+// cover, else the plain head this page always had. The band is painted the way the research's
+// section 5 paints it (see .cv-paint in assets/css/style.css), and its numbers — the image address,
+// the focal point, the zoom, the two heights — arrive in a nonce'd <style> for this one element: on
+// the first frame, before any script, and never as a style="" attribute (userCoverStyleBlock()).
+$profCover = function_exists('userCoverFor') ? userCoverFor($profile, $baseUrl, $cfg) : null;
+$profTopCls = 'profile-top';
+if ($profCover !== null) {
+    $profTopCls .= ' has-cover cv-overlay-' . userCoverOverlay($cfg) . ($profCover['zoom'] < 1 ? ' cv-zoomout' : '');
+    echo userCoverStyleBlock('#profile-top', $profCover, $cfg);
+}
+?>
+<div class="<?= sanitize($profTopCls) ?>" id="profile-top">
+<?php if ($profCover !== null): ?>
+<div class="cv-paint" aria-hidden="true"><div class="cv-shade"></div></div>
+<?php endif; ?>
 <div class="profile-head">
+    <?php /* Left of the name at 64 px, cut from the 128 square — or the letter, or the site's default.
+             Nothing at all when pictures are switched off (userAvatarHtml() answers ''). */ ?>
+    <?= function_exists('userAvatarHtml') ? userAvatarHtml($profile, 64, $baseUrl, 'profile-avatar', $cfg) : '' ?>
     <span class="profile-name"><?= sanitize($profile['username']) ?></span>
     <?php if (!empty($profile['created_at'])): ?>
     <span class="profile-since"><?= _h('profile.member_since', ['date' => sanitize(substr((string)$profile['created_at'], 0, 10))]) ?></span>
@@ -115,6 +135,7 @@ $showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profL
             title="<?= _h('profile.share_title') ?>"><?= _h('search.share') ?></button>
     <?php endif; ?>
 </div>
+</div><?php /* /#profile-top */ ?>
 
 <?php if (!$showFav && !$showUploads && !$showLists): ?>
 <p class="text-muted"><?= _h('profile.nothing_shared') ?></p>
