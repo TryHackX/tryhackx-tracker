@@ -10,6 +10,8 @@ if (!$input || !is_array($input)) {
 $allowed = [
     'site_name', 'site_url', 'site_email', 'mail_from_email',
     'announce_url', 'announce_url_https', 'github_url',
+    // schema v68: the zone this site shows times in (includes/db_clock.php)
+    'site_timezone',
     'contact_visible', 'contact_obfuscate', 'hmac_secret',
     'recaptcha_enabled', 'recaptcha_site_key', 'recaptcha_secret',
     'recaptcha_on_report', 'recaptcha_on_login', 'recaptcha_on_status',
@@ -621,6 +623,14 @@ if (isset($data['tracker_schedule'])) {
 }
 if (isset($data['tracker_schedule_tz']) && !scheduleValidTimezone($data['tracker_schedule_tz'])) {
     jsonResponse(['error' => __('api.settings.schedule_tz_invalid')], 400);
+}
+// The site's display zone (v68). A name PHP knows, or empty — empty being "follow the schedule's
+// zone, then PHP's", which is what siteTimezone() reads it as. The same test users.timezone passes
+// (tzValidName()), so the Settings page and the account page cannot accept different words for a
+// zone. Refused rather than coerced: a zone saved as something else would move every reader's clock
+// to a place the operator never chose.
+if (isset($data['site_timezone']) && $data['site_timezone'] !== '' && !tzValidName($data['site_timezone'])) {
+    jsonResponse(['error' => __('api.settings.site_tz_invalid')], 400);
 }
 if (isset($data['tracker_mode_switch_cmd']) && !scheduleValidSwitchCommand($data['tracker_mode_switch_cmd'])) {
     jsonResponse(['error' => __('api.settings.mode_switch_cmd_invalid')], 400);

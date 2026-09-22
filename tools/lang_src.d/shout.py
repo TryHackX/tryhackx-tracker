@@ -149,3 +149,11 @@ add('', {
     'title.shoutbox': ('Shoutbox', 'Shoutbox'),
     'title.emotes':   ('Emotes', 'Emote'),
 })
+
+# ── 1.62.0: a picture in a shout is a link ─────────────────────────────────
+# The title on the link round a picture. It names the one thing a pointer cannot discover on its own:
+# that the same picture also opens in a tab of its own.
+add('shout', {
+    'img_open': ('Click to enlarge — Ctrl+click opens the original in a new tab',
+                 'Kliknij, aby powiększyć — Ctrl+klik otwiera oryginał w nowej karcie'),
+})

@@ -210,7 +210,11 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
         <div class="shout-row<?= !empty($s['own']) ? ' shout-row-own' : '' ?><?= !empty($s['mentions_me']) ? ' shout-row-mention' : '' ?><?= !empty($s['system']) ? ' shout-row-system' : '' ?>"
              data-id="<?= (int)$s['id'] ?>" data-user="<?= sanitize((string)($s['user'] ?? '')) ?>">
             <?= $shoutWho($s) ?>
-            <span class="shout-time" title="<?= sanitize((string)($s['at'] ?? '')) ?>"><?= sanitize(substr((string)($s['at'] ?? ''), 11, 5)) ?></span>
+            <?php /* The hour in the READER's zone, formatted by the server (1.62.0) — the same
+                     shoutShape() fields the poll hands renderRow(), so a line drawn here and a line
+                     appended later can never disagree about when they were said. The title is the
+                     whole date with its offset. */ ?>
+            <span class="shout-time" title="<?= sanitize((string)($s['at'] ?? '')) ?>"><?= sanitize((string)($s['time'] ?? '')) ?></span>
             <span class="shout-body rt-body"><?= $s['html'] ?? '' ?></span>
             <?php /* Pinning is `shout.moderate`, which the box already knows about — so the button
                      is drawn from that and needs nothing per row. Hidden until the line is hovered,

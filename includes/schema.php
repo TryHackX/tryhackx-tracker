@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 67;  // 67 = one setting and one permission, no tables: `shout_page_action` (the action name the room answers on, so an operator can have ?action=chat) and `shout.emote_auto` (an upload that skips the approval queue) — registered and, like shout.upload_emote before it, granted to nobody
+const TRACKER_SCHEMA_VERSION = 68;  // 68 = one setting and one column: `site_timezone` (the zone this site shows times in; empty = follow tracker_schedule_tz, then PHP's own) and users.timezone (NULL = the site's) — the shoutbox is the first reader of both
+                                    // 67 = one setting and one permission, no tables: `shout_page_action` (the action name the room answers on, so an operator can have ?action=chat) and `shout.emote_auto` (an upload that skips the approval queue) — registered and, like shout.upload_emote before it, granted to nobody
                                     // 66 = the shoutbox's pinned line (shouts.pinned_at/pinned_by, at most one of them at a time) and the lines the SITE says (shouts.is_system) — which is why user_id is nullable from here on: an announcement has no author, and a row pointing at account 0 would be a lie rather than an absence
                                     // 65 = shout_emote_approval and the approved_at stamp beside it: a member's uploaded emote waits for the operator instead of being everybody's the moment it lands, and the stamp is what keeps "waiting to be let in" apart from "switched off afterwards"
                                     // 64 = shoutbox emotes and stickers (includes/shout.php): `shout_emotes` (images as rows, like `sounds`), the five shout_emote_*/shout_stickers_* settings, the `shout.upload_emote` permission (registered, granted to nobody), and the shipped examples seeded from assets/emotes/*.svg
@@ -514,6 +515,11 @@ function trackerSchemaStatements(): array {
             -- marks: how many since this id is a walk down the primary key, and nothing has to be
             -- pruned afterwards. 0 = has never looked, which is what every existing account gets.
             `shout_seen_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            -- v68: the zone this reader sees times in, as an IANA name (Europe/Warsaw). NULL is not
+            -- a zone: it means 'use the site zone', so moving the site zone moves everybody who
+            -- never chose and nobody who did. Validated against the zones PHP knows wherever it is
+            -- written (userSetTimezone), and read as NULL wherever PHP does not know it.
+            `timezone` VARCHAR(64) DEFAULT NULL,
             -- v53. The instant every OTHER session of this account stopped counting: a unix time,
             -- stamped by 'sign out everywhere else' and by a password change. A UNIX TIMESTAMP and
             -- not a DATETIME on purpose — it is compared against the session login time, which
@@ -1304,6 +1310,9 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // v63: how far this reader has read the shoutbox — see the CREATE above. 0 for every existing
     // account, which means "everything in the room is new" until they open it once.
     if (!schemaColumnExists($db, 'users', 'shout_seen_id')) $uparts[] = "ADD COLUMN `shout_seen_id` BIGINT UNSIGNED NOT NULL DEFAULT 0";
+    // v68: the zone this reader sees times in — see the CREATE above. NULL for every existing
+    // account, which is "the site's zone": an upgrade moves nobody's clock except to the site's.
+    if (!schemaColumnExists($db, 'users', 'timezone')) $uparts[] = "ADD COLUMN `timezone` VARCHAR(64) DEFAULT NULL";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
 
     // v56: a message no longer leaves a notification behind.
@@ -2585,6 +2594,13 @@ function trackerSchemaDefaultSettings(): array {
         // (siteRoutes() is what it asks) and falls back to this, because a bad row here would
         // otherwise take an address off the site rather than merely rename one.
         'shout_page_action'           => 'shoutbox',
+        // ── The site's clock (v68) ──────────────────────────────────────────────────────────────
+        // The zone this site shows times in, as an IANA name. EMPTY until the operator picks one,
+        // and empty is not UTC: siteTimezone() reads it as "the zone the schedule already runs in
+        // (tracker_schedule_tz), else the one PHP runs in" — decided on read, so it follows whatever
+        // the operator has actually told the panel rather than a guess frozen at upgrade time. Every
+        // account without a zone of its own (users.timezone NULL) reads the room in this one.
+        'site_timezone'               => '',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

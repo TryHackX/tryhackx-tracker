@@ -191,3 +191,13 @@ add('', {
     'account.snd_ev_shout': ('A shout from anyone else', 'Shout od pozostałych'),
     'account.snd_ev_mention': ('Somebody mentions me (@name) in the shoutbox', 'Ktoś wspomina mnie (@nazwa) w shoutboxie'),
 })
+
+# ── 1.62.0: the zone this reader sees times in ─────────────────────────────
+# `tz_site` names the zone it stands for and its offset right now: a bare "default" is a promise
+# nobody can check.
+add('', {
+    'account.tz_head': ('Time zone', 'Strefa czasowa'),
+    'account.tz_note': ('The shoutbox shows its times in this zone. The site default follows whatever zone the site is set to, so it moves when that does.',
+        'W tej strefie shoutbox pokazuje godziny. Domyślna strefa serwisu idzie za ustawieniem strony, więc zmienia się razem z nim.'),
+    'account.tz_site': ('Site default (:zone, :offset)', 'Domyślna strefa serwisu (:zone, :offset)'),
+})

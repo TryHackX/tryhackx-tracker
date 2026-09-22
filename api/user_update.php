@@ -2,7 +2,7 @@
 /**
  * POST user_update — self-service profile changes; every change requires the CURRENT password.
  * Body: {csrf_token, current_password, new_password?} and/or {email?} (empty = remove) and/or
- * {cancel_email_change:1}.
+ * {cancel_email_change:1} and/or {timezone:'Europe/Warsaw'|''} — the last two need only the session.
  *
  * Email changes are TWO-STEP (schema v9): nothing is written immediately — a confirmation link
  * goes to the OLD address, then one to the NEW address; only the second click applies the change
@@ -23,6 +23,22 @@ if (!$u) jsonResponse(['error' => 'not_logged_in'], 401);
 if (!empty($input['cancel_email_change'])) {
     userEmailChangeCancel($db, (int)$u['id']);
     jsonResponse(['success' => true, 'changed' => ['email_change_cancelled']]);
+}
+
+// The display time zone (v68), and for the same reason: which clock somebody reads the room in says
+// nothing about who they are. A password asked for a preference teaches people the prompt means
+// nothing — the rule the privacy toggles on the same page already follow. '' = the site's zone.
+if (array_key_exists('timezone', $input)) {
+    if (!userSetTimezone($db, (int)$u['id'], (string)$input['timezone'])) {
+        jsonResponse(['error' => __('api.account.timezone_invalid')], 400);
+    }
+    // The zone now in force, said back the way the page prints it, so the answer can be checked
+    // against what the select shows rather than trusted.
+    $fresh = userFindById($db, (int)$u['id']) ?: $u;
+    $zone = userDisplayTimezone($fresh, $cfg);
+    jsonResponse(['success' => true, 'changed' => ['timezone'],
+                  'timezone' => $fresh['timezone'] ?? null,
+                  'zone' => $zone->getName(), 'offset' => tzOffsetLabel($zone)]);
 }
 
 // The same budget as the other password-checking account endpoints (user_2fa, user_sessions): this

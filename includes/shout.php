@@ -299,6 +299,46 @@ function shoutLinkMentions(string $html, array $known, string $baseUrl, string $
     return implode('', $parts);
 }
 
+/**
+ * Make every picture in a shout openable (1.62.0): each `<img class="rt-img">` the renderer built is
+ * wrapped in a link to its own address, opening in a new tab.
+ *
+ * A LINK, not a script's idea of one. assets/js/shoutbox.js intercepts only the unmodified primary
+ * click to open the lightbox; Ctrl/Cmd+click, a middle click, the context menu's "open in new tab"
+ * and a long press on a phone all stay the browser's, and none of them had to be written again.
+ *
+ * The address is the `src` the renderer already put through richtextSafeUrl() (http/https, a host,
+ * control characters gone) and escaped — reused byte for byte, never decoded and never parsed, so
+ * nothing here can make an address the renderer refused. No `data-external`: the picture has already
+ * been fetched from that host to be on the screen at all, and opening it bigger shows the same bytes,
+ * so the "you are leaving" question would be asked about a page the reader is already looking at —
+ * and it would swallow the Ctrl+click this exists to leave alone. `noreferrer` keeps the rule the
+ * image itself follows (referrerpolicy="no-referrer").
+ *
+ * Only pictures the RENDERER made: emotes are words and a sticker is already its own full size, and
+ * both are drawn later by shoutRenderEmotes() with classes of their own. A picture that is already
+ * inside a link is left alone as well — the author made it point somewhere, and a link inside a link
+ * is not HTML. The split is on tags, like shoutLinkMentions(), so an `rt-img` inside some text is text.
+ */
+function shoutLinkImages(string $html, string $title = ''): string
+{
+    if ($html === '' || !str_contains($html, 'rt-img')) return $html;
+    $parts = preg_split('/(<[^>]*>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+    if ($parts === false) return $html;
+    $titleAttr = $title !== '' ? ' title="' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '"' : '';
+    $inLink = 0;
+    foreach ($parts as $i => $part) {
+        if ($i % 2 === 0) continue;                           // even entries are the text between tags
+        if (preg_match('#^<a\b#i', $part)) { $inLink++; continue; }
+        if (preg_match('#^</a\s*>#i', $part)) { $inLink = max(0, $inLink - 1); continue; }
+        if ($inLink > 0 || !preg_match('#^<img\b[^>]*\bclass="rt-img"#i', $part)) continue;
+        if (!preg_match('#\bsrc="([^"]+)"#', $part, $m)) continue;
+        $parts[$i] = '<a class="shout-img-link" href="' . $m[1] . '" target="_blank" rel="noopener noreferrer"'
+                   . $titleAttr . '>' . $part . '</a>';
+    }
+    return implode('', $parts);
+}
+
 /* ── writing one ───────────────────────────────────────────────────────────── */
 
 /**
@@ -435,8 +475,36 @@ function shoutSystemWhitelistAdded(PDO $db, array $cfg, int $count, ?int $submit
  * author. An inner join would have silently dropped exactly those rows from every list.
  */
 const SHOUT_ROW_SELECT = "SELECT s.id, s.user_id, s.body, s.body_format, s.created_at, s.is_system,
-                                 s.pinned_at, u.username
+                                 s.pinned_at, u.username,
+                                 UNIX_TIMESTAMP(s.created_at) AS created_ts
                             FROM shouts s LEFT JOIN users u ON u.id = s.user_id";
+// `created_ts` (1.62.0) is the moment as an INSTANT, converted by the database from its own session
+// zone — the zone that DATETIME was written in. PHP reading `created_at` as a string would assume its
+// own zone instead, which is right on a machine where the two agree and hours off on one where they do
+// not (includes/db_clock.php). Every time a reader sees is made from this number.
+
+/**
+ * When a row was said, as a unix time — or null when nothing says.
+ *
+ * From `created_ts`, which SHOUT_ROW_SELECT has the database compute, because only the database knows
+ * which zone its DATETIME was written in. A row that reached here some other way (a hand-built array)
+ * is asked about the same way rather than parsed in PHP: UNIX_TIMESTAMP() of the string reads it in
+ * the session zone, which is exactly what `new DateTime()` would get wrong.
+ */
+function shoutRowInstant(PDO $db, array $r): ?int
+{
+    if (isset($r['created_ts']) && is_numeric($r['created_ts'])) return (int)$r['created_ts'];
+    $at = (string)($r['created_at'] ?? '');
+    if ($at === '') return null;
+    try {
+        $st = $db->prepare("SELECT UNIX_TIMESTAMP(?)");
+        $st->execute([$at]);
+        $v = $st->fetchColumn();
+        return is_numeric($v) ? (int)$v : null;
+    } catch (\Throwable $e) {
+        return null;
+    }
+}
 
 /** The newest id in the room — the baseline a freshly drawn widget starts polling from. */
 function shoutNewestId(PDO $db): int
@@ -520,6 +588,25 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
     $siteName = trim((string)($cfg['site_name'] ?? ''));
     if ($siteName === '') $siteName = __('shout.system_who');
 
+    // THE READER'S CLOCK (1.62.0), once for the batch. Every row this function shapes — the first
+    // page the server draws and every row a poll appends — gets its time from here, so the two can
+    // never disagree about what hour a line was said at. Their own zone when they chose one, the
+    // site's otherwise; a guest has no row and reads the site's. A caller holding only part of the
+    // account row (a test, a hand-built array) has the zone asked for rather than silently guessed.
+    $tzRow = $meId > 0 ? $me : null;
+    if ($meId > 0 && !array_key_exists('timezone', $me)) {
+        try {
+            $st = $db->prepare("SELECT timezone FROM users WHERE id = ?");
+            $st->execute([$meId]);
+            $tzRow = ['timezone' => $st->fetchColumn() ?: null];
+        } catch (\Throwable $e) {
+            $tzRow = null;   // the column arrives with schema 68; mid-upgrade everybody reads the site's
+        }
+    }
+    $tz = userDisplayTimezone($tzRow, $cfg);
+    // What a picture's link says when the pointer rests on it — one lookup for the batch.
+    $imgTitle = __('shout.img_open');
+
     // Which of these lines named me — from the table written when they were said, not from parsing
     // them again now.
     $mine = [];
@@ -567,14 +654,24 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
         // take back their own sentence, and nobody wrote this one.
         $own = !$system && $meId > 0 && $authorId === $meId;
         $fmt = (string)$r['body_format'];
+        // Pictures become openable here (1.62.0) and nowhere else: this is the one place a shout
+        // becomes something to display, so the first page and the poll hand over the same markup.
         $html = $fmt === 'plain'
             ? nl2br(htmlspecialchars((string)$r['body'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false)
-            : richtextRender((string)$r['body'], $fmt, $cfg, true);
+            : shoutLinkImages(richtextRender((string)$r['body'], $fmt, $cfg, true), $imgTitle);
+        $ts = shoutRowInstant($db, $r);
         $out[] = [
             'id'          => (int)$r['id'],
             'user'        => $authorName !== '' ? $authorName : $siteName,
             'user_id'     => $authorName !== '' ? $authorId : 0,
-            'at'          => (string)$r['created_at'],
+            // The moment, three ways, all in the READER's zone: `time` is what the list prints,
+            // `at` is the title over it — the full date with its offset, so nobody has to guess
+            // which clock "14:05" was on — and `ts` is the instant itself for anything that has to
+            // compare two rows. The raw column never leaves the server: it is a wall-clock string in
+            // the database session's zone, and that zone is nobody's.
+            'time'        => $ts !== null ? userDisplayTime($ts, $tz, 'H:i') : '',
+            'at'          => $ts !== null ? userDisplayTime($ts, $tz, 'Y-m-d H:i:s P') : '',
+            'ts'          => $ts,
             // Mentions first, emotes last: both walk the TEXT of finished html and neither may see
             // the other's tag as writing. `:code:` inside an href is an address, not an emote.
             'html'        => shoutRenderEmotes(shoutLinkMentions($html, $known, $base, $meName), $emotes, $base, $stickersOn),

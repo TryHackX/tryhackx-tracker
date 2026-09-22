@@ -540,6 +540,128 @@ try {
     $mq->execute(['%']);
     check('… and eight is the ceiling however much matches', count($mq->fetchAll(PDO::FETCH_COLUMN)) <= 8);
 
+    // ── 1.62.0: the zone a reader sees times in ─────────────────────────────
+    // Every switch this section leans on is SET here, never inherited: $cfgOn is merged from the
+    // live settings of whatever database runs this, and two checks in this file once accused working
+    // code by inheriting the very switch they claimed was off.
+    $cfgTz = array_merge($cfgOn, ['site_timezone' => 'Europe/Warsaw', 'tracker_schedule_tz' => 'Europe/Warsaw',
+                                  'friends_enabled' => '0', 'shout_emotes_enabled' => '0', 'shout_stickers_enabled' => '0']);
+    check('schema 68: users.timezone exists, and site_timezone ships empty (= follow the schedule, then PHP)',
+          (int)($cfg['schema_version'] ?? 0) >= 68 && schemaColumnExists($db, 'users', 'timezone')
+          && array_key_exists('site_timezone', $defaults) && $defaults['site_timezone'] === '',
+          var_export($defaults['site_timezone'] ?? null, true));
+    check('a zone is an IANA name PHP knows — nothing else passes',
+          tzValidName('Europe/Warsaw') && tzValidName('UTC') && tzValidName('America/Argentina/Buenos_Aires')
+          && !tzValidName('') && !tzValidName('Mars/Olympus_Mons') && !tzValidName('europe/warsaw')
+          && !tzValidName('+02:00') && !tzValidName('Europe/Warsaw ') && !tzValidName('../../etc/passwd'));
+    $phpZone = date_default_timezone_get();
+    check('the site zone: the operator\'s choice first…',
+          siteTimezone(['site_timezone' => 'Asia/Tokyo', 'tracker_schedule_tz' => 'America/New_York']) === 'Asia/Tokyo');
+    check('… then, until they choose, the zone the schedule already runs in…',
+          siteTimezone(['site_timezone' => '', 'tracker_schedule_tz' => 'America/New_York']) === 'America/New_York'
+          && siteTimezone(['site_timezone' => 'Nowhere/Land', 'tracker_schedule_tz' => 'America/New_York']) === 'America/New_York');
+    check('… and only when that is missing or broken, PHP\'s own',
+          siteTimezone(['site_timezone' => '', 'tracker_schedule_tz' => 'bogus']) === (tzValidName($phpZone) ? $phpZone : 'UTC')
+          && siteTimezone([]) === (tzValidName($phpZone) ? $phpZone : 'UTC'), $phpZone);
+    check('a reader\'s own zone wins; NULL, a broken name and a guest all read the site\'s',
+          userDisplayTimezone(['timezone' => 'Asia/Tokyo'], $cfgTz)->getName() === 'Asia/Tokyo'
+          && userDisplayTimezone(['timezone' => null], $cfgTz)->getName() === 'Europe/Warsaw'
+          && userDisplayTimezone(['timezone' => 'Bogus/Zone'], $cfgTz)->getName() === 'Europe/Warsaw'
+          && userDisplayTimezone(null, $cfgTz)->getName() === 'Europe/Warsaw');
+    // Written through the account's own path, with the same test the Settings page uses.
+    $tzOf = function (int $id) use ($db) {
+        $st = $db->prepare("SELECT timezone FROM users WHERE id = ?");
+        $st->execute([$id]);
+        return $st->fetchColumn();
+    };
+    check('an account takes a real zone…', userSetTimezone($db, (int)$me['id'], 'Asia/Tokyo') === true
+          && $tzOf((int)$me['id']) === 'Asia/Tokyo');
+    check('… refuses one that is not, and writes nothing when it does',
+          userSetTimezone($db, (int)$me['id'], 'Mars/Olympus_Mons') === false && $tzOf((int)$me['id']) === 'Asia/Tokyo'
+          && userSetTimezone($db, 0, 'Asia/Tokyo') === false);
+    check('… and an empty choice hands it back to the site (NULL, not a zone called "")',
+          userSetTimezone($db, (int)$mod['id'], '') === true && $tzOf((int)$mod['id']) === null);
+    userSetTimezone($db, (int)$mod['id'], 'America/New_York');
+
+    // TWO READERS, TWO ZONES, ONE ROW. Noon UTC on 15 January, written while the database session
+    // runs on an offset PHP does NOT — so a `new DateTime($row['created_at'])` in PHP's zone gets it
+    // wrong, and the only way to the right hour is the database's own conversion.
+    $db->exec("DELETE FROM shout_mentions");
+    $db->exec("DELETE FROM shouts");
+    $noon = (new DateTimeImmutable('2026-01-15 12:00:00', new DateTimeZone('UTC')))->getTimestamp();
+    $sessZone = date('P') === '+03:00' ? '+05:00' : '+03:00';
+    $written = (new DateTimeImmutable('@' . $noon))->setTimezone(new DateTimeZone($sessZone))->format('Y-m-d H:i:s');
+    $db->exec("SET time_zone = '" . $sessZone . "'");
+    try {
+        $db->prepare("INSERT INTO shouts (user_id, body, body_format, created_at) VALUES (?, 'said at noon UTC', 'plain', ?)")
+           ->execute([(int)$friend['id'], $written]);
+        $noonId = (int)$db->lastInsertId();
+        $tokyo = shoutRows($db, $cfgTz, $row('shtuser'), 5, $noonId - 1)[0] ?? [];
+        $york  = shoutRows($db, $cfgTz, $row('shtmod'), 5, $noonId - 1)[0] ?? [];
+        $guest = shoutRows($db, $cfgTz, [], 5, $noonId - 1)[0] ?? [];
+        $firstPage = shoutRows($db, $cfgTz, $row('shtuser'), 5);
+        // A caller holding only the account's id (the shape a hand-built array has) is asked about.
+        $bare = shoutRows($db, $cfgTz, ['id' => (int)$me['id']], 5, $noonId - 1)[0] ?? [];
+    } finally {
+        $db->exec("SET time_zone = '" . date('P') . "'");
+    }
+    $naive = (new DateTime($written))->setTimezone(new DateTimeZone('Asia/Tokyo'))->format('H:i');
+    check('the fixture is one a naive parse gets wrong (session ' . $sessZone . ', PHP ' . date('P') . ')',
+          $naive !== '21:00', $naive);
+    check('the same row, formatted on the server: 21:00 for a reader in Tokyo…',
+          ($tokyo['time'] ?? '') === '21:00' && ($tokyo['at'] ?? '') === '2026-01-15 21:00:00 +09:00'
+          && ($tokyo['ts'] ?? 0) === $noon, json_encode($tokyo));
+    check('… 07:00 for a reader in New York, the same instant underneath',
+          ($york['time'] ?? '') === '07:00' && ($york['at'] ?? '') === '2026-01-15 07:00:00 -05:00'
+          && ($york['ts'] ?? 0) === $noon, json_encode($york));
+    check('… and the site\'s zone for a guest (Warsaw in January: 13:00, +01:00)',
+          ($guest['time'] ?? '') === '13:00' && ($guest['at'] ?? '') === '2026-01-15 13:00:00 +01:00', json_encode($guest));
+    $fp = array_values(array_filter($firstPage, fn($r) => (int)$r['id'] === $noonId))[0] ?? [];
+    check('the first page and the poll hand over the same hour for the same line',
+          ($fp['time'] ?? '') === ($tokyo['time'] ?? 'x') && ($fp['at'] ?? '') === ($tokyo['at'] ?? 'x'), json_encode($fp));
+    check('a reader row without the column loaded still gets its own zone, not a guess',
+          ($bare['time'] ?? '') === '21:00', json_encode($bare));
+    check('the raw database string does not travel any more', !array_key_exists('created_at', $tokyo)
+          && !str_contains(json_encode($tokyo), $written));
+
+    // ── 1.62.0: a picture is a link to itself; an emote and a sticker are not ──
+    $cfgImg = array_merge($cfgOn, ['desc_max_images' => '5', 'desc_allow_bbcode' => '1', 'desc_allow_markdown' => '1',
+                                   'shout_flood_seconds' => '0', 'shout_emotes_enabled' => '1', 'shout_stickers_enabled' => '1']);
+    $r = shoutPost($db, $cfgImg, $me, 'look [img]https://example.org/pic.png[/img]', 'bbcode', '');
+    $h = (string)($r['row']['html'] ?? '');
+    check('a BBCode picture is wrapped in a link to its own address, opening in a new tab',
+          !empty($r['ok']) && (bool)preg_match('#<a class="shout-img-link" href="https://example\.org/pic\.png" target="_blank" rel="noopener noreferrer"[^>]*><img class="rt-img"[^>]*src="https://example\.org/pic\.png"[^>]*></a>#', $h),
+          $h);
+    $r = shoutPost($db, $cfgImg, $me, '![a cat](https://example.org/cat.png)', 'markdown', '');
+    $h = (string)($r['row']['html'] ?? '');
+    check('… and so is the Markdown form, keeping its alt text',
+          !empty($r['ok']) && str_contains($h, '<a class="shout-img-link" href="https://example.org/cat.png"')
+          && str_contains($h, 'alt="a cat"'), $h);
+    $amp = shoutLinkImages(richtextRender('[img]https://example.org/p.png?a=1&b=2[/img]', 'bbcode', $cfgImg, true), 't');
+    check('the link carries the address the renderer validated, byte for byte',
+          str_contains($amp, 'href="https://example.org/p.png?a=1&amp;b=2"') && str_contains($amp, 'src="https://example.org/p.png?a=1&amp;b=2"'), $amp);
+    $inUrl = shoutLinkImages(richtextRender('[url=https://example.org/page][img]https://example.org/pic.png[/img][/url]', 'bbcode', $cfgImg, true), 't');
+    check('a picture the author already made a link is left as their link — never a link inside a link',
+          substr_count($inUrl, '<a ') === 1 && !str_contains($inUrl, 'shout-img-link'), $inUrl);
+    $bad = shoutLinkImages(richtextRender('[img]javascript:alert(1)[/img]', 'bbcode', $cfgImg, true), 't');
+    check('an address the renderer refused makes no picture and no link', !str_contains($bad, 'shout-img-link') && !str_contains($bad, '<img'), $bad);
+    // Emotes and stickers, through the real pipeline with pictures made for this check.
+    $fakeEmotes = [
+        'zzsmile' => ['id' => 1, 'code' => 'zzsmile', 'name' => 'Smile', 'width' => 16, 'height' => 16, 'is_sticker' => false, 'sha1' => str_repeat('a', 40)],
+        'zzstick' => ['id' => 2, 'code' => 'zzstick', 'name' => 'Stick', 'width' => 128, 'height' => 128, 'is_sticker' => true, 'sha1' => str_repeat('b', 40)],
+    ];
+    $inline = shoutRenderEmotes(shoutLinkImages(richtextRender('hi :zzsmile: there [img]https://example.org/x.png[/img]', 'bbcode', $cfgImg, true), 't'), $fakeEmotes, '/', true);
+    check('an emote is a word in the sentence and stays one — only the real picture beside it opens',
+          str_contains($inline, 'class="shout-emote"') && substr_count($inline, 'shout-img-link') === 1
+          && !preg_match('#shout-img-link[^>]*><img class="shout-emote"#', $inline), $inline);
+    $stick = shoutRenderEmotes(shoutLinkImages(richtextRender(':zzstick:', 'bbcode', $cfgImg, true), 't'), $fakeEmotes, '/', true);
+    check('a sticker is already its full size, so it is not a link either',
+          str_contains($stick, 'class="shout-sticker"') && !str_contains($stick, 'shout-img-link') && !str_contains($stick, '<a '), $stick);
+    $wave = shoutPost($db, $cfgImg, $me, 'hello :wave: there', 'bbcode', '');
+    $wh = (string)($wave['row']['html'] ?? '');
+    check('… and a shipped emote through shoutPost() is drawn, and not wrapped',
+          !empty($wave['ok']) && str_contains($wh, 'class="shout-emote"') && !str_contains($wh, 'shout-img-link'), $wh);
+
     // ── retention ────────────────────────────────────────────────────────────
     // A room of exactly known size, so both halves can be measured rather than estimated.
     $db->exec("DELETE m FROM shout_mentions m JOIN shouts s ON s.id = m.shout_id");
@@ -704,7 +826,9 @@ check('the drop zones\' "choose" word keeps its colour and loses its underline',
       && str_contains($css, '.emote-drop-main u { text-decoration: none;'));
 check('the Purge button is no longer the small one beside a full-height box',
       str_contains($tpl, '<button type="button" class="btn btn-outline-danger w-100" id="shout-purge-run"'));
-check('the format select is less cramped', str_contains($css, 'padding: 0.15rem 0.35rem'));
+// 1.62.0: the owner tried 0.15 and prefers 0.2 — the number this check holds moved with it.
+check('the format select is less cramped', str_contains($css, '.pm-editor .rt-format { background: var(--bg); color: var(--text); border: 1px solid var(--control-border);
+    border-radius: 4px; padding: 0.2rem 0.35rem;'));
 
 check('the refresh button is the icon font\'s glyph with no box around it',
       str_contains($widget, 'bi bi-arrow-clockwise') && !str_contains($widget, '<svg viewBox="0 0 24 24"'));
@@ -737,6 +861,50 @@ check('… nor tells somebody holding shout.emote_auto that they will be waiting
       str_contains($emTpl, 'shout.emote_auto') && str_contains($emTpl, '$emApproval && !$emAuto'));
 check('the permission matrix in Settings lists the new id too',
       str_contains($adminJs, "'shout.emote_auto'"));
+
+// ── 1.62.0, by reading the wiring ────────────────────────────────────────────
+check('both renderers print the SERVER\'s hour and title, and neither slices a database string',
+      str_contains($widget, "sanitize((string)(\$s['time'] ?? ''))") && !str_contains($widget, "substr((string)(\$s['at']")
+      && str_contains($boxJs, "text: String(r.time || '')") && !str_contains($boxJs, 'at.slice(11, 16)'));
+check('the rows are made from the instant the DATABASE converted',
+      str_contains((string)file_get_contents($root . '/includes/shout.php'), 'UNIX_TIMESTAMP(s.created_at) AS created_ts'));
+check('no colon after the name, in either renderer — it was a ::after, and it is gone',
+      !str_contains($css, '.shout-who::after') && !preg_match("/shout-who[^\\n]*':'/", $boxJs));
+check('a picture opens the lightbox on a PLAIN click only; every modifier is left to the browser',
+      str_contains($boxJs, "closest('a.shout-img-link')")
+      && str_contains($boxJs, 'e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey')
+      && str_contains($boxJs, 'lightbox().open(a)') && str_contains($boxJs, "var href = link.getAttribute('href')"));
+check('… and the lightbox has its way out, its link to the original and its focus handling',
+      str_contains($boxJs, "'shout-lb-close'") && str_contains($boxJs, "'shout-lb-orig'")
+      && str_contains($boxJs, "e.key === 'Escape'") && str_contains($boxJs, 'back.focus('));
+check('the picker is placed against its button, above when it fits and clamped to the window',
+      str_contains($boxJs, 'function place()') && str_contains($boxJs, 'Math.max(EDGE, Math.min(b.right - pw, vw - EDGE - pw))')
+      && !str_contains($css, "position: absolute; left: 0; bottom: 100%; z-index: 40;"));
+check('the format select drops its ring after a pointer, and keeps it for the keyboard',
+      str_contains($appJs, "sel.classList.add('rt-pointer')") && str_contains($appJs, "s.classList.remove('rt-pointer')")
+      && str_contains($css, '.rt-format.rt-pointer:focus-visible { outline: none; }'));
+check('every link the widget draws keeps its colour after a visit — the pinned name and the Emotes link included',
+      str_contains($css, '.shoutbox a:visited, .shout-body a:visited, .shout-picker a:visited, .shout-lightbox a:visited { color: var(--link); }')
+      && str_contains($css, '.shoutbox .shout-who:visited, .shoutbox .shout-mention:visited { color: var(--accent); }'));
+check('the tooltip is placed by pubTip() — centred, pushed only by the viewport, flipped below when it must',
+      str_contains($appJs, 'let left = a.left + a.width / 2 - w / 2;') && str_contains($appJs, 'left = Math.max(EDGE, Math.min(left, vw - EDGE - w));')
+      && str_contains($appJs, 'const below = top < EDGE;') && !str_contains($css, '.shout-refresh .pub-tip'));
+check('the site time zone is saveable, validated with the account\'s own test, and on the Settings page',
+      str_contains($save, "'site_timezone',") && str_contains($save, "tzValidName(\$data['site_timezone'])")
+      && str_contains($tpl, 'name="site_timezone"') && isset($kw['site_timezone']));
+$upd = (string)file_get_contents($root . '/api/user_update.php');
+check('the account saves its zone through the account update path, with no password for a preference',
+      str_contains($upd, "userSetTimezone(\$db, (int)\$u['id'], (string)\$input['timezone'])")
+      && strpos($upd, 'userSetTimezone(') < strpos($upd, 'password_verify('));
+$accTpl = (string)file_get_contents($root . '/templates/pages/account.php');
+check('the account page offers "Site default (zone, offset)" first, then every zone',
+      str_contains($accTpl, 'id="acc-timezone"') && str_contains($accTpl, "_h('account.tz_site', ['zone' =>")
+      && str_contains($accTpl, 'tzChoices()'));
+check('the volume slider moves in ones', str_contains($accTpl, 'id="snd-vol" min="0" max="100" step="1"') && !str_contains($accTpl, 'step="5"'));
+$favJs = (string)file_get_contents($root . '/assets/js/favourites.js');
+check('the favourites hash is a chip, and says "Copied!" in the site\'s tooltip over itself',
+      !str_contains($css, 'text-decoration: underline dotted') && str_contains($css, '.pf-hash-copy.is-copied')
+      && str_contains($favJs, "window.pubTip(hs, t('js.common.copied'))"));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

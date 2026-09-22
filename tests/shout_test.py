@@ -151,9 +151,14 @@ try:
           s == 200 and j.get("success") and len(rows) == 5 and [r["id"] for r in rows] == seed_ids[3:]
           and j.get("newest") == seed_ids[-1] and j.get("has_more") is True and j.get("live") == 10,
           (s, str(j)[:300]))
-    check("a row says who said it, when, and what it may be done with",
+    # 1.62.0: WHEN is the reader's own clock, formatted by the server — the hour for the list and the
+    # full date WITH ITS OFFSET for the title — and the database's own string no longer travels.
+    check("a row says who said it, when (in the reader's zone, with its offset), and what it may be done with",
           rows[0]["user"] == PAL and rows[0]["own"] is False and rows[0]["deletable"] is False
-          and rows[0]["mentions_me"] is False and re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$", rows[0]["at"] or ""),
+          and rows[0]["mentions_me"] is False
+          and re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$", rows[0].get("at") or "")
+          and re.match(r"^\d\d:\d\d$", rows[0].get("time") or "") and rows[0]["time"] == (rows[0].get("at") or "")[11:16]
+          and isinstance(rows[0].get("ts"), int) and "created_at" not in rows[0],
           rows[0])
     s, j = me.api("shout_list&after=" + str(seed_ids[5]))
     check("after: only what is newer", s == 200 and [r["id"] for r in j["rows"]] == seed_ids[6:], (s, [r["id"] for r in j.get("rows") or []]))

@@ -77,6 +77,27 @@
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="github_url" value="<?= sanitize($cfg['github_url'] ?? '') ?>" placeholder="https://github.com/YourOrg/your-tracker">
                         <small class="settings-hint"><?= __('settings.site_github_hint') ?></small>
                     </div>
+                    <?php
+                    // The zone this site shows times in (v68). Every zone PHP knows, grouped by region,
+                    // each with the offset it has TODAY — the one list the account page offers too
+                    // (tzChoices()), so the two can never disagree about what a zone is called. What is
+                    // selected is the zone IN FORCE, and until somebody picks one that is the schedule's
+                    // (or PHP's): siteTimezone() decides, and saving this form is what makes it a choice.
+                    $siteTzNow = siteTimezone($cfg);
+                    ?>
+                    <div class="col-md-6">
+                        <label class="form-label" for="site-timezone"><?= _h('settings.site_timezone') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="site_timezone" id="site-timezone">
+                            <?php foreach (tzChoices() as $tzGrp => $tzIds): ?>
+                            <optgroup label="<?= sanitize($tzGrp) ?>">
+                                <?php foreach ($tzIds as $tzId => $tzLabel): ?>
+                                <option value="<?= sanitize($tzId) ?>"<?= $tzId === $siteTzNow ? ' selected' : '' ?>><?= sanitize($tzLabel) ?></option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.site_timezone_hint', ['php' => sanitize(date_default_timezone_get())]) ?></small>
+                    </div>
                 </div>
             </div>
 

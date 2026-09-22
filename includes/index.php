@@ -1163,6 +1163,90 @@ function indexFilesCapped(bool $truncated, int $offset, int $rows, int $max): bo
     return $truncated && ($offset + $rows) >= $max;
 }
 
+/**
+ * How many matching files a list opened from a search hit carries beside its page (1.62.0).
+ *
+ * Small on purpose. The point is that the file which made the torrent a hit can always be SEEN, not
+ * that the whole list becomes searchable: fifty is several screens of one folder tree, and a term
+ * that matches thousands of files in one torrent is a term the list's own highlighting already
+ * answers better than an appendix would.
+ */
+const INDEX_FILE_LIST_MATCHES = 50;
+
+/**
+ * The clause "search inside file names" matches a PATH with — [sql, params] — or null when the term
+ * does not search file names at all.
+ *
+ * The same decision indexSearchCatalogue() makes for its file half, written once so the list a
+ * reader opens from a hit and the search that produced the hit cannot disagree about what matched:
+ * fulltext over `path` in boolean mode with indexFulltextTerm()'s words when the term has any, a
+ * LIKE otherwise, and nothing for an empty term or a hash prefix (a hash is looked up, not searched
+ * for). The caller adds its own row condition — one torrent's rows — in front of this.
+ */
+function indexFilePathClause(string $search): ?array {
+    $search = trim($search);
+    if ($search === '' || preg_match(INDEX_HASH_PREFIX_RE, $search)) return null;
+    $ft = mb_strlen($search) >= 3 ? indexFulltextTerm($search) : '';
+    return $ft !== ''
+        ? ['MATCH(path) AGAINST(? IN BOOLEAN MODE)', [$ft]]
+        : ['path LIKE ?', ['%' . $search . '%']];
+}
+
+/**
+ * The files of ONE torrent that match a search, for a list opened from that search (1.62.0).
+ *
+ * Returns ['rows' => [['path', 'size', 'in_page'], …], 'more' => bool]. `$pageLastId` is the id of the
+ * last file on the page the list opened with (0 when that page was empty): a match at or below it is
+ * already on the screen and comes back marked `in_page`, and one beyond it is the reason this exists —
+ * the capped page of a torrent with tens of thousands of files need not contain the file that made
+ * it a hit. The ones BEYOND the page are asked for first, so the cap can never be spent on matches
+ * the reader already has in front of them.
+ *
+ * One query, and it is the query the search itself ran: the file index's FULLTEXT answers "which
+ * paths match" (the search just paid for exactly that, over the whole table), and `info_hash = ?` /
+ * `whitelist_id = ?` keeps it to one torrent. Nothing walks the torrent's own file list to find them.
+ * A term too short for fulltext is a LIKE, as it is in the search — a scan of this one torrent's rows
+ * through its own index, and a term shorter than that was refused before it got here.
+ *
+ * `$kind` is 'index' or 'whitelist', and each has its literal statement: no table or column name is
+ * built from a string.
+ */
+function indexFileListMatches(PDO $db, string $kind, $owner, string $search, int $pageLastId, int $cap = INDEX_FILE_LIST_MATCHES): array {
+    $none = ['rows' => [], 'more' => false];
+    $found = indexFilePathClause($search);
+    if ($found === null || indexSearchTooShort($search)) return $none;
+    $cap = max(1, min(200, $cap));
+    // One of the two literal fragments indexFilePathClause() writes; the term itself is a parameter.
+    [$clause, $clauseParams] = $found;
+    $lim = $cap + 1;
+    $sql = match ($kind) {
+        'index'     => "SELECT id, path, size FROM index_files WHERE info_hash = ? AND $clause ORDER BY (id > ?) DESC, id ASC LIMIT $lim",
+        'whitelist' => "SELECT id, path, size FROM whitelist_files WHERE whitelist_id = ? AND $clause ORDER BY (id > ?) DESC, id ASC LIMIT $lim",
+        default     => '',
+    };
+    if ($sql === '') return $none;
+    try {
+        $st = $db->prepare($sql);
+        $i = 1;
+        $st->bindValue($i++, $kind === 'index' ? (string)$owner : (int)$owner, $kind === 'index' ? PDO::PARAM_STR : PDO::PARAM_INT);
+        foreach ($clauseParams as $p) $st->bindValue($i++, $p, PDO::PARAM_STR);
+        $st->bindValue($i, max(0, $pageLastId), PDO::PARAM_INT);
+        $st->execute();
+        $found = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        // A file index that is missing or mid-rebuild degrades to "no extra rows", which is what the
+        // list looked like before this existed — never to an error on a list that loaded fine.
+        return $none;
+    }
+    $more = count($found) > $cap;
+    if ($more) $found = array_slice($found, 0, $cap);
+    $rows = [];
+    foreach ($found as $f) {
+        $rows[] = ['path' => (string)$f['path'], 'size' => (int)$f['size'], 'in_page' => (int)$f['id'] <= $pageLastId];
+    }
+    return ['rows' => $rows, 'more' => $more];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // List query — shared by the admin list (api/admin/fetch_index.php) and the public
 // search endpoint (api/index_search.php)
@@ -1505,30 +1589,26 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     // rows into an IN list, and a bounded answer beats an unbounded wait.
     $fileHashes = [];
     $fileIds = [];
-    if ($searchFiles && $search !== '' && !$isHash) {
+    // The path clause is indexFilePathClause()'s (1.62.0), the same one a file list opened from one
+    // of these hits asks with — so "this torrent matched" and "these are the files that matched"
+    // are one decision, not two that happen to agree today. Fulltext over `path` when the term has
+    // words for it; otherwise a LIKE with a leading wildcard, which cannot use an index either, so
+    // the cap below matters most for exactly that branch (a term too short for fulltext).
+    $pathClause = ($searchFiles && !$isHash) ? indexFilePathClause($search) : null;
+    if ($pathClause !== null) {
         $capped = false;
+        [$clause, $clauseParams] = $pathClause;
+        $lim = INDEX_FILE_MATCH_CAP + 1;
         try {
-            if ($ft !== '') {
-                $st = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE) LIMIT " . (INDEX_FILE_MATCH_CAP + 1));
-                $st->execute([$ft]);
-            } else {
-                // A LIKE with a leading wildcard cannot use an index either, so it is capped harder:
-                // this branch only runs for a search too short for fulltext.
-                $st = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE path LIKE ? LIMIT " . (INDEX_FILE_MATCH_CAP + 1));
-                $st->execute(['%' . $search . '%']);
-            }
+            $st = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE $clause LIMIT $lim");
+            $st->execute($clauseParams);
             $fileHashes = $st->fetchAll(PDO::FETCH_COLUMN);
             $st->closeCursor();
             if (count($fileHashes) > INDEX_FILE_MATCH_CAP) { array_pop($fileHashes); $capped = true; }
 
             if ($withWl) {
-                if ($ft !== '') {
-                    $st = $db->prepare("SELECT DISTINCT whitelist_id FROM whitelist_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE) LIMIT " . (INDEX_FILE_MATCH_CAP + 1));
-                    $st->execute([$ft]);
-                } else {
-                    $st = $db->prepare("SELECT DISTINCT whitelist_id FROM whitelist_files WHERE path LIKE ? LIMIT " . (INDEX_FILE_MATCH_CAP + 1));
-                    $st->execute(['%' . $search . '%']);
-                }
+                $st = $db->prepare("SELECT DISTINCT whitelist_id FROM whitelist_files WHERE $clause LIMIT $lim");
+                $st->execute($clauseParams);
                 $fileIds = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
                 $st->closeCursor();
                 if (count($fileIds) > INDEX_FILE_MATCH_CAP) { array_pop($fileIds); $capped = true; }

@@ -13,6 +13,12 @@ require_once __DIR__ . '/lang.php';
 // is a helper somebody will forget; loading it here means they cannot.
 require_once __DIR__ . '/csp.php';
 
+// The clock: which zone the database session writes its DATETIMEs in, and — from 1.62.0 — which
+// zone a READER sees a time in (siteTimezone(), userDisplayTimezone(), userDisplayTime()). Loaded
+// here because every entry point loads this file and a page that prints a time must not depend on
+// somebody remembering to include the thing that knows how to convert it.
+require_once __DIR__ . '/db_clock.php';
+
 /**
  * What this build calls itself.
  *
@@ -22,7 +28,7 @@ require_once __DIR__ . '/csp.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.61.0';
+const TRACKER_VERSION = '1.62.0';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.

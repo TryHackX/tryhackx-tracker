@@ -169,14 +169,29 @@
         }));
         // The hash is shown short and SAID to be short (the ellipsis); a click or a tap copies the
         // whole of it, which is the only thing anybody wants a hash for.
+        //
+        // "Copied!" is the site's tooltip (1.62.0), centred over the chip by pubTip(), and the chip
+        // keeps saying the hash. Swapping its own label for the word used to leave the shorter word
+        // against the right edge of a right-aligned column — beside what was clicked rather than on
+        // it. Focusable and pressable from the keyboard as well, since it is a button in all but tag.
         if (r.info_hash) {
             var full = String(r.info_hash), short = full.slice(0, 12) + '…';
-            var hs = el('span', { className: 'pf-hash pf-hash-copy', text: short, title: t('js.fav.hash_copy_title') });
-            hs.addEventListener('click', function (e) {
+            var hs = el('span', { className: 'pf-hash pf-hash-copy', text: short, title: t('js.fav.hash_copy_title'),
+                                  role: 'button', tabindex: '0' });
+            var copyHash = function (e) {
                 e.preventDefault(); e.stopPropagation();
-                var done = function () { hs.textContent = t('js.common.copied'); setTimeout(function () { hs.textContent = short; }, 1500); };
+                var done = function () {
+                    hs.classList.add('is-copied');
+                    setTimeout(function () { hs.classList.remove('is-copied'); }, 1500);
+                    if (typeof window.pubTip === 'function') { window.pubTip(hs, t('js.common.copied')); return; }
+                    // A page without app.js has no tooltip to borrow: say it in the chip, as before.
+                    hs.textContent = t('js.common.copied');
+                    setTimeout(function () { hs.textContent = short; }, 1500);
+                };
                 if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(full).then(done, function () { /* refused */ });
-            });
+            };
+            hs.addEventListener('click', copyHash);
+            hs.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') copyHash(e); });
             meta.appendChild(hs);
         }
         row.appendChild(meta);
@@ -311,8 +326,9 @@
     /**
      * A short line beside a control that has just failed.
      *
-     * app.js has pubTip() for this and does not export it, so rather than reach into another file's
-     * closure this writes a span the CSS already styles. Silence was the bug: the toggle went back
+     * Written before app.js exported pubTip() (it does from 1.61.0), and kept as a line rather than
+     * a tooltip on purpose: a refusal has to stay readable for longer than a tooltip's second and a
+     * half. It writes a span the CSS already styles. Silence was the bug: the toggle went back
      * to where it was and nothing on the screen said the server had refused it, which reads as a
      * button that does not work.
      */

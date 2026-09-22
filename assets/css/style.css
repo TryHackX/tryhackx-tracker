@@ -1986,14 +1986,21 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .pw-req-ic { display: inline-block; width: 1.1em; text-align: center; font-weight: bold; }
 .pw-req:not(.ok) .pw-req-ic { color: var(--error); }
 
-/* === Tiny action tooltip (notification buttons) === */
+/* === The site's one tooltip (pubTip() in assets/js/app.js) ===
+   WHERE it goes is decided by the script, not here (1.62.0): centred over what was pressed, moved
+   sideways only by what would leave the viewport, above unless there is no room above. The old
+   `left: 50%` + translate put it in the middle of whatever box it happened to sit in, and one rule
+   written to keep it inside the shoutbox then drew it off to the side of the button it was about.
+   It is a child of <body> now, so it sits above every overlay and nothing can clip it. The small
+   slide is the only thing left for CSS: in from below when it hangs above, from above when below. */
 .pub-tip {
-    position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%) translateY(3px);
+    position: fixed; left: 0; top: 0; transform: translateY(3px);
     background: var(--bg-code); border: 1px solid var(--accent); color: var(--text);
-    padding: 0.15rem 0.55rem; border-radius: 4px; font-size: 0.72rem; white-space: nowrap;
-    opacity: 0; transition: opacity 0.18s, transform 0.18s; pointer-events: none; z-index: 50;
+    padding: 0.15rem 0.55rem; border-radius: 4px; font-size: 0.72rem; line-height: 1.5; white-space: nowrap;
+    opacity: 0; transition: opacity 0.18s, transform 0.18s; pointer-events: none; z-index: 3000;
 }
-.pub-tip.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.pub-tip.pub-tip-below { transform: translateY(-3px); }
+.pub-tip.show { opacity: 1; transform: none; }
 
 /* === File tree in the search modal === */
 .ftree { font-size: 0.85rem; }
@@ -2007,6 +2014,12 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .ftree-file:last-child { border-bottom: 0; }
 .ftree-name { word-break: break-word; }
 .ftree-size { white-space: nowrap; }
+/* A list opened from a search hit (1.62.0): the file that matched is marked down its left, like a
+   line in the shoutbox that names you, and a "…" row stands where the folder's other files were cut
+   — so a folder showing one file never reads as a folder holding one. */
+.ftree-hit { box-shadow: inset 3px 0 0 var(--accent); padding-left: 0.5rem; }
+.ftree-cut { color: var(--text-muted); letter-spacing: 0.15em; cursor: default; }
+.files-match-note { margin-top: 0.5rem; }
 
 
 /* === Search loading state + terms modal body (1.9.0) === */
@@ -2242,7 +2255,9 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
    the right, tabular figures — the same reading the search results give. The row's cell for the
    swarm is always drawn, even when the number is unknown: a missing cell would slide the hash into
    the column beside it. */
-.pf-meta { display: grid; grid-template-columns: 6em 7.5em 8em; gap: 0.8rem;
+/* The third column is the hash chip's (1.62.0): twelve monospace characters, the ellipsis and the
+   pill's own padding and edge, which 8em no longer held. */
+.pf-meta { display: grid; grid-template-columns: 6em 7.5em 9.5em; gap: 0.8rem;
     color: var(--text-muted); font-size: 0.8rem; white-space: nowrap;
     text-align: right; font-variant-numeric: tabular-nums; }
 .pf-hash { font-family: var(--mono, monospace); }
@@ -2317,7 +2332,7 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 /* The format select is a real control, not a hint: it decides how everything typed above it will be
    read, and it was a grey word on a grey strip. */
 .pm-editor .rt-format { background: var(--bg); color: var(--text); border: 1px solid var(--control-border);
-    border-radius: 4px; padding: 0.15rem 0.35rem; font-family: inherit; }
+    border-radius: 4px; padding: 0.2rem 0.35rem; font-family: inherit; }
 .pm-editor .rt-tabs { flex-wrap: wrap; }
 .pm-editor textarea:focus { outline: none; box-shadow: none; border-color: transparent; }
 .pm-editor .rt-preview { min-height: 6rem; max-height: 18rem; }
@@ -2624,8 +2639,21 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     .metric-card { justify-content: center; text-align: center; }
     .metric-card .metric-info { align-items: center; }
 }
-.pf-hash-copy { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
-.pf-hash-copy:hover { color: var(--text); }
+/* The short hash that copies itself, in the dress the site's other click-to-copy text wears — the
+   code chip on ?action=emotes (.emote-copy): a pill with an edge, in the accent, going green for a
+   moment once it has copied (1.62.0). The dotted underline it had read as a link to somewhere, which
+   is the one thing it is not. "Copied!" is the site's tooltip now, centred over the chip, instead of
+   the chip's own label swapped in place — in a right-aligned column the shorter word sat against the
+   right edge rather than over what was clicked. */
+.pf-hash-copy {
+    display: inline-block; max-width: 100%; box-sizing: border-box; padding: 0 0.45em;
+    background: var(--bg-code); border: 1px solid var(--control-border); border-radius: 999px;
+    color: var(--accent); line-height: 1.5; cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+.pf-hash-copy:hover { border-color: var(--accent); color: var(--text); }
+.pf-hash-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pf-hash-copy.is-copied { border-color: var(--success); color: var(--success); }
 
 /* ── Shoutbox (1.58.0): a list of one-liners, and the box to add one ────────────────────────────
    Compact on purpose. A shout is a sentence, not a post: the name, the time and the words sit on
@@ -2658,12 +2686,11 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 /* Disabled is the two seconds after a fetch, not an error: dimmed, not greyed out of the layout. */
 .shout-refresh:disabled { opacity: 0.45; cursor: default; }
 .shout-refresh .bi { display: block; }
-/* "Nothing new", against the button that was pressed. It opens UPWARDS, over the head row, so it
-   can never come down over a line somebody is reading — and it hangs from the right rather than
-   being centred on a control that is already at the edge of the block, which would have put half
-   of it outside the box. */
-.shout-refresh .pub-tip { left: auto; right: 0; transform: translateY(3px); }
-.shout-refresh .pub-tip.show { transform: translateY(0); }
+/* "Nothing new" has no rule of its own here any more (1.62.0). It used to hang from the button's
+   RIGHT edge so it could not leave the box, which drew it off to the left of the button on every
+   desktop. pubTip() now centres every tooltip on what was pressed and moves it only by what would
+   actually leave the screen — and it opens upwards whenever there is room, so it still never comes
+   down over a line somebody is reading. */
 .shout-refresh.is-spinning .bi { animation: rotate-cw 0.8s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
     /* Somebody who has asked for no motion still has to be able to tell that it is working, so the
@@ -2710,7 +2737,9 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    with an ellipsis; the anchor carries the full name as its title. */
 .shout-who { flex: 0 0 8rem; min-width: 0; font-weight: 600; color: var(--accent);
              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shout-who::after { content: ':'; color: var(--text-muted); }
+/* No colon after the name (1.62.0). It was a ::after here rather than a character in either
+   renderer, so taking it off is this line and nothing else: the name is a column of its own and
+   the time sits between it and the words, which already says where one ends and the other starts. */
 .shout-time { flex: 0 0 auto; width: 2.6rem; font-size: 0.72rem; color: var(--text-muted);
               font-variant-numeric: tabular-nums; }
 .shout-body { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
@@ -2725,8 +2754,16 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    same address said twice by two people is one visited colour and one link colour, which reads as
    two different things. Scoped to the body of a shout and to the picker's rows; the rule itself is
    left exactly as it is everywhere else on the site. */
-.shout-body a:visited, .shout-picker a:visited, .shout-row a:visited { color: var(--link); }
-.shout-body .shout-mention:visited, .shout-row .shout-who:visited { color: var(--accent); }
+/* 1.62.0: it still leaked in two places the rule below did not reach — the name in the PINNED strip
+   (not a .shout-row) and the Emotes link in the head — and the "Open the shoutbox" link beside it
+   had the same hole. So the scope is the whole widget rather than a list of its parts: a link added
+   to the box later cannot be forgotten by this rule. Every link the widget draws, by kind: names
+   and @mentions (the accent), a system line's author (muted, the colour its row gives it), the head
+   links, links inside a body, picture links, the picker's "All emotes", and the lightbox's "Open the
+   original" — which lives on <body>, outside the box, so it is named on its own. */
+.shoutbox a:visited, .shout-body a:visited, .shout-picker a:visited, .shout-lightbox a:visited { color: var(--link); }
+.shoutbox .shout-who:visited, .shoutbox .shout-mention:visited { color: var(--accent); }
+.shoutbox .shout-row-system .shout-who:visited { color: var(--text-muted); }
 .shout-mention { color: var(--accent); }
 .shout-mention-me { font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .shout-del { position: absolute; top: 0.15rem; right: 0.15rem; background: none; border: 0; padding: 0 0.25rem;
@@ -2768,6 +2805,12 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    already makes: a pointer leaves no ring, a Tab still does, and it is drawn in the accent. */
 .rt-format:focus { outline: none; }
 .rt-format:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* …and that was not enough on its own (1.62.0): Chrome treats a <select> as a keyboard control, so
+   it matches :focus-visible after a CLICK too, and the ring stayed after every choice — including
+   picking the option already chosen, which fires no change. assets/js/app.js marks the select on
+   pointerdown and clears the mark on any key, and while it is marked there is no ring. A keyboard
+   user arrives with Tab, which is a key, and gets the ring back. */
+.rt-format.rt-pointer:focus-visible { outline: none; }
 .shout-older:focus, .shout-yes:focus, .shout-no:focus, .shout-del:focus { outline: none; }
 .shout-older:focus-visible,
 .shout-yes:focus-visible, .shout-no:focus-visible, .shout-del:focus-visible {
@@ -2907,15 +2950,17 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shout-emoji-btn:hover, .shout-emoji-btn:focus-visible { opacity: 1; border-color: var(--control-border); outline: none; }
 .shout-emoji-btn[aria-expanded="true"] { opacity: 1; border-color: var(--accent); }
 
-/* The picker itself: ABOVE the row the button is in, because that row is at the bottom of the box
-   and a panel below it would open off the end of the page on a phone. Anchored to the row rather
-   than to the whole composer, or it opens from the top of the composer and covers the heading over
-   the box instead of the box. */
+/* The picker itself. WHERE it opens is the script's decision from 1.62.0 (place() in
+   assets/js/shoutbox.js): its right edge on the emoji button's right edge, above the button when it
+   fits there and below when it does not, clamped inside the window. Only the frame is described
+   here — absolute inside the text field's wrapper, and never wider than the window less a margin.
+   It used to be pinned to the wrapper's left edge and bottom, which after 1.61.0 moved the button to
+   the field's top right meant it opened a whole field away from what was pressed. */
 .shout-compose { position: relative; }
 .shout-acts { position: relative; }
 .shout-picker {
-    position: absolute; left: 0; bottom: 100%; z-index: 40;
-    width: min(21rem, 100%); margin-bottom: 0.4rem;
+    position: absolute; left: 0; top: 0; z-index: 40;
+    width: min(21rem, calc(100vw - 16px));
     background: var(--bg-card); border: 1px solid var(--control-border); border-radius: var(--radius);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
 }
@@ -2951,9 +2996,50 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     border-top: 1px solid var(--border); padding: 0.25rem 0.5rem; font-size: 0.75rem;
 }
 @media (max-width: 640px) {
-    .shout-picker { width: 100%; }
+    /* The whole width of a phone, less the margin the script keeps it inside. */
+    .shout-picker { width: calc(100vw - 16px); }
     .shout-picker-grid { height: 9.5rem; }
 }
+
+/* ── a picture in a shout, and the lightbox it opens into (1.62.0) ──
+   The picture stays small in the line, as it was; what is new is that it is a link. The pointer says
+   so, and the keyboard ring goes round the picture rather than round an invisible inline box. */
+.shout-img-link { display: inline-block; line-height: 0; border-radius: 3px; cursor: zoom-in; vertical-align: text-bottom; }
+.shout-img-link:hover { opacity: 0.9; text-decoration: none; }
+.shout-img-link:focus { outline: none; }
+.shout-img-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.shout-body.rt-body .shout-img-link .rt-img { vertical-align: bottom; }
+/* The backdrop is the whole window, the picture is fitted INSIDE it (never cropped, never scaled
+   past its own size), and the bar under it carries the two things somebody wants next: the
+   original, and a way out. Above every overlay the site has, because it is opened from the page. */
+.shout-lightbox {
+    position: fixed; inset: 0; z-index: 2500;
+    display: flex; align-items: center; justify-content: center;
+    padding: 1rem; background: rgba(0, 0, 0, 0.86);
+}
+.shout-lb-frame {
+    display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+    max-width: 100%; max-height: 100%;
+}
+.shout-lb-img {
+    display: block; max-width: calc(100vw - 2rem); max-height: calc(100vh - 5.5rem);
+    width: auto; height: auto; object-fit: contain;
+    border-radius: 4px; background: var(--bg-code); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+.shout-lb-bar { display: flex; align-items: center; gap: 0.8rem; font-size: 0.85rem; }
+.shout-lb-orig { color: var(--link); }
+.shout-lb-orig:focus { outline: none; }
+.shout-lb-orig:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.shout-lb-close {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--bg-card); border: 1px solid var(--control-border); border-radius: 999px;
+    color: var(--text); font: inherit; font-size: 0.95rem; line-height: 1; width: 2rem; height: 2rem;
+    cursor: pointer; transition: border-color 0.15s, color 0.15s;
+}
+.shout-lb-close .bi, .shout-lb-orig .bi { display: inline-block; line-height: 1; }
+.shout-lb-close:hover { border-color: var(--accent); color: var(--accent); }
+.shout-lb-close:focus { outline: none; }
+.shout-lb-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ── ?action=emotes ──────────────────────────────────────────────────────────
    A GRID rather than a wrapped row of fixed-width boxes: with `flex-wrap` the last line of tiles sat

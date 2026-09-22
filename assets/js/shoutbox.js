@@ -31,8 +31,9 @@
  *
  * Row bodies arrive as HTML the SERVER rendered, through the same richtextRender() every
  * description and message goes through — <img class="shout-emote"> and <img class="shout-sticker">
- * included. There is exactly one place in this codebase that decides what may be displayed, and it
- * is not here.
+ * included, and from 1.62.0 every picture wrapped in a link to itself, which is what the lightbox
+ * below opens. There is exactly one place in this codebase that decides what may be displayed, and
+ * it is not here. The same goes for the time on a row: the server sends it in the reader's zone.
  */
 (function () {
     'use strict';
@@ -223,6 +224,8 @@
 
         var panel = el('div', { className: 'shout-picker', id: 'shout-picker', hidden: true,
                                 role: 'dialog', 'aria-label': t('js.shout.emoji') });
+        // Where it opens is worked out from the BUTTON each time it opens (1.62.0) — see place().
+        // The stylesheet only says it is absolute inside the field's wrapper.
         var tabsEl = el('div', { className: 'shout-picker-tabs', role: 'tablist' });
         var gridEl = el('div', { className: 'shout-picker-grid', id: 'shout-picker-grid' });
         panel.appendChild(tabsEl);
@@ -317,6 +320,8 @@
                     });
                     tabsEl.appendChild(tabFor(pages[pages.length - 1]));
                 }
+                // Two more tabs can change how tall the panel is, and it may already be open.
+                onMove();
             });
         }
 
@@ -349,14 +354,55 @@
             close();
         }
 
+        /**
+         * Put the panel against the button that opened it (1.62.0).
+         *
+         * The button moved into the text field's top right in 1.61.0 and the panel kept opening from
+         * the field's LEFT edge, a whole field away from what was pressed. The rules now:
+         *
+         *   · its right edge on the button's right edge;
+         *   · ABOVE the button when the panel fits between it and the top of the window, below when
+         *     it does not — above first, because below it covers the text being written;
+         *   · clamped so no part of it leaves the window, and never wider than the window less a
+         *     margin, which on a phone is most of the screen.
+         *
+         * Measured in the viewport and written as offsets inside the wrapper (which is what the
+         * panel is absolute to), so it scrolls with the page like anything else in the box.
+         */
+        var EDGE = 8, GAP = 6;
+        function place() {
+            if (panel.hidden) return;
+            panel.style.left = '0px'; panel.style.top = '0px'; panel.style.width = '';
+            var vw = document.documentElement.clientWidth || window.innerWidth;
+            var vh = document.documentElement.clientHeight || window.innerHeight;
+            var pw = panel.offsetWidth;
+            if (pw > vw - 2 * EDGE) { pw = vw - 2 * EDGE; panel.style.width = pw + 'px'; }
+            var ph = panel.offsetHeight;
+            var b = btn.getBoundingClientRect();
+            var h = host.getBoundingClientRect();
+            var left = Math.max(EDGE, Math.min(b.right - pw, vw - EDGE - pw));
+            var roomAbove = b.top - GAP - EDGE, roomBelow = vh - b.bottom - GAP - EDGE;
+            var above = ph <= roomAbove || roomAbove >= roomBelow;
+            var top = above ? b.top - GAP - ph : b.bottom + GAP;
+            // Neither side has room for all of it: keep the top inside the window, so the tabs
+            // and the first row are what is visible and the grid scrolls inside itself.
+            if (top < EDGE) top = EDGE;
+            panel.style.left = Math.round(left - h.left - host.clientLeft) + 'px';
+            panel.style.top = Math.round(top - h.top - host.clientTop) + 'px';
+            panel.classList.toggle('shout-picker-below', !above);
+        }
+        function onMove() { if (!panel.hidden) requestAnimationFrame(place); }
+
         function open() {
             if (!current) show(pages[0].id);
             panel.hidden = false;
+            place();
             btn.setAttribute('aria-expanded', 'true');
             document.addEventListener('click', onOutside, true);
             document.addEventListener('keydown', onKey, true);
+            window.addEventListener('resize', onMove);
             var first = gridEl.querySelector('.shout-picker-cell');
-            if (first) first.focus();
+            if (first) first.focus({ preventScroll: true });
         }
         function close() {
             if (panel.hidden) return;
@@ -364,10 +410,97 @@
             btn.setAttribute('aria-expanded', 'false');
             document.removeEventListener('click', onOutside, true);
             document.removeEventListener('keydown', onKey, true);
+            window.removeEventListener('resize', onMove);
         }
         btn.addEventListener('click', function () { panel.hidden ? open() : close(); });
-        return { open: open, close: close, panel: panel };
+        return { open: open, close: close, panel: panel, place: place };
     }
+
+    /* ─────────────────────────── a picture, full size ─────────────────────────── */
+
+    /**
+     * The lightbox a picture in a shout opens into (1.62.0).
+     *
+     * The picture fitted to the window on a dark backdrop, a close button, and a link to the
+     * original. Esc, the button and a click on the backdrop all close it; the focus goes into it
+     * when it opens and back to the picture that opened it when it closes, and Tab stays inside it
+     * while it is open — a dialog the keyboard can wander out of is a dialog still covering the page
+     * behind the person who wandered.
+     *
+     * It is opened only by the unmodified primary click on a picture's link (see mountShoutbox).
+     * The address is the link's own href, which the server built out of the URL its renderer had
+     * already validated (shoutLinkImages() in includes/shout.php); nothing here parses, decodes or
+     * rebuilds it — it is handed on as it came.
+     *
+     * One element for the whole page, built the first time it is needed and hidden afterwards
+     * rather than thrown away. It sits on <body>, outside the box: inside it, the list's scroll and
+     * the block's own edges would be the frame of a picture meant to fill the window.
+     */
+    var lb = null;
+    function lightboxBuild() {
+        var img = el('img', { className: 'shout-lb-img', alt: '', referrerpolicy: 'no-referrer' });
+        // Bootstrap Icons, the font every page that draws the room already carries (templates/
+        // layout.php), and the words beside or behind them for whoever cannot see a glyph.
+        var orig = el('a', { className: 'shout-lb-orig', target: '_blank', rel: 'noopener noreferrer' }, [
+            el('i', { className: 'bi bi-box-arrow-up-right', 'aria-hidden': 'true' }),
+            ' ' + t('js.shout.lb_original'),
+        ]);
+        var shut = el('button', { type: 'button', className: 'shout-lb-close', title: t('js.shout.lb_close'),
+                                  'aria-label': t('js.shout.lb_close') },
+                      el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' }));
+        var root = el('div', { className: 'shout-lightbox', hidden: true, role: 'dialog', 'aria-modal': 'true',
+                               'aria-label': t('js.shout.lb_label') }, [
+            el('div', { className: 'shout-lb-frame' }, [
+                img,
+                el('div', { className: 'shout-lb-bar' }, [orig, shut]),
+            ]),
+        ]);
+        var from = null;              // the link that opened it: the focus goes back there
+        function close() {
+            if (root.hidden) return;
+            root.hidden = true;
+            img.removeAttribute('src');
+            document.removeEventListener('keydown', onKey, true);
+            var back = from;
+            from = null;
+            if (back && back.isConnected) back.focus({ preventScroll: true });
+        }
+        function onKey(e) {
+            if (root.hidden) return;
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
+            if (e.key !== 'Tab') return;
+            // Two stops, and the keyboard goes round them rather than out of the dialog.
+            var stops = [orig, shut];
+            var i = stops.indexOf(document.activeElement);
+            e.preventDefault();
+            stops[(i + (e.shiftKey ? stops.length - 1 : 1) + stops.length) % stops.length].focus();
+        }
+        // The backdrop is everything that is not the picture or its bar.
+        root.addEventListener('click', function (e) {
+            if (e.target === root || e.target.classList.contains('shout-lb-frame')) close();
+        });
+        shut.addEventListener('click', close);
+        document.body.appendChild(root);
+        return {
+            root: root,
+            open: function (link) {
+                var href = link.getAttribute('href') || '';
+                if (!href) return false;
+                var small = link.querySelector('img');
+                from = link;
+                img.alt = small ? (small.getAttribute('alt') || '') : '';
+                img.src = href;
+                orig.href = href;
+                root.hidden = false;
+                document.addEventListener('keydown', onKey, true);
+                shut.focus({ preventScroll: true });
+                return true;
+            },
+            close: close,
+            isOpen: function () { return !root.hidden; },
+        };
+    }
+    function lightbox() { return lb || (lb = lightboxBuild()); }
 
     /* ─────────────────────────── the box itself ─────────────────────────── */
 
@@ -419,15 +552,21 @@
                 : el('span', { className: 'shout-who', title: name, text: name });
         }
 
-        /** One shout, exactly as templates/partials/shoutbox_widget.php draws it. */
+        /**
+         * One shout, exactly as templates/partials/shoutbox_widget.php draws it.
+         *
+         * The time is the SERVER's (1.62.0): `time` is the hour in this reader's zone and `at` the
+         * full date with its offset. Nothing here slices a database string any more — that string
+         * is in the database session's zone, which is nobody's, and slicing it showed every reader
+         * PHP's hour.
+         */
         function renderRow(r) {
             var name = String(r.user || '');
-            var at = String(r.at || '');
             var row = el('div', { className: 'shout-row' + (r.own ? ' shout-row-own' : '') + (r.mentions_me ? ' shout-row-mention' : '') + (r.system ? ' shout-row-system' : '') });
             row.dataset.id = String(Number(r.id) || 0);
             row.dataset.user = name;
             row.appendChild(who(r));
-            row.appendChild(el('span', { className: 'shout-time', title: at, text: at.slice(11, 16) }));
+            row.appendChild(el('span', { className: 'shout-time', title: String(r.at || ''), text: String(r.time || '') }));
             row.appendChild(el('span', { className: 'shout-body rt-body', html: r.html || '' }));
             // From the box's own permission rather than from anything per row: pinning is
             // `shout.moderate` and that answer is the same for every line on the page.
@@ -876,6 +1015,19 @@
                 if (b) pin(Number(pinnedEl.dataset.id) || 0, false);
             });
         }
+        // A picture opens in the lightbox on a PLAIN primary click, and on nothing else (1.62.0).
+        // The picture is a real link (target=_blank), so Ctrl/Cmd+click, Shift+click, a middle click
+        // (which never raises `click` at all) and the context menu are left entirely to the browser —
+        // they open the original in a tab, the way a link does everywhere else, and none of that had
+        // to be written here. On the whole box, delegated, so a line in the pinned strip and a line
+        // the poll has just appended behave like the lines the server drew.
+        box.addEventListener('click', function (e) {
+            var a = e.target && e.target.closest ? e.target.closest('a.shout-img-link') : null;
+            if (!a || !box.contains(a)) return;
+            if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+            e.preventDefault();
+            lightbox().open(a);
+        });
         if (olderBtn) olderBtn.addEventListener('click', older);
         if (refreshBtn) refreshBtn.addEventListener('click', refresh);
         if (sendBtn) sendBtn.addEventListener('click', send);
@@ -907,8 +1059,9 @@
                 window.RichText.mount('shout-body', { previewFor: 'shout' });
             }
         }
+        var picker = null;
         if (emojiBtn && ta) {
-            mountPicker({
+            picker = mountPicker({
                 button: emojiBtn,
                 // The box the button now sits in (1.61.0), not the whole composer: anchored to the
                 // composer the panel opened from the TOP of it and covered the heading above the box.
@@ -928,6 +1081,10 @@
         window.ShoutTick = poll;
         window.Shout = { tick: poll, refresh: refresh, older: older, pin: pin,
                          newest: function () { return newest; }, insert: insert, fit: fitComposer,
+                         // The lightbox, for the browser check: open or not, and a way to shut it.
+                         lightbox: { open: function () { return !!lb && lb.isOpen(); },
+                                     close: function () { if (lb) lb.close(); } },
+                         picker: picker,
                          // The `@` list, for the browser check: whether it is open, what is in it,
                          // and the two steps that would otherwise need a real keyboard.
                          mention: { token: mentionToken, fetch: mentionFetch, pick: mentionPick,

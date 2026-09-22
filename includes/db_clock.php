@@ -46,3 +46,104 @@ function dbClockPublish(PDO $db): string {
     }
     return $tz;
 }
+
+/* ── the zone a READER sees times in (1.62.0, schema 68) ─────────────────────────────────────────
+ *
+ * Everything above is about the clock the DATABASE keeps. This half is about the clock a PERSON
+ * reads, and the two must never be confused: a DATETIME column holds a wall-clock string in the
+ * database session's zone, which getDb() sets to PHP's own offset — `+00:00` on the development
+ * machine, whatever php.ini says on the server. Neither of those is where anybody reading the page
+ * lives. The shoutbox used to slice the hour straight out of that string, so every reader on the
+ * site saw PHP's hour, and a room full of people in Warsaw read a conversation two hours in the past.
+ *
+ * So a time travels as an INSTANT, never as a string: the database converts its own DATETIME with
+ * UNIX_TIMESTAMP(), which reads the value in the same session zone it was written in, and only then
+ * does PHP put the instant into a reader's zone. `new DateTime($row['created_at'])` would read the
+ * string in PHP's zone instead — right on a machine where the two happen to agree, and hours off on
+ * the first one where they do not, which is exactly the class of bug the top of this file records.
+ *
+ * One caveat that belongs to the storage, not to this code: the session zone is an OFFSET taken when
+ * the row was written, so on a server whose PHP runs in a zone with summer time a row written before
+ * the change is read back an hour out after it. A server whose PHP runs in UTC (the Debian default,
+ * and this machine) has no such hour.
+ */
+
+/** Is this an IANA zone name this PHP knows? The one test `site_timezone` and `users.timezone` pass. */
+function tzValidName(string $tz): bool {
+    static $known = null;
+    if ($tz === '') return false;
+    // A set rather than in_array() over 419 names: the shoutbox asks this once per request, the
+    // Settings page and the account page once per <option>.
+    if ($known === null) $known = array_fill_keys(DateTimeZone::listIdentifiers(), true);
+    return isset($known[$tz]);
+}
+
+/**
+ * The site's display zone, as a name that is always valid.
+ *
+ * `site_timezone` when the operator chose one. Until they have, the zone the operator already told
+ * the SCHEDULE they run in (`tracker_schedule_tz`), because somebody who said "the tracker switches
+ * mode at 22:00 Warsaw time" has said where they are — and only when that is missing or broken, the
+ * zone PHP itself runs in. Decided on READ rather than written once by a migration, like every clamp
+ * in this codebase: a settings row can arrive from a restored backup or a MySQL client, and the
+ * answer to an empty or broken one is the next-best fact rather than a page that cannot tell the time.
+ */
+function siteTimezone(array $cfg): string {
+    $own = trim((string)($cfg['site_timezone'] ?? ''));
+    if (tzValidName($own)) return $own;
+    $sched = trim((string)($cfg['tracker_schedule_tz'] ?? ''));
+    if (tzValidName($sched)) return $sched;
+    $php = date_default_timezone_get();
+    return tzValidName($php) ? $php : 'UTC';
+}
+
+/**
+ * The zone THIS reader sees times in: their own when they chose one, the site's otherwise.
+ *
+ * NULL in `users.timezone` means "the site's", not a zone of its own — so an operator who moves the
+ * site's zone moves everybody who never chose, and nobody who did is overruled. A name this PHP does
+ * not know (a zone removed from the tz database, a hand-edited row) is treated the same way: the
+ * reader gets the site's clock rather than an exception or UTC. A guest has no row and gets the site's.
+ */
+function userDisplayTimezone(?array $user, array $cfg): DateTimeZone {
+    $own = trim((string)($user['timezone'] ?? ''));
+    return new DateTimeZone(tzValidName($own) ? $own : siteTimezone($cfg));
+}
+
+/**
+ * An instant, written for a reader in their zone. The formatter that goes with the helper above.
+ *
+ * Takes a UNIX TIME and nothing else, on purpose: a DATETIME string has already lost the one fact
+ * this needs (which zone it was written in), so the caller asks the database for UNIX_TIMESTAMP()
+ * of the column and hands that over. `$format` is PHP's date() vocabulary — 'H:i' for a list,
+ * 'Y-m-d H:i:s P' for a title that says which offset it is in.
+ */
+function userDisplayTime(int $unix, DateTimeZone $tz, string $format = 'Y-m-d H:i:s P'): string {
+    return (new DateTimeImmutable('@' . $unix))->setTimezone($tz)->format($format);
+}
+
+/** "UTC+02:00" — a zone's offset NOW (or at `$at`), the way both selects print it beside the name. */
+function tzOffsetLabel(DateTimeZone $tz, ?int $at = null): string {
+    $off = $tz->getOffset(new DateTimeImmutable('@' . ($at ?? time())));
+    $abs = abs($off);
+    return 'UTC' . ($off < 0 ? '-' : '+') . sprintf('%02d:%02d', intdiv($abs, 3600), intdiv($abs % 3600, 60));
+}
+
+/**
+ * Every zone, grouped by its region, each with its current offset: [region => [name => label]].
+ *
+ * One list for the two selects that offer it — Settings → Site and the account page — so the two can
+ * never disagree about which zones exist or how an offset is written. "Current" because that is what
+ * a person choosing is asking ("which of these is my clock right now"); the name is what is stored,
+ * so a zone that changes its offset in winter still means the right thing in winter.
+ */
+function tzChoices(?int $at = null): array {
+    $at = $at ?? time();
+    $out = [];
+    foreach (DateTimeZone::listIdentifiers() as $id) {
+        $slash = strpos($id, '/');
+        $region = $slash === false ? 'Other' : substr($id, 0, $slash);
+        $out[$region][$id] = $id . ' (' . tzOffsetLabel(new DateTimeZone($id), $at) . ')';
+    }
+    return $out;
+}

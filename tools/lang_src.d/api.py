@@ -1762,3 +1762,12 @@ add('', {
     'api.emote.waiting': ('Added. It waits for a moderator before anybody else can see it.',
         'Dodano. Czeka na moderatora, zanim zobaczy ją ktokolwiek inny.'),
 })
+
+# ── 1.62.0: the two time zones ─────────────────────────────────────────────
+# The same test for both (tzValidName()), and the same kind of answer as the schedule's own zone.
+add('', {
+    'api.settings.site_tz_invalid': ('Invalid site time zone. Use an IANA identifier such as Europe/Warsaw or UTC.',
+        'Nieprawidłowa strefa czasowa strony. Użyj identyfikatora IANA, np. Europe/Warsaw lub UTC.'),
+    'api.account.timezone_invalid': ('That is not a time zone this site knows — pick one from the list.',
+        'Tej strefy czasowej serwis nie zna — wybierz jedną z listy.'),
+})

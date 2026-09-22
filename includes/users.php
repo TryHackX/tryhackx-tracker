@@ -1113,6 +1113,22 @@ function userEmailChangeCancel(PDO $db, int $userId): void {
 }
 
 /**
+ * An account's display time zone (v68). '' hands the account back to the site's zone (NULL in the
+ * column); anything else has to be a zone PHP knows — tzValidName(), the very test `site_timezone`
+ * is saved with, so the account page and Settings cannot accept two different ideas of a zone.
+ *
+ * Returns false and writes NOTHING for a name that is not a zone: storing it would leave a row that
+ * every reader treats as NULL anyway, while the account page went on showing the person a choice
+ * they never really made.
+ */
+function userSetTimezone(PDO $db, int $userId, string $tz): bool {
+    $tz = trim($tz);
+    if ($userId <= 0 || ($tz !== '' && !tzValidName($tz))) return false;
+    $db->prepare("UPDATE users SET timezone = ? WHERE id = ?")->execute([$tz === '' ? null : $tz, $userId]);
+    return true;
+}
+
+/**
  * Begin a change/removal ($newEmail '' = remove). Returns ['error'=>code(,'until')] or
  * ['stage'=>'old'|'done_direct']. A user WITHOUT an old address gets the direct path (nothing to
  * confirm from) — the standard verification mail still guards the new address.

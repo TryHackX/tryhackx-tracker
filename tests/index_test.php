@@ -541,6 +541,85 @@ check('panel: a first slice below the panel total leaves the Load-all button', i
 check('panel: a list already at the panel total takes the button away', indexFilesCapped(true, 0, 5000, 5000) === true);
 check('a complete list is never capped, whatever the total', indexFilesCapped(false, 0, 12, 10) === false);
 
+// ── 13b. a list opened from a search hit shows the file that made it one (1.62.0) ──────────
+// A torrent with thousands of files opens on a capped page, and the file somebody searched for is
+// very often not on it. The first page now carries the matching files beside it — driven here
+// through the helper api/index_files.php calls, fed the page boundary the endpoint computes from its
+// own LIMIT query. 150 files stand in for 20 000: what matters is that one match sits BEYOND the
+// first 100 (the page), inside a folder of its own, and another one is already ON the page.
+$db->exec("TRUNCATE TABLE index_hashes"); $db->exec("TRUNCATE TABLE index_files");
+$db->exec("TRUNCATE TABLE whitelist"); $db->exec("TRUNCATE TABLE whitelist_files");
+$hMatch = h(7010);
+$db->exec("INSERT INTO index_hashes (info_hash, name, last_seen, grace_until, meta_status, files_count) VALUES ('$hMatch', 'Big Show Complete', NOW(), NOW() + INTERVAL 3 DAY, 'done', 150)");
+$insF = $db->prepare("INSERT INTO index_files (info_hash, path, size) VALUES (?, ?, ?)");
+for ($i = 1; $i <= 150; $i++) {
+    $p = sprintf('Show/Season %d/ep%03d.mkv', intdiv($i - 1, 50) + 1, $i);
+    if ($i === 5)   $p = 'Show/Season 1/zebra-promo.mkv';        // a match ON the first page
+    if ($i === 140) $p = 'Show/Extras/zebra-interview.mkv';      // a match far beyond it, in a folder of its own
+    if ($i === 141) $p = 'Show/Extras/x-1.nfo';                  // a term with no word long enough for fulltext
+    $insF->execute([$hMatch, $p, 1000 + $i]);
+}
+$pageRows = $db->prepare("SELECT id, path FROM index_files WHERE info_hash = ? ORDER BY id LIMIT 100");
+$pageRows->execute([$hMatch]);
+$page = $pageRows->fetchAll(PDO::FETCH_ASSOC);
+$pageLast = (int)$page[count($page) - 1]['id'];
+$pagePaths = array_column($page, 'path');
+check('the fixture: one match on the first page, one beyond it',
+      in_array('Show/Season 1/zebra-promo.mkv', $pagePaths, true) && !in_array('Show/Extras/zebra-interview.mkv', $pagePaths, true),
+      json_encode(array_slice($pagePaths, 0, 6)));
+
+check('the list and the search match a path with ONE clause: fulltext for a word…',
+      indexFilePathClause('zebra') === ['MATCH(path) AGAINST(? IN BOOLEAN MODE)', ['zebra*']], json_encode(indexFilePathClause('zebra')));
+check('… a LIKE for a term with no word fulltext can use, and nothing for an empty term or a hash',
+      indexFilePathClause('x-1') === ['path LIKE ?', ['%x-1%']] && indexFilePathClause('') === null
+      && indexFilePathClause('  ') === null && indexFilePathClause($hMatch) === null && indexFilePathClause('CAFE0000') === null,
+      json_encode(indexFilePathClause('x-1')));
+
+$mm = indexFileListMatches($db, 'index', $hMatch, 'zebra', $pageLast);
+$mRows = $mm['rows'];
+check('a match BEYOND the capped page comes back — with its whole folder chain from the root',
+      ($mRows[0]['path'] ?? '') === 'Show/Extras/zebra-interview.mkv' && ($mRows[0]['in_page'] ?? null) === false
+      && ($mRows[0]['size'] ?? 0) === 1140, json_encode($mm));
+check('… and the one already on the page is marked so, which is what keeps the tree from drawing it twice',
+      count($mRows) === 2 && ($mRows[1]['path'] ?? '') === 'Show/Season 1/zebra-promo.mkv' && ($mRows[1]['in_page'] ?? null) === true
+      && $mm['more'] === false, json_encode($mm));
+check('… and nothing that is not a match rides along', count(array_filter($mRows, fn($r) => !str_contains($r['path'], 'zebra'))) === 0);
+$one = indexFileListMatches($db, 'index', $hMatch, 'zebra', $pageLast, 1);
+check('the cap is spent on what is NOT on the screen first, and says when it stopped',
+      count($one['rows']) === 1 && $one['rows'][0]['path'] === 'Show/Extras/zebra-interview.mkv' && $one['more'] === true,
+      json_encode($one));
+$like = indexFileListMatches($db, 'index', $hMatch, 'x-1', $pageLast);
+check('a term too short for fulltext is matched by LIKE, exactly as the search does it',
+      count($like['rows']) === 1 && $like['rows'][0]['path'] === 'Show/Extras/x-1.nfo' && $like['rows'][0]['in_page'] === false,
+      json_encode($like));
+check('a hash, a two-letter term and a term nothing matches all add nothing',
+      indexFileListMatches($db, 'index', $hMatch, $hMatch, $pageLast)['rows'] === []
+      && indexFileListMatches($db, 'index', $hMatch, 'ze', $pageLast)['rows'] === []
+      && indexFileListMatches($db, 'index', $hMatch, 'okapi', $pageLast)['rows'] === []);
+check('an unknown kind is refused rather than built into a statement',
+      indexFileListMatches($db, 'index_files; DROP', $hMatch, 'zebra', $pageLast) === ['rows' => [], 'more' => false]);
+check('another torrent\'s files never answer for this one',
+      indexFileListMatches($db, 'index', h(7011), 'zebra', 0)['rows'] === []);
+// The same words, asked of the search itself: the row the list is opened FROM is a hit on them.
+$hit = indexSearchCatalogue($db, $cfg, ['search' => 'zebra', 'search_files' => true, 'include_whitelist' => false]);
+check('… and the search that produced the hit agrees about the same term',
+      in_array($hMatch, array_column($hit['rows'], 'info_hash'), true), json_encode($hit));
+// The whitelist arm reads its own table and is keyed by the row's id.
+$db->exec("INSERT INTO whitelist (info_hash, name, source, meta_status, files_count) VALUES ('" . h(7012) . "', 'WL Zebra', 'admin', 'done', 2)");
+$wlMatchId = (int)$db->lastInsertId();
+$db->exec("INSERT INTO whitelist_files (whitelist_id, path, size) VALUES ($wlMatchId, 'wl/readme.txt', 10), ($wlMatchId, 'wl/zebra.bin', 20)");
+$wlm = indexFileListMatches($db, 'whitelist', $wlMatchId, 'zebra', 0);
+check('the whitelist arm finds its own match the same way',
+      count($wlm['rows']) === 1 && $wlm['rows'][0]['path'] === 'wl/zebra.bin' && $wlm['rows'][0]['in_page'] === false, json_encode($wlm));
+$filesEp = (string)@file_get_contents($root . '/api/index_files.php');
+check('the endpoint asks only on the first page, only with a term, and only adds a key when it did',
+      str_contains($filesEp, 'indexFileListMatches($db, $filesKind, $filesOwner, $matchTerm, $pageLast)')
+      && str_contains($filesEp, "\$matchTerm !== '' && \$offset === 0") && str_contains($filesEp, "\$out['matches'] = \$matches['rows'];"));
+$appJs = (string)@file_get_contents($root . '/assets/js/app.js');
+check('the list opened from a hit names the term, and merges the answer into the tree it already draws',
+      str_contains($appJs, "'&search=' + encodeURIComponent(term)") && str_contains($appJs, 'buildTreePub(allFiles, tokens, { matches, total: totalFiles })')
+      && str_contains($appJs, "if (!loaded.has(p)) beyond.push(m);"));
+
 // ── 14. counting the catalogue is a decision, not a habit ─────────────────────
 //
 // MEASURED on production 2026-09-08: `SELECT COUNT(*) FROM index_hashes` is an index scan over

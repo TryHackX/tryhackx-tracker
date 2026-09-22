@@ -1938,18 +1938,80 @@ const getJson = async (endpoint) => {
         input.addEventListener('input', sync);
         sync();
     }
-    /** Tiny tooltip above an element ("Marked 3 read") — auto-fades, no library. */
+    /**
+     * The site's one tooltip ("Marked 3 read", "Nothing new", "Copied!") — auto-fades, no library.
+     *
+     * PLACED, not styled into place (1.62.0). It used to be a child of the element with
+     * `left: 50%; translateX(-50%)`, which is centred only as long as nothing overrides it, and the
+     * shoutbox's refresh button did override it — hanging the tip from its right edge so it would
+     * not leave the box — which drew "Nothing new" off to the left of the button on every desktop.
+     * The two rules Popper.js calls preventOverflow and flip, written out here because every tooltip
+     * on the site comes through this function:
+     *
+     *   centred over the anchor, and moved sideways ONLY by as much as centring would put outside
+     *   the viewport (which is what a button at the edge of a phone needs);
+     *   above the anchor, and below it only when there is no room above.
+     *
+     * It lives on <body> with fixed coordinates rather than inside the anchor: a tooltip inside the
+     * element it is about inherits that element's clipping, and a <select> cannot hold one at all.
+     * Nothing is written onto the anchor any more — the old `position: relative` it set could move
+     * an absolutely positioned button. It follows the anchor if the page scrolls under it, and is
+     * announced to a screen reader, which is the only way somebody who cannot see it learns that
+     * the button did anything.
+     */
+    const pubTips = new WeakMap();
     function pubTip(target, text) {
-        if (!target) return;
-        const old = target.querySelector(':scope > .pub-tip');
-        if (old) old.remove();
+        if (!target || !document.body) return;
+        const old = pubTips.get(target);
+        if (old) old.drop();
         const tip = document.createElement('span');
         tip.className = 'pub-tip';
+        tip.setAttribute('role', 'status');
         tip.textContent = text;
-        target.style.position = 'relative';
-        target.appendChild(tip);
+        document.body.appendChild(tip);
+        const GAP = 6, EDGE = 8;
+        const place = () => {
+            if (!tip.isConnected) return;
+            const a = target.getBoundingClientRect();
+            const vw = document.documentElement.clientWidth || window.innerWidth;
+            // Measured at the left edge first, where the whole viewport is available to it, so the
+            // width is its own and not whatever was left over at the last position.
+            tip.style.left = '0px'; tip.style.top = '0px';
+            tip.style.whiteSpace = ''; tip.style.width = '';
+            let w = tip.offsetWidth;
+            if (w > vw - 2 * EDGE) {          // a sentence wider than a phone wraps rather than escaping it
+                tip.style.whiteSpace = 'normal';
+                tip.style.width = (vw - 2 * EDGE) + 'px';
+                w = tip.offsetWidth;
+            }
+            const h = tip.offsetHeight;
+            // preventOverflow: centred, then pushed in by exactly what would have left the viewport.
+            let left = a.left + a.width / 2 - w / 2;
+            left = Math.max(EDGE, Math.min(left, vw - EDGE - w));
+            // flip: above when it fits there, below when it does not.
+            let top = a.top - GAP - h;
+            const below = top < EDGE;
+            if (below) top = a.bottom + GAP;
+            tip.style.left = Math.round(left) + 'px';
+            tip.style.top = Math.round(top) + 'px';
+            tip.classList.toggle('pub-tip-below', below);
+        };
+        const onMove = () => requestAnimationFrame(place);
+        let hideTimer = 0, goneTimer = 0;
+        const drop = () => {
+            clearTimeout(hideTimer); clearTimeout(goneTimer);
+            window.removeEventListener('scroll', onMove, true);
+            window.removeEventListener('resize', onMove);
+            tip.remove();
+            if (pubTips.get(target) === entry) pubTips.delete(target);
+        };
+        const entry = { tip, drop };
+        pubTips.set(target, entry);
+        place();
+        window.addEventListener('scroll', onMove, true);
+        window.addEventListener('resize', onMove);
         requestAnimationFrame(() => tip.classList.add('show'));
-        setTimeout(() => { tip.classList.remove('show'); setTimeout(() => tip.remove(), 250); }, 1800);
+        hideTimer = setTimeout(() => { tip.classList.remove('show'); goneTimer = setTimeout(drop, 250); }, 1800);
     }
     // Exported in 1.61.0: the shoutbox's refresh button says "Nothing new" in exactly this shape,
     // and a tooltip written a second time in assets/js/shoutbox.js would be a second set of timings,
@@ -2382,6 +2444,24 @@ const getJson = async (endpoint) => {
             if (r && r.success) { window.location.reload(); return; }
             langSel.disabled = false;
         });
+        // The display time zone (1.62.0). Saved the moment it is chosen, through the account's own
+        // update endpoint, and answered in the site's tooltip on the box — no reload, because
+        // nothing on THIS page prints a time in it; the shoutbox reads it on its next request.
+        // A refusal puts the select back where it was: a choice that did not save must not look
+        // as if it had.
+        const tzSel = $id('acc-timezone');
+        if (tzSel) {
+            let tzWas = tzSel.value;
+            tzSel.addEventListener('change', async () => {
+                const wrap = $id('acc-timezone-wrap') || tzSel.parentNode;
+                tzSel.disabled = true;
+                const r = await postJson('user_update', { csrf_token: $id('account-csrf').value, timezone: tzSel.value });
+                tzSel.disabled = false;
+                if (r && r.success) { tzWas = tzSel.value; pubTip(wrap, t('js.app.saved')); return; }
+                tzSel.value = tzWas;
+                pubTip(wrap, (r && r.error) || t('js.app.update_failed'));
+            });
+        }
         const verifyBtn = $id('acc-verify-send');
         if (verifyBtn) verifyBtn.addEventListener('click', async () => {
             verifyBtn.disabled = true;
@@ -3135,19 +3215,61 @@ const getJson = async (endpoint) => {
         const ic = $id('info-close');
         if (ic) ic.addEventListener('click', closeInfo);
     }
-    function buildTreePub(files, tokens) {
-        const root = { dirs: new Map(), files: [] };
-        files.forEach(f => {
+    /**
+     * The folder tree of a file list.
+     *
+     * `extra` (1.62.0) is { matches: [{path, size}], total } for a list opened from a hit of a search
+     * that looked inside file names. EVERY match is shown, whatever the caps say: its folder chain
+     * from the root, opened, and the file inside it, marked. A match the loaded pages already hold
+     * is simply that file, found and opened up to; one they do not hold is added to the tree where
+     * its path puts it — once, however many times it arrives — and every folder on its chain gets
+     * an explicit "…" row, because the folder's other files were cut and a folder showing one file
+     * must not look like a folder that holds one file. Its count says "at least" for the same reason.
+     * When the torrent's own count shows nothing else is missing, nothing is marked cut.
+     *
+     * The tree says how many it added (`dataset.extra`) so the list can say so in words.
+     */
+    function buildTreePub(files, tokens, extra) {
+        const newDir = () => ({ dirs: new Map(), files: [], hit: false, cut: false, skipped: false });
+        const root = newDir();
+        const put = (f, mark) => {
             const parts = String(f.path).split('/').filter(Boolean);
             let node = root;
+            const chain = [root];
             for (let i = 0; i < parts.length - 1; i++) {
-                if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
+                if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], newDir());
                 node = node.dirs.get(parts[i]);
+                chain.push(node);
             }
-            node.files.push({ name: parts[parts.length - 1] || String(f.path), size: f.size });
+            node.files.push({ name: parts[parts.length - 1] || String(f.path), size: f.size,
+                              hit: !!mark, extra: mark === 'extra' });
+            return chain;
+        };
+        // The matches, by path: a torrent cannot hold two files at one path, so the path IS the file.
+        const matchList = (extra && Array.isArray(extra.matches)) ? extra.matches : [];
+        const loaded = new Set(files.map(f => String(f.path)));
+        const hitPaths = new Set();
+        const beyond = [];
+        matchList.forEach(m => {
+            const p = String(m && m.path || '');
+            if (!p || hitPaths.has(p)) return;
+            hitPaths.add(p);
+            if (!loaded.has(p)) beyond.push(m);
+        });
+        const total = extra ? Number(extra.total) || 0 : 0;
+        // Nothing is cut if the torrent's own count is already on the screen.
+        const cutAround = beyond.length > 0 && !(total && files.length + beyond.length >= total);
+        files.forEach(f => {
+            const isHit = hitPaths.has(String(f.path));
+            const chain = put(f, isHit ? 'page' : null);
+            if (isHit) chain.forEach(n => { n.hit = true; });
+        });
+        beyond.forEach(m => {
+            put(m, 'extra').forEach(n => { n.hit = true; if (cutAround) n.cut = true; });
         });
         const container = document.createElement('div');
         container.className = 'ftree';
+        container.dataset.extra = String(beyond.length);
         let drawn = 0, skipped = 0;
         const countFiles = (n) => { let c = n.files.length; n.dirs.forEach(d => { c += countFiles(d); }); return c; };
         const nameEl = (cls, text) => {
@@ -3158,16 +3280,24 @@ const getJson = async (endpoint) => {
             else sp.textContent = text;
             return sp;
         };
+        const cutRow = () => {
+            const d = document.createElement('div');
+            d.className = 'ftree-file ftree-cut';
+            d.title = t('js.app.files_cut_title');
+            d.textContent = '…';
+            return d;
+        };
         (function render(node, parent, depth) {
             [...node.dirs.keys()].sort().forEach(name => {
                 const subNode = node.dirs.get(name);
                 const det = document.createElement('details');
-                if (depth === 0) det.open = true;
+                // Open at the top, and all the way down to anything the search matched.
+                if (depth === 0 || subNode.hit) det.open = true;
                 const sum = document.createElement('summary');
                 sum.appendChild(nameEl('ftree-dir', name));
                 const cnt = document.createElement('span');
                 cnt.className = 'text-muted ftree-count';
-                cnt.textContent = ' (' + countFiles(subNode) + ')';
+                cnt.textContent = ' (' + countFiles(subNode) + (subNode.cut ? '+' : '') + ')';
                 sum.appendChild(cnt);
                 det.appendChild(sum);
                 const inner = document.createElement('div');
@@ -3177,10 +3307,11 @@ const getJson = async (endpoint) => {
                 parent.appendChild(det);
             });
             node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
-                if (drawn >= PUB_TREE_LEAVES) { skipped++; return; }
+                // A match is drawn past the leaf cap as well: it is the one line this list is for.
+                if (!f.hit && drawn >= PUB_TREE_LEAVES) { skipped++; node.skipped = true; return; }
                 drawn++;
                 const line = document.createElement('div');
-                line.className = 'ftree-file';
+                line.className = 'ftree-file' + (f.hit ? ' ftree-hit' : '') + (f.extra ? ' ftree-extra' : '');
                 line.appendChild(nameEl('ftree-name', f.name));
                 const sz = document.createElement('span');
                 sz.className = 'ftree-size text-muted';
@@ -3188,6 +3319,8 @@ const getJson = async (endpoint) => {
                 line.appendChild(sz);
                 parent.appendChild(line);
             });
+            // Where siblings were cut around a match, say so in the place they would have been.
+            if (node.cut || (node.hit && node.skipped)) parent.appendChild(cutRow());
         })(root, container, 0);
         if (skipped) {
             const cut = document.createElement('p');
@@ -3197,6 +3330,9 @@ const getJson = async (endpoint) => {
         }
         return container;
     }
+    // For the browser check: the tree a list would draw, without having to seed a torrent with
+    // twenty thousand files to get one.
+    window.FileTreePub = { build: buildTreePub };
 
     const PUB_TREE_LEAVES = 5000;
     // The query parameters the search page owns. Named here rather than inside initSearch()
@@ -3559,7 +3695,10 @@ const getJson = async (endpoint) => {
             } finally { urlHeld--; }
             run(st.page, 'none');
         });
-        let lastTokens = [], lastFilesSearch = false;
+        // `lastQuery` is the term exactly as the search sent it (1.62.0): a file list opened from one
+        // of its hits asks the server with the same words, so the files it adds are the files that
+        // made the row a hit rather than the browser's own guess at them.
+        let lastTokens = [], lastFilesSearch = false, lastQuery = '';
         function setLoading(on) {
             const table = $id('search-table');
             table.classList.toggle('search-loading', on);
@@ -3619,6 +3758,7 @@ const getJson = async (endpoint) => {
             }
             lastTokens = q ? queryTokens(q) : [];
             lastFilesSearch = filesOn && !!q;
+            lastQuery = lastFilesSearch ? q : '';
             body.textContent = '';
             json.rows.forEach(r => {
                 const tr = document.createElement('tr');
@@ -3818,7 +3958,12 @@ const getJson = async (endpoint) => {
             body.textContent = t('js.common.loading');
             overlay.hidden = false;
             document.addEventListener('keydown', escFiles);
-            const json = await getJson('index_files&hash=' + encodeURIComponent(hash));
+            // Opened from a hit of a search that looked inside file names: the first page names the
+            // term, and the server answers with the matching files beside the ordinary page (1.62.0).
+            // Captured NOW, because the reader can type a new search while this list is open.
+            const term = lastFilesSearch ? lastQuery : '';
+            const json = await getJson('index_files&hash=' + encodeURIComponent(hash)
+                                       + (term ? '&search=' + encodeURIComponent(term) : ''));
             if (overlay.hidden) return;
             body.textContent = '';
             if (!json || !json.success) {
@@ -3835,9 +3980,19 @@ const getJson = async (endpoint) => {
             // differ for every torrent bigger than the worker's per-torrent cap, and the title said
             // only the second number while the search row said the first.
             const totalFiles = Number(json.files_count) || 0;
+            // The files that matched the term, from the FIRST reply only — the pages after it do not
+            // carry them. Kept as the server sent them and merged on every render, so a match that a
+            // later page brings in for real is drawn once, where it belongs, and stops being an extra.
+            const matches = Array.isArray(json.matches) ? json.matches : [];
+            const tokens = term ? lastTokens : [];
             const tree = document.createElement('div');
             const notes = document.createElement('div');
             const note = (text) => { const p = document.createElement('p'); p.className = 'text-muted'; p.textContent = text; notes.appendChild(p); };
+            // Rewritten on every render rather than appended once: how many matches sit beyond the
+            // loaded part changes as pages arrive.
+            const matchNote = document.createElement('p');
+            matchNote.className = 'text-muted files-match-note';
+            matchNote.hidden = true;
             const foot = document.createElement('div'); foot.className = 'files-more';
             const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-secondary btn-small';
             const sentinel = document.createElement('div'); sentinel.className = 'files-sentinel';
@@ -3847,7 +4002,14 @@ const getJson = async (endpoint) => {
                     ? t('js.app.files_n_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
                     : t('js.app.files_n', {n: allFiles.length.toLocaleString() + (more || (json.truncated && !json.can_more) ? '+' : '')});
                 title.textContent = (json.name || name || t('js.app.files')) + ' — ' + head;
-                tree.replaceChildren(buildTreePub(allFiles, lastFilesSearch ? lastTokens : []));
+                const built = buildTreePub(allFiles, tokens, { matches, total: totalFiles });
+                tree.replaceChildren(built);
+                const beyond = Number(built.dataset.extra || 0);
+                matchNote.hidden = !beyond && !json.matches_more;
+                matchNote.textContent = [
+                    beyond ? t('js.app.files_matches_beyond', {n: beyond.toLocaleString()}) : '',
+                    json.matches_more ? t('js.app.files_matches_more', {n: matches.length.toLocaleString()}) : '',
+                ].filter(Boolean).join(' ');
                 btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
                 btn.disabled = loading; foot.hidden = !more;
             };
@@ -3875,7 +4037,7 @@ const getJson = async (endpoint) => {
             if (filesMode === 'scroll' && 'IntersectionObserver' in window) {
                 new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore(); }, { root: null, rootMargin: '200px' }).observe(sentinel);
             }
-            body.appendChild(tree); body.appendChild(foot); body.appendChild(notes);
+            body.appendChild(tree); body.appendChild(foot); body.appendChild(matchNote); body.appendChild(notes);
             if (json.truncated && !json.can_more) note(t('js.app.files_truncated'));
             // The list ends here and ends short: the rest was never written, so there is nothing to
             // load and nothing wrong — say it once, quietly, under the tree.
@@ -4251,6 +4413,38 @@ const getJson = async (endpoint) => {
     // The message composer is drawn by assets/js/people.js after a conversation loads, so it asks
     // for this rather than being found by it.
     window.RichText = { mount: mountRichtext };
+
+    /**
+     * The format select keeps no ring after a MOUSE choice (1.62.0).
+     *
+     * :focus-visible was meant to settle this and does not, for this control: Chrome counts a
+     * <select> as something that takes keyboard input, so it matches :focus-visible after a click
+     * as well, and the accent ring stayed round the box until somebody clicked elsewhere. Picking
+     * the option that was already chosen fires no `change` at all, so blurring on change alone
+     * leaves exactly that case glowing.
+     *
+     * So the pointer is remembered: pointerdown on the select marks it, ANY key pressed anywhere
+     * clears the mark, and the stylesheet hides the ring while the mark is on (.rt-pointer). A
+     * mouse user never sees it; somebody arriving with Tab — a key — always does. A change made
+     * with the pointer also gives the focus back to the page, but a change made with the arrow keys
+     * does not: taking the focus away from somebody stepping through the options with the keyboard
+     * would leave them nowhere.
+     *
+     * Delegated from the document, because these selects are drawn by more than one script (the
+     * shoutbox, the message composer cloned per conversation, the description forms).
+     */
+    const RT_FMT = 'select.rt-format';
+    document.addEventListener('pointerdown', (e) => {
+        const sel = e.target && e.target.closest ? e.target.closest(RT_FMT) : null;
+        if (sel) sel.classList.add('rt-pointer');
+    }, true);
+    document.addEventListener('keydown', () => {
+        document.querySelectorAll(RT_FMT + '.rt-pointer').forEach((s) => s.classList.remove('rt-pointer'));
+    }, true);
+    document.addEventListener('change', (e) => {
+        const sel = e.target;
+        if (sel && sel.matches && sel.matches(RT_FMT + '.rt-pointer')) sel.blur();
+    }, true);
 })();
 
 /* ── watching a submission prove itself ─────────────────────────────────────

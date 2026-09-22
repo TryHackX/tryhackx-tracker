@@ -127,6 +127,35 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
         <?php if ($accHasEmail && !$accVerified): ?>
         <p class="text-muted acc-verify-note"><?= _h('account.verify_note') ?></p>
         <?php endif; ?>
+        <?php
+        // THE ZONE THIS READER SEES TIMES IN (v68). In the Profile card, under the facts about the
+        // account, as a sub-section in the shape the mail and language preferences use. "Site
+        // default" first and named with the zone it stands for right now, because a bare "default"
+        // is a promise nobody can check; then every zone, from the same list Settings → Site offers.
+        // A stored name PHP no longer knows reads as the default here, which is what every page
+        // already treats it as (userDisplayTimezone()).
+        $accTzOwn  = trim((string)($meUser['timezone'] ?? ''));
+        if (!tzValidName($accTzOwn)) $accTzOwn = '';
+        $accTzSite = new DateTimeZone(siteTimezone($cfg));
+        ?>
+        <div class="acc-mail-prefs acc-tz-block" id="acc-tz">
+            <h3 class="acc-sub"><label for="acc-timezone"><?= _h('account.tz_head') ?></label></h3>
+            <p class="text-muted acc-verify-note acc-lang-note"><?= _h('account.tz_note') ?></p>
+            <?php /* A wrapper, because the "Saved" tooltip is drawn against an element and a <select>
+                     cannot hold one — it is the wrapper pubTip() measures. */ ?>
+            <span class="acc-tz-wrap" id="acc-timezone-wrap">
+                <select id="acc-timezone" class="acc-language acc-timezone">
+                    <option value=""<?= $accTzOwn === '' ? ' selected' : '' ?>><?= _h('account.tz_site', ['zone' => $accTzSite->getName(), 'offset' => tzOffsetLabel($accTzSite)]) ?></option>
+                    <?php foreach (tzChoices() as $accTzGrp => $accTzIds): ?>
+                    <optgroup label="<?= sanitize($accTzGrp) ?>">
+                        <?php foreach ($accTzIds as $accTzId => $accTzLabel): ?>
+                        <option value="<?= sanitize($accTzId) ?>"<?= $accTzOwn === $accTzId ? ' selected' : '' ?>><?= sanitize($accTzLabel) ?></option>
+                        <?php endforeach; ?>
+                    </optgroup>
+                    <?php endforeach; ?>
+                </select>
+            </span>
+        </div>
         <?php if ($accHasEmail): ?>
         <div class="acc-mail-prefs">
             <h3 class="acc-sub"><?= _h('account.mail_prefs') ?></h3>
@@ -628,7 +657,10 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
             <label class="search-check snd-on"><input type="checkbox" id="snd-on"><span class="search-check-box" aria-hidden="true"></span> <?= _h('account.snd_on') ?></label>
             <div class="snd-row">
                 <label for="snd-vol"><?= _h('account.snd_volume') ?></label>
-                <input type="range" id="snd-vol" min="0" max="100" step="5"> <output id="snd-vol-out" for="snd-vol"></output>
+                <?php /* One step is one percent (1.62.0), so the arrow keys move it by one and the
+                         number beside it is the exact volume that will play — steps of five made
+                         "the one between 20 and 25" a setting nobody could reach. */ ?>
+                <input type="range" id="snd-vol" min="0" max="100" step="1"> <output id="snd-vol-out" for="snd-vol"></output>
             </div>
             <div class="snd-row">
                 <label for="snd-pre"><?= _h('account.snd_pre') ?></label>

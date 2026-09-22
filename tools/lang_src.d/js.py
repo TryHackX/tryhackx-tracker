@@ -4691,3 +4691,22 @@ add('js.shout', {
 add('js.shout', {
     'mention_list': ('Matching names', 'Pasujące nazwy'),
 })
+
+# ── 1.62.0: a picture opened full size, and a file list opened from a search hit ──
+# The lightbox's three strings are the box's own (`js.shout.`, already in LANG_JS_PUBLIC). The file
+# list's are `js.app.`, beside the other sentences a list says when it stops short -- this is the one
+# that says the list WAS cut and the file somebody searched for is shown anyway. `files_matches_beyond`
+# carries its number in brackets so neither language has to agree a noun with it.
+add('js.shout', {
+    'lb_label':    ('Picture', 'Obrazek'),
+    'lb_close':    ('Close', 'Zamknij'),
+    'lb_original': ('Open the original', 'Otwórz oryginał'),
+})
+add('js.app', {
+    'files_cut_title': ('There are more files here that this list did not load',
+        'Są tu jeszcze pliki, których ta lista nie wczytała'),
+    'files_matches_beyond': ('Files that match your search but lie beyond the part of the list loaded here (:n) are shown in their folders; “…” marks where the files around them were left out.',
+        'Pliki pasujące do wyszukiwania, które leżą poza wczytaną częścią listy (:n), są pokazane w swoich folderach; „…” oznacza miejsca, gdzie pominięto pliki obok nich.'),
+    'files_matches_more': ('More files match than the first :n shown here.',
+        'Pasujących plików jest więcej niż pierwsze :n pokazane tutaj.'),
+})

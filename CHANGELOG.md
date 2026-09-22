@@ -4,6 +4,121 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.62.0] — 2026-09-22
+
+Schema **68** — one setting and one column. `site_timezone` is the zone this site shows times in,
+and `users.timezone` is a reader's own, where NULL means "the site's" rather than a zone of its own.
+The shoutbox is the first thing that reads either. This is the owner's third pass over the live
+room, plus three things outside it that the same pass turned up.
+
+### Added — a clock for the site, and one for each reader
+
+There was no display time zone at all: only `tracker_schedule_tz` and `backup_schedule_tz`, each
+for its own schedule. The shoutbox printed an hour by slicing it out of the database's own string —
+and `getDb()` sets the database session to PHP's offset, so every reader on the site saw PHP's hour,
+whoever and wherever they were. In a room full of people in Warsaw on a server running UTC, every
+line was two hours in the past.
+
+Settings → Site now has a **Time zone** (every zone PHP knows, grouped by region, with today's
+offset beside each). Until somebody saves a choice it follows the zone the tracker schedule already
+runs in, and failing that the one PHP runs in — decided when it is read, not frozen by a migration,
+so an empty or broken row falls back to the next-best fact instead of to a page that cannot tell
+the time. The account page's Profile card has its own **Time zone**, "Site default (Europe/Warsaw,
+UTC+02:00)" first, then every zone; it saves the moment it is chosen, through the account's own
+update endpoint and with the same test Settings uses — no password, because which clock somebody
+reads the room in says nothing about who they are.
+
+The times are formatted **on the server**, for the first page and for every polled row alike, so
+the two can never disagree: each row carries the hour for the list and the full local timestamp
+with its offset for the title over it. They are made from an instant the DATABASE converts
+(`UNIX_TIMESTAMP(created_at)`), never from the column's string — PHP reading that string would
+assume its own zone, which is right on a machine where the two agree and hours off on the first one
+where they do not. A guest reads the site's zone. One caveat belongs to the storage rather than to
+this code: the session zone is an offset taken when a row is written, so on a server whose PHP runs
+in a zone with summer time a row written before the change reads an hour out after it. A server on
+UTC, like this one, has no such hour.
+
+**Only the shoutbox has been converted.** The other places that print a time still print the
+database's string, or read it in the visitor's browser as if it were local: "Member since" and "Last
+sign-in" on the account page and "member since" on a profile, the notification list and a group's
+expiry on the account page, the times beside messages, the signed-in devices list (which prints
+UTC), "last seen" in the search results and "first seen" / "last seen" in the Info panel, the
+hash-check page, and every table in the panel. Each of those can take `userDisplayTimezone()` and
+`userDisplayTime()` (includes/db_clock.php) the way the shoutbox now does; none of them was touched
+here.
+
+### Added — a picture in a shout opens when it is clicked
+
+Pictures in a shout stay small in the line, and they are links now: a plain click opens the picture
+fitted to the window on a dark backdrop, with a close button and a link to the original, and Esc, the
+button and a click on the backdrop all close it. The focus goes into it and comes back to the picture
+afterwards, and Tab stays inside it while it is open. Ctrl or Cmd+click, a middle click and the
+context menu open the original in a new tab, natively — the picture is a real
+`<a target="_blank" rel="noopener noreferrer">` and only the unmodified primary click is
+intercepted, so nothing a browser user expects of a link had to be written again. The address is
+the one the renderer already validated, reused byte for byte; the lightbox takes it from the link
+and parses nothing. Emotes are words and stay words; a sticker is already its own full size; and a
+picture the author already made into a link keeps being the author's link.
+
+### Fixed — the emoji picker opens beside its button
+
+The button moved into the text field's top right in 1.61.0 and the picker kept opening from the
+field's left edge, a whole field away from what was pressed. It is placed against the button each
+time it opens: its right edge on the button's, above it when it fits there and below when it does
+not, and clamped so no part of it leaves the window — on a phone it takes the width of the screen.
+
+### Fixed — four small things in the room
+
+* No colon after the name. It was a `::after` in the stylesheet rather than a character in either
+  renderer, so it came off in one line.
+* The format select no longer keeps its ring after a mouse choice. Chrome counts a `<select>` as a
+  keyboard control and matches `:focus-visible` after a click too, and picking the option already
+  chosen fires no `change` at all — so the select is marked on pointerdown, the mark is cleared by
+  any key, and there is no ring while it is marked. A mouse user never sees it; somebody arriving
+  with Tab still does. A change made with the pointer gives the focus back to the page; one made with
+  the arrow keys does not, because that would leave a keyboard user nowhere.
+* `.pm-editor .rt-format` is `padding: 0.2rem 0.35rem` — tried at 0.15, preferred at 0.2.
+* The visited colour leaked from the name in the pinned strip and from the Emotes link, and from the
+  "Open the shoutbox" link beside it. The rule now covers every link the widget draws, as one scope
+  rather than a list of parts, plus the lightbox's link, which lives outside the box.
+
+### Fixed — the tooltip sits over what was pressed
+
+`pubTip()` drew "Nothing new" off to the left of the refresh button on every desktop: one rule hung it
+from the button's right edge so it could not leave the box. Every tooltip on the site goes through
+that one function, so it now places itself the way Popper.js does — centred over what was pressed,
+pushed sideways only by as much as centring would put outside the window (which is right on a
+phone), and below it only when there is no room above. It lives on the page rather than inside the
+element it is about, so nothing can clip it and a `<select>` can have one, and it is announced to a
+screen reader.
+
+### Fixed — a file list opened from a search hit shows the file that matched
+
+With "Also search file names" on, a hit is shown as a chip, and opening the file list of a torrent
+with thousands of files showed a capped page that need not contain the matching file at all. The
+first page now carries the files that match the same term, with the same clause the search itself
+used (`indexFilePathClause()` is shared by both, so they cannot disagree about what matched): up to
+fifty, the ones BEYOND the page first, from the file index's own fulltext rather than a walk of the
+torrent's list. The tree shows every match with its folder chain from the root opened, the file
+marked, and an explicit `…` row in each folder on the way where the other files were cut; the folder
+counts say "at least", and a line under the tree says how many matches came from outside the loaded
+part. A match already on the page is simply found and opened up to, and one that a later page brings
+in is drawn once. Everything else stays capped exactly as before.
+
+### Changed — the copyable hash on favourites and lists
+
+The short hash that copies itself wears the dress of the site's other click-to-copy text — the code
+chip on the Emotes page — instead of a dotted underline, which read as a link to somewhere. "Copied!"
+is the site's tooltip, centred over the chip; it used to be the chip's own label swapped for the
+word, which in a right-aligned column left the shorter word against the right edge rather than over
+what was clicked. It can be reached and pressed from the keyboard as well.
+
+### Changed — the volume moves in ones
+
+The volume slider on the account's Sounds tab steps by one percent, so the arrow keys move it by one
+and the number beside it is the exact volume that will play. It is the only volume slider on the
+site; the panel sets default sounds, not a volume.
+
 ## [1.61.0] — 2026-09-15
 
 Schema **67** — no tables, one setting and one permission. `shout_page_action` is the action name

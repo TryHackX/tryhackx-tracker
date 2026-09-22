@@ -2623,3 +2623,10 @@ add('', {
     'js.shoutadmin.matrix_permission': ('Permission', 'Uprawnienie'),
     'js.shoutadmin.matrix_has': (':group has :key', ':group ma :key'),
 })
+
+# ── 1.62.0: the zone this site shows times in ──────────────────────────────
+add('', {
+    'settings.site_timezone': ('Time zone', 'Strefa czasowa'),
+    'settings.site_timezone_hint': ("The zone the shoutbox shows its times in, for every guest and for every member who has not chosen their own on the account page. Until a choice is saved here it follows the zone of the scheduled tracker mode, and failing that the one PHP runs in (:php). The offset beside each zone is today's.",
+        'Strefa, w której shoutbox pokazuje godziny — każdemu gościowi i każdemu członkowi, który nie wybrał własnej na stronie konta. Dopóki nie zapiszesz tu wyboru, obowiązuje strefa harmonogramu trybu trackera, a gdy jej brak — ta, w której działa PHP (:php). Przesunięcie przy każdej strefie jest dzisiejsze.'),
+})
