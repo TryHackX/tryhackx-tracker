@@ -58,7 +58,7 @@ $regTermsText = trim((string)($cfg['users_terms_text'] ?? ''));
     <div class="files-box" role="dialog" aria-modal="true" aria-labelledby="terms-title">
         <div class="files-head">
             <h3 id="terms-title"><?= _h('register.terms_title') ?></h3>
-            <button type="button" class="files-close" id="terms-close" title="<?= _h('common.close') ?>">&times;</button>
+            <button type="button" class="files-close" id="terms-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         </div>
         <div class="files-body terms-body"><?= nl2br(sanitize($regTermsText)) ?></div>
     </div>

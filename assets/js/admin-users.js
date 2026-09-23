@@ -134,8 +134,8 @@
                     className: 'us-group-badge' + (g.active ? '' : ' us-inactive'),
                     title: (g.active ? '' : (new Date(String(g.granted_at).replace(' ', 'T')) > new Date() ? t('js.users.starts_at', { date: g.granted_at }) : t('js.users.expired')) + ' · ')
                         + (g.expires_at ? t('js.users.until', { date: g.expires_at }) : t('js.users.permanent')),
-                    text: g.name + (g.expires_at ? ' ⏱' : ''),
-                });
+                }, [g.name, g.expires_at ? ' ' : null,
+                    g.expires_at ? el('i', { className: 'bi bi-hourglass-split', 'aria-hidden': 'true' }) : null]);
                 if (g.color && /^#[0-9a-fA-F]{3,8}$/.test(g.color)) b.style.borderColor = g.color;
                 gTd.appendChild(b);
             });
@@ -293,7 +293,7 @@
         if (!box || uaPwItems) return;
         uaPwItems = UA_PW_REQS.map(([label]) => {
             const li = el('div', { className: 'pw-req' }, [
-                el('span', { className: 'pw-req-ic', text: '✗' }),
+                el('i', { className: 'bi bi-x-lg pw-req-ic', 'aria-hidden': 'true' }),
                 el('span', { text: ' ' + label }),
             ]);
             box.appendChild(li);
@@ -328,7 +328,7 @@
             const ok = test(pw);
             if (!ok) pwOk = false;
             uaPwItems[i].classList.toggle('ok', ok);
-            uaPwItems[i].querySelector('.pw-req-ic').textContent = ok ? '✓' : '✗';
+            uaPwItems[i].querySelector('.pw-req-ic').className = ok ? 'bi bi-check-lg pw-req-ic' : 'bi bi-x-lg pw-req-ic';
         });
 
         const allOk = userOk === true && mailOk !== false && pwOk;
@@ -538,7 +538,7 @@
             groups.forEach(g => {
                 const on = !!(g.permissions && g.permissions[key]);
                 tr.appendChild(el('td', { className: 'gr-matrix-c' + (on ? ' on' : '') }, [
-                    on ? el('i', { className: 'bi bi-check-lg', title: t('js.users.matrix_has', { group: g.name, key: key }) }) : el('span', { className: 'gr-matrix-off', text: '·' })]));
+                    on ? el('i', { className: 'bi bi-check-lg', title: t('js.users.matrix_has', { group: g.name, key: key }) }) : el('i', { className: 'bi bi-dot gr-matrix-off', 'aria-hidden': 'true' })]));
             });
             tbody.appendChild(tr);
         });

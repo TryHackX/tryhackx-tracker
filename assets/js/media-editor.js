@@ -317,8 +317,9 @@
             const discard = el('button', { type: 'button', className: btn.danger + ' fe-discard', text: T('js.media.discard') });
             const keep = el('button', { type: 'button', className: btn.secondary + ' fe-keep', text: T('js.media.keep') });
             const ask = el('span', { className: 'fe-ask', hidden: true }, [el('span', { text: T('js.media.discard_q') }), discard, keep]);
-            const close = el('button', { type: 'button', className: 'fe-close', 'aria-label': T('js.media.close'), title: T('js.media.close'), text: '×' });
-            // The × asks its question BESIDE ITSELF (1.64.0), not in the footer. Built here rather
+            const close = el('button', { type: 'button', className: 'fe-close', 'aria-label': T('js.media.close'), title: T('js.media.close') },
+                [el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' })]);
+            // The close asks its question BESIDE ITSELF (1.64.0), not in the footer. Built here rather
             // than through window.pubTip(): this editor also runs in the panel, which does not load
             // app.js, and a hint that exists on one side of the site only is not a hint.
             const closeHint = el('span', { className: 'fe-close-hint', role: 'status', 'aria-live': 'polite', hidden: true });

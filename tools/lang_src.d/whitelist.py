@@ -163,7 +163,6 @@ add('rt', {
     'center':    ('Centre', 'Wyśrodkowanie'),
     'hr':        ('Horizontal rule', 'Linia pozioma'),
     'toolbar':   ('Formatting', 'Formatowanie'),
-    'list_word': ('List', 'Lista'),
 })
 
 

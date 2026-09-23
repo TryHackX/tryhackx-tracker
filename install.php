@@ -511,6 +511,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Install - TryHackX Tracker</title>
+    <?php /* The icon font, through the same helper as every other page. There are no settings yet —
+             the database is what this page is configuring — so it is always Bootstrap Icons here. */ ?>
+    <?= iconFontTag([]) ?>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #0a0a1a; color: #e0e0e0; font-family: 'Courier New', monospace; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; }
@@ -540,6 +543,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
         .pw-req { display: inline-block; width: 48%; color: #555; transition: color .2s; }
         .pw-req.ok { color: #4caf50; }
         .pw-req.fail { color: #f44336; }
+        .pw-dot { font-size: 0.55em; vertical-align: 0.15em; }
         @media (max-width: 500px) { .two-col { grid-template-columns: 1fr; } .pw-req { width: 100%; } }
     </style>
 </head>
@@ -574,7 +578,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 'Config writable' => is_writable(__DIR__ . '/config/'),
             ];
             foreach ($checks as $name => $ok): ?>
-                <span style="color:<?= $ok ? '#4caf50' : '#f44336' ?>;"><?= $ok ? '&check;' : '&cross;' ?> <?= $name ?></span><br>
+                <span style="color:<?= $ok ? '#4caf50' : '#f44336' ?>;"><?= $ok ? '<i class="bi bi-check-lg" aria-hidden="true"></i>' : '<i class="bi bi-x-lg" aria-hidden="true"></i>' ?> <?= $name ?></span><br>
             <?php endforeach; ?>
         </p>
         <a href="install.php?step=2" class="btn">Start Installation</a>
@@ -622,12 +626,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 </div>
             </div>
             <div id="pw-reqs" style="margin:-0.5rem 0 1rem;font-size:0.78rem;line-height:1.7;">
-                <span id="pw-len" class="pw-req">&#9679; At least 10 characters</span>
-                <span id="pw-low" class="pw-req">&#9679; Lowercase letter (a-z)</span>
-                <span id="pw-up" class="pw-req">&#9679; Uppercase letter (A-Z)</span>
-                <span id="pw-dig" class="pw-req">&#9679; Digit (0-9)</span>
-                <span id="pw-spc" class="pw-req">&#9679; Special character (!@#$...)</span>
-                <span id="pw-match" class="pw-req" style="display:none;">&#9679; Passwords match</span>
+                <span id="pw-len" class="pw-req"><i class="bi bi-circle-fill pw-dot" aria-hidden="true"></i> At least 10 characters</span>
+                <span id="pw-low" class="pw-req"><i class="bi bi-circle-fill pw-dot" aria-hidden="true"></i> Lowercase letter (a-z)</span>
+                <span id="pw-up" class="pw-req"><i class="bi bi-circle-fill pw-dot" aria-hidden="true"></i> Uppercase letter (A-Z)</span>
+                <span id="pw-dig" class="pw-req"><i class="bi bi-circle-fill pw-dot" aria-hidden="true"></i> Digit (0-9)</span>
+                <span id="pw-spc" class="pw-req"><i class="bi bi-circle-fill pw-dot" aria-hidden="true"></i> Special character (!@#$...)</span>
+                <span id="pw-match" class="pw-req" style="display:none;"><i class="bi bi-circle-fill pw-dot" aria-hidden="true"></i> Passwords match</span>
             </div>
             <div id="pw-strength" style="margin:-0.5rem 0 1rem;">
                 <div style="height:4px;background:#222;border-radius:2px;overflow:hidden;">
@@ -720,9 +724,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
         </div>
         <hr>
         <form method="post" action="install.php?step=4&cleanup=1" style="margin-top:1rem;" id="cleanup-form">
-            <p style="color:#ff9800;font-size:0.85rem;margin-bottom:0.75rem;"><strong>&#9888; Security Cleanup</strong> — This will permanently delete the installer file so it cannot be accessed by anyone.</p>
+            <p style="color:#ff9800;font-size:0.85rem;margin-bottom:0.75rem;"><strong><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> Security Cleanup</strong> — This will permanently delete the installer file so it cannot be accessed by anyone.</p>
             <button type="submit" class="btn" style="background:#f44336;color:#fff;" onclick="return confirm('Are you sure? This will permanently delete the install file.')">
-                &#128465; Delete install.php
+                <i class="bi bi-trash" aria-hidden="true"></i> Delete install.php
             </button>
         </form>
     <?php endif; ?>
@@ -748,10 +752,10 @@ async function testBlacklist() {
         const res = await fetch('install.php?test_blacklist=1', { method: 'POST', body: form });
         const json = await res.json();
         if (json.ok) {
-            el.innerHTML = '<span style="color:#4caf50;">&#10003; ' + json.msg + '</span>' +
+            el.innerHTML = '<span style="color:#4caf50;"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + json.msg + '</span>' +
                 (json.user ? '<br><small style="color:#a0a0b0;">PHP user: ' + json.user + '</small>' : '');
         } else {
-            el.innerHTML = '<span style="color:#f44336;">&#10007; ' + json.msg + '</span>' +
+            el.innerHTML = '<span style="color:#f44336;"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + json.msg + '</span>' +
                 (json.hint ? '<br><small style="color:#ff9800;">' + json.hint + '</small>' : '') +
                 (json.user ? '<br><small style="color:#a0a0b0;">PHP user: ' + json.user + '</small>' : '');
         }

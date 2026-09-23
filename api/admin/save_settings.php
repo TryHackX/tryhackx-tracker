@@ -12,6 +12,8 @@ $allowed = [
     'announce_url', 'announce_url_https', 'github_url',
     // schema v68: the zone this site shows times in (includes/db_clock.php)
     'site_timezone',
+    // schema v73: which library draws every icon on the site (includes/icons.php)
+    'icon_library',
     'contact_visible', 'contact_obfuscate', 'hmac_secret',
     'recaptcha_enabled', 'recaptcha_site_key', 'recaptcha_secret',
     'recaptcha_on_report', 'recaptcha_on_login', 'recaptcha_on_status',
@@ -247,6 +249,12 @@ if (isset($data['admin_hidden_behavior']) && !in_array($data['admin_hidden_behav
 // the answer to a bug in the form is the setting that cannot break a page for a visitor.
 if (isset($data['csp_mode']) && !in_array($data['csp_mode'], CSP_MODES, true)) {
     $data['csp_mode'] = 'report';
+}
+// ── The icon library ──
+// Coerced like csp_mode, and to the library every icon is written in: an unknown value is a bug in
+// the form, and the answer to that is the choice that draws every icon, not a guess.
+if (isset($data['icon_library']) && !in_array($data['icon_library'], ICON_LIBRARIES, true)) {
+    $data['icon_library'] = 'bootstrap';
 }
 if (isset($data['csp_extra_hosts'])) {
     // This value is written VERBATIM into a response header, so the validation is the whole security

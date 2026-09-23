@@ -44,8 +44,16 @@
         const fr = $('pc-preview');
         if (!fr || fr.tagName !== 'IFRAME') { if (fr) fr.innerHTML = html; return; }
         const css = fr.dataset.css || '', base = fr.dataset.base || '/';
+        // The icon font the public page carries, and — with Font Awesome chosen — the same classes the
+        // public page would get: the frame runs no script of its own, so the markup is mapped here,
+        // before it goes in (assets/js/icons.js; absent with Bootstrap Icons, whose markup it already is).
+        const q = (s) => String(s || '').replace(/"/g, '&quot;');
+        const icons = fr.dataset.iconCss
+            ? '<link rel="stylesheet" href="' + q(fr.dataset.iconCss) + '" integrity="' + q(fr.dataset.iconSri) + '" crossorigin="anonymous">'
+            : '';
+        if (window.IconLibrary) html = window.IconLibrary.html(html);
         fr.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><base href="' + base.replace(/"/g, '&quot;') + '">'
-            + '<link rel="stylesheet" href="' + css.replace(/"/g, '&quot;') + '">'
+            + icons + '<link rel="stylesheet" href="' + css.replace(/"/g, '&quot;') + '">'
             + '<style>html,body{background:#000011;margin:0}body{padding:0.9rem 1.1rem 0.9rem 1.4rem}.container{max-width:none;padding:0}'
             + 'ol,ul{padding-left:1.6em;margin-left:0}'
             + 'main{margin:0}.rt-page h1{margin-top:0}</style></head>'

@@ -78,7 +78,7 @@
             const row = el('div', { className: 'hl-row' + (r.hidden ? ' hl-off' : ''), 'data-key': r.key });
             row.draggable = true;
 
-            row.appendChild(el('div', { className: 'hl-grip', text: '⠿', 'aria-hidden': 'true' }));
+            row.appendChild(el('div', { className: 'hl-grip', 'aria-hidden': 'true' }, el('i', { className: 'bi bi-grip-vertical' })));
 
             const mid = el('div', { className: 'hl-mid' });
             const head = el('div', { className: 'hl-head' }, [

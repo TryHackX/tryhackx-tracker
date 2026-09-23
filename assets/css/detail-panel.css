@@ -93,8 +93,6 @@
 .rt-body .rt-spoiler { border: 1px solid rgba(255,255,255,0.14); border-radius: 5px; margin: 0.6rem 0; }
 .rt-body .rt-spoiler > summary { cursor: pointer; padding: 0.35rem 0.7rem; font-weight: 600; list-style: none; }
 .rt-body .rt-spoiler > summary::-webkit-details-marker { display: none; }
-.rt-body .rt-spoiler > summary::before { content: '▸ '; opacity: 0.7; }
-.rt-body .rt-spoiler[open] > summary::before { content: '▾ '; }
 .rt-body .rt-spoiler-body { padding: 0 0.7rem 0.6rem; }
 
 /* Content the reader is not entitled to. The locked form carries no text from the author at all —

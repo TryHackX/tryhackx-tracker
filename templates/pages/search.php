@@ -105,13 +105,13 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
             <col class="search-c-name"><col class="search-c-size"><col class="search-c-sl"><?= $repCol ? '<col class="search-c-rep">' : '' ?><col class="search-c-seen"><?= $canMagnet ? '<col class="search-c-actions">' : '' ?>
         </colgroup>
         <thead><tr>
-            <th class="search-sortable" data-sort="name"><?= _h('search.col_name') ?> <span class="search-sort-icon" aria-hidden="true"></span></th>
-            <th class="search-sortable" data-sort="size"><?= _h('search.col_size') ?> <span class="search-sort-icon" aria-hidden="true"></span></th>
-            <th class="search-sortable" data-sort="seeders" title="<?= _h('search.col_sl_title') ?>"><?= _h('search.col_sl') ?> <span class="search-sort-icon" aria-hidden="true"></span></th>
+            <th class="search-sortable" data-sort="name"><?= _h('search.col_name') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></th>
+            <th class="search-sortable" data-sort="size"><?= _h('search.col_size') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></th>
+            <th class="search-sortable" data-sort="seeders" title="<?= _h('search.col_sl_title') ?>"><?= _h('search.col_sl') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></th>
             <?php if ($repCol): ?>
             <th title="<?= _h('search.col_rating_title') ?>"><?= _h('search.col_rating') ?></th>
             <?php endif; ?>
-            <th class="search-sortable" data-sort="last"><?= _h('search.col_last') ?> <span class="search-sort-icon" aria-hidden="true"></span></th><?= $canMagnet ? '<th></th>' : '' ?>
+            <th class="search-sortable" data-sort="last"><?= _h('search.col_last') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></th><?= $canMagnet ? '<th></th>' : '' ?>
         </tr></thead>
         <tbody id="search-body"></tbody>
     </table>
@@ -133,7 +133,7 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
     <div class="files-box" role="dialog" aria-modal="true" aria-labelledby="files-title">
         <div class="files-head">
             <h3 id="files-title"><?= _h('search.files_head') ?></h3>
-            <button type="button" class="files-close" id="files-close" title="<?= _h('common.close') ?>">&times;</button>
+            <button type="button" class="files-close" id="files-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         </div>
         <div class="files-body" id="files-body"></div>
     </div>

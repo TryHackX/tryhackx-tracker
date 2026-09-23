@@ -180,8 +180,8 @@ add('', {
     'account.snd_ev_message_friend': ('A message from a friend', 'Wiadomość od znajomego'),
     'account.snd_ev_message': ('A message from anyone else', 'Wiadomość od pozostałych'),
     'account.snd_test': ('Test', 'Test'),
-    'account.snd_autoplay': ('Browsers let a page make a sound only after you have clicked or typed on it. Until then a small &#128263; note appears beside your name at the top, and the first click anywhere plays what was waiting.',
-        'Przeglądarki pozwalają stronie wydać dźwięk dopiero po tym, jak na niej klikniesz albo coś wpiszesz. Do tego czasu przy twoim imieniu u góry pojawia się mała notka &#128263;, a pierwsze kliknięcie gdziekolwiek odtwarza to, co czekało.'),
+    'account.snd_autoplay': ('Browsers let a page make a sound only after you have clicked or typed on it. Until then a small <i class="bi bi-volume-mute" aria-hidden="true"></i> note appears beside your name at the top, and the first click anywhere plays what was waiting.',
+        'Przeglądarki pozwalają stronie wydać dźwięk dopiero po tym, jak na niej klikniesz albo coś wpiszesz. Do tego czasu przy twoim imieniu u góry pojawia się mała notka <i class="bi bi-volume-mute" aria-hidden="true"></i>, a pierwsze kliknięcie gdziekolwiek odtwarza to, co czekało.'),
     'account.snd_save': ('Save', 'Zapisz'),
 })
 

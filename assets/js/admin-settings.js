@@ -251,8 +251,11 @@
         const bc = breadcrumbFor(sec);
         bc.classList.toggle('d-hidden', !on);
         if (on) {
-            bc.querySelector('.settings-where-path').textContent =
-                groupTitle(sec.group) + '  ›  ' + (sec.label || sec.title);
+            // Group, a chevron (an icon since 1.68.0), section.
+            const chev = document.createElement('i');
+            chev.className = 'bi bi-chevron-right settings-where-sep';
+            chev.setAttribute('aria-hidden', 'true');
+            bc.querySelector('.settings-where-path').replaceChildren(groupTitle(sec.group), chev, sec.label || sec.title);
         }
     }
 

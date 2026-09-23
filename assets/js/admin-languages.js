@@ -267,7 +267,7 @@
             out.textContent = t('js.languages.already_installed', { name: k.name });
             out.className = 'wl-small text-warning';
         } else if (k) {
-            out.textContent = '→ ' + k.name;
+            out.replaceChildren(el('i', { className: 'bi bi-arrow-right', 'aria-hidden': 'true' }), ' ' + k.name);
             out.className = 'wl-small text-success';
         } else if (/^[a-z]{2,3}$/.test(code)) {
             // The panel's own table is short on purpose (it feeds the dropdown). The browser ships
@@ -275,7 +275,7 @@
             // Intl.DisplayNames gives its native name for anything the browser knows.
             const native = intlName(code);
             if (native) {
-                out.textContent = '→ ' + native;
+                out.replaceChildren(el('i', { className: 'bi bi-arrow-right', 'aria-hidden': 'true' }), ' ' + native);
                 out.className = 'wl-small text-success';
                 $('lu-pick-label').textContent = native + ' (' + code.toUpperCase() + ')';
             } else {

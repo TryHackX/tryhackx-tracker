@@ -220,8 +220,10 @@
             hashCell.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); copyToClipboard(r.info_hash, e.currentTarget); });
             tr.appendChild(hashCell);
             const badges = [];
-            if (r.protected) badges.push(el('span', { className: 'status-badge-sm status-badge', title: t('js.index.protected_title'), text: '🛡' }));
-            if (r.promoted) badges.push(el('span', { className: 'status-badge-sm status-badge', title: t('js.index.promoted_title'), text: '★' }));
+            if (r.protected) badges.push(el('span', { className: 'status-badge-sm status-badge', title: t('js.index.protected_title') },
+                                            el('i', { className: 'bi bi-shield-fill', 'aria-hidden': 'true' })));
+            if (r.promoted) badges.push(el('span', { className: 'status-badge-sm status-badge', title: t('js.index.promoted_title') },
+                                           el('i', { className: 'bi bi-star-fill', 'aria-hidden': 'true' })));
             tr.appendChild(el('td', { className: 'wl-name-cell' }, [el('span', { text: r.name || '—', title: r.name || '' }), ...badges]));
             tr.appendChild(el('td', { className: 'font-mono', text: r.total_size ? fmtBytes(r.total_size) : '—' }));
             tr.appendChild(el('td', { className: 'font-mono', text: r.files_count != null ? String(r.files_count) : '—' }));
@@ -296,7 +298,7 @@
 
         if (hasText) {
             const det = el('details', { className: 'rt-collapse' });
-            det.appendChild(el('summary', { text: t('js.index.description') }));
+            det.appendChild(el('summary', null, [el('i', { className: 'bi bi-chevron-right disc-chev', 'aria-hidden': 'true' }), t('js.index.description')]));
             const body = el('div', { className: 'rt-body' });
             // Built on the server by includes/richtext.php from fully escaped input with a fixed tag
             // whitelist. Everything else in this file goes through el()/textContent.

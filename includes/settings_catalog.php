@@ -79,6 +79,7 @@ function settingsCatalogKeywords(): array {
         'announce_url_https'       => 'http https announce tracker address client torrent tcp',
         'github_url'               => 'source code repository git project link footer',
         'site_timezone'            => 'time zone timezone tz clock hour hours local time display shoutbox utc offset gmt iana dst summer strefa czasowa godzina czas',
+        'icon_library'             => 'icons icon font library glyph glyphs symbols font awesome fontawesome fa bootstrap icons bi appearance look style theme ikony ikona biblioteka czcionka wyglad',
         'items_per_page'           => 'pagination page size rows per page listing admin lists',
         'max_magnet_link_length'   => 'magnet link length limit report form input',
         'max_message_length'       => 'report message length limit characters textarea',

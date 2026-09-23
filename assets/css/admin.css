@@ -5,6 +5,32 @@
     min-height: 100vh;
 }
 
+/* === Icons drawn by Font Awesome (1.68.0) ===
+   Nothing here can apply while Bootstrap Icons is chosen: every selector needs a Font Awesome class on
+   a .bi element, and those are added only when Settings → Site chooses Font Awesome (includes/icons.php
+   on the page, assets/js/icons.js for what scripts build). Near the TOP of the file on purpose: at equal
+   specificity every later rule that sizes or places an icon (`.wl-copybox-btn .bi`,
+   `.admin-emotes-title .bi`, …) still wins, exactly as it does over Bootstrap's own stylesheet.
+   Bootstrap draws its glyph in an inline-block ::before, lowered 0.125em, inside an inline <i> that keeps
+   the line's height; Font Awesome makes the <i> itself an inline-block of line-height 1. Put the box
+   back where Bootstrap keeps it, so a glyph sits at the same height whichever library draws it. */
+.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; }
+.bi[class*=" fa-"]::before { display: inline-block; vertical-align: -0.125em; line-height: 1; }
+/* The face, pinned on the glyph as Bootstrap Icons pins its own (`font-family: bootstrap-icons
+   !important; font-weight: normal !important` on ::before): a site rule that sets a weight on an icon
+   (`.pw-req-ic`, a bold button) must not pick the other face of the family, and the regular face has
+   none of the solid-only glyphs — it would draw a box. */
+.bi.fa-solid::before, .bi.fa-regular::before { font-family: "Font Awesome 6 Free" !important; font-style: normal !important; }
+.bi.fa-brands::before { font-family: "Font Awesome 6 Brands" !important; font-style: normal !important; }
+.bi.fa-solid::before { font-weight: 900 !important; }
+.bi.fa-regular::before, .bi.fa-brands::before { font-weight: 400 !important; }
+/* Font Awesome's glyphs are 0.625em to 1.25em wide where Bootstrap's are all 1em, so an icon-only
+   button would change width with its icon (a pin turning into the filled pin, a sort arrow turning
+   round). A fixed, centred box — Font Awesome's own fixed width — keeps every such button one size. */
+:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child::before { width: 1.25em; text-align: center; }
+/* Free has no dot: its circle, at Bootstrap's dot size (3/8 of the em), in the same box. */
+.bi-dot[class*=" fa-"]::before { transform: scale(0.375); }
+
 /* === CAPTCHA modal (admin dashboard; markup built by the template, driven by assets/js/captcha.js) ===
    Same placement as the public site (assets/css/style.css): a little above the vertical centre on desktop,
    near the top and (almost) full width on phones, always centred horizontally. The overlay is the backdrop
@@ -1054,8 +1080,9 @@ input[type="number"] {
 .wl-files { margin-top: 1rem; }
 .wl-tree { font-size: 0.8rem; color: #ccc; max-height: 360px; overflow: auto; background: #0d1117; border: 1px solid #222; border-radius: 6px; padding: 0.5rem 0.7rem; }
 .wl-tree details { margin: 0.1rem 0; }
-.wl-tree summary { cursor: pointer; color: #cde; }
-.wl-tree summary::marker { color: #8a94a2; }
+.wl-tree summary { cursor: pointer; color: #cde; list-style: none; }
+.wl-tree summary::-webkit-details-marker { display: none; }
+.wl-tree summary > .disc-chev { color: #8a94a2; opacity: 1; }
 .wl-tree-children { padding-left: 1.1rem; border-left: 1px dashed #333; margin-left: 0.3rem; }
 .wl-tree-file:not(.d-hidden) { display: flex; justify-content: space-between; gap: 1rem; padding: 0.05rem 0; }
 .wl-tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1682,8 +1709,16 @@ input[type="number"] {
 .rt-collapse { border: 1px solid rgba(255,255,255,0.10); border-radius: 6px; margin: 0.6rem 0; }
 .rt-collapse > summary { cursor: pointer; padding: 0.45rem 0.7rem; font-size: 0.82rem; font-weight: 600; list-style: none; }
 .rt-collapse > summary::-webkit-details-marker { display: none; }
-.rt-collapse > summary::before { content: '▸ '; opacity: 0.7; }
-.rt-collapse[open] > summary::before { content: '▾ '; }
+/* A disclosure's marker is a chevron icon IN THE MARKUP, turned a quarter when its <details> is open
+   (1.68.0 — the pattern .gr-matrix-chev started). It was a small triangle character in `content:`, or
+   the browser's own marker, and either one is drawn the same whatever icon library the site uses. */
+.disc-chev { display: inline-block; margin-right: 0.35em; font-size: 0.8em; opacity: 0.7; transition: transform 0.15s ease; }
+details[open] > summary > .disc-chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .disc-chev { transition: none; } }
+/* A spoiler draws its chevron wherever it is rendered — a description, a shout, a message, a page of
+   the site's own (which sits in .rt, not .rt-body) — so the browser's marker goes everywhere too. */
+.rt-spoiler > summary { list-style: none; }
+.rt-spoiler > summary::-webkit-details-marker { display: none; }
 .rt-collapse > .rt-body { padding: 0 0.7rem 0.7rem; }
 .rt-src-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin: 0.5rem 0; font-size: 0.84rem; }
 .wl-content-block { margin: 0.6rem 0; }
@@ -1796,8 +1831,6 @@ input[type="number"] {
 .au-detail { margin-top: 0.3rem; }
 .au-detail > summary { cursor: pointer; font-size: 0.75rem; color: #7f8c9a; list-style: none; }
 .au-detail > summary::-webkit-details-marker { display: none; }
-.au-detail > summary::before { content: '▸ '; }
-.au-detail[open] > summary::before { content: '▾ '; }
 .au-json { margin: 0.3rem 0 0; padding: 0.4rem 0.6rem; background: rgba(0,0,0,0.3); border-radius: 4px;
            font-size: 0.72rem; max-height: 16rem; overflow: auto; }
 .au-diff { margin: 0.3rem 0 0; font-size: 0.74rem; border-collapse: collapse; }
@@ -1841,8 +1874,6 @@ input[type="number"] {
     font-size: 0.78rem;
 }
 .settings-more > summary::-webkit-details-marker { display: none; }
-.settings-more > summary::before { content: '▸ '; opacity: 0.75; }
-.settings-more[open] > summary::before { content: '▾ '; }
 .settings-more[open] { padding-bottom: 0.2rem; }
 
 /* The fetch-order card: what the chosen mode actually runs on, next to the choice itself. */
@@ -1886,6 +1917,7 @@ input[type="number"] {
     letter-spacing: 0.02em;
 }
 .settings-where-jump { padding: 0.1rem 0.5rem; font-size: 0.74rem; }
+.settings-where-sep { margin: 0 0.4em; font-size: 0.85em; opacity: 0.7; }
 
 /* ── Review panes: the intro line, and what an empty queue looks like ────────
  *
@@ -2320,8 +2352,8 @@ textarea.pc-text {
    templates/admin/settings.php), turned a quarter when open. It used to be a CSS escape for U+25B8 in
    `content:` that lost its backslash on the way into this file, and what was left was U+0015 — a
    control character no font can draw, so every browser showed a missing-glyph box — with the letters
-   "B8" after it. An element with a class has no escape to lose. The panel's other collapsibles
-   (.rt-collapse, .au-detail, .settings-more) carry the real U+25B8 and were never affected. */
+   "B8" after it. An element with a class has no escape to lose. Since 1.68.0 every other collapsible
+   (.rt-collapse, .au-detail, .settings-more) draws the same kind of chevron: .disc-chev above. */
 .gr-matrix-wrap > summary { cursor: pointer; list-style: none; }
 .gr-matrix-wrap > summary::-webkit-details-marker { display: none; }
 .gr-matrix-chev { display: inline-block; margin-right: 0.35rem; font-size: 0.85em; transition: transform 0.15s ease; }
@@ -2388,7 +2420,7 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .dm-badge-live { color: #6cc38a; border-color: #2f5d3d; }
 .dm-badge-restart { color: #e0b15a; border-color: #6b4f1a; }
 .dm-row-dirty td { background: rgba(74, 158, 255, 0.06); }
-.dm-row-pending .dm-key::after { content: ' •'; color: #e0b15a; }
+.dm-pending-mark { color: #e0b15a; }
 
 /* === Footer, shared with the public pages (templates/footer.php) ===
    The panel had none at all until 1.41.0. It carries the same lines the front page does, so an

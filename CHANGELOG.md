@@ -4,6 +4,105 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.68.0] — 2026-09-23
+
+Schema 73, one new setting. The owner asked for a choice, in the panel, between Bootstrap Icons and
+Font Awesome for the icons of the whole site — and for no standard emoji or symbol character doing an
+icon's job anywhere. Both are here, and the choice reaches the public pages and the panel alike.
+
+### Added — the icon library, one setting for the whole site
+
+* **`icon_library`** in Settings → Site: `bootstrap` (the default) or `fontawesome`, in its four
+  places and coerced to `bootstrap` on save like `csp_mode`. The hint says it is the whole site.
+* **One head helper, `iconFontTag()`** (includes/icons.php), prints the font in all nine page heads and
+  in the installer — and on EVERY public page. Until now the layout asked for it on a handful of
+  actions, and an icon drawn anywhere else (the inbox's bin with pictures and covers off) was an empty
+  box. Bootstrap: the same tag as before. Font Awesome: Free 6.7.2, the CSS webfont build, from
+  jsDelivr with Subresource Integrity (the SHA-256 jsDelivr publishes for the file). Never the JS/SVG
+  build, which would need jsDelivr in the public `script-src`; the policy does not change.
+* **Every icon stays written one way**, in Bootstrap's markup, and Font Awesome is laid over it through
+  one name map (`iconFaMap()`, 177 names, sent to the browser as JSON). With Font Awesome chosen the
+  server adds the mapped classes to every `class="bi bi-NAME…"` attribute of a page (an output buffer
+  started in index.php), and `assets/js/icons.js` does the same for what scripts build — added nodes
+  and `className` reassignments, looking only at the added subtrees. The `bi` and `bi-NAME` classes
+  stay, so every rule, selector and test that names `.bi` or `.bi-trash` keeps working, and the
+  progress bar in the Languages table (an `<i>`) is left alone. **With Bootstrap chosen neither the
+  buffer nor the script exists: a page is byte for byte what the templates wrote.**
+* **Font Awesome sits where Bootstrap's glyphs sit**: its box is put back as Bootstrap keeps it (an
+  inline element, the glyph an inline-block lowered 0.125em), its face is pinned on the glyph the way
+  Bootstrap pins its own (a bold rule must not pick the regular face and draw a box), and icon-only
+  buttons get a fixed 1.25em box, because Font Awesome's glyphs are 0.625–1.25em wide where
+  Bootstrap's are all 1em. The public layout loads the icon font before its own stylesheets now, as
+  the panel always did, so a site rule that places an icon wins over either library.
+* Free has no direct twin for 27 Bootstrap names (the octagons, the shield variants, the database and
+  drive stacks, the reboot mark, the dot, the balloon, an outline pin, a few more); each map entry
+  names the closest honest glyph and says why. Every entry was drawn on a live page against the font's
+  own missing-glyph box before it went in.
+* The page-content preview (an iframe filled through `srcdoc`) carries the icon font and, with Font
+  Awesome, the mapped classes, so a YouTube mark or a task box looks there as it will on the page.
+
+### Changed — no emoji or symbol character doing an icon's job
+
+Everything below is Bootstrap Icons markup now, so it follows the setting like every other icon.
+Content stays content: the emoji the picker offers, emoji in messages, the `:shortcode:` map, emote
+images. Prose stays prose: an arrow between two values, a middle dot between facts, "3×", a dash.
+
+* The muted-sound note in the navigation and the sentence that describes it (`bi-volume-mute`); the
+  close buttons of the Info, list, shelf, bookmark, "who has this", report, terms and file windows and
+  of the picture editor (`bi-x-lg`, drawn at three quarters of the old size so the cross weighs what
+  the multiplication sign did); the list window's remove and the Info panel's "put in a list".
+* The four rich-text toolbars (messages, the whitelist form, the Info description editor, the
+  shoutbox) draw the same icons as the panel's copy: bold, italic, underline and strike, colour,
+  size, highlight, sub- and superscript, link, image, both lists, quote, code, table, spoiler,
+  centre, rule. Titles and labels are unchanged; the now unused `rt.list_word` is gone.
+* The sound test's play mark; the YouTube mark on video links and the task-list boxes in rendered
+  descriptions (an e-mail, where no icon font loads, gets the brackets the author typed instead); the
+  emoji picker's TABS (its grid is content and stays emoji); the favourite star; the message report
+  flag; the password checklists (public and panel); the vote buttons (thumbs, not triangles); the
+  search table's sort arrows; the star beside a rating in the results; the magnet copy's tick; the
+  "Sent" tick on the verification button; the search and notification pagers (the words are plain
+  words in the dictionary now, the chevrons elements beside them).
+* The five-star rating is built from two copies of the library's filled star — a dim one and a lit one
+  in a clipped box — instead of a star character drawn by CSS; half stars stay, centred in either
+  library.
+* Every `<details>` marker is a chevron in the markup that turns a quarter when open, as the
+  permission matrix's already did: descriptions, spoilers, the audit log's details, the settings'
+  "more" folds, the syntax help, and both file trees (these had the browser's own triangle).
+* The panel: the Settings tests' marks (tick, cross, info, circle, dot), the group expiry hourglass,
+  the Index's protected and promoted badges, a list's last-error warning, the sysctl results, the
+  message reports' pager, the home layout's grip, the language upload's arrow, the settings
+  breadcrumb, the permission matrices' empty cells, and the database memory's pending mark.
+* The installer loads Bootstrap Icons through the same helper (it has no settings to read) and marks
+  its checks, password rules, warning and delete button with icons.
+
+### Fixed — the shoutbox composer's scrollbar ran under Send
+
+* A long message made the field scroll, and its bar was drawn under Send and beside the picker
+  handle pinned in the field's corner. The bar's width is measured (what the field is wide beyond its
+  client area, less its borders) and handed to the stylesheet as `--shout-sb`; the two buttons stand
+  that much further in. Re-measured on input, on the field's own drag-resize and on a window resize
+  (a ResizeObserver on the field), and after a live language switch. `scrollbar-gutter: stable` keeps
+  the text from re-wrapping when the bar appears. Where scrollbars overlay the text the width is 0 and
+  the buttons keep their place.
+
+### Documentation
+
+* The README opens with a **Support the project** section — the Monero, Bitcoin and Ethereum
+  addresses the public tracker's home page lists, each with the network to send it over — and a
+  donate badge beside the others that links to it. The table puts each address on a row of its own,
+  so the 95-character Monero one fits a repository page without a scroll bar. The addresses were
+  compared byte for byte with the live home page and checked against their own checksums (bech32,
+  EIP-55, Monero's Keccak) before they went in.
+
+### Tests
+
+* `tests/icons_test.php` (new): the setting in its four places; the helper as the only place a font is
+  named; every `bi-*` name used anywhere has a map entry, and no entry is unused; with Bootstrap no
+  filter is installed and a page goes out byte for byte, with Font Awesome the filter adds and never
+  alters (strip the additions and the Bootstrap page is left); a scan of every template, include,
+  script, stylesheet and dictionary source, comments aside, for an emoji or symbol character standing
+  in for an icon.
+
 ## [1.67.0] — 2026-09-23
 
 No schema change (still 72). Nine things from the owner's fifth pass over the live site: two real

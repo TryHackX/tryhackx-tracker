@@ -125,7 +125,12 @@
             const live = vars[k] !== undefined ? Number(vars[k]) : null;
             const inFile = file[k] !== undefined ? Number(file[k]) : null;
             const tr = el('tr', { className: 'dm-row' + (inFile !== null && live !== null && inFile !== live ? ' dm-row-pending' : '') });
-            tr.appendChild(el('td', {}, [el('div', { className: 'dm-key', text: t('js.dbmem.k_' + k) }), el('div', { className: 'dm-hint', text: t('js.dbmem.h_' + k) })]));
+            // A value in the file that is not the live one yet is marked with a dot (an icon since
+            // 1.68.0; it was a bullet character in the stylesheet).
+            const pending = inFile !== null && live !== null && inFile !== live;
+            tr.appendChild(el('td', {}, [el('div', { className: 'dm-key' }, [t('js.dbmem.k_' + k),
+                pending ? el('i', { className: 'bi bi-dot dm-pending-mark', 'aria-hidden': 'true' }) : null]),
+                el('div', { className: 'dm-hint', text: t('js.dbmem.h_' + k) })]));
             tr.appendChild(el('td', { className: 'font-mono', text: live === null ? '—' : human(k, live) }));
             tr.appendChild(el('td', { className: 'font-mono text-muted', text: inFile === null ? '—' : human(k, inFile) }));
             // the input, in the reader's unit

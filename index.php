@@ -186,6 +186,14 @@ if ($action === 'health') {
 // redirect after the first byte of a page is a redirect that never happens.
 authBridgeHandleRoute($db, $cfg, $action, $baseUrl);
 
+// ── The icon library ──
+// Every page below this line is HTML, and every icon in it is written in Bootstrap Icons' markup. With
+// Font Awesome chosen (Settings → Site) the buffer adds the mapped classes on the way out — see
+// iconFilterHtml(). With Bootstrap Icons chosen this installs NOTHING: no buffer, no callback, and the
+// response is byte for byte what the templates wrote. After the two blocks above, both of which
+// answer with JSON or a redirect and never reach a template.
+iconOutputFilterStart($cfg);
+
 // ── Admin panel ──
 // The sign-in form lives at ?action=<admin_login_path> ('admin' by default, movable to an
 // unguessable address). The panel pages keep their classic actions so every internal link and

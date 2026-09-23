@@ -12,20 +12,10 @@ $timelineNeeded = ($action === 'stats' && ($cfg['tracker_stats_enabled'] ?? '0')
     && userCan($db, $cfg, 'stats.timeline'));
 // the logged-in user (null when the account system is off or nobody is signed in) — nav + pages use it
 $navUser = usersEnabled($cfg) ? currentUser($db) : null;
-// Bootstrap Icons, the CDN stylesheet. The two data pages have always asked for it; from 1.61.0 the
-// shoutbox does too — the refresh button in the widget's head is `bi bi-arrow-clockwise`, and the
-// drop zone on ?action=emotes has carried `bi bi-file-earmark-image` since 1.59.0 with no font on
-// the page to draw it, which is why that icon has been an empty box all along. The widget is drawn
-// on the FRONT PAGE as well as at its own address, so `home` counts whenever the room is really
-// drawn there for this reader — the same three questions includes/homeblocks.php asks, so a page
-// that has no box never pays for the font.
-// The account page's Picture and Cover drop zones (1.63.0) are the Emotes page's own and carry its
-// icon, so the font comes with them — only while either feature is on, so an account page without
-// them costs nothing.
+// The account page's Picture and Cover drop zones (1.63.0) are the Emotes page's own, with the
+// picture and cover editor's stylesheet and script behind them — only while either feature is on,
+// so an account page without them costs nothing.
 $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') && (userAvatarsEnabled($cfg) || userCoversEnabled($cfg));
-$iconsNeeded = in_array($action, ['transparency', 'stats', 'shoutbox', 'emotes'], true) || $mediaEditor
-    || ($action === 'home' && function_exists('shoutEnabled') && shoutEnabled($cfg)
-        && shoutPlacement($cfg) !== 'page' && shoutMayView($db, $cfg));
 ?>
 <!DOCTYPE html>
 <html lang="<?= sanitize(langCurrent()) ?>">
@@ -42,13 +32,17 @@ $iconsNeeded = in_array($action, ['transparency', 'stats', 'shoutbox', 'emotes']
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
     <?= langJsBridge($baseUrl, LANG_JS_PUBLIC) ?>
+    <?php /* The icon font, on EVERY page (1.68.0). It used to come only with the handful of actions
+             known to draw an icon, and anything drawn elsewhere — the inbox's bin with pictures and
+             covers switched off — was an empty box. Which font is Settings → Site's choice.
+             BEFORE the site's own stylesheets, as in the panel: Font Awesome styles the icon element
+             itself (display, line-height), and a site rule of the same weight that places an icon
+             must win over it the way it wins over Bootstrap Icons, which only styles ::before. */ ?>
+    <?= iconFontTag($cfg) ?>
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/style.css<?= assetVer('assets/css/style.css') ?>">
     <!-- shared with the admin whitelist / index pages so the three "everything about one hash"
          panels look like each other (assets/css/detail-panel.css) -->
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/detail-panel.css<?= assetVer('assets/css/detail-panel.css') ?>">
-    <?php if ($iconsNeeded): ?>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
-    <?php endif; ?>
     <?php if ($timelineNeeded): ?>
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/vendor/uplot/uPlot.min.css<?= assetVer('assets/vendor/uplot/uPlot.min.css') ?>">
     <?php endif; ?>

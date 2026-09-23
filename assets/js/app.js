@@ -1989,6 +1989,10 @@ window.askInPlace = askInPlace;
     const EMAIL_RE = new RegExp('^' + EMAIL_LOCAL + '@' + EMAIL_LABEL
                                 + '(?:\\.' + EMAIL_LABEL + ')*\\.' + EMAIL_TLD + '$');
     const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+    // An icon, in the one markup every icon on the site is written in (1.68.0): Bootstrap's classes,
+    // which Font Awesome is laid over when Settings chooses it. Pass the WHOLE class string — `bi
+    // bi-check-lg`, never a name glued on — so tests/icons_test.php can find every name that is used.
+    const iconEl = (cls) => { const i = document.createElement('i'); i.className = cls; i.setAttribute('aria-hidden', 'true'); return i; };
 
 
     function showAlert(el, msg, ok) {
@@ -2019,10 +2023,7 @@ window.askInPlace = askInPlace;
         const items = PW_REQS.map(([label]) => {
             const li = document.createElement('div');
             li.className = 'pw-req';
-            const ic = document.createElement('span');
-            ic.className = 'pw-req-ic';
-            ic.textContent = '✗';
-            li.appendChild(ic);
+            li.appendChild(iconEl('bi bi-x-lg pw-req-ic'));
             li.appendChild(document.createTextNode(' ' + label));
             box.appendChild(li);
             return li;
@@ -2033,7 +2034,7 @@ window.askInPlace = askInPlace;
             PW_REQS.forEach(([, test], i) => {
                 const ok = test(p);
                 items[i].classList.toggle('ok', ok);
-                items[i].querySelector('.pw-req-ic').textContent = ok ? '✓' : '✗';
+                items[i].querySelector('.pw-req-ic').className = ok ? 'bi bi-check-lg pw-req-ic' : 'bi bi-x-lg pw-req-ic';
             });
         };
         input.addEventListener('input', sync);
@@ -2367,19 +2368,19 @@ window.askInPlace = askInPlace;
             box.appendChild(item);
         });
         if (pag && json.pages > 1) {
-            const mk = (label, target, disabled) => {
+            const mk = (parts, target, disabled) => {
                 const b = document.createElement('button');
                 b.type = 'button';
-                b.textContent = label;
+                b.append(...parts);
                 b.disabled = !!disabled;
                 b.addEventListener('click', () => loadNotifications(target));
                 return b;
             };
-            pag.appendChild(mk(t('js.app.pg_prev'), json.page - 1, json.page <= 1));
+            pag.appendChild(mk([iconEl('bi bi-chevron-left'), ' ' + t('js.app.pg_prev')], json.page - 1, json.page <= 1));
             const info = document.createElement('span');
             info.textContent = t('js.app.page_of_total', {page: json.page, pages: json.pages, total: json.total});
             pag.appendChild(info);
-            pag.appendChild(mk(t('js.app.pg_next'), json.page + 1, json.page >= json.pages));
+            pag.appendChild(mk([t('js.app.pg_next') + ' ', iconEl('bi bi-chevron-right')], json.page + 1, json.page >= json.pages));
         }
     }
     /**
@@ -2567,7 +2568,7 @@ window.askInPlace = askInPlace;
         if (verifyBtn) verifyBtn.addEventListener('click', async () => {
             verifyBtn.disabled = true;
             const r = await postJson('user_verify_send', { csrf_token: $id('account-csrf').value });
-            if (r && r.success && r.sent) { verifyBtn.textContent = t('js.app.verify_sent'); }
+            if (r && r.success && r.sent) { verifyBtn.textContent = t('js.app.verify_sent') + ' '; verifyBtn.appendChild(iconEl('bi bi-check-lg')); }
             else { verifyBtn.textContent = t('js.app.failed'); verifyBtn.title = (r && (r.message || r.error)) || t('js.app.verify_could_not_send'); setTimeout(() => { verifyBtn.textContent = t('js.app.verify_resend'); verifyBtn.disabled = false; }, 4000); }
         });
         $id('account-logout').addEventListener('click', async () => {
@@ -2819,6 +2820,16 @@ window.askInPlace = askInPlace;
             const st = document.createElement('span');
             st.className = 'star';
             st.setAttribute('aria-hidden', 'true');
+            // Two copies of the icon library's filled star (1.68.0 — it was a star character drawn by
+            // CSS): the dim one underneath, and a lit one in a box that shows none, half or all of
+            // it. Clipping the box, not the glyph, is what keeps half stars in either library.
+            const back = document.createElement('span');
+            back.className = 'star-layer star-back';
+            back.appendChild(iconEl('bi bi-star-fill'));
+            const front = document.createElement('span');
+            front.className = 'star-layer star-front';
+            front.appendChild(iconEl('bi bi-star-fill'));
+            st.append(back, front);
             // Two hit areas per star: left half and right half.
             if (json.can_vote) {
                 [0.5, 1].forEach(part => {
@@ -3146,17 +3157,17 @@ window.askInPlace = askInPlace;
             if (json.can_vote && r.mode !== 'stars') {
                 const acts = document.createElement('div');
                 acts.className = 'rep-acts';
-                const mk = (dir, glyph, title) => {
+                const mk = (dir, icon, label, title) => {
                     const b = document.createElement('button');
                     b.type = 'button';
                     b.className = 'btn btn-secondary btn-small rep-btn' + (json.my_vote === dir ? ' rep-mine' : '');
-                    b.textContent = glyph;
+                    b.append(icon, ' ' + label);
                     b.title = title;
                     b.addEventListener('click', () => castVote(hash, dir, rep));
                     return b;
                 };
-                acts.appendChild(mk(1, '▲ ' + t('js.app.vote_good'), t('js.app.vote_good_title')));
-                acts.appendChild(mk(-1, '▼ ' + t('js.app.vote_bad'), t('js.app.vote_bad_title')));
+                acts.appendChild(mk(1, iconEl('bi bi-hand-thumbs-up'), t('js.app.vote_good'), t('js.app.vote_good_title')));
+                acts.appendChild(mk(-1, iconEl('bi bi-hand-thumbs-down'), t('js.app.vote_bad'), t('js.app.vote_bad_title')));
                 rep.appendChild(acts);
             } else if (!json.can_vote && json.vote_refusal) {
                 const why = document.createElement('div');
@@ -3218,7 +3229,9 @@ window.askInPlace = askInPlace;
             // 18 000-file torrent has 5 000 rows here. The heading is rewritten with both
             // numbers as pages arrive rather than promising a count nothing can deliver.
             const totalFiles = Number(st.files_count) || 0;
-            sum.textContent = t('js.app.files_count', {n: totalFiles.toLocaleString()});
+            const sumText = document.createElement('span');
+            sumText.textContent = t('js.app.files_count', {n: totalFiles.toLocaleString()});
+            sum.append(iconEl('bi bi-chevron-right disc-chev'), sumText);
             det.appendChild(sum);
             const holder = document.createElement('div');
             holder.className = 'rt-body';
@@ -3259,7 +3272,7 @@ window.askInPlace = askInPlace;
             // rebuild the whole tree — so a folder the reader opened was folded again at the START
             // of every page as well as at the end of it.
             const chrome = () => {
-                sum.textContent = (totalFiles && allFiles.length < totalFiles)
+                sumText.textContent = (totalFiles && allFiles.length < totalFiles)
                     ? t('js.app.files_count_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
                     : t('js.app.files_count', {n: (totalFiles || allFiles.length).toLocaleString()});
                 btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
@@ -3424,6 +3437,7 @@ window.askInPlace = askInPlace;
                 if (said === undefined) { if (depth === 0 || subNode.hit) det.open = true; }
                 else det.open = !!said;
                 const sum = document.createElement('summary');
+                sum.appendChild(iconEl('bi bi-chevron-right disc-chev'));
                 sum.appendChild(nameEl('ftree-dir', name));
                 const cnt = document.createElement('span');
                 cnt.className = 'text-muted ftree-count';
@@ -3689,9 +3703,9 @@ window.askInPlace = askInPlace;
                 const idx = sortStack.findIndex(x => x.col === th.dataset.sort);
                 const old = th.querySelector('.search-sort-priority');
                 if (old) old.remove();
-                if (idx === -1) { icon.textContent = '↕'; icon.classList.remove('active'); return; }
-                icon.textContent = sortStack[idx].dir === 'asc' ? '▲' : '▼';
-                icon.classList.add('active');
+                // The arrows are icons now (1.68.0), the same three the transparency table uses.
+                if (idx === -1) { icon.className = 'bi bi-arrow-down-up search-sort-icon'; return; }
+                icon.className = sortStack[idx].dir === 'asc' ? 'bi bi-arrow-up search-sort-icon active' : 'bi bi-arrow-down search-sort-icon active';
                 if (sortStack.length > 1) {
                     const sup = document.createElement('sup');
                     sup.className = 'search-sort-priority';
@@ -3977,10 +3991,11 @@ window.askInPlace = askInPlace;
                     const repTd = document.createElement('td');
                     repTd.className = 'search-num search-rep';
                     if (r.rep && r.rep.mode === 'stars') {
-                        // Compact in a table cell: the number, then the glyph. Five drawn stars in
+                        // Compact in a table cell: the number, then one star. Five drawn stars in
                         // every row of a fifty-row table is noise, and the tooltip carries the count.
                         repTd.className += ' search-rep-stars';
-                        repTd.textContent = r.rep.stars.toFixed(1) + ' ★';
+                        repTd.textContent = r.rep.stars.toFixed(1) + ' ';
+                        repTd.appendChild(iconEl('bi bi-star-fill'));
                         repTd.title = r.rep.total === 1 ? t('js.app.rep_stars_title_one', {stars: r.rep.stars.toFixed(1)})
                                     : t('js.app.rep_stars_title_many', {stars: r.rep.stars.toFixed(1), n: r.rep.total});
                     } else if (r.rep) {
@@ -4020,7 +4035,7 @@ window.askInPlace = askInPlace;
                         copy.addEventListener('click', () => {
                             if (!navigator.clipboard) return;
                             navigator.clipboard.writeText(magnetFor(r.info_hash, r.name))
-                                .then(() => { copy.textContent = '✓'; copy.classList.add('copied'); setTimeout(() => { copy.textContent = t('js.app.copy'); copy.classList.remove('copied'); }, 1200); })
+                                .then(() => { copy.replaceChildren(iconEl('bi bi-check-lg')); copy.classList.add('copied'); setTimeout(() => { copy.textContent = t('js.app.copy'); copy.classList.remove('copied'); }, 1200); })
                                 .catch(() => {});
                         });
                         actWrap.appendChild(copy);
@@ -4049,23 +4064,25 @@ window.askInPlace = askInPlace;
             note.textContent = json.total === 0 ? t('js.app.nothing_found') : '';
             renderPager(json.page, json.pages, json.total);
         }
-        // « First / ‹ Prev / Page [n] of M · X rows / Next › / Last » — same pattern as the admin tables
+        // First / Prev / Page [n] of M · X rows / Next / Last — same pattern as the admin tables, and the
+        // chevrons are icons beside the words the way admin-common.js draws them (1.68.0; they used to
+        // be angle-quote characters inside the dictionary strings).
         function renderPager(page, pages, total) {
             const box = $id('search-pagination');
             box.textContent = '';
             if (pages <= 1) return;
             const go = (p) => { p = Math.min(pages, Math.max(1, Math.round(p))); if (p !== page) run(p, 'push'); };
-            const mk = (label, target, disabled, cls) => {
+            const mk = (parts, target, disabled, cls) => {
                 const b = document.createElement('button');
                 b.type = 'button';
-                b.textContent = label;
+                b.append(...parts);
                 b.disabled = !!disabled;
                 if (cls) b.className = cls;
                 b.addEventListener('click', () => go(target));
                 return b;
             };
-            box.appendChild(mk(t('js.app.pg_first'), 1, page <= 1, 'pg-edge'));
-            box.appendChild(mk(t('js.app.pg_prev'), page - 1, page <= 1));
+            box.appendChild(mk([iconEl('bi bi-chevron-double-left'), ' ' + t('js.app.pg_first')], 1, page <= 1, 'pg-edge'));
+            box.appendChild(mk([iconEl('bi bi-chevron-left'), ' ' + t('js.app.pg_prev')], page - 1, page <= 1));
             const jump = document.createElement('span');
             jump.className = 'pg-jump';
             jump.appendChild(document.createTextNode(t('js.app.pg_page') + ' '));
@@ -4085,8 +4102,8 @@ window.askInPlace = askInPlace;
                 tot.textContent = '· ' + t('js.app.pg_rows', {n: total.toLocaleString()});
                 box.appendChild(tot);
             }
-            box.appendChild(mk(t('js.app.pg_next'), page + 1, page >= pages));
-            box.appendChild(mk(t('js.app.pg_last'), pages, page >= pages, 'pg-edge'));
+            box.appendChild(mk([t('js.app.pg_next') + ' ', iconEl('bi bi-chevron-right')], page + 1, page >= pages));
+            box.appendChild(mk([t('js.app.pg_last') + ' ', iconEl('bi bi-chevron-double-right')], pages, page >= pages, 'pg-edge'));
         }
         // ── file-list modal: collapsible folder tree; matches marked when searching file names ──
         const overlay = $id('files-overlay');

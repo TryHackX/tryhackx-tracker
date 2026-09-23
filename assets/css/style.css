@@ -9,6 +9,32 @@
    `.x[hidden] { display: none }` lines further down stay, but nothing depends on them any more. */
 [hidden] { display: none !important; }
 
+/* === Icons drawn by Font Awesome (1.68.0) ===
+   Nothing here can apply while Bootstrap Icons is chosen: every selector needs a Font Awesome class on
+   a .bi element, and those are added only when Settings → Site chooses Font Awesome (includes/icons.php
+   on the page, assets/js/icons.js for what scripts build). Near the TOP of the file on purpose: at equal
+   specificity every later rule that sizes or places an icon (`.pm-del .bi`, `.shout-ctl .bi`, …) still
+   wins, exactly as it does over Bootstrap's own stylesheet.
+   Bootstrap draws its glyph in an inline-block ::before, lowered 0.125em, inside an inline <i> that keeps
+   the line's height; Font Awesome makes the <i> itself an inline-block of line-height 1. Put the box
+   back where Bootstrap keeps it, so a glyph sits at the same height whichever library draws it. */
+.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; }
+.bi[class*=" fa-"]::before { display: inline-block; vertical-align: -0.125em; line-height: 1; }
+/* The face, pinned on the glyph as Bootstrap Icons pins its own (`font-family: bootstrap-icons
+   !important; font-weight: normal !important` on ::before): a site rule that sets a weight on an icon
+   (`.pw-req-ic`, a bold button) must not pick the other face of the family, and the regular face has
+   none of the solid-only glyphs — it would draw a box. */
+.bi.fa-solid::before, .bi.fa-regular::before { font-family: "Font Awesome 6 Free" !important; font-style: normal !important; }
+.bi.fa-brands::before { font-family: "Font Awesome 6 Brands" !important; font-style: normal !important; }
+.bi.fa-solid::before { font-weight: 900 !important; }
+.bi.fa-regular::before, .bi.fa-brands::before { font-weight: 400 !important; }
+/* Font Awesome's glyphs are 0.625em to 1.25em wide where Bootstrap's are all 1em, so an icon-only
+   button would change width with its icon (a pin turning into the filled pin, a sort arrow turning
+   round). A fixed, centred box — Font Awesome's own fixed width — keeps every such button one size. */
+:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child::before { width: 1.25em; text-align: center; }
+/* Free has no dot: its circle, at Bootstrap's dot size (3/8 of the em), in the same box. */
+.bi-dot[class*=" fa-"]::before { transform: scale(0.375); }
+
 :root {
     --bg: #000011;
     --bg-card: #0a0a1a;
@@ -1905,6 +1931,8 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .info-box .files-body { padding: 1rem 1.1rem 1.1rem; }
 .files-close { background: transparent; border: 0; color: var(--text-muted); font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 0.25rem; }
 .files-close:hover { color: var(--error); }
+/* The icon fills its em where the old multiplication sign was half of it (1.68.0). */
+.files-close .bi { font-size: 0.75em; }
 .files-body { padding: 0.5rem 1rem 1rem; overflow-y: auto; font-size: 0.85rem; }
 .files-list { list-style: none; margin: 0; padding: 0; }
 .files-list li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
@@ -2005,8 +2033,9 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 /* === File tree in the search modal === */
 .ftree { font-size: 0.85rem; }
 .ftree details { margin: 0.1rem 0; }
-.ftree summary { cursor: pointer; color: var(--link); }
-.ftree summary::marker { color: var(--text-muted); }
+.ftree summary { cursor: pointer; color: var(--link); list-style: none; }
+.ftree summary::-webkit-details-marker { display: none; }
+.ftree summary > .disc-chev { color: var(--text-muted); opacity: 1; }
 .ftree-dir { word-break: break-word; }
 .ftree-count { font-size: 0.75rem; }
 .ftree-children { padding-left: 1.1rem; border-left: 1px dashed var(--border); margin-left: 0.3rem; }
@@ -2062,8 +2091,16 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .rt-collapse { border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; margin: 0.7rem 0; }
 .rt-collapse > summary { cursor: pointer; padding: 0.5rem 0.8rem; font-weight: 600; list-style: none; }
 .rt-collapse > summary::-webkit-details-marker { display: none; }
-.rt-collapse > summary::before { content: '▸ '; opacity: 0.7; }
-.rt-collapse[open] > summary::before { content: '▾ '; }
+/* A disclosure's marker is a chevron icon IN THE MARKUP, turned a quarter when its <details> is open
+   (1.68.0 — the pattern .gr-matrix-chev started). It was a small triangle character in `content:`, or
+   the browser's own marker, and either one is drawn the same whatever icon library the site uses. */
+.disc-chev { display: inline-block; margin-right: 0.35em; font-size: 0.8em; opacity: 0.7; transition: transform 0.15s ease; }
+details[open] > summary > .disc-chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .disc-chev { transition: none; } }
+/* A spoiler draws its chevron wherever it is rendered — a description, a shout, a message, a page of
+   the site's own (which sits in .rt, not .rt-body) — so the browser's marker goes everywhere too. */
+.rt-spoiler > summary { list-style: none; }
+.rt-spoiler > summary::-webkit-details-marker { display: none; }
 .rt-collapse > .rt-body { padding: 0 0.8rem 0.8rem; }
 .rt-src-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.6rem 0; }
 .rt-src-url { font-size: 0.85rem; word-break: break-all; opacity: 0.85; }
@@ -2149,17 +2186,19 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .wl-probe-bad  { border-left-color: #b4433c; }
 
 /* Five stars, half a star at a time.
-   The star is one glyph with a second copy clipped over it: filling half a character is the whole
-   point of a half-star scale, and two stacked glyphs do it without an image or a font icon. */
+   Each star is the icon library's filled star twice: a dim copy underneath and a lit copy in a box that
+   shows none, half or all of it (1.68.0 — it was a star character drawn by CSS, the same whichever library
+   the site uses). The BOX is clipped, never the glyph, and both glyphs are centred on the whole star, so
+   half a star is half the drawing in either library — Font Awesome's star is wider than Bootstrap's. */
 .stars-wrap { margin: 0.2rem 0; }
 .stars { display: inline-flex; gap: 0.15rem; line-height: 1; }
-.star { position: relative; width: 1.35rem; height: 1.35rem; display: inline-block; }
-.star::before,
-.star::after { content: '★'; position: absolute; inset: 0; font-size: 1.3rem; line-height: 1; }
-.star::before { color: rgba(255, 255, 255, 0.18); }               /* the empty star underneath */
-.star::after  { color: #f0b429; width: 0; overflow: hidden; }     /* the filled one, clipped */
-.star-half::after { width: 50%; }
-.star-full::after { width: 100%; }
+.star { position: relative; width: 1.35rem; height: 1.35rem; display: inline-block; font-size: 1.15rem; }
+.star-layer { position: absolute; top: 0; left: 0; height: 100%; overflow: hidden; pointer-events: none; }
+.star-layer > .bi { display: flex; align-items: center; justify-content: center; width: 1.35rem; height: 100%; line-height: 1; }
+.star-back { width: 100%; color: rgba(255, 255, 255, 0.18); }     /* the empty star underneath */
+.star-front { width: 0; color: #f0b429; }                         /* the lit one, in a clipped box */
+.star-half .star-front { width: 50%; }
+.star-full .star-front { width: 100%; }
 .stars-live .star { cursor: pointer; }
 .star-hit { position: absolute; top: 0; height: 100%; width: 50%; padding: 0; margin: 0; border: 0; background: none; cursor: pointer; z-index: 1; }
 .star-hit-l { left: 0; }
@@ -2564,7 +2603,8 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .pmreport-acts { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.6rem; }
 /* The wall of tags, folded. Open it once and it says everything; closed, it is one line. */
 .rt-syntax-fold { margin-top: 0.4rem; }
-.rt-syntax-fold > summary { cursor: pointer; font-size: 0.8rem; color: var(--text-muted); }
+.rt-syntax-fold > summary { cursor: pointer; font-size: 0.8rem; color: var(--text-muted); list-style: none; }
+.rt-syntax-fold > summary::-webkit-details-marker { display: none; }
 .rt-syntax-fold > summary:hover { color: var(--text); }
 .rt-syntax-fold[open] > summary { margin-bottom: 0.2rem; }
 .pm-search-deep { margin-bottom: 0.5rem; font-size: 0.8rem; }
@@ -3170,8 +3210,11 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    Semi-transparent at rest so they are part of the box rather than a thing shouting off it, and
    fully opaque the moment a pointer or the keyboard reaches them — `:focus-within` is what makes
    the second half true for somebody who never touches a mouse. */
+/* `--shout-sb` is the field's own scrollbar, measured by assets/js/shoutbox.js (fitComposer): the
+   buttons stand that much further in, so the bar of a long message never runs under Send or beside
+   the handle (1.68.0). 0 where scrollbars overlay the text, and until the script has measured. */
 .shout-in-acts {
-    position: absolute; top: 0.35rem; right: 0.4rem; z-index: 2;
+    position: absolute; top: 0.35rem; right: calc(var(--shout-sb, 0px) + 0.4rem); z-index: 2;
     display: flex; align-items: center; gap: 0.3rem;
     opacity: 0.6; transition: opacity 0.15s;
 }
@@ -3179,8 +3222,10 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 /* A FALLBACK width only. assets/js/shoutbox.js measures what these two actually take and sets the
    padding from that, because "Send" and "Wyślij" are not the same number of pixels and neither is a
    phone and a desktop — but the first paint happens before any script runs, and a line of text
-   under the buttons for one frame is still a line of text under the buttons. */
-.shout-input-wrap .shout-input { padding-right: 5.6rem; }
+   under the buttons for one frame is still a line of text under the buttons.
+   The scrollbar's gutter is kept whether or not the text scrolls yet (1.68.0): without it the bar
+   would arrive with the first line too many and every line above it would re-wrap under the cursor. */
+.shout-input-wrap .shout-input { padding-right: 5.6rem; scrollbar-gutter: stable; }
 /* 1.67.0: a Bootstrap Icons face rather than the emoji character, so it is drawn in the site's own
    colour by the site's icon font instead of in whatever the device's emoji font makes of it. */
 .shout-emoji-btn {

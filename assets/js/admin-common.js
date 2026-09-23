@@ -471,7 +471,7 @@
             [...node.dirs.keys()].sort().forEach(name => {
                 const sub = node.dirs.get(name);
                 const det = el('details', { open: depth === 0 ? '' : null });
-                det.appendChild(el('summary', null, [el('i', { className: 'bi bi-folder2' }), ' ', nameNode(name), ' ', el('span', { className: 'text-muted wl-small', text: `(${countFiles(sub)})` })]));
+                det.appendChild(el('summary', null, [el('i', { className: 'bi bi-chevron-right disc-chev', 'aria-hidden': 'true' }), el('i', { className: 'bi bi-folder2' }), ' ', nameNode(name), ' ', el('span', { className: 'text-muted wl-small', text: `(${countFiles(sub)})` })]));
                 const inner = el('div', { className: 'wl-tree-children' });
                 renderNode(sub, inner, depth + 1);
                 det.appendChild(inner);

@@ -1121,7 +1121,7 @@
 
         if (hasText) {
             const det = el('details', { className: 'rt-collapse' });
-            det.appendChild(el('summary', { text: t('js.wl.description') }));
+            det.appendChild(el('summary', null, [el('i', { className: 'bi bi-chevron-right disc-chev', 'aria-hidden': 'true' }), t('js.wl.description')]));
             const body = el('div', { className: 'rt-body' });
             // Built on the server by includes/richtext.php from fully escaped input with a fixed tag
             // whitelist. Everything else in this file goes through el()/textContent.

@@ -116,8 +116,7 @@
                 name.appendChild(el('span', {
                     className: 'wl-small text-danger',
                     title: t('js.iplists.last_error_title'),
-                    text: '⚠ ' + l.last_error,
-                }));
+                }, [el('i', { className: 'bi bi-exclamation-triangle', 'aria-hidden': 'true' }), ' ' + l.last_error]));
             }
             tr.appendChild(name);
 

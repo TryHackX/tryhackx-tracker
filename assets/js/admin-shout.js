@@ -442,7 +442,7 @@
                 const on = !!(g.permissions && g.permissions[key]);
                 tr.appendChild(el('td', { className: 'gr-matrix-c' + (on ? ' on' : '') }, [
                     on ? el('i', { className: 'bi bi-check-lg', title: t('js.shoutadmin.matrix_has', { group: g.name, key: key }) })
-                       : el('span', { className: 'gr-matrix-off', text: '·' })]));
+                       : el('i', { className: 'bi bi-dot gr-matrix-off', 'aria-hidden': 'true' })]));
             });
             tbody.appendChild(tr);
         });

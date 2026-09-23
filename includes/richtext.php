@@ -255,6 +255,12 @@ function richtextRenderForEmail(?string $text, string $format, array $cfg): stri
     foreach ($style as $cls => $css) {
         $html = str_replace(' class="' . $cls . '"', ' style="' . $css . '"', $html);
     }
+    // Icons draw from a web font no mail client loads, so they leave (1.68.0): a task box becomes
+    // the brackets its author typed, and every other icon — a spoiler's chevron, the YouTube mark —
+    // is decoration beside words that already say the same thing.
+    $html = (string)preg_replace_callback('#<i class="bi bi-([a-z0-9-]+)[^"]*"[^>]*></i> ?#', static function (array $m): string {
+        return $m[1] === 'check-square' ? '[x]' : ($m[1] === 'square' ? '[ ]' : '');
+    }, $html);
     return str_replace(' data-external="1"', '', $html);
 }
 
@@ -476,9 +482,9 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
 
         // ── spoilers ──
         $s = preg_replace_callback('/\[spoiler=(?:&quot;|&#039;)?([^\]\n]{1,80}?)(?:&quot;|&#039;)?\](.*?)\[\/spoiler\]/is',
-            fn($m) => '<details class="rt-spoiler"><summary>' . trim($m[1]) . '</summary><div class="rt-spoiler-body">' . $m[2] . '</div></details>', $s) ?? $s;
+            fn($m) => '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>' . trim($m[1]) . '</summary><div class="rt-spoiler-body">' . $m[2] . '</div></details>', $s) ?? $s;
         $s = preg_replace('/\[spoiler\](.*?)\[\/spoiler\]/is',
-            '<details class="rt-spoiler"><summary>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s) ?? $s;
+            '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s) ?? $s;
 
         // ── media and links ──
         $s = preg_replace_callback('/\[img(?:=[^\]]*)?\](.*?)\[\/img\]/is', function ($m) {
@@ -494,7 +500,8 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
             if ($id === null) return $m[1];
             $url = 'https://www.youtube.com/watch?v=' . $id;
             $a = richtextLinkAttrs($url, $cfg);
-            return $a === '' ? $url : '<a class="rt-video"' . $a . '>▶ YouTube: ' . $id . '</a>';
+            // The platform's own mark before the words (1.68.0; it was a play-triangle character).
+            return $a === '' ? $url : '<a class="rt-video"' . $a . '><i class="bi bi-youtube" aria-hidden="true"></i> YouTube: ' . $id . '</a>';
         }, $s);
         $s = preg_replace_callback('/\[email=([^\]]{1,190})\](.*?)\[\/email\]/is', function ($m) {
             $e = richtextSafeEmail($m[1]);
@@ -618,7 +625,7 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
         $s = preg_replace('/(?<!~)~([^~\s][^~\n]*)~(?!~)/', '<sub>$1</sub>', $s);
         $s = preg_replace('/\^([^\^\s][^\^\n]*)\^/', '<sup>$1</sup>', $s);
         $s = preg_replace('/\|\|(.+?)\|\|/s',
-            '<details class="rt-spoiler"><summary>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s);
+            '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s);
         $s = preg_replace_callback('/!\[([^\]]*)\]\(([^)\s]+)\)/', function ($m) {
             $u = richtextSafeUrl(html_entity_decode($m[2], ENT_QUOTES, 'UTF-8'));
             if ($u === null) return '';
@@ -639,9 +646,9 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
             $a = richtextLinkAttrs(html_entity_decode($m[2], ENT_QUOTES, 'UTF-8'), $cfg);
             return $a === '' ? $m[1] : '<a' . $a . '>' . $m[1] . '</a>';
         }, $s);
-        // Bullets, including task lists. The checkbox is rendered as a glyph, not an <input>: a
+        // Bullets, including task lists. The checkbox is rendered as an icon, not an <input>: a
         // description is not a form, and a disabled input in the middle of prose is a control that
-        // looks broken rather than a mark that looks ticked.
+        // looks broken rather than a mark that looks ticked. (Ballot-box characters until 1.68.0.)
         $s = preg_replace_callback('/(?:^[-*+]\s+.+\n?)+/m', function ($m) {
             $li = '';
             $task = false;
@@ -651,7 +658,8 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
                     $task = true;
                     $done = strtolower($t[1]) === 'x';
                     $li .= '<li class="rt-task' . ($done ? ' rt-task-done' : '') . '">'
-                         . '<span class="rt-task-box" aria-hidden="true">' . ($done ? '☑' : '☐') . '</span> '
+                         . '<span class="rt-task-box" aria-hidden="true">'
+                         . ($done ? '<i class="bi bi-check-square"></i>' : '<i class="bi bi-square"></i>') . '</span> '
                          . $t[2] . '</li>';
                 } else {
                     $li .= '<li>' . $item . '</li>';

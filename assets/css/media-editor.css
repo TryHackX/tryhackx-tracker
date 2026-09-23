@@ -38,6 +38,8 @@
 .fe-close-hint[hidden] { display: none; }
 .fe-close { background: transparent; border: 0; color: #888; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 0.25rem; }
 .fe-close:hover { color: #f44336; }
+/* An icon fills its em where the multiplication sign it replaced (1.68.0) filled half of it. */
+.fe-close .bi { font-size: 0.75em; }
 .fe-close:focus-visible { outline: 2px solid #4a9eff; outline-offset: 2px; }
 .fe-body { padding: 0.9rem 1rem 0.6rem; }
 .fe-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.7rem 1rem 0.9rem;

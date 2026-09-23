@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= _h('settings.title') ?> &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
+    <?= iconFontTag($cfg) ?>
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
     <?php /* The picture and cover editor Settings → Profiles opens: the same component, and so the same
              stylesheet, as the account page's. */ ?>
@@ -103,6 +103,18 @@
                             <?php endforeach; ?>
                         </select>
                         <small class="settings-hint"><?= __('settings.site_timezone_hint', ['php' => sanitize(date_default_timezone_get())]) ?></small>
+                    </div>
+                    <?php /* Which library draws every icon on the site (v73): the public pages and this
+                             panel alike, since both print their font through iconFontTag(). The markup
+                             is Bootstrap Icons' either way (includes/icons.php). */ ?>
+                    <div class="col-md-6" data-setting="icon_library">
+                        <label class="form-label" for="setting-icon_library"><?= _h('settings.icon_library') ?></label>
+                        <?php $iconLibNow = iconLibrary($cfg); ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="icon_library" id="setting-icon_library">
+                            <option value="bootstrap" <?= $iconLibNow === 'bootstrap' ? 'selected' : '' ?>><?= _h('settings.icon_library_bootstrap') ?></option>
+                            <option value="fontawesome" <?= $iconLibNow === 'fontawesome' ? 'selected' : '' ?>><?= _h('settings.icon_library_fontawesome') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.icon_library_hint') ?></small>
                     </div>
                 </div>
             </div>
@@ -2972,7 +2984,7 @@
                         <label class="form-label"><?= _h('settings.index_worker_conc') ?> <small class="settings-hint"><?= _h('settings.index_worker_conc_note') ?></small></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="meta_worker_concurrency" value="<?= sanitize($cfg['meta_worker_concurrency'] ?? '') ?>" min="1" max="64" placeholder="<?= _h('settings.index_worker_conc_ph') ?>">
                         <small class="settings-hint"><?= __('settings.index_worker_conc_hint') ?>
-                            <details class="settings-more"><summary><?= _h('settings.index_worker_conc_more') ?></summary><?= _h('settings.index_worker_conc_more_body') ?></details></small>
+                            <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.index_worker_conc_more') ?></summary><?= _h('settings.index_worker_conc_more_body') ?></details></small>
                     </div>
                 </div>
             </div>
@@ -2994,7 +3006,7 @@ if (function_exists('getDb')) {
 $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
 ?>
                 <small class="settings-hint d-block mb-3"><?= __('settings.fetch_order_intro') ?>
-                    <details class="settings-more"><summary><?= _h('settings.fetch_order_why') ?></summary><?= __('settings.fetch_order_why_1') ?><?php foreach (metaOrderRejected() as $rk => $rv): ?> <strong><?= sanitize($rk) ?></strong> &mdash; <?= $rv ?><?php endforeach; ?> <?= __('settings.fetch_order_why_2') ?></details>
+                    <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.fetch_order_why') ?></summary><?= __('settings.fetch_order_why_1') ?><?php foreach (metaOrderRejected() as $rk => $rv): ?> <strong><?= sanitize($rk) ?></strong> &mdash; <?= $rv ?><?php endforeach; ?> <?= __('settings.fetch_order_why_2') ?></details>
                 </small>
                 <div class="row g-3">
                     <div class="col-md-4">
@@ -3079,7 +3091,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                                 </div>
                             </div>
                             <small class="settings-hint d-block mt-2"><?= __('settings.fetch_order_mix_hint') ?>
-                                <details class="settings-more"><summary><?= _h('settings.fetch_order_mix_wl_more') ?></summary><?= __('settings.fetch_order_mix_wl_more_body') ?></details>
+                                <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.fetch_order_mix_wl_more') ?></summary><?= __('settings.fetch_order_mix_wl_more_body') ?></details>
                             </small>
                         </div>
                     </div>
@@ -3102,7 +3114,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                         <label class="form-label"><?= _h('settings.index_max_files') ?> <small class="settings-hint"><?= _h('settings.index_max_files_note') ?></small></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="meta_max_files" value="<?= sanitize($cfg['meta_max_files'] ?? '') ?>" min="1" max="<?= META_MAX_FILES_MAX ?>" placeholder="<?= _h('settings.index_max_files_ph') ?>">
                         <small class="settings-hint"><?= __('settings.index_max_files_hint', ['max' => number_format(META_MAX_FILES_MAX, 0, '.', '&nbsp;')]) ?>
-                            <details class="settings-more"><summary><?= _h('settings.index_max_files_more') ?></summary><?= __('settings.index_max_files_more_body') ?></details></small>
+                            <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.index_max_files_more') ?></summary><?= __('settings.index_max_files_more_body') ?></details></small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.index_files_poll_keep') ?> <small class="settings-hint"><?= _h('settings.index_files_days') ?></small></label>
@@ -3153,7 +3165,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                         <label class="form-label"><?= _h('settings.filelist_pub_max') ?></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="index_files_max" value="<?= indexFilesMax($cfg) ?>" min="<?= IDX_FILES_BATCH_MIN ?>" max="<?= IDX_FILES_MAX_HARD ?>">
                         <small class="settings-hint"><?= __('settings.filelist_pub_max_hint', ['max' => $nbsp(IDX_FILES_MAX_HARD)]) ?>
-                            <details class="settings-more"><summary><?= _h('settings.filelist_pub_max_more') ?></summary><?= __('settings.filelist_pub_max_more_body', ['max' => $nbsp(IDX_FILES_MAX_HARD)]) ?></details></small>
+                            <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.filelist_pub_max_more') ?></summary><?= __('settings.filelist_pub_max_more_body', ['max' => $nbsp(IDX_FILES_MAX_HARD)]) ?></details></small>
                     </div>
                 </div>
                 <div class="row g-3 mt-1">
@@ -3284,7 +3296,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                             <?= __('settings.net_trusted_hint') ?>
                             <?php if ($trOk): ?><span class="text-info"><?= _h('settings.net_in_force', ['n' => count($trOk)]) ?> — <code><?= sanitize(implode(', ', array_slice($trOk, 0, 6))) ?><?= count($trOk) > 6 ? ' …' : '' ?></code>.</span><?php endif; ?>
                             <?php if ($trBad): ?><span class="text-warning"><?= _h('settings.net_not_address') ?> <code><?= sanitize(implode(', ', array_slice($trBad, 0, 4))) ?></code>.</span><?php endif; ?>
-                            <details class="settings-more"><summary><?= _h('settings.net_trusted_more') ?></summary><?= __('settings.net_trusted_more_body', ['max' => NET_TRUSTED_MAX]) ?></details>
+                            <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.net_trusted_more') ?></summary><?= __('settings.net_trusted_more_body', ['max' => NET_TRUSTED_MAX]) ?></details>
                         </small>
                     </div>
                     <div class="col-12">
@@ -3295,7 +3307,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                             <?= __('settings.net_blocked_hint') ?>
                             <?php if ($blOk): ?><span class="text-info"><?= _h('settings.net_in_force', ['n' => count($blOk)]) ?> — <code><?= sanitize(implode(', ', array_slice($blOk, 0, 6))) ?><?= count($blOk) > 6 ? ' …' : '' ?></code>.</span><?php endif; ?>
                             <?php if ($blBad): ?><span class="text-warning"><?= _h('settings.net_not_address') ?> <code><?= sanitize(implode(', ', array_slice($blBad, 0, 4))) ?></code>.</span><?php endif; ?>
-                            <details class="settings-more"><summary><?= _h('settings.net_blocked_more') ?></summary>
+                            <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.net_blocked_more') ?></summary>
                                 <?= __('settings.net_blocked_more_1') ?>
                                 <a href="<?= $baseUrl ?>?action=admin-traffic#iplists-card"><?= _h('settings.net_intro_link') ?></a> <?= __('settings.net_blocked_more_2', ['max' => NET_TRUSTED_MAX]) ?>
                             </details>
@@ -3974,8 +3986,12 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                                   // not the public one: the stats widget, the announce box and the type scale all live in
                                   // style.css. The frame loads that sheet and nothing else; the markup comes from the same
                                   // richtextRender() call the public page makes. ?>
+                            <?php // …and the icon font the public page would carry (1.68.0): a description can draw a
+                                  // YouTube mark or a task box, and the frame has no page head of its own to ask for one. ?>
+                            <?php $pcIcons = iconFontCss($cfg); ?>
                             <iframe class="pc-preview" id="pc-preview" title="<?= _h('settings.pages_preview_frame') ?>" sandbox="allow-same-origin"
                                     data-css="<?= $baseUrl ?>assets/css/style.css<?= assetVer('assets/css/style.css') ?>"
+                                    data-icon-css="<?= sanitize($pcIcons['href']) ?>" data-icon-sri="<?= sanitize($pcIcons['integrity']) ?>"
                                     data-base="<?= sanitize($baseUrl) ?>"></iframe>
                         </div>
                     </div>
@@ -4366,10 +4382,10 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             });
             const json = await res.json();
             if (json.ok) {
-                el.innerHTML = '<span class="text-success">&#10003; ' + t('js.settings.path_ok') + '</span>' +
+                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t('js.settings.path_ok') + '</span>' +
                     (json.suggestions.length ? '<br><small style="color: #a0a0b0;">' + json.suggestions.join('<br>') + '</small>' : '');
             } else {
-                el.innerHTML = '<span class="text-danger">&#10007; ' + json.errors.join('<br>') + '</span>' +
+                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + json.errors.join('<br>') + '</span>' +
                     (json.suggestions.length ? '<br><small class="text-warning">' + json.suggestions.join('<br>') + '</small>' : '') +
                     '<br><small style="color: #a0a0b0;">' + t('js.settings.os_php_user', { os: json.os, user: json.php_user }) + '</small>';
             }
@@ -4392,11 +4408,11 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             const json = await res.json();
             const sug = (json.suggestions || []).map(esc);
             if (json.ok) {
-                el.innerHTML = '<span class="text-success">&#10003; ' + t('js.settings.dir_ok') + '</span>' +
+                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t('js.settings.dir_ok') + '</span>' +
                     (sug.length ? '<br><small style="color: #a0a0b0;">' + sug.join('<br>') + '</small>' : '') +
                     (json.file ? '<br><small style="color:#a0a0b0;">' + (json.file.exists ? t('js.settings.file_exists', { lines: esc(String(json.file.lines)), size: esc(String(json.file.size)), mode: esc(json.file.mode || ''), owner: esc(json.file.owner || '') }) : t('js.settings.file_missing')) + '</small>' : '');
             } else {
-                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || [t('js.settings.test_failed_short')]).map(esc).join('<br>') + '</span>' +
+                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [t('js.settings.test_failed_short')]).map(esc).join('<br>') + '</span>' +
                     (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') +
                     '<br><small style="color: #a0a0b0;">' + t('js.settings.os_php_user', { os: esc(json.os || ''), user: esc(json.php_user || '') }) + '</small>';
             }
@@ -4422,20 +4438,20 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const esc2 = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
         let html;
         if (j.ok) {
-            html = '<span class="text-success">&#10003; ' + esc2(okText) + '</span>';
+            html = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + esc2(okText) + '</span>';
         } else if (j.configured === false) {
-            html = '<span class="text-info">&#9432; ' + t('js.settings.test_not_set_up') + '</span>';
+            html = '<span class="text-info"><i class="bi bi-info-circle" aria-hidden="true"></i> ' + t('js.settings.test_not_set_up') + '</span>';
         } else {
-            html = '<span class="text-danger">&#10007; ' + t('js.settings.test_path_missing') + '</span>';
+            html = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + t('js.settings.test_path_missing') + '</span>';
         }
         html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
         (j.checks || []).forEach(c => {
             // A failed check on an unconfigured feature is a step still to take, not a fault.
             const bad = j.configured === false
-                ? '<span class="text-info">&#9675;</span>'
-                : '<span class="text-danger">&#10007;</span>';
-            const mark = c.ok ? '<span class="text-success">&#10003;</span>'
-                              : (c.info ? '<span style="color:#a0a0b0;">&#8226;</span>' : bad);
+                ? '<span class="text-info"><i class="bi bi-circle" aria-hidden="true"></i></span>'
+                : '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i></span>';
+            const mark = c.ok ? '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i></span>'
+                              : (c.info ? '<span style="color:#a0a0b0;"><i class="bi bi-dot" aria-hidden="true"></i></span>' : bad);
             html += '<li>' + mark + ' ' + esc2(c.name)
                  + (c.detail ? ' <small style="color:#a0a0b0;">&mdash; ' + esc2(c.detail) + '</small>' : '') + '</li>';
         });
@@ -4492,11 +4508,11 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 + (json.output ? '<br>' + t('js.settings.meta_output') + '<code>' + esc(json.output) + '</code>' : '')
                 + '<br>' + t('js.settings.meta_os') + esc(json.os || '') + ' | ' + t('js.settings.meta_php_user') + esc(json.php_user || '') + '</small>';
             if (json.ok) {
-                el.innerHTML = '<span class="text-success">&#10003; ' + t('js.settings.perm_ok', {op: label}) + '</span>'
+                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t('js.settings.perm_ok', {op: label}) + '</span>'
                     + (suggestions.length ? '<br><small style="color:#a0a0b0;">' + suggestions.map(esc).join('<br>') + '</small>' : '')
                     + meta;
             } else {
-                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || [t('js.settings.perm_test_failed')]).map(esc).join('<br>') + '</span>'
+                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [t('js.settings.perm_test_failed')]).map(esc).join('<br>') + '</span>'
                     + (suggestions.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + suggestions.map(esc).join('<br>') + '</small>' : '')
                     + meta;
             }
@@ -4582,10 +4598,10 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             const meta = '<br><small style="color:#a0a0b0;">' + facts.join(' | ')
                 + '<br>' + t('js.settings.meta_os') + esc(json.os || '') + ' | ' + t('js.settings.meta_php_user') + esc(json.php_user || '') + '</small>';
             if (json.ok) {
-                el.innerHTML = '<span class="text-success">&#10003; ' + t('js.settings.backup_dir_ok') + '</span>'
+                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t('js.settings.backup_dir_ok') + '</span>'
                     + (sug.length ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             } else {
-                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || [<?= json_encode(__('settings.js_test_failed')) ?>]).map(esc).join('<br>') + '</span>'
+                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [<?= json_encode(__('settings.js_test_failed')) ?>]).map(esc).join('<br>') + '</span>'
                     + (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             }
         } catch {
@@ -4616,10 +4632,10 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 + <?= json_encode(__('settings.js_meta_os')) ?> + esc(json.os || '') + ' | ' + <?= json_encode(__('settings.js_meta_php_user')) ?> + esc(json.php_user || '')
                 + (json.cpus ? ' | ' + <?= json_encode(__('settings.js_meta_cpu_cores')) ?> + esc(String(json.cpus)) : '') + '</small>';
             if (json.ok) {
-                el.innerHTML = '<span class="text-success">&#10003; ' + <?= json_encode(__('settings.js_netlimit_ok')) ?> + '</span>'
+                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + <?= json_encode(__('settings.js_netlimit_ok')) ?> + '</span>'
                     + (sug.length ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             } else {
-                el.innerHTML = '<span class="text-danger">&#10007; ' + (json.errors || [<?= json_encode(__('settings.js_test_failed')) ?>]).map(esc).join('<br>') + '</span>'
+                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [<?= json_encode(__('settings.js_test_failed')) ?>]).map(esc).join('<br>') + '</span>'
                     + (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             }
         } catch {
@@ -4649,10 +4665,10 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 + (j.dropin_writable === false ? ' ' + <?= json_encode(__('settings.js_dropin_readonly')) ?> : '')
                 + '</small>';
             if (j.ok) {
-                box.innerHTML = '<span class="text-success">&#10003; ' + <?= json_encode(__('settings.js_ot_test_ok')) ?> + '</span>'
+                box.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + <?= json_encode(__('settings.js_ot_test_ok')) ?> + '</span>'
                     + (j.hint ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + esc(j.hint) + '</small>' : '') + meta;
             } else {
-                box.innerHTML = '<span class="text-danger">&#10007; ' + esc(j.error || <?= json_encode(__('settings.js_test_failed')) ?>) + '</span>'
+                box.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + esc(j.error || <?= json_encode(__('settings.js_test_failed')) ?>) + '</span>'
                     + (j.hint ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + esc(j.hint) + '</small>' : '') + meta;
             }
         } catch {
@@ -4680,8 +4696,8 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {
-                const mark = c.ok ? '<span class="text-success">&#10003;</span>'
-                                  : (c.info ? '<span style="color:#a0a0b0;">&#8226;</span>' : '<span class="text-danger">&#10007;</span>');
+                const mark = c.ok ? '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i></span>'
+                                  : (c.info ? '<span style="color:#a0a0b0;"><i class="bi bi-dot" aria-hidden="true"></i></span>' : '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i></span>');
                 html += '<li>' + mark + ' ' + esc(c.name)
                      + (c.detail ? ' <small style="color:#a0a0b0;">&mdash; ' + esc(c.detail) + '</small>' : '') + '</li>';
             });
@@ -4717,8 +4733,8 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {
-                const mark = c.ok ? '<span class="text-success">&#10003;</span>'
-                                  : (c.info ? '<span style="color:#a0a0b0;">&#8226;</span>' : '<span class="text-danger">&#10007;</span>');
+                const mark = c.ok ? '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i></span>'
+                                  : (c.info ? '<span style="color:#a0a0b0;"><i class="bi bi-dot" aria-hidden="true"></i></span>' : '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i></span>');
                 html += '<li>' + mark + ' ' + esc(c.name)
                      + (c.detail ? ' <small style="color:#a0a0b0;">&mdash; ' + esc(c.detail) + '</small>' : '') + '</li>';
             });
@@ -4751,8 +4767,8 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {
-                const mark = c.ok ? '<span class="text-success">&#10003;</span>'
-                                  : (c.info ? '<span style="color:#a0a0b0;">&#8226;</span>' : '<span class="text-danger">&#10007;</span>');
+                const mark = c.ok ? '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i></span>'
+                                  : (c.info ? '<span style="color:#a0a0b0;"><i class="bi bi-dot" aria-hidden="true"></i></span>' : '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i></span>');
                 html += '<li>' + mark + ' ' + esc(c.name)
                      + (c.detail ? ' <small style="color:#a0a0b0;">&mdash; ' + esc(c.detail) + '</small>' : '') + '</li>';
             });

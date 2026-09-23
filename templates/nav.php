@@ -46,7 +46,7 @@
                  so this is no query at all; nothing while pictures are switched off. `js-avatar-me`
                  is how assets/js/media-editor.js finds it to follow a new picture without a reload. */ ?>
         <a href="<?= $baseUrl ?>?action=account" class="nav-user <?= $accountActive ? 'active' : '' ?>"><?= function_exists('userAvatarHtml') ? userAvatarHtml($navUser, 20, $baseUrl, 'avatar nav-av js-avatar-me', $cfg) : '' ?><?= sanitize($navUser['username']) ?><?php $navSounds = soundClientConfig($db, $cfg, $navUser, $baseUrl); ?><span class="nav-unread" id="nav-unread" hidden data-uid="<?= (int)$navUser['id'] ?>" data-pulse="<?= (int)siteLiveSeconds($cfg) ?>"<?= $navSounds ? ' data-sounds="' . sanitize(json_encode($navSounds, JSON_UNESCAPED_SLASHES)) . '"' : '' ?>></span></a><?php /* Sounds (1.56.0): what this reader plays rides on the badge as data-sounds, and the note beside it is
-         shown by assets/js/sounds.js only while the browser refuses to let the page make a sound. */ ?><?php if ($navSounds): ?><span class="sound-chip" id="sound-chip" hidden title="<?= _h('nav.sounds_locked_title') ?>">&#128263; <?= _h('nav.sounds_locked') ?></span><?php endif; ?>
+         shown by assets/js/sounds.js only while the browser refuses to let the page make a sound. */ ?><?php if ($navSounds): ?><span class="sound-chip" id="sound-chip" hidden title="<?= _h('nav.sounds_locked_title') ?>"><i class="bi bi-volume-mute" aria-hidden="true"></i> <?= _h('nav.sounds_locked') ?></span><?php endif; ?>
         <?php elseif (usersLinksVisible($cfg)): ?>
         <span class="sep">|</span>
         <a href="<?= $baseUrl ?>?action=login" class="<?= $accountActive ? 'active' : '' ?>"><?= _h('nav.account') ?></a>

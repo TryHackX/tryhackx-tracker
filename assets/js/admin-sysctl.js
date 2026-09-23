@@ -444,8 +444,8 @@
             const r = state.armed.keys[k];
             keys.appendChild(el('div', {
                 className: 'sy-armed-key ' + (r.landed ? '' : 'sy-armed-key-bad'),
-                text: (r.landed ? '✓ ' : '✗ ') + k + ': ' + r.got + (r.landed ? '' : ' ' + t('js.sysctl.asked_for', {v: r.wanted})),
-            }));
+            }, [el('i', { className: r.landed ? 'bi bi-check-lg' : 'bi bi-x-lg', 'aria-hidden': 'true' }),
+                ' ' + k + ': ' + r.got + (r.landed ? '' : ' ' + t('js.sysctl.asked_for', {v: r.wanted}))]));
         });
         paintCountdown();
     }

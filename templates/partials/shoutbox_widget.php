@@ -402,16 +402,16 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
                          wants them is not writing a one-liner. */ ?>
                 <div class="rt-tools shout-tools" id="shout-body-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
                     <span class="rt-tool-group">
-                        <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><strong>B</strong></button>
-                        <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><em>I</em></button>
-                        <button type="button" data-md="underline" title="<?= _h('rt.underline') ?>"><u>U</u></button>
-                        <button type="button" data-md="strike" title="<?= _h('rt.strike') ?>"><s>S</s></button>
+                        <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><i class="bi bi-type-bold" aria-hidden="true"></i></button>
+                        <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><i class="bi bi-type-italic" aria-hidden="true"></i></button>
+                        <button type="button" data-md="underline" title="<?= _h('rt.underline') ?>"><i class="bi bi-type-underline" aria-hidden="true"></i></button>
+                        <button type="button" data-md="strike" title="<?= _h('rt.strike') ?>"><i class="bi bi-type-strikethrough" aria-hidden="true"></i></button>
                     </span>
                     <span class="rt-tool-group">
-                        <button type="button" data-md="code" title="<?= _h('rt.code') ?>">&lt;/&gt;</button>
-                        <button type="button" data-md="link" title="<?= _h('rt.link') ?>">&#128279;</button>
-                        <button type="button" data-md="quote" title="<?= _h('rt.quote') ?>">&rdquo;</button>
-                        <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>">&#128065;</button>
+                        <button type="button" data-md="code" title="<?= _h('rt.code') ?>"><i class="bi bi-code-slash" aria-hidden="true"></i></button>
+                        <button type="button" data-md="link" title="<?= _h('rt.link') ?>"><i class="bi bi-link-45deg" aria-hidden="true"></i></button>
+                        <button type="button" data-md="quote" title="<?= _h('rt.quote') ?>"><i class="bi bi-quote" aria-hidden="true"></i></button>
+                        <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>"><i class="bi bi-eye-slash" aria-hidden="true"></i></button>
                     </span>
                 </div>
                 <?php /* The count belongs on THIS line, at its right-hand end (1.61.0): it is a fact
@@ -437,7 +437,7 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
         <div class="shout-acts">
             <?php if ($shoutFmt !== 'plain'): ?>
             <details class="rt-syntax-fold">
-                <summary><?= _h('shout.syntax_help') ?></summary>
+                <summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('shout.syntax_help') ?></summary>
                 <div class="form-hint" id="shout-body-syntax"></div>
             </details>
             <?php else: ?>

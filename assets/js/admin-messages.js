@@ -254,15 +254,21 @@
 
         pagerEl.textContent = '';
         if (j.pages > 1) {
-            var mk = function (label, target, disabled) {
-                var b = el('button', null, label);
+            // Chevrons as icons (1.68.0), with the words a screen reader needs on the button.
+            var mk = function (icon, label, target, disabled) {
+                var b = el('button');
+                var i = el('i', icon);
+                i.setAttribute('aria-hidden', 'true');
+                b.appendChild(i);
+                b.title = label;
+                b.setAttribute('aria-label', label);
                 b.disabled = !!disabled;
                 b.addEventListener('click', function () { load(target); });
                 return b;
             };
-            pagerEl.appendChild(mk('‹', j.page - 1, j.page <= 1));
+            pagerEl.appendChild(mk('bi bi-chevron-left', t('js.common.pg_prev'), j.page - 1, j.page <= 1));
             pagerEl.appendChild(el('span', 'pg-total', j.page + ' / ' + j.pages));
-            pagerEl.appendChild(mk('›', j.page + 1, j.page >= j.pages));
+            pagerEl.appendChild(mk('bi bi-chevron-right', t('js.common.pg_next'), j.page + 1, j.page >= j.pages));
         }
     }
 

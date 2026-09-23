@@ -19,6 +19,12 @@ require_once __DIR__ . '/csp.php';
 // somebody remembering to include the thing that knows how to convert it.
 require_once __DIR__ . '/db_clock.php';
 
+// The icon library (1.68.0): iconFontTag(), which every page's <head> prints, and the name map that
+// lets Font Awesome draw icons written in Bootstrap Icons' markup. Loaded here for the reason csp.php
+// is: nine templates and the installer print the font, and a helper that is not loaded wherever a
+// <head> is written is a helper some entry point will be missing.
+require_once __DIR__ . '/icons.php';
+
 /**
  * What this build calls itself.
  *
@@ -28,7 +34,7 @@ require_once __DIR__ . '/db_clock.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.67.0';
+const TRACKER_VERSION = '1.68.0';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.

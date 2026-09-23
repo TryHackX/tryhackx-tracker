@@ -259,6 +259,15 @@
 
         function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; } }
 
+        /**
+         * The report button's face: the icon library's flag, filled once this message is reported
+         * (1.68.0 — two flag characters until then), and the word beside it.
+         */
+        function reportFace(btn, reported) {
+            btn.replaceChildren(el('i', { className: reported ? 'bi bi-flag-fill' : 'bi bi-flag', 'aria-hidden': 'true' }),
+                                ' ' + (reported ? t('js.pm.reported') : t('js.pm.report')));
+        }
+
         /** One message, as a row. The first draw and every later arrival go through here. */
         function renderMsg(m) {
             var wrap = el('div', { className: 'pm-msg' + (m.mine ? ' pm-msg-mine' : '') });
@@ -270,9 +279,8 @@
             foot.appendChild(el('span', { text: when(m.created) }));
             if (m.mine && m.read) foot.appendChild(el('span', { className: 'pm-read', text: t('js.pm.read') }));
             if (!m.mine && mayReport) {
-                var rep = el('button', { type: 'button', className: 'pm-report',
-                                         title: t('js.pm.report_title'),
-                                         text: (m.reported ? '⚑ ' : '⚐ ') + (m.reported ? t('js.pm.reported') : t('js.pm.report')) });
+                var rep = el('button', { type: 'button', className: 'pm-report', title: t('js.pm.report_title') });
+                reportFace(rep, !!m.reported);
                 rep.disabled = !!m.reported;
                 rep.addEventListener('click', function () { reportMessage(m.id, rep); });
                 foot.appendChild(rep);
@@ -429,7 +437,7 @@
                 var r = await post('user_messages', { op: 'report', message: id, reason: why.value.trim() });
                 go.disabled = false;
                 if (!r || !r.success) { msg.textContent = t('js.pm.report_failed'); return; }
-                btn.textContent = t('js.pm.reported');
+                reportFace(btn, true);
                 btn.disabled = true;
                 close();
             };

@@ -161,25 +161,27 @@
     /* ─────────────────────────── the emoji, and the images beside them ─────────────────────────── */
 
     /**
-     * Four pages of characters, split on the space between them.
+     * Four pages of characters, split on the space between them. The characters are CONTENT — what
+     * goes into the box — and stay emoji; each page's TAB is a control, and is an icon (1.68.0) that
+     * follows the site's icon library like every other control.
      *
      * Split on spaces rather than by character, because half of these are more than one code point:
      * the variation selector that turns ✌ into the emoji ✌️ is its own character and belongs to the
      * one before it. Array.from() would tear those in half and put a lone modifier in the grid.
      */
     var EMOJI = [
-        { id: 'smileys', tab: '😀', chars:
+        { id: 'smileys', icon: 'bi bi-emoji-smile', chars:
             '😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😋 😛 😜 '
           + '🤪 🤗 🤭 🤔 🤨 😐 😑 😶 😏 😒 🙄 😬 😮 😯 😴 😪 😌 😔 🤤 😷 '
           + '🤒 🤢 🤮 🥵 🥶 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 🙁 😲 🥺 😢 😭 😱 😤 '
           + '😡 🤬 😈 💀 💩 🤡 👻 👽 🤖' },
-        { id: 'gestures', tab: '👍', chars:
+        { id: 'gestures', icon: 'bi bi-hand-thumbs-up', chars:
             '👋 🤚 ✋ 🖖 👌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ 👍 👎 ✊ 👊 '
           + '🤛 🤜 👏 🙌 👐 🤝 🙏 💪 👀 🧠 🤷 🤦' },
-        { id: 'hearts', tab: '❤️', chars:
+        { id: 'hearts', icon: 'bi bi-heart', chars:
             '❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💔 💕 💞 💖 💘 💝 💯 🔥 ✨ 🌟 ⭐ 💫 '
           + '⚡ 💥 💦 💨 💤 🎵 🎶 ✅ ❌ ❗ ❓ ⚠️' },
-        { id: 'objects', tab: '🎉', chars:
+        { id: 'objects', icon: 'bi bi-balloon', chars:
             '🎉 🎊 🎁 🎂 🍕 🍔 🍿 🍎 🍓 🍺 🍻 🍷 ☕ 🌍 🌙 ☀️ 🌈 🌊 🌵 🌲 '
           + '🍀 🌸 🐶 🐱 🐻 🦊 🐸 🐵 🦄 🐝 🐢 🐙 💻 📱 🎮 🚀' },
     ];
@@ -240,14 +242,14 @@
         }
         host.appendChild(panel);
 
-        var pages = [];                     // {id, label, tab, fill(grid)}
+        var pages = [];                     // {id, label, icon, img?, fill(grid)}
         var current = '';
 
         function tabFor(page) {
             var b = el('button', { type: 'button', className: 'shout-picker-tab', role: 'tab',
                                    title: page.label, 'aria-label': page.label, dataset: { g: page.id } });
             if (page.img) b.appendChild(emoteImg(page.img, 'shout-emote'));
-            else b.appendChild(document.createTextNode(page.tab));
+            else b.appendChild(el('i', { className: page.icon, 'aria-hidden': 'true' }));
             b.addEventListener('click', function () { show(page.id); });
             return b;
         }
@@ -275,7 +277,7 @@
 
         EMOJI.forEach(function (g) {
             pages.push({
-                id: g.id, tab: g.tab, label: t('js.shout.tab_' + g.id),
+                id: g.id, icon: g.icon, label: t('js.shout.tab_' + g.id),
                 fill: function (grid) {
                     g.chars.split(' ').forEach(function (ch) {
                         if (!ch) return;
@@ -297,7 +299,7 @@
                 var stick = opts.stickers && opts.sticker ? rows.filter(function (r) { return !!r.sticker; }) : [];
                 if (plain.length) {
                     pages.push({
-                        id: 'emotes', tab: ':)', label: t('js.shout.tab_emotes'), img: plain[0],
+                        id: 'emotes', icon: 'bi bi-image', label: t('js.shout.tab_emotes'), img: plain[0],
                         fill: function (grid) {
                             plain.forEach(function (r) {
                                 grid.appendChild(cell(emoteImg(r, 'shout-emote'), ':' + r.code + ':',
@@ -309,7 +311,7 @@
                 }
                 if (stick.length) {
                     pages.push({
-                        id: 'stickers', tab: '⭐', label: t('js.shout.tab_stickers'), img: stick[0], wide: true,
+                        id: 'stickers', icon: 'bi bi-star', label: t('js.shout.tab_stickers'), img: stick[0], wide: true,
                         fill: function (grid) {
                             stick.forEach(function (r) {
                                 grid.appendChild(cell(emoteImg(r, 'shout-picker-sticker'), ':' + r.code + ':',
@@ -1065,13 +1067,28 @@
          * means somebody's sentence disappearing underneath a button as they type it.
          *
          * The stylesheet still carries a sensible fallback for the frames before this runs.
+         *
+         * And the field's OWN SCROLLBAR (1.68.0). A long message makes the textarea scroll, and its
+         * bar is drawn inside its right edge — exactly where the two buttons are pinned, so the bar
+         * ran under Send and beside the picker handle. The bar's width is measured here (what the
+         * box is wide beyond its client area, less its two borders) and handed to the stylesheet as
+         * --shout-sb, which moves the buttons in by that much. Where scrollbars overlay the text
+         * (phones, macOS) the width is 0 and the buttons stay where they are: no gap, no overlap.
+         * The padding needs no share of it: the bar sits between the border and the padding, so the
+         * text's right edge moves in by the same amount as the buttons do.
          */
         function fitComposer() {
             if (!ta) return;
             var acts = box.querySelector('.shout-in-acts');
             if (!acts) return;
+            // 0 wide while the box is in a hidden ancestor (the account page's tabs): leave both alone.
+            if (ta.offsetWidth > 0 && acts.parentNode) {
+                var cs = getComputedStyle(ta);
+                var sb = ta.offsetWidth - ta.clientWidth
+                       - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0);
+                acts.parentNode.style.setProperty('--shout-sb', Math.max(0, Math.round(sb)) + 'px');
+            }
             var w = acts.getBoundingClientRect().width;
-            // 0 while the box is in a hidden ancestor (the account page's tabs); leave the fallback.
             if (w > 0) ta.style.paddingRight = Math.ceil(w + 14) + 'px';
         }
 
@@ -1109,7 +1126,7 @@
             var body = ta.value.trim();
             if (!body) { ta.focus(); return; }
             sendBtn.disabled = true;
-            await postShout(body, function () { ta.value = ''; countUpdate(); });
+            await postShout(body, function () { ta.value = ''; countUpdate(); fitComposer(); });
             sendBtn.disabled = false;
         }
 
@@ -1582,6 +1599,8 @@
         if (ta) {
             ta.addEventListener('input', countUpdate);
             ta.addEventListener('input', mentionInput);
+            // The scrollbar comes and goes with what is typed (1.68.0) — see fitComposer().
+            ta.addEventListener('input', fitComposer);
             // A click elsewhere takes the focus and the list with it. Deferred, because the pick
             // itself runs on mousedown and would otherwise be cancelled by its own blur.
             ta.addEventListener('blur', function () { setTimeout(mentionClose, 150); });
@@ -1601,6 +1620,18 @@
             // rewritten the page); the width of the box changes with the window.
             window.addEventListener('resize', fitComposer);
             document.addEventListener('langswap', fitComposer);
+            // The field's own drag handle resizes it without resizing the window, and a scrollbar
+            // that appears or goes narrows or widens its content box: both are a change this
+            // observer sees. Measured on the next frame, outside the observer's own delivery, so the
+            // padding it sets cannot count as a resize the same frame has to report again.
+            if (window.ResizeObserver) {
+                var fitQueued = false;
+                new ResizeObserver(function () {
+                    if (fitQueued) return;
+                    fitQueued = true;
+                    requestAnimationFrame(function () { fitQueued = false; fitComposer(); });
+                }).observe(ta);
+            }
             // The write/preview tabs, the syntax help and the counter under them, from the editor the
             // rest of the site writes in. Never in 'plain': there is no syntax to preview.
             if (format !== 'plain' && window.RichText && typeof window.RichText.mount === 'function') {

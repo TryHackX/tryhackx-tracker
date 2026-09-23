@@ -134,7 +134,9 @@
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
         btn.title = on ? t('js.fav.remove') : t('js.fav.add');
         btn.setAttribute('aria-label', btn.title);
-        btn.textContent = on ? '★' : '☆';
+        // The icon library's star, empty or filled (1.68.0 — it was two star characters, which every
+        // library draws the same way). The label above is what a screen reader hears.
+        btn.replaceChildren(el('i', { className: on ? 'bi bi-star-fill' : 'bi bi-star', 'aria-hidden': 'true' }));
     }
 
     function makeStar(hash, on) {
@@ -548,7 +550,8 @@
                     // not build magnets could fill a list and never empty it.
                     if (list.own && (r.info_hash || r.id)) {
                         var rm = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-remove',
-                                                title: t('js.lists.remove_title'), text: '×' });
+                                                title: t('js.lists.remove_title'), 'aria-label': t('js.lists.remove_title') },
+                                    el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' }));
                         rm.addEventListener('click', async function () {
                             rm.disabled = true;
                             var body = { op: 'remove', list: list.id };
@@ -1018,11 +1021,12 @@
         };
     }
 
-    /** The "+" beside the star in the Info panel. Null where lists are off or not permitted. */
+    /** The plus beside the star in the Info panel. Null where lists are off or not permitted. */
     function makeListButton(hash, name) {
         var o = document.getElementById('info-overlay');
         if (!o || o.dataset.lists !== '1' || typeof window.openListPicker !== 'function') return null;
-        var b = el('button', { type: 'button', className: 'search-share lp-open', title: t('js.lists.pick_title'), text: '+' });
+        var b = el('button', { type: 'button', className: 'search-share lp-open', title: t('js.lists.pick_title'), 'aria-label': t('js.lists.pick_title') },
+                   el('i', { className: 'bi bi-plus-lg', 'aria-hidden': 'true' }));
         b.addEventListener('click', function () { window.openListPicker(hash, name); });
         return b;
     }

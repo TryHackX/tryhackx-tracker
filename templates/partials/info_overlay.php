@@ -40,7 +40,7 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
             <button type="button" class="search-share share-btn info-share" id="info-share"
                     title="<?= _h('search.share_one_title') ?>"><?= _h('search.share') ?></button>
 <?php endif; ?>
-            <button type="button" class="files-close" id="info-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
+            <button type="button" class="files-close" id="info-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         </div>
         <div class="files-body" id="info-body"></div>
     </div>
@@ -53,7 +53,7 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
     <div class="files-box lo-box" role="dialog" aria-modal="true" aria-labelledby="lo-title">
         <div class="files-head">
             <h3 id="lo-title"></h3>
-            <button type="button" class="files-close" id="lo-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
+            <button type="button" class="files-close" id="lo-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         </div>
         <div class="files-body" id="lo-body"></div>
     </div>
@@ -68,7 +68,7 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
     <div class="files-box lp-box" role="dialog" aria-modal="true" aria-labelledby="lp-title">
         <div class="files-head">
             <h3 id="lp-title"><?= _h('lists.pick_title') ?></h3>
-            <button type="button" class="files-close" id="lp-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
+            <button type="button" class="files-close" id="lp-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         </div>
         <div class="files-body">
             <?php /* ONE box, at the top, doing both jobs. It filters the lists while somebody types,
@@ -94,7 +94,7 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
     <div class="files-box bk-box" role="dialog" aria-modal="true" aria-labelledby="bk-title">
         <div class="files-head">
             <h3 id="bk-title"><?= _h('people.block_title') ?> <span class="text-muted" id="bk-who"></span></h3>
-            <button type="button" class="files-close" id="bk-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
+            <button type="button" class="files-close" id="bk-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         </div>
         <div class="files-body">
             <p class="text-muted"><?= __('people.block_body') ?></p>
@@ -115,7 +115,7 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
     <div class="files-box" role="dialog" aria-modal="true" aria-labelledby="who-title">
         <div class="files-head">
             <h3 id="who-title"><?= _h('js.fav.who') ?> <span class="text-muted" id="who-total"></span></h3>
-            <button type="button" class="files-close" id="who-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>">&times;</button>
+            <button type="button" class="files-close" id="who-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         </div>
         <div class="files-body">
             <input type="text" class="profile-search" id="who-search" maxlength="60" placeholder="<?= _h('profile.search_ph') ?>" autocomplete="off">
@@ -161,38 +161,38 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
             </div>
             <div class="rt-tools" id="info-desc-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
                 <span class="rt-tool-group">
-                    <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><strong>B</strong></button>
-                    <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><em>I</em></button>
-                    <button type="button" data-md="underline" title="<?= _h('rt.underline') ?>"><u>U</u></button>
-                    <button type="button" data-md="strike" title="<?= _h('rt.strike') ?>"><s>S</s></button>
+                    <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><i class="bi bi-type-bold" aria-hidden="true"></i></button>
+                    <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><i class="bi bi-type-italic" aria-hidden="true"></i></button>
+                    <button type="button" data-md="underline" title="<?= _h('rt.underline') ?>"><i class="bi bi-type-underline" aria-hidden="true"></i></button>
+                    <button type="button" data-md="strike" title="<?= _h('rt.strike') ?>"><i class="bi bi-type-strikethrough" aria-hidden="true"></i></button>
                 </span>
                 <span class="rt-tool-group">
-                    <button type="button" data-md="color" title="<?= _h('rt.color') ?>">&#127912;</button>
-                    <button type="button" data-md="size" title="<?= _h('rt.size') ?>">A&#8593;</button>
-                    <button type="button" data-md="highlight" title="<?= _h('rt.highlight') ?>">&#9635;</button>
-                    <button type="button" data-md="sub" title="<?= _h('rt.sub') ?>">X&#8322;</button>
-                    <button type="button" data-md="sup" title="<?= _h('rt.sup') ?>">X&#178;</button>
+                    <button type="button" data-md="color" title="<?= _h('rt.color') ?>"><i class="bi bi-palette" aria-hidden="true"></i></button>
+                    <button type="button" data-md="size" title="<?= _h('rt.size') ?>"><i class="bi bi-fonts" aria-hidden="true"></i></button>
+                    <button type="button" data-md="highlight" title="<?= _h('rt.highlight') ?>"><i class="bi bi-highlighter" aria-hidden="true"></i></button>
+                    <button type="button" data-md="sub" title="<?= _h('rt.sub') ?>"><i class="bi bi-subscript" aria-hidden="true"></i></button>
+                    <button type="button" data-md="sup" title="<?= _h('rt.sup') ?>"><i class="bi bi-superscript" aria-hidden="true"></i></button>
                 </span>
                 <span class="rt-tool-group">
-                    <button type="button" data-md="link" title="<?= _h('rt.link') ?>">&#128279;</button>
-                    <button type="button" data-md="image" title="<?= _h('rt.image') ?>">&#128444;</button>
-                    <button type="button" data-md="list" title="<?= _h('rt.list') ?>">&#8226;&nbsp;<?= _h('rt.list_word') ?></button>
-                    <button type="button" data-md="olist" title="<?= _h('rt.olist') ?>">1.&nbsp;<?= _h('rt.list_word') ?></button>
+                    <button type="button" data-md="link" title="<?= _h('rt.link') ?>"><i class="bi bi-link-45deg" aria-hidden="true"></i></button>
+                    <button type="button" data-md="image" title="<?= _h('rt.image') ?>"><i class="bi bi-image" aria-hidden="true"></i></button>
+                    <button type="button" data-md="list" title="<?= _h('rt.list') ?>"><i class="bi bi-list-ul" aria-hidden="true"></i></button>
+                    <button type="button" data-md="olist" title="<?= _h('rt.olist') ?>"><i class="bi bi-list-ol" aria-hidden="true"></i></button>
                 </span>
                 <span class="rt-tool-group">
-                    <button type="button" data-md="quote" title="<?= _h('rt.quote') ?>">&rdquo;</button>
-                    <button type="button" data-md="code" title="<?= _h('rt.code') ?>">&lt;/&gt;</button>
-                    <button type="button" data-md="table" title="<?= _h('rt.table') ?>">&#9636;</button>
-                    <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>">&#128065;</button>
-                    <button type="button" data-md="center" title="<?= _h('rt.center') ?>">&#8801;</button>
-                    <button type="button" data-md="hr" title="<?= _h('rt.hr') ?>">&mdash;</button>
+                    <button type="button" data-md="quote" title="<?= _h('rt.quote') ?>"><i class="bi bi-quote" aria-hidden="true"></i></button>
+                    <button type="button" data-md="code" title="<?= _h('rt.code') ?>"><i class="bi bi-code-slash" aria-hidden="true"></i></button>
+                    <button type="button" data-md="table" title="<?= _h('rt.table') ?>"><i class="bi bi-table" aria-hidden="true"></i></button>
+                    <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>"><i class="bi bi-eye-slash" aria-hidden="true"></i></button>
+                    <button type="button" data-md="center" title="<?= _h('rt.center') ?>"><i class="bi bi-text-center" aria-hidden="true"></i></button>
+                    <button type="button" data-md="hr" title="<?= _h('rt.hr') ?>"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
                 </span>
             </div>
             <textarea id="info-desc" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
             <div class="rt-preview rt-body" id="info-desc-preview" hidden></div>
         </div>
         <details class="rt-syntax-fold">
-    <summary><?= _h('rt.syntax_help') ?></summary>
+    <summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('rt.syntax_help') ?></summary>
     <div class="form-hint" id="info-desc-syntax"></div>
 </details>
         <div class="form-hint" id="info-desc-help"></div>

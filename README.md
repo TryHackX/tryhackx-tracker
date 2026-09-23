@@ -4,6 +4,7 @@
 ![PHP](https://img.shields.io/badge/PHP-8.0%2B-777bb4.svg)
 ![MySQL / MariaDB](https://img.shields.io/badge/MySQL%20%2F%20MariaDB-supported-00758f.svg)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
+[![Donate: XMR · BTC · ETH](https://img.shields.io/badge/donate-XMR%20%C2%B7%20BTC%20%C2%B7%20ETH-f26822.svg)](#support-the-project)
 
 A self-hosted BitTorrent tracker information and DMCA/abuse report management system. Built with PHP and MySQL — no frameworks, no dependencies, no build step.
 
@@ -13,6 +14,34 @@ Compatible with [erdgeist OpenTracker](https://erdgeist.org/arts/software/opentr
 - **Whitelist** (1.2.0+) — **only registered hashes are served**. The app owns the whitelist (database → atomically generated file → SIGHUP), offers a public **registration page** (CAPTCHA + rate limits), a **server-to-server API** with bearer keys and strict IP bans (used by the [Flarum forum extension](https://github.com/TryHackX/flarum-homepage-blocks) to register every posted magnet link), an **admin Whitelist page** (multi-column sort, IP grouping, name/file search, magnet generator, seed/leech scrape, bans, API clients) and an optional **metadata worker** (libtorrent, DHT) that stores torrent names and file lists. See [Whitelist mode](#whitelist-mode).
 
 Provides a public-facing website for tracker information, abuse report submission, report status checking, block checking, appeal management, and a full-featured admin panel with email notifications.
+
+---
+
+## Support the project
+
+TryHackX Tracker is free and open source under the MIT license, and the public tracker at
+[tracker.tryhackx.org](https://tracker.tryhackx.org/) runs on a paid server. If this project is useful
+to you, please consider a donation — it pays for the server and keeps new releases coming. Any amount
+helps. Thank you!
+
+<table>
+  <thead>
+    <tr><th>Currency</th><th>Network</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Monero</b> (XMR)</td><td>Monero</td></tr>
+    <tr><td colspan="2"><code>45hvee4Jv7qeAm6SrBzXb9YVjb8DkHtFtFh7qkDMxS9zYX3NRi1dV27MtSdVC5X8T1YVoiG8XFiJkh4p9UncqWGxHi4tiwk</code></td></tr>
+    <tr><td><b>Bitcoin</b> (BTC)</td><td>Bitcoin (on-chain)</td></tr>
+    <tr><td colspan="2"><code>bc1qncavcek4kknpvykedxas8kxash9kdng990qed2</code></td></tr>
+    <tr><td><b>Ethereum</b> (ETH)</td><td>Ethereum (mainnet)</td></tr>
+    <tr><td colspan="2"><code>0xa3d38d5Cf202598dd782C611e9F43f342C967cF5</code></td></tr>
+  </tbody>
+</table>
+
+Send each coin only over the network named beside it; a transfer made over a different network may
+never arrive. The same addresses are on the home page of
+[tracker.tryhackx.org](https://tracker.tryhackx.org/), so each one can be checked against a second
+source before you send.
 
 ---
 
@@ -97,7 +126,7 @@ Provides a public-facing website for tracker information, abuse report submissio
 - **Directory Protection** — `.htaccess` deny rules on `config/`, `includes/`, `templates/`, `api/`, `sql/`, `tests/`; `assets/` blocks server-side script execution and directory listing (see [Reverse proxy / Nginx](#reverse-proxy--nginx-notes) for non-Apache servers)
 - **Security Headers** — `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`
 - **Content-Security-Policy with a per-request nonce** — built in PHP (so it works on nginx, which never reads `.htaccess`, and so a nonce can exist at all), sent report-only until you switch it to enforce, `script-src` with no `'unsafe-inline'` and no `'unsafe-eval'`, a narrower policy for the panel than for public pages, only the CAPTCHA provider you actually configured, and an optional bounded store of what browsers reported
-- **Subresource Integrity** — pinned CDN assets (Bootstrap, Bootstrap Icons) loaded with `integrity` hashes
+- **Subresource Integrity** — pinned CDN assets (Bootstrap, Bootstrap Icons or Font Awesome) loaded with `integrity` hashes
 - **Reverse-Proxy Aware** — optional trusted-proxy allow-list (single addresses **or CIDR ranges**, so a CDN's published ranges can be pasted in) + configurable client-IP header so per-IP limits work correctly behind Cloudflare / nginx without opening a spoofing hole; a block wider than /8 (v4) or /16 (v6) is refused and ignored
 - **Transport security** — `Secure` on the session, language and remember-me cookies, decided once for all of them (automatic detection, or forced on/off), plus optional HSTS with its own `max-age`, `includeSubDomains` and `preload` switches, off by default and never sent over plain HTTP
 - **Information Leak Prevention** — generic responses for not-found queries, email always required for status checks
@@ -2599,7 +2628,7 @@ instead of within the minute.
 - **Database:** MySQL/MariaDB with PDO (prepared statements, FETCH_ASSOC mode)
 - **Frontend:** Vanilla JavaScript (no build step), Bootstrap 5 (CDN) for admin panel, custom dark theme CSS for public pages
 - **Email:** PHP `mail()` with multipart MIME (HTML + plain text), dark-themed templates
-- **Icons:** Bootstrap Icons (CDN, admin panel only)
+- **Icons:** Bootstrap Icons 1.11.3 or Font Awesome Free 6.7.2 (CDN webfonts), chosen for the whole site in Settings → Site (`icon_library`); every icon is written in Bootstrap's markup and Font Awesome is mapped over it (`includes/icons.php`, `assets/js/icons.js`)
 - **CAPTCHA:** Google reCAPTCHA v2 / v3, Cloudflare Turnstile or hCaptcha (explicit render mode, one shared modal — `assets/js/captcha.js`; every provider host must stay allow-listed in the CSP in `.htaccess`)
 - **Metadata worker (optional):** Python 3 + `python3-libtorrent` (see `worker/`)
 - **Federation importer (optional):** Python 3 + `python3-pymysql`, systemd timer (`worker/federation.py`)

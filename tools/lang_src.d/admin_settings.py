@@ -2645,3 +2645,15 @@ add('', {
     'settings.site_timezone_hint': ("The zone the shoutbox shows its times in, for every guest and for every member who has not chosen their own on the account page. Until a choice is saved here it follows the zone of the scheduled tracker mode, and failing that the one PHP runs in (:php). The offset beside each zone is today's.",
         'Strefa, w której shoutbox pokazuje godziny — każdemu gościowi i każdemu członkowi, który nie wybrał własnej na stronie konta. Dopóki nie zapiszesz tu wyboru, obowiązuje strefa harmonogramu trybu trackera, a gdy jej brak — ta, w której działa PHP (:php). Przesunięcie przy każdej strefie jest dzisiejsze.'),
 })
+
+# ── 1.68.0: which library draws the icons ──────────────────────────────────
+# The whole site, both halves: the public pages and the panel print their font through the same
+# helper, so one choice here is the only choice there is. Said in the hint, because a setting on the
+# panel's Settings page reads, at first sight, like a setting about the panel.
+add('', {
+    'settings.icon_library': ('Icons', 'Ikony'),
+    'settings.icon_library_bootstrap': ('Bootstrap Icons (default)', 'Bootstrap Icons (domyślnie)'),
+    'settings.icon_library_fontawesome': ('Font Awesome', 'Font Awesome'),
+    'settings.icon_library_hint': ('Which library draws every icon on the site — the public pages and this panel alike. Both load from jsDelivr with an integrity check. Font Awesome (the free set, 6.7.2) draws each icon with its closest counterpart, so a few look a little different. The choice applies from the next page you open.',
+        'Która biblioteka rysuje wszystkie ikony na stronie — na stronach publicznych i w tym panelu tak samo. Obie ładują się z jsDelivr ze sprawdzeniem integralności. Font Awesome (darmowy zestaw, 6.7.2) rysuje każdą ikonę jej najbliższym odpowiednikiem, więc kilka wygląda trochę inaczej. Wybór obowiązuje od następnej otwartej strony.'),
+})

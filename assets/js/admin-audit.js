@@ -114,7 +114,7 @@
 
     function detailEl(detail) {
         const det = el('details', { className: 'au-detail' });
-        det.appendChild(el('summary', { text: t('js.audit.details') }));
+        det.appendChild(el('summary', null, [el('i', { className: 'bi bi-chevron-right disc-chev', 'aria-hidden': 'true' }), t('js.audit.details')]));
         // A settings diff has a shape worth rendering as a table; anything else is shown as it came.
         const isDiff = Object.values(detail).every(v => v && typeof v === 'object'
             && ('from' in v || 'to' in v || 'changed' in v));

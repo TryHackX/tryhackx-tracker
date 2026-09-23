@@ -210,10 +210,11 @@ function cspReportUri(string $scope): string {
  *
  * PUBLIC and PANEL differ in exactly three places and each difference is paid for:
  *   * script-src gains https://cdn.jsdelivr.net in the panel only — every panel page loads the
- *     Bootstrap 5.3.8 bundle from there (with SRI). A public page loads Bootstrap ICONS (CSS) from
- *     jsDelivr on two actions, which is style-src and font-src, not script-src. Allowing a CDN to
- *     run scripts on the pages every anonymous visitor sees, when nothing there needs it, would be
- *     paying the whole cost of a third-party script origin for nothing.
+ *     Bootstrap 5.3.8 bundle from there (with SRI). Every public page loads its icon font (CSS) from
+ *     jsDelivr — Bootstrap Icons, or Font Awesome's webfont build (includes/icons.php) — which is
+ *     style-src and font-src, not script-src. Allowing a CDN to run scripts on the pages every
+ *     anonymous visitor sees, when nothing there needs it, would be paying the whole cost of a
+ *     third-party script origin for nothing.
  *   * frame-ancestors is 'none' in the panel and 'self' on public pages. The panel has no reason to
  *     be framed by anything, ever.
  *   * frame-src gains 'self' in the panel for the page-content preview iframe.
