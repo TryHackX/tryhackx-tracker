@@ -2568,8 +2568,9 @@ The installer creates the following tables:
 | `index_hashes` | Observed-hash index: hashes seen on the tracker (S/L, seen count, grace/protect, metadata, `meta_source`, `meta_origin_at`) — schema v6/v7/v15 |
 | `index_files` | File lists for indexed hashes (keyed by info_hash, FULLTEXT searchable) |
 | `users` | User accounts (username, optional email, password hash, status) — schema v7 |
-| `user_groups` | Groups with JSON permissions (seeded: `guest` = anonymous visitors, `member` = granted on registration, `admin` = passes every check) — schema v8 semantics |
+| `user_groups` | Groups with JSON permissions (seeded: `guest` = anonymous visitors, `member` = granted on registration, `premium` = the paid extras (`profile.cover`, `shout.upload_emote`) granted by hand or bought, `moderator`, `admin` = passes every check) — schema v8 semantics, matrix v71 |
 | `user_group_members` | Timed memberships (`granted_at`/`expires_at`, expiry warnings) |
+| `user_group_orders` | What a shop asked for: `UNIQUE(client_id, order_id)` is what makes a retried purchase webhook grant one month instead of two, and what a refund of one order is recomputed from — schema v71 |
 | `user_notifications` | In-app notifications (grants, expiry warnings, admin messages) |
 | `user_tokens` | Remember-me + password-reset tokens (sha256 only) |
 | `user_favourites` | A member's favourite hashes — schema v47 |
@@ -2678,7 +2679,7 @@ All require active admin session. Prefix: `admin/`
 | `admin/whitelist_fetch_meta` / `whitelist_scrape` | POST | Queue metadata fetch / live scrape |
 | `admin/whitelist_regenerate` / `whitelist_import_blacklist` | POST | Rewrite the file (+ reload) / import the legacy blacklist as bans |
 | `admin/fetch_banned` / `banned_add` | GET / POST | Banned hashes |
-| `admin/fetch_api_clients` / `api_client_create` / `api_client_update` / `api_client_delete` | GET / POST | API clients (secret shown once; `scope` = `whitelist` \| `users` \| `federation` \| `all`) |
+| `admin/fetch_api_clients` / `api_client_create` / `api_client_update` / `api_client_delete` | GET / POST | API clients (secret shown once; `scope` = `whitelist` \| `abuse` \| `users` \| `shop` \| `federation` \| `all`) |
 | `admin/fetch_api_bans` / `api_ban_lift` / `api_ban_add` | GET / POST | API bans (`&id=` returns the request snapshot) |
 | `admin/fetch_users` / `user_update` / `user_delete` / `user_grant` / `user_revoke` / `user_notify` | GET / POST | User browser + edits, timed group grants, custom notifications (1.6.0) |
 | `admin/fetch_groups` / `group_save` / `group_delete` | GET / POST | Group CRUD with the permission matrix |

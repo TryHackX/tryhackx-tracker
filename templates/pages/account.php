@@ -155,6 +155,21 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
             $accMedia = userMediaEditorState($db, $cfg, $meUser, $baseUrl);
             $accMayAv = $accAvOn && userIdHasPermission($db, $cfg, (int)$meUser['id'], 'profile.avatar');
             $accMayCv = $accCvOn && userIdHasPermission($db, $cfg, (int)$meUser['id'], 'profile.cover');
+            // Where a cover comes from, for somebody who cannot set one (1.65.0). Since the cover
+            // became a Premium extra this is the NORMAL state of every member, so it is an answer —
+            // "it comes with Premium" — not the warning a missing grant usually earns, which reads
+            // as a misconfiguration. The admin group is left out (it passes by its blanket and hands
+            // nothing to anybody), and so is guest. One constant query, filtered here: a handful of
+            // group rows, and no list of ids pasted into SQL.
+            $accCvGroups = [];
+            if ($accCvOn && !$accMayCv && function_exists('userGroupIdsWithPermission')) {
+                $accCvIds = userGroupIdsWithPermission($db, 'profile.cover');
+                foreach ($db->query("SELECT id, slug, name FROM user_groups ORDER BY priority DESC, name")->fetchAll(PDO::FETCH_ASSOC) as $accG) {
+                    if (in_array((int)$accG['id'], $accCvIds, true) && !in_array((string)$accG['slug'], ['admin', 'guest'], true)) {
+                        $accCvGroups[] = (string)$accG['name'];
+                    }
+                }
+            }
             $accCover = $accCvOn ? userCoverFor($meUser, $baseUrl, $cfg) : null;
             $accMaxKb = (int)floor(userMediaMaxBytes($cfg) / 1024);
             $accMedia['avatar'] += ['url64' => userAvatarUrl($meUser, 32, $baseUrl, $cfg), 'url128' => userAvatarUrl($meUser, 64, $baseUrl, $cfg)];
@@ -201,7 +216,10 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
             <?php endif; ?>
         </div>
         <?php endif; ?>
-        <?php if ($accCvOn): ?>
+        <?php /* Shown when there is something to do or to know: the account may set a cover, a group
+                 exists that would let it, or a cover of its own is being kept. A block that could only
+                 ever say "no" to somebody with no way to change that is left out altogether. */ ?>
+        <?php if ($accCvOn && ($accMayCv || $accCvGroups || !empty($accMedia['cover']['has']))): ?>
         <div class="acc-mail-prefs acc-media" id="acc-cover">
             <h3 class="acc-sub"><?= _h('account.media_cover_head') ?></h3>
             <?php /* A miniature of the real header: the same shape and the same painting as the band on
@@ -232,7 +250,15 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
             </div>
             <p class="text-muted acc-verify-note"><?= _h('account.media_cover_note') ?></p>
             <?php if (!$accMayCv): ?>
-            <p class="acc-perm-warn"><?= __('account.media_no_grant', ['perm' => 'profile.cover']) ?></p>
+                <?php if ($accCvGroups): ?>
+            <p class="text-muted acc-verify-note acc-cover-with"><?= __('account.media_cover_with', ['groups' => sanitize(implode(', ', $accCvGroups))]) ?></p>
+                <?php endif; ?>
+            <?php /* 1.65.0: the cover is a premium extra now, so this member may be holding a picture
+                     the site has stopped painting. The row is untouched — say that, because a band
+                     that simply went blank looks like the site lost the file. */ ?>
+                <?php if (!empty($accMedia['cover']['has'])): ?>
+            <p class="acc-perm-warn"><?= __('account.media_cover_kept') ?></p>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
         <?php endif; ?>

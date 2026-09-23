@@ -338,11 +338,11 @@ check('panel permissions are deliberately ungranted by default',
 $ADMIN_ONLY = [
     // permission => why nobody but an admin should ever have it
     //
-    // Adding a picture to a room everybody reads is not part of writing in it (1.59.0), so no
-    // migration hands this out: the admin group passes every check anyway and the owner uploads
-    // from Settings → Shoutbox. An operator who wants members to add their own ticks the box in
-    // Users → Groups, which is the whole reason the id exists.
-    'shout.upload_emote' => 'granted to nobody on purpose: the owner uploads from Settings, the operator may hand it out',
+    // `shout.upload_emote` used to be here, with the reason "granted to nobody on purpose". From
+    // 1.65.0 it IS granted — to the seeded `premium` group, in its own INSERT IGNORE — so it is no
+    // longer admin-only and the check below finds it in schema.php like any other id. The rule it
+    // was protecting has not moved and is asserted by tests/shout_emotes_test.php: no MEMBER gets
+    // it, because adding pictures to a room everybody reads is not part of writing in one.
     //
     // And skipping the queue is a second decision on top of that one (1.61.0). `shout_emote_approval`
     // ships ON, so a member's picture waits for a moderator; an id that walks past that is worth

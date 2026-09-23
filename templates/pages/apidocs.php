@@ -24,11 +24,19 @@ $apiOn = ($cfg['api_enabled'] ?? '0') === '1';
 
 // A fixed vocabulary, chosen by key. A query parameter that is not one of these is not an error —
 // it is somebody editing the address, and the honest response is the default page.
+// `auth` was in this list and has never been in apiClientScopes(): the bridge lives inside the
+// `users` scope, so a key could not be made with it and ?scope=auth was a page describing a key
+// nobody can hold. It is gone, and `shop` — which IS a scope from 1.65.0 — takes its place.
 $docScopes = ['whitelist' => 'v1/whitelist/submit', 'abuse' => 'v1/blacklist/submit',
-              'users' => 'v1/users/lookup',
-              'federation' => 'v1/federation/export', 'auth' => 'v1/auth/login',
+              'users' => 'v1/users/lookup', 'shop' => 'v1/users/grant',
+              'federation' => 'v1/federation/export',
               'all' => 'v1/whitelist/submit'];
-$docScope = isset($_GET['scope']) && isset($docScopes[(string)$_GET['scope']]) ? (string)$_GET['scope'] : 'whitelist';
+// …but an address that once existed keeps landing where it used to. ?scope=auth opened the bridge
+// chapter, and a link to it may sit in a forum post or a partner's notes; it opens that chapter
+// still, as the `users` page it always really was, instead of falling through to the whitelist.
+$docAsked = (string)($_GET['scope'] ?? '');
+if ($docAsked === 'auth') $docAsked = 'users';
+$docScope = isset($docScopes[$docAsked]) ? $docAsked : 'whitelist';
 $docReview = ((string)($_GET['approve'] ?? 'auto')) === 'review';
 $docFields = function_exists('apiClientCleanFields') ? apiClientCleanFields($_GET['fields'] ?? [], $docScope) : [];
 // ABSOLUTE. Every address on this page is copied into somebody else's code on somebody else's
@@ -46,8 +54,12 @@ $showSubmit = in_array($docScope, ['whitelist', 'all'], true);
 // The reporting half. `approve=auto` means something much heavier here than it does above, and the
 // chapter says so where somebody integrating will read it.
 $showAbuse  = in_array($docScope, ['abuse', 'all'], true);
-$showAuth   = in_array($docScope, ['auth', 'users', 'all'], true);
-$showUsers  = in_array($docScope, ['users', 'all'], true);
+$showAuth   = in_array($docScope, ['users', 'all'], true);
+$showUsers  = in_array($docScope, ['users', 'shop', 'all'], true);
+// Selling a membership. A `shop` key can do nothing else, and a `users` key can do this too, so the
+// chapter is printed for both — with the endpoint list above narrowed to what each may call.
+$showShop   = in_array($docScope, ['users', 'shop', 'all'], true);
+$isShopOnly = $docScope === 'shop';
 $showFed    = in_array($docScope, ['federation', 'all'], true);
 
 // The example body, built from the same three answers the page is describing, so what a partner
@@ -107,6 +119,26 @@ $exAbuseReply = json_encode([
     'auto_block' => !$docReview,
     'required_fields' => $docFields,
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+// The shop flow, as three bodies and two replies. The retry's reply is shown beside the first one
+// on purpose: "what do I get when my webhook fires twice" is the question this chapter exists for,
+// and the answer is only convincing when both are on the screen together.
+$exGrant = json_encode(['login' => 'kasia', 'group' => 'premium', 'duration' => '1m',
+                        'order_id' => 'SHOP-2026-000412', 'note' => 'order #412'],
+                       JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exGrantReply = json_encode([
+    'ok' => true, 'user_id' => 7, 'group' => 'premium',
+    'previous_expires_at' => null, 'expires_at' => '2026-10-22 18:40:11',
+    'effective' => true, 'reason' => '',
+    'order_id' => 'SHOP-2026-000412', 'replayed' => false,
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exGrantReplay = json_encode([
+    'ok' => true, 'user_id' => 7, 'group_id' => 4,
+    'previous_expires_at' => null, 'expires_at' => '2026-10-22 18:40:11',
+    'order_id' => 'SHOP-2026-000412', 'order_state' => 'grant', 'replayed' => true,
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exRefund = json_encode(['login' => 'kasia', 'group' => 'premium', 'order_id' => 'SHOP-2026-000412'],
+                        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
 $exLogin = json_encode(['external_id' => '412', 'username' => 'kasia', 'email' => 'kasia@example.org'],
                        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
@@ -279,12 +311,42 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
     <thead><tr><th><?= _h('apidocs.col_endpoint') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
     <tbody>
         <tr><td><code>v1/users/lookup</code></td><td><?= __('apidocs.ep_users_lookup') ?></td></tr>
+        <?php /* A shop key cannot create accounts, so the row is not printed for one: a table listing
+                 an endpoint this key answers 403 on is a table that sends somebody debugging. */ ?>
+        <?php if (!$isShopOnly): ?>
         <tr><td><code>v1/users/provision</code></td><td><?= __('apidocs.ep_users_provision') ?></td></tr>
+        <?php endif; ?>
         <tr><td><code>v1/users/grant</code></td><td><?= __('apidocs.ep_users_grant') ?></td></tr>
         <tr><td><code>v1/users/revoke</code></td><td><?= __('apidocs.ep_users_revoke') ?></td></tr>
     </tbody>
 </table>
 </div>
+<?php endif; ?>
+
+<?php if ($showShop): ?>
+<?php /* Selling a membership, end to end. Four steps, then the two things a shop gets wrong when
+         nobody writes them down: what a retry returns, and what to do when the grant lands on an
+         account that cannot use it yet. */ ?>
+<h2><?= _h('apidocs.h_shop') ?></h2>
+<p><?= __('apidocs.shop_intro') ?></p>
+<ol class="apidocs-rules">
+    <li><?= __('apidocs.shop_step1') ?></li>
+    <li><?= __('apidocs.shop_step2') ?></li>
+    <li><?= __('apidocs.shop_step3') ?></li>
+    <li><?= __('apidocs.shop_step4') ?></li>
+</ol>
+<p><?= __('apidocs.shop_group') ?></p>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/users/grant') ?>
+
+<?= sanitize($exGrant) ?></code></pre>
+<pre class="apidocs-pre"><code><?= sanitize($exGrantReply) ?></code></pre>
+<div class="alert alert-info show"><?= __('apidocs.shop_retry') ?></div>
+<pre class="apidocs-pre"><code><?= sanitize($exGrantReplay) ?></code></pre>
+<p><?= __('apidocs.shop_effective') ?></p>
+<p><?= __('apidocs.shop_permanent') ?></p>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/users/revoke') ?>
+
+<?= sanitize($exRefund) ?></code></pre>
 <?php endif; ?>
 
 <?php if ($showFed): ?>
@@ -316,11 +378,12 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
 <?php
 // The one command that proves the key works, for the scope it actually has. A guide whose "check
 // it works" line calls an endpoint this key cannot reach is a guide that opens with a 403.
-$curlUrl = $showSubmit ? $docApi . 'v1/whitelist/submit' : $docUrl;
+// For an accounts or shop key it is the LOOKUP, never the grant: "check it works" must not be a
+// command that sells somebody a month of something.
+$curlUrl = $showSubmit ? $docApi . 'v1/whitelist/submit' : ($showUsers ? $docApi . 'v1/users/lookup' : $docUrl);
 $curlBody = $showSubmit
     ? json_encode(['items' => [$exItem], 'source' => 'api'], JSON_UNESCAPED_SLASHES)
-    : ($docScope === 'auth' ? json_encode(['external_id' => '412', 'username' => 'kasia'], JSON_UNESCAPED_SLASHES)
-                            : ($showUsers ? json_encode(['login' => 'kasia'], JSON_UNESCAPED_SLASHES) : '{}'));
+    : ($showUsers ? json_encode(['login' => 'kasia'], JSON_UNESCAPED_SLASHES) : '{}');
 ?>
 <pre class="apidocs-pre"><code>curl -sS -X POST '<?= sanitize($curlUrl) ?>' \
   -H 'Authorization: Bearer &lt;key_id&gt;.&lt;secret&gt;' \

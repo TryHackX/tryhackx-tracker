@@ -281,4 +281,14 @@ add('', {
         'Zgłoszenie bez któregoś z tych pól jest odrzucane osobno, z nazwą pola. Roszczenia, którego nie da się sprawdzić, nie da się też rozpatrzyć.'),
     'a.wl.cl_scope_abuse': ('abuse — file reports against torrents',
         'abuse — zgłaszanie torrentów do zablokowania'),
+    # 1.65.0. Named by what it is FOR, because that is the decision: a shop's webhook needs three
+    # endpoints, and `users` would additionally let it make accounts and sign people in here.
+    'a.wl.cl_scope_shop': ('shop — sell and refund group memberships',
+        'shop — sprzedawanie i zwracanie członkostwa w grupach'),
+    'js.wl.cl_scope_shop': ('shop — sell and refund group memberships',
+        'shop — sprzedawanie i zwracanie członkostwa w grupach'),
+    'a.wl.cl_shop_note': ('A shop key can look an account up, grant a group and take that grant back — and nothing else. It cannot create accounts and it cannot reach the sign-in bridge.',
+        'Klucz sklepu może wyszukać konto, nadać grupę i cofnąć to nadanie — i nic więcej. Nie może zakładać kont ani sięgać do mostka logowania.'),
+    'js.wl.cl_shop_note': ('A shop key can look an account up, grant a group and take that grant back — and nothing else. It cannot create accounts and it cannot reach the sign-in bridge.',
+        'Klucz sklepu może wyszukać konto, nadać grupę i cofnąć to nadanie — i nic więcej. Nie może zakładać kont ani sięgać do mostka logowania.'),
 })

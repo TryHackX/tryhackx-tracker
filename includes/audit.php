@@ -36,7 +36,10 @@ function auditActionGroups(): array {
         'hashes'   => ['whitelist.add', 'whitelist.delete', 'whitelist.ban', 'whitelist.unban',
                        'index.delete', 'index.promote', 'blacklist.add', 'blacklist.delete'],
         'reports'  => ['report.status', 'report.delete', 'report.restore', 'report.email', 'appeal.resolve'],
-        'users'    => ['user.update', 'user.delete', 'user.grant', 'user.revoke', 'user.notify', 'group.save', 'group.delete', 'user.media'],
+        // 'user.create' was mapped from admin/user_create since the log was written and named in no
+        // group, so every account the panel made was filed under 'other'. v1/users/provision writes
+        // the same action now, which is how it was noticed.
+        'users'    => ['user.create', 'user.update', 'user.delete', 'user.grant', 'user.revoke', 'user.notify', 'group.save', 'group.delete', 'user.media'],
         'machine'  => ['tracker.mode', 'tracker.restart', 'tracker.reload', 'netlimit.apply', 'iplist.change', 'sysctl.apply',
                        'ot.apply', 'ot.cluster', 'livesync.apply', 'backup.run', 'backup.restore',
                        'backup.delete', 'backup.download', 'tuner.run'],
@@ -284,6 +287,14 @@ function auditEndpointAction(string $endpoint): ?string {
         'admin/fed_purge'             => 'fed.purge',
         'admin/fed_peer_save'         => 'fed.peer_save',
         'admin/fed_peer_delete'       => 'fed.peer_delete',
+        // The server-to-server half of the same three acts (v71). auditFinish() has logged v1/* since
+        // 1.27.1, but under the fallback name 'api.users/grant' — which is not what somebody filtering
+        // the Users group is looking for, and not what the line beside it from the panel says. A
+        // membership sold by a shop and one granted by hand are the same event; the ACTOR column is
+        // where they differ, and it already says 'key <label>'.
+        'v1/users/grant'              => 'user.grant',
+        'v1/users/revoke'             => 'user.revoke',
+        'v1/users/provision'          => 'user.create',
         // Emptying the CSP violation table. A GET of the same endpoint is a read and auditFinish()
         // already returns early on GET, so only the deletion is named here — without the line it
         // would be logged as the fallback 'panel.csp_reports', which reads like a page visit.

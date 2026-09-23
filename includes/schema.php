@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 70;  // 70 = "delete this conversation, for me" and two settings: `message_threads`.u_low_cleared_id / u_high_cleared_id (BIGINT UNSIGNED, 0 = nothing deleted — every read path filters `m.id >` the reader's own, so a thread goes for one side and stays whole for the other, and a new message brings it back showing only what came after), plus `shout_order` (top | bottom — which end of the room the newest line is at) and `account_media_side` (left | right — which card of the account page holds Picture and Cover)
+const TRACKER_SCHEMA_VERSION = 71;  // 71 = the default permission matrix, a `premium` group and a shop's order book: `user_group_orders` (UNIQUE(client_id, order_id) is what makes a retried purchase webhook grant one month instead of two), the seeded `premium` group (profile.cover + shout.upload_emote, no panel id, so a key may sell it), `member` brought up to the shipped matrix (index.view/index.files/index.magnet/whitelist.add, which its index.files_all grant had been paging without), `profile.cover` taken OFF member — the one removal this project has shipped, and the image is KEPT — and `content.view` added to `moderator`, which had been approving descriptions it could not read
+                                    // 70 = "delete this conversation, for me" and two settings: `message_threads`.u_low_cleared_id / u_high_cleared_id (BIGINT UNSIGNED, 0 = nothing deleted — every read path filters `m.id >` the reader's own, so a thread goes for one side and stays whole for the other, and a new message brings it back showing only what came after), plus `shout_order` (top | bottom — which end of the room the newest line is at) and `account_media_side` (left | right — which card of the account page holds Picture and Cover)
                                     // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
                                     // 68 = one setting and one column: `site_timezone` (the zone this site shows times in; empty = follow tracker_schedule_tz, then PHP's own) and users.timezone (NULL = the site's) — the shoutbox is the first reader of both
                                     // 67 = one setting and one permission, no tables: `shout_page_action` (the action name the room answers on, so an operator can have ?action=chat) and `shout.emote_auto` (an upload that skips the approval queue) — registered and, like shout.upload_emote before it, granted to nobody
@@ -580,6 +581,36 @@ function trackerSchemaStatements(): array {
             UNIQUE KEY `uq_ugm_user_group` (`user_id`, `group_id`),
             KEY `idx_ugm_group` (`group_id`),
             KEY `idx_ugm_expires` (`expires_at`)
+        ) $engine",
+        // v71: what a SHOP asked for, so asking twice does it once (api/v1/users_grant.php).
+        //
+        // A payment webhook retries. Every shop's does: the reply was slow, the connection dropped,
+        // the queue redelivered — and a grant endpoint that simply extends by a month each time hands
+        // out three months for one payment. The fix is not "try to notice a duplicate", it is a row
+        // the database refuses to hold twice: UNIQUE(client_id, order_id), INSERT IGNORE as the
+        // test-and-set, and the stored answer replayed to every retry.
+        //
+        // client_id is part of the key for the same reason it is in `user_identities`: two shops both
+        // numbering their orders from 1 are two different orders.
+        //
+        // `prev_expires_at` + `prev_member` are what a refund needs. Taking back "that order's month"
+        // means putting the membership back where the order found it, and NULL alone cannot say
+        // whether it found a permanent membership or no membership at all — so the flag says which.
+        "CREATE TABLE IF NOT EXISTS `user_group_orders` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `client_id` INT UNSIGNED NOT NULL,
+            `order_id` VARCHAR(64) NOT NULL,
+            `user_id` INT UNSIGNED NOT NULL,
+            `group_id` INT UNSIGNED NOT NULL,
+            `action` VARCHAR(16) NOT NULL DEFAULT 'grant',
+            `duration` VARCHAR(16) NOT NULL DEFAULT '',
+            `until` DATETIME DEFAULT NULL,
+            `prev_member` TINYINT(1) NOT NULL DEFAULT 0,
+            `prev_expires_at` DATETIME DEFAULT NULL,
+            `new_expires_at` DATETIME DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_ugo_client_order` (`client_id`, `order_id`),
+            KEY `idx_ugo_user` (`user_id`, `group_id`)
         ) $engine",
         "CREATE TABLE IF NOT EXISTS `user_notifications` (
             `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -1740,6 +1771,24 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         UNIQUE KEY `uq_ident_user` (`user_id`, `client_id`),
         KEY `idx_ident_user` (`user_id`)
     ) $engine";
+    // v71: the shop's order book — see the CREATE above, kept identical on purpose. A new table on
+    // an existing install is a migration, which is why it is repeated down here rather than assumed.
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_group_orders` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `client_id` INT UNSIGNED NOT NULL,
+        `order_id` VARCHAR(64) NOT NULL,
+        `user_id` INT UNSIGNED NOT NULL,
+        `group_id` INT UNSIGNED NOT NULL,
+        `action` VARCHAR(16) NOT NULL DEFAULT 'grant',
+        `duration` VARCHAR(16) NOT NULL DEFAULT '',
+        `until` DATETIME DEFAULT NULL,
+        `prev_member` TINYINT(1) NOT NULL DEFAULT 0,
+        `prev_expires_at` DATETIME DEFAULT NULL,
+        `new_expires_at` DATETIME DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_ugo_client_order` (`client_id`, `order_id`),
+        KEY `idx_ugo_user` (`user_id`, `group_id`)
+    ) $engine";
     $out[] = "CREATE TABLE IF NOT EXISTS `auth_handoffs` (
         `token_hash` CHAR(64) NOT NULL PRIMARY KEY,
         `user_id` INT UNSIGNED NOT NULL,
@@ -2122,6 +2171,78 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     schemaGrantOnce($db, 'v69_profile_media', [
         'member' => ['profile.avatar', 'profile.cover'],
     ]);
+
+    // ── v71: the default permission matrix, and a `premium` group to hold the paid extras ────────
+    //
+    // Why this is one schemaOnce() step and not four schemaGrantOnce() calls: it is a single decision
+    // by the owner ("set the group permissions sensibly, and on my server too"), it contains the ONE
+    // removal this project has ever shipped, and a marker per part would let an install end up half
+    // way through the matrix with nothing to say which half.
+    //
+    // WHAT IT DOES, in order:
+    //   1. creates `premium` if it is absent — the extras only, because a premium account is a member
+    //      as well and a lapse must take away the extras rather than the site;
+    //   2. adds to `member` whatever of the shipped matrix it is missing. A fresh install had
+    //      `index.files_all` (v42) and NOT index.view / index.files / index.magnet / whitelist.add, so
+    //      the paging grant it did have was governing a page it was never allowed to open;
+    //   3. takes `profile.cover` OFF `member` — THE one removal, and the owner's own instruction. The
+    //      uploaded image is NOT touched: userCoverFor() stops drawing it and puts it back the moment
+    //      the permission returns;
+    //   4. adds `content.view` to `moderator`, which has approved descriptions it could not read since
+    //      v58.
+    //
+    // Nothing else an operator added is removed — every step below either inserts a missing key or
+    // deletes the two ids this release deliberately moves.
+    if (schemaOnce($db, 'v71_group_matrix')) {
+        try {
+            // A group a shop can sell: no `panel.*` id (api/v1/users_grant.php refuses a group that
+            // carries one), is_system so it cannot be deleted out from under a running integration,
+            // is_default 0 so nobody becomes premium by signing up, and a priority between member (1)
+            // and moderator (500) so its colour is the one a premium member's name wears.
+            $db->exec("INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `color`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
+                ('premium', 'Premium', 'Granted by hand or bought: a profile cover and emotes of their own, on top of an ordinary membership. Uploads still wait for a moderator.', '#e3a008', 100, 0, 1,
+                 '{\"profile.cover\":true,\"shout.upload_emote\":true}')");
+            $db->exec("UPDATE `user_groups` SET is_system = 1 WHERE slug = 'premium'");
+
+            // The shipped matrix for a signed-in account, written out rather than read from
+            // userGroupPresets(): this is the statement of what an install gets, and a test that
+            // compared the migration with the preset it was generated from would be comparing a thing
+            // with itself. tests/groups_matrix_test.php holds a third copy and all three must agree.
+            $memberMatrix = ['index.view', 'index.files', 'index.files_all', 'index.magnet',
+                             'whitelist.view', 'whitelist.add', 'stats.view', 'stats.timeline', 'home.stats',
+                             'rating.vote', 'content.submit', 'content.propose', 'content.view',
+                             'status.hash_check', 'sounds.use',
+                             'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
+                             'lists.use', 'lists.public',
+                             'pm.send', 'pm.report', 'friends.use', 'directory.view',
+                             'shout.view', 'shout.post', 'shout.delete_own', 'profile.avatar'];
+            $st = $db->prepare("SELECT id, permissions FROM user_groups WHERE slug = ?");
+            $st->execute(['member']);
+            $mg = $st->fetch(PDO::FETCH_ASSOC);
+            if ($mg) {
+                $cur = json_decode((string)$mg['permissions'], true);
+                if (!is_array($cur)) $cur = [];
+                foreach ($memberMatrix as $p) if (!array_key_exists($p, $cur)) $cur[$p] = true;
+                // The removal. Both ids, because the `premium` group is where they live now and a
+                // member holding either would make the paid group buy nothing.
+                unset($cur['profile.cover'], $cur['shout.upload_emote']);
+                $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")
+                   ->execute([json_encode($cur, JSON_UNESCAPED_SLASHES), (int)$mg['id']]);
+            }
+            // The moderator's missing reading grant, added the same careful way: what is there stays.
+            $st->execute(['moderator']);
+            $modg = $st->fetch(PDO::FETCH_ASSOC);
+            if ($modg) {
+                $cur = json_decode((string)$modg['permissions'], true);
+                if (!is_array($cur)) $cur = [];
+                foreach (['content.view'] as $p) if (!array_key_exists($p, $cur)) $cur[$p] = true;
+                $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")
+                   ->execute([json_encode($cur, JSON_UNESCAPED_SLASHES), (int)$modg['id']]);
+            }
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v71 group matrix: ' . $e->getMessage());
+        }
+    }
 
     // v64: the shipped example emotes, read from assets/emotes/*.svg and kept as rows.
     //

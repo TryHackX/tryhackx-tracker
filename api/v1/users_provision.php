@@ -10,6 +10,9 @@
 requirePost();
 $rawBody = apiReadRawBody();
 $client = apiAuthenticate($db, $cfg, 'v1/users/provision', $rawBody);
+// The 'users' scope ONLY, and that is the point of the narrower 'shop' one existing (1.65.0):
+// creating accounts on somebody else's site is not part of taking a payment for a group. A shop key
+// looks an account up, sells it a membership and refunds one — nothing here.
 apiRequireScope($client, 'users');
 if (!usersEnabled($cfg)) jsonResponse(['ok' => false, 'error' => 'users_disabled'], 503);
 
@@ -52,5 +55,13 @@ if ($groupSlug !== '') {
         }
     }
 }
+// A line in the log, like every other act that creates an account or moves a membership. Without it
+// the only record that a partner's key had made somebody was the account's own created_at.
+auditNote([
+    'target_type' => 'user', 'target_id' => (string)$u['id'],
+    'summary' => 'created "' . $u['username'] . '"' . ($grant !== null ? ' in "' . $grant['group'] . '"' : ''),
+    'detail' => ['username' => $u['username'], 'group' => $grant['group'] ?? null,
+                 'expires_at' => $grant['expires_at'] ?? null, 'password_generated' => $generated],
+]);
 jsonResponse(['ok' => true, 'user_id' => (int)$u['id'], 'username' => $u['username'],
               'password' => $generated ? $password : null, 'grant' => $grant, 'server_time' => time()]);

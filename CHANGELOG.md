@@ -4,6 +4,79 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.65.0] — 2026-09-22
+
+Schema 71: one table (`user_group_orders`), one new seeded group (`premium`), and the first
+migration in this project that takes a permission AWAY from a group.
+
+### Added — a sensible default permission matrix, and a group to sell
+
+* **The `member` group finally holds what the member preset always said it did.** A fresh install
+  granted `index.files_all` — the right to page past the first batch of a file list — and not
+  `index.view`, `index.files`, `index.magnet` or `whitelist.add`, so the grant governed a page the
+  group could not open. The owner's own server had them because the owner had added them by hand.
+  The v71 migration adds whatever of the shipped matrix a group is missing, on fresh installs and on
+  existing ones alike.
+* **A `premium` group**, seeded, undeletable, never default, carrying only the extras: `profile.cover`
+  and `shout.upload_emote`. A premium account is an ordinary member as well, so a lapse takes away
+  the extras rather than the site. It carries no `panel.*` id, which is what makes it sellable —
+  `v1/users/grant` refuses any group that does.
+* **`shout.emote_auto` is deliberately NOT in it**: paying for pictures is not paying past
+  moderation, and a premium upload waits in the approval queue like anybody else's. The group's own
+  description says so.
+* **The moderator can read what it approves.** `content.view` became a separate grant in 1.53.0 and
+  the v25 moderator seed never received it, so an account that was only a moderator could approve
+  descriptions it could not see. Its preset and its seed also disagreed — the preset had
+  `panel.whitelist.delete` and no `panel.users.*`, the seed the exact reverse — so "apply the
+  moderator preset" quietly rewrote a seeded moderator into a different job. They agree now.
+
+### Changed — the profile cover is a premium extra
+
+* **`profile.cover` moves from `member` to `premium`**, and that is the one thing the migration
+  removes; everything an operator added by hand is left exactly where it is.
+* **A cover already uploaded is kept.** `userCoverFor()` asks, at the moment of drawing, whether the
+  account it belongs to still holds `profile.cover`; if not the band is simply not painted, the row
+  and the image stay in the database, and renewing brings the cover back on the next page load with
+  its framing intact. The account page says the picture is still there rather than leaving somebody
+  to conclude the site lost it.
+* **A member is told where a cover comes from, not warned.** Not holding `profile.cover` is now the
+  ordinary state of every member, so the account page says "A profile cover comes with: Premium." —
+  naming whichever groups carry it, admin and guest aside — instead of the warning a missing grant
+  earns elsewhere, which reads as a misconfiguration. When no group carries it and there is no cover
+  being kept, the cover block is left out altogether rather than saying "no" with nothing to do.
+* **Emotes and stickers that were already approved stay**, and no permission is re-checked for them:
+  they are in other people's shouts, and pulling them would tear holes in the room's history. Only a
+  NEW upload needs the grant.
+
+### Added — a purchase API a shop can trust
+
+* **`order_id` makes `v1/users/grant` idempotent.** A payment webhook retries; an endpoint that
+  extends by a month on every call hands out three months for one payment. `user_group_orders` has a
+  UNIQUE `(client_id, order_id)` and INSERT IGNORE is the test-and-set, so the first call does the
+  work and every retry gets the stored answer back with `replayed: true`, having changed nothing.
+* **Three ways to name the buyer**, exactly one per call: `login` (as before), `user_id`, or
+  `external_id` resolved through the sign-in bridge's identity table for that key.
+* **`duration` extends, `until` replaces**, and an `until` that would cut short a permanent
+  membership is refused with `would_shorten_permanent` unless the caller sends `"force": true`.
+  Every reply carries `previous_expires_at` beside `expires_at`.
+* **Refund by order.** `v1/users/revoke` with an `order_id` takes back only that order's time,
+  recomputed from the order book: a customer who charges back January keeps the March purchase. The
+  refunded order is marked in the same row, so a retried refund takes nothing away twice.
+* **`effective: false` with a `reason`** (`email_unverified`, `banned`) so the shop can tell its
+  customer why nothing happened yet. The grant is recorded regardless and starts working the moment
+  the obstacle goes.
+* **A narrow `shop` scope.** `users` also opens account creation and the whole sign-in bridge,
+  including `v1/auth/merge` — which attaches an outside identity to an EXISTING account, and is far
+  too much for a payment webhook. `shop` opens lookup, grant and revoke, and nothing else.
+* **Grant, revoke and provision write a real audit line** (target account, group, order id, the new
+  expiry) instead of the fallback `api.users/grant`. `user.create` is in the Users filter group now
+  too — it had been mapped since the log was written and named in no group, so every account the
+  panel made was filed under "other".
+* The integration guide documents the shop flow end to end, and no longer offers `auth` as though it
+  were a scope — `apiClientScopes()` has never had one; the bridge lives in `users`. An old
+  `?scope=auth` link still opens the bridge chapter, as the `users` page it always really was, so a
+  link in somebody's forum post or notes does not fall through to the whitelist page.
+
 ## [1.64.0] — 2026-09-22
 
 Schema 70: two columns on `message_threads` (`u_low_cleared_id`, `u_high_cleared_id`) and two

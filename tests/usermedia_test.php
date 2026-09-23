@@ -58,7 +58,7 @@ $memberBefore = (string)$db->query("SELECT permissions FROM user_groups WHERE sl
 // picture and a default cover, and must not take away one an operator had set on this database.
 $siteRows = $db->query("SELECT user_id, kind, size, sha1, mime, bytes, width, height, data, created_at FROM user_media WHERE user_id IS NULL")
                ->fetchAll(PDO::FETCH_ASSOC) ?: [];
-const UM_USERS = ['umtest_alice', 'umtest_bob', 'umtest_gone', 'umtest_perm', 'umtest_unver'];
+const UM_USERS = ['umtest_alice', 'umtest_bob', 'umtest_gone', 'umtest_perm', 'umtest_unver', 'umtest_prem'];
 register_shutdown_function(function () use ($db, $settingsBefore, $memberBefore, $siteRows) {
     foreach (UM_USERS as $name) {
         $st = $db->prepare("SELECT id FROM users WHERE username = ?");
@@ -254,23 +254,37 @@ check('the numeric ones are clamped to the brief\'s ranges from the constants',
 check('Profiles is a chip of its own', in_array('profiles', array_column(settingsCatalogGroups(), 'id'), true)
       && str_contains($tpl, 'id="section-profiles" data-group="profiles"'));
 
-// ── 2. the permissions: members yes, guests no — asked of the MIGRATION ───────────────────────
-// Other suites rewrite the member group's JSON and the marker is already stamped on this database,
-// so the grant is proved by taking it away and letting the migration put it back.
+// ── 2. the permissions: the picture to members, the COVER to premium — asked of the MIGRATION ──
+// Other suites rewrite the member group's JSON and both markers are already stamped on this
+// database, so the split is proved by undoing it and letting the migrations run again: v69 hands
+// both ids to members, and v71 takes the cover back off them and puts it in `premium`. Running them
+// in that order is exactly what an upgrading server does.
 $db->exec("UPDATE user_groups SET permissions = JSON_REMOVE(permissions, '$.\"profile.avatar\"', '$.\"profile.cover\"') WHERE slug = 'member'");
-$db->exec("DELETE FROM settings WHERE `key` = 'schema_grant_v69_profile_media'");
+$db->exec("DELETE FROM settings WHERE `key` IN ('schema_grant_v69_profile_media', 'schema_once_v71_group_matrix')");
 trackerSchemaDataMigrations($db, $cfgOn);
 $mp = json_decode((string)$db->query("SELECT permissions FROM user_groups WHERE slug = 'member'")->fetchColumn(), true) ?: [];
 $gp = json_decode((string)$db->query("SELECT permissions FROM user_groups WHERE slug = 'guest'")->fetchColumn(), true) ?: [];
-check('the migration grants profile.avatar and profile.cover to members', !empty($mp['profile.avatar']) && !empty($mp['profile.cover']), json_encode($mp));
+$pp = json_decode((string)$db->query("SELECT permissions FROM user_groups WHERE slug = 'premium'")->fetchColumn(), true) ?: [];
+check('the migration grants profile.avatar to members', !empty($mp['profile.avatar']), json_encode($mp));
+check('… and takes profile.cover back off them — the one removal v71 makes', empty($mp['profile.cover']), json_encode($mp));
+check('… putting it on the seeded premium group instead', !empty($pp['profile.cover']));
 check('… and not to guests', empty($gp['profile.avatar']) && empty($gp['profile.cover']));
-check('both ids are registered, and the member preset carries them',
+check('both ids are registered, and each preset carries its own',
       isset(userPermissionList()['profile.avatar'], userPermissionList()['profile.cover'])
-      && in_array('profile.avatar', userGroupPresets()['member']['perms'], true) && in_array('profile.cover', userGroupPresets()['member']['perms'], true));
+      && in_array('profile.avatar', userGroupPresets()['member']['perms'], true)
+      && !in_array('profile.cover', userGroupPresets()['member']['perms'], true)
+      && in_array('profile.cover', userGroupPresets()['premium']['perms'], true));
 $permUid = umUser($db, $cfgOn, 'umtest_perm');
 $unverUid = umUser($db, $cfgOn, 'umtest_unver', false);
-check('a verified member may set a picture and a cover',
-      userIdHasPermission($db, $cfgOn, $permUid, 'profile.avatar') && userIdHasPermission($db, $cfgOn, $permUid, 'profile.cover'));
+check('a verified member may set a picture, and may NOT set a cover',
+      userIdHasPermission($db, $cfgOn, $permUid, 'profile.avatar') && !userIdHasPermission($db, $cfgOn, $permUid, 'profile.cover'));
+// A SECOND account, in the group somebody bought or was given: the cover opens for it. It has to be
+// a different one — userEffectivePermissions() caches per user for the life of the process, so an
+// account that has already been asked about would answer from before the grant.
+$premGid = (int)$db->query("SELECT id FROM user_groups WHERE slug = 'premium'")->fetchColumn();
+$premUid = umUser($db, $cfgOn, 'umtest_prem');
+userGrantGroup($db, $premUid, $premGid, null, 'test', 'usermedia', false);
+check('… an account in the premium group may', $premGid > 0 && userIdHasPermission($db, $cfgOn, $premUid, 'profile.cover'));
 check('… an unverified one is at guest level and may not', !userIdHasPermission($db, $cfgOn, $unverUid, 'profile.avatar'));
 check('… and an anonymous visitor may not', empty(userEffectivePermissions($db, null, $cfgOn)['profile.avatar']));
 check('with accounts switched off nobody may (a picture belongs to an account)', userLegacyDefault('profile.avatar') === false && userLegacyDefault('profile.cover') === false);

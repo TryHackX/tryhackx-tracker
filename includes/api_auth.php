@@ -321,17 +321,32 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
     return $client;
 }
 
-/** Valid client scopes: what family of v1 endpoints a key may call ('all' = everything). */
-function apiClientScopes(): array { return ['whitelist', 'abuse', 'users', 'federation', 'all']; }
+/**
+ * Valid client scopes: what family of v1 endpoints a key may call ('all' = everything).
+ *
+ * `shop` (1.65.0) is `users` with the dangerous two thirds taken out. A payment webhook needs to look
+ * an account up, sell it a month of a group and take that month back on a refund — three endpoints.
+ * The `users` scope also opens `v1/users/provision` (make accounts on this site) and the whole
+ * sign-in bridge, including `v1/auth/merge`, which attaches an outside identity to an EXISTING
+ * account: a key that can call it can be told "the person behind my user 412 is your user 1" and then
+ * open a session as them. That is not a thing a shop's webhook should be able to do, and until there
+ * was a narrower scope the only way to sell a group was to hand it that power.
+ */
+function apiClientScopes(): array { return ['whitelist', 'abuse', 'users', 'shop', 'federation', 'all']; }
 
 /**
  * Enforce the client's scope AFTER apiAuthenticate(). A wrong scope is an admin-side configuration
  * matter, not an attack — 403 without a ban (mirrors the disabled-key branch).
+ *
+ * Several scopes may be named: the endpoint lists every scope that opens it, and the key needs ONE
+ * of them. `v1/users/lookup|grant|revoke` are the only endpoints with two, because they are exactly
+ * the overlap between a full users key and a shop's.
  */
-function apiRequireScope(array $client, string $scope): void {
+function apiRequireScope(array $client, string ...$scopes): void {
     $s = (string)($client['scope'] ?? 'whitelist');
-    if ($s === 'all' || $s === $scope) return;
-    jsonResponse(['error' => 'forbidden', 'detail' => 'this key does not have the "' . $scope . '" scope'], 403);
+    if ($s === 'all' || in_array($s, $scopes, true)) return;
+    jsonResponse(['error' => 'forbidden',
+                  'detail' => 'this key does not have the "' . implode('" or "', $scopes) . '" scope'], 403);
 }
 
 /** Create a client; returns ['id','key_id','secret'] — the secret is never retrievable again. */
@@ -363,6 +378,9 @@ const API_ABUSE_FIELDS = ['title', 'evidence_url', 'reason', 'reporter', 'statem
 function apiScopeFields(?string $scope): array {
     if ($scope === 'abuse') return API_ABUSE_FIELDS;
     if ($scope === 'whitelist') return API_REQUIRED_FIELDS;
+    // A shop key submits nothing, so there is no field it could be told to demand. Answering with
+    // the merged list would let the panel store a rule this key's endpoints will never read.
+    if ($scope === 'shop') return [];
     return array_merge(API_REQUIRED_FIELDS, API_ABUSE_FIELDS);
 }
 

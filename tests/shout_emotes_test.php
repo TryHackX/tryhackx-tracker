@@ -98,13 +98,39 @@ foreach (['shout_emotes_enabled' => '1', 'shout_emote_max_kb' => '64', 'shout_em
     check("the default for $k ships as '$v'", ($defaults[$k] ?? null) === $v, var_export($defaults[$k] ?? null, true));
 }
 check('shout.upload_emote is in the registry', isset(userPermissionList()['shout.upload_emote']));
-check('… and no preset hands it out: adding pictures to a shared room is the operator\'s decision',
+// The rule has always been "no MEMBER gets it" — adding pictures to a shared room is not part of
+// writing in one. 1.65.0 does not change that; it gives the id a home. The seeded `premium` group
+// carries it, which is a group an operator grants by hand or a shop sells, and every account that
+// holds it holds it because somebody decided so.
+check('… and neither the member nor the moderator preset hands it out',
       !in_array('shout.upload_emote', userGroupPresets()['member']['perms'], true)
       && !in_array('shout.upload_emote', userGroupPresets()['moderator']['perms'], true));
+check('… the premium preset is where it lives, and it is the only one',
+      in_array('shout.upload_emote', userGroupPresets()['premium']['perms'], true)
+      && count(array_filter(userGroupPresets(), fn($p) => in_array('shout.upload_emote', $p['perms'], true))) === 1);
 check('… and with accounts off the legacy fallback closes it like the rest of shout.*',
       userLegacyDefault('shout.upload_emote') === false);
-check('no migration grants it either',
-      !preg_match('/schemaGrantOnce[^;]*shout\.upload_emote/s', (string)file_get_contents($root . '/includes/schema.php')));
+$schemaSrc71 = (string)file_get_contents($root . '/includes/schema.php');
+check('no schemaGrantOnce hands it to an existing group — that is what would give it to members',
+      !preg_match('/schemaGrantOnce[^;]*shout\.upload_emote/s', $schemaSrc71));
+// It arrives as a seed ROW, not as a grant onto somebody's existing group — the difference between
+// "a new group has this" and "an established group just got this".
+$seedRows = [];
+preg_match_all('/INSERT IGNORE INTO `user_groups`.*?VALUES(.*?)"\s*\)/s', $schemaSrc71, $mSeed);
+foreach ($mSeed[1] ?? [] as $stmt) if (str_contains($stmt, 'shout.upload_emote')) $seedRows[] = $stmt;
+check('… it arrives only as part of the premium seed row',
+      count($seedRows) === 1 && str_contains($seedRows[0], "'premium'"),
+      count($seedRows) . ' seed statements mention it');
+// Asked of the DATABASE, not of the source: this is the property that matters.
+$emoteGrants = [];
+foreach ($db->query("SELECT slug, permissions FROM user_groups")->fetchAll(PDO::FETCH_ASSOC) as $g) {
+    $p = json_decode((string)$g['permissions'], true) ?: [];
+    if (!empty($p['shout.upload_emote'])) $emoteGrants[] = $g['slug'];
+}
+check('on a migrated database no default group but premium has it',
+      !in_array('member', $emoteGrants, true) && !in_array('guest', $emoteGrants, true)
+      && !in_array('moderator', $emoteGrants, true) && in_array('premium', $emoteGrants, true),
+      implode(',', $emoteGrants));
 
 // ── the switches and their clamps ────────────────────────────────────────────
 $on = ['users_enabled' => '1', 'shout_enabled' => '1'];

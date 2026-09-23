@@ -1020,12 +1020,33 @@ function userAvatarScriptTag(string $baseUrl, array $cfg): string
  * Somebody's cover as the page paints it: ['url', 'thumb', 'x', 'y', 'zoom', 'default' => bool], or
  * null for "no band at all". Their own first, then the site's default cover, then nothing — which
  * the profile page draws as the plain head it always had.
+ *
+ * ── what happens when premium lapses (v71) ────────────────────────────────────────────────────
+ * `profile.cover` belongs to the `premium` group now, and a premium membership can run out. Until
+ * this release an expiry hid nothing that was already set: the permission gated the UPLOAD and the
+ * picture went on being drawn for ever, so the thing being sold was one request, not a month.
+ *
+ * So the question is asked HERE, at the moment of drawing, of the account the cover belongs to —
+ * not of whoever is reading the page. The image itself is kept exactly where it was: renewing puts
+ * it back on the next page load with its framing intact, and nobody's photograph is deleted because
+ * a card expired. An account with no cover of its own is unaffected, and the SITE's default cover
+ * still paints behind everybody — it is the site's, not theirs.
+ *
+ * $userish needs an `id` for the question to be asked at all. Rows that carry only a name and a hash
+ * (a JSON row for a list) are drawn as before; every page that paints a real profile passes the row.
  */
-function userCoverFor(array $userish, string $baseUrl, ?array $cfg = null): ?array
+function userCoverFor(array $userish, string $baseUrl, ?array $cfg = null, ?PDO $db = null): ?array
 {
     $cfg = $cfg ?? (is_array($GLOBALS['cfg'] ?? null) ? $GLOBALS['cfg'] : []);
     if (!userCoversEnabled($cfg)) return null;
     $own = strtolower((string)($userish['cover_sha'] ?? ''));
+    $uid = (int)($userish['id'] ?? 0);
+    $db = $db ?? (($GLOBALS['db'] ?? null) instanceof PDO ? $GLOBALS['db'] : null);
+    if ($own !== '' && $uid > 0 && $db instanceof PDO
+        && function_exists('userIdHasPermission') && function_exists('usersEnabled') && usersEnabled($cfg)
+        && !userIdHasPermission($db, $cfg, $uid, 'profile.cover')) {
+        $own = '';   // kept in the database, not painted — see the note above
+    }
     if (userMediaValidSha($own)) {
         return ['url' => userMediaUrl($own, 0, $baseUrl), 'thumb' => userMediaUrl($own, USER_COVER_THUMB_EDGE, $baseUrl),
                 'x' => (float)($userish['cover_x'] ?? 50), 'y' => (float)($userish['cover_y'] ?? 50),

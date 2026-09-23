@@ -117,10 +117,13 @@ function userPermissionList(): array {
         'shout.delete_own' => 'Delete their own shouts',
         'shout.moderate' => 'Delete anyone\'s shouts, and clear the shoutbox',
         // Adding a picture to a room everybody reads is not "writing in the shoutbox", so it is not
-        // part of shout.post and no migration hands it to anybody (1.59.0). The admin group passes
-        // every check anyway; the owner uploads from Settings → Shoutbox. Give this to a group and
-        // its members may add emotes and stickers of their own, up to shout_emote_per_user each —
-        // every one of them sniffed, capped and refused unless it is really a picture.
+        // part of shout.post (1.59.0). The admin group passes every check anyway; the owner uploads
+        // from Settings → Shoutbox. Give this to a group and its members may add emotes and stickers
+        // of their own, up to shout_emote_per_user each — every one of them sniffed, capped and
+        // refused unless it is really a picture.
+        // 1.65.0: NO MEMBER still gets it, and that rule has not moved. What changed is that the
+        // seeded `premium` group does — the group an operator grants by hand or a shop sells — so
+        // the id is now one an account can hold without the operator inventing a group for it.
         'shout.upload_emote' => 'Upload emotes and stickers for the shoutbox',
         // …and the trust to skip the queue (1.61.0). Only meaningful beside the one above, and only
         // while `shout_emote_approval` is on: it says this group's uploads go straight into the room
@@ -133,11 +136,17 @@ function userPermissionList(): array {
         // ── pictures and profile covers (v69, includes/usermedia.php) ──
         // Two ids, because a small square beside a name and a wide photograph across the top of a
         // profile are different amounts of the site's face, and an operator may want to hand out the
-        // first long before the second. Both go to members by migration. They are about SETTING one:
-        // removing your own is never behind a permission, because taking your own face off a site is
-        // not something anybody should have to be allowed to do.
+        // first long before the second. They are about SETTING one: removing your own is never behind
+        // a permission, because taking your own face off a site is not something anybody should have
+        // to be allowed to do.
+        //
+        // v71 separates them: `profile.avatar` stays with every member, `profile.cover` moves to the
+        // `premium` group. A cover ALREADY UPLOADED is kept in the database when the permission
+        // lapses — userCoverFor() simply stops drawing it, and it reappears the moment the group
+        // comes back. Deleting somebody's picture because their month ran out would be a punishment
+        // nobody bought.
         'profile.avatar' => 'Set their own picture',
-        'profile.cover'  => 'Set their own profile cover',
+        'profile.cover'  => 'Set their own profile cover (drawn only while the account holds this)',
 
         // ── the admin panel ──
         //
@@ -193,19 +202,36 @@ function userPermissionList(): array {
  * Group presets — a starting point for the group editor, not a second registry.
  *
  * Each names permissions that exist in userPermissionList(); a preset naming an id that does not
- * exist is dropped by the editor rather than granted, and users_test.php checks every id here is
- * real. Presets are kept deliberately narrow: the operator adds to them, the preset never carries
- * something they did not mean to hand out.
+ * exist is dropped by the editor rather than granted, and tests/groups_matrix_test.php checks every
+ * id here is real (users.php claimed a test did that from 1.21.0 and none ever had). Presets are
+ * kept deliberately narrow: the operator adds to them, the preset never carries something they did
+ * not mean to hand out.
+ *
+ * A preset that shares a slug with a SEEDED group must say the same thing the seed does. The
+ * moderator's two lists disagreed from v25 to 1.64.0 — the preset had `panel.whitelist.delete` and
+ * no `panel.users.*`, the seed the exact reverse — so "apply the moderator preset" quietly rewrote a
+ * seeded moderator into a different job. The seed wins, because it is what every install already has.
  */
 function userGroupPresets(): array {
     return [
         'moderator' => [
             'label' => 'Moderator',
-            'about' => 'Works the report queue and the whitelist. No users, no backups, no log.',
+            'about' => 'Works the report queue and the whitelist. No settings, no backups, no log, no message queue.',
+            // EXACTLY the v25 seed plus what v63 and v71 added to it — see trackerSchemaDataMigrations().
+            // Deleting whitelist rows is not here and neither is panel.users.edit / .groups: those are
+            // boxes the operator ticks on purpose. panel.messages.* stays out as well (a reported
+            // private message is a different kind of access; tests/people_test.php holds that line).
             'perms' => ['panel.access', 'panel.reports.view', 'panel.reports.status', 'panel.reports.block',
                         'panel.reports.email', 'panel.reports.archive', 'panel.appeals.resolve',
-                        'panel.whitelist.view', 'panel.whitelist.add', 'panel.whitelist.delete',
+                        'panel.whitelist.view', 'panel.whitelist.add',
                         'panel.whitelist.ban', 'panel.whitelist.meta', 'panel.whitelist.content',
+                        'panel.users.view', 'panel.users.notify',
+                        'index.view', 'index.files', 'index.files_all', 'index.magnet',
+                        'whitelist.view', 'whitelist.add', 'stats.view', 'stats.timeline', 'home.stats',
+                        'rating.vote', 'content.submit', 'content.propose',
+                        // Approving a description you are not allowed to READ is not a job (v71).
+                        'content.view',
+                        'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         // The room is moderated from the room, not from a panel page (1.58.0), so the
                         // reading ids come with it — see the v63 grant in includes/schema.php.
                         'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'],
@@ -230,12 +256,28 @@ function userGroupPresets(): array {
         'member' => [
             'label' => 'Site member',
             'about' => 'The public-site features, no panel at all.',
+            // The shipped default matrix for a signed-in account, and the same list the v71 migration
+            // writes — `profile.cover` and `shout.upload_emote` are deliberately NOT here; they are
+            // the premium extras below.
             'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'whitelist.view', 'whitelist.add',
                         'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose', 'content.view',
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         'lists.use', 'lists.public',
                         'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check', 'sounds.use',
-                        'shout.view', 'shout.post', 'shout.delete_own', 'profile.avatar', 'profile.cover'],
+                        'shout.view', 'shout.post', 'shout.delete_own', 'profile.avatar'],
+        ],
+        // v71. ONLY the extras: a premium account is a member as well (the default group is granted
+        // at registration and `v1/users/provision` puts a bought account in it), so repeating the
+        // member list here would mean a premium membership that LAPSES takes the whole site with it.
+        //
+        // `shout.emote_auto` is not here on purpose: paying for pictures is not paying past
+        // moderation, so a premium upload waits in the queue like anybody else's. No `panel.*` id
+        // either, and that is what keeps the group sellable — api/v1/users_grant.php refuses to grant
+        // any group that carries one.
+        'premium' => [
+            'label' => 'Premium',
+            'about' => 'The paid extras on top of an ordinary membership: a profile cover and emotes of their own.',
+            'perms' => ['profile.cover', 'shout.upload_emote'],
         ],
     ];
 }
@@ -737,13 +779,36 @@ function userGroupsAll(PDO $db, int $userId): array {
 }
 
 /**
+ * The per-request memo behind userEffectivePermissions(), reachable so it can be FORGOTTEN.
+ *
+ * It was a `static` inside that function, which made it unforgettable: a request that changed
+ * somebody's groups and then asked what they may do got the answer from before the change. Harmless
+ * on most panel endpoints, which answer and stop — and wrong in every place that grants and then
+ * renders, which is what v1/users/grant and api/admin/user_grant.php do.
+ */
+function &userPermCacheRef(): array {
+    static $cache = [];
+    return $cache;
+}
+
+/** Drop the memo for one account (0 = all of them). Called wherever a membership changes. */
+function userPermissionsForget(int $userId = 0): void {
+    $cache = &userPermCacheRef();
+    if ($userId <= 0) { $cache = []; return; }
+    foreach (array_keys($cache) as $k) {
+        // the key is the id, optionally followed by the verification flag: "7", "7|vt", "7|vu"
+        if ($k === (string)$userId || str_starts_with((string)$k, $userId . '|')) unset($cache[$k]);
+    }
+}
+
+/**
  * Effective permission set. Anonymous ($userId null) = the `guest` group. A signed-in user gets
  * exactly the UNION of their active groups — guest is NOT inherited, so a logged-in user can have
  * fewer permissions than an anonymous visitor if their groups are narrower. Membership in the
  * system `admin` group grants every registered permission.
  */
 function userEffectivePermissions(PDO $db, ?int $userId, ?array $cfg = null): array {
-    static $cache = [];
+    $cache = &userPermCacheRef();
     $gate = $cfg !== null && userEmailVerifyRequired($cfg);
     // the trusted flag is part of the cache key so verifying WITHIN a request (the ?action=verify
     // page) immediately unlocks the groups — a plain per-user key would keep serving guest perms
@@ -932,6 +997,21 @@ function panelRequire(string $perm): void {
 }
 
 /**
+ * ONE membership row, active or expired, or null when there is none.
+ *
+ * The shop API needs the difference between "no membership" and "a permanent membership", and
+ * fetchColumn() on expires_at cannot tell them apart — both answer NULL. So the row, and the caller
+ * asks `$row === null` rather than guessing. Expired rows are returned too: they are what a renewal
+ * extends from, and usersTick() has not necessarily swept them yet.
+ */
+function userMembership(PDO $db, int $userId, int $groupId): ?array {
+    $st = $db->prepare("SELECT id, granted_at, expires_at, granted_by, note FROM user_group_members
+                         WHERE user_id = ? AND group_id = ?");
+    $st->execute([$userId, $groupId]);
+    return $st->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+/**
  * Grant (or extend) a group. $expiresAt = 'Y-m-d H:i:s' or null (permanent). On an existing
  * membership the new expiry REPLACES the old one (callers implementing "extend by duration"
  * compute the new date from max(now, old expiry) themselves — see userDurationExpiry()).
@@ -944,6 +1024,7 @@ function userGrantGroup(PDO $db, int $userId, int $groupId, ?string $expiresAt, 
          ON DUPLICATE KEY UPDATE granted_at = VALUES(granted_at), expires_at = VALUES(expires_at),
                                  granted_by = VALUES(granted_by), note = VALUES(note), warned_at = NULL")
        ->execute([$userId, $groupId, $grantedAt, $expiresAt, mb_substr($grantedBy, 0, 64), mb_substr($note, 0, 255)]);
+    userPermissionsForget($userId);   // this request must not go on answering from before the grant
     $g = $db->prepare("SELECT name, slug FROM user_groups WHERE id = ?");
     $g->execute([$groupId]);
     $group = $g->fetch(PDO::FETCH_ASSOC) ?: ['name' => '?', 'slug' => '?'];
@@ -962,6 +1043,7 @@ function userRevokeGroup(PDO $db, int $userId, int $groupId, bool $notify = true
     $name = (string)($g->fetchColumn() ?: '?');
     $st = $db->prepare("DELETE FROM user_group_members WHERE user_id = ? AND group_id = ?");
     $st->execute([$userId, $groupId]);
+    userPermissionsForget($userId);   // and not from before the revoke either
     if ($st->rowCount() > 0 && $notify) {
         userNotify($db, $userId, 'group-revoked', 'Your "' . $name . '" group access was removed');
         return true;
@@ -989,6 +1071,100 @@ function userDurationExpiry(PDO $db, int $userId, int $groupId, string $duration
     }
     $base->add(new DateInterval($map[$duration]));
     return $base->format('Y-m-d H:i:s');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The shop side of memberships (v71): who is being bought for, was it worth
+// anything, and has this order been seen before
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * WHICH ACCOUNT a machine-to-machine call means. Exactly one of three, and never two.
+ *
+ *   login        username or email, as v1/users/grant has always taken it
+ *   user_id      this tracker's own id, for a shop that stored it at the first sale
+ *   external_id  the id in the CALLER's system, resolved through the sign-in bridge's identity
+ *                table FOR THIS KEY — two shops numbering their customers from 1 are two people,
+ *                which is why the lookup is keyed by (client_id, external_id) and not by the id
+ *                alone.
+ *
+ * Exactly one, because "login and user_id, and they disagree" has no honest answer: picking either
+ * one means a shop's typo silently sells a month to somebody else's account.
+ *
+ * Returns ['user' => row] or ['error' => code, 'status' => http].
+ */
+function userApiTarget(PDO $db, array $client, array $payload): array {
+    $login = trim((string)($payload['login'] ?? ''));
+    $uid   = (int)($payload['user_id'] ?? 0);
+    $ext   = trim((string)($payload['external_id'] ?? ''));
+    $given = ($login !== '' ? 1 : 0) + ($uid > 0 ? 1 : 0) + ($ext !== '' ? 1 : 0);
+    if ($given === 0) return ['error' => 'identity_required', 'status' => 422];
+    if ($given > 1)   return ['error' => 'identity_ambiguous', 'status' => 422];
+    if ($login !== '') {
+        $u = userFindByLogin($db, $login);
+    } elseif ($uid > 0) {
+        $u = userFindById($db, $uid);
+    } else {
+        if (!function_exists('authIdentityFind')) return ['error' => 'bridge_unavailable', 'status' => 503];
+        $ident = authIdentityFind($db, (int)($client['id'] ?? 0), $ext);
+        $u = $ident ? userFindById($db, (int)$ident['user_id']) : null;
+    }
+    if (!$u) return ['error' => 'user_not_found', 'status' => 404];
+    return ['user' => $u];
+}
+
+/**
+ * Is a grant worth anything to this account RIGHT NOW, and if not, why?
+ *
+ * A shop needs to be able to tell its customer. Two things make a perfectly recorded grant do
+ * nothing: an account whose address is not confirmed sits at guest level whatever its groups say
+ * (userEffectivePermissions), and a banned account is not signed in at all. Both are the site's
+ * doing, both are fixable by the person, and neither is a reason to refuse the order — the
+ * membership is written either way, and starts working the moment the obstacle goes.
+ */
+function userGrantEffective(PDO $db, array $cfg, array $u): array {
+    if (!userIsActive($u)) return ['effective' => false, 'reason' => 'banned'];
+    if (userEmailVerifyRequired($cfg) && !userIsEmailTrusted($db, (int)$u['id'])) {
+        return ['effective' => false, 'reason' => 'email_unverified'];
+    }
+    return ['effective' => true, 'reason' => ''];
+}
+
+/** An order this key has already sent, whatever became of it. NULL = never seen. */
+function userOrderFind(PDO $db, int $clientId, string $orderId): ?array {
+    if ($clientId <= 0 || $orderId === '') return null;
+    $st = $db->prepare("SELECT * FROM user_group_orders WHERE client_id = ? AND order_id = ? LIMIT 1");
+    $st->execute([$clientId, $orderId]);
+    return $st->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+/**
+ * Claim an order id, atomically. True = this call is the first and must do the work; false = the
+ * shop is retrying and the caller replays what userOrderFind() holds.
+ *
+ * INSERT IGNORE against UNIQUE(client_id, order_id) rather than "look, then write": two retries
+ * arriving together both pass a SELECT and both grant a month. The database decides instead, and
+ * the answer is the number of rows it accepted. The computed expiry is written IN this statement,
+ * so the row a loser reads is already complete — there is no window where a retry finds a claimed
+ * order with nothing in it.
+ */
+function userOrderClaim(PDO $db, array $row): bool {
+    $ins = $db->prepare(
+        "INSERT IGNORE INTO user_group_orders
+            (client_id, order_id, user_id, group_id, action, duration, `until`, prev_member, prev_expires_at, new_expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $ins->execute([
+        (int)$row['client_id'], (string)$row['order_id'], (int)$row['user_id'], (int)$row['group_id'],
+        (string)($row['action'] ?? 'grant'), mb_substr((string)($row['duration'] ?? ''), 0, 16),
+        $row['until'] ?? null, !empty($row['prev_member']) ? 1 : 0,
+        $row['prev_expires_at'] ?? null, $row['new_expires_at'] ?? null,
+    ]);
+    return $ins->rowCount() === 1;
+}
+
+/** An order id a shop may send: printable, and short enough for the column that makes it unique. */
+function userValidOrderId(string $id): bool {
+    return $id !== '' && strlen($id) <= 64 && preg_match('/^[\x21-\x7e][\x20-\x7e]{0,62}[\x21-\x7e]$|^[\x21-\x7e]$/', $id) === 1;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

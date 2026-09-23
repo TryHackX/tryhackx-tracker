@@ -502,6 +502,9 @@
                             <option value="whitelist"><?= _h('a.wl.cl_scope_wl') ?></option>
                             <option value="abuse"><?= _h('a.wl.cl_scope_abuse') ?></option>
                             <option value="users"><?= _h('a.wl.cl_scope_users') ?></option>
+                            <?php /* 1.65.0: `users` with the dangerous two thirds taken out. A payment
+                                     webhook wants three endpoints, not account creation and the bridge. */ ?>
+                            <option value="shop"><?= _h('a.wl.cl_scope_shop') ?></option>
                             <option value="federation"><?= _h('a.wl.cl_scope_fed') ?></option>
                             <option value="all"><?= _h('a.wl.cl_scope_all') ?></option>
                         </select>

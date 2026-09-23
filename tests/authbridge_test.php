@@ -306,7 +306,13 @@ check('the bridge never accepts or hands out a password',
 /* ── 12. the guide describes it ───────────────────────────────────────────── */
 $docsSrc = (string)@file_get_contents($root . '/templates/pages/apidocs.php');
 check('the guide has a bridge chapter', str_contains($docsSrc, 'apidocs.h_bridge'));
-check('… reachable by scope', str_contains($docsSrc, "'auth' => 'v1/auth/login'"));
+// It is reached by the scope a key can actually HOLD. The guide used to offer ?scope=auth, and
+// apiClientScopes() has never had an 'auth' — so that address described a key nobody could be given,
+// while the real bridge key (scope 'users') was told about the bridge by the same page anyway.
+// 1.65.0 removed the phantom; what must stay true is that a users key still gets the chapter.
+check('… reachable by a scope that exists', !str_contains($docsSrc, "'auth' => 'v1/auth/login'")
+      && str_contains($docsSrc, "\$showAuth   = in_array(\$docScope, ['users', 'all'], true);")
+      && !in_array('auth', apiClientScopes(), true));
 check('… and it warns against putting the key in a browser', str_contains($docsSrc, 'apidocs.bridge_warning'));
 
 /* ── clean up ─────────────────────────────────────────────────────────────── */

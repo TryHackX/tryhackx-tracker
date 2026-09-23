@@ -177,11 +177,21 @@ try {
               $have === $want, 'missing: ' . implode(', ', array_diff($want, $have)));
     }
     // And the ones this release added, by name — so a rename cannot make the comparison vacuous.
-    foreach (['favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public'] as $perm) {
+    foreach (['favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
+              // v71: the four the fresh member group never had, which is why its index.files_all
+              // grant governed a page the group could not open.
+              'index.view', 'index.files', 'index.files_all', 'index.magnet', 'whitelist.add'] as $perm) {
         check("member gets $perm out of the box", in_array($perm, $pf['member'] ?? [], true));
     }
+    // The one thing a migration has ever taken away, checked on BOTH sides: a fresh install must not
+    // ship what an upgraded one has had removed, or the two drift apart at the first release.
+    check('member does NOT get profile.cover on either', !in_array('profile.cover', $pf['member'] ?? [], true)
+          && !in_array('profile.cover', $pu['member'] ?? [], true));
+    check('the premium group is seeded on a fresh install and carries exactly the paid extras',
+          ($pf['premium'] ?? null) === ['profile.cover', 'shout.upload_emote'], implode(',', $pf['premium'] ?? []));
     check('the seeded moderator group exists on a fresh install', isset($pf['moderator']));
     check('… and it is not empty', count($pf['moderator'] ?? []) > 10, (string)count($pf['moderator'] ?? []));
+    check('… and it can read the descriptions it approves', in_array('content.view', $pf['moderator'] ?? [], true));
 
     /* ── the grant markers ────────────────────────────────────────────────── */
     // schemaGrantOnce() records that it has run. If the markers are absent on a fresh install, the

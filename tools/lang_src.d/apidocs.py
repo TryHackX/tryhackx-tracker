@@ -131,9 +131,41 @@ add('apidocs', {
                            'Czy istnieje konto o tej nazwie albo adresie?'),
     'ep_users_provision': ('Create one. The password is returned once when you do not supply one.',
                            'Utwórz je. Hasło wraca raz, jeśli sami go nie podacie.'),
-    'ep_users_grant':     ('Put an account in a group, permanently or until a date.',
-                           'Wstaw konto do grupy, na stałe albo do daty.'),
-    'ep_users_revoke':    ('Take it back out.', 'Wyjmij je z powrotem.'),
+    'ep_users_grant':     ('Put an account in a group, permanently or until a date. With an <code>order_id</code> it is safe to repeat.',
+                           'Wstaw konto do grupy, na stałe albo do daty. Z <code>order_id</code> można je powtarzać bez obaw.'),
+    'ep_users_revoke':    ('Take it back out — the whole membership, or just the time one order paid for.',
+                           'Wyjmij je z powrotem — całe członkostwo albo tylko czas opłacony jednym zamówieniem.'),
+
+    # ── selling a group: the chapter a shop integrator actually needs ────────
+    # Written as the order things happen in, because that is how somebody builds a webhook — and the
+    # retry paragraph is the point of the whole chapter.
+    'h_shop':    ('Selling a group', 'Sprzedawanie grupy'),
+    'shop_intro': ('A shop that sells a membership here needs three calls and one habit: <strong>send your own order id with every grant</strong>. '
+                   'With it, a webhook that fires twice — a dropped connection, a redelivered queue message — sells one month instead of two.',
+                   'Sklep, który sprzedaje tu członkostwo, potrzebuje trzech wywołań i jednego nawyku: <strong>przy każdym nadaniu wysyłajcie własne id zamówienia</strong>. '
+                   'Dzięki niemu webhook wywołany dwa razy — zerwane połączenie, ponownie dostarczona wiadomość z kolejki — sprzedaje jeden miesiąc, a nie dwa.'),
+    'shop_step1': ('Ask the operator for a key with the <code>shop</code> scope. It opens exactly three endpoints: lookup, grant and revoke.',
+                   'Poproście operatora o klucz z zakresem <code>shop</code>. Otwiera dokładnie trzy endpointy: lookup, grant i revoke.'),
+    'shop_step2': ('Find the buyer. <code>login</code> takes a username or an e-mail address; <code>user_id</code> and <code>external_id</code> name the same person if you stored one of those at the first sale. Send exactly one of the three.',
+                   'Znajdźcie kupującego. <code>login</code> przyjmuje nazwę użytkownika albo adres e-mail; <code>user_id</code> i <code>external_id</code> wskazują tę samą osobę, jeśli zapisaliście je przy pierwszej sprzedaży. Wyślijcie dokładnie jedno z trzech.'),
+    'shop_step3': ('Grant the group with your order id. <code>duration</code> extends what is already there (from the later of today and the current end date); <code>until</code> replaces it instead.',
+                   'Nadajcie grupę ze swoim id zamówienia. <code>duration</code> przedłuża to, co już jest (od późniejszej z dwóch dat: dzisiejszej i obecnego końca); <code>until</code> zamiast tego ją zastępuje.'),
+    'shop_step4': ('On a refund, send the same order id to <code>v1/users/revoke</code>. Only that order\'s time is taken back — a second, later purchase keeps its own.',
+                   'Przy zwrocie wyślijcie to samo id zamówienia do <code>v1/users/revoke</code>. Cofnięty zostanie tylko czas z tego zamówienia — druga, późniejsza zakupiona porcja zostaje.'),
+    'shop_retry': ('A repeated <code>order_id</code> changes nothing and returns the stored answer with <code>"replayed": true</code>. '
+                   'The dates in it are the ones from the first call, so your customer sees the same end date however many times the webhook fired.',
+                   'Powtórzone <code>order_id</code> nic nie zmienia i zwraca zapisaną odpowiedź z <code>"replayed": true</code>. '
+                   'Daty w niej są tymi z pierwszego wywołania, więc klient widzi tę samą datę końca niezależnie od tego, ile razy webhook zadziałał.'),
+    'shop_effective': ('<code>effective: false</code> means the grant was recorded but does nothing yet, and <code>reason</code> says why: '
+                       '<code>email_unverified</code> (this site requires a confirmed address, and theirs is not) or <code>banned</code>. '
+                       'Tell the customer — the membership starts working the moment they fix it, and nothing has to be bought again.',
+                       '<code>effective: false</code> znaczy, że nadanie zostało zapisane, ale na razie nic nie daje, a <code>reason</code> mówi dlaczego: '
+                       '<code>email_unverified</code> (ta strona wymaga potwierdzonego adresu, a ten nie jest) albo <code>banned</code>. '
+                       'Powiedzcie o tym klientowi — członkostwo zacznie działać, gdy tylko to naprawi, i niczego nie trzeba kupować drugi raz.'),
+    'shop_permanent': ('An <code>until</code> that would cut short a membership somebody already has for ever is refused with <code>would_shorten_permanent</code>. Send <code>"force": true</code> if you really mean it.',
+                       '<code>until</code>, które skróciłoby członkostwo posiadane już na zawsze, jest odrzucane z <code>would_shorten_permanent</code>. Wyślijcie <code>"force": true</code>, jeśli naprawdę o to chodzi.'),
+    'shop_group': ('The group slug is the operator\'s choice — <code>premium</code> on a default install. A group that carries admin-panel access can never be granted this way.',
+                   'Slug grupy wybiera operator — na domyślnej instalacji to <code>premium</code>. Grupy dającej dostęp do panelu administracyjnego nie da się nadać tą drogą.'),
     'h_fed':     ('Federation', 'Federacja'),
     'fed_intro': ('Your key exchanges hash lists with this tracker rather than submitting to it.',
                   'Wasz klucz wymienia z tym trackerem listy hashy, zamiast do niego zgłaszać.'),

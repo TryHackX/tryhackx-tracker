@@ -186,6 +186,20 @@ add('account', {
         'the panel, under Users → Groups.',
         'Żadna z Twoich grup nie ma uprawnienia <code>:perm</code>, więc na razie nie możesz tego zmienić. '
         'Administrator nadaje je w panelu, w Użytkownicy → Grupy.'),
+    # 1.65.0: what a member without the cover sees instead of a warning. Since the cover is a Premium
+    # extra, NOT having it is the ordinary state of every member, so the page answers where it comes
+    # from rather than implying something is misconfigured. :groups is the names, already escaped.
+    'media_cover_with': (
+        'A profile cover comes with: :groups.',
+        'Okładkę profilu daje: :groups.'),
+    # 1.65.0: the cover moved to the premium group, so an account can be holding a picture it is no
+    # longer allowed to show. It is not deleted and this says so -- a page that simply stopped
+    # painting it would read as "the site lost my image".
+    'media_cover_kept': (
+        'Your cover is still here, but it is not being shown while you do not have that permission. Nothing was '
+        'deleted — it appears again the moment the permission comes back.',
+        'Twoja okładka nadal tu jest, ale nie jest pokazywana, dopóki nie masz tego uprawnienia. Nic nie zostało '
+        'usunięte — pojawi się z powrotem w chwili, gdy uprawnienie wróci.'),
 })
 
 # ── the editor (assets/js/media-editor.js); `js.media.` is in LANG_JS_PUBLIC ──

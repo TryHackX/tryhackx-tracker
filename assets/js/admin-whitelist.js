@@ -1563,6 +1563,9 @@
             abuse: ['v1/blacklist/submit'],
             users: ['v1/users/lookup', 'v1/users/provision', 'v1/users/grant', 'v1/users/revoke',
                     'v1/auth/login', 'v1/auth/logout', 'v1/auth/verify', 'v1/auth/merge', 'v1/auth/status'],
+            // The shop's three. Deliberately a SUBSET of users rather than a flag on it: an operator
+            // comparing the two lists on this screen is looking at exactly what the narrower key buys.
+            shop: ['v1/users/lookup', 'v1/users/grant', 'v1/users/revoke'],
             federation: ['v1/federation/ping', 'v1/federation/export'],
         };
         ENDPOINTS.all = [...ENDPOINTS.whitelist, ...ENDPOINTS.abuse, ...ENDPOINTS.users, ...ENDPOINTS.federation];
@@ -1594,6 +1597,11 @@
             }
             if (scope.value === 'federation') {
                 canBox.appendChild(el('div', { className: 'cl-hint', text: t('js.wl.cl_fed_note') }));
+            }
+            // What a shop key CANNOT do, said on the screen where the choice is made — the whole
+            // reason the scope exists is the two things missing from its list.
+            if (scope.value === 'shop') {
+                canBox.appendChild(el('div', { className: 'cl-hint', text: t('js.wl.cl_shop_note') }));
             }
             paint();
         };
