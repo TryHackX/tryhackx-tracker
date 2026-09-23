@@ -387,6 +387,63 @@ function shoutLinkImages(string $html, string $title = ''): string
     return implode('', $parts);
 }
 
+/* ── one body: what is wrong with it, and what it renders as (1.67.0) ───────── */
+
+/**
+ * What is wrong with a shout's words, or null. The ONE answer shoutPost(), shoutEdit() and the
+ * composer's Preview (api/richtext_preview.php with `for: shout`) give, so the box under the Preview
+ * says exactly what pressing Enter would be refused for.
+ *
+ * The SHOUT's length limit is handed to the shared validator in place of the description's — the
+ * counter under the box has to say the number the send is actually judged against (the same trick
+ * api/user_messages.php uses). 'plain' is the whole feature's answer, not this shout's: nothing is
+ * parsed, so there is nothing to validate beyond the length the caller has already checked.
+ */
+function shoutBodyProblem(array $cfg, string $body, string $format): ?string
+{
+    if ($format === 'plain' || !function_exists('richtextValidate')) return null;
+    return richtextValidate($body, $format, array_merge($cfg, ['desc_max_chars' => (string)shoutMaxChars($cfg)]));
+}
+
+/**
+ * What the body renderer needs to know, asked ONCE for a batch of bodies: the names that exist (for
+ * the @mentions), the site's address, the reader's own name, the emote table, whether stickers are
+ * on, and the words a picture's link says when the pointer rests on it.
+ */
+function shoutRenderContext(PDO $db, array $cfg, array $me, array $bodies): array
+{
+    return [
+        'known'     => shoutKnownNames($db, $bodies),
+        'base'      => function_exists('getBaseUrl') ? getBaseUrl() : '',
+        'me_name'   => (string)($me['username'] ?? ''),
+        // Empty when the feature is off, which is what makes shoutRenderEmotes() a no-op instead of a
+        // second switch (1.59.0).
+        'emotes'    => shoutEmotes($db, $cfg),
+        'stickers'  => shoutStickersEnabled($cfg),
+        'img_title' => __('shout.img_open'),
+    ];
+}
+
+/**
+ * One body, as HTML — the room's own pipeline, and the only one (1.67.0). shoutShape() draws every
+ * line through it and the composer's Preview draws the words being typed through it, so what the
+ * Preview shows is byte for byte what the line will be once it is said: the same renderer with hidden
+ * blocks shown (a line in the room has no "signed in" half), pictures made openable (1.62.0), then
+ * mentions, then emotes. Whatever the renderer does not support comes out the way a posted line
+ * would show it — as text — rather than as an error.
+ *
+ * Mentions first, emotes last: both walk the TEXT of finished html and neither may see the other's
+ * tag as writing. `:code:` inside an href is an address, not an emote.
+ */
+function shoutBodyHtml(string $body, string $format, array $cfg, array $ctx): string
+{
+    $html = $format === 'plain'
+        ? nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false)
+        : shoutLinkImages(richtextRender($body, $format, $cfg, true), (string)($ctx['img_title'] ?? ''));
+    return shoutRenderEmotes(shoutLinkMentions($html, (array)($ctx['known'] ?? []), (string)($ctx['base'] ?? ''), (string)($ctx['me_name'] ?? '')),
+                             (array)($ctx['emotes'] ?? []), (string)($ctx['base'] ?? ''), !empty($ctx['stickers']));
+}
+
 /* ── writing one ───────────────────────────────────────────────────────────── */
 
 /**
@@ -424,14 +481,11 @@ function shoutPost(PDO $db, array $cfg, array $user, string $body, string $forma
     if (mb_strlen($body) > $max) return ['ok' => false, 'error' => 'too_long', 'limit' => $max, 'row' => null];
 
     // 'plain' is the whole feature's answer, not this shout's: when the site says plain, nothing is
-    // parsed and there is nothing to validate beyond the length above.
+    // parsed and there is nothing to validate beyond the length above. The rest is shoutBodyProblem(),
+    // the same answer the composer's Preview gives (1.67.0).
     $format = in_array($format, shoutFormatChoices($cfg), true) ? $format : shoutFormat($cfg);
-    if ($format !== 'plain' && function_exists('richtextValidate')) {
-        // The SHOUT's limit, not the description's: the counter under the box has to say the number
-        // the send is actually judged against (the same trick api/user_messages.php uses).
-        $bad = richtextValidate($body, $format, array_merge($cfg, ['desc_max_chars' => (string)$max]));
-        if ($bad !== null) return ['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null];
-    }
+    $bad = shoutBodyProblem($cfg, $body, $format);
+    if ($bad !== null) return ['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null];
 
     $bucket = function_exists('ipBucket') && $ip !== '' ? ipBucket($ip) : '';
     $db->prepare("INSERT INTO shouts (user_id, body, body_format, ip_bucket) VALUES (?, ?, ?, ?)")
@@ -640,13 +694,11 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
     $mayWrite   = ($mayEditAny || $mayEditOwn) && !empty(shoutMayPost($db, $cfg, $me)['ok']);
     $editWin    = shoutEditMinutes($cfg) * 60;          // 0 = no window: own lines are never editable
     $delWin     = shoutDeleteOwnMinutes($cfg) * 60;     // 0 = no limit
-    $known = shoutKnownNames($db, array_column($raw, 'body'));
-    $base = function_exists('getBaseUrl') ? getBaseUrl() : '';
-    $meName = (string)($me['username'] ?? '');
-    // The emote table, once for the page rather than once per line (1.59.0). Empty when the feature
-    // is off, which is what makes shoutRenderEmotes() a no-op instead of a second switch.
-    $emotes = shoutEmotes($db, $cfg);
-    $stickersOn = shoutStickersEnabled($cfg);
+    // What the body renderer needs, once for the batch rather than once per line: the known names,
+    // the address, the emote table (1.59.0)… — see shoutRenderContext(). The composer's Preview asks
+    // for the same thing for one body, which is how the two can never draw a line differently.
+    $render = shoutRenderContext($db, $cfg, $me, array_column($raw, 'body'));
+    $base = (string)$render['base'];
     // What a line with no author is signed with. `user_id` is nullable from v66, so a row can
     // honestly have nobody behind it — and a blank name column reads as a bug rather than as the
     // site saying something.
@@ -672,8 +724,6 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
         }
     }
     $tz = userDisplayTimezone($tzRow, $cfg);
-    // What a picture's link says when the pointer rests on it — one lookup for the batch.
-    $imgTitle = __('shout.img_open');
 
     // Which of these lines named me — from the table written when they were said, not from parsing
     // them again now.
@@ -722,11 +772,6 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
         // take back their own sentence, and nobody wrote this one.
         $own = !$system && $meId > 0 && $authorId === $meId;
         $fmt = (string)$r['body_format'];
-        // Pictures become openable here (1.62.0) and nowhere else: this is the one place a shout
-        // becomes something to display, so the first page and the poll hand over the same markup.
-        $html = $fmt === 'plain'
-            ? nl2br(htmlspecialchars((string)$r['body'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false)
-            : shoutLinkImages(richtextRender((string)$r['body'], $fmt, $cfg, true), $imgTitle);
         $ts = shoutRowInstant($db, $r);
         // How old the line is, by the database's clock (SHOUT_ROW_SELECT). NULL for a hand-built row
         // that did not come through it — and a line whose age nobody can say is inside no window.
@@ -791,9 +836,11 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
             // language switch that could not reach this row. Always shown, today's lines included.
             'day'         => $ts !== null ? userDisplayWeekday($ts, $tz) : '',
             'dow'         => $ts !== null ? userDisplayDow($ts, $tz) : 0,
-            // Mentions first, emotes last: both walk the TEXT of finished html and neither may see
-            // the other's tag as writing. `:code:` inside an href is an address, not an emote.
-            'html'        => shoutRenderEmotes(shoutLinkMentions($html, $known, $base, $meName), $emotes, $base, $stickersOn),
+            // The body through the room's one pipeline — renderer, openable pictures (1.62.0), mentions,
+            // emotes — which is also what the composer's Preview draws (1.67.0). This is the one place
+            // a stored shout becomes something to display, so the first page and the poll hand over
+            // the same markup.
+            'html'        => shoutBodyHtml((string)$r['body'], $fmt, $cfg, $render),
             'own'         => $own,
             'system'      => $system,
             'pinned'      => ($r['pinned_at'] ?? null) !== null,
@@ -851,6 +898,17 @@ function shoutPinned(PDO $db, array $cfg, ?array $me): ?array
  * `shout.moderate` and no new permission: it already means room-wide authority, it is already what
  * takes somebody else's line down, and a grant nobody has been given yet is a feature nobody can
  * use until the operator goes looking for it.
+ *
+ * THE PAGE TOGGLES, THE SERVER DOES WHAT IT IS ASKED (1.67.0). On the line that is pinned the row's
+ * pin is drawn filled, says "Unpin" and sends `pin: false` — that is the toggle the owner asked for,
+ * and it lives in the button. Here, `pin: true` on a line that is already pinned changes nothing, and
+ * `pin: false` takes down THAT line only. The first build toggled on the server as well, and a
+ * browser check caught what that meant: a moderator whose page had not yet seen a colleague pin a
+ * line would press "pin" and take the colleague's announcement DOWN; and an unpin cleared whatever
+ * was pinned, so a stale "Unpin" could remove a different announcement altogether. Both decided on a
+ * locking read of the row inside the transaction, so two moderators pressing at once act in turn.
+ * A request that changes nothing writes no audit line — the log records what happened to the room.
+ * ['ok' => true, 'id' => <the pinned id afterwards, 0 for none>, 'changed' => bool].
  */
 function shoutPin(PDO $db, array $cfg, array $me, int $id, bool $on): array
 {
@@ -862,22 +920,33 @@ function shoutPin(PDO $db, array $cfg, array $me, int $id, bool $on): array
     $st->execute([$id]);
     if (!$st->fetchColumn()) return ['ok' => false, 'error' => 'not_found'];
 
+    $changed = false;
     try {
         $db->beginTransaction();
-        $db->prepare("UPDATE shouts SET pinned_at = NULL, pinned_by = NULL WHERE pinned_at IS NOT NULL")->execute();
-        if ($on) {
+        $st = $db->prepare("SELECT pinned_at IS NOT NULL FROM shouts WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+        $st->execute([$id]);
+        $isPinned = (int)$st->fetchColumn() === 1;
+        if ($on && !$isPinned) {
+            // At most one: whatever was pinned comes down in the same transaction this one goes up in.
+            $db->prepare("UPDATE shouts SET pinned_at = NULL, pinned_by = NULL WHERE pinned_at IS NOT NULL")->execute();
             $db->prepare("UPDATE shouts SET pinned_at = NOW(), pinned_by = ? WHERE id = ?")->execute([$meId, $id]);
+            $changed = true;
+        } elseif (!$on && $isPinned) {
+            // THIS line only, never "whatever is pinned".
+            $db->prepare("UPDATE shouts SET pinned_at = NULL, pinned_by = NULL WHERE id = ?")->execute([$id]);
+            $changed = true;
         }
         $db->commit();
     } catch (\Throwable $e) {
         if ($db->inTransaction()) $db->rollBack();
         return ['ok' => false, 'error' => 'failed'];
     }
-    if (function_exists('auditLog')) {
+    if ($changed && function_exists('auditLog')) {
         auditLog($db, 'shout.pin', ['target_type' => 'shout', 'target_id' => $id,
             'summary' => (string)($me['username'] ?? '#' . $meId) . ($on ? ' → pinned shout #' : ' → unpinned shout #') . $id]);
     }
-    return ['ok' => true, 'error' => '', 'id' => $on ? $id : 0];
+    $pinnedNow = (int)$db->query("SELECT COALESCE(MAX(id), 0) FROM shouts WHERE pinned_at IS NOT NULL AND deleted_at IS NULL")->fetchColumn();
+    return ['ok' => true, 'error' => '', 'id' => $pinnedNow, 'changed' => $changed];
 }
 
 /* ── removing one ──────────────────────────────────────────────────────────── */
@@ -1070,10 +1139,8 @@ function shoutEdit(PDO $db, array $cfg, array $me, int $id, string $body): array
     // The format the line was WRITTEN in. Changing it in an edit would change how every other word
     // of it renders, which is not a correction — and it is the one the reader has been reading.
     $format = (string)$row['body_format'];
-    if ($format !== 'plain' && function_exists('richtextValidate')) {
-        $bad = richtextValidate($body, $format, array_merge($cfg, ['desc_max_chars' => (string)$max]));
-        if ($bad !== null) return ['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null];
-    }
+    $bad = shoutBodyProblem($cfg, $body, $format);
+    if ($bad !== null) return ['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null];
 
     $changed = $body !== (string)$row['body'];
     if ($changed) {

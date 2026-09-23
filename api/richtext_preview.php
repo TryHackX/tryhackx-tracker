@@ -53,7 +53,11 @@ if (!rateLimitAllow('rtpreview', ipBucket(getClientIp($cfg)), $perMin, 60)) {
 
 $text = (string)($input['text'] ?? '');
 $fmt  = (string)($input['format'] ?? 'bbcode');
-if (!in_array($fmt, richtextFormats($cfg), true)) $fmt = richtextFormats($cfg)[0];
+// The syntaxes THIS writer may choose from. A shout's are the room's (shoutFormatChoices(): both, or
+// 'plain' when the room formats nothing) — not the description switches, which used to turn a
+// Markdown shout into BBCode here on a site that allows Markdown only in the room (1.67.0).
+$fmtChoices = $for === 'shout' ? shoutFormatChoices($cfg) : richtextFormats($cfg);
+if (!in_array($fmt, $fmtChoices, true)) $fmt = $fmtChoices[0];
 
 // Cap before parsing, not after. A megabyte of nested tags is a CPU bill, and refusing it is
 // cheaper than rendering it and then deciding it was too long.
@@ -67,17 +71,31 @@ if ($max > 0 && mb_strlen($text) > $max) {
 }
 
 // The limits are reported rather than enforced here: somebody still typing should see "3 of 3
-// images" as they go, not have the preview refuse to draw.
-$counts = richtextCount($text);
+// images" as they go, not have the preview refuse to draw. Counted in the syntax the text is written
+// in — counted as BBCode, a Markdown link was "0 links" (1.67.0).
+$counts = $fmt === 'plain' ? ['images' => 0, 'links' => 0] : richtextCount($text, $fmt, $cfg);
+if ($for === 'shout') {
+    // A SHOUT previews through the room's own pipeline and its own rules (1.67.0): shoutBodyHtml() is
+    // what every line in the room is drawn with — hidden blocks shown, pictures openable, mentions and
+    // emotes — and shoutBodyProblem() is exactly what shoutPost() would refuse it for. So whatever the
+    // room does not support comes out here the way it would come out once said, and the sentence
+    // under the box is the one pressing Enter would get, with the room's length limit in it.
+    $me = currentUser($db);
+    $html = shoutBodyHtml($text, $fmt, $cfg, shoutRenderContext($db, $cfg, is_array($me) ? $me : [], [$text]));
+    $problem = shoutBodyProblem($cfg, $text, $fmt);
+} else {
+    // The author previewing their own text sees their own hidden block; that is the only way to
+    // check it before submitting. A message is judged against the message limit, as its send is.
+    $html = richtextRender($text, $fmt, $cfg, richtextViewerSignedIn($db));
+    $problem = richtextValidate($text, $fmt, $for === 'message' ? array_merge($cfg, ['desc_max_chars' => (string)$max]) : $cfg);
+}
 jsonResponse([
     'success' => true,
-    // The author previewing their own text sees their own hidden block; that is the only way to
-    // check it before submitting.
-    'html'    => richtextRender($text, $fmt, $cfg, richtextViewerSignedIn($db)),
+    'html'    => $html,
     'format'  => $fmt,
     'length'  => mb_strlen($text),
     'limit'   => $max,
     'images'  => ['used' => $counts['images'], 'limit' => richtextMaxImages($cfg)],
     'links'   => ['used' => $counts['links'], 'limit' => richtextMaxLinks($cfg)],
-    'problem' => richtextValidate($text, $fmt, $cfg),
+    'problem' => $problem,
 ]);

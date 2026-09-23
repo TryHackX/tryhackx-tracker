@@ -523,6 +523,46 @@ try {
           shoutPin($db, $cfgOn, $mod, 999999999, true)['error'] === 'not_found');
     check('unpinning leaves nothing pinned',
           shoutPin($db, $cfgOn, $mod, $p2, false)['ok'] === true && shoutPinned($db, $cfgOn, $me) === null);
+
+    // ── 1.67.0: the page toggles, the server does exactly what it is asked ──
+    // The pinned line's own pin is drawn filled and sends pin:false — the toggle lives in the button.
+    // The server must NOT toggle too: a page that has not yet seen a colleague's pin would take it
+    // down by pressing "pin", and an unpin that clears "whatever is pinned" lets a stale "Unpin"
+    // remove a different announcement. Both were true of the first build; these pin them shut.
+    $pinnedCount = fn () => (int)$db->query("SELECT COUNT(*) FROM shouts WHERE pinned_at IS NOT NULL")->fetchColumn();
+    $pinAudits = fn () => (int)$db->query("SELECT COUNT(*) FROM audit_log WHERE action = 'shout.pin'")->fetchColumn();
+    shoutPin($db, $cfgOn, $mod, $p1, false); shoutPin($db, $cfgOn, $mod, $p2, false);
+    $auditsWere = $pinAudits();
+    $t1 = shoutPin($db, $cfgOn, $mod, $p2, true);
+    check('1.67.0: pinning a line that is not pinned pins it, and says it changed something',
+          $t1['ok'] === true && $t1['id'] === $p2 && $t1['changed'] === true
+          && (int)(shoutPinned($db, $cfgOn, $me)['id'] ?? 0) === $p2, json_encode($t1));
+    check('… and the list says so on that row, and on no other (what the row\'s pin is drawn from)',
+          array_column(array_filter(shoutRows($db, $cfgOn, $me, 50, 0), fn ($r) => !empty($r['pinned'])), 'id') === [$p2]);
+    $t2 = shoutPin($db, $cfgOn, $mod, $p2, true);
+    check('… and pinning the line that IS pinned changes nothing — a stale page cannot undo a colleague\'s pin',
+          $t2['ok'] === true && $t2['id'] === $p2 && $t2['changed'] === false
+          && (int)(shoutPinned($db, $cfgOn, $me)['id'] ?? 0) === $p2 && $pinnedCount() === 1, json_encode($t2));
+    check('… and writes no audit line for a request that changed nothing', $pinAudits() === $auditsWere + 1);
+    $t3 = shoutPin($db, $cfgOn, $mod, $p2, false);
+    $lastPin = $db->query("SELECT summary FROM audit_log WHERE action = 'shout.pin' ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: [];
+    check('… while the unpin the pinned line\'s own button sends takes it down, audited',
+          $t3['id'] === 0 && $t3['changed'] === true && shoutPinned($db, $cfgOn, $me) === null
+          && $pinAudits() === $auditsWere + 2 && str_contains((string)($lastPin['summary'] ?? ''), 'unpinned shout #' . $p2), json_encode($lastPin));
+    check('… and a second unpin is a quiet no-op, not a second log line',
+          shoutPin($db, $cfgOn, $mod, $p2, false)['changed'] === false && $pinAudits() === $auditsWere + 2);
+    shoutPin($db, $cfgOn, $mod, $p1, true);
+    $stale = shoutPin($db, $cfgOn, $mod, $p2, false);
+    check('… and a stale "Unpin" for a line that is NOT pinned leaves the real announcement up',
+          $stale['changed'] === false && $stale['id'] === $p1 && (int)(shoutPinned($db, $cfgOn, $me)['id'] ?? 0) === $p1, json_encode($stale));
+    $b = shoutPin($db, $cfgOn, $mod, $p2, true);
+    check('… and pinning ANOTHER line still moves the pin — there is only ever one',
+          $b['changed'] === true && $b['id'] === $p2
+          && (int)(shoutPinned($db, $cfgOn, $me)['id'] ?? 0) === $p2 && $pinnedCount() === 1);
+    check('… and a member still cannot pin anything', shoutPin($db, $cfgOn, $me, $p2, true)['error'] === 'no_permission'
+          && (int)(shoutPinned($db, $cfgOn, $me)['id'] ?? 0) === $p2);
+    shoutPin($db, $cfgOn, $mod, $p2, false);
+
     shoutPin($db, $cfgOn, $mod, $p1, true);
     shoutDelete($db, $cfgOn, $mod, $p1);
     check('deleting the pinned line takes the strip with it', shoutPinned($db, $cfgOn, $me) === null);
@@ -1072,8 +1112,10 @@ check('the rows carry what the player needs, decided by the server',
       str_contains((string)file_get_contents($root . '/includes/shout.php'), "'friend'      => !\$system"));
 
 $css = (string)file_get_contents($root . '/assets/css/style.css');
+// 1.67.0: the right-hand room is the controls group's own now (reserved per row by `:has`), so the
+// row's shorthand is the plain one — the LEFT gutter this check is about is unchanged.
 check('every shout row has the gutter a mention\'s bar needs, so nothing shifts when a line is one',
-      str_contains($css, 'padding: 0.34rem 1.3rem 0.34rem 0.6rem'));
+      str_contains($css, 'padding: 0.34rem 0.6rem; border-bottom: 1px dashed #23233a;'));
 check('the Add-one box is no longer pinned to a narrow column', !str_contains($css, 'max-width: 44rem'));
 check('the drop zones\' "choose" word keeps its colour and loses its underline',
       str_contains((string)file_get_contents($root . '/assets/css/admin.css'), '.ipl-drop-main u { text-decoration: none;')
@@ -1310,6 +1352,44 @@ check('an unknown order is coerced to the chat order the room ships with',
       str_contains($save, "\$data['shout_order'] = 'bottom';"));
 check('the Settings matrix lists both new ids',
       str_contains((string)file_get_contents($root . '/assets/js/admin-shout.js'), "'shout.edit_own', 'shout.delete_own', 'shout.edit_any'"));
+
+// ── 1.67.0, by reading the wiring ────────────────────────────────────────────
+// The behaviour is measured in a real browser (scratchpad/shots/shout_check.js); these keep the
+// shape from drifting between the two renderers, and keep the emoji out of the controls.
+$widget = (string)file_get_contents($root . '/templates/partials/shoutbox_widget.php');
+$boxJs = (string)file_get_contents($root . '/assets/js/shoutbox.js');
+$appJs = (string)file_get_contents($root . '/assets/js/app.js');
+$css = (string)file_get_contents($root . '/assets/css/style.css');
+check('1.67.0: both renderers put the row\'s controls in ONE group, with the same three glyphs',
+      str_contains($widget, '<span class="shout-ctl">') && str_contains($boxJs, "el('span', { className: 'shout-ctl' }, ctl)")
+      && str_contains($widget, '<i class="bi bi-trash" aria-hidden="true"></i>') && str_contains($boxJs, "el('i', { className: 'bi bi-trash', 'aria-hidden': 'true' })")
+      && str_contains($widget, "'bi-pin-angle-fill' : 'bi-pin-angle'") && str_contains($boxJs, "(on ? 'bi-pin-angle-fill' : 'bi-pin-angle')"));
+check('… and no emoji or × is left in them, in the pinned strip or on the picker handle',
+      !preg_match('/&#128204;|&#128512;|&times;/', $widget) && !str_contains($boxJs, "text: '×'") && !str_contains($boxJs, "text: '📌'")
+      && str_contains($widget, 'bi bi-emoji-smile') && str_contains($widget, '<i class="bi bi-x-lg" aria-hidden="true"></i>'));
+check('… revealed on hover and :focus-visible only — no bare :focus keeps them up',
+      str_contains($css, '.shout-row:hover .shout-ctl, .shout-ctl:has(:focus-visible) { opacity: 1; }')
+      && !preg_match('/\.shout-(?:edit|pin|del):focus\s*\{\s*opacity/', $css) && !str_contains($css, '.shout-edit:focus { opacity'));
+check('… and a pointer Cancel or Save does not hand the focus back to the pencil; the keyboard still gets it',
+      str_contains($boxJs, "box.addEventListener('pointerdown', function () { viaPointer = true; }, true);")
+      && str_contains($boxJs, "document.addEventListener('keydown', function () { viaPointer = false; }, true);")
+      && str_contains($boxJs, 'if (focusBack && !viaPointer) {') && str_contains($boxJs, 'if (b && !viaPointer) b.focus({ preventScroll: true });'));
+check('the row\'s pin is a toggle on the page too: the pinned line\'s sends pin:false',
+      str_contains($boxJs, "pin(Number(row.dataset.id) || 0, !p.classList.contains('shout-pin-on'))")
+      && str_contains($boxJs, 'syncPins(row ? Number(row.id) || 0 : 0);'));
+check('the editor finds ITS token: a data-csrf naming it, then the nearest token field — the widget names #shout-csrf',
+      str_contains($appJs, "const namer = ta.closest('[data-csrf]');") && str_contains($appJs, "input[type=\"hidden\"][id$=\"-csrf\"]")
+      && str_contains($widget, 'data-csrf="shout-csrf">'));
+$prev = (string)file_get_contents($root . '/api/richtext_preview.php');
+check('a shout previews through the room\'s own renderer and rules, the ones posting uses',
+      str_contains($prev, 'shoutBodyHtml($text, $fmt, $cfg, shoutRenderContext(') && str_contains($prev, 'shoutBodyProblem($cfg, $text, $fmt)')
+      && str_contains($prev, "\$for === 'shout' ? shoutFormatChoices(\$cfg) : richtextFormats(\$cfg)")
+      && str_contains((string)file_get_contents($root . '/includes/shout.php'), "'html'        => shoutBodyHtml((string)\$r['body'], \$fmt, \$cfg, \$render)"));
+// …and by running it: the Preview's body and the list's body are one function's answer.
+$ctxT = shoutRenderContext($db, $cfgOn, [], ['hi [b]there[/b]']);
+check('… shoutBodyHtml() draws a body exactly as a posted line is drawn',
+      shoutBodyHtml('hi [b]there[/b]', 'bbcode', $cfgOn, $ctxT) === shoutLinkImages(richtextRender('hi [b]there[/b]', 'bbcode', $cfgOn, true), __('shout.img_open'))
+      && shoutBodyProblem($cfgOn, str_repeat('x', 10), 'bbcode') === null && shoutBodyProblem($cfgOn, 'anything', 'plain') === null);
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

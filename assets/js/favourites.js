@@ -57,6 +57,13 @@
     }
 
     async function post(endpoint, body) {
+        // Every write to a list goes through here, so this is where the list window learns that the
+        // shelf behind it is out of date (1.67.0, see closeListOverlay()). Marked when the write is
+        // SENT, not when it is answered: a window closed while an add is still on its way must still
+        // reload once the add has landed. 'check' is the add box asking whether a hash is known —
+        // a question, not a change.
+        var write = !!LIST_WRITES[endpoint] && !!body && body.op !== 'check';
+        if (write) listWriteStarted();
         try {
             body.csrf_token = csrf();
             var r = await fetch(API + endpoint, {
@@ -65,7 +72,37 @@
                 body: JSON.stringify(body),
             });
             return await r.json();
-        } catch (e) { return null; }
+        } catch (e) {
+            return null;
+        } finally {
+            if (write) listWriteDone();
+        }
+    }
+
+    /* ── the shelf behind a list's window (1.67.0) ──────────────────────────────────────────────
+     *
+     * Closing the window used to reload the shelf every time, because the count on a card is the
+     * number somebody may just have changed inside. Most openings change nothing — a list opened,
+     * read and closed re-fetched the whole shelf for nothing. Now the window is DIRTY only after a
+     * write to a list (an item added or removed, from its own add box or its rows, or from the
+     * "Put this in a list" picker the Info panel opens over it) and only a dirty window reloads the
+     * shelf when it closes. The mark is per opening: openListOverlay() clears it.
+     *
+     * The two endpoints that change what a shelf shows. Nothing else a page here posts does: a star
+     * is a favourite, not a list.
+     */
+    var LIST_WRITES = { user_lists: 1, user_list_items: 1 };
+    var listDirty = false;          // something changed since the window opened
+    var listWrites = 0;             // list writes still on their way
+    var listReloadWhenIdle = null;  // a reload that is waiting for those to land
+    function listWriteStarted() { listDirty = true; listWrites++; }
+    function listWriteDone() {
+        listWrites = Math.max(0, listWrites - 1);
+        if (listWrites === 0 && listReloadWhenIdle) {
+            var go = listReloadWhenIdle;
+            listReloadWhenIdle = null;
+            go();
+        }
     }
 
     function fmtBytes(n) {
@@ -728,9 +765,11 @@
         body.appendChild(itemsBoxFor(head, list, cfg));
         box.hidden = false;
         document.addEventListener('keydown', escList);
-        // The shelf behind it has to agree when this closes: the count on the card is the number
-        // somebody just changed in here.
-        box.dataset.reload = '1';
+        // The shelf behind it has to agree when this closes — the count on the card is the number
+        // somebody may change in here — but only if something IS changed in here (1.67.0): a fresh
+        // opening starts clean, and a list write marks it (post() above). A reload the last closing
+        // left waiting for a write still on its way is left alone: it still has a shelf to fix.
+        listDirty = false;
         window.__listReload = state && state.reload ? state.reload : null;
     }
     function escList(e) { if (e.key === 'Escape') closeListOverlay(); }
@@ -739,7 +778,15 @@
         if (!box) return;
         box.hidden = true;
         document.removeEventListener('keydown', escList);
-        if (typeof window.__listReload === 'function') window.__listReload();
+        // Clean: read and closed, nothing to fetch. Dirty: the shelf once — after any write still on
+        // its way has landed, so the card counts what the server now holds rather than what it held a
+        // moment before the add arrived.
+        var reload = typeof window.__listReload === 'function' ? window.__listReload : null;
+        var dirty = listDirty;
+        listDirty = false;
+        if (!dirty || !reload) return;
+        if (listWrites > 0) listReloadWhenIdle = reload;
+        else reload();
     }
     function initListOverlay() {
         var box = document.getElementById('list-overlay');

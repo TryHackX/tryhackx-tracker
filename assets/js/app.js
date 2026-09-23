@@ -4479,13 +4479,31 @@ window.askInPlace = askInPlace;
     const editor = ta.closest('.rt-editor') || document;
     const tabs = [...editor.querySelectorAll('.rt-tab')];
     const fmtEl = document.getElementById(id + '-format');
-    // Whichever page this editor was mounted on. It was the whitelist form's token and nothing
-    // else, so the preview on the account page posted an empty one and was answered 403 — the
-    // editor was reusable, its token was not.
-    const csrfEl = () => document.querySelector('#wl-form input[name="csrf_token"]')
-        || document.getElementById('account-csrf')
-        || document.getElementById('search-csrf')
-        || document.querySelector('input[name="csrf_token"]');
+    // THE TOKEN THAT BELONGS TO THIS EDITOR (1.67.0). It was a list of page-wide places — the
+    // whitelist form's field, #account-csrf, #search-csrf, any name="csrf_token" — and every page that
+    // mounted the editor somewhere new had to be added to it. The shoutbox never was: its token is
+    // #shout-csrf, the list did not know that id, and on the front page the Preview tab posted an
+    // empty token and was answered "Invalid CSRF token". So the editor asks its own surroundings,
+    // nearest first, instead of a list that has to know every page:
+    //   · a `data-csrf` on the textarea or any ancestor NAMES the element holding its token (the
+    //     shoutbox says data-csrf="shout-csrf" on its root, which covers the composer and every
+    //     line's in-place editor alike);
+    //   · otherwise the nearest token there is — the textarea's own form, then its widget, then
+    //     outwards: any hidden `name="csrf_token"` field or `<something>-csrf` field;
+    //   · the walk ends at the document, which is the page-wide fallback the list used to be.
+    // A `data-csrf` that names nothing (the panel's <body> carries the token's VALUE under that
+    // name) finds no element and simply falls through to the walk.
+    const TOKEN_FIELD = 'input[name="csrf_token"], input[type="hidden"][id$="-csrf"]';
+    const csrfEl = () => {
+        const namer = ta.closest('[data-csrf]');
+        const named = namer ? document.getElementById(namer.dataset.csrf) : null;
+        if (named && typeof named.value === 'string') return named;
+        for (let n = ta.parentElement; n; n = n.parentElement) {
+            const near = n.querySelector(TOKEN_FIELD);
+            if (near) return near;
+        }
+        return null;
+    };
     let timer = null;
     let lastShown = null;          // {key, ok} — what the box is currently displaying
 

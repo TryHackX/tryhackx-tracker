@@ -2416,12 +2416,21 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
    so what this hides is the row's own hover highlight fighting with it. */
 .pm-row-wrap { position: relative; display: flex; }
 .pm-row-wrap > .pm-row { flex: 1 1 auto; min-width: 0; }
+/* 1.67.0: the bin sat ON the date — it is laid over the corner the date is printed in. Now the meta
+   line keeps the bin's width free on its right AT ALL TIMES (so nothing moves when it appears and
+   nothing is ever under it), and the bin is centred on that line: the row's border and top padding,
+   then half of what the name's line (1.7rem) has over the bin's own 1.5rem box — the same hit box as
+   the shoutbox's row controls. */
 .pm-del {
-    position: absolute; top: 0.3rem; right: 0.35rem;
-    background: none; border: 0; padding: 0 0.2rem; line-height: 1;
+    position: absolute; top: calc(1px + 0.5rem + (1.7rem - 1.5rem) / 2); right: 0.3rem;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.5rem; height: 1.5rem; padding: 0; box-sizing: border-box;
+    background: none; border: 0; border-radius: 4px; line-height: 1;
     color: var(--text-muted); font: inherit; font-size: 0.85rem; cursor: pointer;
     opacity: 0; transition: opacity 0.15s, color 0.15s;
 }
+.pm-del .bi { display: block; line-height: 1; }
+.pm-row-wrap .pm-meta { padding-right: 1.4rem; }
 .pm-row-wrap:hover .pm-del, .pm-del:focus-visible { opacity: 1; }
 .pm-del:hover { color: var(--error); }
 .pm-row-wrap .shout-confirm {
@@ -2673,6 +2682,18 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 #pe-list a.pf-name:visited, #dir-list a.pf-name:visited,
 #who-overlay .who-name:visited, #who-overlay .who-list:visited,
 a.pm-head-name:visited, a.av-who:visited, .av-who a:visited { color: var(--link); }
+/* 1.67.0: "Who has this" draws names and lists as CHIPS, and a chip is not a sentence — the site-wide
+   `a:hover` underlined the words inside the pill (and dimmed them) the moment the pointer arrived.
+   Here hover is the accent, on the edge and the name, and the keyboard's ring is a real outline;
+   no underline either way. After the :visited line above, so a name already opened lights up too. */
+#who-overlay .who-name:hover, #who-overlay .who-list:hover,
+#who-overlay .who-name:focus, #who-overlay .who-list:focus { text-decoration: none; opacity: 1; }
+#who-overlay .who-name:hover, #who-overlay .who-list:hover { border-color: var(--accent); color: var(--accent); }
+#who-overlay .who-name:focus { outline: none; }
+#who-overlay .who-list:focus { outline: none; }
+#who-overlay .who-name:focus-visible, #who-overlay .who-list:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent);
+}
 
 .acc-tabs { margin-bottom: 1rem; }
 /* The same checkbox the mail preferences above it use, for the same reason those carry the extra
@@ -2814,11 +2835,22 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    column still lines the rows up without drawing an empty box to do it. The dress is
    `.search-files-chip`'s, the pill this site already uses beside a torrent's name: no fill, a
    hairline edge, muted until the pointer is on it. */
+/* 1.67.0: centred, not lifted. `line-height: 1.5` made the pill's height out of the text's line box,
+   the grid then STRETCHED the chip to its row, and the line sat at the top of the taller box — the
+   hash read as riding high in its pill. Now the line is exactly one em, the height comes from even
+   padding, `inline-flex` + `align-items: center` puts the characters in the middle of the pill,
+   and `align-self: center` keeps the grid from stretching it. The same chip on every list that
+   draws one (favourites, uploads, a list's window, a profile), since they all come from torrentRow().
+   The padding is a little heavier on top on purpose, and MEASURED: the site's font keeps more room
+   under the baseline than twelve hex digits and an ellipsis have ink in, so an even padding still
+   left them 0.9px high (ink 3.6px from the top edge, 5.4px from the bottom); 0.29em / 0.13em gives
+   4.5 and 4.5 at the same height. */
 .pf-hash-copy {
-    display: inline-block; justify-self: end; max-width: 100%; box-sizing: border-box;
-    padding: 0 0.5em;
+    display: inline-flex; align-items: center; justify-self: end; align-self: center;
+    max-width: 100%; box-sizing: border-box;
+    padding: 0.29em 0.55em 0.13em;
     background: transparent; border: 1px solid var(--border); border-radius: 999px;
-    color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; cursor: pointer;
+    color: var(--text-muted); font-size: 0.75rem; line-height: 1; cursor: pointer;
     transition: border-color 0.15s, color 0.15s;
 }
 .pf-hash-copy:hover { border-color: var(--accent); color: var(--accent); }
@@ -2878,11 +2910,19 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
                 margin-bottom: 0.5rem; padding: 0.35rem 0.5rem; border: 1px dashed var(--accent);
                 border-radius: var(--radius); background: rgba(74, 158, 255, 0.07);
                 font-size: 0.88rem; line-height: 1.5; }
-.shout-pin-icon { flex: 0 0 auto; font-size: 0.78rem; }
+/* 1.67.0: Bootstrap Icons — the filled pin the pinned line's own button shows, and the plain cross —
+   in place of the pushpin emoji and the multiplication sign. The cross has the row controls' hit box. */
+.shout-pin-icon { flex: 0 0 auto; font-size: 0.78rem; color: var(--accent); }
+.shout-pin-icon .bi { line-height: 1; }
 .shout-pinned .shout-body { flex: 1 1 10rem; min-width: 0; }
-.shout-unpin { flex: 0 0 auto; margin-left: auto; background: none; border: 0; padding: 0 0.25rem;
-               color: var(--text-muted); font: inherit; line-height: 1; cursor: pointer; }
-.shout-unpin:hover { color: var(--error); }
+.shout-unpin { flex: 0 0 auto; align-self: center; margin-left: auto;
+               display: inline-flex; align-items: center; justify-content: center;
+               width: 1.5rem; height: 1.5rem; padding: 0; background: none; border: 0; border-radius: 4px;
+               color: var(--text-muted); font: inherit; font-size: 0.75rem; line-height: 1; cursor: pointer; }
+.shout-unpin .bi { display: block; line-height: 1; }
+.shout-unpin:hover { color: var(--error); background: rgba(255, 255, 255, 0.06); }
+.shout-unpin:focus { outline: none; }
+.shout-unpin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .shout-list { display: flex; flex-direction: column; max-height: 22rem; overflow-y: auto;
               padding-right: 0.2rem; overscroll-behavior: contain; }
 .shoutbox-page .shout-list { max-height: 34rem; }
@@ -2897,8 +2937,10 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    0.3rem the bar sat hard against the name, and an ordinary line and a mention started their text
    at two different places. One padding for all of them: the bar now has room after it, and nothing
    on the screen shifts sideways when a line turns out to be about you. */
+/* 1.67.0: the right padding is the plain one on a row with no controls; a row that has them reserves
+   exactly their width (see `.shout-ctl` below) rather than every row keeping room for a cross. */
 .shout-row { position: relative; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem;
-             padding: 0.34rem 1.3rem 0.34rem 0.6rem; border-bottom: 1px dashed #23233a;
+             padding: 0.34rem 0.6rem; border-bottom: 1px dashed #23233a;
              border-radius: 4px; font-size: 0.88rem; line-height: 1.5; }
 /* Nothing under the last one: a rule there is a promise of a row that is not coming. */
 .shout-row:last-child { border-bottom: 0; }
@@ -2963,27 +3005,46 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shoutbox .shout-row-system .shout-who:visited { color: var(--text-muted); }
 .shout-mention { color: var(--accent); }
 .shout-mention-me { font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
-.shout-del { position: absolute; top: 0.15rem; right: 0.15rem; background: none; border: 0; padding: 0 0.25rem;
-             color: var(--text-muted); font: inherit; line-height: 1; cursor: pointer; opacity: 0; }
-.shout-row:hover .shout-del, .shout-del:focus { opacity: 1; }
+/* ── a line's own controls (1.67.0) ──
+   ONE group at the right end of the row — the pencil, the pin and the bin in a single flex container:
+   one gap between them, one icon size, one hit box each, centred on the row. They used to be three
+   buttons each positioned on its own, at three different tops and two sizes with a gap before the
+   cross that matched nothing, which is what "misaligned" was about. Bootstrap Icons all three.
+
+   The group's width is RESERVED on the right of every row that has one (the three `:has` rules
+   below), so the controls never cover the end of a line when they appear and nothing moves when they
+   do. Hidden until the row is hovered or one of them has the KEYBOARD focus — :focus-visible, never
+   a bare :focus: a click leaves the focus on the button, and a bare :focus kept the controls up and
+   the pencil lit until somebody clicked somewhere else. A control only a moderator or the author has
+   is noise on all twenty-five lines until somebody wants it. */
+.shout-ctl {
+    position: absolute; top: 50%; right: 0.3rem; transform: translateY(-50%);
+    display: inline-flex; align-items: center; gap: 0.15rem;
+    opacity: 0; transition: opacity 0.12s;
+}
+.shout-row:hover .shout-ctl, .shout-ctl:has(:focus-visible) { opacity: 1; }
+.shout-ctl > button {
+    display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+    width: 1.5rem; height: 1.5rem; margin: 0; padding: 0; box-sizing: border-box;
+    background: none; border: 0; border-radius: 4px;
+    color: var(--text-muted); font: inherit; font-size: 0.8rem; line-height: 1; cursor: pointer;
+    transition: color 0.12s, background-color 0.12s;
+}
+.shout-ctl .bi { display: block; font-size: 0.8rem; line-height: 1; }
+.shout-ctl > button:hover { background: rgba(255, 255, 255, 0.06); }
+.shout-edit:hover, .shout-pin:hover { color: var(--accent); }
 .shout-del:hover { color: var(--error); }
-/* The pin, beside the delete cross and hidden until the row is hovered for the same reason it is: a
-   control only a moderator has is noise on all twenty-five lines until somebody wants it. */
-.shout-pin { position: absolute; top: 0.18rem; right: 1.35rem; background: none; border: 0; padding: 0 0.2rem;
-             color: var(--text-muted); font: inherit; font-size: 0.68rem; line-height: 1; cursor: pointer; opacity: 0; }
-.shout-row:hover .shout-pin, .shout-pin:focus { opacity: 1; }
-.shout-pin:hover { color: var(--accent); }
-/* The pencil (1.66.0): in the pin's place for somebody who may not pin, and beside it — further in —
-   for somebody who may. The DOM order is pin, pencil, cross, so "a pencil straight after a pin" is
-   the one case that needs the other position. Hidden until the row is hovered, like its neighbours. */
-.shout-edit { position: absolute; top: 0.2rem; right: 1.35rem; background: none; border: 0; padding: 0 0.2rem;
-              color: var(--text-muted); font: inherit; font-size: 0.7rem; line-height: 1; cursor: pointer; opacity: 0; }
-.shout-pin + .shout-edit { right: 2.55rem; }
-.shout-row:hover .shout-edit, .shout-edit:focus { opacity: 1; }
-.shout-edit:hover { color: var(--accent); }
+/* The pin on the line that IS pinned: filled, in the accent, and it says "Unpin" — pressing it
+   takes the line down (1.67.0). */
+.shout-pin-on { color: var(--accent); }
 .shout-edit:disabled { cursor: progress; }
-.shout-edit:focus { outline: none; }
-.shout-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.shout-ctl > button:focus { outline: none; }
+.shout-ctl > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The room the group takes, by how many controls it holds: 1.5rem each, the gaps between them and
+   0.6rem of the group's own margin from the edge. */
+.shout-row:has(> .shout-ctl) { padding-right: 2.1rem; }
+.shout-row:has(> .shout-ctl > :nth-child(2)) { padding-right: 3.75rem; }
+.shout-row:has(> .shout-ctl > :nth-child(3)) { padding-right: 5.4rem; }
 /* A line the SITE said, not a person (1.60.0): muted, italic where the name would be, and marked
    down the left — so it reads as an announcement at a glance rather than as somebody with an odd
    name saying something odd. The bar is the border colour, not the accent: a mention of me is the
@@ -2999,6 +3060,17 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    pin, pencil and cross are all gone, so neither a question nor a second editor can open on it. */
 .shout-asking .shout-edit,
 .shout-editing .shout-pin, .shout-editing .shout-edit, .shout-editing .shout-del { display: none; }
+/* 1.67.0: the question the bin turns into is wider than the group, and laid over the end of the line
+   from the group's place it would cover the words — so while it is up the group goes back into the
+   row's flow and the question stands at the end of the line, where it always did. A row being
+   CORRECTED hides the group and gives the room it reserved back to the editor. */
+.shout-asking .shout-ctl { position: static; transform: none; opacity: 1; margin-left: auto; }
+.shout-editing .shout-ctl { display: none; }
+.shout-row.shout-asking:has(> .shout-ctl), .shout-row.shout-editing:has(> .shout-ctl) { padding-right: 0.6rem; }
+/* No hover on this device — a tablet as much as a phone — so "on hover" would mean "never". */
+@media (hover: none) {
+    .shout-ctl { opacity: 1; }
+}
 /* The editor a row turns into: a line of its own under the name and the time, as wide as the row. */
 .shout-edit-form { flex: 1 1 100%; min-width: 0; margin: 0.15rem 0 0.1rem; }
 .shout-edit-form > .shout-input { width: 100%; box-sizing: border-box; padding: 0.4rem 0.55rem; resize: vertical;
@@ -3058,9 +3130,9 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    pointerdown and clears the mark on any key, and while it is marked there is no ring. A keyboard
    user arrives with Tab, which is a key, and gets the ring back. */
 .rt-format.rt-pointer:focus-visible { outline: none; }
-.shout-older:focus, .shout-yes:focus, .shout-no:focus, .shout-del:focus { outline: none; }
+.shout-older:focus, .shout-yes:focus, .shout-no:focus { outline: none; }
 .shout-older:focus-visible,
-.shout-yes:focus-visible, .shout-no:focus-visible, .shout-del:focus-visible {
+.shout-yes:focus-visible, .shout-no:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px;
 }
 /* The formatting rail shares the line with the tabs and the select rather than taking a row of its
@@ -3109,11 +3181,16 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    phone and a desktop — but the first paint happens before any script runs, and a line of text
    under the buttons for one frame is still a line of text under the buttons. */
 .shout-input-wrap .shout-input { padding-right: 5.6rem; }
+/* 1.67.0: a Bootstrap Icons face rather than the emoji character, so it is drawn in the site's own
+   colour by the site's icon font instead of in whatever the device's emoji font makes of it. */
 .shout-emoji-btn {
+    display: inline-flex; align-items: center; justify-content: center;
     background: none; border: 1px solid transparent; border-radius: var(--radius);
-    padding: 0.05rem 0.2rem; font-size: 1rem; line-height: 1.2; cursor: pointer;
-    color: inherit; transition: border-color 0.15s;
+    padding: 0.15rem 0.25rem; font-size: 1rem; line-height: 1; cursor: pointer;
+    color: inherit; transition: border-color 0.15s, color 0.15s;
 }
+.shout-emoji-btn .bi { display: block; font-size: 0.95rem; line-height: 1; }
+.shout-emoji-btn:hover { color: var(--accent); }
 /* Quiet: it is a button on top of somebody's sentence, so it reads as a small label with an edge
    rather than as the filled, accented thing a form's submit button is. */
 .shout-send-btn {
@@ -3149,12 +3226,10 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 @media (max-width: 640px) {
     .shout-list { max-height: 16rem; }
     .shoutbox-page .shout-list { max-height: 22rem; }
-    /* Touch has no hover, so a delete button that only appears on one is a button nobody has. */
-    .shout-del { opacity: 1; }
-    /* …and the same for the pencil (1.66.0), with the room at the end of the row to keep it off the
-       words — it is on for ten minutes of somebody's own line, not on every row. */
-    .shout-edit { opacity: 1; }
-    .shout-row:has(> .shout-edit) { padding-right: 2.5rem; }
+    /* A narrow screen is usually a touch one, and touch has no hover: controls that only appear on
+       one are controls nobody has. The whole group is on here (1.67.0) — its room is reserved on
+       every row that has it, so it never sits on the words. */
+    .shout-ctl { opacity: 1; }
     /* A narrower name column, because the words matter more than the column does at this width. */
     .shout-who { flex-basis: 5.5rem; }
     .shout-who:has(> .shout-av) { flex-basis: calc(5.5rem + 20px + 0.4rem); }
@@ -3267,10 +3342,10 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    1.64.0: the two controls moved INTO the picture. They used to sit on a bar under it, which is a
    strip of furniture standing in front of the one thing the window exists to show — and it cost
    the picture 3.5rem of the height it could have used. Now: the close in the top right corner, the
-   link to the original centred along the bottom edge, both on a dark pill so they read over a
-   light picture as well as a dark one, and both invisible until the pointer is on the picture or
-   something inside it has the focus. A device with no hover to give (see the media query below)
-   keeps them on — an invisible control on a phone is no control. */
+   link to the original centred along the bottom edge on a dark pill, both invisible until the
+   pointer is on the picture or something inside it has the focus. A device with no hover to give
+   (see the media query below) keeps them on — an invisible control on a phone is no control.
+   1.67.0: the close lost its pill — a bare cross with a shadow under it (see .shout-lb-close). */
 .shout-lightbox {
     position: fixed; inset: 0; z-index: 2500;
     display: flex; align-items: center; justify-content: center;
@@ -3292,8 +3367,7 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 }
 .shout-lb-orig, .shout-lb-close {
     position: absolute; opacity: 0; pointer-events: none;
-    background: rgba(0, 0, 0, 0.62); border: 1px solid rgba(255, 255, 255, 0.28);
-    border-radius: 999px; color: #fff; line-height: 1;
+    color: #fff; line-height: 1;
     transition: opacity 0.15s, border-color 0.15s, color 0.15s;
 }
 .shout-lb-frame:hover .shout-lb-orig, .shout-lb-frame:hover .shout-lb-close,
@@ -3303,19 +3377,27 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shout-lb-orig {
     left: 50%; bottom: 0.7rem; transform: translateX(-50%);
     padding: 0.3rem 0.8rem; font-size: 0.82rem; white-space: nowrap; text-decoration: none;
+    background: rgba(0, 0, 0, 0.62); border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 999px;
 }
 .shout-lb-orig:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
 .shout-lb-orig:focus { outline: none; }
 .shout-lb-orig:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 1.67.0: the close is the bare cross — no circle, no border, no fill; a bordered pill round an ×
+   is a second object in the picture's corner. What keeps it legible on a white picture as well as a
+   black one is a soft shadow under the glyph, and what keeps it easy to hit is a 2.75rem box around
+   it that draws nothing. Shown on hover and focus exactly as before, always where there is no hover. */
 .shout-lb-close {
-    top: 0.5rem; right: 0.5rem;
+    top: 0.15rem; right: 0.15rem;
     display: inline-flex; align-items: center; justify-content: center;
-    font: inherit; font-size: 0.95rem; width: 2rem; height: 2rem; padding: 0; cursor: pointer;
+    width: 2.75rem; height: 2.75rem; padding: 0;
+    background: none; border: 0; border-radius: 6px;
+    font: inherit; font-size: 1.3rem; cursor: pointer;
 }
 .shout-lb-close .bi, .shout-lb-orig .bi { display: inline-block; line-height: 1; }
-.shout-lb-close:hover { border-color: var(--accent); color: var(--accent); }
+.shout-lb-close .bi { text-shadow: 0 0 2px rgba(0, 0, 0, 0.95), 0 1px 5px rgba(0, 0, 0, 0.75); }
+.shout-lb-close:hover { color: var(--accent); }
 .shout-lb-close:focus { outline: none; }
-.shout-lb-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.shout-lb-close:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 /* No hover on this device, so "on hover" would mean "never". */
 @media (hover: none) {
     .shout-lb-orig, .shout-lb-close { opacity: 1; pointer-events: auto; }

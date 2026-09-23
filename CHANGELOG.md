@@ -4,6 +4,81 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.67.0] — 2026-09-23
+
+No schema change (still 72). Nine things from the owner's fifth pass over the live site: two real
+bugs, the shoutbox's row controls, and four small visual defects. Every icon touched here is a
+Bootstrap Icons glyph — no emoji and no Unicode symbol — so the icon-library switch that comes next
+has one kind of thing to map.
+
+### Fixed — the shoutbox Preview said "Invalid CSRF token"
+
+* **The Preview tab posted an empty token on the front page.** The shared editor (assets/js/app.js)
+  looked for its token in a list of page-wide places — the whitelist form's field, `#account-csrf`,
+  `#search-csrf` — and the shoutbox keeps its own as `#shout-csrf`, which the list did not know. Now
+  an editor finds the token that belongs to IT: an element named by `data-csrf` on the textarea or an
+  ancestor (the shoutbox names `shout-csrf` on its root, covering the composer and every line's
+  in-place editor), otherwise the nearest token field walking out from the textarea — its form, its
+  widget, then the page. The whitelist form, the Info panel's description editor and the message
+  composer find theirs exactly as before.
+* **A shout previews by the room's rules and through the room's renderer.** `for: 'shout'` now takes
+  the room's syntaxes (`shout_format`, not the description switches), draws the words through the one
+  pipeline every line in the room is drawn with — mentions and emotes included — and reports exactly
+  the problem pressing Enter would be refused with. `shoutBodyHtml()` / `shoutBodyProblem()` in
+  includes/shout.php are shared by the list, posting, editing and the Preview, so the four cannot
+  drift apart. Whatever the renderer does not support comes out as text, as it would once said.
+* The Preview's image and link counts are taken in the syntax the text is written in (a Markdown link
+  was counted as BBCode, i.e. as nothing), and a message's Preview is judged against the message
+  length limit its send uses.
+
+### Fixed — closing a list reloaded the shelf behind it every time
+
+* The list window reloaded the whole shelf on every close, so that a card's count agreed with what
+  was changed inside. Now it reloads only when something WAS changed: every write to a list (an item
+  added or removed from its own box or rows, or through the "Put this in a list" picker opened over
+  it) marks the window, marked when the request is sent so a close during an add still counts, and
+  the reload waits for that write to land. A list opened, read and closed fetches nothing.
+
+### Changed — the shoutbox's row controls
+
+* **Pencil, pin and bin are one group**: one flex container at the right end of the row, one gap,
+  one icon size, one 1.5rem hit box each, centred on the row, in the order the row always read —
+  correct it, pin it, take it away. They were three separately placed buttons at three heights with
+  an uneven gap before the cross. The group's width is reserved on the rows that have one, so the
+  controls never cover the end of a line and nothing moves when they appear; the delete question
+  still stands at the end of the line, and on a touch screen the group is always shown.
+* **Bootstrap Icons throughout**: `bi-pencil`, `bi-pin-angle` / `bi-pin-angle-fill`, and `bi-trash`
+  for delete — the inbox's bin, one meaning and one glyph. The pinned strip's pushpin and cross and
+  the composer's emoji-picker handle (`bi-emoji-smile`) went the same way; the picker's grid of emoji
+  is content and stays emoji.
+* **The pin toggles.** On the line that is pinned it is drawn filled and says "Unpin", and pressing it
+  takes the line down. The toggle lives in the button; the server does exactly what it is asked. A
+  first build toggled on the server too, and a browser check showed what that meant: a moderator
+  whose page had not yet seen a colleague pin a line would press "pin" and take the colleague's
+  announcement down. So `pin` on a line already pinned changes nothing, and `unpin` takes down that
+  line only — before, it cleared whatever was pinned, so a stale "Unpin" could remove a different
+  announcement altogether. Decided on a locked read inside the transaction; a request that changes
+  nothing writes no audit line.
+* **No highlight left behind after Cancel.** A click on Cancel or Save left the focus on the pencil,
+  and the row's controls stayed up (and the pencil lit) until somebody clicked elsewhere. As with the
+  format select in 1.62.0, a pointer press is now remembered and any key forgets it: after a pointer
+  Cancel or Save nothing is focused, while Esc or Enter still hands the keyboard its pencil back with
+  a visible ring. The controls show on hover and on `:focus-visible`, never on a bare `:focus`.
+
+### Changed — four small things
+
+* **The picture lightbox's close** is the bare `bi-x-lg`: no circle, no border, no fill, legible on any
+  picture through a soft shadow under the glyph, with a 2.75rem invisible hit area. It still appears
+  on hover and focus, and is always there without a hover.
+* **The hash chip is centred.** Its 1.5 line-height built a taller line box that the grid then
+  stretched, and the characters rode high in the pill; now one-em line, padding, `inline-flex` and
+  centring — measured to within 0.1px on every list that draws the chip.
+* **The inbox bin no longer sits on the date.** Its width is kept free on the right of the row's
+  top line at all times, and it is centred on that line; nothing moves when it appears.
+* **"Who has this" names do not underline.** The site-wide link hover underlined (and dimmed) the
+  words inside the chips; hover is the accent colour on the name and its edge now, and the keyboard
+  gets a visible `:focus-visible` ring.
+
 ## [1.66.0] — 2026-09-23
 
 Schema 72: `shouts.edited_at` / `edited_by` and `shout_mentions.late`, two permissions

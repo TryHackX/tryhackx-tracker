@@ -662,27 +662,57 @@
             var mark = editedMark(r, 'shout-ed-' + (Number(r.id) || 0));
             if (mark) row.appendChild(mark);
             row.appendChild(el('span', { className: 'shout-body rt-body', html: r.html || '' }));
-            // From the box's own permission rather than from anything per row: pinning is
-            // `shout.moderate` and that answer is the same for every line on the page.
-            if (mayModerate) {
-                row.appendChild(el('button', { type: 'button', className: 'shout-pin',
-                                               title: t('js.shout.pin_title'), 'aria-label': t('js.shout.pin'), text: '📌' }));
-            }
+            // THE ROW'S CONTROLS, as one group (1.67.0) — exactly the template's `.shout-ctl`: the
+            // pencil, the pin and the bin in one flex container, drawn only when it holds something.
+            var ctl = [];
             // The pencil (1.66.0) — per row, because the answer is: this reader's own line inside the
             // window, or anybody's with shout.edit_any. `data-left` is the window the server had left.
             if (r.editable) {
-                row.appendChild(el('button', { type: 'button', className: 'shout-edit', title: t('js.shout.edit_title'),
-                                               'aria-label': t('js.shout.edit'),
-                                               'data-left': Number(r.edit_left) > 0 ? String(Number(r.edit_left)) : null },
-                                   el('i', { className: 'bi bi-pencil', 'aria-hidden': 'true' })));
+                ctl.push(el('button', { type: 'button', className: 'shout-edit', title: t('js.shout.edit_title'),
+                                        'aria-label': t('js.shout.edit'),
+                                        'data-left': Number(r.edit_left) > 0 ? String(Number(r.edit_left)) : null },
+                            el('i', { className: 'bi bi-pencil', 'aria-hidden': 'true' })));
             }
+            // From the box's own permission rather than from anything per row: pinning is
+            // `shout.moderate` and that answer is the same for every line on the page. Whether THIS
+            // line is the pinned one is the row's own (`pinned`), and decides how the pin looks.
+            if (mayModerate) ctl.push(pinButton(!!r.pinned));
             if (r.deletable) {
-                row.appendChild(el('button', { type: 'button', className: 'shout-del',
-                                               title: t('js.shout.delete_title'), 'aria-label': t('js.shout.delete'),
-                                               'data-left': Number(r.del_left) > 0 ? String(Number(r.del_left)) : null, text: '×' }));
+                ctl.push(el('button', { type: 'button', className: 'shout-del',
+                                        title: t('js.shout.delete_title'), 'aria-label': t('js.shout.delete'),
+                                        'data-left': Number(r.del_left) > 0 ? String(Number(r.del_left)) : null },
+                            el('i', { className: 'bi bi-trash', 'aria-hidden': 'true' })));
             }
+            if (ctl.length) row.appendChild(el('span', { className: 'shout-ctl' }, ctl));
             stampDeadlines(row, Date.now());
             return row;
+        }
+
+        /**
+         * The pin on a row, and what it says (1.67.0). A TOGGLE: on the line that is pinned it is the
+         * filled pin and says "Unpin", everywhere else the outline and "Pin". The template draws the
+         * same two states; labelPin() is also what re-words it after a live language switch, from the
+         * state the button carries rather than from a fixed string.
+         */
+        function pinButton(on) {
+            var b = el('button', { type: 'button', className: 'shout-pin' + (on ? ' shout-pin-on' : '') },
+                       el('i', { className: 'bi ' + (on ? 'bi-pin-angle-fill' : 'bi-pin-angle'), 'aria-hidden': 'true' }));
+            labelPin(b, on);
+            return b;
+        }
+        function labelPin(b, on) {
+            b.classList.toggle('shout-pin-on', !!on);
+            b.title = t(on ? 'js.shout.unpin_title' : 'js.shout.pin_title');
+            b.setAttribute('aria-label', t(on ? 'js.shout.unpin' : 'js.shout.pin'));
+            var i = b.querySelector('i');
+            if (i) i.className = 'bi ' + (on ? 'bi-pin-angle-fill' : 'bi-pin-angle');
+        }
+        /** Every row's pin, set from which line is pinned now (0 = none). */
+        function syncPins(pinnedId) {
+            Array.prototype.forEach.call(listEl.querySelectorAll('.shout-row .shout-pin'), function (b) {
+                var row = b.closest('.shout-row');
+                labelPin(b, pinnedId > 0 && !!row && (Number(row.dataset.id) || 0) === pinnedId);
+            });
         }
 
         /**
@@ -745,7 +775,11 @@
                 if (Number(b.dataset.until) > now) return;
                 var row = b.closest('.shout-row');
                 if (row && row.classList.contains('shout-editing') && b.classList.contains('shout-edit')) return;
+                // …and the group with it once it holds nothing (1.67.0): the server never draws an
+                // empty one, and the row should be the row it would draw.
+                var group = b.parentElement;
                 b.remove();
+                if (group && group.classList.contains('shout-ctl') && !group.children.length) group.remove();
             });
         }
 
@@ -757,12 +791,18 @@
          * with nothing pinned, not like one with an empty box at the top.
          */
         function renderPinned(row) {
+            // Every row's pin follows the strip (1.67.0): the pinned line's own pin is the filled one
+            // that takes it down, whichever of the ways in here the news arrived by.
+            syncPins(row ? Number(row.id) || 0 : 0);
             if (!pinnedEl) return;
             pinnedEl.textContent = '';
             if (!row) { pinnedEl.hidden = true; delete pinnedEl.dataset.id; return; }
             pinnedEl.dataset.id = String(Number(row.id) || 0);
             pinnedEl.hidden = false;
-            pinnedEl.appendChild(el('span', { className: 'shout-pin-icon', 'aria-hidden': 'true', text: '📌' }));
+            // Bootstrap Icons, exactly as the template draws them (1.67.0): the filled pin, and the
+            // plain cross for taking it down.
+            pinnedEl.appendChild(el('span', { className: 'shout-pin-icon', 'aria-hidden': 'true' },
+                                    el('i', { className: 'bi bi-pin-angle-fill' })));
             pinnedEl.appendChild(who(row));
             // A corrected announcement says so up here too (1.66.0): the strip shows the same words.
             var mark = editedMark(row, 'shout-pinned-ed');
@@ -770,7 +810,8 @@
             pinnedEl.appendChild(el('span', { className: 'shout-body rt-body', html: row.html || '' }));
             if (mayModerate) {
                 pinnedEl.appendChild(el('button', { type: 'button', className: 'shout-unpin',
-                                                    title: t('js.shout.unpin_title'), 'aria-label': t('js.shout.unpin'), text: '×' }));
+                                                    title: t('js.shout.unpin_title'), 'aria-label': t('js.shout.unpin') },
+                                        el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' })));
             }
         }
 
@@ -780,7 +821,11 @@
          * The answer carries the pinned row as the server would hand it to anybody else, so the
          * strip is drawn from that rather than from whatever this browser happened to have — which
          * is also how pinning a second line makes the first one disappear from it without this
-         * side having to know that rule.
+         * side having to know that rule. renderPinned() sets every row's pin from the same answer.
+         *
+         * A row's pin is a toggle (1.67.0): the pinned line's sends `pin: false`. The toggle lives
+         * HERE; the server does exactly what it is asked, so a page that has not yet seen a
+         * colleague's pin cannot take it down by pressing "pin".
          */
         async function pin(id, on) {
             if (!id) return;
@@ -1258,6 +1303,19 @@
         var editing = null;           // { row, id, form, ta, save, cancel, enote, busy }
         var editSeq = 0;              // an answer for an editor that is no longer being opened is dropped
 
+        /**
+         * How the reader last reached the box — a pointer or the keyboard (1.67.0). The pattern the
+         * format select has had since 1.62.0 (`.rt-pointer` in assets/js/app.js): a pointerdown inside
+         * the box marks it, any key anywhere clears it. It decides one thing, whether closing the
+         * editor hands the focus back to the pencil. At the keyboard it must — Esc, or Enter on
+         * Cancel, would otherwise drop the reader at the top of the page — and they get the pencil
+         * with its ring. After a CLICK on Cancel or Save it must not: the pencil kept the focus, the
+         * row kept its controls up for it, and the pencil stayed lit until somebody clicked elsewhere.
+         */
+        var viaPointer = false;
+        box.addEventListener('pointerdown', function () { viaPointer = true; }, true);
+        document.addEventListener('keydown', function () { viaPointer = false; }, true);
+
         /** What the server's refusal of an edit means, in this reader's language. */
         function editErr(r) {
             var code = r && r.error;
@@ -1366,7 +1424,11 @@
             else if (nr.bottom > lr.bottom) listEl.scrollTop += Math.ceil(nr.bottom - lr.bottom) + 4;
         }
 
-        /** Close the editor without saving. `focusBack` returns the keyboard to the pencil. */
+        /**
+         * Close the editor without saving. `focusBack` returns the keyboard to the pencil — for a
+         * reader at the keyboard only (1.67.0, see `viaPointer`): after a click the focus is not put
+         * anywhere, so nothing in the row is left lit or revealed.
+         */
         function closeEdit(focusBack) {
             var ed = editing;
             if (!ed) return;
@@ -1377,7 +1439,7 @@
             if (bodyEl) bodyEl.hidden = false;
             // A window that ran out while the editor was open takes the pencil now.
             expire();
-            if (focusBack) {
+            if (focusBack && !viaPointer) {
                 var b = ed.row.querySelector('.shout-edit');
                 if (b) b.focus({ preventScroll: true });
             }
@@ -1408,8 +1470,9 @@
                 was.replaceWith(fresh);
                 // The announcement strip shows the same words.
                 if (pinnedEl && pinnedEl.dataset.id === String(Number(r.row.id) || 0)) renderPinned(r.row);
+                // Back to the pencil for the keyboard (Enter saved), nowhere after a click on Save.
                 var b = fresh.querySelector('.shout-edit');
-                if (b) b.focus({ preventScroll: true });
+                if (b && !viaPointer) b.focus({ preventScroll: true });
                 if (stick) toEnd(false);
             }
             note('');
@@ -1437,7 +1500,8 @@
                 mark.title = t(mod ? 'js.shout.edited_mod_title' : 'js.shout.edited_title', { at: mark.dataset.at || '' });
             }
             var b;
-            if ((b = row.querySelector('.shout-pin'))) { b.title = t('js.shout.pin_title'); b.setAttribute('aria-label', t('js.shout.pin')); }
+            // The pin's words depend on its state (1.67.0), so they come from the state it carries.
+            if ((b = row.querySelector('.shout-pin'))) labelPin(b, b.classList.contains('shout-pin-on'));
             if ((b = row.querySelector('.shout-edit'))) { b.title = t('js.shout.edit_title'); b.setAttribute('aria-label', t('js.shout.edit')); }
             if ((b = row.querySelector('.shout-del'))) { b.title = t('js.shout.delete_title'); b.setAttribute('aria-label', t('js.shout.delete')); }
             if ((b = row.querySelector('.shout-unpin'))) { b.title = t('js.shout.unpin_title'); b.setAttribute('aria-label', t('js.shout.unpin')); }
@@ -1486,10 +1550,11 @@
             if (eb && listEl.contains(eb)) { openEdit(eb); return; }
             // Pinning asks nothing first: it is one line moving to the top of a room, and the strip
             // it lands in has an unpin beside it. Deleting is the one that cannot be taken back.
+            // The pinned line's own pin takes it down again (1.67.0): it is a toggle.
             var p = e.target.closest('.shout-pin');
             if (p && listEl.contains(p)) {
                 var row = p.closest('.shout-row');
-                if (row) pin(Number(row.dataset.id) || 0, true);
+                if (row) pin(Number(row.dataset.id) || 0, !p.classList.contains('shout-pin-on'));
             }
         });
         if (pinnedEl) {

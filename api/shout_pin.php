@@ -8,7 +8,10 @@
  * this file only unpacks the request and names the failure.
  *
  * `pin` absent means pin it: the button somebody pressed is far more often "pin this" than its
- * opposite, and an unpin always comes from the strip, which sends `pin: false` explicitly.
+ * opposite. An unpin comes from the strip, or from the pinned line's own pin (1.67.0, a toggle on the
+ * PAGE), and both send `pin: false` explicitly. shoutPin() then does exactly what it was asked — a pin
+ * of the line that is already pinned changes nothing, an unpin takes down that line only — so a stale
+ * page can never undo a colleague's pin or remove a different announcement.
  */
 requirePost();
 $input = readJsonBody();

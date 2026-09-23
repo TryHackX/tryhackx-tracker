@@ -148,11 +148,15 @@ $shoutEdited = function (array $s, string $id = ''): string {
  *
  * Both are real buttons with a title and a label, so Tab still reaches them; Enter in the field
  * still sends and Shift+Enter still starts a line.
+ *
+ * The picker handle is a Bootstrap Icons face (1.67.0), not the grinning-face emoji: an icon is
+ * drawn in the site's colours by the site's font, where the character was whatever the device's
+ * emoji font made of it. The GRID it opens is emoji, because there they are the content.
  */
 $shoutInActs = '<div class="shout-in-acts">'
     . '<button type="button" class="shout-emoji-btn" id="shout-emoji" aria-haspopup="dialog"'
     . ' aria-expanded="false" title="' . _h('shout.emoji_title') . '"'
-    . ' aria-label="' . _h('shout.emoji_title') . '">&#128512;</button>'
+    . ' aria-label="' . _h('shout.emoji_title') . '"><i class="bi bi-emoji-smile" aria-hidden="true"></i></button>'
     . '<button type="button" class="shout-send-btn" id="shout-send" title="' . _h('shout.send') . '">'
     . _h('shout.send') . '</button>'
     . '</div>';
@@ -178,7 +182,13 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
      data-emotes="<?= $shoutEmotesOn ? '1' : '0' ?>"
      data-stickers="<?= $shoutStickersOn ? '1' : '0' ?>"
      data-order="<?= sanitize($shoutOrder) ?>"
-     data-page="<?= $shoutOnPage ? '1' : '0' ?>">
+     data-page="<?= $shoutOnPage ? '1' : '0' ?>"
+     <?php /* Which element holds THIS widget's token (1.67.0). The shared editor in assets/js/app.js
+              looks for `data-csrf` on the textarea's ancestors before anything else, so the
+              composer's Preview and every line's in-place editor post the token below — the
+              front page used to have no other, and the Preview tab was answered "Invalid CSRF
+              token" there. */ ?>
+     data-csrf="shout-csrf">
     <input type="hidden" id="shout-csrf" value="<?= $shoutCsrf ?>">
     <?php /* ── the head: one line, in reading order ──────────────────────────────────────────────
              What it is, then the two places to go from here, then the two buttons — and the refresh
@@ -241,12 +251,15 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
              shape, whichever side built it, so one stylesheet rule describes both. */ ?>
     <div class="shout-pinned" id="shout-pinned"<?= $shoutPin ? ' data-id="' . (int)$shoutPin['id'] . '"' : ' hidden' ?>>
         <?php if ($shoutPin): ?>
-        <span class="shout-pin-icon" aria-hidden="true">&#128204;</span>
+        <?php /* Bootstrap Icons, not the pushpin emoji and the multiplication sign (1.67.0): the same
+                 filled pin the pinned line's own button shows in the list, and the plain cross this
+                 site closes things with. */ ?>
+        <span class="shout-pin-icon" aria-hidden="true"><i class="bi bi-pin-angle-fill"></i></span>
         <?= $shoutWho($shoutPin) ?>
         <?= $shoutEdited($shoutPin, 'shout-pinned-ed') ?>
         <span class="shout-body rt-body"><?= $shoutPin['html'] ?? '' ?></span>
         <?php if ($shoutMod): ?>
-        <button type="button" class="shout-unpin" title="<?= _h('shout.unpin_title') ?>" aria-label="<?= _h('shout.unpin') ?>">&times;</button>
+        <button type="button" class="shout-unpin" title="<?= _h('shout.unpin_title') ?>" aria-label="<?= _h('shout.unpin') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         <?php endif; ?>
         <?php endif; ?>
     </div>
@@ -299,24 +312,39 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
             <span class="shout-time" title="<?= sanitize((string)($s['at'] ?? '')) ?>"><?php if ((string)($s['day'] ?? '') !== ''): ?><span class="shout-dow" data-dow="<?= (int)($s['dow'] ?? 0) ?>"><?= sanitize((string)$s['day']) ?></span> <?php endif; ?><?= sanitize((string)($s['time'] ?? '')) ?></span>
             <?= $shoutEdited($s, 'shout-ed-' . (int)$s['id']) ?>
             <span class="shout-body rt-body"><?= $s['html'] ?? '' ?></span>
-            <?php /* Pinning is `shout.moderate`, which the box already knows about — so the button
-                     is drawn from that and needs nothing per row. Hidden until the line is hovered,
-                     like the delete cross beside it. */ ?>
-            <?php if ($shoutMod): ?>
-            <button type="button" class="shout-pin" title="<?= _h('shout.pin_title') ?>" aria-label="<?= _h('shout.pin') ?>">&#128204;</button>
-            <?php endif; ?>
-            <?php /* The pencil (1.66.0), beside the pin — or in the pin's place for a reader who may
-                     not pin. Drawn only where this reader may actually use it right now: their own
-                     line inside `shout_edit_minutes`, or anybody's with `shout.edit_any`. `data-left`
-                     is how many seconds of the window this answer had left, so the script can take
-                     the button away when it runs out rather than offer a control the server will
-                     refuse; the server checks again on its own clock either way. The cross carries
-                     the same number for `shout_delete_own_minutes`. */ ?>
-            <?php if (!empty($s['editable'])): ?>
-            <button type="button" class="shout-edit" title="<?= _h('shout.edit_title') ?>" aria-label="<?= _h('shout.edit') ?>"<?= (int)($s['edit_left'] ?? 0) > 0 ? ' data-left="' . (int)$s['edit_left'] . '"' : '' ?>><i class="bi bi-pencil" aria-hidden="true"></i></button>
-            <?php endif; ?>
-            <?php if (!empty($s['deletable'])): ?>
-            <button type="button" class="shout-del" title="<?= _h('shout.delete_title') ?>" aria-label="<?= _h('shout.delete') ?>"<?= (int)($s['del_left'] ?? 0) > 0 ? ' data-left="' . (int)$s['del_left'] . '"' : '' ?>>&times;</button>
+            <?php /* THE ROW'S CONTROLS, as one group (1.67.0): the pencil, the pin and the bin in ONE
+                     flex container at the right end of the row — equal gaps, one icon size, one hit
+                     box each, centred on the row. They used to be three buttons each placed on its
+                     own, which is what left them at three heights with an uneven gap before the cross.
+                     Drawn only when there is something in it, and in the order the row has always
+                     read: correct it, pin it, take it away. assets/js/shoutbox.js renderRow() builds
+                     exactly this.
+
+                     The pencil (1.66.0): only where this reader may use it right now — their own line
+                     inside `shout_edit_minutes`, or anybody's with `shout.edit_any`. `data-left` is how
+                     many seconds of the window this answer had left, so the script can take the button
+                     away when it runs out rather than offer a control the server will refuse; the
+                     server checks again on its own clock either way. The bin carries the same number
+                     for `shout_delete_own_minutes`, and it is the bin the inbox uses: one meaning, one
+                     glyph.
+
+                     The pin is `shout.moderate`, which the box already knows about, so it needs nothing
+                     per row but whether this line IS the pinned one: then it is drawn filled and says
+                     "Unpin", and pressing it takes the line down (1.67.0) — as the server does when it
+                     is asked to pin the line that is already pinned. */ ?>
+            <?php $shoutPinOn = !empty($s['pinned']); ?>
+            <?php if ($shoutMod || !empty($s['editable']) || !empty($s['deletable'])): ?>
+            <span class="shout-ctl">
+                <?php if (!empty($s['editable'])): ?>
+                <button type="button" class="shout-edit" title="<?= _h('shout.edit_title') ?>" aria-label="<?= _h('shout.edit') ?>"<?= (int)($s['edit_left'] ?? 0) > 0 ? ' data-left="' . (int)$s['edit_left'] . '"' : '' ?>><i class="bi bi-pencil" aria-hidden="true"></i></button>
+                <?php endif; ?>
+                <?php if ($shoutMod): ?>
+                <button type="button" class="shout-pin<?= $shoutPinOn ? ' shout-pin-on' : '' ?>" title="<?= _h($shoutPinOn ? 'shout.unpin_title' : 'shout.pin_title') ?>" aria-label="<?= _h($shoutPinOn ? 'shout.unpin' : 'shout.pin') ?>"><i class="bi <?= $shoutPinOn ? 'bi-pin-angle-fill' : 'bi-pin-angle' ?>" aria-hidden="true"></i></button>
+                <?php endif; ?>
+                <?php if (!empty($s['deletable'])): ?>
+                <button type="button" class="shout-del" title="<?= _h('shout.delete_title') ?>" aria-label="<?= _h('shout.delete') ?>"<?= (int)($s['del_left'] ?? 0) > 0 ? ' data-left="' . (int)$s['del_left'] . '"' : '' ?>><i class="bi bi-trash" aria-hidden="true"></i></button>
+                <?php endif; ?>
+            </span>
             <?php endif; ?>
         </div>
         <?php endforeach; ?>
