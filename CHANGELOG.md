@@ -4,6 +4,84 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.66.0] — 2026-09-23
+
+Schema 72: `shouts.edited_at` / `edited_by` and `shout_mentions.late`, two permissions
+(`shout.edit_own`, `shout.edit_any`), four settings in (`shout_edit_minutes`,
+`shout_delete_own_minutes`, `account_picture_side`, `account_cover_side`) and one out
+(`account_media_side`).
+
+### Changed — the room is the right way up again, and scrolls like a chat
+
+* **Chat order is the default again** (`shout_order = bottom`): the composer at the bottom, the lines
+  above it oldest first and newest last, "Older" back in the head. `top` was the shipped default for
+  one afternoon in 1.64.0 and the owner rejected it, so the v72 migration moves a stored `top` back to
+  `bottom` once; an operator who picks `top` again from now on keeps it, and it still works, mirrored.
+* **The scrolling is what was actually wrong, and it is fixed.** The list opens at its newest line —
+  including a box that was hidden when the page loaded, which scrolls the first time it gets a height —
+  and follows new lines while the reader is at the end (within 40 px). While they are reading further
+  up it leaves them exactly where they are and shows a small "New lines" button at the end of the list,
+  counting what arrived; pressing it (or scrolling back down) goes to the newest line and it goes away.
+  The reader's own line always goes to the end: pressing Send is asking to see it. Pictures that load
+  late no longer push a reader who was at the end away from it. Only the list scrolls — never the
+  window around it — and the glide is instant for anybody who asked for reduced motion.
+* **It does not "always scroll down", which is what was literally asked for:** being dragged to the
+  bottom while reading history is the thing people hate most about chat windows, so a new line never
+  moves a reader who has scrolled up — the button tells them instead.
+
+### Added — a weekday beside the hour
+
+* Every line shows the short day before its time — "pon 21:43", "Mon 21:43" — in the reader's own zone
+  and language, from the dictionary (`common.dow_1…7`, never a PHP locale); the full moment with its
+  offset stays in the title. It is shown on today's lines as well, as asked; they could show just the
+  hour if the owner would rather.
+* The live language switch carries it. A row it cannot reach (anything "Older" loaded) is re-worded from
+  the day's number, with its "(edited)" and its buttons; nothing is polled while a switch is under way;
+  and every list, post and edit answer now says which language it was written for, so a poll that set
+  off before the switch and landed after it is thrown away and asked again, in the new language.
+
+### Added — a line can be corrected, for a while
+
+* **A pencil beside the pin** — or in its place for somebody who may not pin. A member corrects their
+  own line for `shout_edit_minutes` (10 by default; 0 = no window at all, and only `shout.edit_any`
+  edits anything); a moderator holding `shout.edit_any` edits any line at any time. Two permissions on
+  purpose: `shout.edit_own` goes to `member` beside `shout.delete_own`, and `shout.edit_any` to the
+  `moderator` group ONLY — deleting somebody's line is visible and honest, rewriting it leaves words
+  under their name that they did not write, so that authority never rides along with `shout.moderate`.
+* **The line becomes a small editor in place** — the composer's tabs and rail for a line with markup, a
+  plain box for a plain one — with Save and Cancel; Enter saves, Shift+Enter starts a line, Esc cancels.
+  While it is open the row's other controls are hidden exactly as they are while the delete question
+  is up, and the two can never be open on one row. The button is drawn only where it will work, and is
+  taken away when the window runs out while the page is open.
+* **The server decides.** The window is the database's own arithmetic on `created_at`; the request
+  carries the id and the words and nothing else is read, so a client claiming a different author or a
+  younger line is refused like any other. Editing goes through the same door as posting: the line's
+  stored format, the same validator, length limit, renderer, emote and mention passes; the flood
+  interval applies between edits (a post does not count against it) and edits have an address ceiling
+  of their own. Mentions follow the words: somebody newly named gets their mention and it counts as
+  unread even on a line they had already read past, somebody dropped loses it, and nobody already
+  told is told twice.
+* **A correction leaves a mark.** "(edited)" beside the time, with the exact moment in its title, and
+  "(edited by a moderator)" when somebody other than the author changed the words — a reader must be
+  able to tell the difference. Every edit of somebody else's line is written to the audit log (the
+  shout, who, when). A line the site said is nobody's to rewrite; a moderator takes it down instead.
+* **Taking your own line back has a window now too:** `shout_delete_own_minutes`, 10 by default and 0
+  for no limit, which is how it behaved until now — shipping 10 is the owner's own request.
+  `shout.moderate` is held by no window.
+* Corrections and deletions reach other open tabs on their next page load, as deletions always have:
+  the poll carries new lines, not changed ones.
+
+### Changed — the picture and the cover are placed separately
+
+* `account_media_side` moved both blocks together; it is two settings now, each with its own control in
+  Settings → Profiles. `account_picture_side` ships `left` — at the end of the left card, after Account
+  security, where the owner wants it — and `account_cover_side` ships `right`, under Privacy, where both
+  used to sit. Each block is rendered once and echoed in its own column with its ids and classes
+  unchanged; the media editor finds either one by its id.
+* The migration seeds both new settings from a stored `left` and then removes the old key. A stored
+  `right` is the shipped default rather than a choice — it is where both blocks sit on the live site,
+  which is exactly what the owner asked to change — so it seeds nothing and the new defaults apply.
+
 ## [1.65.0] — 2026-09-22
 
 Schema 71: one table (`user_group_orders`), one new seeded group (`premium`), and the first

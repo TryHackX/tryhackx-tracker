@@ -140,17 +140,21 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
         // the file and its framing in one request. Remove is drawn even without the permission:
         // taking your own picture down is never something to be allowed to do.
         //
-        // 1.64.0: WHICH CARD it lands in is `account_media_side`. The markup is built once, into a
-        // buffer, and echoed at one of two places — the ids and the classes are identical either
-        // way, so media-editor.js finds exactly what it found before and nothing else on the page
-        // has to know the setting exists. An output buffer rather than a closure because this is a
-        // template: the block is written as markup, and a closure would have turned fifty lines of
-        // it into a string built with echo.
+        // WHICH CARD each one lands in is a setting of its own (1.66.0): `account_picture_side` and
+        // `account_cover_side` — until then `account_media_side` (1.64.0) moved both together. Each
+        // block is built once, into a buffer of its own, and echoed at one of two places: at the end
+        // of THIS card, after Account security, or at the end of the right-hand card, under the
+        // privacy answers. The ids and the classes are identical wherever a block lands, so
+        // media-editor.js finds exactly what it found before (it looks for #acc-avatar, #acc-cover and
+        // #acc-media-data, never for a column) and nothing else on the page has to know the settings
+        // exist. Output buffers rather than closures because this is a template: the blocks are
+        // written as markup, and a closure would have turned fifty lines of it into strings.
         $accAvOn = function_exists('userAvatarsEnabled') && userAvatarsEnabled($cfg);
         $accCvOn = function_exists('userCoversEnabled') && userCoversEnabled($cfg);
-        $accMediaHtml = '';
-        $accMediaSide = function_exists('accountMediaSide') ? accountMediaSide($cfg) : 'right';
-        ob_start();
+        $accAvatarHtml = '';
+        $accCoverHtml = '';
+        $accPicSide = function_exists('accountPictureSide') ? accountPictureSide($cfg) : 'left';
+        $accCovSide = function_exists('accountCoverSide') ? accountCoverSide($cfg) : 'right';
         if ($accAvOn || $accCvOn):
             $accMedia = userMediaEditorState($db, $cfg, $meUser, $baseUrl);
             $accMayAv = $accAvOn && userIdHasPermission($db, $cfg, (int)$meUser['id'], 'profile.avatar');
@@ -175,11 +179,13 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
             $accMedia['avatar'] += ['url64' => userAvatarUrl($meUser, 32, $baseUrl, $cfg), 'url128' => userAvatarUrl($meUser, 64, $baseUrl, $cfg)];
             $accMedia['cover'] += ['css' => $accCover !== null ? userCoverCssVars($accCover) : '', 'is_default' => $accCover !== null && !empty($accCover['default'])];
         ?>
-        <div id="acc-media">
+        <?php /* What the editor starts from, once for both blocks and printed here whichever column
+                 they land in: a script element takes no room, and there is exactly one of it. */ ?>
         <script type="application/json" id="acc-media-data"<?= nonceAttr() ?>><?= json_encode($accMedia + [
             'max_bytes' => userMediaMaxBytes($cfg), 'cover_h' => userCoverHeight($cfg), 'cover_hm' => userCoverHeightMobile($cfg),
             'desk_w' => USER_COVER_DESKTOP_W, 'phone_w' => USER_COVER_PHONE_W,
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES) ?></script>
+        <?php ob_start(); ?>
         <?php if ($accAvOn): ?>
         <div class="acc-mail-prefs acc-media" id="acc-avatar">
             <h3 class="acc-sub"><?= _h('account.media_avatar_head') ?></h3>
@@ -216,6 +222,10 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
             <?php endif; ?>
         </div>
         <?php endif; ?>
+        <?php
+        $accAvatarHtml = (string)ob_get_clean();
+        ob_start();
+        ?>
         <?php /* Shown when there is something to do or to know: the account may set a cover, a group
                  exists that would let it, or a cover of its own is being kept. A block that could only
                  ever say "no" to somebody with no way to change that is left out altogether. */ ?>
@@ -262,11 +272,9 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
             <?php endif; ?>
         </div>
         <?php endif; ?>
-        </div><?php /* /#acc-media */ ?>
-        <?php endif; ?>
         <?php
-        $accMediaHtml = (string)ob_get_clean();
-        if ($accMediaSide === 'left') echo $accMediaHtml;
+        $accCoverHtml = (string)ob_get_clean();
+        endif;
         ?>
         <?php if ($accHasEmail): ?>
         <div class="acc-mail-prefs">
@@ -332,6 +340,11 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
                 <p class="text-muted acc-pref-note"><?= __('account.sessions_note') ?></p>
             </div>
         </div>
+        <?php /* The picture and the cover, each where its own setting says (1.66.0): here, at the
+                 end of this card after Account security — the picture's shipped place — or at the
+                 end of the right-hand card further down. Picture first when both land here. */ ?>
+        <?php if ($accPicSide === 'left') echo $accAvatarHtml; ?>
+        <?php if ($accCovSide === 'left') echo $accCoverHtml; ?>
     </div>
     <div class="account-card">
         <h2><?= _h('account.groups') ?></h2>
@@ -444,10 +457,11 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
             <?php endif; ?>
         </div>
 <?php endif; ?>
-<?php /* The picture and the cover, when `account_media_side` says the right-hand card (1.64.0, the
-         shipped answer): under the privacy answers, at the end of the things a member can change
-         about themselves. Exactly the markup built above — one block, two possible places. */ ?>
-<?php if ($accMediaSide !== 'left') echo $accMediaHtml; ?>
+<?php /* The picture and the cover when their settings say the right-hand card (1.66.0 — the cover's
+         shipped place): under the privacy answers, at the end of the things a member can change
+         about themselves. Exactly the markup built above — each block one piece, two possible places. */ ?>
+<?php if ($accPicSide === 'right') echo $accAvatarHtml; ?>
+<?php if ($accCovSide === 'right') echo $accCoverHtml; ?>
 <?php
 // WHERE THIS ACCOUNT SIGNS IN FROM. Shown to the person holding it, not only to the operator: an
 // account that a forum created on somebody's behalf should say so to them, and the sentence about

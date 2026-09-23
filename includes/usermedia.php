@@ -146,16 +146,25 @@ function userCoverOverlay(array $cfg): string
 }
 
 /**
- * Which card of the account page holds the Picture and Cover blocks (1.64.0): 'left' | 'right'.
+ * Which card of the account page holds the Picture block (1.66.0): 'left' | 'right'.
  *
- * The blocks are rendered ONCE, into a buffer, and echoed at whichever position this names — so the
- * ids and the classes are the same either way and assets/js/media-editor.js does not know or care
- * which card it is working in. 'right' is the shipped answer: the left card is the facts about the
- * account and these are two things to DO, which is what the right card already holds.
+ * Until 1.66.0 one setting (`account_media_side`) moved the picture and the cover together; the owner
+ * wanted them apart. Each block is rendered ONCE, into a buffer of its own, and echoed at whichever
+ * position its setting names — so its ids and classes are the same either way and
+ * assets/js/media-editor.js does not know or care which card it is working in.
+ *
+ * 'left' is the shipped answer for the picture — at the end of the card that holds Account security,
+ * which is where the owner wants it. Anything that is not 'right' reads as the default.
  */
-function accountMediaSide(array $cfg): string
+function accountPictureSide(array $cfg): string
 {
-    return (string)($cfg['account_media_side'] ?? 'right') === 'left' ? 'left' : 'right';
+    return (string)($cfg['account_picture_side'] ?? 'left') === 'right' ? 'right' : 'left';
+}
+
+/** The same question for the Cover block (1.66.0). 'right' — under the privacy answers — as shipped. */
+function accountCoverSide(array $cfg): string
+{
+    return (string)($cfg['account_cover_side'] ?? 'right') === 'left' ? 'left' : 'right';
 }
 
 /**

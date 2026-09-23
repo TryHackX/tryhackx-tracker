@@ -518,7 +518,9 @@
         if (!n) return null;
         try { return JSON.parse(n.textContent || '{}'); } catch (e) { return null; }
     })();
-    if (!data || !document.getElementById('acc-media')) return;
+    // Either block is enough to wire (1.66.0): each lands in whichever card its own setting names,
+    // so there is no one wrapper round both any more — block() below finds each by its id.
+    if (!data || !(document.getElementById('acc-avatar') || document.getElementById('acc-cover'))) return;
     const csrf = () => { const n = document.getElementById('account-csrf'); return n ? n.value : ''; };
 
     /** POST to user_avatar / user_cover. Multipart: the file, when there is one, travels as itself. */

@@ -808,10 +808,10 @@
                     </div>
                     <div class="col-md-3" data-setting="shout_order">
                         <label class="form-label" for="setting-shout_order"><?= _h('settings.shout_order') ?></label>
-                        <?php $shOrder = function_exists('shoutOrder') ? shoutOrder($cfg) : 'top'; ?>
+                        <?php $shOrder = function_exists('shoutOrder') ? shoutOrder($cfg) : 'bottom'; ?>
                         <select class="form-select bg-dark text-light border-secondary" name="shout_order" id="setting-shout_order">
-                            <option value="top" <?= $shOrder === 'top' ? 'selected' : '' ?>><?= _h('settings.shout_order_top') ?></option>
                             <option value="bottom" <?= $shOrder === 'bottom' ? 'selected' : '' ?>><?= _h('settings.shout_order_bottom') ?></option>
+                            <option value="top" <?= $shOrder === 'top' ? 'selected' : '' ?>><?= _h('settings.shout_order_top') ?></option>
                         </select>
                         <small class="settings-hint"><?= __('settings.shout_order_hint') ?></small>
                     </div>
@@ -849,6 +849,19 @@
                         <label class="form-label"><?= _h('settings.shout_flood_seconds') ?></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_flood_seconds" value="<?= sanitize($cfg['shout_flood_seconds'] ?? '5') ?>" min="0" max="300">
                         <small class="settings-hint"><?= __('settings.shout_flood_seconds_hint') ?></small>
+                    </div>
+                    <?php /* 1.66.0: the two windows on a member's own line, measured by the server from
+                             when it was said. Each hint says what ITS zero means, because they mean
+                             opposite things: no editing at all, and no limit on taking a line back. */ ?>
+                    <div class="col-md-3" data-setting="shout_edit_minutes">
+                        <label class="form-label" for="setting-shout_edit_minutes"><?= _h('settings.shout_edit_minutes') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_edit_minutes" id="setting-shout_edit_minutes" value="<?= (int)(function_exists('shoutEditMinutes') ? shoutEditMinutes($cfg) : 10) ?>" min="0" max="1440">
+                        <small class="settings-hint"><?= __('settings.shout_edit_minutes_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_delete_own_minutes">
+                        <label class="form-label" for="setting-shout_delete_own_minutes"><?= _h('settings.shout_delete_own_minutes') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_delete_own_minutes" id="setting-shout_delete_own_minutes" value="<?= (int)(function_exists('shoutDeleteOwnMinutes') ? shoutDeleteOwnMinutes($cfg) : 10) ?>" min="0" max="1440">
+                        <small class="settings-hint"><?= __('settings.shout_delete_own_minutes_hint') ?></small>
                     </div>
                     <div class="col-md-3" data-setting="shout_keep_rows">
                         <label class="form-label"><?= _h('settings.shout_keep_rows') ?></label>
@@ -1629,14 +1642,25 @@
                         </select>
                         <small class="settings-hint"><?= __('settings.profiles_default_mode_hint') ?></small>
                     </div>
-                    <div class="col-md-3" data-setting="account_media_side">
-                        <label class="form-label" for="setting-account_media_side"><?= _h('settings.account_media_side') ?></label>
-                        <?php $pmSide = function_exists('accountMediaSide') ? accountMediaSide($cfg) : 'right'; ?>
-                        <select class="form-select bg-dark text-light border-secondary" name="account_media_side" id="setting-account_media_side">
-                            <option value="right" <?= $pmSide === 'right' ? 'selected' : '' ?>><?= _h('settings.account_media_side_right') ?></option>
-                            <option value="left" <?= $pmSide === 'left' ? 'selected' : '' ?>><?= _h('settings.account_media_side_left') ?></option>
+                    <?php /* 1.66.0: one control per block, in place of the single "Picture and cover on
+                             the account page" (account_media_side, removed by the v72 migration). */ ?>
+                    <div class="col-md-3" data-setting="account_picture_side">
+                        <label class="form-label" for="setting-account_picture_side"><?= _h('settings.account_picture_side') ?></label>
+                        <?php $pmPicSide = function_exists('accountPictureSide') ? accountPictureSide($cfg) : 'left'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="account_picture_side" id="setting-account_picture_side">
+                            <option value="left" <?= $pmPicSide === 'left' ? 'selected' : '' ?>><?= _h('settings.account_side_left') ?></option>
+                            <option value="right" <?= $pmPicSide === 'right' ? 'selected' : '' ?>><?= _h('settings.account_side_right') ?></option>
                         </select>
-                        <small class="settings-hint"><?= __('settings.account_media_side_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.account_picture_side_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="account_cover_side">
+                        <label class="form-label" for="setting-account_cover_side"><?= _h('settings.account_cover_side') ?></label>
+                        <?php $pmCovSide = function_exists('accountCoverSide') ? accountCoverSide($cfg) : 'right'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="account_cover_side" id="setting-account_cover_side">
+                            <option value="left" <?= $pmCovSide === 'left' ? 'selected' : '' ?>><?= _h('settings.account_side_left') ?></option>
+                            <option value="right" <?= $pmCovSide === 'right' ? 'selected' : '' ?>><?= _h('settings.account_side_right') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.account_cover_side_hint') ?></small>
                     </div>
                 </div>
                 <?php /* The two stored images. No name="" anywhere in here on purpose: none of this is a

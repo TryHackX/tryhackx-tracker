@@ -81,15 +81,21 @@ add('settings', {
         'Inicjał to pierwsza litera nazwy na jednym z dwunastu kolorów, wybranym na podstawie nazwy, więc każdy '
         'zachowuje swój. Domyślne zdjęcie poniżej jest używane dopiero wtedy, gdy jest ustawione; do tego czasu '
         'każdy dostaje swój inicjał.'),
-    # 1.64.0: which card of the account page holds Picture and Cover.
-    'account_media_side': ('Picture and cover on the account page', 'Zdjęcie i okładka na stronie konta'),
-    'account_media_side_right': ('In the right-hand card', 'W prawej karcie'),
-    'account_media_side_left': ('In the left-hand card', 'W lewej karcie'),
-    'account_media_side_hint': (
-        'The right-hand card holds what a member can change about themselves; the left one holds the facts about '
-        'their account. Nothing else moves, and neither does anything on the profile page.',
-        'Prawa karta trzyma to, co członek może o sobie zmienić; lewa — fakty o koncie. Nic poza tym się nie '
-        'przesuwa i nic nie zmienia się na stronie profilu.'),
+    # 1.66.0: which card of the account page holds each of the two blocks. Until then one setting
+    # (`account_media_side`, 1.64.0) moved both together; the owner wanted them apart. The two
+    # options name the place precisely, because "left" alone does not say WHERE in the card.
+    'account_picture_side': ('Picture on the account page', 'Zdjęcie na stronie konta'),
+    'account_cover_side': ('Cover on the account page', 'Okładka na stronie konta'),
+    'account_side_left': ('Left-hand card, after Account security', 'Lewa karta, pod Bezpieczeństwem konta'),
+    'account_side_right': ('Right-hand card, under Privacy', 'Prawa karta, pod Prywatnością'),
+    'account_picture_side_hint': (
+        'Where the Picture block is drawn. With both blocks in one card the picture comes first. Nothing else '
+        'moves, and nothing changes on the profile page.',
+        'Gdzie rysuje się blok Zdjęcie. Gdy oba bloki są w jednej karcie, zdjęcie idzie pierwsze. Nic poza tym się '
+        'nie przesuwa i nic nie zmienia się na stronie profilu.'),
+    'account_cover_side_hint': (
+        'Where the Cover block is drawn, on its own — the picture has a setting of its own beside this one.',
+        'Gdzie rysuje się blok Okładka, niezależnie — zdjęcie ma własne ustawienie obok.'),
     'profiles_default_avatar': ('Default picture', 'Domyślne zdjęcie profilowe'),
     'profiles_default_avatar_hint': (
         'Shown for everybody without a picture of their own when the setting above says so. Framed with the same '

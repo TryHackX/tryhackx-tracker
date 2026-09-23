@@ -55,6 +55,12 @@ $out = [
     // The cadence this reader is on, which is not the same number for everybody from 1.60.0: a
     // guest reads and never writes, so `shout_live_seconds_guest` is what answers them.
     'live'     => shoutLiveSecondsFor($cfg, $me === null),
+    // Which language these rows were written for (1.66.0). Every row is formatted per request — the
+    // weekday beside the hour, the "(edited)" mark, the title over a picture — in whatever language
+    // THIS request resolved to (the switcher's cookie outranks the account's saved language, see
+    // langInit()). A poll that set off before a live language switch and lands after it is answering
+    // for the old language; assets/js/shoutbox.js compares this with its own and asks again.
+    'lang'     => langCurrent(),
 ];
 // The pinned line rides with the two answers that FILL the list — the first draw and the "older"
 // button — and never with the poll. `after=` is the append path: a pinned row handed to it would be

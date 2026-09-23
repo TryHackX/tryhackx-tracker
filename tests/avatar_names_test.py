@@ -250,9 +250,13 @@ try:
     check("… a line the site said carries the site's own mark", rs.get("avatar") == SITE_MARK and rs.get("system") is True, rs)
     check("… and so does one the site said ABOUT somebody, signed with their name", rb.get("avatar") == SITE_MARK
           and rb.get("user") == BOB and rb.get("system") is True, rb)
+    # Still an EXACT set: 1.66.0 adds the day beside the hour (day, dow), the two windows (editable,
+    # edit_left, del_left) and the mark a correction leaves (edited, edited_at, edited_mod) — and
+    # nothing else: no picture hash, no raw body, no database timestamp.
     check("… and the row still carries user_id, which the shoutbox always sent, and nothing new besides the address",
           keys([ra]) == {tuple(sorted(["id", "user", "user_id", "avatar", "time", "at", "ts", "html", "own", "system", "pinned",
-                                        "deletable", "mentions_me", "friend"]))}, keys([ra]))
+                                        "deletable", "mentions_me", "friend",
+                                        "day", "dow", "editable", "edit_left", "del_left", "edited", "edited_at", "edited_mod"]))}, keys([ra]))
     seen += [r.get("avatar", "") for r in rows]
 
     s, html = me.page("?action=shoutbox")

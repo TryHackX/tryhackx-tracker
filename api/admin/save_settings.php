@@ -50,6 +50,8 @@ $allowed = [
     'shout_enabled', 'shout_placement', 'shout_order', 'shout_widget_rows', 'shout_page_rows', 'shout_max_chars',
     'shout_flood_seconds', 'shout_live_seconds', 'shout_keep_rows', 'shout_keep_days',
     'shout_format', 'shout_rules',
+    // the two windows on a member's own line (1.66.0)
+    'shout_edit_minutes', 'shout_delete_own_minutes',
     // its emotes and stickers (1.59.0)
     'shout_emotes_enabled', 'shout_emote_max_kb', 'shout_emote_max_px', 'shout_emote_per_user',
     'shout_stickers_enabled', 'shout_emote_approval',
@@ -60,7 +62,9 @@ $allowed = [
     // pictures and profile covers (1.63.0, includes/usermedia.php). The default picture and cover
     // themselves are NOT here: they are stored bytes, written by admin/user_media, never typed.
     'avatars_enabled', 'covers_enabled', 'avatar_max_kb', 'avatar_max_mp',
-    'cover_height', 'cover_height_mobile', 'cover_overlay', 'avatar_default', 'account_media_side',
+    // Which card of the account page each block is in (1.66.0 — `account_media_side` moved both
+    // together until then, and is gone: a key nothing reads must not be saveable either).
+    'cover_height', 'cover_height_mobile', 'cover_overlay', 'avatar_default', 'account_picture_side', 'account_cover_side',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -348,6 +352,10 @@ $intClamp = [
     // visitor does not poll at all, which on a public tracker is most of the traffic.
     'shout_live_seconds_guest' => [0, 300, 30],
     'shout_keep_rows' => [100, 100000, 2000], 'shout_keep_days' => [1, 3650, 30],
+    // The two windows (1.66.0), in minutes. 0 is a real answer for both and means OPPOSITE things:
+    // no editing at all, and no limit on deleting your own. A day at most — past that a correction is
+    // rewriting yesterday's conversation, which is a moderator's decision, not a window's.
+    'shout_edit_minutes' => [0, 1440, 10], 'shout_delete_own_minutes' => [0, 1440, 10],
     // Its pictures. No 0 anywhere: an emote of no kilobytes, no pixels or a person allowed none of
     // them is not a setting, it is the feature switch beside it spelled badly.
     'shout_emote_max_kb' => [8, 512, 64], 'shout_emote_max_px' => [32, 512, 128],
@@ -436,10 +444,10 @@ if (isset($data['shout_placement']) && !in_array($data['shout_placement'], ['hom
 if (isset($data['shout_format']) && !in_array($data['shout_format'], ['plain', 'bbcode', 'markdown'], true)) {
     $data['shout_format'] = 'bbcode';
 }
-// Which end of the room the newest line is at (1.64.0). 'top' is the shipped answer, so it is also
-// what an unknown value becomes.
+// Which end of the room the newest line is at (1.64.0). 'bottom' is the shipped answer again from
+// 1.66.0, so it is also what an unknown value becomes.
 if (isset($data['shout_order']) && !in_array($data['shout_order'], ['top', 'bottom'], true)) {
-    $data['shout_order'] = 'top';
+    $data['shout_order'] = 'bottom';
 }
 // The address the room answers on. Coerced to the literal when it is not a legal action name, or
 // when it is already another page's — asked of siteRoutes() rather than of a list written out here,
@@ -463,9 +471,13 @@ if (isset($data['cover_overlay']) && !in_array($data['cover_overlay'], ['gradien
 if (isset($data['avatar_default']) && !in_array($data['avatar_default'], ['generated', 'image'], true)) {
     $data['avatar_default'] = 'generated';
 }
-// Which card of the account page the Picture and Cover blocks are drawn in (1.64.0).
-if (isset($data['account_media_side']) && !in_array($data['account_media_side'], ['left', 'right'], true)) {
-    $data['account_media_side'] = 'right';
+// Which card of the account page each block is drawn in (1.66.0): an unknown value becomes the
+// block's own shipped side — the picture on the left, the cover on the right.
+if (isset($data['account_picture_side']) && !in_array($data['account_picture_side'], ['left', 'right'], true)) {
+    $data['account_picture_side'] = 'left';
+}
+if (isset($data['account_cover_side']) && !in_array($data['account_cover_side'], ['left', 'right'], true)) {
+    $data['account_cover_side'] = 'right';
 }
 // House rules are a line of TEXT above the box — no markup is rendered from it, so it is only
 // bounded and stripped of control characters.

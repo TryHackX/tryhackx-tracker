@@ -38,3 +38,20 @@ add('common', {
     'result':        ('Result', 'Wynik'),
     'language':      ('Language', 'Język'),
 })
+
+# ── 1.66.0: the short name of a weekday ─────────────────────────────────────
+# Beside the hour in the shoutbox ("pon 21:43"), read by userDisplayWeekday() in includes/db_clock.php.
+# Numbered the way ISO-8601 and PHP's date('N') number them: 1 = Monday … 7 = Sunday. From the
+# dictionary rather than a system locale on purpose: the site has never depended on which locales a
+# server happens to have installed. The Polish is the ordinary dictionary abbreviation without its
+# full stop — the owner's own example is "pon 21:43" — and lower case, as Polish writes day names.
+# The browser has the same seven under `js.common.dow_*` (tools/lang_src.d/js.py).
+add('common', {
+    'dow_1': ('Mon', 'pon'),
+    'dow_2': ('Tue', 'wt'),
+    'dow_3': ('Wed', 'śr'),
+    'dow_4': ('Thu', 'czw'),
+    'dow_5': ('Fri', 'pt'),
+    'dow_6': ('Sat', 'sob'),
+    'dow_7': ('Sun', 'niedz'),
+})

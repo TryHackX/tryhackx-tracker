@@ -157,3 +157,24 @@ add('shout', {
     'img_open': ('Click to enlarge — Ctrl+click opens the original in a new tab',
                  'Kliknij, aby powiększyć — Ctrl+klik otwiera oryginał w nowej karcie'),
 })
+
+# ── 1.66.0: correcting a line, the mark it leaves, and the way back down ────
+# The pencil beside the pin (or in its place), and what a corrected line says beside its time. A line
+# somebody ELSE changed says who in general terms, because a reader must be able to tell a typo the
+# author fixed from words a moderator put under their name. The Polish avoids agreeing a participle
+# with anything: "edytowano" is impersonal, and "edytował moderator" names the one who did it.
+# `:at` is the exact moment, in the reader's zone with its offset. The browser draws the same strings
+# for a row it appends (`js.shout.*` in tools/lang_src.d/js.py) and they must stay identical.
+add('shout', {
+    'edit':             ('Edit', 'Edytuj'),
+    'edit_title':       ('Correct this line', 'Popraw ten wpis'),
+    'edited':           ('(edited)', '(edytowano)'),
+    'edited_mod':       ('(edited by a moderator)', '(edytował moderator)'),
+    'edited_title':     ('Edited :at', 'Edytowano :at'),
+    'edited_mod_title': ('Edited by a moderator, :at', 'Edytował moderator, :at'),
+    # The button pinned to the end of the list that new lines arrive at, shown only while the reader
+    # has scrolled away from it. The count sits beside the words as a number of its own, so neither
+    # language has to agree a noun with it.
+    'new_lines':        ('New lines', 'Nowe wpisy'),
+    'new_lines_title':  ('Jump to the newest lines', 'Przejdź do najnowszych wpisów'),
+})

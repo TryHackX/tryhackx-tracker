@@ -4732,3 +4732,42 @@ add('js.app', {
     'files_folder_hit': ('A file matching your search is in this folder',
         'W tym folderze jest plik pasujący do wyszukiwania'),
 })
+
+# ── 1.66.0: the weekday, a corrected line, and the way back to the newest ──
+# The seven day names the server prints beside the hour (common.dow_* in tools/lang_src.d/common.py),
+# again for the browser: a row the live language switch cannot reach — one loaded with "Older", which
+# a fresh render of the page does not contain — is renamed from its `data-dow` with these.
+add('js.common', {
+    'dow_1': ('Mon', 'pon'),
+    'dow_2': ('Tue', 'wt'),
+    'dow_3': ('Wed', 'śr'),
+    'dow_4': ('Thu', 'czw'),
+    'dow_5': ('Fri', 'pt'),
+    'dow_6': ('Sat', 'sob'),
+    'dow_7': ('Sun', 'niedz'),
+})
+# The pencil and the "(edited)" mark exactly as templates/partials/shoutbox_widget.php has them
+# (shout.edit, shout.edit_title, shout.edited*): the two renderers must draw identical rows. The rest
+# is the editor the row turns into, and what it says when the server refuses.
+add('js.shout', {
+    'edit':             ('Edit', 'Edytuj'),
+    'edit_title':       ('Correct this line', 'Popraw ten wpis'),
+    'edited':           ('(edited)', '(edytowano)'),
+    'edited_mod':       ('(edited by a moderator)', '(edytował moderator)'),
+    'edited_title':     ('Edited :at', 'Edytowano :at'),
+    'edited_mod_title': ('Edited by a moderator, :at', 'Edytował moderator, :at'),
+    'edit_write':       ('Write', 'Pisz'),
+    'edit_preview':     ('Preview', 'Podgląd'),
+    'edit_save':        ('Save', 'Zapisz'),
+    'edit_cancel':      ('Cancel', 'Anuluj'),
+    'edit_label':       ('Correct the line', 'Popraw wpis'),
+    'edit_hint':        ('Enter saves, Shift+Enter starts a new line, Esc cancels.',
+                         'Enter zapisuje, Shift+Enter zaczyna nową linię, Esc anuluje.'),
+    'err_edit_denied':  ('You cannot edit this line.', 'Nie możesz edytować tego wpisu.'),
+    'err_too_late_edit': ('The time for correcting this line has run out.',
+                          'Czas na poprawienie tego wpisu już minął.'),
+    'err_too_late_delete': ('The time for taking this line back has run out.',
+                            'Czas na wycofanie tego wpisu już minął.'),
+    'new_lines':        ('New lines', 'Nowe wpisy'),
+    'new_lines_title':  ('Jump to the newest lines', 'Przejdź do najnowszych wpisów'),
+})

@@ -122,6 +122,27 @@ function userDisplayTime(int $unix, DateTimeZone $tz, string $format = 'Y-m-d H:
     return (new DateTimeImmutable('@' . $unix))->setTimezone($tz)->format($format);
 }
 
+/**
+ * Which day of the week an instant falls on FOR THIS READER: 1 (Monday) … 7 (Sunday), ISO-8601's own
+ * numbering (1.66.0). In their zone, because "Monday 23:30" in Warsaw is already Tuesday in Tokyo, and
+ * a weekday from another clock is the hour-in-the-wrong-zone bug again, one field over.
+ */
+function userDisplayDow(int $unix, DateTimeZone $tz): int {
+    return (int)(new DateTimeImmutable('@' . $unix))->setTimezone($tz)->format('N');
+}
+
+/**
+ * The short name of that day in the reader's language — "pon", "Mon" — taken from the DICTIONARY
+ * (`common.dow_1` … `common.dow_7`), never from PHP's locale: date('D') is English whatever the
+ * reader speaks, strftime() is gone, and setlocale() is a per-process switch on a server whose
+ * installed locales this site has never depended on. The number is keyed the same way in the browser
+ * (`js.common.dow_*`), which is how a row the live language switch cannot reach still gets its day
+ * renamed (assets/js/shoutbox.js).
+ */
+function userDisplayWeekday(int $unix, DateTimeZone $tz): string {
+    return __('common.dow_' . userDisplayDow($unix, $tz));
+}
+
 /** "UTC+02:00" — a zone's offset NOW (or at `$at`), the way both selects print it beside the name. */
 function tzOffsetLabel(DateTimeZone $tz, ?int $at = null): string {
     $off = $tz->getOffset(new DateTimeImmutable('@' . ($at ?? time())));

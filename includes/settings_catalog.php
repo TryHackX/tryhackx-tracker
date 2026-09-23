@@ -272,7 +272,8 @@ function settingsCatalogKeywords(): array {
         'cover_height'             => 'cover height pixels desktop profile band banner header tall',
         'cover_height_mobile'      => 'cover height pixels mobile phone profile band banner header small screen',
         'cover_overlay'            => 'cover overlay readability gradient darken shade dim text contrast name legible',
-        'account_media_side'       => 'account page picture cover block side left right column card position where drawn strona konta zdjecie okladka lewa prawa',
+        'account_picture_side'     => 'account page picture avatar photo block side left right column card position where drawn security strona konta zdjecie awatar lewa prawa',
+        'account_cover_side'       => 'account page cover banner header block side left right column card position where drawn privacy strona konta okladka tlo lewa prawa',
         'avatar_default'           =>'default avatar picture letter initials generated fallback no picture placeholder image',
         'avatar_default_image'     => 'default avatar picture image upload site fallback everybody without a picture position',
         'cover_default_image'      => 'default cover banner header image upload site fallback everybody without a cover position',
@@ -299,6 +300,8 @@ function settingsCatalogKeywords(): array {
         'shout_keep_days'          => 'shoutbox retention days keep age prune janitor old lines history',
         'shout_format'             => 'shoutbox format bbcode markdown plain text markup formatting default',
         'shout_rules'              => 'shoutbox rules notice line above the box house rules regulamin',
+        'shout_edit_minutes'       => 'shoutbox edit correct fix typo own line window minutes how long change mistake edytuj poprawka popraw wpis',
+        'shout_delete_own_minutes' => 'shoutbox delete remove take back own line window minutes how long limit usun wycofaj wpis',
         // ── Shoutbox emotes and stickers (1.59.0) ──
         'shout_emotes_enabled'     => 'shoutbox emotes emoticons smileys custom images pictures svg png gif webp emotki obrazki master switch',
         'shout_emote_max_kb'       => 'shoutbox emote size limit kilobytes kb upload maximum picture file',

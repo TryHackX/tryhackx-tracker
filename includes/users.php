@@ -114,8 +114,18 @@ function userPermissionList(): array {
         // the second one also opens the Purge button in Settings.
         'shout.view'     => 'Read the shoutbox',
         'shout.post'     => 'Write in the shoutbox',
+        // From 1.66.0 for as long as `shout_delete_own_minutes` says (0 = no limit): taking back what
+        // you just said is tidying, taking back yesterday's argument is rewriting the room.
         'shout.delete_own' => 'Delete their own shouts',
         'shout.moderate' => 'Delete anyone\'s shouts, and clear the shoutbox',
+        // Correcting a line (1.66.0). TWO ids, and they are separate on purpose: fixing a typo in your
+        // own sentence for a few minutes (`shout_edit_minutes`) is the same kind of right as taking it
+        // back, and goes to members; changing somebody ELSE's words leaves a sentence under their name
+        // that they did not write, so it is granted deliberately — to the seeded moderator group and to
+        // nobody else — and never rides along with shout.moderate. Every such edit is marked on the
+        // line itself and written to the audit log.
+        'shout.edit_own' => 'Correct their own shouts for a while',
+        'shout.edit_any' => 'Edit anyone\'s shout',
         // Adding a picture to a room everybody reads is not "writing in the shoutbox", so it is not
         // part of shout.post (1.59.0). The admin group passes every check anyway; the owner uploads
         // from Settings → Shoutbox. Give this to a group and its members may add emotes and stickers
@@ -217,7 +227,7 @@ function userGroupPresets(): array {
         'moderator' => [
             'label' => 'Moderator',
             'about' => 'Works the report queue and the whitelist. No settings, no backups, no log, no message queue.',
-            // EXACTLY the v25 seed plus what v63 and v71 added to it — see trackerSchemaDataMigrations().
+            // EXACTLY the v25 seed plus what v63, v71 and v72 added to it — see trackerSchemaDataMigrations().
             // Deleting whitelist rows is not here and neither is panel.users.edit / .groups: those are
             // boxes the operator ticks on purpose. panel.messages.* stays out as well (a reported
             // private message is a different kind of access; tests/people_test.php holds that line).
@@ -233,8 +243,9 @@ function userGroupPresets(): array {
                         'content.view',
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         // The room is moderated from the room, not from a panel page (1.58.0), so the
-                        // reading ids come with it — see the v63 grant in includes/schema.php.
-                        'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'],
+                        // reading ids come with it — see the v63 grant in includes/schema.php. Editing
+                        // anybody's line is the v72 grant, to this group alone.
+                        'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate', 'shout.edit_any'],
         ],
         'reviewer' => [
             'label' => 'Content reviewer',
@@ -264,7 +275,8 @@ function userGroupPresets(): array {
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         'lists.use', 'lists.public',
                         'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check', 'sounds.use',
-                        'shout.view', 'shout.post', 'shout.delete_own', 'profile.avatar'],
+                        // shout.edit_own is v72's, beside the delete it mirrors.
+                        'shout.view', 'shout.post', 'shout.delete_own', 'shout.edit_own', 'profile.avatar'],
         ],
         // v71. ONLY the extras: a premium account is a member as well (the default group is granted
         // at registration and `v1/users/provision` puts a bought account in it), so repeating the

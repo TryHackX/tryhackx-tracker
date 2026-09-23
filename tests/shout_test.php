@@ -88,6 +88,93 @@ check('… and the seeded moderator group may moderate a room it can also see',
 check('with accounts off the legacy fallback closes the whole feature',
       !userLegacyDefault('shout.view') && !userLegacyDefault('shout.post') && !userLegacyDefault('shout.moderate'));
 
+// ── 1.66.0: schema 72, the two edit ids and their grant ──────────────────────
+// Asked of the migration itself, like v63 above: both ids are taken off every group, the marker is
+// forgotten, and the data migrations run again. This happens BEFORE any account below is asked what
+// it may do — userEffectivePermissions() caches per account for the life of the process.
+check('schema version is at least 72', (int)($cfg['schema_version'] ?? 0) >= 72, (string)($cfg['schema_version'] ?? '?'));
+foreach (['edited_at', 'edited_by'] as $col) check("shouts.$col exists", schemaColumnExists($db, 'shouts', $col));
+check('an edit\'s flood check has an index to answer from', schemaIndexExists($db, 'shouts', 'idx_shouts_edited_by'));
+check('shout_mentions.late exists (a mention an edit added still counts)', schemaColumnExists($db, 'shout_mentions', 'late'));
+foreach (['shout.edit_own', 'shout.edit_any'] as $p) check("$p is in the registry", isset(userPermissionList()[$p]));
+$presets = userGroupPresets();
+check('the member preset corrects its own lines and never edits anybody else\'s',
+      in_array('shout.edit_own', $presets['member']['perms'], true) && !in_array('shout.edit_any', $presets['member']['perms'], true));
+check('the moderator preset edits anybody\'s', in_array('shout.edit_any', $presets['moderator']['perms'], true));
+$gperms = function (string $slug) use ($db): array {
+    $st = $db->prepare("SELECT permissions FROM user_groups WHERE slug = ?");
+    $st->execute([$slug]);
+    $j = json_decode((string)$st->fetchColumn(), true);
+    return is_array($j) ? $j : [];
+};
+foreach (['member', 'moderator', 'guest'] as $slug) {
+    $p = $gperms($slug);
+    unset($p['shout.edit_own'], $p['shout.edit_any']);
+    $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = ?")->execute([json_encode($p, JSON_UNESCAPED_SLASHES), $slug]);
+}
+$db->exec("DELETE FROM settings WHERE `key` = 'schema_grant_v72_shout_edit'");
+trackerSchemaDataMigrations($db, getSettings($db, true));
+$mp = $gperms('member');
+$modp = $gperms('moderator');
+$gp = $gperms('guest');
+check('the v72 grant gives members shout.edit_own and nothing more',
+      ($mp['shout.edit_own'] ?? null) === true && empty($mp['shout.edit_any']), json_encode(array_keys($mp)));
+check('… and shout.edit_any to the moderator group ONLY', ($modp['shout.edit_any'] ?? null) === true, json_encode(array_keys($modp)));
+check('… and a guest neither', empty($gp['shout.edit_own']) && empty($gp['shout.edit_any']));
+check('… and it records its marker, so an operator who takes one away is not overruled next release',
+      isset(getSettings($db, true)['schema_grant_v72_shout_edit']));
+check('shout.edit_any never rides along with shout.moderate — they are two grants in the source',
+      str_contains((string)file_get_contents($root . '/includes/schema.php'), "'moderator' => ['shout.edit_any']"));
+
+// The order: 'bottom' again, and a stored 'top' moved back ONCE (it was the default for one afternoon).
+check('the room ships in chat order again', ($defaults['shout_order'] ?? null) === 'bottom', var_export($defaults['shout_order'] ?? null, true));
+check('shoutOrder() reads anything but "top" as the chat order',
+      shoutOrder([]) === 'bottom' && shoutOrder(['shout_order' => 'top']) === 'top'
+      && shoutOrder(['shout_order' => 'bottom']) === 'bottom' && shoutOrder(['shout_order' => 'sideways']) === 'bottom');
+$orderWas = $db->query("SELECT `value` FROM settings WHERE `key` = 'shout_order'")->fetchColumn();
+setSetting($db, 'shout_order', 'top');
+$db->exec("DELETE FROM settings WHERE `key` = 'schema_once_v72_shout_order_bottom'");
+trackerSchemaDataMigrations($db, getSettings($db, true));
+check('a stored "top" is moved back to "bottom" by the one-time v72 step',
+      (string)$db->query("SELECT `value` FROM settings WHERE `key` = 'shout_order'")->fetchColumn() === 'bottom');
+setSetting($db, 'shout_order', 'top');
+trackerSchemaDataMigrations($db, getSettings($db, true));
+check('… once: "top" chosen again afterwards is the operator\'s, and stays',
+      (string)$db->query("SELECT `value` FROM settings WHERE `key` = 'shout_order'")->fetchColumn() === 'top');
+if ($orderWas === false) $db->exec("DELETE FROM settings WHERE `key` = 'shout_order'");
+else setSetting($db, 'shout_order', (string)$orderWas);
+
+// The two windows and their clamps: 0 means OPPOSITE things for the two.
+check('the edit window ships at ten minutes, 0 meaning no window at all, and a day at most',
+      ($defaults['shout_edit_minutes'] ?? null) === '10' && shoutEditMinutes([]) === 10
+      && shoutEditMinutes(['shout_edit_minutes' => '0']) === 0 && shoutEditMinutes(['shout_edit_minutes' => '-5']) === 0
+      && shoutEditMinutes(['shout_edit_minutes' => '99999']) === 1440 && shoutEditMinutes(['shout_edit_minutes' => 'x']) === 0);
+check('the delete-your-own window ships at ten minutes, 0 meaning no limit, and a day at most',
+      ($defaults['shout_delete_own_minutes'] ?? null) === '10' && shoutDeleteOwnMinutes([]) === 10
+      && shoutDeleteOwnMinutes(['shout_delete_own_minutes' => '0']) === 0
+      && shoutDeleteOwnMinutes(['shout_delete_own_minutes' => '5000']) === 1440);
+
+// The weekday: from the dictionary, in both languages, and the browser's copy says the same.
+$dowPl = ['pon', 'wt', 'śr', 'czw', 'pt', 'sob', 'niedz'];
+$dowEn = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+$dowOk = true;
+for ($d = 1; $d <= 7; $d++) {
+    $dowOk = $dowOk && langFor('pl', 'common.dow_' . $d) === $dowPl[$d - 1] && langFor('en', 'common.dow_' . $d) === $dowEn[$d - 1]
+          && langFor('pl', 'js.common.dow_' . $d) === $dowPl[$d - 1] && langFor('en', 'js.common.dow_' . $d) === $dowEn[$d - 1];
+}
+check('seven short day names per language, in the server\'s dictionary and the browser\'s alike', $dowOk);
+// 23:30 UTC on Thursday 15 January 2026 is already Friday in Warsaw — the day is the READER's.
+$lateThu = (new DateTimeImmutable('2026-01-15 23:30:00', new DateTimeZone('UTC')))->getTimestamp();
+check('the day of the week is taken in the reader\'s zone (Thursday in UTC, Friday in Warsaw)',
+      userDisplayDow($lateThu, new DateTimeZone('UTC')) === 4 && userDisplayDow($lateThu, new DateTimeZone('Europe/Warsaw')) === 5
+      && userDisplayWeekday($lateThu, new DateTimeZone('UTC')) === __('common.dow_4')
+      && userDisplayWeekday($lateThu, new DateTimeZone('Europe/Warsaw')) === __('common.dow_5'));
+// Read as PHP tokens, so the comment that explains WHY there is no locale is not taken for one.
+$clockNames = array_map(fn($t) => is_array($t) ? strtolower($t[1]) : '',
+                        array_filter(token_get_all((string)file_get_contents($root . '/includes/db_clock.php')),
+                                     fn($t) => is_array($t) && $t[0] === T_STRING));
+check('… and never from a PHP locale', !array_intersect(['setlocale', 'strftime', 'intldateformatter'], $clockNames));
+
 // ── the switches and their clamps ────────────────────────────────────────────
 check('the feature needs accounts AND its own switch',
       !shoutEnabled(['users_enabled' => '0', 'shout_enabled' => '1'])
@@ -663,6 +750,172 @@ try {
     check('… and a shipped emote through shoutPost() is drawn, and not wrapped',
           !empty($wave['ok']) && str_contains($wh, 'class="shout-emote"') && !str_contains($wh, 'shout-img-link'), $wh);
 
+    // ── 1.66.0: correcting a line, and the window on taking your own back ─────
+    // Every switch this section leans on is SET here. An empty room, so the counts are exact.
+    $db->exec("DELETE FROM shout_mentions");
+    $db->exec("DELETE FROM shouts");
+    $cfgEd = array_merge($cfgOn, ['shout_edit_minutes' => '10', 'shout_delete_own_minutes' => '10',
+                                  'shout_flood_seconds' => '0', 'shout_max_chars' => '500', 'shout_format' => 'bbcode',
+                                  'desc_allow_bbcode' => '1', 'desc_allow_markdown' => '1', 'desc_max_images' => '3',
+                                  'friends_enabled' => '0', 'shout_emotes_enabled' => '0', 'shout_stickers_enabled' => '0',
+                                  'site_timezone' => 'Europe/Warsaw', 'tracker_schedule_tz' => 'Europe/Warsaw']);
+    $meRow = $row('shtuser'); $modRow = $row('shtmod'); $palRow = $row('shtfriend'); $noneRow = $row('shtnone');
+    $shaped = function (array $reader, int $id) use ($db, $cfgEd): array {
+        foreach (shoutRows($db, $cfgEd, $reader, 50, 0) as $r) if ((int)$r['id'] === $id) return $r;
+        return [];
+    };
+    $ageBy = function (int $id, int $minutes) use ($db) {
+        $db->prepare("UPDATE shouts SET created_at = NOW() - INTERVAL ? MINUTE WHERE id = ?")->execute([$minutes, $id]);
+    };
+    $w = shoutPost($db, $cfgEd, $meRow, 'a typo in this lnie', 'bbcode', '');
+    $eid = (int)($w['id'] ?? 0);
+    $mine = $shaped($meRow, $eid);
+    check('a fresh line of my own offers me the pencil and the cross, each with the window it has left',
+          ($mine['editable'] ?? null) === true && ($mine['edit_left'] ?? 0) > 590 && ($mine['edit_left'] ?? 0) <= 600
+          && ($mine['deletable'] ?? null) === true && ($mine['del_left'] ?? 0) > 590 && ($mine['del_left'] ?? 0) <= 600,
+          json_encode(array_intersect_key($mine, array_flip(['editable', 'edit_left', 'deletable', 'del_left']))));
+    $theirs = $shaped($palRow, $eid);
+    check('… another member is offered neither on it', ($theirs['editable'] ?? null) === false && ($theirs['deletable'] ?? null) === false);
+    $asMod = $shaped($modRow, $eid);
+    check('… a moderator is offered both, with no clock on either',
+          ($asMod['editable'] ?? null) === true && ($asMod['edit_left'] ?? null) === 0
+          && ($asMod['deletable'] ?? null) === true && ($asMod['del_left'] ?? null) === 0);
+    check('… and a guest nothing', ($shaped([], $eid)['editable'] ?? null) === false);
+    check('the row carries a weekday beside the hour, from the dictionary, and the hour is unchanged',
+          ($mine['day'] ?? '') === __('common.dow_' . (int)($mine['dow'] ?? 0)) && (int)($mine['dow'] ?? 0) >= 1
+          && (int)($mine['dow'] ?? 0) <= 7 && preg_match('/^\d\d:\d\d$/', (string)($mine['time'] ?? '')) === 1,
+          json_encode(array_intersect_key($mine, array_flip(['day', 'dow', 'time', 'at']))));
+
+    $src = shoutEditSource($db, $cfgEd, $meRow, $eid);
+    check('the editor starts from the STORED words and format, and is told how long it has',
+          !empty($src['ok']) && ($src['body'] ?? '') === 'a typo in this lnie' && ($src['format'] ?? '') === 'bbcode'
+          && ($src['left'] ?? 0) > 590, json_encode($src));
+    $auditBefore = (int)$db->query("SELECT COUNT(*) FROM audit_log WHERE action = 'shout.edit'")->fetchColumn();
+    $e = shoutEdit($db, $cfgEd, $meRow, $eid, '  a typo in this [b]line[/b]  ');
+    check('the author corrects it inside the window: saved trimmed, rendered by the same renderer',
+          !empty($e['ok']) && ($e['changed'] ?? null) === true && str_contains((string)($e['row']['html'] ?? ''), '<strong>line</strong>')
+          && (string)$db->query("SELECT body FROM shouts WHERE id = $eid")->fetchColumn() === 'a typo in this [b]line[/b]', json_encode($e));
+    check('… and the line says so: edited, by its author, with the moment in the reader\'s zone',
+          ($e['row']['edited'] ?? null) === true && ($e['row']['edited_mod'] ?? null) === false
+          && preg_match('/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$/', (string)($e['row']['edited_at'] ?? '')) === 1
+          && (int)$db->query("SELECT edited_by FROM shouts WHERE id = $eid")->fetchColumn() === (int)$meRow['id'],
+          json_encode(array_intersect_key($e['row'] ?? [], array_flip(['edited', 'edited_mod', 'edited_at']))));
+    check('… the first page and the poll carry the same mark', ($shaped($meRow, $eid)['edited_at'] ?? 'x') === ($e['row']['edited_at'] ?? 'y')
+          && (shoutRows($db, $cfgEd, $meRow, 1, $eid - 1)[0]['edited_at'] ?? 'z') === ($e['row']['edited_at'] ?? 'y')
+          && (shoutRows($db, $cfgEd, $palRow, 1, $eid - 1)[0]['edited'] ?? null) === true);
+    check('… and tidying your own line is not an audited act',
+          (int)$db->query("SELECT COUNT(*) FROM audit_log WHERE action = 'shout.edit'")->fetchColumn() === $auditBefore);
+    $same = shoutEdit($db, $cfgEd, $meRow, $eid, 'a typo in this [b]line[/b]');
+    check('saving the same words changes nothing and says so', !empty($same['ok']) && ($same['changed'] ?? null) === false);
+
+    // Refusals, each for its own reason, and each leaving the stored words alone.
+    $bodyNow = fn() => (string)$db->query("SELECT body FROM shouts WHERE id = $eid")->fetchColumn();
+    check('an empty correction is refused', (shoutEdit($db, $cfgEd, $meRow, $eid, "  \n ")['error'] ?? '') === 'empty');
+    $long = shoutEdit($db, array_merge($cfgEd, ['shout_max_chars' => '10']), $meRow, $eid, str_repeat('y', 11));
+    check('an over-long one is refused with the limit it was judged against', ($long['error'] ?? '') === 'too_long' && ($long['limit'] ?? 0) === 10);
+    $bad = shoutEdit($db, array_merge($cfgEd, ['desc_max_images' => '0']), $meRow, $eid, 'now [img]https://example.org/a.png[/img]');
+    check('the validator a new line meets refuses a correction too (an image while images are off)',
+          ($bad['error'] ?? '') === 'invalid_body' && ($bad['detail'] ?? '') !== '' && $bodyNow() === 'a typo in this [b]line[/b]', json_encode($bad));
+    check('somebody else\'s line is not a member\'s to correct — whatever the request claims',
+          (shoutEdit($db, $cfgEd, $palRow, $eid, 'words put in my mouth')['error'] ?? '') === 'no_permission' && $bodyNow() === 'a typo in this [b]line[/b]');
+    check('a guest corrects nothing', (shoutEdit($db, $cfgEd, [], $eid, 'x')['error'] ?? '') === 'login');
+    check('an account that may not write here corrects nothing either', (shoutEdit($db, $cfgEd, $noneRow, $eid, 'x')['error'] ?? '') === 'no_permission');
+    $mutedRow = $row('shtmute');
+    $mutedLine = (function () use ($db, $mutedRow) {
+        $db->prepare("INSERT INTO shouts (user_id, body, body_format) VALUES (?, 'said before the mute', 'bbcode')")->execute([(int)$mutedRow['id']]);
+        return (int)$db->lastInsertId();
+    })();
+    check('a silenced account cannot correct its own line — an edit is writing',
+          (shoutEdit($db, $cfgEd, $mutedRow, $mutedLine, 'sneaky')['error'] ?? '') === 'muted'
+          && ($shaped($mutedRow, $mutedLine)['editable'] ?? null) === false);
+    check('a line that is not there is not_found', (shoutEdit($db, $cfgEd, $meRow, 999999999, 'x')['error'] ?? '') === 'not_found');
+
+    // The window, measured by the database against created_at.
+    $ageBy($eid, 11);
+    check('eleven minutes on, the author\'s window has closed: refused, and the pencil is gone',
+          (shoutEdit($db, $cfgEd, $meRow, $eid, 'too late now')['error'] ?? '') === 'too_late'
+          && (shoutEditSource($db, $cfgEd, $meRow, $eid)['error'] ?? '') === 'too_late'
+          && ($shaped($meRow, $eid)['editable'] ?? null) === false && $bodyNow() === 'a typo in this [b]line[/b]');
+    check('… and so has the window on taking it back', (shoutDelete($db, $cfgEd, $meRow, $eid)['error'] ?? '') === 'too_late'
+          && ($shaped($meRow, $eid)['deletable'] ?? null) === false);
+    $cfgNoDelLimit = array_merge($cfgEd, ['shout_delete_own_minutes' => '0']);
+    check('delete-your-own at 0 means no limit — the behaviour before 1.66.0',
+          ($shaped($meRow, $eid)['deletable'] ?? null) === false
+          && (shoutRows($db, $cfgNoDelLimit, $meRow, 50, 0)[0]['deletable'] ?? null) === true
+          && (shoutRows($db, $cfgNoDelLimit, $meRow, 50, 0)[0]['del_left'] ?? null) === 0);
+    $e = shoutEdit($db, $cfgEd, $modRow, $eid, 'a moderator\'s version of this line');
+    check('a moderator holding shout.edit_any edits it at any time',
+          !empty($e['ok']) && ($e['changed'] ?? null) === true && ($shaped($modRow, $eid)['editable'] ?? null) === true, json_encode($e));
+    $seenBy = $shaped($palRow, $eid);
+    check('… and every reader is told a MODERATOR changed these words',
+          ($seenBy['edited'] ?? null) === true && ($seenBy['edited_mod'] ?? null) === true, json_encode(array_intersect_key($seenBy, array_flip(['edited', 'edited_mod']))));
+    $aud = $db->query("SELECT * FROM audit_log WHERE action = 'shout.edit' ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: [];
+    $audDetail = json_decode((string)($aud['detail'] ?? ''), true) ?: [];
+    check('… which is written to the audit log: the shout as the target, who changed it and when',
+          (int)$db->query("SELECT COUNT(*) FROM audit_log WHERE action = 'shout.edit'")->fetchColumn() === $auditBefore + 1
+          && ($aud['target_type'] ?? '') === 'shout' && (string)($aud['target_id'] ?? '') === (string)$eid
+          && ($audDetail['editor'] ?? '') === 'shtmod' && ($audDetail['author'] ?? '') === 'shtuser'
+          && ($audDetail['edited_at'] ?? '') !== '' && ($audDetail['said_at'] ?? '') !== '', json_encode($aud));
+    check('… and a moderator also takes it down at any time', !empty(shoutDelete($db, $cfgEd, $modRow, $eid)['ok']));
+
+    // Zero: no window at all — members do not edit, the moderator still does.
+    $cfgNoEdit = array_merge($cfgEd, ['shout_edit_minutes' => '0']);
+    $z = shoutPost($db, $cfgNoEdit, $meRow, 'fresh, and still not mine to fix', 'bbcode', '');
+    $zid = (int)($z['id'] ?? 0);
+    check('with the edit window at 0 even a brand-new own line has no pencil, and a save is refused',
+          (shoutRows($db, $cfgNoEdit, $meRow, 1, $zid - 1)[0]['editable'] ?? null) === false
+          && (shoutEdit($db, $cfgNoEdit, $meRow, $zid, 'fixed')['error'] ?? '') === 'no_permission');
+    check('… while shout.edit_any still edits it', !empty(shoutEdit($db, $cfgNoEdit, $modRow, $zid, 'fixed by a moderator')['ok']));
+
+    // Nobody rewrites what the site said, a moderator included.
+    $sysEd = shoutSystemPost($db, array_merge($cfgEd, ['shout_system_lines' => '1']), 'The site said this.', null);
+    check('a line the SITE said is nobody\'s to edit, not even a moderator\'s',
+          $sysEd > 0 && (shoutEdit($db, $cfgEd, $modRow, $sysEd, 'rewritten')['error'] ?? '') === 'no_permission'
+          && (shoutRows($db, $cfgEd, $modRow, 1, $sysEd - 1)[0]['editable'] ?? null) === false);
+
+    // Mentions follow the words: a name added gets its row (and counts as unread even below the
+    // reader's mark), a name dropped loses it, a name kept is not told twice.
+    $m = shoutPost($db, $cfgEd, $meRow, 'hello @shtfriend', 'bbcode', '');
+    $mid = (int)($m['id'] ?? 0);
+    $mentionRows = function () use ($db, $mid): array {
+        $st = $db->prepare("SELECT user_id, late FROM shout_mentions WHERE shout_id = ? ORDER BY user_id");
+        $st->execute([$mid]);
+        $out = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $out[(int)$r['user_id']] = (int)$r['late'];
+        return $out;
+    };
+    check('the line names one person', $mentionRows() === [(int)$palRow['id'] => 0], json_encode($mentionRows()));
+    // Both readers have read past the line already: whatever an edit does must still reach them.
+    shoutSeen($db, (int)$palRow['id'], $mid);
+    shoutSeen($db, (int)$modRow['id'], $mid);
+    check('… and the person it names has read it', shoutUnreadCounts($db, $cfgEd, $row('shtfriend'))['mention'] === 0);
+    $e = shoutEdit($db, $cfgEd, $meRow, $mid, 'hello @shtmod');
+    check('an edit that swaps the name: the dropped one loses their row, the new one gets one, marked late',
+          !empty($e['ok']) && $mentionRows() === [(int)$modRow['id'] => 1], json_encode($mentionRows()));
+    check('… and it counts as unread for them though they had read past the line',
+          shoutUnreadCounts($db, $cfgEd, $row('shtmod'))['mention'] === 1
+          && shoutUnreadCounts($db, $cfgEd, $row('shtmod'))['shout'] === 1, json_encode(shoutUnreadCounts($db, $cfgEd, $row('shtmod'))));
+    check('… the person dropped from it is not left counting it', shoutUnreadCounts($db, $cfgEd, $row('shtfriend'))['mention'] === 0);
+    check('… and the row shows it is theirs', ($shaped($modRow, $mid)['mentions_me'] ?? null) === true
+          && ($shaped($palRow, $mid)['mentions_me'] ?? null) === false);
+    shoutSeen($db, (int)$modRow['id'], $mid);
+    check('looking at the room clears it', shoutUnreadCounts($db, $cfgEd, $row('shtmod'))['mention'] === 0 && $mentionRows() === [(int)$modRow['id'] => 0]);
+    $e = shoutEdit($db, $cfgEd, $meRow, $mid, 'hello @shtmod and @shtfriend');
+    $wantRows = [(int)$palRow['id'] => 1, (int)$modRow['id'] => 0];
+    ksort($wantRows);
+    check('an edit that keeps a name leaves that row alone — nobody already told is told twice',
+          !empty($e['ok']) && $mentionRows() === $wantRows, json_encode($mentionRows()));
+
+    // An edit box is a flood vector too: the interval applies between EDITS, and a post does not
+    // count against it — fixing the typo in what you just said is the commonest edit there is.
+    $cfgFloodEd = array_merge($cfgEd, ['shout_flood_seconds' => '60']);
+    $fl = shoutEdit($db, $cfgFloodEd, $meRow, $mid, 'hello again @shtmod');
+    check('a second edit inside the flood interval is refused, with how long is left',
+          ($fl['error'] ?? '') === 'flood' && ($fl['retry_after'] ?? 0) > 0 && ($fl['retry_after'] ?? 0) <= 60, json_encode($fl));
+    $pp = shoutPost($db, $cfgEd, $palRow, 'just said, with a tpyo', 'bbcode', '');
+    check('… while somebody who has only just POSTED may correct it at once',
+          !empty(shoutEdit($db, $cfgFloodEd, $palRow, (int)($pp['id'] ?? 0), 'just said, with a typo')['ok']));
+
     // ── retention ────────────────────────────────────────────────────────────
     // A room of exactly known size, so both halves can be measured rather than estimated.
     $db->exec("DELETE m FROM shout_mentions m JOIN shouts s ON s.id = m.shout_id");
@@ -864,9 +1117,11 @@ check('the permission matrix in Settings lists the new id too',
       str_contains($adminJs, "'shout.emote_auto'"));
 
 // ── 1.62.0, by reading the wiring ────────────────────────────────────────────
+// 1.66.0: the hour now follows the day's element as ONE text node (" 21:43"), in both renderers.
 check('both renderers print the SERVER\'s hour and title, and neither slices a database string',
       str_contains($widget, "sanitize((string)(\$s['time'] ?? ''))") && !str_contains($widget, "substr((string)(\$s['at']")
-      && str_contains($boxJs, "text: String(r.time || '')") && !str_contains($boxJs, 'at.slice(11, 16)'));
+      && str_contains($boxJs, "var day = String(r.day || ''), time = String(r.time || '');")
+      && str_contains($boxJs, "document.createTextNode(' ' + time)") && !str_contains($boxJs, 'at.slice(11, 16)'));
 check('the rows are made from the instant the DATABASE converted',
       str_contains((string)file_get_contents($root . '/includes/shout.php'), 'UNIX_TIMESTAMP(s.created_at) AS created_ts'));
 check('no colon after the name, in either renderer — it was a ::after, and it is gone',
@@ -988,6 +1243,73 @@ check('the media editor\'s × arms itself instead of opening the footer\'s quest
       // The hint is built inside the dialog, because the panel runs this editor without app.js.
       && str_contains($medJs, "className: 'fe-close-hint', role: 'status', 'aria-live': 'polite'")
       && str_contains((string)file_get_contents($root . '/assets/css/media-editor.css'), '.fe-close-hint'));
+
+// ── 1.66.0, by reading the wiring ────────────────────────────────────────────
+$api = (string)file_get_contents($root . '/api.php');
+$editSrc = (string)file_get_contents($root . '/api/shout_edit.php');
+check('the edit endpoint is routed', str_contains($api, "'shout_edit'                 => 'api/shout_edit.php'"));
+check('… checks the CSRF token on a save, has an address ceiling of its own, and lets go of the session to read',
+      str_contains($editSrc, 'verifyCsrfToken') && str_contains($editSrc, "rateLimitAllow('shoutedit'")
+      && str_contains($editSrc, 'session_write_close()'));
+// "The server decides, always": nothing but the id and the words is ever read from the request.
+preg_match_all('/\$input\[\'([a-z_]+)\'\]/', $editSrc, $inKeys);
+check('… and reads nothing from the request but the id and the words — no author, no age, no "own"',
+      array_values(array_diff(array_unique($inKeys[1]), ['csrf_token', 'id', 'body'])) === [], implode(',', array_unique($inKeys[1])));
+check('the poll and the send say which language their rows were written for',
+      str_contains($list, "'lang'     => langCurrent()") && str_contains((string)file_get_contents($root . '/api/shout_post.php'), "'lang' => langCurrent()"));
+$widget = (string)file_get_contents($root . '/templates/partials/shoutbox_widget.php');
+$boxJs = (string)file_get_contents($root . '/assets/js/shoutbox.js');
+$css = (string)file_get_contents($root . '/assets/css/style.css');
+check('both renderers draw the same pencil, the same "(edited)" mark and the same day element',
+      str_contains($widget, 'class="shout-edit"') && str_contains($widget, '<i class="bi bi-pencil" aria-hidden="true"></i>')
+      && str_contains($boxJs, "className: 'shout-edit'") && str_contains($boxJs, "el('i', { className: 'bi bi-pencil', 'aria-hidden': 'true' })")
+      && str_contains($widget, "'<span class=\"shout-edited' . (\$mod ? ' shout-edited-mod' : '')")
+      && str_contains($boxJs, "className: 'shout-edited' + (mod ? ' shout-edited-mod' : '')")
+      && str_contains($widget, '<span class="shout-dow" data-dow="') && str_contains($boxJs, "className: 'shout-dow', 'data-dow'"));
+// The mark carries a stable id in both renderers, like the row and the editor: the live language
+// switch matches identified nodes by id only, so a mark a page does not have yet (a line corrected
+// elsewhere after it loaded) cannot be paired with the words beside it and overwrite them.
+check('the "(edited)" mark and the editor carry stable ids in both renderers',
+      str_contains($widget, "\$shoutEdited(\$s, 'shout-ed-' . (int)\$s['id'])") && str_contains($widget, "\$shoutEdited(\$shoutPin, 'shout-pinned-ed')")
+      && str_contains($boxJs, "editedMark(r, 'shout-ed-' + (Number(r.id) || 0))") && str_contains($boxJs, "editedMark(row, 'shout-pinned-ed')")
+      && str_contains($boxJs, "var base = 'shout-edit-' + id, taId = base + '-body';"));
+$pairsOk = true;
+foreach (['edit', 'edit_title', 'edited', 'edited_mod', 'edited_title', 'edited_mod_title', 'new_lines', 'new_lines_title'] as $k) {
+    foreach (['en', 'pl'] as $lc) $pairsOk = $pairsOk && langFor($lc, 'shout.' . $k) === langFor($lc, 'js.shout.' . $k);
+}
+check('… worded identically: the template\'s strings and the script\'s are the same pairs in both languages', $pairsOk);
+check('the list is scrolled as the LIST, never by scrollIntoView() on a row (which drags the window too)',
+      !preg_match('/\.scrollIntoView\s*\(/', $boxJs) && str_contains($boxJs, "listEl.scrollTo({ top: top, behavior: 'smooth' })")
+      && str_contains($boxJs, "matchMedia('(prefers-reduced-motion: reduce)')"));
+check('… follows within 40 px of the end, and counts on the "new lines" button otherwise',
+      str_contains($boxJs, 'function atEnd(slack) { return fromEnd() < (slack === undefined ? 40 : slack); }')
+      && str_contains($boxJs, 'showJump(added.length)') && str_contains($widget, 'id="shout-jump"')
+      && str_contains($css, '.shout-list-wrap-top .shout-jump { bottom: auto; top: 0.5rem; }'));
+check('… and the reader\'s own line always goes to the end', str_contains($boxJs, "appendRows([r.row], { mine: true });")
+      && str_contains($boxJs, "if ((opts && opts.mine) || following) {"));
+check('an editor and a delete question never share a row',
+      str_contains($css, '.shout-editing .shout-pin, .shout-editing .shout-edit, .shout-editing .shout-del { display: none; }')
+      && str_contains($css, '.shout-asking .shout-edit,')
+      && str_contains($boxJs, "if (row.classList.contains('shout-editing')) return;")
+      && str_contains($boxJs, "if (!row || row.classList.contains('shout-asking')) return;"));
+check('a poll answered for the language the page has left is asked again, and nothing is asked during a switch',
+      str_contains($boxJs, 'if (stale(j)) return again ? 0 : fetchNew(force, true);')
+      && str_contains($boxJs, "document.addEventListener('langswap:begin', function () { swapping = true; });")
+      && str_contains($boxJs, "document.addEventListener('langswap', function () {"));
+$save = (string)file_get_contents($root . '/api/admin/save_settings.php');
+$tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
+$kw = settingsCatalogKeywords();
+$missing66 = [];
+foreach (['shout_edit_minutes', 'shout_delete_own_minutes'] as $k) {
+    if (!isset($kw[$k]) || !str_contains($tpl, 'name="' . $k . '"') || !str_contains($save, "'" . $k . "'")) $missing66[] = $k;
+}
+check('the two windows are on the Settings page, saveable, clamped and in the search catalogue',
+      $missing66 === [] && str_contains($save, "'shout_edit_minutes' => [0, 1440, 10], 'shout_delete_own_minutes' => [0, 1440, 10]"),
+      implode(', ', $missing66));
+check('an unknown order is coerced to the chat order the room ships with',
+      str_contains($save, "\$data['shout_order'] = 'bottom';"));
+check('the Settings matrix lists both new ids',
+      str_contains((string)file_get_contents($root . '/assets/js/admin-shout.js'), "'shout.edit_own', 'shout.delete_own', 'shout.edit_any'"));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

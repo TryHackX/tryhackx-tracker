@@ -1703,6 +1703,15 @@ add('', {
     'api.shout.purged': ('Cleared :n shouts.', 'Usunięto :n wypowiedzi.'),
 })
 
+# ── 1.66.0: correcting a line, and the window on taking your own back ──────
+add('', {
+    'api.shout.edit_no_permission': ('You cannot edit this line.', 'Nie możesz edytować tego wpisu.'),
+    'api.shout.edit_too_late': ('The time for correcting this line has run out.',
+        'Czas na poprawienie tego wpisu już minął.'),
+    'api.shout.delete_too_late': ('The time for taking this line back has run out.',
+        'Czas na wycofanie tego wpisu już minął.'),
+})
+
 # ── 1.59.0: a sound's name has to be its own ─────────────────────────────────
 add('', {
     'api.sounds.name_short': ('A name needs at least 2 characters.', 'Nazwa musi mieć co najmniej 2 znaki.'),

@@ -25,7 +25,8 @@ if (!rateLimitAllow('shoutpost', ipBucket(getClientIp($cfg)), 120, 60)) {
 }
 
 $r = shoutPost($db, $cfg, $me, (string)($input['body'] ?? ''), (string)($input['format'] ?? ''), getClientIp($cfg));
-if (!empty($r['ok'])) jsonResponse(['success' => true, 'row' => $r['row']]);
+// `lang` (1.66.0): the language the row was rendered for — see api/shout_list.php.
+if (!empty($r['ok'])) jsonResponse(['success' => true, 'row' => $r['row'], 'lang' => langCurrent()]);
 
 switch ((string)$r['error']) {
     case 'login':          // the session went away between the check above and the write

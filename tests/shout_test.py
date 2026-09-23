@@ -101,28 +101,45 @@ class Client:
                 return e.code, {}
 
 
-USER, PAL, PASS = "shoutuser", "shoutpal", "SmokePass123!"
+USER, PAL, MOD, PASS = "shoutuser", "shoutpal", "shoutmod", "SmokePass123!"
 SETTINGS = ("users_enabled", "shout_enabled", "shout_placement", "shout_live_seconds",
             "shout_flood_seconds", "shout_max_chars", "shout_widget_rows", "shout_page_rows",
-            "shout_format", "shout_keep_rows", "shout_keep_days", "shout_rules")
+            "shout_format", "shout_keep_rows", "shout_keep_days", "shout_rules",
+            # 1.66.0: the two windows, the order, the switches the edit checks lean on
+            "shout_edit_minutes", "shout_delete_own_minutes", "shout_order", "desc_max_images",
+            "account_picture_side", "account_cover_side")
 clear_throttles()
 was = {k: php("echo $cfg['" + k + "'] ?? '';") for k in SETTINGS}
 member_before = php("$st = $db->query(\"SELECT permissions FROM user_groups WHERE slug = 'member'\"); echo $st->fetchColumn();")
+moderator_before = php("$st = $db->query(\"SELECT permissions FROM user_groups WHERE slug = 'moderator'\"); echo $st->fetchColumn();")
+# The grants this run relies on, stated rather than inherited — and built on the PHP side, so no
+# quote in them has to survive three layers of escaping on the way.
 php("setSetting($db, 'users_enabled', '1'); setSetting($db, 'shout_enabled', '1');"
     "setSetting($db, 'shout_placement', 'both'); setSetting($db, 'shout_live_seconds', '10');"
     "setSetting($db, 'shout_flood_seconds', '0'); setSetting($db, 'shout_max_chars', '500');"
     "setSetting($db, 'shout_widget_rows', '5'); setSetting($db, 'shout_page_rows', '100');"
-    "setSetting($db, 'shout_format', 'bbcode');"
-    "$db->exec(\"UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions,"
-    " '{\\\"shout.view\\\":true,\\\"shout.post\\\":true,\\\"shout.delete_own\\\":true}') WHERE slug = 'member'\");"
-    "$db->prepare('DELETE FROM users WHERE username IN (?, ?)')->execute(['" + USER + "', '" + PAL + "']);"
+    "setSetting($db, 'shout_format', 'bbcode'); setSetting($db, 'shout_edit_minutes', '10');"
+    "setSetting($db, 'shout_delete_own_minutes', '10'); setSetting($db, 'shout_order', 'bottom');"
+    "setSetting($db, 'desc_max_images', '3');"
+    "$db->prepare(\"UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions, ?) WHERE slug = 'member'\")"
+    "   ->execute([json_encode(['shout.view' => true, 'shout.post' => true, 'shout.delete_own' => true, 'shout.edit_own' => true])]);"
+    "$db->prepare(\"UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions, ?) WHERE slug = 'moderator'\")"
+    "   ->execute([json_encode(['shout.view' => true, 'shout.post' => true, 'shout.moderate' => true, 'shout.edit_any' => true])]);"
+    "$db->prepare(\"UPDATE user_groups SET permissions = JSON_REMOVE(permissions, ?) WHERE slug = 'member' AND JSON_CONTAINS_PATH(permissions, 'one', ?)\")"
+    "   ->execute(['$.\"shout.edit_any\"', '$.\"shout.edit_any\"']);"
+    "$db->prepare('DELETE FROM users WHERE username IN (?, ?, ?)')->execute(['" + USER + "', '" + PAL + "', '" + MOD + "']);"
     "$db->exec('DELETE FROM shout_mentions'); $db->exec('DELETE FROM shouts');"
     "userCreate($db, $cfg, '" + USER + "', 'shoutuser@example.org', '" + PASS + "', '127.0.0.1');"
     "userCreate($db, $cfg, '" + PAL + "', 'shoutpal@example.org', '" + PASS + "', '127.0.0.1');"
-    "$db->exec(\"UPDATE users SET email_verified = 1 WHERE username IN ('" + USER + "', '" + PAL + "')\");")
+    "userCreate($db, $cfg, '" + MOD + "', 'shoutmod@example.org', '" + PASS + "', '127.0.0.1');"
+    "$db->exec(\"UPDATE users SET email_verified = 1 WHERE username IN ('" + USER + "', '" + PAL + "', '" + MOD + "')\");"
+    "$gid = (int)$db->query(\"SELECT id FROM user_groups WHERE slug = 'moderator'\")->fetchColumn();"
+    "$mid = (int)$db->query(\"SELECT id FROM users WHERE username = '" + MOD + "'\")->fetchColumn();"
+    "userGrantGroup($db, $mid, $gid, null, 'shout_test', '', false);")
 uid = int(php("echo (int)$db->query(\"SELECT id FROM users WHERE username = '" + USER + "'\")->fetchColumn();") or 0)
 pid = int(php("echo (int)$db->query(\"SELECT id FROM users WHERE username = '" + PAL + "'\")->fetchColumn();") or 0)
-check("both accounts exist", uid > 0 and pid > 0, (uid, pid))
+mod_id = int(php("echo (int)$db->query(\"SELECT id FROM users WHERE username = '" + MOD + "'\")->fetchColumn();") or 0)
+check("the three accounts exist", uid > 0 and pid > 0 and mod_id > 0, (uid, pid, mod_id))
 
 # Eight lines by somebody else, oldest first, so the paging below has something to walk.
 seeded = php("for ($i = 1; $i <= 8; $i++) {"
@@ -204,6 +221,88 @@ try:
     s, j = me.api("shout_delete", "POST", {"csrf_token": me.csrf, "id": mentioned})
     check("deleting it twice is 404", s == 404, (s, j))
 
+    # ── 1.66.0: correcting a line, and the windows ───────────────────────────
+    s, j = me.api("shout_post", "POST", {"csrf_token": me.csrf, "body": "a lnie with a typo"})
+    own = (j.get("row") or {}).get("id") or 0
+    row0 = j.get("row") or {}
+    check("a fresh own line comes back with the pencil and the cross, and the window each has left",
+          s == 200 and row0.get("editable") is True and 590 < (row0.get("edit_left") or 0) <= 600
+          and row0.get("deletable") is True and 590 < (row0.get("del_left") or 0) <= 600, (s, row0))
+    s, j = me.api("shout_edit&id=" + str(own))
+    check("the editor is handed the STORED words and their format",
+          s == 200 and j.get("success") and j.get("body") == "a lnie with a typo" and j.get("format") == "bbcode"
+          and 590 < (j.get("left") or 0) <= 600, (s, j))
+    s, j = guest.api("shout_edit&id=" + str(own))
+    check("a guest is told to sign in", s == 401 and j.get("error") == "login_required", (s, j))
+    s, j = me.api("shout_edit", "POST", {"csrf_token": "nope", "id": own, "body": "x"})
+    check("a correction with a bad CSRF token is refused", s == 403, (s, j))
+    s, j = me.api("shout_edit", "POST", {"csrf_token": me.csrf, "id": own, "body": "a [b]line[/b] with a typo fixed"})
+    row1 = j.get("row") or {}
+    check("the author corrects the line: the finished row comes back, marked as edited by its author",
+          s == 200 and j.get("success") and j.get("changed") is True and "<strong>line</strong>" in (row1.get("html") or "")
+          and row1.get("edited") is True and row1.get("edited_mod") is False
+          and re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$", row1.get("edited_at") or ""), (s, str(j)[:300]))
+    check("… and the reply says which language it was written for", j.get("lang") == "en", j.get("lang"))
+    # A client claiming to be the author — or claiming the line is its own — changes nothing.
+    s, j = me.api("shout_edit", "POST", {"csrf_token": me.csrf, "id": seed_ids[1], "body": "words put in their mouth",
+                                         "user_id": uid, "author": USER, "own": True})
+    check("somebody else's line is refused, whatever author the request claims",
+          s == 403 and j.get("error") == "no_permission" and count("id = " + str(seed_ids[1]) + " AND body = 'seed 2'") == 1, (s, j))
+    s, j = me.api("shout_edit", "POST", {"csrf_token": me.csrf, "id": own, "body": "   "})
+    check("an empty correction is 400", s == 400 and j.get("error") == "empty", (s, j))
+    php("setSetting($db, 'desc_max_images', '0');")
+    s, j = me.api("shout_edit", "POST", {"csrf_token": me.csrf, "id": own, "body": "look [img]https://example.org/a.png[/img]"})
+    check("a correction the validator refuses is 400 invalid_body", s == 400 and j.get("error") == "invalid_body", (s, j))
+    php("setSetting($db, 'desc_max_images', '3'); setSetting($db, 'shout_flood_seconds', '60');")
+    s, j = me.api("shout_edit", "POST", {"csrf_token": me.csrf, "id": own, "body": "again, and too soon"})
+    check("a second edit inside the flood interval is 429", s == 429 and j.get("error") == "flood" and 0 < (j.get("retry_after") or 0) <= 60, (s, j))
+    php("setSetting($db, 'shout_flood_seconds', '0');")
+    # The window is the DATABASE's arithmetic on created_at: eleven minutes old is eleven minutes old,
+    # whatever the request says about it.
+    php("$db->prepare('UPDATE shouts SET created_at = NOW() - INTERVAL 11 MINUTE WHERE id = ?')->execute([" + str(own) + "]);")
+    s, j = me.api("shout_edit", "POST", {"csrf_token": me.csrf, "id": own, "body": "too late now",
+                                         "created_at": "2099-01-01 00:00:00", "age_s": 0, "edit_left": 600})
+    check("outside the window a correction is refused, whatever age the request claims",
+          s == 403 and j.get("error") == "too_late", (s, j))
+    s, j = me.api("shout_edit&id=" + str(own))
+    check("… the editor will not even open", s == 403 and j.get("error") == "too_late", (s, j))
+    s, j = me.api("shout_delete", "POST", {"csrf_token": me.csrf, "id": own})
+    check("… and the author's window on taking it back has closed as well", s == 403 and j.get("error") == "too_late", (s, j))
+    modc = Client()
+    modc.page("login")
+    s, j = modc.api("user_login", "POST", {"csrf_token": modc.csrf, "login": MOD, "password": PASS})
+    check("the moderator signs in", s == 200 and j.get("success"), (s, j))
+    audits = int(php("echo (int)$db->query(\"SELECT COUNT(*) FROM audit_log WHERE action = 'shout.edit'\")->fetchColumn();") or 0)
+    s, j = modc.api("shout_edit", "POST", {"csrf_token": modc.csrf, "id": own, "body": "a moderator's words"})
+    check("a moderator holding shout.edit_any edits it outside any window",
+          s == 200 and j.get("success") and (j.get("row") or {}).get("edited_mod") is True, (s, str(j)[:300]))
+    s, j = me.api("shout_list&after=" + str(own - 1))
+    back = [r for r in (j.get("rows") or []) if r["id"] == own]
+    check("… and the author is shown that a MODERATOR changed their words",
+          bool(back) and back[0].get("edited") is True and back[0].get("edited_mod") is True and back[0].get("editable") is False, back)
+    check("… which is written to the audit log",
+          int(php("echo (int)$db->query(\"SELECT COUNT(*) FROM audit_log WHERE action = 'shout.edit' AND target_type = 'shout' AND target_id = '" + str(own) + "'\")->fetchColumn();") or 0) >= 1
+          and int(php("echo (int)$db->query(\"SELECT COUNT(*) FROM audit_log WHERE action = 'shout.edit'\")->fetchColumn();") or 0) == audits + 1)
+    s, j = modc.api("shout_delete", "POST", {"csrf_token": modc.csrf, "id": own})
+    check("… and a moderator takes it down at any time", s == 200 and j.get("success"), (s, j))
+
+    # The day of the week beside the hour, in the reader's language — formatted per request.
+    en_days = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+    pl_days = {"pon", "wt", "śr", "czw", "pt", "sob", "niedz"}
+    s, j = me.api("shout_list")
+    rows_en = j.get("rows") or []
+    check("every row carries the day of the week beside its hour, in English for an English reader",
+          s == 200 and j.get("lang") == "en" and rows_en and all(r.get("day") in en_days and 1 <= (r.get("dow") or 0) <= 7 for r in rows_en),
+          [(r.get("day"), r.get("dow")) for r in rows_en])
+    plc = Client()
+    plc.page("login&lang=pl")                    # the switcher's cookie, as a click on PL sets it
+    s, j = plc.api("user_login", "POST", {"csrf_token": plc.csrf, "login": USER, "password": PASS})
+    s, j = plc.api("shout_list")
+    rows_pl = j.get("rows") or []
+    check("… and in Polish for the same reader reading in Polish: the same days, named from the Polish dictionary",
+          s == 200 and j.get("lang") == "pl" and rows_pl and all(r.get("day") in pl_days for r in rows_pl)
+          and [r.get("dow") for r in rows_pl] == [r.get("dow") for r in rows_en], [(r.get("day"), r.get("dow")) for r in rows_pl])
+
     # ── seen, and the pulse ──────────────────────────────────────────────────
     php("$db->prepare('UPDATE users SET shout_seen_id = 0 WHERE id = ?')->execute([" + str(uid) + "]);")
     others = count("deleted_at IS NULL AND user_id <> " + str(uid))
@@ -260,7 +359,8 @@ try:
         "shout_widget_rows": "999", "shout_page_rows": "1", "shout_max_chars": "99999",
         "shout_flood_seconds": "-3", "shout_live_seconds": "9999", "shout_keep_rows": "1",
         "shout_keep_days": "99999", "shout_rules": "  be nice  "}, csrf_header=True)
-    keys = list(SETTINGS[1:])
+    # The card's original eleven: SETTINGS grew in 1.66.0 with keys this save does not send.
+    keys = list(SETTINGS[1:12])
     stored = dict(zip(keys, php("$out = []; foreach (['" + "','".join(keys) + "'] as $k) $out[] = (string)($cfg[$k] ?? '');"
                                 " echo implode('|', $out);").split("|")))
     check("every field is saveable, and the nonsense is clamped or coerced rather than refused",
@@ -273,6 +373,26 @@ try:
         "setSetting($db, 'shout_max_chars', '500'); setSetting($db, 'shout_widget_rows', '5');"
         "setSetting($db, 'shout_page_rows', '100'); setSetting($db, 'shout_keep_rows', '2000');"
         "setSetting($db, 'shout_keep_days', '30'); setSetting($db, 'shout_placement', 'both');")
+    # 1.66.0: the two windows, the order and the two account-page sides, with nonsense in each.
+    s, j = adm.api("admin/save_settings", "POST", {
+        "shout_edit_minutes": "99999", "shout_delete_own_minutes": "-3", "shout_order": "sideways",
+        "account_picture_side": "middle", "account_cover_side": "nowhere"}, csrf_header=True)
+    keys66 = ["shout_edit_minutes", "shout_delete_own_minutes", "shout_order", "account_picture_side", "account_cover_side"]
+    stored66 = dict(zip(keys66, php("$c = getSettings($db, true); $out = []; foreach (['" + "','".join(keys66) + "'] as $k) $out[] = (string)($c[$k] ?? '');"
+                                    " echo implode('|', $out);").split("|")))
+    check("the 1.66.0 fields are saveable, clamped to a day and coerced to their shipped answers",
+          s == 200 and j.get("success") and stored66 == {"shout_edit_minutes": "1440", "shout_delete_own_minutes": "0",
+                                                         "shout_order": "bottom", "account_picture_side": "left",
+                                                         "account_cover_side": "right"}, (s, stored66))
+    s, j = adm.api("admin/save_settings", "POST", {"shout_edit_minutes": "0", "account_picture_side": "right",
+                                                   "account_cover_side": "left"}, csrf_header=True)
+    stored66 = dict(zip(keys66, php("$c = getSettings($db, true); $out = []; foreach (['" + "','".join(keys66) + "'] as $k) $out[] = (string)($c[$k] ?? '');"
+                                    " echo implode('|', $out);").split("|")))
+    check("… 0 survives the clamp (no window at all), and either side can be chosen for either block",
+          stored66["shout_edit_minutes"] == "0" and stored66["account_picture_side"] == "right" and stored66["account_cover_side"] == "left", stored66)
+    s, j = adm.api("admin/save_settings", "POST", {"account_media_side": "left"}, csrf_header=True)
+    check("… and the old single setting is not a thing anybody can save any more",
+          php("$st = $db->query(\"SELECT COUNT(*) FROM settings WHERE `key` = 'account_media_side'\"); echo (int)$st->fetchColumn();") == "0")
     php("$db->exec('UPDATE shouts SET created_at = NOW() - INTERVAL 10 DAY WHERE id <= " + str(seed_ids[3]) + "');")
     # A purge counts ROWS, including the ones a moderator deleted — a soft delete hides a line from
     # the room, it does not remove it until retention or a purge does.
@@ -294,8 +414,12 @@ try:
 finally:
     php("$db->prepare('DELETE FROM user_friends WHERE user_id = ? OR friend_id = ?')->execute([" + str(uid) + ", " + str(uid) + "]);"
         "$db->exec('DELETE FROM shout_mentions'); $db->exec('DELETE FROM shouts');"
-        "$db->prepare('DELETE FROM users WHERE username IN (?, ?)')->execute(['" + USER + "', '" + PAL + "']);"
+        # Through userDeleteCascade(): the moderator has a group membership, which a bare DELETE of
+        # the account would leave behind pointing at nobody.
+        "foreach (['" + USER + "', '" + PAL + "', '" + MOD + "'] as $nm) { $st = $db->prepare('SELECT id FROM users WHERE username = ?');"
+        " $st->execute([$nm]); if ($id = (int)$st->fetchColumn()) userDeleteCascade($db, $id); }"
         "$db->prepare(\"UPDATE user_groups SET permissions = ? WHERE slug = 'member'\")->execute([" + json.dumps(member_before) + "]);"
+        "$db->prepare(\"UPDATE user_groups SET permissions = ? WHERE slug = 'moderator'\")->execute([" + json.dumps(moderator_before) + "]);"
         + "".join("setSetting($db, '%s', '%s');" % (k, v) for k, v in was.items()))
     clear_throttles()
 

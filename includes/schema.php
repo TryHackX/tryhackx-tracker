@@ -11,7 +11,8 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 71;  // 71 = the default permission matrix, a `premium` group and a shop's order book: `user_group_orders` (UNIQUE(client_id, order_id) is what makes a retried purchase webhook grant one month instead of two), the seeded `premium` group (profile.cover + shout.upload_emote, no panel id, so a key may sell it), `member` brought up to the shipped matrix (index.view/index.files/index.magnet/whitelist.add, which its index.files_all grant had been paging without), `profile.cover` taken OFF member — the one removal this project has shipped, and the image is KEPT — and `content.view` added to `moderator`, which had been approving descriptions it could not read
+const TRACKER_SCHEMA_VERSION = 72;  // 72 = a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
+                                    // 71 = the default permission matrix, a `premium` group and a shop's order book: `user_group_orders` (UNIQUE(client_id, order_id) is what makes a retried purchase webhook grant one month instead of two), the seeded `premium` group (profile.cover + shout.upload_emote, no panel id, so a key may sell it), `member` brought up to the shipped matrix (index.view/index.files/index.magnet/whitelist.add, which its index.files_all grant had been paging without), `profile.cover` taken OFF member — the one removal this project has shipped, and the image is KEPT — and `content.view` added to `moderator`, which had been approving descriptions it could not read
                                     // 70 = "delete this conversation, for me" and two settings: `message_threads`.u_low_cleared_id / u_high_cleared_id (BIGINT UNSIGNED, 0 = nothing deleted — every read path filters `m.id >` the reader's own, so a thread goes for one side and stays whole for the other, and a new message brings it back showing only what came after), plus `shout_order` (top | bottom — which end of the room the newest line is at) and `account_media_side` (left | right — which card of the account page holds Picture and Cover)
                                     // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
                                     // 68 = one setting and one column: `site_timezone` (the zone this site shows times in; empty = follow tracker_schedule_tz, then PHP's own) and users.timezone (NULL = the site's) — the shoutbox is the first reader of both
@@ -902,6 +903,12 @@ function trackerSchemaStatements(): array {
         // does not exist — an absence written as a lie. A system line MAY still carry an author, the
         // submitter it is about, when that submitter asked to be named; what `is_system` decides is
         // that nobody owns it, it is nobody's unread and it makes no sound.
+        //
+        // v72: a line CAN be corrected now, and the correction leaves a mark. `edited_at` is the last
+        // time the words changed and `edited_by` who changed them — the author, or a moderator
+        // holding `shout.edit_any`, which is the difference every reader is shown. The index answers
+        // the one question an edit asks before it writes: "when did this account last edit", the
+        // flood interval for edits, the way `idx_shouts_user` answers it for posting.
         "CREATE TABLE IF NOT EXISTS `shouts` (
             `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             `user_id` INT UNSIGNED DEFAULT NULL,
@@ -912,19 +919,28 @@ function trackerSchemaStatements(): array {
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `pinned_at` DATETIME DEFAULT NULL,
             `pinned_by` INT UNSIGNED DEFAULT NULL,
+            `edited_at` DATETIME DEFAULT NULL,
+            `edited_by` INT UNSIGNED DEFAULT NULL,
             `deleted_by` INT UNSIGNED DEFAULT NULL,
             `deleted_at` DATETIME DEFAULT NULL,
             KEY `idx_shouts_created` (`created_at`),
             KEY `idx_shouts_user` (`user_id`),
-            KEY `idx_shouts_pinned` (`pinned_at`)
+            KEY `idx_shouts_pinned` (`pinned_at`),
+            KEY `idx_shouts_edited_by` (`edited_by`, `edited_at`)
         ) $engine",
 
         // Who a shout named, decided ONCE when it was written. Parsing every body on every read
         // would mean a rename retro-mentions somebody, which is not what "did this line mean me"
         // asks. The pair is the primary key, so saying a name twice in one line is one mention.
+        //
+        // v72: `late` marks a mention an EDIT added to a line the person may already have read past.
+        // Unread is counted by id ("everything above the last id I saw"), and an edit does not move a
+        // line's id — so without this, somebody newly named in a corrected line would never hear of
+        // it. It counts until they next look at the room (shoutSeen() clears it).
         "CREATE TABLE IF NOT EXISTS `shout_mentions` (
             `shout_id` BIGINT UNSIGNED NOT NULL,
             `user_id` INT UNSIGNED NOT NULL,
+            `late` TINYINT(1) NOT NULL DEFAULT 0,
             PRIMARY KEY (`shout_id`, `user_id`),
             KEY `idx_mention_user` (`user_id`, `shout_id`)
         ) $engine",
@@ -1608,15 +1624,19 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         `pinned_at` DATETIME DEFAULT NULL,
         `pinned_by` INT UNSIGNED DEFAULT NULL,
+        `edited_at` DATETIME DEFAULT NULL,
+        `edited_by` INT UNSIGNED DEFAULT NULL,
         `deleted_by` INT UNSIGNED DEFAULT NULL,
         `deleted_at` DATETIME DEFAULT NULL,
         KEY `idx_shouts_created` (`created_at`),
         KEY `idx_shouts_user` (`user_id`),
-        KEY `idx_shouts_pinned` (`pinned_at`)
+        KEY `idx_shouts_pinned` (`pinned_at`),
+        KEY `idx_shouts_edited_by` (`edited_by`, `edited_at`)
     ) $engine";
     $out[] = "CREATE TABLE IF NOT EXISTS `shout_mentions` (
         `shout_id` BIGINT UNSIGNED NOT NULL,
         `user_id` INT UNSIGNED NOT NULL,
+        `late` TINYINT(1) NOT NULL DEFAULT 0,
         PRIMARY KEY (`shout_id`, `user_id`),
         KEY `idx_mention_user` (`user_id`, `shout_id`)
     ) $engine";
@@ -1685,6 +1705,21 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         if (!schemaIndexExists($db, 'shouts', 'idx_shouts_pinned')) $sparts[] = "ADD KEY `idx_shouts_pinned` (`pinned_at`)";
     }
     if ($sparts) $out[] = "ALTER TABLE `shouts` " . implode(', ', $sparts);
+
+    // v72: a line can be corrected, and says so (`edited_at` / `edited_by`), and a mention an edit
+    // added is counted as unread until its reader next looks (`shout_mentions.late`). One ALTER per
+    // table for the reason the v66 block gives, and behind schemaTableExists() for the one it gives
+    // too: an ALTER against a missing table throws, and a throw here stops every migration after it.
+    $eparts = [];
+    if (schemaTableExists($db, 'shouts')) {
+        if (!schemaColumnExists($db, 'shouts', 'edited_at')) $eparts[] = "ADD COLUMN `edited_at` DATETIME DEFAULT NULL";
+        if (!schemaColumnExists($db, 'shouts', 'edited_by')) $eparts[] = "ADD COLUMN `edited_by` INT UNSIGNED DEFAULT NULL";
+        if (!schemaIndexExists($db, 'shouts', 'idx_shouts_edited_by')) $eparts[] = "ADD KEY `idx_shouts_edited_by` (`edited_by`, `edited_at`)";
+    }
+    if ($eparts) $out[] = "ALTER TABLE `shouts` " . implode(', ', $eparts);
+    if (schemaTableExists($db, 'shout_mentions') && !schemaColumnExists($db, 'shout_mentions', 'late')) {
+        $out[] = "ALTER TABLE `shout_mentions` ADD COLUMN `late` TINYINT(1) NOT NULL DEFAULT 0";
+    }
 
     // v53: the second factor, and what a remember-me token was handed to. Same definitions as the
     // CREATE above, for the reason the v51 comment gives.
@@ -2244,6 +2279,57 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
         }
     }
 
+    // ── v72: a line can be corrected, the room is the right way up again, the two blocks apart ──
+    //
+    // Two ids, granted apart ON PURPOSE. `shout.edit_own` goes to members beside `shout.delete_own`:
+    // correcting a typo in your own sentence for a few minutes is the same kind of right as taking it
+    // back. `shout.edit_any` goes to the moderator group ONLY, and never rides along with
+    // `shout.moderate`: deleting somebody's line is visible and honest, rewriting it leaves words
+    // under their name that they did not write — so that authority is handed out deliberately, and
+    // an operator who made a moderator group of their own has to tick it themselves.
+    schemaGrantOnce($db, 'v72_shout_edit', [
+        'member'    => ['shout.edit_own'],
+        'moderator' => ['shout.edit_any'],
+    ]);
+
+    // `shout_order` back to 'bottom' where it says 'top'. Changing the DEFAULT does nothing to a row
+    // that already exists, and every install that ran 1.64.0 got the row: 'top' was the shipped
+    // default for one afternoon, the owner used it and rejected it, and nobody else can have chosen
+    // it deliberately yet. So a stored 'top' is the old default, not a decision — moved once, and an
+    // operator who picks 'top' again from now on keeps it.
+    if (schemaOnce($db, 'v72_shout_order_bottom')) {
+        try {
+            $db->exec("UPDATE settings SET `value` = 'bottom' WHERE `key` = 'shout_order' AND `value` = 'top'");
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v72 shout order: ' . $e->getMessage());
+        }
+    }
+
+    // `account_media_side` (1.64.0) moved the picture AND the cover; it becomes two settings, one
+    // per block. A stored 'left' was somebody's choice — 'right' was the shipped default — so it
+    // seeds BOTH new keys and the account page looks exactly as it did. A stored 'right' is that
+    // default, which is where both blocks sit on the live site and exactly what the owner asked to
+    // change: it seeds nothing, and the new defaults put the picture on the left and leave the cover
+    // on the right. Then the old key goes, because a row nothing reads is a setting that lies.
+    //
+    // This runs BEFORE the defaults pass (ensureSchema() inserts those afterwards, INSERT IGNORE), so
+    // a seeded value is never overwritten by a default, and a key an install already has is kept.
+    if (schemaOnce($db, 'v72_account_sides')) {
+        try {
+            $st = $db->prepare("SELECT `value` FROM settings WHERE `key` = 'account_media_side' LIMIT 1");
+            $st->execute();
+            $old = $st->fetchColumn();
+            if ($old !== false && (string)$old === 'left') {
+                $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, 'left')");
+                $ins->execute(['account_picture_side']);
+                $ins->execute(['account_cover_side']);
+            }
+            $db->exec("DELETE FROM settings WHERE `key` = 'account_media_side'");
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v72 account sides: ' . $e->getMessage());
+        }
+    }
+
     // v64: the shipped example emotes, read from assets/emotes/*.svg and kept as rows.
     //
     // NO GRANT goes with them. `shout.upload_emote` is registered and given to nobody: the admin
@@ -2772,11 +2858,14 @@ function trackerSchemaDefaultSettings(): array {
         // Retention is both halves at once: two thousand lines or thirty days, whichever bites first.
         'shout_enabled'               => '0',
         'shout_placement'             => 'home',  // home | page | both
-        // Which end of the room the newest line is at (1.64.0). 'top' is newest first — what the
-        // owner asked for, and what a reader opening a room expects to see without scrolling,
-        // because nothing ever scrolled the list for them. 'bottom' is chat order, and that arm
-        // scrolls to the end on mount instead.
-        'shout_order'                 => 'top',   // top | bottom
+        // Which end of the room the newest line is at (1.64.0). 'bottom' is chat order — the composer
+        // under the list, oldest first, newest last — and from 1.66.0 the default again: 'top' was
+        // tried on the live site for an afternoon and the owner wanted the ordinary shape back. What
+        // was actually wrong with it (the list never scrolled, so it opened on its OLDEST line) is
+        // fixed in assets/js/shoutbox.js instead: it opens at the newest line, follows new ones while
+        // the reader is down there, and offers a "new lines" button instead of dragging them down
+        // while they are reading history. A stored 'top' is moved back once by the v72 migration.
+        'shout_order'                 => 'bottom', // top | bottom
         'shout_widget_rows'           => '25',    // clamped [5, 100]
         'shout_page_rows'             => '100',   // clamped [20, 500]
         'shout_max_chars'             => '500',   // clamped [1, 2000]
@@ -2788,6 +2877,14 @@ function trackerSchemaDefaultSettings(): array {
         'shout_keep_days'             => '30',    // clamped [1, 3650]
         'shout_format'                => 'bbcode', // plain | bbcode | markdown
         'shout_rules'                 => '',      // an optional line of house rules above the box
+        // ── Correcting a line, and taking one back (v72) ───────────────────────────────────────
+        // How long a member may correct their own line (`shout.edit_own`), in minutes counted from
+        // when it was said. 0 = never: only `shout.edit_any` edits at all. And how long they may
+        // take one back (`shout.delete_own`); 0 = no limit, which is what every install did before
+        // 1.66.0 — ten is the owner's own request. A moderator (`shout.moderate`, `shout.edit_any`)
+        // is held by neither. Both are checked by the server against `created_at`, on its own clock.
+        'shout_edit_minutes'          => '10',    // clamped [0, 1440]; 0 = no window at all
+        'shout_delete_own_minutes'    => '10',    // clamped [0, 1440]; 0 = no limit
         // ── Emotes and stickers (v64) ──────────────────────────────────────────────────────────
         // ON, unlike the room itself: with the shoutbox switched off none of this is reachable, so
         // the only thing a default of 0 would buy is an operator who turns the room on and finds the
@@ -2855,9 +2952,12 @@ function trackerSchemaDefaultSettings(): array {
         // from their name ('generated'), or the site's own picture ('image') once the owner has set
         // one in Settings -> Profiles — until then 'image' falls back to the letter.
         'avatar_default'              => 'generated', // generated | image
-        // Which card of the account page the Picture and Cover blocks are drawn in (1.64.0): the
-        // left one, among the facts about the account, or the right one under the privacy answers.
-        'account_media_side'          => 'right',    // left | right
+        // Which card of the account page each block is drawn in (1.66.0 — until then one setting,
+        // `account_media_side`, moved both together and the v72 migration removes it). The picture
+        // on the LEFT, at the end of the card that holds Account security, which is where the owner
+        // wants it; the cover on the right, under the privacy answers, where both used to sit.
+        'account_picture_side'        => 'left',     // left | right
+        'account_cover_side'          => 'right',    // left | right
         // The site's default picture and default cover, as the rows they point at (user_media,
         // user_id NULL) and the framing chosen for them. Written by admin/user_media, never by the
         // settings form: the id is a fact about stored bytes, not something to type.

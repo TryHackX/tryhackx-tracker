@@ -743,5 +743,108 @@ check('the .htaccess fallback (what production enforces) and this application\'s
 check('… and neither allows blob: ones — the reason for the checks above',
       $htImg !== [] && !in_array('blob:', $htImg, true) && !in_array('blob:', $appImg, true), json_encode([$htImg, $appImg]));
 
+/* ── 1.66.0: the picture and the cover, placed apart ─────────────────────────────────────────────
+   One setting (`account_media_side`, 1.64.0) moved both blocks; it is two now. The shipped answers,
+   what a junk value reads as, the migration from the old key in each of its three cases, and the
+   template echoing each block in the column its own setting names. */
+$defs = trackerSchemaDefaultSettings();
+check('the picture ships on the left and the cover on the right, and the old key ships no more',
+      ($defs['account_picture_side'] ?? null) === 'left' && ($defs['account_cover_side'] ?? null) === 'right'
+      && !array_key_exists('account_media_side', $defs));
+check('each side reads anything it does not know as its own shipped answer',
+      accountPictureSide([]) === 'left' && accountPictureSide(['account_picture_side' => 'right']) === 'right'
+      && accountPictureSide(['account_picture_side' => 'middle']) === 'left'
+      && accountCoverSide([]) === 'right' && accountCoverSide(['account_cover_side' => 'left']) === 'left'
+      && accountCoverSide(['account_cover_side' => 'middle']) === 'right'
+      && !function_exists('accountMediaSide'));
+$saveSrc = (string)file_get_contents($root . '/api/admin/save_settings.php');
+check('both are saveable and coerced on the way in; the old key is not saveable at all',
+      str_contains($saveSrc, "'account_picture_side', 'account_cover_side'")
+      && str_contains($saveSrc, "\$data['account_picture_side'] = 'left';") && str_contains($saveSrc, "\$data['account_cover_side'] = 'right';")
+      && !str_contains($saveSrc, "'account_media_side'"));
+$catKw = function_exists('settingsCatalogKeywords') ? settingsCatalogKeywords() : null;
+if ($catKw === null) { require_once $root . '/includes/settings_catalog.php'; $catKw = settingsCatalogKeywords(); }
+$setTpl = (string)file_get_contents($root . '/templates/admin/settings.php');
+check('two controls on the Settings page, each with its own label, in the search catalogue — and the old one gone from both',
+      isset($catKw['account_picture_side'], $catKw['account_cover_side']) && !isset($catKw['account_media_side'])
+      && str_contains($setTpl, 'name="account_picture_side"') && str_contains($setTpl, 'name="account_cover_side"')
+      && str_contains($setTpl, "_h('settings.account_picture_side')") && str_contains($setTpl, "_h('settings.account_cover_side')")
+      && !str_contains($setTpl, 'account_media_side"'));
+
+// The migration, asked of itself. What the three keys hold now is put back afterwards.
+$sideKeys = ['account_media_side', 'account_picture_side', 'account_cover_side'];
+$sidesWere = [];
+foreach ($sideKeys as $k) {
+    $st = $db->prepare("SELECT `value` FROM settings WHERE `key` = ?");
+    $st->execute([$k]);
+    $sidesWere[$k] = $st->fetchColumn();
+}
+$sideNow = function () use ($db, $sideKeys): array {
+    $out = [];
+    foreach ($sideKeys as $k) {
+        $st = $db->prepare("SELECT `value` FROM settings WHERE `key` = ?");
+        $st->execute([$k]);
+        $v = $st->fetchColumn();
+        $out[$k] = $v === false ? null : (string)$v;
+    }
+    return $out;
+};
+$runSides = function (?string $old, array $existing = []) use ($db) {
+    $db->exec("DELETE FROM settings WHERE `key` IN ('account_media_side', 'account_picture_side', 'account_cover_side', 'schema_once_v72_account_sides')");
+    if ($old !== null) setSetting($db, 'account_media_side', $old);
+    foreach ($existing as $k => $v) setSetting($db, $k, $v);
+    trackerSchemaDataMigrations($db, getSettings($db, true));
+};
+$fillDefaults = function () use ($db) {
+    // What ensureSchema() does right after the data migrations: the defaults, INSERT IGNORE.
+    $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
+    foreach (['account_picture_side', 'account_cover_side'] as $k) $ins->execute([$k, trackerSchemaDefaultSettings()[$k]]);
+};
+try {
+    $runSides('left');
+    check('a stored "left" (somebody chose it; "right" was the default) seeds BOTH blocks on the left, and the old key goes',
+          $sideNow() === ['account_media_side' => null, 'account_picture_side' => 'left', 'account_cover_side' => 'left'], json_encode($sideNow()));
+    $runSides('right');
+    $afterStep = $sideNow();
+    $fillDefaults();
+    check('a stored "right" is the shipped default, not a choice: it seeds nothing, and the new defaults put the picture left and the cover right',
+          $afterStep === ['account_media_side' => null, 'account_picture_side' => null, 'account_cover_side' => null]
+          && $sideNow() === ['account_media_side' => null, 'account_picture_side' => 'left', 'account_cover_side' => 'right'],
+          json_encode([$afterStep, $sideNow()]));
+    $runSides('left', ['account_picture_side' => 'right', 'account_cover_side' => 'left']);
+    check('a key an install already has is never overwritten by the seeding',
+          $sideNow() === ['account_media_side' => null, 'account_picture_side' => 'right', 'account_cover_side' => 'left'], json_encode($sideNow()));
+    $runSides(null);
+    $fillDefaults();
+    check('with no old key at all the defaults are simply what arrives',
+          $sideNow() === ['account_media_side' => null, 'account_picture_side' => 'left', 'account_cover_side' => 'right']);
+} finally {
+    $db->exec("DELETE FROM settings WHERE `key` IN ('account_media_side', 'account_picture_side', 'account_cover_side')");
+    foreach ($sidesWere as $k => $v) if ($v !== false) setSetting($db, $k, (string)$v);
+    $db->exec("INSERT IGNORE INTO settings (`key`, `value`) VALUES ('schema_once_v72_account_sides', '" . time() . "')");
+}
+
+// The template: each block buffered on its own and echoed at exactly one of two places, the left
+// one AFTER Account security and the right one under the privacy answers; nothing wraps both.
+$acc = (string)file_get_contents($root . '/templates/pages/account.php');
+$secAt = strpos($acc, 'id="acc-security"');
+$leftPic = strpos($acc, "if (\$accPicSide === 'left') echo \$accAvatarHtml;");
+$leftCov = strpos($acc, "if (\$accCovSide === 'left') echo \$accCoverHtml;");
+$card2 = strpos($acc, '<h2><?= _h(\'account.groups\') ?></h2>');
+$privAt = strpos($acc, 'id="acc-privacy"');
+$rightPic = strpos($acc, "if (\$accPicSide === 'right') echo \$accAvatarHtml;");
+$rightCov = strpos($acc, "if (\$accCovSide === 'right') echo \$accCoverHtml;");
+check('on the left each block sits in the first card after Account security, picture first',
+      $secAt !== false && $leftPic !== false && $leftCov !== false && $card2 !== false
+      && $secAt < $leftPic && $leftPic < $leftCov && $leftCov < $card2);
+check('on the right each sits in the second card under the privacy answers, picture first',
+      $privAt !== false && $rightPic !== false && $rightCov !== false && $card2 < $privAt && $privAt < $rightPic && $rightPic < $rightCov);
+check('the two blocks are two buffers, with the editor\'s data printed once and no wrapper round both',
+      substr_count($acc, 'id="acc-media-data"') === 1 && !str_contains($acc, '<div id="acc-media">')
+      && str_contains($acc, '$accAvatarHtml = (string)ob_get_clean();') && str_contains($acc, '$accCoverHtml = (string)ob_get_clean();'));
+check('… and the editor wires either block by its own id, not by a wrapper',
+      str_contains((string)file_get_contents($root . '/assets/js/media-editor.js'),
+                   "if (!data || !(document.getElementById('acc-avatar') || document.getElementById('acc-cover'))) return;"));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

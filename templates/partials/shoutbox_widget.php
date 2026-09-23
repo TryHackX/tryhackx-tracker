@@ -96,15 +96,39 @@ if (empty($shoutPost['ok'])) {
 }
 $shoutRules = shoutRules($cfg);
 $shoutBoth  = shoutPlacement($cfg) === 'both';
-// WHICH END THE NEWEST LINE IS AT (1.64.0). The rows come out of shoutRows() oldest-first and were
-// printed that way with nothing ever scrolling the list — so opening the room put the reader in
-// front of its OLDEST lines. 'top' turns the list round and moves two things with it: the composer
-// goes ABOVE the list (a reader writing is at the end the new lines arrive at) and "Older" goes
-// BELOW it (the direction older lines are now in). 'bottom' is chat order, unchanged, and
-// assets/js/shoutbox.js scrolls it to the end on mount. NOT `flex-direction: column-reverse`: that
-// makes scrollTop negative and breaks both of the calculations the script does with it.
-$shoutOrder = function_exists('shoutOrder') ? shoutOrder($cfg) : 'top';
+// WHICH END THE NEWEST LINE IS AT (1.64.0). 'bottom' is chat order — the list oldest-first, the
+// composer under it, "Older" in the head — and from 1.66.0 the default again. The scrolling that
+// order always needed is assets/js/shoutbox.js's: it opens the list at its newest line, follows new
+// ones while the reader is down there, and offers the "new lines" button below while they are not.
+// 'top' turns the list round and moves two things with it: the composer goes ABOVE the list and
+// "Older" BELOW it. NOT `flex-direction: column-reverse`: that makes scrollTop negative and breaks
+// every calculation the script does with it.
+$shoutOrder = function_exists('shoutOrder') ? shoutOrder($cfg) : 'bottom';
 $shoutTop   = $shoutOrder === 'top';
+
+/**
+ * The mark a corrected line carries (1.66.0), beside its time — and in the pinned strip, which shows
+ * the same words. "(edited)" when the author changed them, "(edited by a moderator)" when somebody
+ * else did, because a reader must be able to tell the two apart; the exact moment, in the reader's
+ * zone, is the title. `data-at` keeps that moment so assets/js/shoutbox.js can re-word the mark after
+ * a live language switch that could not reach the row. editedMark() there draws the same element.
+ *
+ * It carries an ID of its own (`shout-ed-<id>` on a row, `shout-pinned-ed` in the strip), and that is
+ * not decoration. A line somebody corrects while a reader has the page open is still unmarked on
+ * their screen, while the fresh render the live language switch walks against has the mark in front
+ * of the words. Paired by POSITION the reader's words were paired with the fresh mark and replaced
+ * by "(edited by a moderator)" — in a plain-text room the words are a bare text node and nothing
+ * stopped it. An identified node is matched by id or not at all (assets/js/lang-swap.js).
+ */
+$shoutEdited = function (array $s, string $id = ''): string {
+    if (empty($s['edited'])) return '';
+    $mod = !empty($s['edited_mod']);
+    $at = (string)($s['edited_at'] ?? '');
+    return '<span class="shout-edited' . ($mod ? ' shout-edited-mod' : '') . '"'
+         . ($id !== '' ? ' id="' . sanitize($id) . '"' : '')
+         . ' title="' . _h($mod ? 'shout.edited_mod_title' : 'shout.edited_title', ['at' => $at]) . '"'
+         . ' data-at="' . sanitize($at) . '">' . _h($mod ? 'shout.edited_mod' : 'shout.edited') . '</span>';
+};
 
 /**
  * The two controls that live INSIDE the text field (1.61.0), built once and drawn in whichever box
@@ -219,6 +243,7 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
         <?php if ($shoutPin): ?>
         <span class="shout-pin-icon" aria-hidden="true">&#128204;</span>
         <?= $shoutWho($shoutPin) ?>
+        <?= $shoutEdited($shoutPin, 'shout-pinned-ed') ?>
         <span class="shout-body rt-body"><?= $shoutPin['html'] ?? '' ?></span>
         <?php if ($shoutMod): ?>
         <button type="button" class="shout-unpin" title="<?= _h('shout.unpin_title') ?>" aria-label="<?= _h('shout.unpin') ?>">&times;</button>
@@ -227,8 +252,16 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
     </div>
     <?php /* THE LIST, built into a buffer and printed on the side the setting says (1.64.0): after
              the composer when the newest line is at the top, before it otherwise. Identical markup
-             either way — one description of a room, printed in one of two places. */ ?>
+             either way — one description of a room, printed in one of two places.
+
+             1.66.0: inside a wrapper that also holds the "new lines" button. The button has to stay
+             at the visible end of the list while the list scrolls, so it cannot be a child of the
+             list (it would scroll away with the rows, and every row the poll appends would land
+             after it); the wrapper is what it is positioned against. Drawn here, hidden, rather than
+             built by the script, so the live language switch finds it in the fresh page and words it
+             like everything else. The arrow points at the end the new lines arrive at. */ ?>
     <?php ob_start(); ?>
+    <div class="shout-list-wrap<?= $shoutTop ? ' shout-list-wrap-top' : '' ?>">
     <div class="shout-list" id="shout-list">
         <?php if (!$shoutList): ?>
         <div class="shout-empty text-muted"><?= _h('shout.empty') ?></div>
@@ -257,8 +290,14 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
             <?php /* The hour in the READER's zone, formatted by the server (1.62.0) — the same
                      shoutShape() fields the poll hands renderRow(), so a line drawn here and a line
                      appended later can never disagree about when they were said. The title is the
-                     whole date with its offset. */ ?>
-            <span class="shout-time" title="<?= sanitize((string)($s['at'] ?? '')) ?>"><?= sanitize((string)($s['time'] ?? '')) ?></span>
+                     whole date with its offset.
+
+                     1.66.0: with the day of the week in front of it, "pon 21:43", in the reader's
+                     language from the dictionary. The day is an element of its own carrying its
+                     number, so a row the live language switch cannot reach (one "Older" loaded) is
+                     renamed by the script; the ONE space after it is part of the text on purpose. */ ?>
+            <span class="shout-time" title="<?= sanitize((string)($s['at'] ?? '')) ?>"><?php if ((string)($s['day'] ?? '') !== ''): ?><span class="shout-dow" data-dow="<?= (int)($s['dow'] ?? 0) ?>"><?= sanitize((string)$s['day']) ?></span> <?php endif; ?><?= sanitize((string)($s['time'] ?? '')) ?></span>
+            <?= $shoutEdited($s, 'shout-ed-' . (int)$s['id']) ?>
             <span class="shout-body rt-body"><?= $s['html'] ?? '' ?></span>
             <?php /* Pinning is `shout.moderate`, which the box already knows about — so the button
                      is drawn from that and needs nothing per row. Hidden until the line is hovered,
@@ -266,11 +305,23 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
             <?php if ($shoutMod): ?>
             <button type="button" class="shout-pin" title="<?= _h('shout.pin_title') ?>" aria-label="<?= _h('shout.pin') ?>">&#128204;</button>
             <?php endif; ?>
+            <?php /* The pencil (1.66.0), beside the pin — or in the pin's place for a reader who may
+                     not pin. Drawn only where this reader may actually use it right now: their own
+                     line inside `shout_edit_minutes`, or anybody's with `shout.edit_any`. `data-left`
+                     is how many seconds of the window this answer had left, so the script can take
+                     the button away when it runs out rather than offer a control the server will
+                     refuse; the server checks again on its own clock either way. The cross carries
+                     the same number for `shout_delete_own_minutes`. */ ?>
+            <?php if (!empty($s['editable'])): ?>
+            <button type="button" class="shout-edit" title="<?= _h('shout.edit_title') ?>" aria-label="<?= _h('shout.edit') ?>"<?= (int)($s['edit_left'] ?? 0) > 0 ? ' data-left="' . (int)$s['edit_left'] . '"' : '' ?>><i class="bi bi-pencil" aria-hidden="true"></i></button>
+            <?php endif; ?>
             <?php if (!empty($s['deletable'])): ?>
-            <button type="button" class="shout-del" title="<?= _h('shout.delete_title') ?>" aria-label="<?= _h('shout.delete') ?>">&times;</button>
+            <button type="button" class="shout-del" title="<?= _h('shout.delete_title') ?>" aria-label="<?= _h('shout.delete') ?>"<?= (int)($s['del_left'] ?? 0) > 0 ? ' data-left="' . (int)$s['del_left'] . '"' : '' ?>>&times;</button>
             <?php endif; ?>
         </div>
         <?php endforeach; ?>
+    </div>
+    <button type="button" class="shout-jump" id="shout-jump" hidden title="<?= _h('shout.new_lines_title') ?>"><i class="bi <?= $shoutTop ? 'bi-arrow-up' : 'bi-arrow-down' ?>" aria-hidden="true"></i> <span class="shout-jump-text"><?= _h('shout.new_lines') ?></span> <span class="shout-jump-n"></span></button>
     </div>
     <?php
     $shoutListHtml = (string)ob_get_clean();

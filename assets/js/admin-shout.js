@@ -417,8 +417,9 @@
     const t = window.t;
     // Written out rather than filtered on the `shout.` prefix, so a permission added to the registry
     // later shows up here because somebody decided it should and not because it was named alike.
-    const IDS = ['shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate', 'shout.upload_emote',
-                 'shout.emote_auto'];
+    // 1.66.0: correcting your own line and editing anybody's, beside the delete each one mirrors.
+    const IDS = ['shout.view', 'shout.post', 'shout.edit_own', 'shout.delete_own', 'shout.edit_any', 'shout.moderate',
+                 'shout.upload_emote', 'shout.emote_auto'];
     let asked = false;
 
     function render(groups, permList) {

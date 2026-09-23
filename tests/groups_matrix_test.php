@@ -74,6 +74,8 @@ $MEMBER = array_merge($GUEST, [
     'lists.use', 'lists.public',
     'pm.send', 'pm.report', 'friends.use', 'directory.view',
     'shout.view', 'shout.post', 'shout.delete_own',
+    // v72 (1.66.0): correcting your own line for a while, beside the delete it mirrors.
+    'shout.edit_own',
     'profile.avatar',
 ]);
 // ONLY the extras. A premium account is a member as well, so repeating the member row here would
@@ -90,7 +92,9 @@ $MODERATOR = ['panel.access', 'panel.reports.view', 'panel.reports.status', 'pan
               'whitelist.view', 'whitelist.add', 'stats.view', 'stats.timeline', 'home.stats',
               'rating.vote', 'content.submit', 'content.propose', 'content.view',
               'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
-              'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'];
+              'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate',
+              // v72 (1.66.0): editing anybody's line, to this group ONLY and never with shout.moderate.
+              'shout.edit_any'];
 
 /* ══ 1. the presets ════════════════════════════════════════════════════════ */
 // includes/users.php has claimed since 1.21.0 that "users_test.php checks every id here is real".
@@ -145,11 +149,12 @@ check('the premium SEED carries exactly the paid extras',
       array_values(array_diff($PREMIUM, $seedFor['premium'] ?? [])) === []
       && array_values(array_diff($seedFor['premium'] ?? [], $PREMIUM)) === [],
       setDiff($PREMIUM, $seedFor['premium'] ?? []));
-// What the moderator ends up with is its seed plus two later grants; that union is what the preset
+// What the moderator ends up with is its seed plus three later grants; that union is what the preset
 // must equal. Naming the grants here rather than grepping for them keeps the sum honest.
 $modSeedPlus = array_unique(array_merge($seedFor['moderator'] ?? [],
                                         ['shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'],
-                                        ['content.view']));
+                                        ['content.view'],
+                                        ['shout.edit_any']));
 check('the moderator preset and the moderator seed agree',
       array_values(array_diff($modSeedPlus, $presets['moderator']['perms'])) === []
       && array_values(array_diff($presets['moderator']['perms'], $modSeedPlus)) === [],
@@ -227,7 +232,8 @@ try {
         'shout.moderate' => true,
     ])) . " WHERE slug = 'member'");
     $sdb->exec("DELETE FROM user_groups WHERE slug = 'premium'");
-    $sdb->exec("DELETE FROM settings WHERE `key` = 'schema_once_v71_group_matrix'");
+    // …and from before 1.66.0 as well: the v72 grant (shout.edit_own) has not happened on it yet.
+    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit')");
     trackerSchemaDataMigrations($sdb, $scfg);
     $after = $perms($sdb, 'member');
     check('the migration puts the missing matrix ids on an existing member group',

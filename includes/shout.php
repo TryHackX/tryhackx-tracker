@@ -4,10 +4,16 @@
  *
  * ── what it is, and what it deliberately is not ────────────────────────────────────────────────
  *
- * A shout is a sentence, not a post. It cannot be edited (delete it and say it again), it carries no
- * notification of its own, and it expires: `shout_keep_rows` newest rows and `shout_keep_days` of
- * age, whichever bites first, swept by the janitor. That is the whole retention policy, and it is
- * why the table has no archive and no history — a room people talk in is not a record.
+ * A shout is a sentence, not a post. It carries no notification of its own, and it expires:
+ * `shout_keep_rows` newest rows and `shout_keep_days` of age, whichever bites first, swept by the
+ * janitor. That is the whole retention policy, and it is why the table has no archive and no
+ * history — a room people talk in is not a record.
+ *
+ * From 1.66.0 a line CAN be corrected — by its author for `shout_edit_minutes`, by a moderator
+ * holding `shout.edit_any` at any time — and a correction is never silent: the row keeps when and by
+ * whom (`edited_at`, `edited_by`), every reader is shown "(edited)" beside the time, and a line
+ * somebody else changed says so. There is still no history of the old words: the audit log records
+ * that a moderator changed a line, not what it used to say.
  *
  * ── only new rows ever travel ──────────────────────────────────────────────────────────────────
  *
@@ -22,6 +28,11 @@
  * the operator says so), `shout.post`, `shout.delete_own`, `shout.moderate`. Silence is INHERITED
  * rather than duplicated: `users.pm_muted_until` is the one moment a moderator sets, and somebody
  * silenced in private messages is silenced here too. They still read — a mute is about writing.
+ *
+ * 1.66.0 adds two more and two windows: `shout.edit_own` (a member's, for `shout_edit_minutes`) and
+ * `shout.edit_any` (the moderator group's alone), and `shout.delete_own` now holds for
+ * `shout_delete_own_minutes`. Every window is measured by the DATABASE against `created_at`, never by
+ * anything a browser sends; the browser only hides a button it already knows would be refused.
  *
  * ── three kinds of "new" ───────────────────────────────────────────────────────────────────────
  *
@@ -51,17 +62,40 @@ function shoutPlacement(array $cfg): string
 }
 
 /**
- * Which end of the room the newest line is at (1.64.0): 'top' (newest first) or 'bottom' (chat).
+ * Which end of the room the newest line is at (1.64.0): 'bottom' (chat) or 'top' (newest first).
  *
  * The room used to be drawn oldest-to-newest with nothing ever scrolling the list, so a reader
- * opening it was looking at its OLDEST lines and had to scroll to find out what had been said. The
- * two arms fix that differently: 'top' puts the newest line where the eye already is and 'bottom'
- * keeps chat order and scrolls to the end on mount. 'top' is the shipped answer.
+ * opening it was looking at its OLDEST lines. 1.64.0 answered that with 'top' as the default; the
+ * owner used it and wanted the ordinary shape back, so from 1.66.0 'bottom' is the default again and
+ * the fault it had is fixed where it lived — assets/js/shoutbox.js opens the list at its newest line,
+ * follows new lines while the reader is down there, and offers a "new lines" button instead of
+ * dragging somebody down while they read history. 'top' still works, mirrored.
  */
 function shoutOrder(array $cfg): string
 {
-    $v = (string)($cfg['shout_order'] ?? 'top');
-    return $v === 'bottom' ? 'bottom' : 'top';
+    $v = (string)($cfg['shout_order'] ?? 'bottom');
+    return $v === 'top' ? 'top' : 'bottom';
+}
+
+/**
+ * How long a member may correct their own line, in MINUTES from when it was said (1.66.0).
+ *
+ * 0 means no window at all — nobody edits their own line and only `shout.edit_any` edits anything —
+ * which is a different answer from "a very long window", so it is not floored. The ceiling is a day:
+ * past that a correction is rewriting yesterday's conversation, and that is a moderator's decision.
+ */
+function shoutEditMinutes(array $cfg): int
+{
+    return max(0, min(1440, (int)($cfg['shout_edit_minutes'] ?? 10)));
+}
+
+/**
+ * How long a member may take their own line back, in MINUTES (1.66.0). 0 = no limit, which is what
+ * `shout.delete_own` meant before this setting existed; `shout.moderate` is never held by it.
+ */
+function shoutDeleteOwnMinutes(array $cfg): int
+{
+    return max(0, min(1440, (int)($cfg['shout_delete_own_minutes'] ?? 10)));
 }
 
 /**
@@ -489,9 +523,14 @@ function shoutSystemWhitelistAdded(PDO $db, array $cfg, int $count, ?int $submit
  * author. An inner join would have silently dropped exactly those rows from every list.
  */
 const SHOUT_ROW_SELECT = "SELECT s.id, s.user_id, s.body, s.body_format, s.created_at, s.is_system,
-                                 s.pinned_at, u.username, u.avatar_sha,
-                                 UNIX_TIMESTAMP(s.created_at) AS created_ts
+                                 s.pinned_at, s.edited_at, s.edited_by, u.username, u.avatar_sha,
+                                 UNIX_TIMESTAMP(s.created_at) AS created_ts,
+                                 UNIX_TIMESTAMP(s.edited_at) AS edited_ts,
+                                 TIMESTAMPDIFF(SECOND, s.created_at, NOW()) AS age_s
                             FROM shouts s LEFT JOIN users u ON u.id = s.user_id";
+// `edited_ts` and `age_s` (1.66.0): when the words last changed, as an instant for the same reason
+// `created_ts` is one, and how old the line is — by the DATABASE's clock, the one `created_at` was
+// written on — so the two windows (edit, delete-your-own) are measured without PHP's clock taking part.
 // `avatar_sha` (1.63.0) is the picture beside the name, from the same join that brings the name: a
 // room of twenty-five lines is one query, not twenty-six.
 // `created_ts` (1.62.0) is the moment as an INSTANT, converted by the database from its own session
@@ -591,6 +630,16 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
     // Two permissions, asked once for the reader rather than once per row.
     $mayModerate = $meId > 0 && userIdHasPermission($db, $cfg, $meId, 'shout.moderate');
     $mayDeleteOwn = $meId > 0 && userIdHasPermission($db, $cfg, $meId, 'shout.delete_own');
+    // …and the two that correct a line, with the windows (1.66.0), once for the batch too. The
+    // buttons are drawn from exactly the rules shoutEdit() and shoutDelete() enforce, so nobody is
+    // offered a control that will refuse them — but the server checks again either way. Editing is
+    // WRITING: somebody who may not write here right now (silenced, or without shout.post) is not
+    // offered the pencil either.
+    $mayEditAny = $meId > 0 && userIdHasPermission($db, $cfg, $meId, 'shout.edit_any');
+    $mayEditOwn = $meId > 0 && userIdHasPermission($db, $cfg, $meId, 'shout.edit_own');
+    $mayWrite   = ($mayEditAny || $mayEditOwn) && !empty(shoutMayPost($db, $cfg, $me)['ok']);
+    $editWin    = shoutEditMinutes($cfg) * 60;          // 0 = no window: own lines are never editable
+    $delWin     = shoutDeleteOwnMinutes($cfg) * 60;     // 0 = no limit
     $known = shoutKnownNames($db, array_column($raw, 'body'));
     $base = function_exists('getBaseUrl') ? getBaseUrl() : '';
     $meName = (string)($me['username'] ?? '');
@@ -679,6 +728,41 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
             ? nl2br(htmlspecialchars((string)$r['body'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false)
             : shoutLinkImages(richtextRender((string)$r['body'], $fmt, $cfg, true), $imgTitle);
         $ts = shoutRowInstant($db, $r);
+        // How old the line is, by the database's clock (SHOUT_ROW_SELECT). NULL for a hand-built row
+        // that did not come through it — and a line whose age nobody can say is inside no window.
+        $age = (isset($r['age_s']) && is_numeric($r['age_s'])) ? max(0, (int)$r['age_s']) : null;
+        // May THIS reader correct it, and for how much longer? `edit_left` is seconds from this answer
+        // and 0 when there is no clock on it (a moderator's `shout.edit_any`); the browser uses it only
+        // to take the button away once it can no longer work. Nobody edits a line the SITE said: its
+        // words are the site's, and a moderator who disagrees with one takes it down instead.
+        $editable = false;
+        $editLeft = 0;
+        if (!$system && $mayWrite) {
+            if ($mayEditAny) {
+                $editable = true;
+            } elseif ($own && $mayEditOwn && $editWin > 0 && $age !== null && $age < $editWin) {
+                $editable = true;
+                $editLeft = $editWin - $age;
+            }
+        }
+        // Taking it back: a moderator always, the author inside `shout_delete_own_minutes` (0 = no
+        // limit, the only answer before 1.66.0). `del_left` is the same kind of number as `edit_left`.
+        $deletable = $mayModerate;
+        $delLeft = 0;
+        if (!$deletable && $own && $mayDeleteOwn) {
+            if ($delWin === 0) {
+                $deletable = true;
+            } elseif ($age !== null && $age < $delWin) {
+                $deletable = true;
+                $delLeft = $delWin - $age;
+            }
+        }
+        // The mark a correction leaves. `edited_mod` is "somebody other than the author changed these
+        // words" — a moderator with shout.edit_any, since nobody else can — and it is the difference a
+        // reader must be able to see: the author fixing a typo is not the same event as words being put
+        // under their name. Compared on the raw ids, so it still holds after the author's account goes.
+        $editedTs = (isset($r['edited_ts']) && is_numeric($r['edited_ts'])) ? (int)$r['edited_ts'] : null;
+        $editedBy = (($r['edited_by'] ?? null) === null) ? 0 : (int)$r['edited_by'];
         $out[] = [
             'id'          => (int)$r['id'],
             'user'        => $authorName !== '' ? $authorName : $siteName,
@@ -701,13 +785,26 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
             'time'        => $ts !== null ? userDisplayTime($ts, $tz, 'H:i') : '',
             'at'          => $ts !== null ? userDisplayTime($ts, $tz, 'Y-m-d H:i:s P') : '',
             'ts'          => $ts,
+            // The day of the week beside the hour (1.66.0), in the reader's zone and — from the
+            // dictionary, never a PHP locale — in the reader's language: `day` is what is printed,
+            // `dow` (1 = Monday … 7 = Sunday) is what the browser renames it from after a live
+            // language switch that could not reach this row. Always shown, today's lines included.
+            'day'         => $ts !== null ? userDisplayWeekday($ts, $tz) : '',
+            'dow'         => $ts !== null ? userDisplayDow($ts, $tz) : 0,
             // Mentions first, emotes last: both walk the TEXT of finished html and neither may see
             // the other's tag as writing. `:code:` inside an href is an address, not an emote.
             'html'        => shoutRenderEmotes(shoutLinkMentions($html, $known, $base, $meName), $emotes, $base, $stickersOn),
             'own'         => $own,
             'system'      => $system,
             'pinned'      => ($r['pinned_at'] ?? null) !== null,
-            'deletable'   => $mayModerate || ($own && $mayDeleteOwn),
+            'deletable'   => $deletable,
+            'del_left'    => $delLeft,
+            'editable'    => $editable,
+            'edit_left'   => $editLeft,
+            'edited'      => $editedTs !== null,
+            'edited_mod'  => $editedTs !== null && $editedBy > 0 && $editedBy !== $authorId,
+            // The exact moment, in the reader's zone with its offset — the title over "(edited)".
+            'edited_at'   => $editedTs !== null ? userDisplayTime($editedTs, $tz, 'Y-m-d H:i:s P') : '',
             'mentions_me' => isset($mine[(int)$r['id']]),
             // Never true for a line the SITE said, whoever it happens to be signed with: an
             // announcement is nobody's unread (shoutUnreadCounts agrees) and must not be the reason
@@ -793,12 +890,18 @@ function shoutPin(PDO $db, array $cfg, array $me, int $id, bool $on): array
  * asks for `deleted_at IS NULL`.
  *
  * Somebody else's line is an audited act; your own is not. Deleting what you just said is tidying.
+ *
+ * 1.66.0: your own only for `shout_delete_own_minutes` (0 = no limit) — 'too_late' after that, and
+ * measured by the database against `created_at`, never by anything the request carries.
+ * `shout.moderate` is held by no window.
  */
 function shoutDelete(PDO $db, array $cfg, array $me, int $id): array
 {
     $meId = (int)($me['id'] ?? 0);
     if ($meId <= 0) return ['ok' => false, 'error' => 'no_permission'];
-    $st = $db->prepare("SELECT s.id, s.user_id, s.is_system, u.username FROM shouts s LEFT JOIN users u ON u.id = s.user_id
+    $st = $db->prepare("SELECT s.id, s.user_id, s.is_system, u.username,
+                               TIMESTAMPDIFF(SECOND, s.created_at, NOW()) AS age_s
+                          FROM shouts s LEFT JOIN users u ON u.id = s.user_id
                          WHERE s.id = ? AND s.deleted_at IS NULL LIMIT 1");
     $st->execute([$id]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
@@ -811,6 +914,10 @@ function shoutDelete(PDO $db, array $cfg, array $me, int $id): array
     if (!$mayModerate && !($own && userIdHasPermission($db, $cfg, $meId, 'shout.delete_own'))) {
         return ['ok' => false, 'error' => 'no_permission'];
     }
+    if (!$mayModerate) {
+        $win = shoutDeleteOwnMinutes($cfg) * 60;
+        if ($win > 0 && (int)$row['age_s'] >= $win) return ['ok' => false, 'error' => 'too_late'];
+    }
     $db->prepare("UPDATE shouts SET deleted_by = ?, deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL")
        ->execute([$meId, $id]);
     if (!$own && function_exists('auditLog')) {
@@ -820,6 +927,184 @@ function shoutDelete(PDO $db, array $cfg, array $me, int $id): array
     return ['ok' => true, 'error' => ''];
 }
 
+/* ── correcting one (1.66.0) ───────────────────────────────────────────────── */
+
+/**
+ * The row an edit is about, with its age by the database's clock. Null when it is not there.
+ * One reader for the two edit paths below, so they cannot disagree about what a line is.
+ */
+function shoutEditRow(PDO $db, int $id): ?array
+{
+    if ($id <= 0) return null;
+    $st = $db->prepare("SELECT s.id, s.user_id, s.body, s.body_format, s.is_system, s.created_at, u.username,
+                               TIMESTAMPDIFF(SECOND, s.created_at, NOW()) AS age_s
+                          FROM shouts s LEFT JOIN users u ON u.id = s.user_id
+                         WHERE s.id = ? AND s.deleted_at IS NULL LIMIT 1");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+/**
+ * May this account change these words right now? '' when it may, otherwise 'no_permission' or
+ * 'too_late'. The ONE place the rule lives — shoutShape() draws the pencil from the same three facts.
+ *
+ *   · a line the SITE said is nobody's to rewrite, `shout.edit_any` included: its words are the
+ *     site's, and a moderator who disagrees with one takes it down;
+ *   · `shout.edit_any` edits anybody's line at any time — the moderator group's, and nobody else's
+ *     unless an operator hands it out;
+ *   · `shout.edit_own` edits your OWN line for `shout_edit_minutes` from when it was said; 0 minutes
+ *     means members do not edit at all. "Own" is the stored author, compared with the account the
+ *     SESSION says is asking — nothing in the request can claim a different author or a younger line.
+ */
+function shoutEditRight(PDO $db, array $cfg, int $meId, array $row): string
+{
+    if ($meId <= 0 || !empty($row['is_system'])) return 'no_permission';
+    if (userIdHasPermission($db, $cfg, $meId, 'shout.edit_any')) return '';
+    $own = $row['user_id'] !== null && (int)$row['user_id'] === $meId;
+    if (!$own || !userIdHasPermission($db, $cfg, $meId, 'shout.edit_own')) return 'no_permission';
+    $win = shoutEditMinutes($cfg) * 60;
+    if ($win <= 0) return 'no_permission';
+    return (int)$row['age_s'] < $win ? '' : 'too_late';
+}
+
+/**
+ * The words as they are STORED, for the editor to start from: ['ok' => true, 'id', 'body', 'format',
+ * 'left'] or ['ok' => false, 'error' => …]. The rendered HTML is not something to edit, and the list
+ * carries nothing else — so the editor asks for this when it opens, and the same gate as the save
+ * answers, which also means a window that closed since the page was drawn is caught before anybody
+ * types a word.
+ */
+function shoutEditSource(PDO $db, array $cfg, array $me, int $id): array
+{
+    $gate = shoutMayPost($db, $cfg, $me);
+    if (!$gate['ok']) return ['ok' => false, 'error' => $gate['reason'], 'until' => $gate['until']];
+    $row = shoutEditRow($db, $id);
+    if (!$row) return ['ok' => false, 'error' => 'not_found'];
+    $meId = (int)$me['id'];
+    $why = shoutEditRight($db, $cfg, $meId, $row);
+    if ($why !== '') return ['ok' => false, 'error' => $why];
+    // Seconds left in the author's own window, or 0 when no clock applies (shout.edit_any).
+    $left = 0;
+    if (!userIdHasPermission($db, $cfg, $meId, 'shout.edit_any')) {
+        $left = max(0, shoutEditMinutes($cfg) * 60 - (int)$row['age_s']);
+    }
+    return ['ok' => true, 'error' => '', 'id' => (int)$row['id'], 'body' => (string)$row['body'],
+            'format' => (string)$row['body_format'], 'left' => $left];
+}
+
+/**
+ * Bring a line's mention rows in line with its words: ['added' => ids, 'dropped' => ids].
+ *
+ * The same parse a new line gets (shoutParseMentions: real names, five at most, never the author —
+ * the line's AUTHOR, also when a moderator is the one editing). Somebody named in both the old words
+ * and the new keeps the row they had, untouched, so nobody is told twice; somebody dropped loses it;
+ * somebody newly named gets one with `late = 1`, because unread is counted by id and an edit does not
+ * move the line's id — shoutUnreadCounts() counts a late mention below the reader's mark until
+ * shoutSeen() says they have looked at the room again.
+ */
+function shoutSyncMentions(PDO $db, int $shoutId, string $body, int $authorId): array
+{
+    $want = shoutParseMentions($db, $body, $authorId);
+    $st = $db->prepare("SELECT user_id FROM shout_mentions WHERE shout_id = ?");
+    $st->execute([$shoutId]);
+    $have = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+    $add = array_values(array_diff($want, $have));
+    $drop = array_values(array_diff($have, $want));
+    if ($add) {
+        $ins = $db->prepare("INSERT IGNORE INTO shout_mentions (shout_id, user_id, late) VALUES (?, ?, 1)");
+        foreach ($add as $uid) $ins->execute([$shoutId, $uid]);
+    }
+    if ($drop) {
+        $in = implode(',', array_fill(0, count($drop), '?'));
+        $db->prepare("DELETE FROM shout_mentions WHERE shout_id = ? AND user_id IN ($in)")
+           ->execute(array_merge([$shoutId], $drop));
+    }
+    return ['added' => $add, 'dropped' => $drop];
+}
+
+/**
+ * Correct a line. ['ok' => true, 'row' => …, 'changed' => bool] or ['ok' => false, 'error' => code]
+ * with codes disabled | login | no_permission | muted | not_found | too_late | flood | empty |
+ * too_long | invalid_body.
+ *
+ * THROUGH THE SAME DOOR AS POSTING, in the same order: who is asking (the composer's own gate — the
+ * room on, `shout.post`, not silenced: an edit is writing), whether they may touch THIS line, how
+ * fast they are going, and only then what they typed. The words are judged exactly as a new line's
+ * are — the length limit, and for the STORED `body_format` the same validator with the shout's own
+ * limit — and rendered by the same function, so a corrected line is byte for byte what the poll
+ * would hand anybody.
+ *
+ * The flood interval is `shout_flood_seconds` between two EDITS by one account, on the database's
+ * clock (idx_shouts_edited_by), so an edit box is not a way round the interval posting has; a post
+ * does not count against it, because fixing the typo in what you just said is the commonest edit
+ * there is. The address ceiling is the endpoint's (api/shout_edit.php).
+ *
+ * Words that did not change change nothing: no mark, no mention pass, no audit line.
+ */
+function shoutEdit(PDO $db, array $cfg, array $me, int $id, string $body): array
+{
+    $gate = shoutMayPost($db, $cfg, $me);
+    if (!$gate['ok']) return ['ok' => false, 'error' => $gate['reason'], 'until' => $gate['until'], 'row' => null];
+    $meId = (int)$me['id'];
+
+    $row = shoutEditRow($db, $id);
+    if (!$row) return ['ok' => false, 'error' => 'not_found', 'row' => null];
+    $why = shoutEditRight($db, $cfg, $meId, $row);
+    if ($why !== '') return ['ok' => false, 'error' => $why, 'row' => null];
+
+    $wait = shoutFloodSeconds($cfg);
+    if ($wait > 0) {
+        $st = $db->prepare("SELECT TIMESTAMPDIFF(SECOND, MAX(edited_at), NOW()) FROM shouts WHERE edited_by = ?");
+        $st->execute([$meId]);
+        $since = $st->fetchColumn();
+        if ($since !== false && $since !== null && (int)$since < $wait) {
+            return ['ok' => false, 'error' => 'flood', 'retry_after' => max(1, $wait - (int)$since), 'row' => null];
+        }
+    }
+
+    $body = trim($body);
+    if ($body === '') return ['ok' => false, 'error' => 'empty', 'row' => null];
+    $max = shoutMaxChars($cfg);
+    if (mb_strlen($body) > $max) return ['ok' => false, 'error' => 'too_long', 'limit' => $max, 'row' => null];
+    // The format the line was WRITTEN in. Changing it in an edit would change how every other word
+    // of it renders, which is not a correction — and it is the one the reader has been reading.
+    $format = (string)$row['body_format'];
+    if ($format !== 'plain' && function_exists('richtextValidate')) {
+        $bad = richtextValidate($body, $format, array_merge($cfg, ['desc_max_chars' => (string)$max]));
+        if ($bad !== null) return ['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null];
+    }
+
+    $changed = $body !== (string)$row['body'];
+    if ($changed) {
+        $st = $db->prepare("UPDATE shouts SET body = ?, edited_at = NOW(), edited_by = ? WHERE id = ? AND deleted_at IS NULL");
+        $st->execute([$body, $meId, $id]);
+        if ($st->rowCount() < 1) return ['ok' => false, 'error' => 'not_found', 'row' => null];   // deleted meanwhile
+        $authorId = $row['user_id'] === null ? 0 : (int)$row['user_id'];
+        shoutSyncMentions($db, $id, $body, $authorId);
+        // Somebody ELSE's words: an audited act, like taking a line down — who changed it and when,
+        // not what it said (the room keeps no history of words, and the log is kept longer than the
+        // room is). The author tidying their own line is not an act anybody needs a record of.
+        if ($authorId !== $meId && function_exists('auditLog')) {
+            $wst = $db->prepare("SELECT edited_at FROM shouts WHERE id = ?");
+            $wst->execute([$id]);
+            $when = (string)($wst->fetchColumn() ?: '');
+            auditLog($db, 'shout.edit', [
+                'target_type' => 'shout', 'target_id' => $id,
+                'summary' => (string)($me['username'] ?? '#' . $meId) . ' → edited shout #' . $id . ' by '
+                           . (string)($row['username'] ?? ('#' . $authorId)),
+                'detail' => ['editor' => (string)($me['username'] ?? ''), 'editor_id' => $meId,
+                             'author' => (string)($row['username'] ?? ''), 'author_id' => $authorId,
+                             'edited_at' => $when, 'said_at' => (string)$row['created_at']],
+            ]);
+        }
+    }
+
+    $rows = shoutRows($db, $cfg, $me, 1, $id - 1);
+    $out = ($rows && (int)$rows[0]['id'] === $id) ? $rows[0] : null;
+    return ['ok' => true, 'error' => '', 'row' => $out, 'changed' => $changed, 'id' => $id];
+}
+
 /* ── what is new for one reader ────────────────────────────────────────────── */
 
 /** Remember how far this reader has read. GREATEST, so a slow tab cannot move the mark backwards. */
@@ -827,6 +1112,14 @@ function shoutSeen(PDO $db, int $userId, int $id): void
 {
     if ($userId <= 0 || $id <= 0) return;
     $db->prepare("UPDATE users SET shout_seen_id = GREATEST(shout_seen_id, ?) WHERE id = ?")->execute([$id, $userId]);
+    // …and a mention an EDIT added to a line at or below that id (v72) has now been in front of
+    // them: it stops counting. Up to the id THIS tab says it saw, not to the stored mark — a slow tab
+    // reporting an older id clears less, never more.
+    try {
+        $db->prepare("UPDATE shout_mentions SET late = 0 WHERE user_id = ? AND late = 1 AND shout_id <= ?")->execute([$userId, $id]);
+    } catch (\Throwable $e) {
+        // the column arrives with schema 72; mid-upgrade there is nothing late to clear
+    }
 }
 
 /**
@@ -865,11 +1158,36 @@ function shoutUnreadCounts(PDO $db, array $cfg, array $me): array
               WHERE s.id > ? AND s.deleted_at IS NULL AND s.is_system = 0 AND s.user_id <> ?");
         $st->execute([$meId, $meId, $meId, $seen, $meId]);
         $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
-        return ['shout' => (int)($r['total'] ?? 0), 'shout_friend' => (int)($r['friends'] ?? 0),
+        $out = ['shout' => (int)($r['total'] ?? 0), 'shout_friend' => (int)($r['friends'] ?? 0),
                 'mention' => (int)($r['mentions'] ?? 0)];
     } catch (\Throwable $e) {
         return $zero;   // mid-upgrade: no table, no numbers, no error page
     }
+    // …plus the lines an EDIT named this reader in after they had already read past them (v72,
+    // shout_mentions.late). Unread is counted by id and an edit does not move a line's id, so these
+    // are counted here, BELOW the mark only — a late row above it is already counted by the query
+    // above and must not be counted twice. Each is a mention and a line, and a friend's line when a
+    // friend said it, so the two subsets stay subsets of the total. Its own try: the column arrives
+    // with schema 72, and its absence must not take the numbers above away with it.
+    try {
+        $st = $db->prepare(
+            "SELECT COUNT(*) AS total,
+                    COALESCE(SUM(EXISTS(SELECT 1 FROM user_friends f WHERE f.status = 'accepted'
+                                          AND ((f.user_id = ? AND f.friend_id = s.user_id)
+                                            OR (f.user_id = s.user_id AND f.friend_id = ?)))), 0) AS friends
+               FROM shout_mentions m JOIN shouts s ON s.id = m.shout_id
+              WHERE m.user_id = ? AND m.late = 1 AND m.shout_id <= ?
+                AND s.deleted_at IS NULL AND s.is_system = 0 AND s.user_id <> ?");
+        $st->execute([$meId, $meId, $meId, $seen, $meId]);
+        $late = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        $n = (int)($late['total'] ?? 0);
+        $out['shout'] += $n;
+        $out['mention'] += $n;
+        $out['shout_friend'] += (int)($late['friends'] ?? 0);
+    } catch (\Throwable $e) {
+        // mid-upgrade: nothing is late yet
+    }
+    return $out;
 }
 
 /* ── retention ─────────────────────────────────────────────────────────────── */

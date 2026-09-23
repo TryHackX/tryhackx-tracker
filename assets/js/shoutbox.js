@@ -21,6 +21,13 @@
  * same thing: skip this tick. The counter on the badge is somebody else's job and comes from the
  * pulse; this only fetches text for a box that is on the screen.
  *
+ * ── it keeps the reader where they chose to be (1.66.0) ───────────────────────────────────────
+ * The list opens at its newest line and follows new ones while the reader is there; while they read
+ * further up it does not move them and counts on a "new lines" button instead; their own line always
+ * goes to the end. Only the list ever scrolls (scrollTop / scrollTo, never scrollIntoView), and a
+ * glide is instant for anybody who asked for reduced motion. The one row that IS redrawn is a line
+ * its reader has just corrected, replaced by the server's own rendering of it — see openEdit().
+ *
  * ── the emoji are characters, the emotes are images ────────────────────────────────────────────
  * The four emoji pages are a fixed list of Unicode characters written into this file, drawn by the
  * font the device already has — Segoe UI Emoji on Windows, Noto on Android, Apple's on iOS. No
@@ -521,6 +528,10 @@
         var emojiBtn = document.getElementById('shout-emoji');
         var refreshBtn = document.getElementById('shout-refresh');
         var pinnedEl = document.getElementById('shout-pinned');
+        // The "new lines" button (1.66.0): drawn by the template, hidden, beside the list rather than
+        // in it, so it stays at the visible end of the list while the rows scroll under it.
+        var jumpBtn = document.getElementById('shout-jump');
+        var jumpN = jumpBtn ? jumpBtn.querySelector('.shout-jump-n') : null;
         if (!listEl) return;
 
         // Which end the newest line is at (1.64.0). The template has already drawn the room this
@@ -537,11 +548,71 @@
         var seen = 0;                 // the highest id this reader has been told about
         var polling = false;
         var timer = 0;
+        // While the language is being switched in place (assets/js/lang-swap.js), a poll would be
+        // answered for whichever language the cookie said when it set off. Nothing is asked until
+        // the switch is over.
+        var swapping = false;
 
         /** Is this box on the screen of a tab somebody is looking at? */
         function visible() { return !document.hidden && box.offsetParent !== null; }
 
         function note(text) { if (noteEl) noteEl.textContent = text || ''; }
+
+        /* ─────────────────────── keeping the reader at the newest line (1.66.0) ───────────────────────
+         *
+         * What a modern chat does, and deliberately NOT "always scroll down" — being dragged to the
+         * bottom while reading history is the thing people hate most about chat windows:
+         *
+         *   · the list OPENS at its newest line, always — and when it has no height yet (a hidden
+         *     tab, a collapsed pane) the first time it gets one;
+         *   · a new line while the reader is at that end (within 40 px) is followed;
+         *   · a new line while they have scrolled away does NOT move them: the "new lines" button at
+         *     the end of the list counts what arrived, jumps there when pressed, and goes;
+         *   · the reader's OWN line always jumps there — pressing Send is asking to see it.
+         *
+         * Every scroll here is the LIST's own (scrollTop / scrollTo), never scrollIntoView() on a row:
+         * that scrolls every ancestor too, and on the front page it would drag the whole window along.
+         * A smooth glide is used only where the reader has not asked for reduced motion. With the
+         * newest at the top everything is the mirror image — its "end" is scrollTop 0.
+         */
+        var stick = true;             // following the newest end
+        var unseen = 0;               // lines that arrived while the reader was away from it
+        var autoUntil = 0;            // our own smooth glide is under way until then
+        function reduceMotion() {
+            return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        }
+        /** How far the reader is from the end the new lines arrive at, in pixels. */
+        function fromEnd() {
+            return newestTop ? listEl.scrollTop : listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight;
+        }
+        function atEnd(slack) { return fromEnd() < (slack === undefined ? 40 : slack); }
+        function hideJump() {
+            unseen = 0;
+            if (!jumpBtn) return;
+            jumpBtn.hidden = true;
+            if (jumpN) jumpN.textContent = '';
+        }
+        function showJump(n) {
+            unseen += n;
+            if (!jumpBtn || unseen <= 0) return;
+            if (jumpN) jumpN.textContent = String(unseen);
+            jumpBtn.hidden = false;
+        }
+        /**
+         * To the newest line. `smooth` glides there unless the reader asked for reduced motion; the
+         * glide's own scroll events are not the reader moving (see the listener below).
+         */
+        function toEnd(smooth) {
+            var top = newestTop ? 0 : listEl.scrollHeight;
+            stick = true;
+            hideJump();
+            if (smooth && !reduceMotion() && typeof listEl.scrollTo === 'function') {
+                autoUntil = Date.now() + 900;
+                try { listEl.scrollTo({ top: top, behavior: 'smooth' }); return; } catch (e) { /* an engine without options */ }
+            }
+            autoUntil = 0;
+            listEl.scrollTop = top;
+        }
 
         /**
          * The name a line is signed with — a link to the profile, or plain text when nobody wrote
@@ -587,7 +658,9 @@
             row.dataset.id = String(Number(r.id) || 0);
             row.dataset.user = name;
             row.appendChild(who(r));
-            row.appendChild(el('span', { className: 'shout-time', title: String(r.at || ''), text: String(r.time || '') }));
+            row.appendChild(timeEl(r));
+            var mark = editedMark(r, 'shout-ed-' + (Number(r.id) || 0));
+            if (mark) row.appendChild(mark);
             row.appendChild(el('span', { className: 'shout-body rt-body', html: r.html || '' }));
             // From the box's own permission rather than from anything per row: pinning is
             // `shout.moderate` and that answer is the same for every line on the page.
@@ -595,11 +668,85 @@
                 row.appendChild(el('button', { type: 'button', className: 'shout-pin',
                                                title: t('js.shout.pin_title'), 'aria-label': t('js.shout.pin'), text: '📌' }));
             }
+            // The pencil (1.66.0) — per row, because the answer is: this reader's own line inside the
+            // window, or anybody's with shout.edit_any. `data-left` is the window the server had left.
+            if (r.editable) {
+                row.appendChild(el('button', { type: 'button', className: 'shout-edit', title: t('js.shout.edit_title'),
+                                               'aria-label': t('js.shout.edit'),
+                                               'data-left': Number(r.edit_left) > 0 ? String(Number(r.edit_left)) : null },
+                                   el('i', { className: 'bi bi-pencil', 'aria-hidden': 'true' })));
+            }
             if (r.deletable) {
                 row.appendChild(el('button', { type: 'button', className: 'shout-del',
-                                               title: t('js.shout.delete_title'), 'aria-label': t('js.shout.delete'), text: '×' }));
+                                               title: t('js.shout.delete_title'), 'aria-label': t('js.shout.delete'),
+                                               'data-left': Number(r.del_left) > 0 ? String(Number(r.del_left)) : null, text: '×' }));
             }
+            stampDeadlines(row, Date.now());
             return row;
+        }
+
+        /**
+         * The hour, with the day of the week in front of it (1.66.0): "pon 21:43". Both come from the
+         * server, in the reader's zone and language. ONE text node after the day's element — " 21:43"
+         * — exactly as the template writes it: the live language switch pairs text nodes by position,
+         * and a " " and a "21:43" beside a fresh page's single " 21:43" would come out as the hour twice.
+         */
+        function timeEl(r) {
+            var span = el('span', { className: 'shout-time', title: String(r.at || '') });
+            var day = String(r.day || ''), time = String(r.time || '');
+            if (day !== '') {
+                span.appendChild(el('span', { className: 'shout-dow', 'data-dow': String(Number(r.dow) || 0), text: day }));
+                span.appendChild(document.createTextNode(' ' + time));
+            } else {
+                span.appendChild(document.createTextNode(time));
+            }
+            return span;
+        }
+
+        /**
+         * "(edited)" beside the time, or "(edited by a moderator)" when somebody other than the
+         * author changed the words — the exact moment in its title. The template's $shoutEdited
+         * draws the same element; null for a line nobody has corrected.
+         *
+         * With an id of its own (`shout-ed-<id>`, `shout-pinned-ed` in the strip), exactly as the
+         * template writes it: the live language switch matches identified nodes by id and nothing
+         * else, so a mark the page does not have yet — a line corrected elsewhere after this page
+         * loaded — can never be paired with the words beside it and overwrite them.
+         */
+        function editedMark(r, id) {
+            if (!r || !r.edited) return null;
+            var mod = !!r.edited_mod, at = String(r.edited_at || '');
+            return el('span', { className: 'shout-edited' + (mod ? ' shout-edited-mod' : ''), id: id || null,
+                                title: t(mod ? 'js.shout.edited_mod_title' : 'js.shout.edited_title', { at: at }),
+                                'data-at': at, text: t(mod ? 'js.shout.edited_mod' : 'js.shout.edited') });
+        }
+
+        /**
+         * When each window on a row runs out, as a moment on THIS machine's clock: `data-left` is
+         * seconds from the answer the row came in, and `base` is when that answer arrived — the
+         * navigation's start for the rows the server drew, now for a row just appended. Written once.
+         */
+        function stampDeadlines(scope, base) {
+            Array.prototype.forEach.call(scope.querySelectorAll('.shout-edit[data-left], .shout-del[data-left]'), function (b) {
+                if (b.dataset.until) return;
+                var left = Number(b.dataset.left) || 0;
+                if (left > 0) b.dataset.until = String(Math.round(base + left * 1000));
+            });
+        }
+
+        /**
+         * Take away a pencil or a cross whose window has closed, so nobody is offered a control the
+         * server would refuse. Not the pencil of a row whose editor is open: the words somebody is in
+         * the middle of stay where they are, and Save says plainly that the time ran out.
+         */
+        function expire() {
+            var now = Date.now();
+            Array.prototype.forEach.call(listEl.querySelectorAll('.shout-edit[data-until], .shout-del[data-until]'), function (b) {
+                if (Number(b.dataset.until) > now) return;
+                var row = b.closest('.shout-row');
+                if (row && row.classList.contains('shout-editing') && b.classList.contains('shout-edit')) return;
+                b.remove();
+            });
         }
 
         /**
@@ -617,6 +764,9 @@
             pinnedEl.hidden = false;
             pinnedEl.appendChild(el('span', { className: 'shout-pin-icon', 'aria-hidden': 'true', text: '📌' }));
             pinnedEl.appendChild(who(row));
+            // A corrected announcement says so up here too (1.66.0): the strip shows the same words.
+            var mark = editedMark(row, 'shout-pinned-ed');
+            if (mark) pinnedEl.appendChild(mark);
             pinnedEl.appendChild(el('span', { className: 'shout-body rt-body', html: row.html || '' }));
             if (mayModerate) {
                 pinnedEl.appendChild(el('button', { type: 'button', className: 'shout-unpin',
@@ -644,16 +794,25 @@
          * Append the rows that are not already there, and follow the list down only if the reader was
          * already at the bottom of it. Scrolling somebody away from the line they are reading is worse
          * than a row they have to scroll to.
+         *
+         * 1.66.0: `opts.mine` is the reader's own line from the answer to Send, which always goes to
+         * the end. Anything else that lands while they are away from the end is counted on the "new
+         * lines" button instead of moving them.
          */
-        function appendRows(rows) {
+        function appendRows(rows, opts) {
             // "Am I standing where the new lines arrive?" — the bottom of the list with the newest
             // at the bottom, the top of it with the newest at the top (1.64.0). Either way: follow
             // only if they were already there, and otherwise give back exactly the height that was
             // added so the line being read does not move under them.
+            //
+            // MEASURED NOW, not taken from the last scroll event: the browser reports a scroll a frame
+            // later, and a poll landing inside that frame would otherwise follow a reader who has just
+            // moved away. Two cases keep `stick` instead: our own glide still on its way (the position
+            // lags behind it) and a list with no height (nothing to measure — it follows whatever it
+            // was following when it was hidden).
             var wasHeight = listEl.scrollHeight, wasTop = listEl.scrollTop;
-            var atEnd = newestTop
-                ? wasTop < 40
-                : wasHeight - wasTop - listEl.clientHeight < 40;
+            var following = listEl.clientHeight <= 0 ? stick : (atEnd() || (stick && Date.now() < autoUntil));
+            if (!following) stick = false;
             var added = [];
             (rows || []).forEach(function (r) {
                 var id = Number(r && r.id) || 0;
@@ -670,15 +829,15 @@
             if (added.length) {
                 var empty = listEl.querySelector('.shout-empty');
                 if (empty) empty.remove();
-                if (atEnd) listEl.scrollTop = newestTop ? 0 : listEl.scrollHeight;
-                else if (newestTop) listEl.scrollTop = wasTop + (listEl.scrollHeight - wasHeight);
+                if ((opts && opts.mine) || following) {
+                    toEnd(true);
+                } else {
+                    if (newestTop) listEl.scrollTop = wasTop + (listEl.scrollHeight - wasHeight);
+                    showJump(added.length);
+                }
             }
             return added;
         }
-
-        /** Where the newest line is: the top of the list, or the bottom of it. */
-        function toEnd() { listEl.scrollTop = newestTop ? 0 : listEl.scrollHeight; }
-        function bottom() { toEnd(); }
 
         /**
          * "I have seen up to here."
@@ -707,13 +866,18 @@
          * Returns how many rows landed, so the button can say "nothing new" and the tick can stay
          * silent about it.
          */
-        async function fetchNew(force) {
-            if (polling) return 0;
+        async function fetchNew(force, again) {
+            if (polling || swapping) return 0;
             if (!force && (!live || !visible())) return 0;
             polling = true;
             var j = null;
             try { j = await get('shout_list&after=' + newest); } finally { polling = false; }
             if (!j) return 0;
+            // Asked before a live language switch and answered after it (1.66.0): every row in this
+            // answer was written for the language the page has just left — the weekday, the
+            // "(edited)" mark, the title over a picture. Nothing from it is used, and `newest` does
+            // not move; the same question goes again, carrying the new language's cookie. Once.
+            if (stale(j)) return again ? 0 : fetchNew(force, true);
             if (!j.success) {
                 // Switched off, signed out, or the permission taken away mid-session: stop asking. The
                 // box stays on the screen with what it had, which is honest — those rows were real.
@@ -732,6 +896,17 @@
         }
 
         function poll() { return fetchNew(false); }
+
+        /**
+         * Was this answer written for a language the page is no longer in? Every reply that carries
+         * rows says which language it formatted them for (`lang`, 1.66.0); the page knows its own
+         * from the bundle lang-swap.js reloads after a switch. An answer without the field (an older
+         * server mid-deploy) is taken as it comes.
+         */
+        function stale(j) {
+            var mine = window.t && window.t.lang ? String(window.t.lang) : '';
+            return !!(j && j.success && j.lang && mine && String(j.lang) !== mine);
+        }
 
         /**
          * The button in the head: the same fetch, asked for on purpose.
@@ -762,6 +937,9 @@
             if (!olderBtn || olderBtn.disabled || !oldest) return;
             olderBtn.disabled = true;
             var j = await get('shout_list&before=' + oldest);
+            // The same rule as the poll's: an answer written for the language the page has left is
+            // asked for again rather than pasted in (1.66.0).
+            if (stale(j)) j = await get('shout_list&before=' + oldest);
             olderBtn.disabled = false;
             if (!j || !j.success) { note(errText(j, maxChars)); return; }
             var rows = j.rows || [];
@@ -801,12 +979,23 @@
         function askDelete(btn) {
             var row = btn.closest('.shout-row');
             if (!row) return;
+            // Never both on one row (1.66.0): while a row is being corrected its cross is hidden, and
+            // this is the second lock on the same door.
+            if (row.classList.contains('shout-editing')) return;
             var id = Number(row.dataset.id) || 0;
             askInPlace(btn, t('js.shout.delete_q'), async function () {
                 var r = await post('shout_delete', { id: id });
                 if (r && r.success) { row.remove(); note(''); return true; }
                 // A row somebody else already deleted is gone either way: take it off the screen.
                 if (r && r.error === 'not_found') { row.remove(); return true; }
+                // The window closed while the page was open (1.66.0): say so, and let the cross go
+                // once the question has put it back — it can only be refused again.
+                if (r && r.error === 'too_late') {
+                    note(t('js.shout.err_too_late_delete'));
+                    btn.dataset.until = '1';
+                    setTimeout(expire, 0);
+                    return false;
+                }
                 note(errText(r, maxChars));
                 return false;
             }, {
@@ -859,9 +1048,12 @@
             if (typeof after === 'function') after();
             if (r.row) {
                 // Straight from the answer, without waiting for a tick: the line somebody just wrote
-                // appearing a few seconds later reads as a send that did not work.
-                appendRows([r.row]);
-                bottom();
+                // appearing a few seconds later reads as a send that did not work. And always at the
+                // end, wherever the reader had scrolled to: pressing Send is asking to see it (1.66.0).
+                appendRows([r.row], { mine: true });
+                // Answered for the language the page has just left (a switch mid-flight): the words
+                // are the writer's own either way, and the parts the page words itself are re-worded.
+                if (stale(r)) { var mineRow = document.getElementById('shout-' + (Number(r.row.id) || 0)); if (mineRow) relabelRow(mineRow); }
                 markSeen(newest);
             }
             return true;
@@ -1047,13 +1239,251 @@
             return false;
         }
 
+        /* ─────────────────────────── correcting a line (1.66.0) ───────────────────────────
+         *
+         * The row's body becomes a small editor in place: the composer's own tabs and rail when the
+         * line was written with markup, a bare box when it was plain — the format the line was STORED
+         * in, which the server keeps (a correction does not re-render the rest of the sentence in
+         * another syntax). Save and Cancel under it; Enter saves, Shift+Enter starts a line, Esc
+         * cancels. While it is open the row's other controls are hidden, exactly as they are while
+         * the delete question is open — and the two can never be open on one row at once.
+         *
+         * The words come from the SERVER when the editor opens (GET shout_edit), not from the
+         * rendered line: HTML is not what anybody typed. That same answer is the server saying yes —
+         * a window that closed since the page was drawn is caught before a word is typed. Save
+         * replaces the row with the server's own rendering of it, the "(edited)" mark included.
+         *
+         * One editor in the whole box at a time: opening another one closes this one, unsaved.
+         */
+        var editing = null;           // { row, id, form, ta, save, cancel, enote, busy }
+        var editSeq = 0;              // an answer for an editor that is no longer being opened is dropped
+
+        /** What the server's refusal of an edit means, in this reader's language. */
+        function editErr(r) {
+            var code = r && r.error;
+            if (code === 'too_late') return t('js.shout.err_too_late_edit');
+            if (code === 'no_permission') return t('js.shout.err_edit_denied');
+            return errText(r, maxChars);
+        }
+
+        function buildEditor(id, body, fmt) {
+            var base = 'shout-edit-' + id, taId = base + '-body';
+            var form = el('div', { className: 'shout-edit-form', id: base });
+            var tarea = el('textarea', { id: taId, className: 'pm-input shout-input shout-edit-input', rows: '2',
+                                         maxlength: String(maxChars), 'aria-label': t('js.shout.edit_label') });
+            tarea.value = body;
+            if (fmt === 'plain') {
+                form.appendChild(tarea);
+            } else {
+                var editor = el('div', { className: 'rt-editor pm-editor shout-editor shout-edit-editor' });
+                var tabs = el('div', { className: 'rt-tabs' }, [
+                    el('button', { type: 'button', className: 'rt-tab active', 'data-rt': 'write', text: t('js.shout.edit_write') }),
+                    el('button', { type: 'button', className: 'rt-tab', 'data-rt': 'preview', text: t('js.shout.edit_preview') }),
+                    // The editor reads its syntax from `<id>-format` (assets/js/app.js); a hidden field
+                    // says the stored one and offers no choice, because the server would not take one.
+                    el('input', { type: 'hidden', id: taId + '-format', value: fmt }),
+                ]);
+                // The composer's own rail, copied — the same eight marks, already titled in whatever
+                // language the page is in — so there is one toolbar on this page, drawn once.
+                var rail = document.getElementById('shout-body-tools');
+                if (rail) {
+                    var tools = rail.cloneNode(true);
+                    tools.id = taId + '-tools';
+                    tabs.appendChild(tools);
+                }
+                editor.appendChild(tabs);
+                editor.appendChild(tarea);
+                editor.appendChild(el('div', { className: 'rt-preview rt-body', id: taId + '-preview', hidden: true }));
+                form.appendChild(editor);
+            }
+            var save = el('button', { type: 'button', className: 'btn btn-small shout-edit-save', text: t('js.shout.edit_save') });
+            var cancel = el('button', { type: 'button', className: 'btn btn-secondary btn-small shout-edit-cancel', text: t('js.shout.edit_cancel') });
+            var enote = el('span', { className: 'shout-edit-note', role: 'status', 'aria-live': 'polite' });
+            form.appendChild(el('div', { className: 'shout-edit-acts' }, [save, cancel,
+                el('span', { className: 'shout-edit-hint text-muted', text: t('js.shout.edit_hint') }), enote]));
+            return { form: form, ta: tarea, save: save, cancel: cancel, enote: enote, taId: taId };
+        }
+
+        async function openEdit(btn) {
+            var row = btn.closest('.shout-row');
+            if (!row || row.classList.contains('shout-asking')) return;
+            if (editing && editing.row === row) { editing.ta.focus({ preventScroll: true }); return; }
+            var id = Number(row.dataset.id) || 0;
+            if (!id) return;
+            var mine = ++editSeq;
+            btn.disabled = true;
+            var j = await get('shout_edit&id=' + id);
+            btn.disabled = false;
+            if (mine !== editSeq || !row.isConnected || row.classList.contains('shout-asking')) return;
+            if (!j || !j.success) {
+                if (j && j.error === 'not_found') { row.remove(); note(t('js.shout.err_not_found')); return; }
+                // The window closed, or the permission went, since the page was drawn: the pencil
+                // can only be refused again, so it goes.
+                if (j && (j.error === 'too_late' || j.error === 'no_permission')) btn.remove();
+                note(editErr(j));
+                return;
+            }
+            if (editing) closeEdit(false);
+            var ed = buildEditor(id, String(j.body || ''), String(j.format || format));
+            ed.row = row; ed.id = id; ed.busy = false;
+            var bodyEl = row.querySelector('.shout-body');
+            if (bodyEl) { bodyEl.hidden = true; bodyEl.insertAdjacentElement('afterend', ed.form); }
+            else row.appendChild(ed.form);
+            row.classList.add('shout-editing');
+            editing = ed;
+            if (ed.form.querySelector('.rt-editor') && window.RichText && typeof window.RichText.mount === 'function') {
+                window.RichText.mount(ed.taId, { previewFor: 'shout' });
+            }
+            ed.save.addEventListener('click', saveEdit);
+            ed.cancel.addEventListener('click', function () { closeEdit(true); });
+            ed.form.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEdit(true); return; }
+                if (e.target === ed.ta && e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing) {
+                    e.preventDefault();
+                    saveEdit();
+                }
+            });
+            // The editor makes the row taller, and on the newest line — the one people correct most —
+            // that puts Save below the bottom of the list. The LIST is scrolled to show the whole row;
+            // nothing else moves (see revealInList).
+            revealInList(row);
+            // Into the box without scrolling anything: focus() alone would scroll every ancestor to
+            // reveal it, the window included — the thing scrollIntoView() is not used for either.
+            ed.ta.focus({ preventScroll: true });
+            try { ed.ta.setSelectionRange(ed.ta.value.length, ed.ta.value.length); } catch (err) { /* a box that will not be told */ }
+            note('');
+        }
+
+        /**
+         * Bring a row wholly into the list's view by scrolling the LIST and nothing else — the job
+         * scrollIntoView() would do, without dragging the page around the list with it. A row taller
+         * than the list shows its top.
+         */
+        function revealInList(node) {
+            var lr = listEl.getBoundingClientRect(), nr = node.getBoundingClientRect();
+            if (lr.height <= 0) return;
+            if (nr.top < lr.top || nr.height > lr.height) listEl.scrollTop += Math.floor(nr.top - lr.top) - 4;
+            else if (nr.bottom > lr.bottom) listEl.scrollTop += Math.ceil(nr.bottom - lr.bottom) + 4;
+        }
+
+        /** Close the editor without saving. `focusBack` returns the keyboard to the pencil. */
+        function closeEdit(focusBack) {
+            var ed = editing;
+            if (!ed) return;
+            editing = null;
+            ed.form.remove();
+            ed.row.classList.remove('shout-editing');
+            var bodyEl = ed.row.querySelector('.shout-body');
+            if (bodyEl) bodyEl.hidden = false;
+            // A window that ran out while the editor was open takes the pencil now.
+            expire();
+            if (focusBack) {
+                var b = ed.row.querySelector('.shout-edit');
+                if (b) b.focus({ preventScroll: true });
+            }
+        }
+
+        async function saveEdit() {
+            var ed = editing;
+            if (!ed || ed.busy) return;
+            var body = ed.ta.value.trim();
+            if (!body) { ed.enote.textContent = t('js.shout.err_empty'); ed.ta.focus({ preventScroll: true }); return; }
+            ed.busy = true;
+            ed.save.disabled = true;
+            var r = await post('shout_edit', { id: ed.id, body: body });
+            ed.busy = false;
+            ed.save.disabled = false;
+            if (editing !== ed) return;               // cancelled while the answer was on its way
+            if (!r || !r.success) {
+                if (r && r.error === 'not_found') { closeEdit(false); ed.row.remove(); note(t('js.shout.err_not_found')); return; }
+                // Refused: the words stay in the box, so they can still be copied somewhere.
+                ed.enote.textContent = editErr(r);
+                return;
+            }
+            var was = ed.row;
+            closeEdit(false);
+            if (r.row) {
+                var fresh = renderRow(r.row);
+                if (stale(r)) relabelRow(fresh);
+                was.replaceWith(fresh);
+                // The announcement strip shows the same words.
+                if (pinnedEl && pinnedEl.dataset.id === String(Number(r.row.id) || 0)) renderPinned(r.row);
+                var b = fresh.querySelector('.shout-edit');
+                if (b) b.focus({ preventScroll: true });
+                if (stick) toEnd(false);
+            }
+            note('');
+        }
+
+        /**
+         * Re-word everything this script says on a row, from the dictionary the page carries NOW.
+         *
+         * The live language switch (assets/js/lang-swap.js) rewrites every row that is also in a
+         * fresh render of the page — which is the newest widgetful. A row "Older" loaded is not in
+         * it, so the walk skips it, and it would keep yesterday's language on its weekday, its
+         * "(edited)" and its buttons. So after every switch each row is re-worded from what it
+         * carries: the day's number, the mark's moment, the buttons' fixed words. A row the walk DID
+         * reach comes out exactly as the walk left it.
+         */
+        function relabelRow(row) {
+            Array.prototype.forEach.call(row.querySelectorAll('.shout-dow[data-dow]'), function (d) {
+                var n = Number(d.dataset.dow) || 0;
+                if (n >= 1 && n <= 7) d.textContent = t('js.common.dow_' + n);
+            });
+            var mark = row.querySelector('.shout-edited');
+            if (mark) {
+                var mod = mark.classList.contains('shout-edited-mod');
+                mark.textContent = t(mod ? 'js.shout.edited_mod' : 'js.shout.edited');
+                mark.title = t(mod ? 'js.shout.edited_mod_title' : 'js.shout.edited_title', { at: mark.dataset.at || '' });
+            }
+            var b;
+            if ((b = row.querySelector('.shout-pin'))) { b.title = t('js.shout.pin_title'); b.setAttribute('aria-label', t('js.shout.pin')); }
+            if ((b = row.querySelector('.shout-edit'))) { b.title = t('js.shout.edit_title'); b.setAttribute('aria-label', t('js.shout.edit')); }
+            if ((b = row.querySelector('.shout-del'))) { b.title = t('js.shout.delete_title'); b.setAttribute('aria-label', t('js.shout.delete')); }
+            if ((b = row.querySelector('.shout-unpin'))) { b.title = t('js.shout.unpin_title'); b.setAttribute('aria-label', t('js.shout.unpin')); }
+        }
+
+        /** The open editor's own words, and its copy of the rail from the composer's, re-worded. */
+        function relabelEdit(ed) {
+            var tabs = ed.form.querySelectorAll('.rt-tab');
+            if (tabs[0]) tabs[0].textContent = t('js.shout.edit_write');
+            if (tabs[1]) tabs[1].textContent = t('js.shout.edit_preview');
+            ed.save.textContent = t('js.shout.edit_save');
+            ed.cancel.textContent = t('js.shout.edit_cancel');
+            ed.ta.setAttribute('aria-label', t('js.shout.edit_label'));
+            var hint = ed.form.querySelector('.shout-edit-hint');
+            if (hint) hint.textContent = t('js.shout.edit_hint');
+            var rail = document.getElementById('shout-body-tools');
+            var copy = document.getElementById(ed.taId + '-tools');
+            if (rail && copy) {
+                var from = rail.querySelectorAll('button'), to = copy.querySelectorAll('button');
+                for (var i = 0; i < to.length && i < from.length; i++) to[i].title = from[i].title;
+                copy.setAttribute('aria-label', rail.getAttribute('aria-label') || '');
+            }
+        }
+
+        function relabelAll() {
+            Array.prototype.forEach.call(listEl.querySelectorAll('.shout-row'), relabelRow);
+            if (pinnedEl) relabelRow(pinnedEl);
+            if (editing) relabelEdit(editing);
+            if (jumpBtn) {
+                jumpBtn.title = t('js.shout.new_lines_title');
+                var jt = jumpBtn.querySelector('.shout-jump-text');
+                if (jt) jt.textContent = t('js.shout.new_lines');
+            }
+        }
+
         /* ─────────────────────────── wiring ─────────────────────────── */
 
         // Delegated, so a row drawn by the server and a row drawn above by this script behave the same.
         listEl.addEventListener('click', function (e) {
             if (!e.target.closest) return;
+            // Inside an open editor nothing below applies: its own buttons have their own handlers.
+            if (e.target.closest('.shout-edit-form')) return;
             var del = e.target.closest('.shout-del');
             if (del && listEl.contains(del)) { askDelete(del); return; }
+            var eb = e.target.closest('.shout-edit');
+            if (eb && listEl.contains(eb)) { openEdit(eb); return; }
             // Pinning asks nothing first: it is one line moving to the top of a room, and the strip
             // it lands in has an unpin beside it. Deleting is the one that cannot be taken back.
             var p = e.target.closest('.shout-pin');
@@ -1128,34 +1558,72 @@
         }
 
         /**
-         * Start the reader at the end the newest line is at (1.64.0).
+         * Start the reader at the newest line, and keep them there while they want to be (1.64.0,
+         * reworked in 1.66.0).
          *
-         * With the newest at the TOP that is where a list starts anyway, so this is about the other
-         * arm: chat order puts the newest line at the bottom of a box nothing ever scrolled, and
-         * the reader opened the room looking at its oldest lines. One line of scroll fixes it —
-         * except that a box inside a hidden ancestor has height 0, and scrolling something with no
-         * height does nothing at all. That is every account-page tab that is not the open one, and
-         * a background tab restored on startup. So it is tried once now, and again the first time
-         * the box actually has a height.
+         * With the newest at the TOP that is where a list starts anyway; in chat order it is the
+         * bottom of a box nothing used to scroll. Three things can undo a scroll made once on mount,
+         * and each is answered here:
+         *
+         *   · A box with NO HEIGHT cannot be scrolled — every account-page tab that is not the open
+         *     one, a collapsed pane, a background tab. A ResizeObserver sees the list go from nothing
+         *     to a real height and puts the reader at the newest line THEN; and a list that is hidden
+         *     again later comes back to wherever its reader was following.
+         *   · A PICTURE that loads after the first paint (an avatar, an emote, a picture in a line)
+         *     makes the content taller under a reader who was at the end, and they are no longer at
+         *     it. A `load` from any image in the list, while following, goes back to the end.
+         *   · The reader's own SCROLLING decides whether they are following: at the end (within 40
+         *     px) they are, anywhere else they are not, and the "new lines" button goes away the
+         *     moment they are back. Our own glide's scroll events are not the reader: until it
+         *     arrives (or they take hold of the list) they do not count.
          */
-        toEnd();
-        if (listEl.clientHeight <= 0) {
-            if (window.ResizeObserver) {
-                // A pane that is unhidden takes the list from a height of nothing to a real one,
-                // which is a resize — so this fires exactly once, when there is finally something
-                // to scroll.
-                var firstPaint = new ResizeObserver(function () {
-                    if (listEl.clientHeight <= 0) return;
-                    firstPaint.disconnect();
-                    toEnd();
-                });
-                firstPaint.observe(listEl);
+        toEnd(false);
+        stampDeadlines(listEl, (window.performance && performance.timeOrigin) ? performance.timeOrigin : Date.now());
+        listEl.addEventListener('scroll', function () {
+            if (listEl.clientHeight <= 0) return;           // hidden: nothing here is the reader
+            if (autoUntil) {
+                if (Date.now() < autoUntil && !atEnd(2)) return;
+                autoUntil = 0;
             }
-            // A tab restored in the background is laid out but never painted; this is the moment
-            // somebody looks at it.
-            var onShown = function () { if (listEl.clientHeight > 0) { toEnd(); document.removeEventListener('visibilitychange', onShown); } };
-            document.addEventListener('visibilitychange', onShown);
+            stick = atEnd();
+            if (stick) hideJump();
+        }, { passive: true });
+        // The reader taking hold of the list ends our glide at once: from then on the position is theirs.
+        ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(function (ev) {
+            listEl.addEventListener(ev, function () { autoUntil = 0; }, { passive: true });
+        });
+        listEl.addEventListener('load', function (e) {
+            if (e.target && e.target.tagName === 'IMG' && stick && !autoUntil) toEnd(false);
+        }, true);
+        if (window.ResizeObserver) {
+            var lastH = listEl.clientHeight, wasStick = true;
+            new ResizeObserver(function () {
+                var h = listEl.clientHeight;
+                if (h <= 0) { if (lastH > 0) wasStick = stick; lastH = 0; return; }
+                var reappeared = lastH <= 0;
+                lastH = h;
+                if (reappeared) stick = wasStick;
+                if (stick) toEnd(false);
+            }).observe(listEl);
         }
+        // A tab restored in the background is laid out but never painted; this is the moment
+        // somebody looks at it.
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden && stick && listEl.clientHeight > 0) toEnd(false);
+        });
+        window.addEventListener('resize', function () { if (stick && listEl.clientHeight > 0) toEnd(false); });
+        if (jumpBtn) jumpBtn.addEventListener('click', function () { toEnd(true); markSeen(newest); });
+        // The windows on the pencils and crosses: taken away once they have run out.
+        setInterval(expire, 5000);
+        // A live language switch (assets/js/lang-swap.js): nothing is asked while it runs, and when it
+        // is over every row it could not reach is re-worded from the new dictionary.
+        document.addEventListener('langswap:begin', function () { swapping = true; });
+        document.addEventListener('langswap:end', function () { swapping = false; });
+        document.addEventListener('langswap', function () {
+            swapping = false;
+            relabelAll();
+            if (stick && listEl.clientHeight > 0) toEnd(false);
+        });
 
         // Everything already on the screen has been seen by whoever is looking at it.
         markSeen(newest);
@@ -1166,6 +1634,16 @@
                          newest: function () { return newest; }, insert: insert, fit: fitComposer,
                          // Which end the newest line is at, and a way to go there (1.64.0).
                          order: function () { return newestTop ? 'top' : 'bottom'; }, toEnd: toEnd,
+                         // 1.66.0, for the browser check: is the list following the newest line, how
+                         // many have arrived while it was not, the editor, the windows and the re-wording.
+                         following: function () { return stick; }, unseen: function () { return unseen; },
+                         edit: { open: function (id) { var b = listEl.querySelector('#shout-' + Number(id) + ' .shout-edit'); return b ? openEdit(b) : null; },
+                                 save: function () { return saveEdit(); }, close: function () { closeEdit(true); },
+                                 open_id: function () { return editing ? editing.id : 0; } },
+                         expire: expire, relabel: relabelAll,
+                         // The row renderer itself, so the check can hold what it draws against what
+                         // the template drew for the same row — the two must be one description.
+                         render: function (r) { return renderRow(r); },
                          // The lightbox, for the browser check: open or not, and a way to shut it.
                          lightbox: { open: function () { return !!lb && lb.isOpen(); },
                                      close: function () { if (lb) lb.close(); } },

@@ -2389,8 +2389,8 @@ add('', {
 # ── 1.58.0: the shoutbox (Settings → Descriptions & review → Shoutbox) ──────
 add('', {
     'settings.shout_title': ('Shoutbox', 'Shoutbox'),
-    'settings.shout_intro': ('One room, one line each: members say something short and it scrolls away. Nothing is kept for long — retention is both a number of lines and a number of days, swept by the janitor. Who may read, write, delete their own and delete anyone\'s are four permissions (<code>shout.view</code>, <code>shout.post</code>, <code>shout.delete_own</code>, <code>shout.moderate</code>) in Users → Groups; a visitor reads nothing unless you grant it. Somebody silenced in private messages is silenced here too.',
-        'Jeden pokój, po jednej linijce: członkowie mówią coś krótkiego i to odpływa. Nic nie zostaje na długo — retencja to i liczba linii, i liczba dni, sprząta janitor. Kto może czytać, pisać, kasować swoje i kasować cudze, to cztery uprawnienia (<code>shout.view</code>, <code>shout.post</code>, <code>shout.delete_own</code>, <code>shout.moderate</code>) w Użytkownicy → Grupy; gość nie czyta nic, dopóki mu tego nie nadasz. Kto ma wyciszenie w wiadomościach, ma je i tutaj.'),
+    'settings.shout_intro': ('One room, one line each: members say something short and it scrolls away. Nothing is kept for long — retention is both a number of lines and a number of days, swept by the janitor. Who may read, write, correct and delete their own, and edit or delete anyone\'s are six permissions (<code>shout.view</code>, <code>shout.post</code>, <code>shout.edit_own</code>, <code>shout.delete_own</code>, <code>shout.edit_any</code>, <code>shout.moderate</code>) in Users → Groups; a visitor reads nothing unless you grant it. Somebody silenced in private messages is silenced here too.',
+        'Jeden pokój, po jednej linijce: członkowie mówią coś krótkiego i to odpływa. Nic nie zostaje na długo — retencja to i liczba linii, i liczba dni, sprząta janitor. Kto może czytać, pisać, poprawiać i kasować swoje oraz edytować i kasować cudze, to sześć uprawnień (<code>shout.view</code>, <code>shout.post</code>, <code>shout.edit_own</code>, <code>shout.delete_own</code>, <code>shout.edit_any</code>, <code>shout.moderate</code>) w Użytkownicy → Grupy; gość nie czyta nic, dopóki mu tego nie nadasz. Kto ma wyciszenie w wiadomościach, ma je i tutaj.'),
     'settings.shout_enabled': ('Shoutbox', 'Shoutbox'),
     'settings.shout_enabled_hint': ('Off draws nothing anywhere and every endpoint answers 403.',
         'Wyłączony nie rysuje nic i każdy endpoint odpowiada 403.'),
@@ -2398,13 +2398,13 @@ add('', {
     'settings.shout_placement_home': ('Home page block', 'Blok na stronie głównej'),
     'settings.shout_placement_page': ('Its own page', 'Własna strona'),
     'settings.shout_placement_both': ('Both', 'Obie'),
-    # 1.64.0: which end of the room the newest line is at. The default is newest-first, because the
-    # list never scrolled itself and a reader opening the room was looking at its oldest lines.
+    # 1.64.0: which end of the room the newest line is at. 1.66.0: chat order is the default again,
+    # and the hint says what the list does about scrolling in either arm.
     'settings.shout_order': ('Newest lines', 'Najnowsze wpisy'),
     'settings.shout_order_top': ('At the top', 'Na górze'),
     'settings.shout_order_bottom': ('At the bottom (chat)', 'Na dole (jak czat)'),
-    'settings.shout_order_hint': ('At the top, the room opens on what was said last and the composer sits above the list. At the bottom is chat order, and the list scrolls to the end when it opens.',
-        'Na górze: pokój otwiera się na tym, co powiedziano ostatnio, a pole pisania jest nad listą. Na dole to kolejność jak w czacie — lista przewija się wtedy na koniec przy otwarciu.'),
+    'settings.shout_order_hint': ('At the bottom is chat order: the composer under the list, and the room opens on its newest line. It follows new lines while the reader is down there, and while they are reading further up it leaves them where they are and shows a “New lines” button instead. At the top is the same room the other way up, with the composer above the list.',
+        'Na dole to kolejność jak w czacie: pole pisania pod listą, a pokój otwiera się na najnowszym wpisie. Nadąża za nowymi wpisami, dopóki czytelnik jest na dole, a gdy czyta wyżej, zostawia go w spokoju i pokazuje zamiast tego przycisk „Nowe wpisy”. Na górze to ten sam pokój odwrócony, z polem pisania nad listą.'),
     'settings.shout_placement_hint': ('The home block sits in the front-page layout (Site pages → Home layout); the page is <code>?action=shoutbox</code>.',
         'Blok strony głównej siedzi w układzie strony głównej (Strony → Układ strony głównej); strona to <code>?action=shoutbox</code>.'),
     'settings.shout_format': ('Markup', 'Formatowanie'),
@@ -2437,6 +2437,14 @@ add('', {
     'settings.shout_rules_ph': ('One line shown above the box (optional)', 'Jedna linia nad polem (opcjonalnie)'),
     'settings.shout_rules_hint': ('Plain text, at most 500 characters. Left empty, nothing is drawn.',
         'Zwykły tekst, najwyżej 500 znaków. Puste — nic się nie rysuje.'),
+    # 1.66.0: the two windows. Each hint says what ITS zero means, because the two zeros mean opposite
+    # things: no editing at all, and no limit on deleting.
+    'settings.shout_edit_minutes': ('Correcting your own line', 'Poprawianie własnego wpisu'),
+    'settings.shout_edit_minutes_hint': ('Minutes from when a line was said during which its author may correct it (<code>shout.edit_own</code>). 0 = no window at all: members cannot edit, and only <code>shout.edit_any</code> — a moderator\'s — edits anything, at any time. A corrected line says “(edited)” beside its time, and one a moderator changed says so.',
+        'Minuty od napisania wpisu, przez które autor może go poprawić (<code>shout.edit_own</code>). 0 = żadnego okna: członkowie nie edytują wcale, a edytuje tylko <code>shout.edit_any</code> — uprawnienie moderatora — i to w każdej chwili. Poprawiony wpis ma przy godzinie „(edytowano)”, a zmieniony przez moderatora mówi i to.'),
+    'settings.shout_delete_own_minutes': ('Taking your own line back', 'Wycofanie własnego wpisu'),
+    'settings.shout_delete_own_minutes_hint': ('Minutes from when a line was said during which its author may delete it (<code>shout.delete_own</code>). 0 = no limit, which is how deleting your own worked before this setting. <code>shout.moderate</code> deletes any line at any time either way.',
+        'Minuty od napisania wpisu, przez które autor może go usunąć (<code>shout.delete_own</code>). 0 = bez limitu — tak działało kasowanie własnych wpisów przed tym ustawieniem. <code>shout.moderate</code> i tak kasuje każdy wpis w każdej chwili.'),
     'settings.shout_purge': ('Clear the shoutbox', 'Wyczyść shoutbox'),
     'settings.shout_purge_days_ph': ('Days (empty = all)', 'Dni (puste = wszystko)'),
     'settings.shout_purge_run': ('Purge', 'Wyczyść'),
@@ -2611,8 +2619,8 @@ add('', {
     'settings.shout_system_lines_hint': ('The tracker says so in the room when a torrent is registered — one line per batch, never one per hash. It names the submitter only where that submitter is public; otherwise it says a torrent arrived without naming anybody. These lines belong to nobody: members cannot delete them, they are nobody\'s unread and they make no sound.',
         'Tracker pisze w pokoju, gdy ktoś zarejestruje torrent — jedna linia na paczkę, nigdy jedna na hash. Nazywa zgłaszającego tylko tam, gdzie jest on publiczny; inaczej pisze, że torrent się pojawił, nie wymieniając nikogo. Te wpisy nie należą do nikogo: członkowie ich nie skasują, nikomu nie liczą się jako nieprzeczytane i nie wydają dźwięku.'),
     'settings.shout_matrix_title': ('Who may read and who may write', 'Kto może czytać, a kto pisać'),
-    'settings.shout_matrix_hint': ('The six shoutbox permissions across your groups, as they stand right now. Read-only here: grants are made in Users → Groups, where every other permission is, so there is one place that decides and one place that shows.',
-        'Sześć uprawnień shoutboksa we wszystkich grupach, tak jak wyglądają w tej chwili. Tutaj tylko do odczytu: nadaje się je w Użytkownicy → Grupy, tam gdzie wszystkie pozostałe — jedno miejsce decyduje, jedno pokazuje.'),
+    'settings.shout_matrix_hint': ('The eight shoutbox permissions across your groups, as they stand right now. Read-only here: grants are made in Users → Groups, where every other permission is, so there is one place that decides and one place that shows.',
+        'Osiem uprawnień shoutboksa we wszystkich grupach, tak jak wyglądają w tej chwili. Tutaj tylko do odczytu: nadaje się je w Użytkownicy → Grupy, tam gdzie wszystkie pozostałe — jedno miejsce decyduje, jedno pokazuje.'),
 })
 
 # ── 1.61.0: the address the room answers on ────────────────────────────────
