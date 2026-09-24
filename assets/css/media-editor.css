@@ -49,13 +49,12 @@
 /* ── the buttons ─────────────────────────────────────────────────────────────────────────────
    Every button here is the side's own standard one, passed in through `buttons` (media-editor.js):
    .btn-small on the account page, Bootstrap's .btn-sm in the panel (1.63.0 drew the account page's
-   Save at the full .btn size between two small ones). Two things the account page's classes do not
-   do by themselves. Its primary .btn has NO border and its .btn-secondary a 1 px one, so even at the
-   same size Save would stand 2 px shorter than Cancel beside it; a transparent border evens them
-   out. And it has no red button, so the one that throws work away (Discard, "Yes, remove") is the
-   secondary one turning red under the pointer, the way the shoutbox's in-place "delete?" reads.
-   The panel passes Bootstrap's btn-outline-danger for that, and neither class is used there. */
-.fe-box .fe-btn-primary { border: 1px solid transparent; }
+   Save at the full .btn size between two small ones). The account page has no red button, so the
+   one that throws work away (Discard, "Yes, remove") is the secondary one turning red under the
+   pointer, the way the shoutbox's in-place "delete?" reads. The panel passes Bootstrap's
+   btn-outline-danger for that, and this class is not used there. (Save and Cancel are one height
+   because every public .btn carries a 1px border since 1.68.1 — style.css; this file used to add
+   the transparent edge to its own primary button.) */
 .fe-btn-danger:hover, .fe-btn-danger:focus-visible { border-color: #f44336; color: #f44336; background: rgba(244, 67, 54, 0.10); }
 
 /* ── the frame ───────────────────────────────────────────────────────────────────────────── */

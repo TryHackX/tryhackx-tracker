@@ -17,8 +17,13 @@
    wins, exactly as it does over Bootstrap's own stylesheet.
    Bootstrap draws its glyph in an inline-block ::before, lowered 0.125em, inside an inline <i> that keeps
    the line's height; Font Awesome makes the <i> itself an inline-block of line-height 1. Put the box
-   back where Bootstrap keeps it, so a glyph sits at the same height whichever library draws it. */
-.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; }
+   back where Bootstrap keeps it, so a glyph sits at the same height whichever library draws it.
+   And the <i> keeps the TEXT's family, as Bootstrap's does (1.68.1): Font Awesome's class gives the
+   element its own family too, and although the element is empty its line box is placed with that
+   font's ascent, which reaches above the text's — an icon button came out a pixel taller than its
+   Bootstrap twin (a list row's remove, 26.98 px beside Magnet and Info at 25.98). The glyph's face is
+   pinned on ::before below, so nothing that is drawn changes. */
+.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; font-family: inherit; }
 .bi[class*=" fa-"]::before { display: inline-block; vertical-align: -0.125em; line-height: 1; }
 /* The face, pinned on the glyph as Bootstrap Icons pins its own (`font-family: bootstrap-icons
    !important; font-weight: normal !important` on ::before): a site rule that sets a weight on an icon
@@ -30,8 +35,13 @@
 .bi.fa-regular::before, .bi.fa-brands::before { font-weight: 400 !important; }
 /* Font Awesome's glyphs are 0.625em to 1.25em wide where Bootstrap's are all 1em, so an icon-only
    button would change width with its icon (a pin turning into the filled pin, a sort arrow turning
-   round). A fixed, centred box — Font Awesome's own fixed width — keeps every such button one size. */
-:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child::before { width: 1.25em; text-align: center; }
+   round). A fixed, centred box — Font Awesome's own fixed width, 1.25em — keeps every such button one
+   size; the negative margins make that box take 1em of the line, the width every Bootstrap glyph
+   takes, so the button is also the SAME size in either library (1.68.1: taking the whole 1.25em made
+   every icon-only button wider than the one the page was measured with, and the panel's Whitelist
+   clipped its delete button behind "…"). The 29 glyphs of the map wider than 1em reach at most 0.125em
+   into the padding, centred. */
+:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child::before { width: 1.25em; margin-inline: -0.125em; text-align: center; }
 /* Free has no dot: its circle, at Bootstrap's dot size (3/8 of the em), in the same box. */
 .bi-dot[class*=" fa-"]::before { transform: scale(0.375); }
 
@@ -425,12 +435,19 @@ ul.feature-list li::before {
 .form-group.has-error textarea { border-color: var(--error); }
 .form-group.has-error .error-msg { display: block; }
 
+/* Every button carries a 1px border, the primary one's transparent (its fill runs under it). The
+   primary had `border: none` while .btn-secondary drew a 1px edge, so the two were never the same size:
+   in a row that centres them (favourites, list rows) Magnet stood 2px shorter than Info beside it, and
+   in the search results' row, which stretches its items to one height, Magnet got the height but not
+   the edge, so its text sat 1px above Copy's and Info's. Measured, not guessed: same padding, line
+   height, font and display on the <a> and the <button>s — the border was the only difference. One
+   rule here instead of a nudge per row (media-editor.css carried one for its own footer). */
 .btn {
     display: inline-block;
     padding: 0.6rem 1.5rem;
     background: var(--accent);
     color: #000;
-    border: none;
+    border: 1px solid transparent;
     border-radius: var(--radius);
     font-family: inherit;
     font-size: 0.9rem;
@@ -1846,7 +1863,9 @@ body.page-search .container { max-width: 86em; }
 .search-table thead th { border-top: 0; }
 .search-c-size { width: 6.5em; }
 .search-c-sl { width: 6.5em; }
-.search-c-seen { width: 10em; }
+/* 11.25em, not 10: the Polish "Ostatnio widziany", its arrow and the cell's padding need 177px, and at
+   160 the arrow ran out of its cell (1.68.1). */
+.search-c-seen { width: 11.25em; }
 /* Only drawn when ratings are shown in results — the colgroup asks the same question the <thead>
    does, from the same variable. */
 .search-c-rep { width: 5.5em; }
@@ -1984,7 +2003,9 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 }
 
 /* === Search: clickable multi-sort headers + match highlight (1.8.0) === */
-.search-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+/* A header wraps between its words (1.68.1); `nowrap` let a label longer than its column push its arrow
+   out over the next one — the Polish "Ostatnio widziany" on a phone, where the column is 7.5–8.5em. */
+.search-sortable { cursor: pointer; user-select: none; text-wrap: pretty; }
 .search-sortable:hover { color: #fff; }
 .search-sort-icon { font-size: 0.7rem; opacity: 0.45; margin-left: 0.2rem; }
 .search-sort-icon.active { opacity: 1; color: var(--accent); }
@@ -2248,6 +2269,10 @@ details[open] > summary > .disc-chev { transform: rotate(90deg); }
 .fav-star.fav-on { color: #f5c451; }
 .fav-star[disabled] { opacity: 0.5; cursor: default; }
 .info-acts { display: inline-flex; gap: 0.4rem; align-items: center; margin-left: auto; }
+/* The star is a button in a row of buttons: as tall as they are, its glyph centred in that height (a
+   button centres its content), so the row is one height whatever draws the star — the search results'
+   row already stretched it (1.68.1). */
+.pf-acts > .fav-star, .info-acts > .fav-star { align-self: stretch; }
 
 /* `center`, not `baseline` (1.63.0): a 64 px picture now sits at the start of this row, and a
    baseline row hangs everything else off the bottom of the picture. */
@@ -2429,8 +2454,11 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .pf-st-live { color: #4caf50; border-color: #2e5c30; }
 .pf-st-waiting { color: #e0b15a; border-color: #6b4f1a; }
 .pf-st-refused, .pf-st-blocked { color: #ff6b6b; border-color: #6b2a2a; }
+/* The small button's box — font size, line height, padding, a 1px edge — because it stands beside small
+   buttons: Magnet on an upload's row, Share / Rename / Delete on a list's card. At 0.75rem on the
+   inherited line it came out 0.4px shorter than them with its word 0.8px lower (1.68.1). */
 .pf-vis { background: none; border: 1px solid var(--border); color: var(--text-muted); font: inherit;
-    font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+    font-size: 0.8rem; line-height: 1.25; padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 .pf-vis-on { color: #4caf50; border-color: #2e5c30; }
 .pf-empty, .pf-loading { color: var(--text-muted); padding: 0.6rem 0; }
 
@@ -2688,7 +2716,13 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .list-add-ok { border-color: var(--success, #4caf50); }
 /* the picker, opened from the Info panel */
 .lp-box { max-width: 32em; }
-.lp-open { font-size: 1rem; line-height: 1; padding: 0.05rem 0.45rem; }
+/* The box of its neighbours in the Info panel's head ("Who has this", Share: .search-share's font, line
+   and padding), with only the icon drawn at 1rem on a line of its own height (1.68.1). As a 1rem box
+   of line-height 1 it stood 21.6px tall between two 28px buttons. Lifted a sixteenth of an em: at the
+   baseline Bootstrap's glyph reached a pixel below the line and made the button 29px; there it is 28 in
+   either library, the glyph in the same place in both. */
+.lp-open { padding: 0.15rem 0.45rem; }
+.lp-open .bi { font-size: 1rem; line-height: 1; vertical-align: -0.0625em; }
 .lp-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; white-space: normal; font-size: 0.9rem; }
 .lp-row + .lp-row { border-top: 1px solid var(--border); }
 .lp-name { flex: 1 1 auto; }

@@ -295,7 +295,7 @@
             <div class="table-responsive">
                 <table class="table table-dark table-hover wl-table" id="cl-table">
                     <colgroup>
-                        <col class="wl-c-flex"><col class="wl-c-enabled"><col class="wl-c-keyid"><col class="wl-c-secret"><col class="wl-c-enabled"><col class="wl-c-date"><col class="wl-c-date"><col class="wl-c-ip"><col class="wl-c-num"><col class="wl-c-actions-2">
+                        <col class="wl-c-flex"><col class="wl-c-enabled"><col class="wl-c-keyid"><col class="wl-c-secret"><col class="wl-c-enabled"><col class="wl-c-date"><col class="wl-c-date"><col class="wl-c-ip"><col class="wl-c-num"><col class="wl-c-actions-3">
                     </colgroup>
                     <thead><tr>
                         <th><?= _h('a.wl.col_label') ?></th>

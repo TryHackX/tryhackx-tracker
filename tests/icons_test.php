@@ -266,6 +266,13 @@ foreach (['assets/css/style.css', 'assets/css/admin.css'] as $css) {
     $firstBi = preg_match('/(^|[\s,}])\.bi[ ,{:.\[]/', (string)preg_replace('#/\*.*?\*/#s', '', substr($c, 0, (int)$p))) === 1;
     check("$css: … placed before every other rule that styles an icon", $p !== false && !$firstBi);
     check("$css: … fixed width for icon-only buttons", str_contains($c, ':is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child::before { width: 1.25em;'));
+    // 1.68.1: that box takes 1em of the line, the width every Bootstrap glyph takes, so a button is the
+    // same size in either library — the whole 1.25em made the Whitelist's actions cell clip its delete —
+    // and the <i> keeps the text's family, whose line box Font Awesome's own family made a pixel taller.
+    check("$css: … taking 1em of the line, as Bootstrap's glyphs do",
+          str_contains($c, ':is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child::before { width: 1.25em; margin-inline: -0.125em;'));
+    check("$css: … and the icon element keeps the text's font family",
+          str_contains($c, '.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; font-family: inherit; }'));
     // Font Awesome's two faces live in one family: a site rule that sets a weight on an icon would
     // otherwise pick the regular face for a solid-only glyph and draw a box. Pinned on the glyph, as
     // Bootstrap Icons pins its own.

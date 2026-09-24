@@ -544,12 +544,13 @@ function updateTableHeaders(src) {
 
     const isAppeal = src === 'appeals' || src === 'appeal_archives';
 
-    // Fixed-layout column widths (admin.css .dash-c-*): the two views pin different columns.
+    // Fixed-layout column widths (admin.css .dash-c-*): the two views pin different columns. The name
+    // is pinned in both (1.68.1) — its Polish header is the longest single word on either view.
     const colgroup = document.getElementById('reports-colgroup');
     if (colgroup) {
         colgroup.innerHTML = isAppeal
-            ? '<col class="dash-c-id"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-type"><col class="dash-c-report"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">'
-            : '<col class="dash-c-id"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">';
+            ? '<col class="dash-c-id"><col class="dash-c-name"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-type"><col class="dash-c-report"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">'
+            : '<col class="dash-c-id"><col class="dash-c-name"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">';
     }
 
     if (isAppeal) {

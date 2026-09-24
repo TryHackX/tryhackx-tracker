@@ -91,7 +91,7 @@
         <div class="table-responsive" id="reports-table-card">
             <table class="table table-dark table-hover dash-table" id="reports-table">
                 <colgroup id="reports-colgroup">
-                    <col class="dash-c-id"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">
+                    <col class="dash-c-id"><col class="dash-c-name"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">
                 </colgroup>
                 <thead><tr>
                     <th class="sortable" data-sort="id"><?= _h('a.reports.c_id') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>

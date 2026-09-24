@@ -13,8 +13,13 @@
    `.admin-emotes-title .bi`, …) still wins, exactly as it does over Bootstrap's own stylesheet.
    Bootstrap draws its glyph in an inline-block ::before, lowered 0.125em, inside an inline <i> that keeps
    the line's height; Font Awesome makes the <i> itself an inline-block of line-height 1. Put the box
-   back where Bootstrap keeps it, so a glyph sits at the same height whichever library draws it. */
-.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; }
+   back where Bootstrap keeps it, so a glyph sits at the same height whichever library draws it.
+   And the <i> keeps the TEXT's family, as Bootstrap's does (1.68.1): Font Awesome's class gives the
+   element its own family too, and although the element is empty its line box is placed with that
+   font's ascent, which reaches above the text's — every icon button came out a pixel taller than its
+   Bootstrap twin (the Whitelist's actions 26.5 px against 25.5). The glyph's face is pinned on ::before
+   below, so nothing that is drawn changes. */
+.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; font-family: inherit; }
 .bi[class*=" fa-"]::before { display: inline-block; vertical-align: -0.125em; line-height: 1; }
 /* The face, pinned on the glyph as Bootstrap Icons pins its own (`font-family: bootstrap-icons
    !important; font-weight: normal !important` on ::before): a site rule that sets a weight on an icon
@@ -26,8 +31,13 @@
 .bi.fa-regular::before, .bi.fa-brands::before { font-weight: 400 !important; }
 /* Font Awesome's glyphs are 0.625em to 1.25em wide where Bootstrap's are all 1em, so an icon-only
    button would change width with its icon (a pin turning into the filled pin, a sort arrow turning
-   round). A fixed, centred box — Font Awesome's own fixed width — keeps every such button one size. */
-:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child::before { width: 1.25em; text-align: center; }
+   round). A fixed, centred box — Font Awesome's own fixed width, 1.25em — keeps every such button one
+   size; the negative margins make that box take 1em of the line, the width every Bootstrap glyph
+   takes, so the button is also the SAME size in either library (1.68.1). Taking the whole 1.25em made
+   each icon-only button a quarter of its font size wider than the one the page was measured with, and
+   a column sized for Bootstrap's buttons clipped its last one: the Whitelist's delete, behind "…". The
+   29 glyphs of the map that are wider than 1em reach at most 0.125em into the padding, centred. */
+:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child::before { width: 1.25em; margin-inline: -0.125em; text-align: center; }
 /* Free has no dot: its circle, at Bootstrap's dot size (3/8 of the em), in the same box. */
 .bi-dot[class*=" fa-"]::before { transform: scale(0.375); }
 
@@ -1124,11 +1134,26 @@ input[type="number"] {
 .admin-hc .table-dark tbody tr.wl-row-banned:hover td,
 .admin-hc .table-dark tbody tr.wl-row-muted:hover td { opacity: 0.9; }
 
-/* Toolbar search on the wide pages: a comfortable search box. The search cluster (icon + box + filters) asks
-   for 560px and may grow to ~1100px, the box itself up to 640px. When the right-hand controls do not fit
-   next to it any more, they wrap onto their own line, right-aligned, instead of squashing the box. */
-.admin-wide .toolbar-search { flex: 1 1 560px; max-width: 1100px; }
-.admin-wide .search-input-wrap { flex: 1 1 420px; min-width: 240px; max-width: 640px; }
+/* Toolbar search on the wide pages: a comfortable search box. The search cluster (icon + box + filters)
+   asks for what its contents need and may grow to ~1100px, the box itself up to 640px. When the
+   right-hand controls do not fit next to it any more, they wrap onto their own line, right-aligned,
+   instead of squashing the box.
+   1.68.1 — the cluster clips (overflow: hidden, for its rounded frame), and it clipped its own filters:
+   it asked for a flat 560px, so the right-hand controls were let onto its line and squeezed it below its
+   contents, and every filter was pinned at 170px, which made the Whitelist's five need 1120px in a
+   cluster capped at 1100 — its last filter was cut at every width, and at 1920 wide three of them were
+   not on screen at all (the Index's per-page select at 1680 the same way). Now: the cluster's basis is
+   its contents, so the right-hand controls move down first; each filter is as wide as its longest option
+   and shares out what is left once the box has had its 640; and if the filters still do not fit the
+   line, they wrap onto a second one, under a divider, instead of being cut off. */
+.admin-wide .toolbar-search { flex: 1 1 auto; max-width: 1100px; flex-wrap: wrap; row-gap: 1px; align-items: stretch; }
+/* The divider is a line above every item, full height all (stretch): on the first line it falls under
+   the cluster's own top edge and is clipped away; on a wrapped line it is the rule between the two. */
+.admin-wide .toolbar-search > :not(:focus) { box-shadow: 0 -1px 0 #495057; }
+.admin-wide .search-input-wrap { flex: 1000 1 240px; min-width: 240px; max-width: 640px; }
+.admin-wide .toolbar-search .toolbar-status-filter { width: auto; max-width: none; flex: 1 0 auto; }
+/* Five filters: in Polish they need ~1280px beside the box's minimum, so this cluster may grow further. */
+#view-whitelist .toolbar-search { max-width: 1400px; }
 .admin-wide .toolbar-right { margin-left: auto; }
 @media (max-width: 768px) {
     /* phones: the box keeps at least 160px; filters that do not fit next to it wrap underneath (full width)
@@ -1165,10 +1190,17 @@ input[type="number"] {
 .wl-dd-menu .dropdown-header { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 0.3rem; }
 .wl-dd-menu .wl-dd-note { color: #8b96a5; font-size: 0.75rem; line-height: 1.4; max-width: 18rem; white-space: normal; padding-top: 0.35rem; }
 
-/* ---- Dashboard table: same fixed-column look as the whitelist tables. Pinned columns (id / hash / ip /
-   status / date / actions) never wrap; the text columns (name / email / company / entity / object /
-   description) share the rest and ellipsize (full value in the cell title). ---- */
+/* ---- Dashboard table: same fixed-column look as the whitelist tables. Pinned columns (id / name / hash /
+   ip / status / date / actions) never wrap; the text columns (email / company / entity / object /
+   description) share the rest and ellipsize (full value in the cell title). ----
+   1.68.1, measured with the headers' own labels in both languages: the five shared columns got 95px at
+   1440 wide and "COMPANY" with its sort arrow needs 98, the Polish "ZGŁASZAJĄCY" 122 — the arrow was cut
+   off, and the whole label in Polish. The name column is pinned at 130 (its Polish header is the longest
+   single word), the hash takes 150 until the page has room for all 40 characters, and the reports'
+   floor below (1200, the other tables that borrow this class keep 1180) leaves every shared column at
+   least 101px. */
 .admin-wide .dash-table { table-layout: fixed; width: 100%; min-width: 1180px; margin-bottom: 0; }
+.admin-wide #reports-table { min-width: 1200px; }
 .admin-wide .dash-table th,
 .admin-wide .dash-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .admin-wide .dash-table td { padding: 0.45rem 0.5rem; }
@@ -1179,11 +1211,13 @@ input[type="number"] {
 .admin-wide .dash-table .dash-id { color: #9aa4b2; }
 .admin-wide .dash-table .dash-date { color: #b0b8c4; font-size: 0.8rem; }
 .dash-c-id      { width: 56px; }
-.dash-c-hash    { width: 190px; }
+.dash-c-name    { width: 130px; }
+.dash-c-hash    { width: 150px; }
 .dash-c-ip      { width: 128px; }
 .dash-c-status  { width: 96px; }
 .dash-c-type    { width: 84px; }
-.dash-c-report  { width: 72px; }
+/* 112, not 72: the appeals' "REPORT" and its arrow need 83, the Polish "ZGŁOSZENIE" 110 (1.68.1). */
+.dash-c-report  { width: 112px; }
 .dash-c-date    { width: 150px; }
 /* 84, not 64. Measured in the browser: the header's own label needs 72 px of content box and
    `.dash-table` is `table-layout: fixed` with `overflow: hidden`, so at 64 the word "Actions"
@@ -1191,8 +1225,9 @@ input[type="number"] {
    the one thing a width may never save space on. */
 .dash-c-actions { width: 84px; }
 .dash-c-flex    { width: auto; }
-@media (min-width: 1700px) {
-    /* enough room for the full 40-hex hash */
+@media (min-width: 1880px) {
+    /* enough room for the full 40-hex hash. From 1880, not 1700: at 1700 the page is 1322px of content,
+       and 316 for the hash left the shared columns 98px each — less than their headers need. */
     .dash-c-hash { width: 316px; }
 }
 
@@ -1204,11 +1239,24 @@ input[type="number"] {
 .wl-page .wl-table th,
 .wl-page .wl-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wl-page .wl-table td { padding: 0.45rem 0.5rem; }
-/* Pinned widths sum to ~1180px (whitelist) / ~1030px (API bans); the min-widths keep the flexible
-   column usable and hand overflow to .table-responsive instead of squashing it to 0. */
-.wl-page #wl-table { min-width: 1320px; }
+/* Two exceptions to "one line that ellipsises" (1.68.1), for the two things in these tables that must
+   never be cut: a column's name, and a control.
+   A HEADER wraps between its words. Every sortable header ends in its arrow, so a label one word too
+   long for its column lost the arrow first and then its own last letters — in Polish on half the
+   tables ("NAZWA UŻYTKOWNIKA", "OSTATNIE LOGOWANIE", "PIERWSZE / OSTATNIE"). The columns are sized so a
+   header's longest WORD and its arrow fit; `pretty` keeps the arrow off a line of its own where it can.
+   An ACTIONS cell wraps its buttons onto a second line rather than ellipsising them: a button that does
+   not fit is not shortened, it vanishes behind "…" — the Whitelist's delete with Font Awesome chosen,
+   the API clients' delete in either library. The columns are sized to hold their buttons on one line;
+   this only decides what happens if one ever does not. */
+.admin-wide .dash-table th,
+.wl-page .wl-table th { white-space: normal; text-overflow: clip; text-wrap: pretty; }
+.admin-wide .dash-table td:is(.wl-actions, .th-actions, .td-actions),
+.wl-page .wl-table td:is(.wl-actions, .th-actions, .td-actions) { white-space: normal; overflow: visible; text-overflow: clip; }
+/* The min-widths keep the flexible column usable and hand overflow to .table-responsive instead of
+   squashing it to 0. The whitelist's own (#wl-table) are with its column widths, further down. */
 .wl-page #ab-table { min-width: 1240px; }
-.wl-page #cl-table { min-width: 1120px; }
+.wl-page #cl-table { min-width: 1160px; }   /* 1120 until its actions column grew by 36 (1.68.1) */
 .wl-page #bn-table { min-width: 900px; }
 .wl-page .wl-name { max-width: none; }
 .wl-page .wl-name .wl-small { color: #9aa4b2; }
@@ -1251,6 +1299,10 @@ input[type="number"] {
 .wl-c-files    { width: 78px; }
 .wl-files-col  { text-align: center; font-variant-numeric: tabular-nums; }
 .wl-c-actions-2 { width: 76px; }
+/* Three buttons (API clients: settings, the guide's address, delete). They sat in the two-button column
+   above, and the third — delete — was cut off behind "…" in either icon library (1.68.1). Three buttons
+   and their gaps are 88px, the cell's padding 16. */
+.wl-c-actions-3 { width: 112px; }
 .wl-c-keyid    { width: 140px; }
 .wl-c-secret   { width: 96px; }
 .wl-c-enabled  { width: 84px; }
@@ -1258,22 +1310,38 @@ input[type="number"] {
 .wl-c-ipv6     { width: 176px; }
 .wl-c-bucket   { width: 168px; }
 .wl-c-flex     { width: auto; }
-/* Below ~1700px the 80vw page (min 1100px â†’ ~1060px of content) cannot hold ten pinned columns plus a full
-   40-char hash: tighten the pinned columns and let the hash cell ellipsize (full hash in the cell title,
-   click still copies it) so the whitelist table stays inside the page without a horizontal scrollbar. */
-@media (max-width: 1699.98px) {
-    .wl-page #wl-table { min-width: 1040px; }
+/* The whitelist table (#wl-table) in two sets of widths, one for a page that can show the whole 40-char
+   hash and one for a page that cannot (the hash cell then ellipsizes: full hash in its title, a click
+   still copies it). NAME is the one flexible column and gets what the others leave.
+   1.68.1, measured: the pinned columns of the narrow set had grown to 1110px (Files arrived in 1.8.0 and
+   was never tightened, nor was Date) over a table of 1040–1114, so from 1280 to 1440 wide the NAME column
+   was 0–4px — every name invisible and its header's arrow cut off — and the wide set, switched on at
+   1700, left it 20px there (1302px pinned in 1322). Each width below is what that column's header or
+   widest cell needs in English and Polish, plus a few pixels: Size 92/96 for "ROZMIAR", Date 128/132
+   for "23.09.2026, 22:11", the actions 168/176 for five buttons. The min-widths are the pinned sum plus a
+   floor for NAME, so a page too narrow for both scrolls sideways instead of squashing it; and the wide set
+   waits until 1830, where it leaves NAME 150px. */
+@media (max-width: 1829.98px) {
+    .wl-page #wl-table { min-width: 1120px; }
     .wl-page #wl-table .wl-c-check   { width: 32px; }
     .wl-page #wl-table .wl-c-id      { width: 56px; }
-    .wl-page #wl-table .wl-c-hash    { width: 190px; }
-    .wl-page #wl-table .wl-c-size    { width: 76px; }
+    .wl-page #wl-table .wl-c-hash    { width: 130px; }
+    .wl-page #wl-table .wl-c-size    { width: 92px; }
+    .wl-page #wl-table .wl-c-files   { width: 68px; }
     .wl-page #wl-table .wl-c-source  { width: 84px; }
-    .wl-page #wl-table .wl-c-ip      { width: 128px; }
+    .wl-page #wl-table .wl-c-ip      { width: 120px; }
     .wl-page #wl-table .wl-c-meta    { width: 80px; }
-    .wl-page #wl-table .wl-c-sl      { width: 70px; }
+    .wl-page #wl-table .wl-c-sl      { width: 66px; }
+    .wl-page #wl-table .wl-c-date    { width: 128px; }
     .wl-page #wl-table .wl-c-actions { width: 168px; }
     .wl-page #wl-table td { padding-left: 0.4rem; padding-right: 0.4rem; }
     .wl-page #wl-table th { padding-left: 0.4rem; padding-right: 0.4rem; }
+}
+@media (min-width: 1830px) {
+    .wl-page #wl-table { min-width: 1400px; }
+    .wl-page #wl-table .wl-c-hash    { width: 290px; }
+    .wl-page #wl-table .wl-c-size    { width: 96px; }
+    .wl-page #wl-table .wl-c-date    { width: 132px; }
 }
 @media (max-width: 768px) {
     .admin-container.admin-wide,
@@ -1315,9 +1383,11 @@ input[type="number"] {
 /* === Observed-hash Index page (templates/admin/index_page.php + assets/js/admin-index.js) === */
 .idx-subtitle { font-size: 0.72rem; color: #888; font-weight: 400; margin-left: 0.5rem; }
 .idx-note { font-size: 0.8rem; color: #c9a227; margin: 0.6rem 0 0; }
-.idx-c-check { width: 34px; } .idx-c-hash { width: 160px; } .idx-c-size { width: 90px; }
-#idx-table th { white-space: nowrap; }
-.idx-c-sl { width: 90px; } .idx-c-seen { width: 74px; } .idx-c-dates { width: 150px; }
+/* Size 96 and Seen 100, not 90 and 74: the Polish "ROZMIAR" and "WIDZIANE" with their arrows need 94 and
+   98 (1.68.1). The headers wrap between words like every panel table's; `#idx-table th { nowrap }`
+   used to forbid it here, and "PIERWSZE / OSTATNIE" lost its arrow. */
+.idx-c-check { width: 34px; } .idx-c-hash { width: 160px; } .idx-c-size { width: 96px; }
+.idx-c-sl { width: 90px; } .idx-c-seen { width: 100px; } .idx-c-dates { width: 150px; }
 .idx-c-meta { width: 80px; } .idx-c-actions { width: 126px; } .idx-c-files { width: 78px; }
 .idx-th-check { text-align: center; }
 #idx-table td, #idx-table th { vertical-align: middle; }
@@ -1382,9 +1452,31 @@ input[type="number"] {
    hit still reveals a hidden one, so looking for "turnstile" finds its fields whatever is selected */
 .captcha-prov-hidden { display: none; }
 .captcha-prov-hidden.settings-hit { display: block; }
-/* a matched setting (search) / a section reached by #anchor or matched as a whole group */
-.settings-hit { box-shadow: inset 2px 0 0 rgba(74, 158, 255, 0.55); }
-.settings-section-hit { box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.45); }
+/* ONE mark for everything the search matched and for where "Show me where" (or a #section link) lands:
+   a field, a block inside a section (Shoutbox → Emotes and stickers), a whole section.
+   1.68.1. It was a 2px inset shadow on each matched element's own left edge, and those edges are not in
+   one place: a field is a grid column, whose edge sits half a gutter LEFT of its text, while a block is
+   a plain child of the section, whose edge IS its text's edge. Searching "icon" drew the bars at two x
+   positions 8px apart, the block's ran through the first letter of every line inside it ("Custom
+   emotes" — the C under the bar), and the jump drew a third thing, a 1px outline round the section.
+   Now the mark is a soft tint with a 3px accent on its left, drawn by a ::before measured from the TEXT
+   edge rather than the box edge: --hit-inset is how far the element's content sits inside its box (a
+   column's half-gutter, a section's padding, 0 for a block), and the mark begins 0.75rem before it.
+   Every setting's text starts at the section's content edge, so every accent stands on one x, 9px clear
+   of the text, inside the section's own padding; the tint reaches as far past the text on the right.
+   The tint sits under the text (z-index -1 in the element's own stacking context), never over it. */
+.settings-hit, .settings-section-hit { position: relative; isolation: isolate; --hit-inset: 0px; }
+.row > .settings-hit { --hit-inset: calc(var(--bs-gutter-x) * 0.5); }
+.settings-section.settings-section-hit { --hit-inset: 1.25rem; }
+.settings-hit::before, .settings-section-hit::before {
+    content: ''; position: absolute; z-index: -1; pointer-events: none;
+    top: -0.4rem; bottom: -0.4rem;
+    left: calc(var(--hit-inset) - 0.75rem); right: calc(var(--hit-inset) - 0.75rem);
+    border-left: 3px solid #4a9eff; border-radius: 3px 6px 6px 3px;
+    background: rgba(74, 158, 255, 0.07); background-clip: padding-box;
+}
+/* A whole section: the same mark inside its padding, not over its frame. */
+.settings-section.settings-section-hit::before { top: 0.5rem; bottom: 0.5rem; }
 /* the sticky toolbar covers the top of the page: #section-... deep links must clear it */
 .settings-section { scroll-margin-top: 9.5rem; }
 /* search results: precise hits first, then whole sections that only match the group name */
@@ -1392,6 +1484,12 @@ input[type="number"] {
 @media (max-width: 767px) { .settings-toolbar { position: static; } }
 
 /* === Admin › Users page === */
+/* The e-mail cell (1.68.1): the address ellipsizes and the "verified" badge beside it does not — the
+   cell used to be one ellipsising line, and on any address longer than the column the badge was the
+   part cut off. */
+.us-email { display: flex; align-items: center; min-width: 0; }
+.us-email-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.us-email > .bi { flex: none; }
 .us-group-badge { display: inline-block; padding: 0.1em 0.55em; margin: 0.1em 0.25em 0.1em 0; border-radius: 999px; border: 1px solid #3a3a4c; background: #23232f; font-size: 0.72rem; white-space: nowrap; }
 .us-group-badge.us-inactive { opacity: 0.5; text-decoration: line-through; }
 .ge-perms { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.25rem 1rem; margin-bottom: 0.5rem; }

@@ -125,8 +125,11 @@
                 }));
             });
             tr.appendChild(nameTd);
+            // The address ellipsizes on its own and the "verified" badge stands outside it (1.68.1): as
+            // one line of the cell, a long address pushed the badge past the edge and "…" took its place.
             tr.appendChild(el('td', { className: 'wl-small', title: u.email ? (u.email_verified ? t('js.users.email_verified') : t('js.users.email_not_verified')) : '' },
-                [u.email || '—', u.email && u.email_verified ? el('i', { className: 'bi bi-patch-check-fill text-success ms-1', title: t('js.users.verified') }) : null]));
+                el('span', { className: 'us-email' }, [el('span', { className: 'us-email-text', text: u.email || '—' }),
+                    u.email && u.email_verified ? el('i', { className: 'bi bi-patch-check-fill text-success ms-1', title: t('js.users.verified') }) : null])));
             tr.appendChild(el('td', {}, badge(u.status, u.status === 'active' ? 'wl-b-ok' : 'wl-b-bad')));
             const gTd = el('td', {});
             (u.groups || []).forEach(g => {

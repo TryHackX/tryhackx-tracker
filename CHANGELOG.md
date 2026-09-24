@@ -4,6 +4,95 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.68.1] — 2026-09-24
+
+No schema change (still 73). Three things the owner found with Font Awesome switched on in production,
+fixed at their causes in both icon libraries — and what a systematic look for the second one turned up
+in either.
+
+### Fixed — Magnet stood a pixel above Copy and Info
+
+* **In the search results the text of Magnet sat 1px higher than the text of the buttons beside it.**
+  Measured in the browser, button box against text box: the `<a>` and the `<button>`s share padding,
+  line height, font and display, and differ in one thing — the edge. The public `.btn` (the blue
+  primary: Magnet) had `border: none`, `.btn-secondary` (Copy, Info) a 1px border. The results row
+  stretches its items to one height, so Magnet got the height but not the edge, and its text began at
+  the padding instead of a pixel lower. Where a row centres its items instead — the favourites on the
+  profile and the account page, a list's rows — Magnet stood 2px shorter than Info. Every `.btn` now
+  carries a 1px border, transparent on the primary (its fill runs under it), so primary and secondary
+  buttons are one size wherever they meet: Save and Cancel in the shoutbox and the account's security
+  forms, a list's Save and Create, the picture editor's footer (whose stylesheet carried this fix for
+  itself alone; that nudge is gone).
+* The same pairing, checked wherever buttons stand in a row: the visibility toggle on an upload's row
+  and on a list's card (0.4px shorter, its word 0.8px lower) has the small button's box; the Info
+  panel's "+" (21.6px tall between two 28px buttons) has its neighbours' box; the favourite star is as
+  tall as the buttons it stands with.
+
+### Fixed — the Whitelist lost its delete button with Font Awesome chosen
+
+* **The actions column showed eye, magnet, clipboard, lock — and "…".** 1.68.0 gave the icon of an
+  icon-only button a fixed 1.25em box under Font Awesome (its glyphs are 0.625–1.25em wide, Bootstrap's
+  all 1em), so every such button was a quarter of its font size wider than the one the column had been
+  measured with: five buttons needed 176px in a 168px column that ellipsises. The box stays 1.25em, so
+  every glyph is still centred on one axis, but it takes 1em of the line; and the icon element keeps the
+  text's font family — Font Awesome's class gave it its own, whose ascent made every icon button a pixel
+  taller too. An icon button is now the same size in either library (27.28 × 25.5 against
+  27.27 × 25.5), so a column sized for one fits the other.
+* **An actions cell in the panel's tables never clips its controls**: should its column ever be too
+  narrow, the buttons wrap onto a second line instead of one of them vanishing behind "…".
+* **What an audit found beside it** — every public page and every panel page and tab, both libraries,
+  English and Polish, 390 to 1920px wide (the toolbars to 2560), looking for anything that cuts off a
+  button, a form field or an icon:
+  * Whitelist → API clients: three buttons in the two-button column; delete was cut off in either
+    library. The column holds three.
+  * Whitelist: the Name column was 0–4px wide from 1280 to 1440 (every name invisible, its header's
+    sort arrow cut off) and 20px just above 1700. The pinned columns had grown to 1110px — Files arrived
+    in 1.8.0 and nothing was tightened for it — over a table of 1040–1114. The narrow set is re-balanced
+    from measured needs (the hash ellipsizes a little sooner, Size fits "ROZMIAR"), a floor keeps Name at
+    96px or more, and the full-hash set waits until 1830px, where it leaves Name 150.
+  * The toolbars' filters: the Whitelist's five selects were pinned at 170px in a cluster capped at
+    1100, so its last filter was cut at every width and at 1920 three were off screen; the Index lost its
+    per-page select at 1680. The cluster asks for what its contents need now (the right-hand controls
+    move down first), each filter is as wide as its longest option, and a filter that does not fit wraps
+    onto a second line under a divider.
+  * Users: a long e-mail address pushed its "verified" badge out of the cell. The address ellipsizes on
+    its own; the badge stays.
+  * Sortable headers that lost their arrow and then their own name: the reports' "Company" at
+    1280–1440 and the appeals' "Report", and in Polish half the panel ("NAZWA UŻYTKOWNIKA", "OSTATNIE
+    LOGOWANIE", "PIERWSZE / OSTATNIE", "ZGŁOSZENIE", "ROZMIAR", "WIDZIANE") and the public search's
+    "Ostatnio widziany". A header wraps between its words now instead of ellipsising, and the columns
+    whose longest word did not fit are wider: the reports' name pinned at 130, the appeals' report
+    column 112, the Index's size and seen, the search's last-seen.
+
+### Fixed — the Settings search's highlight ran over the text
+
+* **Searching "icon" drew three blue bars at two x positions, one of them through the first letter of
+  every line of a block** ("Custom emotes" — the C under the bar). Each mark was an inset shadow on the
+  matched element's own left edge, and those edges are not in one place: a field is a grid column whose
+  edge sits half a gutter left of its text, while a block inside a section (Shoutbox → Emotes and
+  stickers) has its edge at its text. "Show me where" and a #section link drew a third thing, a 1px
+  outline round the section.
+* One mark for all of them: a soft blue tint under the text with a 3px accent on its left, measured
+  from the text edge rather than the box edge, so every accent stands on one x, 9px clear of the text,
+  inside the section's own padding. A field, a block, a whole section matched by name and the section
+  "Show me where" lands on carry the same mark; a field that matched inside a block that matched reads
+  as one bar, the field a shade stronger. The categories are unchanged (1.69.0 reorganises them).
+
+### Tests
+
+* `scratchpad/shots/icons_check.js`, in both libraries, on every page and panel tab it visits: no
+  control or icon is cut off (an ancestor that clips, following a positioned box's containing blocks, or
+  a table cell wider inside than out — the rating's half star is the one clip by design); the buttons of
+  every search result's row and every favourites row on the profile are one height with their text on
+  one line (±0.5px). It makes the rows it needs — two favourites, a report, an appeal, an API key — and
+  removes them again, and it now opens the panel's tabs as well.
+* `scratchpad/shots/settings_hit_check.js` (new, in `browsersweep.sh`): searches "icon" and reads every
+  mark's accent against every text box and icon of its block — none touched, every accent on one x, the
+  tint under the text — then a section matched by name, the "Show me where" jump and a #section link:
+  the same mark on the same x. Both libraries.
+* `tests/icons_test.php`: the fixed icon box takes 1em of the line and the icon element keeps the text's
+  family, in both stylesheets.
+
 ## [1.68.0] — 2026-09-23
 
 Schema 73, one new setting. The owner asked for a choice, in the panel, between Bootstrap Icons and
