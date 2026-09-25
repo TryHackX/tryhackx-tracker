@@ -37,7 +37,7 @@ $count->execute($params);
 $total = (int)$count->fetchColumn();
 
 $stmt = $db->prepare("SELECT id, username, email, status, email_verified, created_at, created_ip, last_login_at, last_login_ip,
-                             avatar_sha, cover_sha
+                             avatar_sha, cover_sha, bio
                       FROM users $whereClause ORDER BY " . implode(', ', $orderParts) . " LIMIT ? OFFSET ?");
 $i = 1;
 foreach ($params as $v) $stmt->bindValue($i++, $v, PDO::PARAM_STR);
@@ -97,7 +97,15 @@ foreach ($rows as &$r) {
     // switched off. Not the same thing as `avatar` above, which is the account's own picture for the
     // remove button and is there whatever the switch says.
     $r['name_avatar'] = function_exists('userAvatarField') ? userAvatarField($r, 24, getBaseUrl(), $cfg) : '';
-    unset($r['avatar_sha'], $r['cover_sha']);
+    // The description on their profile (1.69.0), for the edit modal's Clear: rendered here by the same
+    // function the profile uses, so the moderator reads exactly what the page shows — and `bio_shown`
+    // says whether the page shows it right now (the switch, and the account's own grant). Only rows
+    // that have one pay for either question.
+    $bioSrc = function_exists('profileBioClean') ? profileBioClean((string)($r['bio'] ?? '')) : '';
+    $r['has_bio'] = $bioSrc !== '';
+    $r['bio_html'] = $bioSrc !== '' ? profileBioRender($bioSrc, $cfg) : '';
+    $r['bio_shown'] = $bioSrc !== '' && profileBioFor($db, $cfg, $r) !== '';
+    unset($r['avatar_sha'], $r['cover_sha'], $r['bio']);
 }
 unset($r);
 

@@ -93,18 +93,22 @@
                 <colgroup id="reports-colgroup">
                     <col class="dash-c-id"><col class="dash-c-name"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">
                 </colgroup>
+                <?php /* The same keys assets/js/admin.js redraws this row with when the tab changes
+                         (1.69.0). Two dictionaries for one header had drifted apart in Polish — the first
+                         column said "Zgłaszający" until a tab was clicked and "Imię i nazwisko" after, the
+                         object column "Utwór" and then "Obiekt" — and one set cannot drift from itself. */ ?>
                 <thead><tr>
-                    <th class="sortable" data-sort="id"><?= _h('a.reports.c_id') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="name"><?= _h('a.reports.c_name') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="email"><?= _h('a.reports.c_email') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="company"><?= _h('a.reports.c_company') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="representative"><?= _h('a.reports.c_entity') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="object"><?= _h('a.reports.c_object') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="hash"><?= _h('status.f_hash') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="ip"><?= _h('a.reports.c_ip') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable col-badge" data-sort="blocked"><?= _h('status.f_status') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="date"><?= _h('a.reports.c_date') ?> <i class="bi bi-arrow-down sort-icon active"></i></th>
-                    <th class="th-actions"><?= _h('a.reports.c_actions') ?></th>
+                    <th class="sortable" data-sort="id"><?= _h('js.reports.col_id') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="name"><?= _h('js.reports.col_name') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="email"><?= _h('js.reports.col_email') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="company"><?= _h('js.reports.col_company') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="representative"><?= _h('js.reports.col_entity') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="object"><?= _h('js.reports.col_object') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="hash"><?= _h('js.reports.col_hash') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="ip"><?= _h('js.reports.col_ip') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable col-badge" data-sort="blocked"><?= _h('js.reports.col_status') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                    <th class="sortable" data-sort="date"><?= _h('js.reports.col_date') ?> <i class="bi bi-arrow-down sort-icon active"></i></th>
+                    <th class="th-actions"><?= _h('js.reports.col_actions') ?></th>
                 </tr></thead>
                 <tbody id="reports-body"></tbody>
             </table>

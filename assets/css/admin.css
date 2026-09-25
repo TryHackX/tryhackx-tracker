@@ -5,30 +5,112 @@
     min-height: 100vh;
 }
 
-/* === Icons drawn by Font Awesome (1.68.0) ===
-   Nothing here can apply while Bootstrap Icons is chosen: every selector needs a Font Awesome class on
-   a .bi element, and those are added only when Settings → Site chooses Font Awesome (includes/icons.php
-   on the page, assets/js/icons.js for what scripts build). Near the TOP of the file on purpose: at equal
-   specificity every later rule that sizes or places an icon (`.wl-copybox-btn .bi`,
-   `.admin-emotes-title .bi`, …) still wins, exactly as it does over Bootstrap's own stylesheet.
-   Bootstrap draws its glyph in an inline-block ::before, lowered 0.125em, inside an inline <i> that keeps
-   the line's height; Font Awesome makes the <i> itself an inline-block of line-height 1. Put the box
-   back where Bootstrap keeps it, so a glyph sits at the same height whichever library draws it.
-   And the <i> keeps the TEXT's family, as Bootstrap's does (1.68.1): Font Awesome's class gives the
+/* === Icons, in either library (1.68.0; where the glyph sits, 1.69.0) ===
+   Every icon is written in Bootstrap's markup, `<i class="bi bi-NAME">`; with Font Awesome chosen the
+   mapped classes are added beside the `bi` ones (includes/icons.php for the page, assets/js/icons.js
+   for what scripts build), so a rule below that names a Font Awesome class cannot apply while Bootstrap
+   Icons is chosen. Near the TOP of the file on purpose: at equal specificity every later rule that
+   sizes or places an icon (`.wl-copybox-btn .bi`, `.admin-emotes-title .bi`, …) still wins, exactly as
+   it does over Bootstrap's own stylesheet.
+
+   WHERE THE GLYPH SITS. An icon beside a word is level with it when the middle of the glyph is the
+   middle of the word's capitals, half the cap height above the baseline — the height both icon sets
+   are drawn to centre on (each lowers its glyph so that a full-height one is centred 0.375em up, the
+   cap middle of the sans-serif faces they were made for). Two things kept icons off it:
+   * the two libraries draw at different heights. Bootstrap's glyphs fill their em from the baseline up
+     and its stylesheet lowers them 0.125em; Font Awesome's em already starts 0.125em below the baseline
+     (its own stylesheet draws the webfont at vertical-align 0), and 1.68.0 lowered it 0.125em more — so
+     every Font Awesome icon hung 0.125em (1.75px at 14px) under its Bootstrap twin beside every label
+     of the site. Measured, the ink's middle against the text's cap middle on every public and panel
+     page, in English on a desktop: Bootstrap +0.08px, Free 6 +1.84, Free 7 +1.81 on the median, and
+     657 (Free 6) and 649 (Free 7) of the 724 icons beside words more than a pixel off. 6 and 7 place
+     their glyphs alike (the same 0.375em middle, the same box once line-height is 1), so one correction
+     serves both, Free and Pro.
+   * the offset was a fraction of a pixel. Chrome puts each run of text on a whole pixel — the label's,
+     and the glyph's in its own box — so 1.75px came out 1px or 2px depending only on where the control
+     happened to sit on the page: the Index page's Fetch metadata stood a pixel higher in the bulk bar
+     than in the toolbar above it, in Bootstrap too. Moving a control down in steps of 1/16px, its
+     offset jumped by exactly 1.00px; with a whole-pixel offset it did not move at all, in either
+     library, at 1x and at 2x.
+   So the glyph's BOX stays where Bootstrap has always put it — for Font Awesome that is its own
+   baseline, vertical-align 0 — which keeps every line box, and every button, the size it was; and the
+   glyph is moved (painted, not laid out: `top` on a relatively positioned <i>) so that, box and move
+   together, it sits the whole number of pixels from the text's baseline that brings its middle nearest
+   the cap middle of the text beside it, in that text's font and size: `cap` is read on the icon's
+   PARENT, because a sort arrow is smaller than the header it sits in. Bootstrap's -0.125em is kept to
+   1/64px — the unit Chrome lays boxes out in — so that the box's share and the move's share add up to
+   exactly a whole pixel; a 1.8px box shift and a 0.2px move had still come apart for one position in
+   sixteen. A browser without `cap` or `round()` moves nothing, and the glyph stays in its box. */
+@property --bi-cap { syntax: "<length>"; inherits: true; initial-value: 0px; }
+:where(:has(> .bi)) { --bi-cap: 1cap; }
+@supports (top: round(1cap, 1px)) {
+    .bi { --bi-va: round(-0.125em, 0.015625px); position: relative; top: calc(round(var(--bi-mid, 0.5em) - var(--bi-cap) / 2, 1px) + var(--bi-va)); }
+    .bi::before, .bi::after { vertical-align: var(--bi-va); }
+}
+/* Where a Bootstrap glyph's own ink middle is, when its drawing is not centred in its square (the
+   list-check stands high in it, the person with a gear low): read off the font's glyph bounds (Bootstrap
+   Icons 1.11.3, pinned by its SRI), so the placement above centres the ink and not the square — 1.3px
+   at the page titles' 22px otherwise. Font Awesome's own middle (below) outranks these. */
+:is(.bi-person-gear, .bi-reply, .bi-type-underline) { --bi-mid: 0.435em; }
+:is(.bi-person-x, .bi-subscript) { --bi-mid: 0.44em; }
+:is(.bi-database-gear, .bi-scissors) { --bi-mid: 0.465em; }
+:is(.bi-box-arrow-in-down, .bi-database-down, .bi-folder2-open, .bi-sliders) { --bi-mid: 0.47em; }
+:is(.bi-youtube) { --bi-mid: 0.525em; }
+:is(.bi-check2, .bi-check2-all, .bi-collection, .bi-highlighter, .bi-link-45deg, .bi-trash) { --bi-mid: 0.53em; }
+:is(.bi-heart, .bi-list-ul, .bi-quote) { --bi-mid: 0.535em; }
+:is(.bi-book) { --bi-mid: 0.54em; }
+:is(.bi-arrow-clockwise, .bi-arrow-counterclockwise, .bi-list-check) { --bi-mid: 0.55em; }
+:is(.bi-superscript) { --bi-mid: 0.58em; }
+/* The <i> keeps the TEXT's family, as Bootstrap's does (1.68.1): Font Awesome's class gives the
    element its own family too, and although the element is empty its line box is placed with that
    font's ascent, which reaches above the text's — every icon button came out a pixel taller than its
    Bootstrap twin (the Whitelist's actions 26.5 px against 25.5). The glyph's face is pinned on ::before
-   below, so nothing that is drawn changes. */
-.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; font-family: inherit; }
-.bi[class*=" fa-"]::before { display: inline-block; vertical-align: -0.125em; line-height: 1; }
+   below, so nothing that is drawn changes. --bi-mid / --bi-va: where Font Awesome's glyph middle and
+   box are, for the placement above. `width: auto`: Font Awesome 7 gives every icon `width:
+   var(--fa-width, 1.25em)`, inert on an inline <i> and not on an item of a button's row (below), where
+   every glyph stood in a 1.25em box and the space to its word grew as the glyph narrowed (1.69.0). */
+.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; font-family: inherit; --bi-mid: 0.375em; --bi-va: 0px; width: auto; }
+/* The glyph's box — and, since 1.69.0, the second layer's: the duotone families (and Pro 7's "duo"
+   ones) draw an icon twice, the first layer in ::before, placed over the second, drawn in ::after.
+   Nothing else draws an ::after, so these rules cost nothing anywhere else. */
+.bi[class*=" fa-"]::before, .bi[class*=" fa-"]::after { display: inline-block; vertical-align: 0; line-height: 1; }
 /* The face, pinned on the glyph as Bootstrap Icons pins its own (`font-family: bootstrap-icons
    !important; font-weight: normal !important` on ::before): a site rule that sets a weight on an icon
-   (`.pw-req-ic`, a bold button) must not pick the other face of the family, and the regular face has
-   none of the solid-only glyphs — it would draw a box. */
-.bi.fa-solid::before, .bi.fa-regular::before { font-family: "Font Awesome 6 Free" !important; font-style: normal !important; }
-.bi.fa-brands::before { font-family: "Font Awesome 6 Brands" !important; font-style: normal !important; }
-.bi.fa-solid::before { font-weight: 900 !important; }
-.bi.fa-regular::before, .bi.fa-brands::before { font-weight: 400 !important; }
+   (`.pw-req-ic`, a bold button) must not pick another face of the family, and the regular face has
+   none of the solid-only glyphs — it would draw a box.
+   Since 1.69.0 the site may draw with Free 6 or 7 and with Pro 6 or 7 in any of their families, so
+   the family is read from Font Awesome's own variables instead of being written here: 7.x works it
+   out on the icon itself (--_fa-family: classic, sharp, jelly, …), 6.x names each family on :root
+   (--fa-style-family-classic, -sharp, -duotone, -sharp-duotone, -brands). The weight is the style
+   class's, which every version gives the same number. After the chosen family comes the classic one:
+   a 7.x family such as Jelly has a few hundred glyphs, and a name it lacks is drawn by the classic
+   font at the same weight rather than as nothing. With Free 6.7.2 all of it resolves to the very
+   families and weights 1.68 pinned by name. */
+.bi[class*=" fa-"]::before, .bi[class*=" fa-"]::after {
+    font-family: var(--_fa-family, var(--fa-style-family-classic, "Font Awesome 6 Free")), var(--fa-style-family-classic, "Font Awesome 6 Free") !important;
+    font-style: normal !important;
+    font-weight: var(--fa-style, 900) !important;
+}
+.bi.fa-brands::before { font-family: var(--_fa-family, var(--fa-style-family-brands, "Font Awesome 6 Brands")) !important; }
+.bi.fa-duotone::before, .bi.fa-duotone::after { font-family: var(--_fa-family, var(--fa-style-family-duotone, "Font Awesome 6 Duotone")), var(--fa-style-family-classic, "Font Awesome 6 Free") !important; }
+.bi.fa-sharp::before { font-family: var(--_fa-family, var(--fa-style-family-sharp, "Font Awesome 6 Sharp")), var(--fa-style-family-classic, "Font Awesome 6 Free") !important; }
+.bi.fa-sharp-duotone::before, .bi.fa-sharp-duotone::after { font-family: var(--_fa-family, var(--fa-style-family-sharp-duotone, "Font Awesome 6 Sharp Duotone")), var(--fa-style-family-classic, "Font Awesome 6 Free") !important; }
+.bi.fa-solid::before, .bi.fa-solid::after { font-weight: 900 !important; }
+.bi.fa-semibold::before, .bi.fa-semibold::after { font-weight: 600 !important; }
+.bi.fa-regular::before, .bi.fa-regular::after, .bi.fa-brands::before { font-weight: 400 !important; }
+.bi.fa-light::before, .bi.fa-light::after { font-weight: 300 !important; }
+.bi.fa-thin::before, .bi.fa-thin::after { font-weight: 100 !important; }
+/* The two-layer families (duotone, sharp duotone and Pro 7's "duo" families, Thumbprint and Vellum)
+   place their first layer absolutely over the second — which, inside the inline box the site gives an
+   icon, puts the two at different heights. One grid cell holds both instead: the icon is as wide and
+   as high as a one-layer glyph (the cell is the glyph, on its baseline like the rest), and the layers
+   coincide. `width: auto`: Font Awesome 7 gives every icon `width: var(--fa-width, 1.25em)`, inert on
+   the inline box of a one-layer icon but not on a grid — measured, it made every two-layer icon-only
+   button 0.25em wider than its Bootstrap twin (32 → 35.5 px in the panel). The cell is as wide as its
+   glyph. */
+.bi:is([class*=" fa-"][class*="-duo"], .fa-thumbprint, .fa-vellum) { display: inline-grid; width: auto; vertical-align: 0; line-height: 1; }
+.bi:is([class*=" fa-"][class*="-duo"], .fa-thumbprint, .fa-vellum)::before,
+.bi:is([class*=" fa-"][class*="-duo"], .fa-thumbprint, .fa-vellum)::after { grid-area: 1 / 1; position: static; vertical-align: baseline; }
 /* Font Awesome's glyphs are 0.625em to 1.25em wide where Bootstrap's are all 1em, so an icon-only
    button would change width with its icon (a pin turning into the filled pin, a sort arrow turning
    round). A fixed, centred box — Font Awesome's own fixed width, 1.25em — keeps every such button one
@@ -36,10 +118,88 @@
    takes, so the button is also the SAME size in either library (1.68.1). Taking the whole 1.25em made
    each icon-only button a quarter of its font size wider than the one the page was measured with, and
    a column sized for Bootstrap's buttons clipped its last one: the Whitelist's delete, behind "…". The
-   29 glyphs of the map that are wider than 1em reach at most 0.125em into the padding, centred. */
-:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child::before { width: 1.25em; margin-inline: -0.125em; text-align: center; }
-/* Free has no dot: its circle, at Bootstrap's dot size (3/8 of the em), in the same box. */
-.bi-dot[class*=" fa-"]::before { transform: scale(0.375); }
+   29 glyphs of the map that are wider than 1em reach at most 0.125em into the padding, centred.
+   Only for an icon with NO words beside it (1.69.0): `:only-child` counts elements, not text, and until
+   1.69.0 it also boxed every icon that stood before bare text — the cloud of "Fetch metadata" reached
+   0.125em into the space before its word while the bin of "Delete" stood 0.19em back from its own
+   (3.1px against 5.9 at 14px). An icon beside words carries `data-label` (the server's filter and
+   assets/js/icons.js put it there) and keeps its glyph's own width, so the space is the same for all. */
+:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child:not([data-label])::before,
+:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child:not([data-label])::after { width: 1.25em; margin-inline: -0.125em; text-align: center; }
+/* Free (and Pro 6) has no dot: its circle, at Bootstrap's dot size (3/8 of the em), in the same box.
+   Only the circle: Pro 7 has a dot of its own, drawn at Bootstrap's size already. */
+.bi-dot.fa-circle::before { transform: scale(0.375); }
+
+/* === An icon and its words: one layout for every control (1.69.0) ===
+   A button, a tab, a menu item or a pager button that holds an icon is a row: the icon and its words,
+   one gap between them that nothing in the markup decides. Until 1.69.0 the space was whatever the
+   markup had — a space character; a space AND 0.2rem when the words were in a <span> (`.btn i` had a
+   margin that `.btn i:only-child` took away again, and :only-child counts elements, so a bare-text
+   label was let off and a <span> label was not); 0.3rem more in the tabs, 0.35rem in the Whitelist's
+   menus; nothing where a script built the button without a space. Measured in one toolbar of the Index
+   page: 4.8px before "Fetch metadata", 8.4px before "Refresh S/L". In a flex row a space at either end
+   of the words is not drawn, so the gap is this one whatever the markup says — and a button a script
+   builds comes out as the page's own do. Baseline-aligned, so the icon stands where the glyph placement
+   above puts it; the gap exists only between items.
+   An icon-only button is not a row: with Font Awesome that is an icon that is the only child and has no
+   data-label, and as a row a two-layer icon (a grid of line-height 1, the duotone families) left its
+   button without the line's height — 6px shorter than its Bootstrap twin. With Bootstrap Icons every
+   icon is inline and an icon-only row is the size it was. (:where keeps the exception weightless.) */
+@property --bi-sb { syntax: "<length>"; inherits: false; initial-value: 0px; }
+/* The row's DISPLAY weighs one class and no more, so whatever hides a control still hides it:
+   `.d-hidden` further down this file, a media query's `display: none`, `[hidden]`. At the weight of the
+   layout below it outweighed them, and an icon button marked d-hidden was shown (Backups' "Cancel run",
+   the API ban's "Lift ban"). Bootstrap's own `.btn` / `.dropdown-item` display comes from an earlier
+   stylesheet, so this still wins over it. */
+:is(.btn, .dropdown-item, .source-tab, .source-tab-link, .settings-group-btn):where(:has(> .bi):not(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))),
+.admin-pagination :where(button:has(> .bi):not(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))) { display: inline-flex; }
+.dropdown-item:where(:has(> .bi)) { display: flex; }
+/* The row's layout, at the weight it needs over the controls' own rules (the settings chips centre
+   their items and have a gap of their own). text-align: start — words that wrap (a narrow phone) start
+   right after their icon, line under line; centred, the first line of a two-line label stood a whole
+   column's width away from its icon. */
+:is(.btn, .dropdown-item, .source-tab, .source-tab-link, .settings-group-btn, .admin-pagination button):has(> .bi):not(:where(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))) {
+    align-items: baseline; justify-content: center; text-align: start;
+    column-gap: max(0px, var(--bi-gap, 0.275em) - var(--bi-sb));
+}
+.dropdown-item:has(> .bi) { justify-content: flex-start; }
+:is(.btn, .dropdown-item, .source-tab, .source-tab-link, .settings-group-btn, .admin-pagination button):has(> .bi) > .bi { margin-inline: 0; }
+/* A menu button's caret is a row item too: centred as its inline-block was raised, the gap its margin. */
+.dropdown-toggle:has(> .bi)::after { align-self: center; margin-left: 0; }
+/* The gap each kind of control had with a space and its own margin: a space (0.275em of the panel's
+   face), and the tabs' 0.3rem and the menus' 0.35rem on top; the settings chips their 0.35rem. */
+.source-tab, .source-tab-link { --bi-gap: calc(0.275em + 0.3rem); }
+.dropdown-item { --bi-gap: calc(0.275em + 0.35rem); }
+.settings-group-btn { --bi-gap: 0.35rem; }
+/* The gap is what the eye sees: from the glyph's INK. A Bootstrap glyph stands in a 1em square with
+   room of its own on either side — none for the cloud, 0.12em for the cross and the plus, 0.21em for the
+   arrows, 0.27em for a single chevron — and that room came on top of the gap, so one row of buttons ran
+   from 3.7px to 7.3px (the nav: Traffic's gauge fills its square, Reports' flag does not). The room on
+   the words' side of each glyph (for the pagers' Next and Last, the side before them), read off the
+   font's own glyph bounds (canvas metrics of Bootstrap Icons 1.11.3, the version pinned with its SRI),
+   is taken off the gap. A Font Awesome glyph beside words is drawn at its own width, so its room is only
+   what its drawing leaves (a wand's sparkles, a chevron's point): assets/js/icons.js measures it in the
+   face it is drawn in and sets it on the row. The gap lies only between the icon and its words, so an
+   icon-only button is not touched. */
+:where(:has(> :is(.bi-eraser):not([class*=" fa-"]))) { --bi-sb: 0.03em; }
+:where(:has(> :is(.bi-pin-angle, .bi-pin-angle-fill, .bi-shield-check, .bi-shield-fill, .bi-shield-lock, .bi-shield-lock-fill, .bi-shield-plus, .bi-shield-slash, .bi-shield-x):not([class*=" fa-"]))) { --bi-sb: 0.04em; }
+:where(:has(> :is(.bi-stopwatch):not([class*=" fa-"]))) { --bi-sb: 0.05em; }
+:where(:has(> :is(.bi-arrow-left-right, .bi-arrow-right, .bi-bell, .bi-bug, .bi-clipboard, .bi-clipboard-check, .bi-files, .bi-flag, .bi-flag-fill, .bi-folder2, .bi-journal-text, .bi-list-check, .bi-list-ol, .bi-list-ul, .bi-plus-slash-minus, .bi-sliders2, .bi-type-strikethrough):not([class*=" fa-"]))) { --bi-sb: 0.06em; }
+:where(:has(> :is(.bi-hand-thumbs-down, .bi-hand-thumbs-up-fill, .bi-reply, .bi-subscript, .bi-superscript):not([class*=" fa-"]))) { --bi-sb: 0.08em; }
+:where(:has(> :is(.bi-chevron-down, .bi-chevron-up, .bi-hand-thumbs-down-fill, .bi-hand-thumbs-up, .bi-three-dots, .bi-trash):not([class*=" fa-"]))) { --bi-sb: 0.09em; }
+:where(:has(> :is(.bi-arrow-clockwise, .bi-arrow-counterclockwise):not([class*=" fa-"]))) { --bi-sb: 0.1em; }
+:where(:has(> :is(.bi-scissors):not([class*=" fa-"]))) { --bi-sb: 0.11em; }
+:where(:has(> :is(.bi-box-arrow-in-down, .bi-check-lg, .bi-check2, .bi-dash-lg, .bi-file-earmark, .bi-file-earmark-arrow-down, .bi-file-earmark-arrow-up, .bi-file-earmark-code, .bi-file-earmark-image, .bi-file-earmark-music, .bi-file-earmark-text, .bi-hourglass-split, .bi-person, .bi-person-badge, .bi-plus-lg, .bi-text-center, .bi-unlock, .bi-volume-mute, .bi-volume-up, .bi-x-lg):not([class*=" fa-"]))) { --bi-sb: 0.12em; }
+:where(:has(> :is(.bi-award):not([class*=" fa-"]))) { --bi-sb: 0.14em; }
+:where(:has(> :is(.bi-link-45deg):not([class*=" fa-"]))) { --bi-sb: 0.15em; }
+:where(:has(> :is(.bi-balloon, .bi-lock, .bi-lock-fill, .bi-phone, .bi-quote):not([class*=" fa-"]))) { --bi-sb: 0.18em; }
+:where(:has(> :is(.bi-arrow-down, .bi-arrow-up, .bi-chevron-double-left, .bi-chevron-double-right, .bi-type-underline):not([class*=" fa-"]))) { --bi-sb: 0.21em; }
+:where(:has(> :is(.bi-fonts):not([class*=" fa-"]))) { --bi-sb: 0.22em; }
+:where(:has(> :is(.bi-play-fill, .bi-plug):not([class*=" fa-"]))) { --bi-sb: 0.24em; }
+:where(:has(> :is(.bi-chevron-left, .bi-chevron-right, .bi-type-bold, .bi-x):not([class*=" fa-"]))) { --bi-sb: 0.27em; }
+:where(:has(> :is(.bi-type-italic):not([class*=" fa-"]))) { --bi-sb: 0.31em; }
+:where(:has(> :is(.bi-grip-vertical):not([class*=" fa-"]))) { --bi-sb: 0.37em; }
+:where(:has(> :is(.bi-dot):not([class*=" fa-"]))) { --bi-sb: 0.4em; }
 
 /* === CAPTCHA modal (admin dashboard; markup built by the template, driven by assets/js/captcha.js) ===
    Same placement as the public site (assets/css/style.css): a little above the vertical centre on desktop,
@@ -224,10 +384,7 @@
     border-bottom-color: #4a9eff;
 }
 
-.source-tab i,
-.source-tab-link i {
-    margin-right: 0.3rem;
-}
+/* (A tab's icon keeps its 0.3rem as the row's gap, at the top of the file — 1.69.0.) */
 
 /* Plain navigation link that sits in the tab row but is not a data-source tab (no data-source, not
    bound by admin.js). The first link is pushed to the right end of the row; any further links sit
@@ -318,11 +475,23 @@
     box-shadow: none !important;
 }
 
+/* background-COLOR (1.69.0): the `background` shorthand this was also reset background-image, which is
+   where Bootstrap draws a select's arrow — every toolbar filter was a box of text with nothing to say it
+   opens. */
 .toolbar-search .toolbar-status-filter {
     border: none !important;
     border-left: 1px solid #495057 !important;
     border-radius: 0 !important;
-    background: #212529 !important;
+    background-color: #212529 !important;
+}
+
+/* A select must look like a select, on a dark field (1.69.0). Bootstrap's arrow is a background image
+   stroked in #343a40 for a light field; every select in this panel is a dark one (#212529), where that
+   arrow measured 1.3:1 against its ground — there and not there. The panel's arrow is Bootstrap's own
+   dark-theme one (#dee2e6, 11.8:1), the same data: image, which the panel's policy allows. Nothing here
+   is an icon font, so it is the same arrow whichever icon library is chosen. */
+.admin-body .form-select {
+    --bs-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23dee2e6' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
 }
 
 .search-clear-btn {
@@ -686,7 +855,7 @@
 .admin-pagination button:disabled { opacity: 0.3; cursor: not-allowed; }
 .admin-pagination span { color: #888; }
 
-/* First/Last + "page N of M" jump box (AdminCommon.renderPagination â€” used by the whitelist views and the dashboard). */
+/* First/Last + "page N of M" jump box (AdminCommon.renderPagination — used by the whitelist views and the dashboard). */
 .admin-pagination .pg-edge { padding-left: 0.6rem; padding-right: 0.6rem; }
 .admin-pagination .pg-jump { display: inline-flex; align-items: center; gap: 0.35rem; color: #9aa4b2; white-space: nowrap; }
 .admin-pagination .pg-input {
@@ -769,13 +938,7 @@
     transition: all 0.2s ease;
 }
 
-.btn i {
-    margin-right: 0.2rem;
-}
-
-.btn i:only-child {
-    margin-right: 0;
-}
+/* (The icon's margin in a button is gone, 1.69.0: the row at the top of the file sets one gap.) */
 
 .settings-section {
     background: #1e1e1e;
@@ -984,7 +1147,7 @@ input[type="number"] {
 
 /* Key/value blocks. Shared label/value styling; two layouts:
    - .wl-status-grid (status card): small aligned tiles, badges vertically centred with their text;
-   - .wl-kv (details / snapshot modals): definition list â€” label column | value, one row per item,
+   - .wl-kv (details / snapshot modals): definition list — label column | value, one row per item,
      hairline separators; .wl-kv-cols splits it into two columns on wide modals. */
 .wl-kv-item { min-width: 0; }
 .wl-kv-label { color: #8b96a5; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.3; }
@@ -1164,7 +1327,7 @@ input[type="number"] {
     .admin-wide .toolbar-right { margin-left: 0; }
 }
 
-/* Toolbar dropdown tools (bulk "Fetch metadata" / "Refresh S/L" split control) â€” dark menu, sm buttons. */
+/* Toolbar dropdown tools (bulk "Fetch metadata" / "Refresh S/L" split control) — dark menu, sm buttons. */
 .wl-tool-dd .dropdown-toggle-split { padding-left: 0.45rem; padding-right: 0.45rem; }
 .wl-tool-dd .btn.wl-busy { cursor: progress; }
 .wl-tool-dd .btn.wl-busy > i { animation: wlSpin 1s linear infinite; }
@@ -1185,7 +1348,7 @@ input[type="number"] {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
     z-index: 1060;
 }
-.wl-dd-menu .dropdown-item i { margin-right: 0.35rem; color: #9aa4b2; }
+.wl-dd-menu .dropdown-item i { color: #9aa4b2; }   /* its 0.35rem is the row's gap (top of the file) */
 .wl-dd-menu .dropdown-item:hover i { color: #4a9eff; }
 .wl-dd-menu .dropdown-header { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 0.3rem; }
 .wl-dd-menu .wl-dd-note { color: #8b96a5; font-size: 0.75rem; line-height: 1.4; max-width: 18rem; white-space: normal; padding-top: 0.35rem; }
@@ -1215,7 +1378,11 @@ input[type="number"] {
 .dash-c-hash    { width: 150px; }
 .dash-c-ip      { width: 128px; }
 .dash-c-status  { width: 96px; }
-.dash-c-type    { width: 84px; }
+/* 112, not 84 (1.69.0): the column is as wide as its longest badge in either language plus the cell's
+   16px of padding — measured in the browser, the Polish "Odblokowanie" badge is 91.3px ("Blokada" 58.3,
+   "Unblock" 59.5, "Block" 58), so 108 at the least, and at 84 it was cut at the cell's edge. The last
+   4px are for a system UI font a little wider than the one it was measured in (Segoe UI). */
+.dash-c-type    { width: 112px; }
 /* 112, not 72: the appeals' "REPORT" and its arrow need 83, the Polish "ZGŁOSZENIE" 110 (1.68.1). */
 .dash-c-report  { width: 112px; }
 .dash-c-date    { width: 150px; }
@@ -1755,6 +1922,14 @@ input[type="number"] {
 /* ── the review queue, and rendered submitter text wherever it appears ──────
    The description is shown as a visitor would see it. That means it needs real styling: reviewing
    raw source is how an image tag gets waved through because nobody saw what it pointed at. */
+/* A Font Awesome face written as a :fa-NAME: token (1.69.0) is drawn in the text the panel reviews as
+   the public pages draw it (assets/css/style.css, .fae): an emoji's yellow, a duotone face's features
+   dark on its disc. */
+.fae {
+    --fa-primary-color: #3b2a00; --fa-primary-opacity: 1;
+    --fa-secondary-color: #f7c948; --fa-secondary-opacity: 1;
+    color: #f7c948; font-size: 1.15em; line-height: 1; vertical-align: -0.125em;
+}
 /* Review queue.
    A card used to be a run-on line: name, hash, date and then the text, with nothing saying what the
    card WAS. Now the state leads — a coloured left edge plus an icon and a word, because a colour on
@@ -1807,12 +1982,21 @@ input[type="number"] {
 .rt-collapse { border: 1px solid rgba(255,255,255,0.10); border-radius: 6px; margin: 0.6rem 0; }
 .rt-collapse > summary { cursor: pointer; padding: 0.45rem 0.7rem; font-size: 0.82rem; font-weight: 600; list-style: none; }
 .rt-collapse > summary::-webkit-details-marker { display: none; }
-/* A disclosure's marker is a chevron icon IN THE MARKUP, turned a quarter when its <details> is open
-   (1.68.0 — the pattern .gr-matrix-chev started). It was a small triangle character in `content:`, or
-   the browser's own marker, and either one is drawn the same whatever icon library the site uses. */
-.disc-chev { display: inline-block; margin-right: 0.35em; font-size: 0.8em; opacity: 0.7; transition: transform 0.15s ease; }
-details[open] > summary > .disc-chev { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) { .disc-chev { transition: none; } }
+/* A disclosure's marker is a chevron icon IN THE MARKUP (1.68.0 — the pattern .gr-matrix-chev
+   started). It was a small triangle character in `content:`, or the browser's own marker, and either
+   one is drawn the same whatever icon library the site uses.
+   An open <details> draws the chevron that POINTS DOWN (1.69.0). Until then the chevron was turned a
+   quarter, and a turned glyph is not drawn the way text is: every glyph of text stands on a whole pixel
+   (so the placement at the top of this file can put an icon level with its words), a turned one exactly
+   where its box's geometry says, which Chrome lays out rounded its own way — a turned chevron stood up
+   to 2px below its words, 0.6px to 1px apart from the same chevron shut, with the size and the face.
+   The glyph that points down is drawn like any other, where the placement puts it. Its code point in
+   each library, as the libraries' own stylesheets write it: Bootstrap Icons 1.11.3 \f282; Font Awesome
+   6 and 7 \f078, from the variables their stylesheets draw every glyph from (--fa, and 6's second
+   duotone layer --fa--fa; 7 draws both layers from --fa). The Groups matrix's chevron the same. */
+.disc-chev { display: inline-block; margin-right: 0.35em; font-size: 0.8em; opacity: 0.7; }
+details[open] > summary > .disc-chev:not([class*=" fa-"])::before { content: "\f282"; }
+details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "\f078\f078"; }
 /* A spoiler draws its chevron wherever it is rendered — a description, a shout, a message, a page of
    the site's own (which sits in .rt, not .rt-body) — so the browser's marker goes everywhere too. */
 .rt-spoiler > summary { list-style: none; }
@@ -1924,7 +2108,13 @@ details[open] > summary > .disc-chev { transform: rotate(90deg); }
 .au-g-other    { color: #8a929e; border-color: #4a5058; }
 .au-failed td { background: rgba(180,67,60,0.10); }
 .au-failed-badge { color: #ff8a8a; border-color: #b4433c; }
+/* The summary is what the line is for, so its cell wraps (1.69.0): the tables' "one line that
+   ellipsises" (1.68.1, `.wl-page .wl-table td`) cut a long summary at the column's edge — and the
+   `overflow-wrap` below never applied — and a cell that also holds the details' toggle is a cell with
+   a control in it, which that rule must not clip. Long words and a detail's values break, not spill. */
+.wl-page .wl-table td.au-c-sum { white-space: normal; overflow: visible; text-overflow: clip; }
 .au-summary { overflow-wrap: anywhere; }
+.au-c-sum .au-diff td { overflow-wrap: anywhere; }
 .au-target { display: inline-block; margin-top: 0.15rem; font-size: 0.72rem; opacity: 0.75; word-break: break-all; }
 .au-detail { margin-top: 0.3rem; }
 .au-detail > summary { cursor: pointer; font-size: 0.75rem; color: #7f8c9a; list-style: none; }
@@ -2454,9 +2644,9 @@ textarea.pc-text {
    (.rt-collapse, .au-detail, .settings-more) draws the same kind of chevron: .disc-chev above. */
 .gr-matrix-wrap > summary { cursor: pointer; list-style: none; }
 .gr-matrix-wrap > summary::-webkit-details-marker { display: none; }
-.gr-matrix-chev { display: inline-block; margin-right: 0.35rem; font-size: 0.85em; transition: transform 0.15s ease; }
-.gr-matrix-wrap[open] > summary .gr-matrix-chev { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) { .gr-matrix-chev { transition: none; } }
+.gr-matrix-chev { display: inline-block; margin-right: 0.35rem; font-size: 0.85em; }
+.gr-matrix-wrap[open] > summary .gr-matrix-chev:not([class*=" fa-"])::before { content: "\f282"; }
+.gr-matrix-wrap[open] > summary .gr-matrix-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "\f078\f078"; }
 .gr-matrix { --bs-table-bg: transparent; font-size: 0.8rem; }
 .gr-matrix th, .gr-matrix td { border-color: #1b232d; vertical-align: middle; }
 .gr-matrix-g { text-align: center; white-space: nowrap; font-weight: 500; }
@@ -2702,13 +2892,21 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .admin-sound-add-title { margin-bottom: 0.5rem; font-size: 0.82rem; color: #c3ccd8; }
 .admin-sound-add-title .bi { color: #4d9fd6; }
 /* Across the whole panel, so it reads as one row rather than as a tall column beside the name box:
-   the icon, what to do and what is accepted on one line, wrapping only when there is no room. */
+   the icon, what to do and what is accepted on one line, wrapping only when there is no room.
+   On their baseline (1.69.0), as every icon and its words are: centred by their boxes, the icon (a
+   larger size than its words) stood a fraction of a pixel from their baseline that came out a whole
+   pixel one way or the other with where the zone sat — one zone of two a pixel off its twin. And in
+   its words' size (what the zone says is in .ipl-drop-main, 0.84rem): the placement at the top of this
+   file reads the cap height on the icon's PARENT, and the zone's own 16px capitals put the icon 0.9px
+   above the middle of its words'. Nothing else in the zone is sized in em. */
 .ipl-drop-wide {
     flex-direction: row;
     flex-wrap: wrap;
     justify-content: center;
+    align-items: baseline;
     gap: 0.4rem;
     padding: 0.55rem 0.8rem;
+    font-size: 0.84rem;
 }
 .ipl-drop-wide .ipl-drop-icon { font-size: 1.05rem; }
 .ipl-drop-wide .ipl-drop-sub::before { content: '·'; margin-right: 0.4rem; opacity: 0.6; }
@@ -2829,6 +3027,14 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .ue-media-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .ue-media-thumb { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: rgba(255, 255, 255, 0.04); }
 .ue-media-thumb[hidden] { display: none !important; }
+/* The description on their profile (1.69.0), as the profile draws it: the member's own words in a
+   quiet box, links underlined so they read as links, long words broken rather than widening the modal. */
+.ue-bio-text {
+    margin-bottom: 0.45rem; padding: 0.45rem 0.6rem; border: 1px solid #2a2f45; border-radius: 4px;
+    background: rgba(255, 255, 255, 0.03); font-size: 0.85rem; line-height: 1.5; overflow-wrap: anywhere;
+    max-height: 12rem; overflow-y: auto;
+}
+.ue-bio-text a { text-decoration: underline; text-underline-offset: 2px; }
 
 /* ── The picture beside a name in the panel (1.63.0 phase B) ───────────────────────────────────
    The element assets/js/avatar.js draws on the public pages too, with the look it has there: round,
@@ -2844,3 +3050,54 @@ img.js-avatar { border-radius: 50%; object-fit: cover; background: rgba(255, 255
 /* The reported-message card, the content review cards and the emote manager: beside a name inside a
    sentence or a link, so it sits on the text rather than stretching the line. */
 .msgrep-av, .rv-av, .emote-av-admin { margin: -0.2rem 0.3rem -0.1rem 0; }
+
+/* ── Settings → Site → Font Awesome (1.69.0): the source, the package's styles, the preview, the
+   packages. The same shapes as the sounds manager beside it — a table with a count, the drop zone,
+   a row of controls under it — so the two read as one kind of thing. ────────────────────────────── */
+/* The package select waits beside a source that is not a package, dimmed rather than disabled: a
+   disabled control is not posted, and the choice it holds is still the one a switch back will use. */
+.ip-dim { opacity: 0.55; }
+.ip-styles { margin-top: 0.2rem; padding: 0.6rem 0.75rem 0.5rem; border: 1px solid #2a3442; border-radius: 8px; background: #10161f; }
+.ip-styles-head { display: flex; flex-direction: column; gap: 0.15rem; margin-bottom: 0.45rem; }
+.ip-core-list { color: #c3ccd8; }
+.ip-styles-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(19rem, 100%), 1fr)); gap: 0.1rem 0.9rem; margin-bottom: 0.35rem; }
+.ip-style { display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.45rem; padding: 0.2rem 0.3rem; border-radius: 4px; font-size: 0.82rem; color: #b8c1cd; cursor: pointer; }
+.ip-style:hover { background: rgba(77,159,214,0.07); }
+.ip-style.is-loaded .ip-style-name { color: #e3e9f0; }
+.ip-style .form-check-input { margin: 0; flex: 0 0 auto; }
+.ip-style .form-check-input:disabled { opacity: 0.8; }
+.ip-style-name { font-weight: 600; }
+.ip-style-facts, .ip-style-size { font-size: 0.74rem; color: #8a94a2; white-space: nowrap; }
+.ip-style .wl-badge { font-size: 0.6rem; padding: 0.05rem 0.3rem; }
+.ip-preview-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.8rem; margin-bottom: 0.3rem; }
+.ip-preview { display: block; width: 100%; height: 6.4rem; background: #0d0f14; border: 1px solid #2a3a4c; border-radius: 6px; }
+.ip-coverage { margin-top: 0.45rem; font-size: 0.8rem; color: #b8c1cd; }
+.ip-cov-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+.ip-cov-measure { margin-top: 0.3rem; font-size: 0.78rem; }
+.ip-cov-list { margin-top: 0.35rem; }
+.ip-cov-list > summary { cursor: pointer; color: #9fd0ef; font-size: 0.78rem; list-style: none; }
+.ip-cov-list > summary::-webkit-details-marker { display: none; }
+.ip-fb { margin: 0.25rem 0 0 1.1rem; font-size: 0.76rem; line-height: 1.5; }
+.ip-fb-why { color: #d8dee6; }
+.ip-fb code { color: #9fb3c8; overflow-wrap: anywhere; }
+/* The packages. */
+.ip-table td { vertical-align: middle; }
+.ip-table th { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: #8a94a2; border-bottom-color: #2a3442; }
+.ip-cell-name { min-width: 12rem; }
+.ip-name { font-size: 0.88rem; color: #e3e9f0; }
+.ip-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.72rem; color: #7f8a98; overflow-wrap: anywhere; }
+.ip-row-active td { background: rgba(76,175,80,0.05); }
+.ip-add { padding: 0.7rem 0.8rem 0.8rem; border: 1px solid #2a3442; border-radius: 8px; background: #10161f; margin-bottom: 0.4rem; }
+.ip-path-row .form-control { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; }
+.ip-manager.is-busy .ip-add { opacity: 0.6; pointer-events: none; }
+/* What an import said. */
+.ip-report { margin-top: 0.6rem; padding: 0.5rem 0.7rem; border: 1px solid rgba(76,175,80,0.35); border-radius: 6px; background: rgba(76,175,80,0.06); font-size: 0.8rem; }
+.ip-report.is-refused { border-color: rgba(255,82,82,0.4); background: rgba(244,67,54,0.06); }
+.ip-report-head { color: #e3e9f0; margin-bottom: 0.3rem; overflow-wrap: anywhere; }
+.ip-report-list { display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 0.7rem; margin: 0; }
+.ip-report-list dt { font-weight: 600; color: #8a94a2; }
+.ip-report-list dd { margin: 0; color: #c3ccd8; overflow-wrap: anywhere; }
+@media (max-width: 575.98px) {
+    .ip-report-list { grid-template-columns: 1fr; }
+    .ip-report-list dd { margin-bottom: 0.25rem; }
+}

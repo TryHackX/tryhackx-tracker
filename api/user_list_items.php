@@ -192,9 +192,13 @@ if ($search !== '') {
         jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
     }
     $inFiles = $wantFiles ? favHashesMatchingFiles($db, array_column($items, 'info_hash'), $search) : [];
-    $items = array_values(array_filter($items, static function ($i) use ($needle, $inFiles) {
+    // The hash half only where the row's hash will be SHOWN to this reader — `index.magnet`, and not a
+    // banned row (the rule the rows are cut with below). Matched first and blanked afterwards, it let a
+    // reader without the permission read a hidden hash back out of the count (1.69.0).
+    $items = array_values(array_filter($items, static function ($i) use ($needle, $inFiles, $canMagnet) {
+        $hashShown = $canMagnet && empty($i['banned']);
         return str_contains(mb_strtolower((string)($i['name'] ?? '')), $needle)
-            || str_contains((string)$i['info_hash'], $needle)
+            || ($hashShown && str_contains((string)$i['info_hash'], $needle))
             || isset($inFiles[strtolower((string)$i['info_hash'])]);
     }));
 }

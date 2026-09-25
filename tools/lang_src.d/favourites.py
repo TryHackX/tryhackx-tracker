@@ -23,8 +23,11 @@ add('profile', {
     # which would be a scriptable way to tell hidden from nonexistent.
     'not_found':      ('There is nothing here to see.', 'Nie ma tu nic do obejrzenia.'),
     'member_since':   ('member since :date', 'w serwisie od :date'),
-    'this_is_you':    ('this is your profile, as others see it',
-                       'to twój profil, tak jak widzą go inni'),
+    # 1.69.0: "as others see it" stopped being true twice over — your own profile draws the description's
+    # edit box, which nobody else gets, and it always showed your favourites, likes, registered torrents
+    # and lists whether or not you had made them public. What stays true in every case, about as short.
+    'this_is_you':    ('this is your profile — others see only what you show',
+                       'to twój profil — inni widzą tylko to, co pokazujesz'),
     'nothing_shared': ('This account does not share anything publicly.',
                        'To konto nie udostępnia niczego publicznie.'),
     'favourites':     ('Favourites', 'Ulubione'),

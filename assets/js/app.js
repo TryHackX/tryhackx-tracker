@@ -2894,6 +2894,9 @@ window.askInPlace = askInPlace;
         // Redraw from the server's answer, never from an optimistic guess: the whole value of a
         // score is that it is the server's count and not the browser's.
         openInfo(hash, null);
+        // …and tell whatever else on the page shows this vote: the likes / ratings table (1.69.0,
+        // assets/js/favourites.js) the panel may have been opened from asks for its page again.
+        document.dispatchEvent(new CustomEvent('rating:changed', { detail: { hash } }));
     }
 
     /**

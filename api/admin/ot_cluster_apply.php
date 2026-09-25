@@ -18,6 +18,8 @@ $op = (string)($input['op'] ?? '');
 if (!in_array($op, ['plan', 'create', 'remove', 'restart', 'reload'], true)) {
     jsonResponse(['error' => __('api.admin.unknown_op')], 400);
 }
+// A plan is a read (1.69.0), refused or not: the router logged every one as `ot.cluster`.
+if ($op === 'plan') auditSuppress();
 if (!otClusterEnabled($cfg)) {
     jsonResponse(['error' => __('api.cluster.not_enabled')], 400);
 }

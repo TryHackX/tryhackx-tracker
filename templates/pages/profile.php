@@ -50,6 +50,10 @@ $isSelf = (int)$profile['id'] === (int)$viewer['id'];
 $showFav = favPublicEnabled($cfg)
     && ($isSelf || ((int)($profile['fav_public'] ?? 0) === 1
                     && userIdHasGrantedPermission($db, $cfg, (int)$profile['id'], 'favourites.public')));
+// Likes or ratings (1.69.0, includes/profilevotes.php) — the one gate the endpoint behind the section
+// asks as well: the site's switch and ratings on; for somebody else, their group's GRANT of
+// rating.public (not the admin blanket) and their own yes. Your own profile shows yours either way.
+$showVotes = function_exists('profileVotesShownTo') && profileVotesShownTo($db, $cfg, $profile, $viewer);
 $showUploads = uploadsPossible($cfg) && uploadsPublicEnabled($cfg)
     && ($isSelf || userIdHasGrantedPermission($db, $cfg, (int)$profile['id'], 'uploads.public'));
 $canMagnet = userCan($db, $cfg, 'index.magnet');
@@ -79,6 +83,12 @@ if (!$isSelf && profileHiddenFrom($db, (int)$profile['id'], (int)$viewer['id']))
 $profState   = $profPeople['may_friend'] && !$isSelf ? friendState($db, (int)$viewer['id'], (int)$profile['id']) : 'none';
 $profBlocked = !$isSelf && blockRow($db, (int)$viewer['id'], (int)$profile['id']) !== null;
 $showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profLists['may_view'] && listsVisibleFor($db, $cfg, $profile)));
+// The description (1.69.0, includes/profilebio.php): what the page SHOWS is asked of the account the
+// words belong to (hidden, never deleted, while its groups do not grant profile.bio), and the editor is
+// drawn only on your own profile while you may write one. Another member's empty description draws
+// nothing at all; your own empty one is the dashed "write something" box.
+$bioHtml = function_exists('profileBioFor') ? profileBioFor($db, $cfg, $profile) : '';
+$bioEdit = $isSelf && function_exists('profileBioMayWrite') && profileBioMayWrite($db, $cfg, $viewer);
 ?>
 <h1><?= _h('profile.h1') ?></h1>
 <?php /* The token every POST from this page needs — following somebody, blocking them, un-starring
@@ -103,10 +113,15 @@ if ($profCover !== null) {
 <?php if ($profCover !== null): ?>
 <div class="cv-paint" aria-hidden="true"><div class="cv-shade"></div></div>
 <?php endif; ?>
-<div class="profile-head">
+<div class="profile-head<?= ($bioHtml !== '' || $bioEdit) ? ' has-bio' : '' ?>">
     <?php /* Left of the name at 64 px, cut from the 128 square — or the letter, or the site's default.
              Nothing at all when pictures are switched off (userAvatarHtml() answers ''). */ ?>
     <?= function_exists('userAvatarHtml') ? userAvatarHtml($profile, 64, $baseUrl, 'profile-avatar', $cfg) : '' ?>
+    <?php /* The text column beside the picture (1.69.0): the name row, and under it the description —
+             the Flarum hero the owner pointed at, in this site's own type and colours. One column, so
+             a long description grows the head downwards beside the picture instead of wrapping under it. */ ?>
+    <div class="profile-head-main">
+    <div class="profile-head-row">
     <span class="profile-name"><?= sanitize($profile['username']) ?></span>
     <?php if (!empty($profile['created_at'])): ?>
     <span class="profile-since"><?= _h('profile.member_since', ['date' => sanitize(substr((string)$profile['created_at'], 0, 10))]) ?></span>
@@ -134,10 +149,37 @@ if ($profCover !== null) {
             data-user="<?= sanitize($profile['username']) ?>"
             title="<?= _h('profile.share_title') ?>"><?= _h('search.share') ?></button>
     <?php endif; ?>
+    </div><?php /* /.profile-head-row */ ?>
+    <?php if ($bioHtml !== '' || $bioEdit): ?>
+    <?php /* The words are the member's own: `data-lang-keep` keeps the in-place language switch out of
+             them where nothing else in the element is in the page's language, and dir="auto" lets a
+             right-to-left text read the right way in its own block (the bidi overrides that could make
+             a line lie about itself were taken out when it was saved). On your own profile the text is
+             also the button that opens the editor (assets/js/profile-bio.js) — a link inside it still
+             just opens the link — so there it carries no data-lang-keep: its title is in the page's
+             language, and the words are the same in both renders, so the switch finds nothing in them
+             to change. The source travels in data-source, for its owner's page only. Every node here
+             has an id, because lang-swap.js pairs by id. */ ?>
+    <div class="profile-bio<?= $bioEdit ? ' is-editable' : '' ?>" id="profile-bio"
+         <?php if ($bioEdit): ?>data-edit="1" data-max="<?= profileBioMax($cfg) ?>" data-cap="<?= profileBioSourceCap($cfg) ?>"
+         data-source="<?= sanitize(profileBioClean((string)($profile['bio'] ?? ''))) ?>"<?php endif; ?>>
+        <?php if ($bioEdit): ?>
+        <?php /* Named by its own words (a screen reader reads the description), described as the way
+                 to edit it — an aria-label would have replaced the text it is a button for. */ ?>
+        <span class="profile-bio-hint" id="profile-bio-hint" hidden><?= _h('profile.bio_edit_title') ?></span>
+        <div class="profile-bio-text" id="profile-bio-text" dir="auto" role="button" tabindex="0"
+             title="<?= _h('profile.bio_edit_title') ?>" aria-describedby="profile-bio-hint"<?= $bioHtml === '' ? ' hidden' : '' ?>><?= $bioHtml ?></div>
+        <button type="button" class="profile-bio-ph" id="profile-bio-ph"<?= $bioHtml !== '' ? ' hidden' : '' ?>><?= _h('profile.bio_placeholder') ?></button>
+        <?php else: ?>
+        <div class="profile-bio-text" id="profile-bio-text" dir="auto" data-lang-keep><?= $bioHtml ?></div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+    </div><?php /* /.profile-head-main */ ?>
 </div>
 </div><?php /* /#profile-top */ ?>
 
-<?php if (!$showFav && !$showUploads && !$showLists): ?>
+<?php if (!$showFav && !$showVotes && !$showUploads && !$showLists): ?>
 <p class="text-muted"><?= _h('profile.nothing_shared') ?></p>
 <?php endif; ?>
 
@@ -171,6 +213,15 @@ if ($profCover !== null) {
         </div>
         <div class="profile-list" id="pf-fav-list"></div>
         <div class="trans-pagination" id="pf-fav-pager"></div>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($showVotes): ?>
+    <?php /* Likes or ratings (1.69.0): right after Favourites, before Uploads and Lists. The same partial
+             as the account page's tab; "your" on your own profile, "their" on anybody else's. */ ?>
+    <section class="profile-section" id="profile-votes">
+        <h2 id="profile-votes-heading"><?= _h('profile.votes_' . repMode($cfg)) ?></h2>
+        <?php $pvUser = (string)$profile['username']; $pvSelf = $isSelf; $pvExtra = $profExtra; include __DIR__ . '/../partials/votes_section.php'; ?>
     </section>
     <?php endif; ?>
 

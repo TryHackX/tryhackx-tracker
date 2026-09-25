@@ -27,6 +27,9 @@ twofaSyncSetting($db, $cfg);
 $state = twofaState();
 
 if ($op === 'status') {
+    // A read (1.69.0): Settings asks for it every time the page opens, and the router logged each ask
+    // as `twofa.change` — a line that says the second factor changed when nobody touched it.
+    auditSuppress();
     jsonResponse([
         'success' => true,
         'enabled' => twofaEnabled(),

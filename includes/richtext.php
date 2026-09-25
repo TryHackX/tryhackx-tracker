@@ -27,6 +27,8 @@
 
 /** Formats the site is willing to accept, from settings. Never empty — falls back to bbcode. */
 require_once __DIR__ . '/content.php';
+// Font Awesome's faces, written as :fa-NAME: tokens (1.69.0): drawn on the finished text below.
+require_once __DIR__ . '/emoji.php';
 
 function richtextFormats(array $cfg): array {
     $out = [];
@@ -242,7 +244,9 @@ function richtextViewerSignedIn(?PDO $db = null): bool {
 }
 
 function richtextRenderForEmail(?string $text, string $format, array $cfg): string {
-    $html = richtextRender($text, $format, $cfg);
+    // A Font Awesome face is a glyph of a web font no mail client loads: in a mail, a :fa-NAME: token is
+    // the ordinary emoji it stands for, as it is wherever Font Awesome is switched off (1.69.0).
+    $html = richtextRender($text, $format, array_merge($cfg, ['shout_emoji_fa' => 'off']));
     if ($html === '') return '';
     $style = [
         'rt-code'   => 'margin:0.6rem 0;padding:10px 12px;border-radius:4px;background:#f4f5f7;border:1px solid #dcdfe4;overflow-x:auto;font-family:Consolas,Menlo,monospace;font-size:13px;white-space:pre-wrap',
@@ -764,6 +768,13 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
     $s = preg_replace('/\n{2,}/', "\x02PARA\x02", $s);
     $s = str_replace("\n", '<br>', $s);
 
+    // Font Awesome's faces (1.69.0, includes/emoji.php): a `:fa-NAME:` token becomes the face — or the
+    // ordinary emoji it stands for — here, at the END, on the text between tags only. Every address and
+    // attribute built above keeps its bytes (a token inside a link's href is part of the address), and
+    // the code blocks are still stashed, so a token in [code] stays what was typed, as a :shortcode:
+    // there does. The shortcodes ran first and left these alone: no shortcode starts with `fa-`.
+    $s = emojiFaRenderHtml($s, $cfg);
+
     // Put the stashed blocks back BEFORE paragraphs are decided, so the pass below sees real tags.
     foreach ($stash as $i => $html) {
         $s = str_replace("\x00CODE" . $i . "\x00", $html, $s);
@@ -861,7 +872,9 @@ function richtextParagraphs(string $html): string {
                 return $m[0];
             }, $chunk) ?? $chunk;
             $plain = trim(str_replace(['<br>', '&nbsp;'], ' ', strip_tags($chunk)));
-            if ($plain === '' && strpos($chunk, '<img') === false) continue;
+            // A paragraph of pictures and nothing else is still a paragraph — and so is one of Font
+            // Awesome's faces (1.69.0): a line that was nothing but :fa-face-grin: came out empty.
+            if ($plain === '' && strpos($chunk, '<img') === false && strpos($chunk, '<i class="fae ') === false) continue;
             $out .= '<p>' . $openList($before) . trim($chunk, ' ') . $closeList($carry) . '</p>';
             // The paragraph closed the anchor and the next one will not resume it, so it is not
             // "still open" either — the same rule the block branch below applies.

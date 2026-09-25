@@ -14,6 +14,10 @@ $op = (string)($input['op'] ?? '');
 if (!in_array($op, ['status', 'plan', 'apply', 'revert'], true)) {
     jsonResponse(['error' => __('api.admin.unknown_op')], 400);
 }
+// The two reads — the status and the plan the helper would carry out — write nothing to the audit log
+// (1.69.0), not even when the feature is off: the router logged both as `livesync.apply`, as if
+// something had been applied (or had failed to be).
+if ($op === 'status' || $op === 'plan') auditSuppress();
 if (!livesyncEnabled($cfg)) {
     jsonResponse(['error' => __('api.livesync.off')], 409);
 }

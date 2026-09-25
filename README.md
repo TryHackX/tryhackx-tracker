@@ -360,17 +360,30 @@ hidden synonyms ("bot", "smtp", "cron", "hidden url") kept in `includes/settings
 served through `admin/settings_catalog`, so they never appear in the page text. Press `/` or `Ctrl+K`
 anywhere on the page to jump into it.
 
+Since 1.69.0 each group answers one question, and a section is filed where you would look for it
+first: **Site & pages** (the site and its pages) · **Contact & email** (how mail goes out — the operator
+digest included) · **Security & CAPTCHA** (how abuse is kept out — the public forms' hourly limits
+too) · **User accounts** (who may have an account, how they sign in and reach each other) ·
+**Profiles** (everything a member has and shows on a profile: the profile switch, favourites, the
+picture and cover, the description, likes / ratings, lists) · **Tracker & whitelist** (the mode and
+both accesslist files) · **OpenTracker service** · **Network & limits** (the UDP firewall and its address
+lists, kernel buffers, database memory) · **Statistics** · **Descriptions & ratings** (what members add
+to a torrent) · **Shoutbox** · **Sounds** · **Index** · **API & federation** · **Backups & maintenance**
+(backups, archiving of old reports / appeals / sent mail, the health check, the audit log) ·
+**Languages** · **Admin credentials**. *All settings* reads group by group in that order; the
+section ids did not change, so every `#section-…` link still opens.
+
 
 | Section | Settings |
 |---------|----------|
 | **Site Configuration** | Site name, URL, announce URLs (HTTP/S + UDP), GitHub URL (point it at the project **repository** — it is the footer's GitHub link) |
 | **Contact & Email** | Site email, **sender address** (local part + a domain picked from the Site-URL host and its parents — nothing else can align with SPF/DKIM/DMARC), contact visibility, email obfuscation, HMAC secret |
 | **CAPTCHA** | Provider (reCAPTCHA v2 / reCAPTCHA v3 / Turnstile / hCaptcha) — **only the selected provider's keys are shown** (the others keep their values and reappear when selected, or when the search matches them), enable globally and per-context (report, login, status, appeals, block check); the whitelist registration page always requires a CAPTCHA |
-| **Tracker Mode & Whitelist** | `blacklist` / `whitelist`, whitelist file path (+ Test), public registration on/off, max hashes per submission, submissions per hour, per-IP and global daily caps, minimum seconds between tracker reloads, OpenTracker scrape URL, **require our tracker** (public registration accepts only magnets whose `tr=` list includes one of *Our tracker hosts* / the announce hosts; bare hashes refused) — see [Whitelist mode](#whitelist-mode) |
+| **Tracker Mode & Whitelist** | `blacklist` / `whitelist`, whitelist file path (+ Test), blacklist file path (+ Test; under Security until 1.69.0), public registration on/off, max hashes per submission, submissions per hour, per-IP and global daily caps, minimum seconds between tracker reloads, OpenTracker scrape URL, **require our tracker** (public registration accepts only magnets whose `tr=` list includes one of *Our tracker hosts* / the announce hosts; bare hashes refused) — see [Whitelist mode](#whitelist-mode) |
 | **Server-to-server API** | Enable, ban length (days), exempt IPs — clients and bans are managed on the Whitelist page |
 | **Smart CAPTCHA** | Point threshold, grace period, points per action type |
-| **Public Pages** | Auto-archive days for reports and appeals |
-| **Rate Limits & Blacklist** | Reports/status-checks/block-lookups/appeals per hour (per IP), items per page, message length limits, blacklist file path with test |
+| **Archiving & the e-mail log** (Backups & maintenance; "Public Pages" before 1.69.0) | Auto-archive days for reports and appeals, how long the sent-mail log is kept |
+| **Rate & length limits** (Security & CAPTCHA; "Rate Limits & Blacklist" before 1.69.0) | Reports/status-checks/block-lookups/appeals per hour (per IP), items per page, message length limits |
 | **Admin Access & Sessions** | **Admin sign-in address** (the `?action=` value that shows the sign-in form &mdash; move it off `admin` to keep bots off the form), **what other admin URLs answer when signed out** (redirect to the front page / show the form / 404), session idle timeout, absolute session cap, login lockout attempts/window, trusted proxy IPs, client IP header &mdash; see [Moving the admin sign-in address](#moving-the-admin-sign-in-address-1100) |
 | **Donation Fields** | Enable/disable, custom label+value fields (max 15), auto-detects URLs vs addresses |
 | **Transparency** | Enable/disable, results per page |
@@ -743,7 +756,9 @@ default — with it off, everything behaves exactly like the classic single-admi
   rarer/longer words weigh more) with multi-column header sorts, live-as-you-type with a loading
   state, match highlighting, a rows-per-page choice (15–200), and per-permission columns (file
   counts open a **folder-tree modal** with `index.files`; info hashes / magnet links with
-  `index.magnet`).
+  `index.magnet`). A reader who is not shown hashes does not search by one either (1.69.0): without
+  `index.magnet` a hex term is searched as a name, here and on a profile's favourites, registered
+  torrents and lists — a prefix matched first and blanked afterwards spelt the hidden hash out.
 - **Selling group access**: create an API key with the **users** scope and call
   `v1/users/lookup | grant | revoke | provision` from your shop after a purchase — see
   [tools/api_client_example.py](tools/api_client_example.py). Grants made through the API notify the
@@ -982,6 +997,32 @@ is logged by default rather than forgotten. Credentials never appear: the settin
 key *name*, so one added later is covered without anybody remembering, and a match is recorded as
 "changed" with no value either side. There is no delete and no edit — a log the panel it records can
 rewrite is not evidence. Retention is a setting; the janitor enforces it.
+
+### The emoji picker: every emoji, a search, variants, and Font Awesome's faces (1.69.0)
+
+The shoutbox's picker offers **every emoji Unicode has up to Emoji 16.0** — the newest set Windows 11,
+Android and iOS all draw (17.0 is still reaching Windows) — on Unicode's own nine pages, after a
+**Recently used** page kept by the browser, with a **search** box at the top that reads names and
+keywords in the reader's language, accents or not, and English after them. **Hold an emoji down** (a
+finger or the mouse), right-click it, or press Shift+Enter or the menu key, and its variants open over
+it, as on a phone: the five skin tones — the one chosen last is remembered and drawn in the grid — and,
+for Font Awesome's faces, the styles the site loads. A plain click inserts at once; a corner mark shows
+which cells have variants. Nothing is loaded until the picker first opens: the emoji are a file per language
+(`assets/emoji/emoji-en.json`, `emoji-pl.json`, about 50 KB compressed each), generated by
+`tools/emoji_data.php` from an unpacked `emojibase-data` package (`npm pack emojibase-data`; `php
+tools/emoji_data.php <package> [--cap=16.0]` rewrites both files). Windows draws no country flags at
+all — it shows their two letters, everywhere, not only here.
+
+With a **Font Awesome Pro package** as the site's icon source (Settings → Site), **Settings → Shoutbox →
+Emoji in the picker** offers its faces — the `emoji` category of the package's own index, 113 in 7.3.1
+— **instead of** the ordinary emoji or **mixed** with them (`shout_emoji_fa`: off / fa / mixed, off as
+shipped), drawn by default in a style you choose (`shout_emoji_fa_style`, else the site's own). A face
+travels in a shout as a token, `:fa-face-grin-tears:` or `:fa-face-grin-tears/duotone-light:` with a
+style of its own; the server draws it wherever `:shortcode:` emoji are drawn, as the face when the
+package and that style load, and as the ordinary emoji it stands for anywhere else (Font Awesome off,
+the package gone, a style no longer loaded, an e-mail). The package importer reads the index a download
+carries — Font Awesome's own `icon-families.json`, or the compact `icons-search-vX.Y.Z.json` of the
+owner's download script — and keeps what the site needs of it beside the package.
 
 ### The shoutbox in the bar, a pinned line, and lines from the site (1.60.0)
 
@@ -1378,8 +1419,9 @@ cannot leave the tracker unprotected.
 
 ### Address lists — whole networks, whole countries (1.28.0)
 
-**Admin → Traffic → Address lists**, master switch in **Settings → Tracker & whitelist → Address
-lists**. Trusted addresses above is a box you type a handful of addresses into. This is the same idea
+**Admin → Traffic → Address lists**, master switch in **Settings → Network & limits → Address
+lists** (under Tracker & whitelist before 1.69.0). Trusted addresses above is a box you type a handful
+of addresses into. This is the same idea
 at the scale an operator actually needs: import a country zone file from
 `https://www.ipdeny.com/ipblocks/data/countries/cn.zone`, upload a blocklist, paste a range.
 
@@ -2015,7 +2057,8 @@ it never installs or removes `ottrack.nft` — that stays a manual, documented s
 #### 8. Backups from the panel (optional, 1.11.0)
 
 **Admin → Backups** (`?action=admin-backups`) makes, schedules, rotates, verifies, downloads and
-restores archives; **Settings → Backups** holds the policy. Everything is off by default.
+restores archives; **Settings → Backups & maintenance → Backups** holds the policy. Everything is off
+by default.
 
 This backs up **the tracker**, and by default that means its database. Where `Backup-serwera.sh` —
 the server toolkit that lives outside this repo — is installed, the panel **steers that instead of
@@ -2628,7 +2671,8 @@ instead of within the minute.
 - **Database:** MySQL/MariaDB with PDO (prepared statements, FETCH_ASSOC mode)
 - **Frontend:** Vanilla JavaScript (no build step), Bootstrap 5 (CDN) for admin panel, custom dark theme CSS for public pages
 - **Email:** PHP `mail()` with multipart MIME (HTML + plain text), dark-themed templates
-- **Icons:** Bootstrap Icons 1.11.3 or Font Awesome Free 6.7.2 (CDN webfonts), chosen for the whole site in Settings → Site (`icon_library`); every icon is written in Bootstrap's markup and Font Awesome is mapped over it (`includes/icons.php`, `assets/js/icons.js`)
+- **Icons:** Bootstrap Icons 1.11.3 or Font Awesome — Free 6.7.2 / 7.3.1 from the CDN, or a package uploaded in Settings → Site or imported with `tools/iconpack.php`, Pro included (1.69.0) — chosen for the whole site in Settings → Site (`icon_library`); every icon is written in Bootstrap's markup and Font Awesome is mapped over it (`includes/icons.php`, `assets/js/icons.js`)
+- **Emoji:** Unicode's own, drawn by the reader's device, from `assets/emoji/` (generated from emojibase-data / CLDR by `tools/emoji_data.php`, see [License](#license)); with a Font Awesome Pro package, its faces too (1.69.0)
 - **CAPTCHA:** Google reCAPTCHA v2 / v3, Cloudflare Turnstile or hCaptcha (explicit render mode, one shared modal — `assets/js/captcha.js`; every provider host must stay allow-listed in the CSP in `.htaccess`)
 - **Metadata worker (optional):** Python 3 + `python3-libtorrent` (see `worker/`)
 - **Federation importer (optional):** Python 3 + `python3-pymysql`, systemd timer (`worker/federation.py`)
@@ -2782,6 +2826,14 @@ permission** to confirm the sudoers rule, and make sure the unit defines
 ## License
 
 Released under the [MIT License](LICENSE) — free to use, modify and redistribute; keep the copyright notice.
+
+**Emoji data.** `assets/emoji/emoji-en.json` and `emoji-pl.json` are generated from
+[emojibase-data](https://github.com/milesj/emojibase) (MIT License, Copyright (c) 2017-2019 Miles
+Johnson), whose emoji names and keywords are the [Unicode CLDR](https://cldr.unicode.org/) annotations
+(Unicode License v3, Copyright (c) 1991-2026 Unicode, Inc.). Both licences are reproduced in full in
+[assets/emoji/LICENSE.txt](assets/emoji/LICENSE.txt), as they require. `assets/emoji/fa-faces.json` is
+this project's own (Font Awesome icon names with words written for them); no Font Awesome file is part
+of this repository.
 
 ## Author
 

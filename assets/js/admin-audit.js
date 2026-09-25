@@ -98,7 +98,7 @@
         if (!row.ok) what.appendChild(el('span', { className: 'au-badge au-failed-badge', text: t('js.audit.failed_badge') }));
         tr.appendChild(what);
 
-        const cell = el('td', {});
+        const cell = el('td', { className: 'au-c-sum' });
         cell.appendChild(el('div', { className: 'au-summary', text: row.summary || '—' }));
         if (row.target_id) {
             cell.appendChild(el('code', { className: 'au-target', text: row.target_id }));

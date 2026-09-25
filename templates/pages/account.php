@@ -19,6 +19,9 @@ $accRestricted = userEmailVerifyRequired($cfg) && !($accHasEmail && $accVerified
 $accPending = userEmailChangeState($db, $meUser);
 $accCooldownDays = userEmailChangeCooldownDays($cfg);
 $accFav = favContext($db, $cfg, $meUser);
+// Likes or ratings (1.69.0, includes/profilevotes.php): the tab after Favourites and the privacy switch.
+$accVotes = function_exists('profileVotesContext') ? profileVotesContext($db, $cfg, $meUser)
+    : ['enabled' => false, 'mode' => 'thumbs', 'public_ok' => false, 'may_publish' => false, 'publish_blocked' => false];
 $accLists = listsContext($db, $cfg, $meUser);
 $accPeople = peopleContext($db, $cfg, $meUser);
 // Whether this reader may search inside file names — the same permission the search page asks, and
@@ -39,7 +42,7 @@ if ($accTwofa['feature']) {
 // can only ever be empty teaches people the feature is broken rather than absent.
 $accShowUploads = $accFav['uploads'] && uploadsPublicEnabled($cfg);
 $accSounds = soundsEnabled($cfg) && userCan($db, $cfg, 'sounds.use');
-$accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
+$accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accShowUploads || $accLists['may_use']
         || $accPeople['may_message'] || $accPeople['may_friend'] || $accSounds;
 ?>
 <div class="account-head">
@@ -83,6 +86,11 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
     <button type="button" class="rt-tab active" data-pane="overview"><?= _h('account.tab_overview') ?></button>
     <?php if ($accFav['may_use']): ?>
     <button type="button" class="rt-tab" data-pane="favourites"><?= _h('account.tab_favourites') ?></button>
+    <?php endif; ?>
+    <?php if ($accVotes['enabled']): ?>
+    <?php /* Named by the rating system's mode: thumbs are likes, stars are ratings. Right after
+             Favourites, as the owner asked — the router's list in assets/js/favourites.js names it too. */ ?>
+    <button type="button" class="rt-tab" data-pane="votes"><?= _h('account.tab_votes_' . $accVotes['mode']) ?></button>
     <?php endif; ?>
     <?php if ($accShowUploads): ?>
     <button type="button" class="rt-tab" data-pane="uploads"><?= _h('account.tab_uploads') ?></button>
@@ -128,6 +136,20 @@ $accTabs = $accFav['may_use'] || $accShowUploads || $accLists['may_use']
             </td></tr>
             <tr><td><?= _h('account.member_since') ?></td><td><?= sanitize((string)$meUser['created_at']) ?></td></tr>
             <tr><td><?= _h('account.last_login') ?></td><td><?= sanitize((string)($meUser['last_login_at'] ?? '—')) ?></td></tr>
+            <?php /* The description (1.69.0): written where it is read, on the profile — this row shows it
+                     and sends you there with the editor open (#bio). Only while the feature is on and the
+                     account may write one: a row about something you cannot change is not a setting. */ ?>
+            <?php if (function_exists('profileBioMayWrite') && profileBioMayWrite($db, $cfg, $meUser)): ?>
+            <?php $accBio = profileBioFor($db, $cfg, $meUser); ?>
+            <tr id="acc-bio-row"><td><?= _h('account.bio') ?></td><td>
+                <?php if ($accBio !== ''): ?>
+                <div class="acc-bio-text" id="acc-bio-text" dir="auto" data-lang-keep><?= $accBio ?></div>
+                <?php else: ?>
+                <em class="text-muted" id="acc-bio-none"><?= _h('account.bio_none') ?></em>
+                <?php endif; ?>
+                <a class="acc-bio-edit" id="acc-bio-edit" href="<?= $baseUrl ?>?action=u&amp;name=<?= urlencode((string)$meUser['username']) ?>#bio"><i class="bi bi-pencil" aria-hidden="true"></i> <?= _h('account.bio_edit') ?></a>
+            </td></tr>
+            <?php endif; ?>
         </table>
         <?php if ($accHasEmail && !$accVerified): ?>
         <p class="text-muted acc-verify-note"><?= _h('account.verify_note') ?></p>
@@ -410,6 +432,7 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
          Gating it on favourites alone hid the lists switch on an install that runs lists without
          them. */ ?>
 <?php if (($accFav['may_use'] && ($accFav['public_ok'] || $accFav['who_ok']))
+          || $accVotes['public_ok']
           || ($accLists['may_use'] && $accLists['public_ok'])
           || $accPeople['pm'] || $accPeople['directory']): ?>
         <?php /* In the card that already holds the mail and language preferences, not a card of its
@@ -423,6 +446,19 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
             <p class="text-muted acc-verify-note"><?= __('account.fav_public_hint', ['name' => sanitize($meUser['username'])]) ?></p>
             <?php if ($accFav['publish_blocked']): ?>
             <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'favourites.public']) ?></p>
+            <?php endif; ?>
+            <?php endif; ?>
+            <?php /* Likes or ratings on my profile (1.69.0): drawn exactly when the favourites switch above
+                     is — whenever there is a public side for it to control — and, with the grant missing,
+                     still drawn with the sentence that says who has to change what. The label and the
+                     warning follow the mode: thumbs down and low stars are listed too, and saying so is
+                     the point of asking. */ ?>
+            <?php if ($accVotes['may_publish'] || $accVotes['publish_blocked']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-votes-public"<?= (int)($meUser['votes_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.votes_public_label_' . $accVotes['mode']) ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.votes_public_hint_' . $accVotes['mode']) ?></p>
+            <?php if ($accVotes['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'rating.public']) ?></p>
             <?php endif; ?>
             <?php endif; ?>
             <?php if ($accLists['may_use'] && ($accLists['may_publish'] || $accLists['publish_blocked'])): ?>
@@ -529,6 +565,18 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
         </div>
         <div class="profile-list" id="af-list"></div>
         <div class="trans-pagination" id="af-pager"></div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($accVotes['enabled']): ?>
+<?php /* Likes or ratings (1.69.0): the torrents this account voted on, in the mode the site is in. The
+         table and its toolbar are one partial, shared with the profile's section; assets/js/favourites.js
+         fills it from api/user_votes.php. Your own list, so "your" in every label. */ ?>
+<div class="acc-pane" id="acc-pane-votes" hidden>
+    <h2 class="section-heading-spaced" id="acc-votes-heading"><?= _h('profile.votes_' . $accVotes['mode']) ?></h2>
+    <div id="account-votes" class="profile-section">
+        <?php $pvUser = ''; $pvSelf = true; $pvExtra = $accExtra; include __DIR__ . '/../partials/votes_section.php'; ?>
     </div>
 </div>
 <?php endif; ?>

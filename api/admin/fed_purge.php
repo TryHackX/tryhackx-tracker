@@ -20,6 +20,8 @@ requirePost();
 $input = readJsonBody();
 $peer = mb_substr(trim((string)($input['peer'] ?? '')), 0, 64);
 $op = (string)($input['op'] ?? 'count');
+// A count is a read (1.69.0): the router logged every one as `fed.purge`, as if rows had gone.
+if ($op === 'count') auditSuppress();
 if ($peer === '' || !fedPeerValidName($peer)) jsonResponse(['error' => __('api.federation.which_peer')], 400);
 
 const PURGE_SLICE = 2000;     // rows per request — a second or two of work, never a locked table

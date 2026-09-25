@@ -222,7 +222,31 @@
         ueSyncRepeats();
         $('ue-alert').textContent = '';
         ueMedia(u);
+        ueBio(u);
         bootstrap.Modal.getOrCreateInstance($('usEditModal')).show();
+    }
+    /**
+     * The description on their profile (1.69.0): the rendering admin/fetch_users sent — made by the
+     * same function the profile uses — and a Clear that takes it away at once through admin/user_bio,
+     * asked first like Remove picture, because the text is deleted for good and the member is told.
+     */
+    function ueBio(u) {
+        const box = $('ue-bio');
+        if (!box) return;
+        box.hidden = !u.has_bio;
+        // Server-rendered (includes/profilebio.php): escaped text and five tags, nothing else.
+        $('ue-bio-text').innerHTML = u.has_bio ? String(u.bio_html || '') : '';
+        $('ue-bio-hidden').hidden = !u.has_bio || !!u.bio_shown;
+    }
+    async function ueClearBio() {
+        if (!editUser) return;
+        if (!(await confirmAction(t('js.users.bio_clear_title'), t('js.users.bio_clear_q', { user: editUser.username })))) return;
+        const r = await apiCall('admin/user_bio', 'POST', { op: 'clear', id: editUser.id });
+        if (!r.success) { showToast(r.error || t('js.users.bio_failed'), 'danger'); return; }
+        if (r.user) { editUser.has_bio = !!r.user.has_bio; editUser.bio_html = String(r.user.html || ''); editUser.bio_shown = !!r.user.shown; }
+        ueBio(editUser);
+        showToast(r.message || t('js.users.bio_cleared'));
+        loadUsers();
     }
     /**
      * The picture and the cover (1.63.0): the pair of buttons appears only for what the account has.
@@ -908,6 +932,7 @@
         $('ue-save').addEventListener('click', saveEdit);
         if ($('ue-remove-avatar')) $('ue-remove-avatar').addEventListener('click', () => ueRemoveMedia('avatar'));
         if ($('ue-remove-cover')) $('ue-remove-cover').addEventListener('click', () => ueRemoveMedia('cover'));
+        if ($('ue-bio-clear')) $('ue-bio-clear').addEventListener('click', ueClearBio);
         $('ue-email').addEventListener('input', () => { ueSyncRepeats(); ueValidate(); });
         $('ue-email2').addEventListener('input', ueValidate);
         $('ue-password').addEventListener('input', () => { ueSyncRepeats(); ueValidate(); });

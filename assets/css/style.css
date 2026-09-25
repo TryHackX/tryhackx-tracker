@@ -9,30 +9,96 @@
    `.x[hidden] { display: none }` lines further down stay, but nothing depends on them any more. */
 [hidden] { display: none !important; }
 
-/* === Icons drawn by Font Awesome (1.68.0) ===
-   Nothing here can apply while Bootstrap Icons is chosen: every selector needs a Font Awesome class on
-   a .bi element, and those are added only when Settings → Site chooses Font Awesome (includes/icons.php
-   on the page, assets/js/icons.js for what scripts build). Near the TOP of the file on purpose: at equal
-   specificity every later rule that sizes or places an icon (`.pm-del .bi`, `.shout-ctl .bi`, …) still
-   wins, exactly as it does over Bootstrap's own stylesheet.
-   Bootstrap draws its glyph in an inline-block ::before, lowered 0.125em, inside an inline <i> that keeps
-   the line's height; Font Awesome makes the <i> itself an inline-block of line-height 1. Put the box
-   back where Bootstrap keeps it, so a glyph sits at the same height whichever library draws it.
-   And the <i> keeps the TEXT's family, as Bootstrap's does (1.68.1): Font Awesome's class gives the
+/* === Icons, in either library (1.68.0; where the glyph sits, 1.69.0) ===
+   Every icon is written in Bootstrap's markup, `<i class="bi bi-NAME">`; with Font Awesome chosen the
+   mapped classes are added beside the `bi` ones (includes/icons.php for the page, assets/js/icons.js
+   for what scripts build), so a rule below that names a Font Awesome class cannot apply while Bootstrap
+   Icons is chosen. Near the TOP of the file on purpose: at equal specificity every later rule that
+   sizes or places an icon (`.pm-del .bi`, `.shout-ctl .bi`, …) still wins, exactly as it does over
+   Bootstrap's own stylesheet.
+
+   WHERE THE GLYPH SITS — the same rules as the panel's (assets/css/admin.css says why at length). An
+   icon beside a word is level with it when the middle of the glyph is the middle of the word's
+   capitals, half the cap height above the baseline. Font Awesome's em starts 0.125em lower than
+   Bootstrap's, and 1.68.0 lowered it 0.125em more, so its icons hung under their Bootstrap twins; and a
+   fractional offset between the glyph and its text is painted a whole pixel one way or the other
+   depending only on where the control sits. The glyph's box stays where Bootstrap has always put it
+   (Font Awesome's: its own baseline), so no line box changes; the glyph is painted the whole number of
+   pixels that brings its middle nearest the cap middle of the text beside it — `cap` read on the
+   icon's parent, in Courier New here, whose capitals are short (0.57em) and whose icons therefore sat
+   a pixel high in either library. Bootstrap's -0.125em is kept to 1/64px, the unit boxes are laid out
+   in, so that box and move add up to exactly a whole pixel. Without `cap` or `round()` nothing moves. */
+@property --bi-cap { syntax: "<length>"; inherits: true; initial-value: 0px; }
+:where(:has(> .bi)) { --bi-cap: 1cap; }
+@supports (top: round(1cap, 1px)) {
+    .bi { --bi-va: round(-0.125em, 0.015625px); position: relative; top: calc(round(var(--bi-mid, 0.5em) - var(--bi-cap) / 2, 1px) + var(--bi-va)); }
+    .bi::before, .bi::after { vertical-align: var(--bi-va); }
+}
+/* …except an icon laid out as a box of its own — a star of a rating, the shoutbox's and the messages'
+   small round controls — centred in that box by its own rules and on no line of words: it keeps its
+   place (moved, a star came out 1.7–2px low and its layer's clipping cut it off). */
+:is(.star-layer > .bi, .pm-del .bi, .shout-refresh .bi, .shout-unpin .bi, .shout-ctl .bi, .shout-emoji-btn .bi) { top: 0; }
+/* Where a Bootstrap glyph's ink middle is when its drawing is not centred in its square — the panel's
+   table (admin.css says why); Font Awesome's own middle (below) outranks these. */
+:is(.bi-person-gear, .bi-reply, .bi-type-underline) { --bi-mid: 0.435em; }
+:is(.bi-person-x, .bi-subscript) { --bi-mid: 0.44em; }
+:is(.bi-database-gear, .bi-scissors) { --bi-mid: 0.465em; }
+:is(.bi-box-arrow-in-down, .bi-database-down, .bi-folder2-open, .bi-sliders) { --bi-mid: 0.47em; }
+:is(.bi-youtube) { --bi-mid: 0.525em; }
+:is(.bi-check2, .bi-check2-all, .bi-collection, .bi-highlighter, .bi-link-45deg, .bi-trash) { --bi-mid: 0.53em; }
+:is(.bi-heart, .bi-list-ul, .bi-quote) { --bi-mid: 0.535em; }
+:is(.bi-book) { --bi-mid: 0.54em; }
+:is(.bi-arrow-clockwise, .bi-arrow-counterclockwise, .bi-list-check) { --bi-mid: 0.55em; }
+:is(.bi-superscript) { --bi-mid: 0.58em; }
+/* The <i> keeps the TEXT's family, as Bootstrap's does (1.68.1): Font Awesome's class gives the
    element its own family too, and although the element is empty its line box is placed with that
    font's ascent, which reaches above the text's — an icon button came out a pixel taller than its
    Bootstrap twin (a list row's remove, 26.98 px beside Magnet and Info at 25.98). The glyph's face is
-   pinned on ::before below, so nothing that is drawn changes. */
-.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; font-family: inherit; }
-.bi[class*=" fa-"]::before { display: inline-block; vertical-align: -0.125em; line-height: 1; }
+   pinned on ::before below, so nothing that is drawn changes. --bi-mid / --bi-va: where Font
+   Awesome's glyph middle and box are, for the placement above. `width: auto`: Font Awesome 7's
+   `width: var(--fa-width, 1.25em)` is inert on an inline <i> and not on an item of a button's row. */
+.bi[class*=" fa-"] { --fa-display: inline; line-height: inherit; font-family: inherit; --bi-mid: 0.375em; --bi-va: 0px; width: auto; }
+/* The glyph's box — and, since 1.69.0, the second layer's: the duotone families (and Pro 7's "duo"
+   ones) draw an icon twice, the first layer in ::before, placed over the second, drawn in ::after.
+   Nothing else draws an ::after, so these rules cost nothing anywhere else. */
+.bi[class*=" fa-"]::before, .bi[class*=" fa-"]::after { display: inline-block; vertical-align: 0; line-height: 1; }
 /* The face, pinned on the glyph as Bootstrap Icons pins its own (`font-family: bootstrap-icons
    !important; font-weight: normal !important` on ::before): a site rule that sets a weight on an icon
-   (`.pw-req-ic`, a bold button) must not pick the other face of the family, and the regular face has
-   none of the solid-only glyphs — it would draw a box. */
-.bi.fa-solid::before, .bi.fa-regular::before { font-family: "Font Awesome 6 Free" !important; font-style: normal !important; }
-.bi.fa-brands::before { font-family: "Font Awesome 6 Brands" !important; font-style: normal !important; }
-.bi.fa-solid::before { font-weight: 900 !important; }
-.bi.fa-regular::before, .bi.fa-brands::before { font-weight: 400 !important; }
+   (`.pw-req-ic`, a bold button) must not pick another face of the family, and the regular face has
+   none of the solid-only glyphs — it would draw a box.
+   Since 1.69.0 the site may draw with Free 6 or 7 and with Pro 6 or 7 in any of their families, so
+   the family is read from Font Awesome's own variables instead of being written here: 7.x works it
+   out on the icon itself (--_fa-family: classic, sharp, jelly, …), 6.x names each family on :root
+   (--fa-style-family-classic, -sharp, -duotone, -sharp-duotone, -brands). The weight is the style
+   class's, which every version gives the same number. After the chosen family comes the classic one:
+   a 7.x family such as Jelly has a few hundred glyphs, and a name it lacks is drawn by the classic
+   font at the same weight rather than as nothing. With Free 6.7.2 all of it resolves to the very
+   families and weights 1.68 pinned by name. */
+.bi[class*=" fa-"]::before, .bi[class*=" fa-"]::after {
+    font-family: var(--_fa-family, var(--fa-style-family-classic, "Font Awesome 6 Free")), var(--fa-style-family-classic, "Font Awesome 6 Free") !important;
+    font-style: normal !important;
+    font-weight: var(--fa-style, 900) !important;
+}
+.bi.fa-brands::before { font-family: var(--_fa-family, var(--fa-style-family-brands, "Font Awesome 6 Brands")) !important; }
+.bi.fa-duotone::before, .bi.fa-duotone::after { font-family: var(--_fa-family, var(--fa-style-family-duotone, "Font Awesome 6 Duotone")), var(--fa-style-family-classic, "Font Awesome 6 Free") !important; }
+.bi.fa-sharp::before { font-family: var(--_fa-family, var(--fa-style-family-sharp, "Font Awesome 6 Sharp")), var(--fa-style-family-classic, "Font Awesome 6 Free") !important; }
+.bi.fa-sharp-duotone::before, .bi.fa-sharp-duotone::after { font-family: var(--_fa-family, var(--fa-style-family-sharp-duotone, "Font Awesome 6 Sharp Duotone")), var(--fa-style-family-classic, "Font Awesome 6 Free") !important; }
+.bi.fa-solid::before, .bi.fa-solid::after { font-weight: 900 !important; }
+.bi.fa-semibold::before, .bi.fa-semibold::after { font-weight: 600 !important; }
+.bi.fa-regular::before, .bi.fa-regular::after, .bi.fa-brands::before { font-weight: 400 !important; }
+.bi.fa-light::before, .bi.fa-light::after { font-weight: 300 !important; }
+.bi.fa-thin::before, .bi.fa-thin::after { font-weight: 100 !important; }
+/* The two-layer families (duotone, sharp duotone and Pro 7's "duo" families, Thumbprint and Vellum)
+   place their first layer absolutely over the second — which, inside the inline box the site gives an
+   icon, puts the two at different heights. One grid cell holds both instead: the icon is as wide and
+   as high as a one-layer glyph (the cell is the glyph, on its baseline like the rest), and the layers
+   coincide. `width: auto`: Font Awesome 7 gives every icon `width: var(--fa-width, 1.25em)`, inert on
+   the inline box of a one-layer icon but not on a grid — measured, it made every two-layer icon-only
+   button 0.25em wider than its Bootstrap twin (32 → 35.5 px in the panel). The cell is as wide as its
+   glyph. */
+.bi:is([class*=" fa-"][class*="-duo"], .fa-thumbprint, .fa-vellum) { display: inline-grid; width: auto; vertical-align: 0; line-height: 1; }
+.bi:is([class*=" fa-"][class*="-duo"], .fa-thumbprint, .fa-vellum)::before,
+.bi:is([class*=" fa-"][class*="-duo"], .fa-thumbprint, .fa-vellum)::after { grid-area: 1 / 1; position: static; vertical-align: baseline; }
 /* Font Awesome's glyphs are 0.625em to 1.25em wide where Bootstrap's are all 1em, so an icon-only
    button would change width with its icon (a pin turning into the filled pin, a sort arrow turning
    round). A fixed, centred box — Font Awesome's own fixed width, 1.25em — keeps every such button one
@@ -40,10 +106,54 @@
    takes, so the button is also the SAME size in either library (1.68.1: taking the whole 1.25em made
    every icon-only button wider than the one the page was measured with, and the panel's Whitelist
    clipped its delete button behind "…"). The 29 glyphs of the map wider than 1em reach at most 0.125em
-   into the padding, centred. */
-:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child::before { width: 1.25em; margin-inline: -0.125em; text-align: center; }
-/* Free has no dot: its circle, at Bootstrap's dot size (3/8 of the em), in the same box. */
-.bi-dot[class*=" fa-"]::before { transform: scale(0.375); }
+   into the padding, centred. Only for an icon with NO words beside it (1.69.0): `:only-child` counts
+   elements, not text, and it boxed every icon before bare text too, so the space to the word changed
+   with the glyph; an icon beside words carries `data-label` (the server's filter, assets/js/icons.js)
+   and keeps its glyph's own width. */
+:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child:not([data-label])::before,
+:is(button, .btn, [role="button"]) > .bi[class*=" fa-"]:only-child:not([data-label])::after { width: 1.25em; margin-inline: -0.125em; text-align: center; }
+/* Free (and Pro 6) has no dot: its circle, at Bootstrap's dot size (3/8 of the em), in the same box.
+   Only the circle: Pro 7 has a dot of its own, drawn at Bootstrap's size already. */
+.bi-dot.fa-circle::before { transform: scale(0.375); }
+
+/* An icon and its words, one layout for every button (1.69.0 — admin.css says why at length): a row,
+   baseline-aligned, one gap between them that no space or margin in the markup decides. 0.6em is what
+   a space is in Courier New, the gap these buttons always had. An icon-only button (with Font Awesome:
+   an only child without data-label) is not a row and is exactly as it was — the panel's rule says why. */
+@property --bi-sb { syntax: "<length>"; inherits: false; initial-value: 0px; }
+/* The DISPLAY weighs one class and no more, so whatever hides a control still hides it — `.d-hidden`,
+   the pagers' `display: none` for First / Last on a phone, `[hidden]` — while the layout keeps the
+   weight it needs (the panel's rule says why). A button's is set right after `.btn`'s own rule, which
+   says inline-block; a pager button's here. */
+.trans-pagination :where(button:has(> .bi):not(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))) { display: inline-flex; }
+:is(.btn, .trans-pagination button):has(> .bi):not(:where(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))) {
+    align-items: baseline; justify-content: center; text-align: start;
+    column-gap: max(0px, var(--bi-gap, 0.6em) - var(--bi-sb));
+}
+:is(.btn, .trans-pagination button):has(> .bi) > .bi { margin-inline: 0; }
+/* From the glyph's ink: the room a Bootstrap glyph has on the words' side of its 1em square (the side
+   before them for the pagers' Next and Last), off the font's own glyph bounds (Bootstrap Icons 1.11.3),
+   is taken off the gap; a Font Awesome glyph's, only what its drawing leaves, is measured where it is
+   drawn (assets/js/icons.js). The same table as the panel's (admin.css says why). */
+:where(:has(> :is(.bi-eraser):not([class*=" fa-"]))) { --bi-sb: 0.03em; }
+:where(:has(> :is(.bi-pin-angle, .bi-pin-angle-fill, .bi-shield-check, .bi-shield-fill, .bi-shield-lock, .bi-shield-lock-fill, .bi-shield-plus, .bi-shield-slash, .bi-shield-x):not([class*=" fa-"]))) { --bi-sb: 0.04em; }
+:where(:has(> :is(.bi-stopwatch):not([class*=" fa-"]))) { --bi-sb: 0.05em; }
+:where(:has(> :is(.bi-arrow-left-right, .bi-arrow-right, .bi-bell, .bi-bug, .bi-clipboard, .bi-clipboard-check, .bi-files, .bi-flag, .bi-flag-fill, .bi-folder2, .bi-journal-text, .bi-list-check, .bi-list-ol, .bi-list-ul, .bi-plus-slash-minus, .bi-sliders2, .bi-type-strikethrough):not([class*=" fa-"]))) { --bi-sb: 0.06em; }
+:where(:has(> :is(.bi-hand-thumbs-down, .bi-hand-thumbs-up-fill, .bi-reply, .bi-subscript, .bi-superscript):not([class*=" fa-"]))) { --bi-sb: 0.08em; }
+:where(:has(> :is(.bi-chevron-down, .bi-chevron-up, .bi-hand-thumbs-down-fill, .bi-hand-thumbs-up, .bi-three-dots, .bi-trash):not([class*=" fa-"]))) { --bi-sb: 0.09em; }
+:where(:has(> :is(.bi-arrow-clockwise, .bi-arrow-counterclockwise):not([class*=" fa-"]))) { --bi-sb: 0.1em; }
+:where(:has(> :is(.bi-scissors):not([class*=" fa-"]))) { --bi-sb: 0.11em; }
+:where(:has(> :is(.bi-box-arrow-in-down, .bi-check-lg, .bi-check2, .bi-dash-lg, .bi-file-earmark, .bi-file-earmark-arrow-down, .bi-file-earmark-arrow-up, .bi-file-earmark-code, .bi-file-earmark-image, .bi-file-earmark-music, .bi-file-earmark-text, .bi-hourglass-split, .bi-person, .bi-person-badge, .bi-plus-lg, .bi-text-center, .bi-unlock, .bi-volume-mute, .bi-volume-up, .bi-x-lg):not([class*=" fa-"]))) { --bi-sb: 0.12em; }
+:where(:has(> :is(.bi-award):not([class*=" fa-"]))) { --bi-sb: 0.14em; }
+:where(:has(> :is(.bi-link-45deg):not([class*=" fa-"]))) { --bi-sb: 0.15em; }
+:where(:has(> :is(.bi-balloon, .bi-lock, .bi-lock-fill, .bi-phone, .bi-quote):not([class*=" fa-"]))) { --bi-sb: 0.18em; }
+:where(:has(> :is(.bi-arrow-down, .bi-arrow-up, .bi-chevron-double-left, .bi-chevron-double-right, .bi-type-underline):not([class*=" fa-"]))) { --bi-sb: 0.21em; }
+:where(:has(> :is(.bi-fonts):not([class*=" fa-"]))) { --bi-sb: 0.22em; }
+:where(:has(> :is(.bi-play-fill, .bi-plug):not([class*=" fa-"]))) { --bi-sb: 0.24em; }
+:where(:has(> :is(.bi-chevron-left, .bi-chevron-right, .bi-type-bold, .bi-x):not([class*=" fa-"]))) { --bi-sb: 0.27em; }
+:where(:has(> :is(.bi-type-italic):not([class*=" fa-"]))) { --bi-sb: 0.31em; }
+:where(:has(> :is(.bi-grip-vertical):not([class*=" fa-"]))) { --bi-sb: 0.37em; }
+:where(:has(> :is(.bi-dot):not([class*=" fa-"]))) { --bi-sb: 0.4em; }
 
 :root {
     --bg: #000011;
@@ -459,8 +569,12 @@ ul.feature-list li::before {
 .btn:hover { opacity: 0.85; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+/* A button that holds an icon and words is a row (1.69.0 — the icon block at the top of this file says
+   why). Its display at one class's weight, placed after `.btn`'s inline-block and before `.d-hidden`, so
+   that a hidden button stays hidden; the row's layout is at the top. */
+.btn:where(:has(> .bi):not(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))) { display: inline-flex; }
 
-/* Link styled as a button (home page "Register your torrent" CTA) â€” identical to <button class="btn">: the
+/* Link styled as a button (home page "Register your torrent" CTA) — identical to <button class="btn">: the
    generic a / a:visited / a:hover rules would otherwise paint it pink and underline it. */
 a.btn, a.btn:visited { color: #000; text-decoration: none; }
 a.btn:hover, a.btn:focus-visible { opacity: 0.85; text-decoration: none; }
@@ -1500,7 +1614,7 @@ footer p { margin: 0.25rem 0; }
     }
     /* Without this override the 280px floor on dashboard-row cards forces horizontal scroll
        on viewports narrower than ~330px (280px card + 48px container padding). That's what
-       was making the page look "squeezed to the left" â€” the browser was just showing the
+       was making the page look "squeezed to the left" — the browser was just showing the
        left side of an over-wide layout. */
     .dashboard-row .card {
         min-width: 0;
@@ -1531,14 +1645,14 @@ footer p { margin: 0.25rem 0; }
     }
     /* Stats page header: switch to flex column so the h1, subtitle, and live badge all
        center horizontally. The earlier text-align: center didn't work because the header
-       was still flex-row with wrap â€” items each got their own line but aligned to the
+       was still flex-row with wrap — items each got their own line but aligned to the
        cross axis (top in row mode). */
     .stats-header {
         flex-direction: column;
         align-items: center;
         text-align: center;
     }
-    /* Subtitle had a max-width: 32rem which broke centering on narrow screens â€” let it
+    /* Subtitle had a max-width: 32rem which broke centering on narrow screens — let it
        stretch and rely on the parent's text-align for visual alignment. */
     .stats-subtitle {
         max-width: 100%;
@@ -1710,6 +1824,15 @@ footer p { margin: 0.25rem 0; }
 .account-kv { width: 100%; border-collapse: collapse; }
 .account-kv td { padding: 0.3rem 0.5rem 0.3rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
 .account-kv td:first-child { color: var(--text-muted); white-space: nowrap; width: 38%; }
+/* A value breaks before it widens the card (1.69.0): a table column is as wide as its longest piece
+   that cannot break, and beside a label column that never wraps, the e-mail address and the "Edit on
+   your profile" link made the table 369px wide in a 300px card at 375 in Polish (294 in English at
+   320). `anywhere`, not `break-word`: only `anywhere` lets the column's minimum shrink. The phone
+   rules below let the labels and the link wrap as well. */
+.account-kv td:last-child { overflow-wrap: anywhere; }
+/* The messages default is a select, and a select is as wide as its longest option — 392px, 433 in
+   Polish, in a card as narrow as 260. At most its card's width; the open list still shows it whole. */
+.acc-pm-select { max-width: 100%; }
 .acc-badge { display: inline-block; padding: 0.1em 0.6em; margin: 0 0.5em; border-radius: 999px; background: var(--accent); color: #fff; font-size: 0.72rem; vertical-align: 0.15em; }
 .acc-group { padding: 0.4rem 0; border-bottom: 1px solid var(--border); }
 .acc-group:last-child { border-bottom: 0; }
@@ -1998,7 +2121,7 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
     .search-c-seen { width: 7.5em; }
     .search-c-actions { width: 10.5em; }
     .search-c-actions-inner { flex-wrap: wrap; }
-    .account-kv td:first-child { width: auto; }
+    .account-kv td:first-child { width: auto; white-space: normal; }
     .home-stats-widget { margin-left: 0; margin-right: 0; }
 }
 
@@ -2112,12 +2235,21 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .rt-collapse { border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; margin: 0.7rem 0; }
 .rt-collapse > summary { cursor: pointer; padding: 0.5rem 0.8rem; font-weight: 600; list-style: none; }
 .rt-collapse > summary::-webkit-details-marker { display: none; }
-/* A disclosure's marker is a chevron icon IN THE MARKUP, turned a quarter when its <details> is open
-   (1.68.0 — the pattern .gr-matrix-chev started). It was a small triangle character in `content:`, or
-   the browser's own marker, and either one is drawn the same whatever icon library the site uses. */
-.disc-chev { display: inline-block; margin-right: 0.35em; font-size: 0.8em; opacity: 0.7; transition: transform 0.15s ease; }
-details[open] > summary > .disc-chev { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) { .disc-chev { transition: none; } }
+/* A disclosure's marker is a chevron icon IN THE MARKUP (1.68.0 — the pattern .gr-matrix-chev
+   started). It was a small triangle character in `content:`, or the browser's own marker, and either
+   one is drawn the same whatever icon library the site uses.
+   An open <details> draws the chevron that POINTS DOWN (1.69.0). Until then the chevron was turned a
+   quarter, and a turned glyph is not drawn the way text is: every glyph of text stands on a whole pixel
+   (so the placement at the top of this file can put an icon level with its words), a turned one exactly
+   where its box's geometry says, which Chrome lays out rounded its own way — an open folder's chevron in
+   the Info panel's file list stood 1–2.5px below its name, 0.6px to 1px apart from the same chevron
+   shut, with the size and the face. The glyph that points down is drawn like any other, where the
+   placement puts it. Its code point in each library, as the libraries' own stylesheets write it:
+   Bootstrap Icons 1.11.3 \f282; Font Awesome 6 and 7 \f078, from the variables their stylesheets draw
+   every glyph from (--fa, and 6's second duotone layer --fa--fa; 7 draws both layers from --fa). */
+.disc-chev { display: inline-block; margin-right: 0.35em; font-size: 0.8em; opacity: 0.7; }
+details[open] > summary > .disc-chev:not([class*=" fa-"])::before { content: "\f282"; }
+details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "\f078\f078"; }
 /* A spoiler draws its chevron wherever it is rendered — a description, a shout, a message, a page of
    the site's own (which sits in .rt, not .rt-body) — so the browser's marker goes everywhere too. */
 .rt-spoiler > summary { list-style: none; }
@@ -2344,7 +2476,24 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
     position: relative; padding: 0.55rem 1rem 0.6rem calc(1rem + 64px + 0.75rem);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
-.profile-top.has-cover .profile-since, .profile-top.has-cover .profile-you { color: #c4c8d2; }
+/* THE NAME ROW OVER A COVER (1.69.0): the translucent backing the description under it has, the same
+   geometry and the same shade, with the text and the buttons on it light enough to read. A shadow alone
+   left "member since", "this is your profile" and the outlined buttons grey on light stripes. Measured
+   on part A's striped test cover (stripes of 225/215/190–240 on black, the gradient shade), text against
+   the worst pixel behind it: 1.1–1.8:1 at 1280 and down to 1.0:1 on a phone before; 5.76:1 at the
+   least now, desktop and phone, in both icon libraries (scratchpad/shots/profile_head_check.js).
+   Without a cover none of this applies. */
+.profile-top.has-cover .profile-head-row {
+    align-self: flex-start; width: fit-content; max-width: calc(100% + 1.1rem);
+    padding: 0.25rem 0.55rem; margin: 0 -0.55rem; border-radius: var(--radius);
+    background: rgba(0, 0, 0, 0.55);
+}
+.profile-top.has-cover .profile-name { color: #fff; }
+.profile-top.has-cover .profile-since, .profile-top.has-cover .profile-you { color: #dde1e8; }
+/* Filled, not outlined: a button's own ground on top of the row's, so its label never meets the cover. */
+.profile-top.has-cover .profile-head-row .btn-secondary,
+.profile-top.has-cover .profile-head-row .pf-badge { background: rgba(0, 0, 0, 0.35); border-color: rgba(255, 255, 255, 0.3); color: #eef0f4; text-shadow: none; }
+.profile-top.has-cover .profile-head-row .btn-secondary:hover { background: rgba(74, 158, 255, 0.3); border-color: var(--accent); }
 .profile-avatar { width: 64px; height: 64px; }
 .profile-top.has-cover .profile-avatar {
     position: absolute; left: 1rem; bottom: -32px;
@@ -2355,6 +2504,107 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
     .profile-top.has-cover > .profile-head { padding-left: calc(0.75rem + 64px + 0.6rem); padding-right: 0.75rem; }
     .profile-top.has-cover .profile-avatar { left: 0.75rem; }
 }
+
+/* === The description on a profile (1.69.0, includes/profilebio.php) ========
+   The head is the picture and a TEXT COLUMN beside it: the name row (what .profile-head used to hold
+   directly, laid out exactly as before) and under it the description. One column, so a long text grows
+   the head downwards beside the picture instead of wrapping under it, and with a cover the band grows
+   with it (min-height, never a fixed height) instead of clipping. `min-width: 0` lets the column be
+   narrower than its longest word, which then breaks (overflow-wrap) rather than widening the page. */
+.profile-head-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.profile-head-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+/* A head with no description is laid out exactly as it was before: the two wrappers step out of the
+   way and the name, the date and the buttons are the head's own flex items again — on a phone they
+   wrap under the picture as they always did, instead of into a narrow column beside it.
+   Not over a cover (1.69.0): there the picture is taken out of the flow and the column is the head's
+   only item either way, so the wrappers as boxes move nothing — and the row has to be a box to carry
+   its backing (whose own padding is the only difference: 4px above and below the row). */
+.profile-top:not(.has-cover) > .profile-head:not(.has-bio) > .profile-head-main,
+.profile-top:not(.has-cover) > .profile-head:not(.has-bio) .profile-head-row { display: contents; }
+/* Without a band the picture sits at the top of the column once there is a description, as in the
+   Flarum head the owner pointed at; a head with nothing under the name keeps the name centred on it. */
+.profile-top:not(.has-cover) > .profile-head.has-bio { align-items: flex-start; }
+.profile-top:not(.has-cover) > .profile-head.has-bio .profile-head-row { min-height: 2.2rem; }
+.profile-bio { max-width: 46rem; font-size: 0.86rem; line-height: 1.6; }
+.profile-bio-text { color: var(--text); overflow-wrap: anywhere; unicode-bidi: isolate; }
+/* A link reads as a link in running text: the site's links carry no underline, and a pale blue among
+   grey words is not enough to tell them apart. */
+.profile-bio-text a, .profile-bio-text a:visited { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+/* Your own: the words are the button that opens the editor (a dashed edge on hover, a ring only for
+   the keyboard), and when there are none, the dashed box that asks for some. */
+/* The edge sits round the words without moving them: the box reaches out to the sides and up into the
+   gap under the name row, but not below its own last line, so the head still holds all of it. */
+.profile-bio.is-editable .profile-bio-text {
+    margin: calc(-0.2rem - 1px) calc(-0.45rem - 1px) 0; padding: 0.2rem 0.45rem; border: 1px dashed transparent;
+    border-radius: var(--radius); cursor: text;
+}
+.profile-bio.is-editable .profile-bio-text:hover { border-color: var(--control-border); }
+.profile-bio-text:focus { outline: none; }
+.profile-bio-text:focus-visible, .profile-bio-ph:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.profile-bio-ph {
+    display: block; width: 100%; max-width: 30rem; padding: 0.45rem 0.7rem; text-align: left;
+    background: transparent; border: 1px dashed var(--control-border); border-radius: var(--radius);
+    color: var(--text-muted); font: inherit; font-size: 0.85rem; line-height: 1.5; cursor: text;
+}
+.profile-bio-ph:hover { border-color: var(--accent); color: var(--text); }
+.profile-bio-ph:focus { outline: none; }
+/* The editor: the five tags over the box, the box, then Save, Cancel and the counter. */
+.profile-bio-editor { display: flex; flex-direction: column; gap: 0.4rem; }
+.profile-bio-tools { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.profile-bio-tool {
+    min-width: 1.9rem; padding: 0.15rem 0.4rem; border: 1px solid var(--control-border); border-radius: var(--radius);
+    background: var(--control-bg); color: var(--text-muted); font: inherit; font-size: 0.85rem; line-height: 1.4; cursor: pointer;
+}
+.profile-bio-tool:hover { color: var(--text); border-color: var(--accent); }
+.profile-bio-tool:focus { outline: none; }
+.profile-bio-tool:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.profile-bio-input {
+    display: block; width: 100%; min-height: 4.8rem; max-height: 20rem; padding: 0.5rem 0.6rem; resize: vertical;
+    background: rgba(0, 0, 0, 0.45); color: #eef0f4; border: 1px solid rgba(255, 255, 255, 0.22); border-radius: var(--radius);
+    font: inherit; font-size: 0.86rem; line-height: 1.55; overflow-wrap: anywhere;
+}
+.profile-bio-input::placeholder { color: #9aa0ad; }
+.profile-bio-input:focus { outline: none; border-color: var(--accent); }
+.profile-bio-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.75rem; }
+.profile-bio-cancel {
+    padding: 0.25rem 0.1rem; background: none; border: 0; color: var(--link); font: inherit; font-size: 0.8rem; cursor: pointer;
+}
+.profile-bio-cancel:hover { text-decoration: underline; }
+.profile-bio-cancel:focus { outline: none; }
+.profile-bio-cancel:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.profile-bio-cancel:disabled { opacity: 0.5; cursor: default; }
+.profile-bio-count { margin-left: auto; color: var(--text-muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.profile-bio-count.is-near { color: #e0b15a; }
+.profile-bio-count.is-over { color: var(--error); font-weight: 600; }
+.profile-bio-err { color: var(--error); font-size: 0.8rem; line-height: 1.45; }
+/* Over a cover: the words get a translucent backing of their own — a description is a paragraph, and a
+   paragraph over a bright photograph needs more than a shadow — the dashed box and the editor a darker
+   ground. The same shade as the name row's above it (0.55; it was 0.42 until that row got one in 1.69.0
+   part C and a shadow alone proved not enough there), so the two read as one head. */
+.profile-top.has-cover .profile-bio-text {
+    display: block; width: fit-content; max-width: calc(100% + 1.1rem);
+    padding: 0.25rem 0.55rem; margin: 0 -0.55rem; border-radius: var(--radius);
+    background: rgba(0, 0, 0, 0.55); color: #e8eaf0;
+}
+.profile-top.has-cover .profile-bio.is-editable .profile-bio-text { border: 1px dashed transparent; margin: -1px calc(-0.55rem - 1px) 0; }
+.profile-top.has-cover .profile-bio.is-editable .profile-bio-text:hover { border-color: rgba(255, 255, 255, 0.45); }
+.profile-top.has-cover .profile-bio-ph { background: rgba(0, 0, 0, 0.55); border-color: rgba(255, 255, 255, 0.4); color: #d5d8e0; }
+.profile-top.has-cover .profile-bio-ph:hover { border-color: #fff; color: #fff; }
+.profile-top.has-cover .profile-bio-editor { text-shadow: none; }
+.profile-top.has-cover .profile-bio-tool { background: rgba(0, 0, 0, 0.55); border-color: rgba(255, 255, 255, 0.28); color: #d5d8e0; }
+.profile-top.has-cover .profile-bio-tool:hover { border-color: var(--accent); color: #fff; }
+.profile-top.has-cover .profile-bio-count, .profile-top.has-cover .profile-bio-cancel { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
+.profile-top.has-cover .profile-bio-count { color: #c4c8d2; }
+.profile-top.has-cover .profile-bio-err { background: rgba(0, 0, 0, 0.6); padding: 0.2rem 0.5rem; border-radius: var(--radius); }
+/* The account page's row: the same words, smaller, and the way to them. */
+.acc-bio-text { overflow-wrap: anywhere; line-height: 1.5; margin-bottom: 0.2rem; unicode-bidi: isolate; }
+.acc-bio-text a, .acc-bio-text a:visited { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+.acc-bio-edit { font-size: 0.8rem; white-space: nowrap; }
+/* On a phone the link may wrap (1.69.0): unbroken, "Edytuj na swoim profilu" was the account table's
+   widest piece and pushed it out of its card at 320–340. Here and not with the other phone rules, which
+   come earlier in this file and would lose to the rule above. */
+@media (max-width: 480px) { .acc-bio-edit { white-space: normal; display: inline-block; } }
+.acc-bio-edit:visited { color: var(--link); }
 
 /* The account page: the Picture and Cover sub-sections of the Profile card. The drop zone is the
    Emotes page's own (.emote-drop), a little shallower here beside the three preview sizes. */
@@ -2461,6 +2711,83 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
     font-size: 0.8rem; line-height: 1.25; padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 .pf-vis-on { color: #4caf50; border-color: #2e5c30; }
 .pf-empty, .pf-loading { color: var(--text-muted); padding: 0.6rem 0; }
+
+/* ── likes / ratings (1.69.0): the table on the account tab and the profile section ────────────────
+   The search table's look (the transparency table's head and rules, its sort arrows, its rating
+   colours) with columns of its own. A table only where it fits: under 960px a row becomes a card —
+   the name on its own line, the facts after it, each labelled from the header — and the header row
+   becomes a row of sort buttons, so a phone can still sort without a horizontal scrollbar. */
+/* The filters are a row of their own under the search, each group a label and its controls. */
+.pv-filters { gap: 0.5rem 1.5rem; }
+.pv-filters .pv-range { display: inline-flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.pv-range-label, .pv-range-to { color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
+.pv-filters .pv-number { flex: 0 0 5.5em; min-width: 0; width: 5.5em; }
+.pv-wrap { margin: 0; }
+.pv-table { table-layout: fixed; min-width: 0; }
+/* Half the transparency table's side padding: eight columns in 62em, and the name is the one that
+   needs the room. */
+.pv-table th, .pv-table td { padding-left: 0.5rem; padding-right: 0.5rem; }
+.pv-table th { vertical-align: bottom; }
+.pv-table td { vertical-align: middle; }
+/* Every column but the name has the width its content and its header need (measured in both
+   languages and both modes, see scratchpad/shots/profile_votes_check.js); the name takes the rest. */
+.pv-c-size  { width: 6.5em; }
+.pv-c-sl    { width: 5.5em; }
+/* The header wraps between its words and never between the last word and its arrow (a no-break space in
+   templates/partials/votes_section.php), so these two hold their longest word AND the arrow: the Polish
+   UŻYTKOWNIKA (84px in the header's capitals, then 22px of arrow) and AVERAGE / ŚREDNIA. */
+.pv-c-own   { width: 8em; }
+.pv-c-score { width: 6em; }
+.pv-c-votes { width: 5em; }
+.pv-c-date  { width: 7em; }
+.pv-c-acts  { width: 9.5em; }
+/* The header's words are buttons (the keyboard reaches them), dressed as the words they were. */
+.pv-sort { background: none; border: 0; padding: 0; margin: 0; color: inherit; font: inherit;
+    text-transform: inherit; letter-spacing: inherit; text-align: left; cursor: pointer; text-wrap: pretty; }
+.pv-sort:hover { color: #fff; }
+.pv-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.pv-sort .search-sort-icon { margin-left: 0.2rem; }
+/* Both libraries draw the glyph as an inline-BLOCK, which a line may break before however it is joined
+   to the word in front of it — measured: "DATA OCENY" kept its words on one line and sent the arrow to
+   the next. As a plain inline glyph the no-break space holds and the arrow stays with its last word. */
+.pv-sort .bi::before, .pv-sort .bi[class*=" fa-"]::before { display: inline; }
+.pv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.pv-name { word-break: break-word; }
+.pv-name .pf-badge { margin-left: 0.4rem; }
+.pv-size, .pv-sl, .pv-score, .pv-votes, .pv-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The stars of the Info panel, a size down; a whole star is 1em, half of it is the clipped front. */
+.pv-stars { gap: 0.1rem; vertical-align: middle; }
+.pv-stars .star { width: 0.95rem; height: 0.95rem; font-size: 0.85rem; }
+.pv-stars .star-layer > .bi { width: 0.95rem; }
+.pv-thumb { display: inline-flex; font-size: 1rem; line-height: 1; }
+.pv-thumb-up { color: #6fce8b; }
+.pv-thumb-down { color: #ff8a8a; }
+.pv-table .pv-score .bi { font-size: 0.8em; }
+.pv-table .pf-acts { min-width: 0; margin-left: 0; justify-content: flex-start; flex-wrap: nowrap; }
+@media (max-width: 959px) {
+    .pv-table, .pv-table thead, .pv-table tbody, .pv-table tr, .pv-table th, .pv-table td { display: block; }
+    .pv-table colgroup { display: none; }
+    .pv-table thead tr { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
+    .pv-table thead th { padding: 0; border: 0; background: none; }
+    .pv-table thead th[data-col="acts"] { display: none; }
+    .pv-table .pv-sort { padding: 0.2rem 0.55rem; border: 1px solid var(--control-border); border-radius: var(--radius);
+        background: var(--bg-code); white-space: nowrap; }
+    .pv-table .pv-sort.active { border-color: var(--accent); }
+    /* A card: the name across the top, then the facts in columns — the same fact in the same place on
+       every card, which a free-flowing row could not promise (each card wrapped where its own numbers
+       happened to run out) — and the two buttons at the bottom right. */
+    .pv-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 0.3rem 1rem;
+        padding: 0.5rem 0.6rem; margin-bottom: 0.35rem; border: 1px solid var(--border); border-radius: 5px; }
+    .pv-table tbody td { padding: 0; border: 0; font-size: 0.85rem; white-space: normal; }
+    .pv-table tr:hover td { background: none; }
+    .pv-table td.pv-name { grid-column: 1 / -1; font-size: 0.9rem; }
+    .pv-table td[data-label]::before { content: attr(data-label) ": "; color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; }
+    .pv-table .pv-v { white-space: nowrap; }
+    .pv-table td.pv-acts { grid-column: 1 / -1; justify-self: end; }
+}
+@media (min-width: 600px) and (max-width: 959px) {
+    .pv-table tbody tr { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 
 /* ── people: the inbox, friends, blocks, the directory ───────────────────────
    Two columns where there is room for two, one where there is not: an inbox is a list of names and
@@ -2656,7 +2983,10 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
    on top of that put "Messages" and its count a word apart; the margin now only keeps the pill off
    the letter it follows. */
 .pm-unread-badge { background: var(--accent); color: #000; border-radius: 999px; padding: 0 0.4em; font-size: 0.7rem; margin-left: 0.1em; }
-.pe-tabs { margin-bottom: 0.6rem; }
+/* Wraps (1.69.0): the four sub-tabs in Polish ("Znajomi", "Zaprosili mnie", "Ja zaprosiłem",
+   "Zablokowani") are wider than a phone, and a tab bar that cannot wrap pushed the page 98px sideways
+   at 320. */
+.pe-tabs { margin-bottom: 0.6rem; flex-wrap: wrap; row-gap: 0.3rem; }
 .pe-count { color: var(--text-muted); font-size: 0.8rem; }
 .pe-row .pf-main { gap: 0.6rem; }
 .pe-since { font-size: 0.78rem; }
@@ -2671,7 +3001,9 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
    A card, not a row. A row is a line in a table; a list is a thing you open, and it carries a name
    somebody chose, a count, and a decision about who may see it. */
 .lists-intro { font-size: 0.82rem; line-height: 1.55; margin: 0 0 0.8rem; }
-.lists-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 0.7rem; }
+/* min(20rem, 100%) (1.69.0): a 20rem track is 320px, wider than the column on a 320px screen, and the
+   grid pushed the page 16px sideways; now a card is never wider than the space it is in. */
+.lists-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(20rem, 100%), 1fr)); gap: 0.7rem; }
 /* An open list spans the whole width: its rows are the same rows the search results use, and half a
    card is not enough room for them. */
 .lists-cards .list-card:has(.list-items) { grid-column: 1 / -1; }
@@ -2769,7 +3101,10 @@ a.pm-head-name:visited, a.av-who:visited, .av-who a:visited { color: var(--link)
     outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent);
 }
 
-.acc-tabs { margin-bottom: 1rem; }
+/* Wraps at every width, not only on a phone (1.69.0): with the Likes / Ratings tab there are nine, and
+   between 641px and about 900px the Polish ones ran 100px past the page's edge in one unbroken row —
+   measured at 768px: 820px of tabs in a 720px bar. Where they fit, nothing wraps and nothing moves. */
+.acc-tabs { margin-bottom: 1rem; flex-wrap: wrap; row-gap: 0.3rem; }
 /* The same checkbox the mail preferences above it use, for the same reason those carry the extra
    class: .search-check is an inline-flex nowrap toolbar control, and a privacy sentence is two lines
    of prose. The box is aligned to the FIRST line rather than to the middle of the block — with
@@ -3366,14 +3701,38 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shout-acts { position: relative; }
 .shout-picker {
     position: absolute; left: 0; top: 0; z-index: 40;
-    width: min(21rem, calc(100vw - 16px));
+    width: min(22.5rem, calc(100vw - 16px));
     background: var(--bg-card); border: 1px solid var(--control-border); border-radius: var(--radius);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
 }
-.shout-picker-tabs { display: flex; gap: 0.15rem; padding: 0.3rem 0.35rem 0; border-bottom: 1px solid var(--border); }
+/* The search box (1.69.0): the site's own field — its border, its ground, the accent when it has the
+   focus — with the magnifier inside it on the left and the picker's own clear button on the right (the
+   browser's clear cross is a light-theme drawing on some systems, so it is not used). */
+.shout-picker-head { position: relative; padding: 0.4rem 0.4rem 0.3rem; }
+.shout-picker-search {
+    display: block; width: 100%; box-sizing: border-box; margin: 0;
+    padding: 0.28rem 1.9rem; font: inherit; font-size: 0.85rem; line-height: 1.4;
+    color: var(--text); background: var(--control-bg); border: 1px solid var(--control-border); border-radius: var(--radius);
+}
+.shout-picker-search::placeholder { color: var(--text-muted); opacity: 1; }
+.shout-picker-search:focus { outline: none; border-color: var(--accent); }
+.shout-picker-search::-webkit-search-cancel-button, .shout-picker-search::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+.shout-picker-search-ic { position: absolute; left: 0.95rem; top: 50%; transform: translateY(-50%); font-size: 0.8rem; color: var(--text-muted); pointer-events: none; }
+.shout-picker-clear {
+    position: absolute; right: 0.7rem; top: 50%; transform: translateY(-50%);
+    background: none; border: 1px solid transparent; border-radius: 4px; padding: 0.05rem 0.3rem;
+    font-size: 0.75rem; line-height: 1.2; color: var(--text-muted); cursor: pointer;
+}
+.shout-picker-clear:hover, .shout-picker-clear:focus-visible { color: var(--text); border-color: var(--control-border); outline: none; }
+/* One row of tabs that scrolls sideways when there are more than fit (sixteen with both kinds of
+   emoji and the pictures); the script keeps the chosen one in view and lets a wheel scroll the row. */
+.shout-picker-tabs {
+    display: flex; flex-wrap: nowrap; gap: 0.1rem; padding: 0 0.35rem; border-bottom: 1px solid var(--border);
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: var(--control-border) transparent;
+}
 .shout-picker-tab {
     flex: 0 0 auto; background: none; border: 1px solid transparent; border-bottom: 0;
-    border-radius: var(--radius) var(--radius) 0 0; padding: 0.2rem 0.45rem;
+    border-radius: var(--radius) var(--radius) 0 0; padding: 0.2rem 0.4rem;
     font-size: 1rem; line-height: 1.4; color: inherit; cursor: pointer; opacity: 0.65;
 }
 .shout-picker-tab:hover, .shout-picker-tab:focus-visible { opacity: 1; outline: none; }
@@ -3381,30 +3740,62 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shout-picker-tab .shout-emote { height: 1.2em; vertical-align: -0.2em; }
 .shout-picker-grid {
     display: flex; flex-wrap: wrap; gap: 0.1rem; align-content: flex-start;
-    height: 12rem; overflow-y: auto; padding: 0.35rem;
+    height: 13rem; overflow-y: auto; padding: 0.35rem;
+    /* A long press is the picker's own gesture: no text selection and no callout on the way to it. */
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
 }
 .shout-picker-grid-wide { gap: 0.35rem; }
-.shout-picker-cell {
-    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+.shout-picker-cell, .shout-picker-vopt {
+    position: relative; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
     min-width: 2rem; height: 2rem; padding: 0 0.15rem;
     background: none; border: 1px solid transparent; border-radius: 4px;
     /* The emoji font the machine has, whichever it is. The monospace body font draws several of
        these as a box, and one missing glyph in a picker is a picker with a hole in it. */
     font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif;
     font-size: 1.25rem; line-height: 1; color: inherit; cursor: pointer;
+    -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none;
 }
 .shout-picker-cell:hover, .shout-picker-cell:focus { background: var(--control-bg); border-color: var(--control-border); outline: none; }
+/* The mark of a cell that has variants (skin tones, a face's other styles): the corner a phone marks,
+   drawn with borders — a small triangle in the bottom right — not with a character. */
+.shout-picker-cell.has-var::after {
+    content: ""; position: absolute; right: 2px; bottom: 2px; width: 0; height: 0; pointer-events: none;
+    border-style: solid; border-width: 0 0 5px 5px; border-color: transparent transparent var(--text-muted) transparent;
+}
+.shout-picker-cell.has-var[aria-expanded="true"] { border-color: var(--accent); }
 .shout-picker-sticker { max-width: 4.5rem; max-height: 4.5rem; height: auto; width: auto; }
 .shout-picker-grid-wide .shout-picker-cell { min-width: 5rem; height: 5rem; }
-.shout-picker-note { flex: 1 1 100%; margin: 0.2rem 0 0; font-size: 0.72rem; color: var(--text-muted); }
+.shout-picker-status { padding: 0.15rem 0.55rem 0.3rem; font-size: 0.72rem; line-height: 1.35; color: var(--text-muted); }
+/* The bubble of variants, over the emoji that was held — the card's ground, the accent round it. */
+.shout-picker-var {
+    position: absolute; z-index: 2; display: flex; flex-wrap: wrap; gap: 0.1rem;
+    max-width: calc(100% - 8px); box-sizing: border-box; padding: 0.2rem;
+    background: var(--bg-card); border: 1px solid var(--accent); border-radius: var(--radius);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+.shout-picker-vopt:hover, .shout-picker-vopt:focus { background: var(--control-bg); border-color: var(--control-border); outline: none; }
+.shout-picker-vopt.current { border-color: var(--accent); }
 .shout-picker-foot {
     display: flex; align-items: center; gap: 0.6rem;
     border-top: 1px solid var(--border); padding: 0.25rem 0.5rem; font-size: 0.75rem;
 }
+/* Font Awesome's faces (1.69.0, includes/emoji.php): a face is an emoji, so it is drawn in an emoji's
+   yellow — and a two-layer style (Duotone, Sharp Duotone) gets its features dark on a solid yellow
+   disc, the way the ordinary emoji look — rather than in the text's grey like one of the site's icons.
+   A little larger than the words, as an emoji's picture is; in the picker, the size of its emoji. */
+.fae {
+    --fa-primary-color: #3b2a00; --fa-primary-opacity: 1;
+    --fa-secondary-color: var(--emoji-yellow, #f7c948); --fa-secondary-opacity: 1;
+    color: var(--emoji-yellow, #f7c948); font-size: 1.15em; line-height: 1; vertical-align: -0.125em;
+}
+.shout-picker .fae { font-size: 1.15rem; vertical-align: 0; }
+.shout-picker-tab .fae { font-size: 1rem; }
 @media (max-width: 640px) {
     /* The whole width of a phone, less the margin the script keeps it inside. */
     .shout-picker { width: calc(100vw - 16px); }
-    .shout-picker-grid { height: 9.5rem; }
+    .shout-picker-grid { height: 10rem; }
+    /* A finger is wider than a pointer: the cells a little bigger, still eight or nine to a row. */
+    .shout-picker-cell, .shout-picker-vopt { min-width: 2.35rem; height: 2.35rem; }
 }
 
 /* ── a picture in a shout, and the lightbox it opens into (1.62.0) ──

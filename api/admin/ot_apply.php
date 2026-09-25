@@ -10,11 +10,13 @@
  *   {"op":"preview"}   render the drop-in without writing it (no password — it changes nothing)
  */
 requirePost();
-$input = json_decode(file_get_contents('php://input'), true);
-if (!is_array($input)) $input = [];
+// readJsonBody(), as every other endpoint reads its body (1.69.0): the same JSON, and a form post or a
+// test's request read the same way.
+$input = readJsonBody();
 $op = (string)($input['op'] ?? '');
 
 if ($op === 'preview') {
+    auditSuppress();   // a read (1.69.0): the router logged every preview as `ot.apply`
     $r = otApply($cfg, true);
     if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? __('api.ot.render_failed'), 'output' => $r['output']], 500);
     jsonResponse(['success' => true, 'file' => $r['json']['file'] ?? '', 'content' => $r['json']['content'] ?? '']);

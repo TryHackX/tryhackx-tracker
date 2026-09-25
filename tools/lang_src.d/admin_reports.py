@@ -37,16 +37,9 @@ add('a.reports', {
     'f_all':           ('All statuses', 'Wszystkie statusy'),
     'archive_reviewed': ('Archive reviewed', 'Archiwizuj rozpatrzone'),
 
-    # table columns (narrow — keep the Polish just as short)
-    'c_id':      ('ID', 'ID'),
-    'c_name':    ('Name', 'Zgłaszający'),
-    'c_email':   ('Email', 'E-mail'),
-    'c_company': ('Company', 'Firma'),
-    'c_entity':  ('Entity', 'Podmiot'),
-    'c_object':  ('Object', 'Utwór'),
-    'c_ip':      ('IP', 'IP'),
-    'c_date':    ('Date', 'Data'),
-    'c_actions': ('Actions', 'Akcje'),
+    # The table's column headers are js.reports.col_* (tools/lang_src.d/js.py) since 1.69.0, in the
+    # template's first row as much as in the row admin.js redraws: a second set here had drifted
+    # ("Zgłaszający" / "Imię i nazwisko" for one column, "Utwór" / "Obiekt" for another).
 
     # report detail modal
     'm_title':       ('Report Details', 'Szczegóły zgłoszenia'),

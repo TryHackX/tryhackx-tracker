@@ -77,6 +77,8 @@ $res = indexSearchCatalogue($db, $cfg, [
     'search_files'      => $canFiles && ($_GET['search_files'] ?? '') === '1',
     'include_whitelist' => $canWl,
     'content'           => (string)($_GET['content'] ?? 'not_rejected'),
+    // A reader who is not shown hashes does not search by one either (1.69.0): see indexSearchCatalogue().
+    'hash_search'       => $canMagnet,
 ]);
 
 $repInResults = repEnabled($cfg) && repShowInResults($cfg);

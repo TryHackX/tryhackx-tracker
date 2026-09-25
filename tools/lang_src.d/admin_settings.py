@@ -1074,8 +1074,11 @@ add('', {
         'Sprawdzeń blokady / godz. (na IP)'),
     'settings.limits_rate_limit_status': ('Status checks / hour (per IP)',
         'Sprawdzeń statusu / godz. (na IP)'),
-    'settings.limits_title': ('Rate Limits & Blacklist',
-        'Limity częstotliwości i czarna lista'),
+    # 1.69.0: "Rate Limits & Blacklist" until the blacklist file moved beside the whitelist file
+    # (Tracker & whitelist); what is left is the public forms' hourly limits, the lengths they accept
+    # and two page sizes of the panel's.
+    'settings.limits_title': ('Rate & length limits',
+        'Limity częstotliwości i długości'),
     'settings.limits_zero_off': ('(0 = off)',
         '(0 = wył.)'),
     'settings.limits_zero_unlimited': ('(0 = unlimited)',
@@ -1432,8 +1435,10 @@ add('', {
         'BBCode — bez nagłówków, zamiast nich duże pogrubienie'),
     'settings.pages_format_markdown': ('Markdown — has headings',
         'Markdown — z nagłówkami'),
-    'settings.pages_heading': ('Public Pages',
-        'Strony publiczne'),
+    # 1.69.0: "Public Pages" until then — the three fields are what gets archived or deleted after so
+    # many days (reports, appeals, the sent-mail log), and the section moved to Backups & maintenance.
+    'settings.pages_heading': ('Archiving & the e-mail log',
+        'Archiwizacja i log e-maili'),
     'settings.pages_heading_2': ('Site pages (Terms & Info)',
         'Strony serwisu (Regulamin i Informacje)'),
     'settings.pages_intro1': ('<strong>Terms of Service</strong> and <strong>Tracker Information</strong> ship as written pages and can be replaced with your own, using the same editor the whitelist descriptions and the bulk mail use — Markdown or BBCode, with a live preview. The built-in pages <em>rewrite themselves</em> when the tracker mode or the account system changes; a saved page does not, and <strong>Restore</strong> brings back the built-in one written for how the tracker is configured at that moment.',
@@ -2008,14 +2013,17 @@ add('', {
     'settings.group_opentracker': ('OpenTracker service', 'Usługa OpenTracker'),
     'settings.group_network': ('Network & limits', 'Sieć i limity'),
     'settings.group_stats': ('Statistics', 'Statystyki'),
-    'settings.group_content': ('Descriptions & review', 'Opisy i recenzja'),
+    # 1.69.0: "Descriptions & review" until the ratings had to be findable by the chip's name.
+    'settings.group_content': ('Descriptions & ratings', 'Opisy i oceny'),
     # 1.60.0: two chips of their own. The shoutbox was filed under "Descriptions & review" and the
     # sounds under "User accounts", which is where they landed rather than where anybody looks.
     'settings.group_shoutbox': ('Shoutbox', 'Shoutbox'),
     'settings.group_sounds': ('Sounds', 'Dźwięki'),
     'settings.group_index': ('Index', 'Indeks'),
     'settings.group_integrations': ('API & federation', 'API i federacja'),
-    'settings.group_maintenance': ('Backups', 'Kopie zapasowe'),
+    # 1.69.0: "Backups" until the health check, the audit log's recording and retention, and the
+    # archiving of old reports, appeals and sent mail joined the backups here.
+    'settings.group_maintenance': ('Backups & maintenance', 'Kopie zapasowe i utrzymanie'),
     'settings.group_languages': ('Languages', 'Języki'),
     'settings.group_credentials': ('Admin credentials', 'Dane logowania admina'),
 })

@@ -79,6 +79,10 @@ function userPermissionList(): array {
         // feature that groups cannot govern means the only choices are "everybody" and "nobody",
         // which is not a permission system, it is a switch.
         'rating.vote'     => 'Rate torrents up or down (needs ratings switched on in Settings)',
+        // v75 (includes/profilevotes.php). A permission about what OTHERS may see, like
+        // favourites.public beside it: read with userIdHasGrantedPermission(), so the admin group's
+        // blanket is not consent, and the member's own users.votes_public still has to say yes.
+        'rating.public'   => 'Let their likes/ratings be shown on their public profile',
         'content.submit'  => 'Attach a source link and a description when registering a torrent',
         'content.propose' => 'Propose a rewrite of a description somebody else wrote',
         // Reading them is its own grant since 1.53.0: an operator may keep the catalogue's words for
@@ -157,6 +161,12 @@ function userPermissionList(): array {
         // nobody bought.
         'profile.avatar' => 'Set their own picture',
         'profile.cover'  => 'Set their own profile cover (drawn only while the account holds this)',
+        // ── the description on a profile (v74, includes/profilebio.php) ──
+        // Writing one AND having it shown: the text is kept when the grant lapses and simply not drawn
+        // (the same rule as the cover above), so a group taken away hides words without deleting them.
+        // Clearing your own is never behind this — the endpoint accepts an empty text from any
+        // signed-in account, grant or no grant.
+        'profile.bio'    => 'Write a description on their profile (shown only while the account holds this)',
 
         // ── the admin panel ──
         //
@@ -275,8 +285,10 @@ function userGroupPresets(): array {
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         'lists.use', 'lists.public',
                         'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check', 'sounds.use',
-                        // shout.edit_own is v72's, beside the delete it mirrors.
-                        'shout.view', 'shout.post', 'shout.delete_own', 'shout.edit_own', 'profile.avatar'],
+                        // shout.edit_own is v72's, beside the delete it mirrors; profile.bio is v74's,
+                        // rating.public v75's.
+                        'shout.view', 'shout.post', 'shout.delete_own', 'shout.edit_own', 'profile.avatar', 'profile.bio',
+                        'rating.public'],
         ],
         // v71. ONLY the extras: a premium account is a member as well (the default group is granted
         // at registration and `v1/users/provision` puts a bought account in it), so repeating the
@@ -313,6 +325,10 @@ function userLegacyDefault(string $perm): bool {
     // moderator, and the final `return true` below would otherwise hand every panel permission to
     // the whole world the moment one was registered.
     if (userIsPanelPermission($perm)) return false;
+    // The one rating id that is not about casting a vote: rating.public (v75) is consent to a list on
+    // a PROFILE, and without accounts there is no profile and nobody to consent — so it answers no,
+    // like favourites.public, before the rule for the rest of rating.* says yes.
+    if ($perm === 'rating.public') return false;
     if (str_starts_with($perm, 'rating.') || str_starts_with($perm, 'content.')) return true;
     // The other way round from rating.* and content.*, and for the reason that decides both: those
     // two work without accounts, so answering false would switch them off for every install that

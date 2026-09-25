@@ -125,6 +125,29 @@ preg_match_all('/class="settings-section" id="[a-z-]+" data-group="([a-z-]+)"/',
 $used = array_unique($m[1]);
 check('catalogue: every section group exists', count($used) > 0 && !array_diff($used, $ids), implode(',', array_diff($used, $ids)));
 check('catalogue: every group is used by a section', !array_diff($ids, $used), implode(',', array_diff($ids, $used)));
+// "All settings" is the page's own order (admin-settings.js puts a search's reordering back to it), so
+// since 1.69.0 the template lays the sections out group by group in the sub-menu's order. A section
+// added at the end of the file under an early group would split that group in two on the page.
+$runs = [];
+foreach ($m[1] as $g) { if (!$runs || end($runs) !== $g) $runs[] = $g; }
+check('catalogue: the page lays its sections out group by group, in the sub-menu\'s order', $runs === $ids, implode(' ', $runs));
+// Where 1.69.0 filed what it moved — each by what its fields are, not by its id or an old title.
+preg_match_all('/class="settings-section" id="([a-z0-9-]+)" data-group="([a-z-]+)"/', $tpl, $mg);
+$groupOf = array_combine($mg[1], $mg[2]);
+foreach (['section-digest' => 'mail', 'section-favourites' => 'profiles', 'section-lists' => 'profiles',
+          'section-profiles' => 'profiles', 'section-iplists' => 'network', 'section-public-pages' => 'maintenance',
+          'section-health' => 'maintenance', 'section-audit' => 'maintenance', 'section-limits' => 'security',
+          'section-reputation' => 'content', 'section-users' => 'users'] as $sec => $grp) {
+    check("catalogue: $sec is under $grp", ($groupOf[$sec] ?? '') === $grp, (string)($groupOf[$sec] ?? 'missing'));
+}
+$wlFrom = (int)strpos($tpl, 'id="section-whitelist"');
+$wlSec = $wlFrom > 0 ? substr($tpl, $wlFrom, (int)strpos($tpl, 'class="settings-section"', $wlFrom + 30) - $wlFrom) : '';
+check('catalogue: the blacklist file path is beside the whitelist file path, in the accesslist section',
+      str_contains($wlSec, 'name="whitelist_path"') && str_contains($wlSec, 'name="blacklist_path"') && str_contains($wlSec, 'id="btn-test-blacklist"')
+      && substr_count($tpl, 'name="blacklist_path" value="') === 1);   // the one field (the Test button's script names it too)
+$titles = array_column($groups, 'title', 'id');
+check('catalogue: the two renamed groups say what they hold', ($titles['maintenance'] ?? '') === 'Backups & maintenance'
+      && ($titles['content'] ?? '') === 'Descriptions & ratings');
 // every keyword key must be reachable from the page: a name="" control or a data-setting="" block
 preg_match_all('/name="([a-z0-9_]+)"/', $tpl, $mn);
 preg_match_all('/data-setting="([a-z0-9_]+)"/', $tpl, $ms);

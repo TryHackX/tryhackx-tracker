@@ -6,7 +6,9 @@
  * The permission side is proved over HTTP with a real member session in deploy/smoke_users.py —
  * userCan() returns true for any panel session, so nothing in a CLI test could prove it. What is
  * proved here is everything that does not need a session: the schema, the toggle's idempotence, the
- * limit, the cascade, and the truth table the "who has this in favourites" query has to satisfy.
+ * limit, the cascade, and the truth table the "who has this in favourites" query has to satisfy —
+ * and (§12, 1.69.0) that a hash withheld from a reader cannot be searched by, on the three lists of a
+ * profile, each endpoint FILE run as a request in a child process with a member's session (no panel).
  */
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 $root = dirname(__DIR__);
@@ -21,6 +23,7 @@ require_once $root . '/includes/index.php';
 require_once $root . '/includes/mail.php';
 require_once $root . '/includes/users.php';
 require_once $root . '/includes/favourites.php';
+require_once $root . '/includes/lists.php';
 
 $fails = 0; $n = 0;
 function check(string $name, bool $ok, string $info = ''): void {
@@ -261,6 +264,157 @@ foreach (['fav_enabled' => '0', 'fav_max_per_user' => '500', 'fav_public_enabled
     check("$key is in the save allow-list", str_contains($saveSrc, "'$key'"));
     check("$key has a control", str_contains($setTpl, 'name="' . $key . '"'));
 }
+
+/* ── 12. a hash withheld from a reader is not a hash they can search by (1.69.0) ─────────────── */
+//
+// Each list of a profile blanks a row's hash for a reader who may not have it (no `index.magnet`;
+// on the uploads and a list, no banned row's either) — and each one used to MATCH the search against
+// that hash first. Searching somebody's public favourites for "a", "b", … "f0f0a" and reading the count
+// spelt a hidden hash out sixteen answers at a time. The rule the likes / ratings list was built with
+// (includes/profilevotes.php): the hash half of a search only where the hash is shown. The name half
+// stays for everybody. Run as requests, because the answer is the endpoint's, not a helper's.
+$fpHashLive = 'f0f0a1' . str_repeat('0', 33) . '1';
+$fpHashBan  = 'f0f0b2' . str_repeat('0', 33) . '2';
+$fpTmp = [];
+$fpClean = function () use ($db): void {
+    foreach ($db->query("SELECT id FROM users WHERE username LIKE 'favprobe\\_%'")->fetchAll(PDO::FETCH_COLUMN) as $id) userDeleteCascade($db, (int)$id);
+    $db->exec("DELETE FROM user_groups WHERE slug LIKE 'favprobe\\_%'");
+    $db->exec("DELETE FROM whitelist WHERE info_hash LIKE 'f0f0%'");
+};
+$fpClean();
+register_shutdown_function(function () use ($fpClean, &$fpTmp) { $fpClean(); foreach ($fpTmp as $f) @unlink($f); });
+$fpGroup = function (string $slug, array $perms) use ($db): int {
+    $db->prepare("INSERT INTO user_groups (slug, name, description, color, priority, is_default, is_system, permissions) VALUES (?, ?, '', '', 2, 0, 0, ?)")
+       ->execute([$slug, $slug, json_encode(array_fill_keys($perms, true), JSON_UNESCAPED_SLASHES)]);
+    return (int)$db->lastInsertId();
+};
+// A verified account in ONE group: the member group registration hands out carries index.magnet.
+$fpUser = function (string $name, int $gid) use ($db, $cfg): int {
+    $r = userCreate($db, array_merge($cfg, ['users_enabled' => '1']), $name, $name . '@example.org', 'Password123!', '127.0.0.1');
+    $id = (int)($r['user']['id'] ?? 0);
+    $db->prepare("UPDATE users SET email_verified = 1, status = 'active' WHERE id = ?")->execute([$id]);
+    $db->prepare("DELETE FROM user_group_members WHERE user_id = ?")->execute([$id]);
+    // granted in the past, spelled out: see 7b on why NOW() of one connection is not the other's.
+    userGrantGroup($db, $id, $gid, null, 'test', 'favourites_test', false, '2000-01-01 00:00:00');
+    return $id;
+};
+$gOwner = $fpGroup('favprobe_owner', ['favourites.use', 'favourites.public', 'uploads.public', 'lists.use', 'lists.public',
+                                      'favourites.view_others', 'index.view', 'whitelist.view']);
+$gNoMag = $fpGroup('favprobe_nomag', ['favourites.view_others', 'index.view', 'whitelist.view']);
+$gMag   = $fpGroup('favprobe_mag',   ['favourites.view_others', 'index.view', 'whitelist.view', 'index.magnet']);
+$fpOwner = $fpUser('favprobe_owner', $gOwner);
+$fpNoMag = $fpUser('favprobe_nomag', $gNoMag);
+$fpMag   = $fpUser('favprobe_mag', $gMag);
+check('§12: three accounts, each in one scratch group', $fpOwner > 0 && $fpNoMag > 0 && $fpMag > 0, "$fpOwner/$fpNoMag/$fpMag");
+$db->prepare("UPDATE users SET fav_public = 1, lists_public = 1 WHERE id = ?")->execute([$fpOwner]);
+$wlIns = $db->prepare("INSERT INTO whitelist (info_hash, name, source, created_at, submitter_id, submitter_public, banned) VALUES (?, ?, 'web', NOW(), ?, 1, ?)");
+$wlIns->execute([$fpHashLive, 'favprobe alpha', $fpOwner, 0]);
+$wlIns->execute([$fpHashBan, 'favprobe beta', $fpOwner, 1]);
+foreach ([$fpHashLive, $fpHashBan] as $h) $db->prepare("INSERT INTO user_favourites (user_id, info_hash) VALUES (?, ?)")->execute([$fpOwner, $h]);
+$db->prepare("INSERT INTO user_lists (user_id, name, slug, is_public) VALUES (?, 'probe list', 'probe-list', 1)")->execute([$fpOwner]);
+$fpList = (int)$db->lastInsertId();
+foreach ([$fpHashLive, $fpHashBan] as $h) $db->prepare("INSERT INTO user_list_items (list_id, info_hash) VALUES (?, ?)")->execute([$fpList, $h]);
+
+$fpRunner = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'fp_runner_' . bin2hex(random_bytes(4)) . '.php';
+$fpTmp[] = $fpRunner;
+file_put_contents($fpRunner, '<?php
+$a = json_decode((string)file_get_contents($argv[1]), true);
+chdir($a["root"]);
+$_SERVER["REQUEST_METHOD"] = "GET";
+$_SERVER["REMOTE_ADDR"] = "127.0.0.1";
+$_GET = $a["get"];
+foreach (["config/app.php", "config/database.php", "includes/settings.php", "includes/functions.php", "includes/schema.php",
+          "includes/whitelist.php", "includes/richtext.php", "includes/reputation.php", "includes/schedule.php", "includes/index.php",
+          "includes/auth.php", "includes/mail.php", "includes/users.php", "includes/favourites.php", "includes/usermedia.php",
+          "includes/profilebio.php", "includes/profilevotes.php", "includes/lists.php", "includes/people.php",
+          "includes/audit.php", "includes/lang.php"] as $f) if (is_file($f)) require_once $f;
+$db = getDb();
+$cfg = array_merge(getSettings($db), $a["cfg"]);
+$GLOBALS["db"] = $db; $GLOBALS["cfg"] = $cfg;
+session_id($a["sid"]);
+session_start();
+$_SESSION["user_id"] = $a["uid"]; $_SESSION["user_login_time"] = time(); $_SESSION["csrf_token"] = "fp-child-token";
+register_shutdown_function(function () { if (session_status() === PHP_SESSION_ACTIVE) session_destroy(); });
+langInit($cfg, null);
+require $a["file"];
+');
+$fpCfg = ['users_enabled' => '1', 'fav_enabled' => '1', 'fav_public_enabled' => '1', 'profiles_enabled' => '1', 'lists_enabled' => '1',
+          'lists_public_enabled' => '1', 'wl_submitter_public' => '1', 'tracker_mode' => 'whitelist', 'index_search_include_whitelist' => '1',
+          'users_require_email_verify' => '1'];
+// $cfg: settings for THIS request on top of $fpCfg, in the child's memory only — the table is never
+// written. An argument, not a variable the closure reads: `use ($fpCfg)` takes a COPY when the closure is
+// made, so keys added to $fpCfg further down never reached a request, and the catalogue cases ran on
+// whatever the table held (the battery's bootstrap leaves index_enabled at 0: "search_disabled").
+$fpGet = function (string $file, int $uid, array $get, array $cfg = []) use ($root, $fpRunner, $fpCfg, &$fpTmp): array {
+    $arg = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'fp_args_' . bin2hex(random_bytes(4)) . '.json';
+    $fpTmp[] = $arg;
+    // files=0: the file-name half is its own feature (and charged to a rate bucket); this is about the hash.
+    file_put_contents($arg, json_encode(['root' => $root, 'file' => $root . '/' . $file, 'get' => $get + ['files' => '0'], 'uid' => $uid,
+        'cfg' => array_merge($fpCfg, $cfg), 'sid' => 'fptest' . bin2hex(random_bytes(8))]));
+    $out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' -d display_errors=0 -d xdebug.mode=off ' . escapeshellarg($fpRunner) . ' ' . escapeshellarg($arg) . ' 2>&1');
+    $j = json_decode(trim($out), true);
+    return is_array($j) ? $j : ['__raw' => substr($out, 0, 300)];
+};
+$hashes = fn(array $j): array => array_map(fn($r) => $r['info_hash'] ?? null, $j['rows'] ?? []);
+$pfxLive = substr($fpHashLive, 0, 8);
+$pfxBan  = substr($fpHashBan, 0, 8);
+
+// Favourites: the hash is shown on your own list, and on somebody else's with index.magnet.
+$j = $fpGet('api/user_favourites.php', $fpNoMag, ['user' => 'favprobe_owner', 'search' => $pfxLive]);
+check('favourites, a stranger WITHOUT index.magnet, searching a hash prefix: nothing matches — the bug this is for',
+      !empty($j['success']) && ($j['total'] ?? -1) === 0, json_encode($j));
+$j = $fpGet('api/user_favourites.php', $fpNoMag, ['user' => 'favprobe_owner', 'search' => 'probe alpha']);
+check('… the same stranger searching the NAME finds the row, without its hash',
+      ($j['total'] ?? -1) === 1 && $hashes($j) === [null], json_encode($j));
+$j = $fpGet('api/user_favourites.php', $fpMag, ['user' => 'favprobe_owner', 'search' => $pfxLive]);
+check('… a stranger WITH index.magnet finds it by the prefix, hash and all',
+      ($j['total'] ?? -1) === 1 && $hashes($j) === [$fpHashLive], json_encode($j));
+$j = $fpGet('api/user_favourites.php', $fpOwner, ['search' => $pfxLive]);
+check('… and so does the owner on their own list, where the hash is always shown (no index.magnet in their group)',
+      ($j['total'] ?? -1) === 1 && $hashes($j) === [$fpHashLive], json_encode($j));
+
+// Uploads: the hash goes out with index.magnet and never for a banned row.
+$j = $fpGet('api/user_uploads.php', $fpNoMag, ['user' => 'favprobe_owner', 'search' => $pfxLive]);
+check('uploads, a stranger without index.magnet, a hash prefix: nothing matches',
+      !empty($j['success']) && ($j['total'] ?? -1) === 0, json_encode($j));
+$j = $fpGet('api/user_uploads.php', $fpNoMag, ['user' => 'favprobe_owner', 'search' => 'favprobe']);
+check('… by name: both rows, neither with a hash', ($j['total'] ?? -1) === 2 && $hashes($j) === [null, null], json_encode($j));
+$j = $fpGet('api/user_uploads.php', $fpMag, ['user' => 'favprobe_owner', 'search' => $pfxLive]);
+check('… with index.magnet the prefix finds the live row, hash and all', ($j['total'] ?? -1) === 1 && $hashes($j) === [$fpHashLive], json_encode($j));
+$j = $fpGet('api/user_uploads.php', $fpMag, ['user' => 'favprobe_owner', 'search' => $pfxBan]);
+check('… but not the BANNED row, whose hash nobody is shown', ($j['total'] ?? -1) === 0, json_encode($j));
+$j = $fpGet('api/user_uploads.php', $fpMag, ['user' => 'favprobe_owner', 'search' => '%']);
+check('… and a "%" is not a wildcard in the hash half (it matched every row)', ($j['total'] ?? -1) === 0, json_encode($j));
+
+// A list: the hash goes out with index.magnet and never for a banned row (a stranger gets no banned row).
+$mid = substr($fpHashLive, 2, 8);
+$j = $fpGet('api/user_list_items.php', $fpNoMag, ['list' => (string)$fpList, 'search' => $mid]);
+check('a list, a stranger without index.magnet, a piece of the hash: nothing matches',
+      !empty($j['success']) && ($j['total'] ?? -1) === 0, json_encode($j));
+$j = $fpGet('api/user_list_items.php', $fpNoMag, ['list' => (string)$fpList, 'search' => 'probe alpha']);
+check('… by name: the row, without its hash', ($j['total'] ?? -1) === 1 && $hashes($j) === [null], json_encode($j));
+$j = $fpGet('api/user_list_items.php', $fpMag, ['list' => (string)$fpList, 'search' => $mid]);
+check('… with index.magnet the piece of the hash finds it', ($j['total'] ?? -1) === 1 && $hashes($j) === [$fpHashLive], json_encode($j));
+$j = $fpGet('api/user_list_items.php', $fpOwner, ['list' => (string)$fpList, 'search' => substr($fpHashBan, 2, 8)]);
+check('… and the owner without index.magnet does not find their own banned row by its (withheld) hash',
+      !empty($j['success']) && ($j['total'] ?? -1) === 0, json_encode($j));
+
+// The catalogue search, which also leaves the hash out of its rows without index.magnet — and matched a
+// hash prefix first all the same. Everything api/index_search.php reads before it answers is set here, for
+// these two requests: the accounts switch, the index and the search switches in front of it, the address
+// verification gate on the reader's groups (both readers are verified), the whitelist arm the registered
+// row lives in, and the hourly search limit — a FILE (config/rate_limits.json) the running site and every
+// browser check's search from 127.0.0.1 charge too; 0 = no limit, and nothing is charged. The permissions
+// are the scratch groups': index.view (the gate), whitelist.view (the arm), index.magnet (the case), no
+// index.files. Nothing to restore: none of it is written to the table.
+$fpSearchCfg = ['users_enabled' => '1', 'index_enabled' => '1', 'index_search_enabled' => '1', 'users_require_email_verify' => '1',
+                'index_search_include_whitelist' => '1', 'rate_limit_index_search' => '0'];
+$j = $fpGet('api/index_search.php', $fpNoMag, ['search' => substr($fpHashLive, 0, 6)], $fpSearchCfg);
+check('the catalogue search, a reader without index.magnet, a hash prefix: searched as a name, nothing matches',
+      !empty($j['success']) && ($j['total'] ?? -1) === 0, json_encode($j));
+$j = $fpGet('api/index_search.php', $fpMag, ['search' => substr($fpHashLive, 0, 6)], $fpSearchCfg);
+check('… with index.magnet the prefix still finds the registered row, hash and all',
+      ($j['total'] ?? -1) === 1 && ($j['rows'][0]['info_hash'] ?? '') === $fpHashLive, json_encode($j));
 
 $db->exec("DELETE FROM user_favourites WHERE user_id > 900000");
 echo "\n$n checks, $fails failed\n";

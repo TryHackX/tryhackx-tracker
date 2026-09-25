@@ -89,10 +89,19 @@ $params = [(int)$owner['id']];
 // The visibility flag is enforced HERE and in the profile's own render, and nowhere else. It decides
 // whose list a torrent appears on — never what the tracker serves, never what the search finds.
 if (!$isOwn) $where[] = 'submitter_public = 1';
+// A row's hash goes out only with `index.magnet`, and never for a banned row (the loop below). The
+// hash half of the search asks exactly that, in SQL, BEFORE a row is counted (1.69.0): a prefix matched
+// on a hash the answer then blanks is a hash read back sixteen answers at a time. Hex only, so a `%` or
+// `_` typed into the box is not a wildcard in the hash arm either.
+$canMagnet = userCan($db, $cfg, 'index.magnet');
 if ($search !== '') {
-    $where[] = '(name LIKE ? OR info_hash LIKE ?)';
+    $or = ['name LIKE ?'];
     $params[] = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
-    $params[] = strtolower($search) . '%';
+    if ($canMagnet && preg_match('/^[0-9a-f]{1,40}$/i', $search)) {
+        $or[] = '(info_hash LIKE ? AND banned <> 1)';
+        $params[] = strtolower($search) . '%';
+    }
+    $where[] = '(' . implode(' OR ', $or) . ')';
 }
 // Literal fragments chosen by key; nothing from the request reaches the SQL. `live` is everything
 // that is neither blocked nor mid-probe nor refused — the rows the tracker actually serves.
@@ -124,7 +133,6 @@ $st->bindValue($i++, $perPage, PDO::PARAM_INT);
 $st->bindValue($i, ($page - 1) * $perPage, PDO::PARAM_INT);
 $st->execute();
 
-$canMagnet = userCan($db, $cfg, 'index.magnet');
 $rows = [];
 foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
     $rows[] = [

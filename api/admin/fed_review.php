@@ -18,6 +18,10 @@ $op = (string)($input['op'] ?? 'list');
 $peer = mb_substr(trim((string)($input['peer'] ?? '')), 0, 64);
 $ids = is_array($input['ids'] ?? null) ? array_slice($input['ids'], 0, 5000) : [];
 
+// The two reads write nothing to the audit log (1.69.0): Settings lists the queue when it opens, and
+// the router logged every POST here as `panel.fed_review` — a decision nobody made.
+if ($op === 'counts' || $op === 'list') auditSuppress();
+
 if ($op === 'counts') {
     jsonResponse(['success' => true, 'counts' => fedReviewCounts($db)]);
 }

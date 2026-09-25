@@ -317,6 +317,20 @@
                         </div>
                         <small class="text-muted"><?= _h('a.users.media_note') ?></small>
                     </div>
+                    <?php /* The description on their profile (1.69.0): shown as the profile shows it — the
+                             server's own rendering — and cleared at once through admin/user_bio, like the
+                             picture above. Drawn only for an account that has one. */ ?>
+                    <div class="mb-2" id="ue-bio" hidden>
+                        <label class="form-label wl-label"><?= _h('a.users.bio_label') ?></label>
+                        <div class="ue-bio-text" id="ue-bio-text" dir="auto"></div>
+                        <?php /* A div with `small`, not <small class="d-block">: Bootstrap's d-block is
+                                 display:block !important and beats the hidden attribute. */ ?>
+                        <div class="small text-warning" id="ue-bio-hidden" hidden><?= _h('a.users.bio_hidden') ?></div>
+                        <div class="ue-media-row">
+                            <button type="button" class="btn btn-sm btn-outline-danger" id="ue-bio-clear"><i class="bi bi-eraser"></i> <?= _h('a.users.bio_clear') ?></button>
+                        </div>
+                        <small class="text-muted"><?= _h('a.users.bio_note') ?></small>
+                    </div>
                     <div id="ue-alert"></div>
                     <div class="d-flex justify-content-end gap-2 mt-3">
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>

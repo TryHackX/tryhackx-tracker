@@ -342,9 +342,11 @@ function langJsBundle(array $prefixes = ['js.']): array {
 
 /**
  * The prefixes the PUBLIC scripts use (app.js, captcha.js, stats-timeline.js) — see langJsBridge().
- * `js.media.` is the picture and cover editor (assets/js/media-editor.js, 1.63.0).
+ * `js.media.` is the picture and cover editor (assets/js/media-editor.js, 1.63.0); `js.bio.` the
+ * profile description's editor (assets/js/profile-bio.js, 1.69.0); `js.votes.` the likes / ratings
+ * table on the account page and the profile (assets/js/favourites.js, 1.69.0).
  */
-const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.', 'js.fav.', 'js.lists.', 'js.pm.', 'js.people.', 'js.sec.', 'js.sounds.', 'js.shout.', 'js.media.'];
+const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.', 'js.fav.', 'js.lists.', 'js.pm.', 'js.people.', 'js.sec.', 'js.sounds.', 'js.shout.', 'js.media.', 'js.bio.', 'js.votes.'];
 
 /**
  * The `<script>` pair that puts the bundle and the t() helper on a page — before any other script.

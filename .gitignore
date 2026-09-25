@@ -41,6 +41,11 @@ config/backup_state.json.tmp.*
 config/backup_state.lock
 config/*.marker
 
+# Font Awesome packages installed by the operator (1.69.0, includes/iconpack.php). A Pro package is a
+# LICENSED copy that belongs to the site that bought it — it must never reach the repository, a fork or
+# a release. The whole directory, whatever is in it: manifests, fonts, stylesheets, metadata, temp dirs.
+config/iconpacks/
+
 # Stray backups — must never ship to production (e.g. hash.txt.orig leaks the admin hash)
 *.orig
 *.bak

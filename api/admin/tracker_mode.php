@@ -22,6 +22,9 @@ $op = (string)($input['op'] ?? 'status');
 if (!in_array($op, ['status', 'switch'], true)) jsonResponse(['error' => __('api.index.unknown_op')], 400);
 
 if ($op === 'status') {
+    // A read (1.69.0): asking the helper which mode it runs in is not switching it, and the router
+    // logged it as `tracker.mode`.
+    auditSuppress();
     // fresh: the whole point of pressing Test is not to be told what we already believed
     $agree = scheduleModeAgreement($cfg, true);
     $msg = $agree['known']

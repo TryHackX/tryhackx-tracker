@@ -5,6 +5,8 @@
  *   fav_public   — may a stranger read my favourites on my profile?
  *   fav_listed   — may my name appear on somebody else's "who has this in favourites"?
  *   lists_public — may a stranger see that I have lists at all? (each list still carries its own)
+ *   votes_public — may a stranger see what I liked or rated, thumbs down and low stars included?
+ *                  (1.69.0, includes/profilevotes.php; the group still needs rating.public)
  *
  * Two flags, not one, because they answer two different questions. Somebody may be happy to publish
  * a list on a page they chose to publish, and not happy to be enumerated from a torrent's page by
@@ -31,7 +33,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $sets = [];
     $args = [];
-    foreach (['fav_public', 'fav_listed', 'lists_public', 'profile_listed'] as $flag) {
+    // votes_public (1.69.0): may a stranger see my likes or ratings — see includes/profilevotes.php.
+    foreach (['fav_public', 'fav_listed', 'lists_public', 'profile_listed', 'votes_public'] as $flag) {
         if (!array_key_exists($flag, $input)) continue;
         $sets[] = "`$flag` = ?";
         $args[] = !empty($input[$flag]) ? 1 : 0;
@@ -64,4 +67,8 @@ jsonResponse([
     'may_publish' => favPublicEnabled($cfg) && userIdHasGrantedPermission($db, $cfg, (int)$u['id'], 'favourites.public'),
     'who_enabled' => favWhoEnabled($cfg),
     'lists_may_publish' => listsPublicEnabled($cfg) && userIdHasGrantedPermission($db, $cfg, (int)$u['id'], 'lists.public'),
+    // Likes or ratings (1.69.0): the flag, and whether anything would show it — the same grant the
+    // profile asks, never the administrator's blanket.
+    'votes_public' => (int)($u['votes_public'] ?? 0) === 1,
+    'votes_may_publish' => function_exists('profileVotesContext') && profileVotesContext($db, $cfg, $u)['may_publish'],
 ]);

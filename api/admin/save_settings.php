@@ -14,6 +14,8 @@ $allowed = [
     'site_timezone',
     // schema v73: which library draws every icon on the site (includes/icons.php)
     'icon_library',
+    // schema v76: which Font Awesome — Free 6/7 from jsDelivr or an installed package — and its styles
+    'fa_source', 'fa_pack', 'fa_pack_styles', 'fa_style',
     'contact_visible', 'contact_obfuscate', 'hmac_secret',
     'recaptcha_enabled', 'recaptcha_site_key', 'recaptcha_secret',
     'recaptcha_on_report', 'recaptcha_on_login', 'recaptcha_on_status',
@@ -57,6 +59,8 @@ $allowed = [
     // its emotes and stickers (1.59.0)
     'shout_emotes_enabled', 'shout_emote_max_kb', 'shout_emote_max_px', 'shout_emote_per_user',
     'shout_stickers_enabled', 'shout_emote_approval',
+    // Font Awesome's faces in its picker, and the style they are drawn in (1.69.0, includes/emoji.php)
+    'shout_emoji_fa', 'shout_emoji_fa_style',
     // in the navigation, a cadence of its own for guests, and the site's own lines (1.60.0)
     'shout_nav', 'shout_live_seconds_guest', 'shout_system_lines',
     // the action name the room answers on (1.61.0)
@@ -67,6 +71,10 @@ $allowed = [
     // Which card of the account page each block is in (1.66.0 — `account_media_side` moved both
     // together until then, and is gone: a key nothing reads must not be saveable either).
     'cover_height', 'cover_height_mobile', 'cover_overlay', 'avatar_default', 'account_picture_side', 'account_cover_side',
+    // the description on a profile (1.69.0, includes/profilebio.php)
+    'profile_bio_enabled', 'profile_bio_max',
+    // a member's likes or ratings on the profile (1.69.0, includes/profilevotes.php)
+    'profile_votes_enabled',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -256,6 +264,16 @@ if (isset($data['csp_mode']) && !in_array($data['csp_mode'], CSP_MODES, true)) {
 if (isset($data['icon_library']) && !in_array($data['icon_library'], ICON_LIBRARIES, true)) {
     $data['icon_library'] = 'bootstrap';
 }
+// ── Which Font Awesome ──
+// Checked against what is INSTALLED, not against a list of words: a package id is only a value when
+// that package is in config/iconpacks and its manifest reads, a style file only when the package has
+// it, a style only when it loads (iconSettingsNormalise(), includes/icons.php — the CLI's check too).
+// The source is coerced like csp_mode; asking for a package that is not there is refused.
+$faCheck = iconSettingsNormalise($data, $cfg);
+if ($faCheck['error'] !== null) {
+    jsonResponse(['error' => __($faCheck['error'], $faCheck['vars'])], 400);
+}
+$data = $faCheck['data'];
 if (isset($data['csp_extra_hosts'])) {
     // This value is written VERBATIM into a response header, so the validation is the whole security
     // boundary of the feature — and it lives in includes/csp.php, called from here AND from
@@ -374,6 +392,9 @@ $intClamp = [
     'avatar_max_mp' => [USER_MEDIA_MP_MIN, USER_MEDIA_MP_MAX, USER_MEDIA_MP_DEFAULT],
     'cover_height' => [USER_COVER_H_MIN, USER_COVER_H_MAX, 220],
     'cover_height_mobile' => [USER_COVER_H_MIN, USER_COVER_H_MAX, 160],
+    // The description's visible characters, from includes/profilebio.php like the ceilings above. No 0:
+    // a description of no characters is the feature switch beside it spelled badly.
+    'profile_bio_max' => [PROFILE_BIO_MAX_MIN, PROFILE_BIO_MAX_MAX, PROFILE_BIO_MAX_DEFAULT],
     'digest_hours' => [1, 168, 24], 'digest_min' => [0, 10000, 1],
     'wl_edit_max_pending' => [0, 50, 3],
     'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],
@@ -440,7 +461,7 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
           'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval',
-          'shout_nav', 'shout_system_lines', 'avatars_enabled', 'covers_enabled'] as $k) {
+          'shout_nav', 'shout_system_lines', 'profile_votes_enabled', 'avatars_enabled', 'covers_enabled', 'profile_bio_enabled'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
 // ── The shoutbox ──
@@ -456,6 +477,22 @@ if (isset($data['shout_format']) && !in_array($data['shout_format'], ['plain', '
 // 1.66.0, so it is also what an unknown value becomes.
 if (isset($data['shout_order']) && !in_array($data['shout_order'], ['top', 'bottom'], true)) {
     $data['shout_order'] = 'bottom';
+}
+// Font Awesome's faces in the picker (1.69.0). The mode is coerced like the room's other closed sets.
+// The style must be one that LOADS with the Font Awesome settings this very save leaves behind (judged
+// above by iconSettingsNormalise()), brands never; anything else is '' — the site's own style.
+if (isset($data['shout_emoji_fa']) && !in_array($data['shout_emoji_fa'], EMOJI_FA_MODES, true)) {
+    $data['shout_emoji_fa'] = 'off';
+}
+if (isset($data['shout_emoji_fa_style'])) {
+    $v = (string)$data['shout_emoji_fa_style'];
+    if ($v !== '') {
+        $eff = $data + $cfg;
+        $loads = iconSetup(['icon_library' => 'fontawesome', 'fa_source' => (string)($eff['fa_source'] ?? 'cdn6'), 'fa_pack' => (string)($eff['fa_pack'] ?? ''),
+                            'fa_pack_styles' => (string)($eff['fa_pack_styles'] ?? '[]'), 'fa_style' => (string)($eff['fa_style'] ?? 'solid')])['styles'];
+        if ($v === 'brands' || !isset($loads[$v])) $v = '';
+    }
+    $data['shout_emoji_fa_style'] = $v;
 }
 // The address the room answers on. Coerced to the literal when it is not a legal action name, or
 // when it is already another page's — asked of siteRoutes() rather than of a list written out here,
@@ -826,6 +863,12 @@ $reauthChanged = [];
 foreach ($reauthKeys as $k => $fallback) {
     if (array_key_exists($k, $data) && $data[$k] !== (string)($cfg[$k] ?? $fallback)) $reauthChanged[] = $k;
 }
+// A Font Awesome PACKAGE is a stylesheet and fonts the operator brought, served to every visitor —
+// switching the site to one, or to another one, is the same kind of decision as a CSP host. Moving
+// between the two jsDelivr builds is not (both pinned, both with SRI), and neither are its styles.
+$faPackNow = ($data['fa_source'] ?? ($cfg['fa_source'] ?? 'cdn6')) === 'pack' ? (string)($data['fa_pack'] ?? ($cfg['fa_pack'] ?? '')) : '';
+$faPackWas = ($cfg['fa_source'] ?? 'cdn6') === 'pack' ? (string)($cfg['fa_pack'] ?? '') : '';
+if ($faPackNow !== '' && $faPackNow !== $faPackWas) $reauthChanged[] = 'fa_pack';
 if ($reauthChanged) {
     $confirmPassword = (string)($input['confirm_password'] ?? '');
     if ($confirmPassword === '') {

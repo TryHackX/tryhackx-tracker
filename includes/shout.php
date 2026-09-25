@@ -437,8 +437,11 @@ function shoutRenderContext(PDO $db, array $cfg, array $me, array $bodies): arra
  */
 function shoutBodyHtml(string $body, string $format, array $cfg, array $ctx): string
 {
+    // A Font Awesome face (:fa-NAME:, 1.69.0) is drawn in 'plain' as well, as an emote is: the picker
+    // puts it in the box whatever the room's format, and plain means no markup, not no emoji.
     $html = $format === 'plain'
-        ? nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false)
+        ? (function_exists('emojiFaRenderHtml') ? emojiFaRenderHtml(nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false), $cfg)
+                                                  : nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false))
         : shoutLinkImages(richtextRender($body, $format, $cfg, true), (string)($ctx['img_title'] ?? ''));
     return shoutRenderEmotes(shoutLinkMentions($html, (array)($ctx['known'] ?? []), (string)($ctx['base'] ?? ''), (string)($ctx['me_name'] ?? '')),
                              (array)($ctx['emotes'] ?? []), (string)($ctx['base'] ?? ''), !empty($ctx['stickers']));

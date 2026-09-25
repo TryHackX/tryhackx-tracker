@@ -77,6 +77,10 @@ $MEMBER = array_merge($GUEST, [
     // v72 (1.66.0): correcting your own line for a while, beside the delete it mirrors.
     'shout.edit_own',
     'profile.avatar',
+    // v74 (1.69.0): a description on their own profile.
+    'profile.bio',
+    // v75 (1.69.0): their likes or ratings may be listed on their profile — with their own yes.
+    'rating.public',
 ]);
 // ONLY the extras. A premium account is a member as well, so repeating the member row here would
 // mean a membership that lapses takes the whole site with it.
@@ -232,8 +236,9 @@ try {
         'shout.moderate' => true,
     ])) . " WHERE slug = 'member'");
     $sdb->exec("DELETE FROM user_groups WHERE slug = 'premium'");
-    // …and from before 1.66.0 as well: the v72 grant (shout.edit_own) has not happened on it yet.
-    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit')");
+    // …and from before 1.66.0 as well: the v72 grant (shout.edit_own) has not happened on it yet, and
+    // neither have 1.69.0's v74 and v75 ones (profile.bio, rating.public).
+    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public')");
     trackerSchemaDataMigrations($sdb, $scfg);
     $after = $perms($sdb, 'member');
     check('the migration puts the missing matrix ids on an existing member group',

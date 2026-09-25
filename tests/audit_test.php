@@ -120,6 +120,115 @@ foreach (['admin/save_settings', 'admin/whitelist_ban', 'admin/user_grant', 'adm
 }
 check('the endpoints that matter all map to something', count($mapped) === 6, implode(',', $mapped));
 
+/* ── 4b. an endpoint that reads by POST writes no line (1.69.0) ─────────────── */
+//
+// admin/bulk_send answers the Users page's bulk-mail tab by POST — the preview of an audience, the
+// rendered body, the recent batches, a batch's progress — and the router logs every POST to an admin
+// endpoint: two `bulk.queue` lines per visit to the tab, with nothing queued. Run as the request it is
+// (the endpoint FILE in a child process, a panel session, the router's audit hook), each read must
+// leave the log as it was, while a queue, a cancel and a test copy each write their own line — here
+// all three refused before anything could be sent (no password; mail switched off for the test copy).
+$runner = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'au_runner_' . bin2hex(random_bytes(4)) . '.php';
+file_put_contents($runner, '<?php
+$a = json_decode((string)file_get_contents($argv[1]), true);
+chdir($a["root"]);
+$_SERVER["REQUEST_METHOD"] = "POST";
+$_SERVER["REMOTE_ADDR"] = "127.0.0.1";
+$_POST = $a["post"];
+foreach (["config/app.php", "config/database.php", "includes/settings.php", "includes/functions.php", "includes/schema.php",
+          "includes/richtext.php", "includes/mail.php", "includes/bulkmail.php", "includes/users.php", "includes/audit.php",
+          "includes/auth.php", "includes/lang.php", "includes/twofa.php", "includes/federation.php", "includes/schedule.php",
+          "includes/livesync.php", "includes/content.php"] as $f) require_once $f;
+$db = getDb();
+$cfg = array_merge(getSettings($db), $a["cfg"]);
+$GLOBALS["db"] = $db; $GLOBALS["cfg"] = $cfg;
+session_id($a["sid"]);
+session_start();
+$_SESSION = ["loggedin" => true, "login_time" => time(), "last_activity" => time()];
+register_shutdown_function(function () { if (session_status() === PHP_SESSION_ACTIVE) session_destroy(); });
+langInit($cfg, null);
+$GLOBALS["__audit_endpoint"] = "admin/" . $a["endpoint"];
+require "api/admin/" . $a["endpoint"] . ".php";
+');
+// One POST to an admin endpoint FILE, as the router runs it (1.69.0: any endpoint, bulk_send first).
+$adminRun = function (string $endpoint, array $post, array $cfgExtra = []) use ($root, $runner): array {
+    $argFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'au_args_' . bin2hex(random_bytes(4)) . '.json';
+    file_put_contents($argFile, json_encode(['root' => $root, 'endpoint' => $endpoint, 'post' => $post, 'cfg' => $cfgExtra, 'sid' => 'autest' . bin2hex(random_bytes(8))]));
+    $out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' -d display_errors=0 -d xdebug.mode=off ' . escapeshellarg($runner) . ' ' . escapeshellarg($argFile) . ' 2>&1');
+    @unlink($argFile);
+    $j = json_decode(trim($out), true);
+    return is_array($j) ? $j : ['__raw' => substr($out, 0, 300)];
+};
+$bulkRun = fn(array $post, array $cfgExtra = []): array => $adminRun('bulk_send', $post, $cfgExtra);
+$bulkLines = function (int $floor) use ($db): array {
+    return array_map(fn($r) => [(string)$r[0], (int)$r[1]],
+        $db->query("SELECT action, ok FROM audit_log WHERE id > " . $floor . " AND action LIKE 'bulk.%' ORDER BY id")->fetchAll(PDO::FETCH_NUM));
+};
+$floor = (int)$db->query("SELECT COALESCE(MAX(id), 0) FROM audit_log")->fetchColumn();
+$reads = [];
+foreach ([['op' => 'preview', 'audience' => ['kind' => 'all']], ['op' => 'batches'], ['op' => 'render', 'body' => 'hi', 'format' => 'plain'],
+          ['op' => 'status', 'batch_id' => 'abc123']] as $post) {
+    $reads[$post['op']] = $bulkRun($post);
+}
+check('the bulk-mail tab\'s four reads answer as before (preview, batches, render, status)',
+      !empty($reads['preview']['success']) && !empty($reads['batches']['success']) && isset($reads['render']['html']) && !empty($reads['status']['success']),
+      json_encode(array_map(fn($r) => array_slice($r, 0, 3), $reads)));
+check('… and write no line in the log', $bulkLines($floor) === [], json_encode($bulkLines($floor)));
+$q = $bulkRun(['op' => 'queue', 'password' => '', 'audience' => ['kind' => 'all'], 'subject' => 's', 'body' => 'b', 'email' => true]);
+$c = $bulkRun(['op' => 'cancel', 'password' => '', 'batch_id' => 'abc123']);
+$tc = $bulkRun(['op' => 'test', 'subject' => 's', 'body' => 'b'], ['bulk_mail_enabled' => '0']);
+$lines = $bulkLines($floor);
+check('a queue, a cancel and a test copy each write one line, under their own names, refused (nothing was sent)',
+      !empty($q['error']) && !empty($c['error']) && !empty($tc['error'])
+      && $lines === [['bulk.queue', 0], ['bulk.cancel', 0], ['bulk.test', 0]], json_encode([$lines, $q, $c, $tc]));
+check('… all three in the mail group', auditGroupOf('bulk.queue') === 'mail' && auditGroupOf('bulk.cancel') === 'mail' && auditGroupOf('bulk.test') === 'mail');
+$db->exec("DELETE FROM audit_log WHERE id > " . $floor . " AND action LIKE 'bulk.%'");
+
+// The same fault, found by opening every panel page and tab and reading the log after each (1.69.0):
+// Settings asked admin/twofa for its status and admin/fed_review for its queue, and the Whitelist's
+// Review tab asked admin/wl_content for the queue and the rewrites — `twofa.change` on a mere visit
+// would alarm anybody who reads the log. The other reads that answer by POST — a tracker mode's status,
+// live sync's status and plan, the previews of the firewall, sysctl and OpenTracker files, a cluster
+// node's plan, a federation purge's count — were logged under their apply's name the same way. Each
+// read writes nothing now; a decision still writes its line — a content decision under its own name,
+// which the Content group lists and nothing wrote until now (they were all `content.review`).
+$lines = function (int $floor) use ($db): array {
+    return array_map(fn($r) => [(string)$r[0], (int)$r[1]],
+        $db->query("SELECT action, ok FROM audit_log WHERE id > " . $floor . " AND actor_name <> 'audit-test' ORDER BY id")->fetchAll(PDO::FETCH_NUM));
+};
+$floor2 = (int)$db->query("SELECT COALESCE(MAX(id), 0) FROM audit_log")->fetchColumn();
+$reads = [
+    'twofa status'           => $adminRun('twofa', ['op' => 'status']),
+    'fed_review counts'      => $adminRun('fed_review', ['op' => 'counts']),
+    'fed_review list'        => $adminRun('fed_review', ['op' => 'list']),
+    'wl_content list'        => $adminRun('wl_content', ['op' => 'list']),
+    'wl_content edits'       => $adminRun('wl_content', ['op' => 'edits']),
+    'tracker_mode status'    => $adminRun('tracker_mode', ['op' => 'status']),
+    'livesync_apply status'  => $adminRun('livesync_apply', ['op' => 'status']),
+    'livesync_apply plan'    => $adminRun('livesync_apply', ['op' => 'plan']),
+    'net_apply preview'      => $adminRun('net_apply', ['op' => 'preview']),
+    'sysctl_apply preview'   => $adminRun('sysctl_apply', ['op' => 'preview']),
+    'ot_apply preview'       => $adminRun('ot_apply', ['op' => 'preview']),
+    'ot_cluster_apply plan'  => $adminRun('ot_cluster_apply', ['op' => 'plan', 'name' => 'edge-a']),
+    'fed_purge count'        => $adminRun('fed_purge', ['op' => 'count', 'peer' => 'nobody']),
+];
+check('the reads the panel\'s pages make by POST answer as before (2FA status, the federation and content queues)',
+      isset($reads['twofa status']['enabled']) && !empty($reads['fed_review counts']['success']) && !empty($reads['fed_review list']['success'])
+      && !empty($reads['wl_content list']['success']) && isset($reads['wl_content edits']['success']),
+      json_encode(array_map(fn($r) => array_slice($r, 0, 3), array_slice($reads, 0, 5, true))));
+check('… and none of the thirteen reads — answered or refused — writes a line', $lines($floor2) === [], json_encode($lines($floor2)));
+$d1 = $adminRun('twofa', ['op' => 'begin', 'password' => '']);
+$d2 = $adminRun('fed_review', ['op' => 'accept']);
+$d3 = $adminRun('wl_content', ['op' => 'approve', 'id' => 0, 'kind' => 'wl']);
+$d4 = $adminRun('tracker_mode', ['op' => 'switch', 'mode' => 'whitelist', 'password' => '']);
+$dl = $lines($floor2);
+check('… while a decision still writes one: 2FA set up, a federation accept, a description approved, a tracker switch (all refused here)',
+      !empty($d1['error']) && !empty($d2['error']) && !empty($d3['error']) && !empty($d4['error'])
+      && $dl === [['twofa.change', 0], ['panel.fed_review', 0], ['content.approve', 0], ['tracker.mode', 0]], json_encode([$dl, $d1, $d2, $d3, $d4]));
+check('… a content decision under its own name, in the Content group', auditGroupOf('content.approve') === 'content' && auditGroupOf('content.edit_reject') === 'content');
+$db->exec("DELETE FROM audit_log WHERE id > " . $floor2 . " AND actor_name <> 'audit-test'");
+@unlink($runner);
+
 /* ── 5. retention ────────────────────────────────────────────────────────── */
 
 check('the retention window is clamped to something sane',

@@ -27,6 +27,15 @@ $audience = (array)($input['audience'] ?? []);
 $subject  = (string)($input['subject'] ?? '');
 $body     = (string)($input['body'] ?? '');
 
+// The audit log records what queues, cancels or sends mail — not a read (1.69.0). The router logs
+// every POST to an admin endpoint, and this one answers four reads by POST as well (the preview of an
+// audience, the rendered body, a batch's progress, the recent batches): opening the Users page's
+// bulk-mail tab wrote two `bulk.queue` lines with nothing queued. Cancelling and the test copy are
+// lines of their own names, so a filter on bulk.queue finds only what was queued.
+if (in_array($op, ['render', 'preview', 'batches', 'status'], true)) auditSuppress();
+elseif ($op === 'cancel') auditNote(['action' => 'bulk.cancel']);
+elseif ($op === 'test') auditNote(['action' => 'bulk.test']);
+
 // 'plain' is always available; the two markup formats are the ones the site has switched on, so the
 // composer cannot offer a syntax the renderer has been told not to accept.
 $bulkFormats = array_merge(['plain'], richtextFormats($cfg));

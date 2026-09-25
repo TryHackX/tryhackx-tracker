@@ -107,6 +107,13 @@ $rows = $hashes ? favRowsFor($db, $hashes, $canWl, $isOwn) : [];
 // column of its own — it is the order the list already arrived in.
 $byHash = array_flip($hashes);
 $addedRank = static fn(array $r): int => $byHash[$r['info_hash']] ?? PHP_INT_MAX;
+// Whether this reader is shown the hash of a row (the rule is spelt out where the rows are cut, below):
+// on your own list always, on somebody else's only with `index.magnet`. Asked HERE, before the search,
+// because a hash is only as withheld as it is unsearchable — matching a prefix and then blanking the
+// column let a stranger read a hidden hash back sixteen answers at a time (1.69.0; the rule the
+// likes / ratings list was built with, includes/profilevotes.php).
+$canMagnet = userCan($db, $cfg, 'index.magnet');
+$hashShown = $isOwn || $canMagnet;
 
 if ($search !== '') {
     // A LIKE over an array PHP already holds. This set is one person's favourites, capped at
@@ -122,9 +129,9 @@ if ($search !== '') {
         jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
     }
     $inFiles = $wantFiles ? favHashesMatchingFiles($db, $hashes, $search) : [];
-    $rows = array_values(array_filter($rows, static function (array $r) use ($needle, $inFiles) {
+    $rows = array_values(array_filter($rows, static function (array $r) use ($needle, $inFiles, $hashShown) {
         return ($r['name'] !== null && str_contains(mb_strtolower((string)$r['name']), $needle))
-            || str_starts_with($r['info_hash'], strtolower($needle))
+            || ($hashShown && str_starts_with($r['info_hash'], strtolower($needle)))
             || isset($inFiles[strtolower((string)$r['info_hash'])]);
     }));
 }
@@ -144,7 +151,6 @@ if ($col === 'added' && $desc) $rows = array_reverse($rows);
 
 $total = count($rows);
 $slice = array_slice($rows, ($page - 1) * $perPage, $perPage);
-$canMagnet = userCan($db, $cfg, 'index.magnet');
 foreach ($slice as &$r) {
     // The hash is not only a magnet HERE: it is the name the star posts back to un-star a row. A
     // reader who holds `favourites.use` and not `index.magnet` could add a favourite and then not
@@ -152,7 +158,7 @@ foreach ($slice as &$r) {
     // withheld only on somebody ELSE's list, where it would be a magnet and nothing else.
     // A banned row keeps it on the owner's own list for the same reason, and the page draws no
     // magnet for one (assets/js/favourites.js): a link that cannot work is worse than saying so.
-    if (!$canMagnet && !$isOwn) $r['info_hash'] = null;
+    if (!$hashShown) $r['info_hash'] = null;
     foreach (['total_size', 'files_count', 'seeders', 'leechers'] as $k) {
         $r[$k] = $r[$k] !== null ? (int)$r[$k] : null;
     }

@@ -1523,7 +1523,12 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     if (!$orderParts) $orderParts = ['score' => 'score DESC', 'seeders' => 'seeders DESC'];
     elseif (count($orderParts) === 1 && isset($orderParts['score'])) $orderParts['seeders'] = 'seeders DESC';
 
-    $isHash = $search !== '' && preg_match(INDEX_HASH_PREFIX_RE, $search);
+    // `hash_search` false (1.69.0): the caller's reader is not shown hashes (no `index.magnet`), so a
+    // hex term is searched as a NAME like any other word. Matching a prefix and then leaving the hash out
+    // of the rows let such a reader read a hash back from the counts, sixteen answers per digit — the
+    // same rule the profile's lists follow. Absent means yes: every other caller searches as before.
+    $isHash = $search !== '' && (!array_key_exists('hash_search', $q) || !empty($q['hash_search']))
+              && preg_match(INDEX_HASH_PREFIX_RE, $search);
     $ft = ($search !== '' && !$isHash && mb_strlen($search) >= 3) ? indexFulltextTerm($search) : '';
 
     /**

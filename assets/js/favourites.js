@@ -176,6 +176,29 @@
 
     /* ─────────────────────────── list rendering ─────────────────────────── */
 
+    /**
+     * Magnet and Info, the two things every row that names a torrent offers — a favourites or uploads
+     * row, a list's row, and a likes / ratings table row (1.69.0), which is why they live here once.
+     */
+    function addMagnetInfo(acts, r, trackers) {
+        // No magnet for a banned hash: the tracker refuses to serve it, and a link that cannot work
+        // is worse than saying so.
+        if (r.info_hash && !r.banned && trackers) {
+            // The word from the dictionary the search results' Magnet uses (js.app.magnet), not a
+            // literal: a translation that renames the button there has to reach these rows too.
+            acts.appendChild(el('a', { className: 'btn btn-small', href: magnetFor(r.info_hash, r.name, trackers), text: t('js.app.magnet') }));
+        }
+        // The same Info the search results have, opening the same panel — the markup for it is a
+        // partial these pages include now. A row that names a torrent and cannot say what it IS
+        // sends the reader back to the search page to type the name in again.
+        if (r.info_hash && window.TorrentInfo && document.getElementById('info-overlay')) {
+            var inf = el('button', { type: 'button', className: 'btn btn-secondary btn-small pf-info',
+                                     title: t('js.app.info_title'), text: t('js.app.info') });
+            inf.addEventListener('click', function () { window.TorrentInfo.open(r.info_hash, r.name || null); });
+            acts.appendChild(inf);
+        }
+    }
+
     function torrentRow(r, opts) {
         var row = el('div', { className: 'pf-row' });
         var main = el('div', { className: 'pf-main' });
@@ -236,20 +259,7 @@
         row.appendChild(meta);
 
         var acts = el('div', { className: 'pf-acts' });
-        // No magnet for a banned hash: the tracker refuses to serve it, and a link that cannot work
-        // is worse than saying so.
-        if (r.info_hash && !r.banned && opts.trackers) {
-            acts.appendChild(el('a', { className: 'btn btn-small', href: magnetFor(r.info_hash, r.name, opts.trackers), text: 'Magnet' }));
-        }
-        // The same Info the search results have, opening the same panel — the markup for it is a
-        // partial these pages include now. A row that names a torrent and cannot say what it IS
-        // sends the reader back to the search page to type the name in again.
-        if (r.info_hash && window.TorrentInfo && document.getElementById('info-overlay')) {
-            var inf = el('button', { type: 'button', className: 'btn btn-secondary btn-small pf-info',
-                                     title: t('js.app.info_title'), text: t('js.app.info') });
-            inf.addEventListener('click', function () { window.TorrentInfo.open(r.info_hash, r.name || null); });
-            acts.appendChild(inf);
-        }
+        addMagnetInfo(acts, r, opts.trackers);
         if (opts.star && r.info_hash) acts.appendChild(makeStar(r.info_hash, true));
         if (opts.visibility && r.info_hash) {
             var v = el('button', { type: 'button', className: 'pf-vis' + (r.public ? ' pf-vis-on' : ''),
@@ -1087,6 +1097,261 @@
         }
     }
 
+    /* ───────────────── likes / ratings: the account tab and the profile section ─────────────────
+     *
+     * The torrents a member voted on, as a table (1.69.0, includes/profilevotes.php): one component for
+     * both places, fed by api/user_votes.php, inside the shell templates/partials/votes_section.php
+     * renders. The header sorts (one column at a time, the search table's arrows), the toolbar filters
+     * — in star mode by a range of the member's own rating and of the overall average, in thumbs mode by
+     * which way they voted and how many votes a torrent has — and the favourites pager pages. Filters
+     * and the sort survive paging; changing either goes back to page 1.
+     *
+     * The server decides everything a reader may see: whether the list exists for them at all, which
+     * rows, whether a score is shown (never below the site's minimum number of votes), what the time
+     * reads in their zone. This only draws it — with textContent, a torrent's name being a stranger's
+     * text — and redraws it from the last answer on a live language switch, because the rows are the
+     * one part of this table the switch cannot reach (assets/js/lang-swap.js leaves script-built rows
+     * alone, and the render it fetches has an empty body).
+     */
+
+    /** Stars, in half steps, read-only: the Info panel's markup (a dim star under a clipped lit one). */
+    function starsReadOnly(value) {
+        var n = Math.max(0, Math.min(5, Math.round(Number(value) * 2) / 2));
+        var wrap = el('span', { className: 'stars pv-stars', role: 'img',
+                                'aria-label': t('js.votes.stars_aria', { n: n % 1 ? n.toFixed(1) : String(n) }) });
+        for (var i = 0; i < 5; i++) {
+            var full = n >= i + 1, half = !full && n >= i + 0.5;
+            wrap.appendChild(el('span', { className: 'star' + (full ? ' star-full' : half ? ' star-half' : ''), 'aria-hidden': 'true' }, [
+                el('span', { className: 'star-layer star-back' }, el('i', { className: 'bi bi-star-fill', 'aria-hidden': 'true' })),
+                el('span', { className: 'star-layer star-front' }, el('i', { className: 'bi bi-star-fill', 'aria-hidden': 'true' })),
+            ]));
+        }
+        return wrap;
+    }
+
+    /** A thumb, up or down — the icons of the Info panel's two buttons, filled, because this one is cast. */
+    function thumbFor(vote) {
+        var up = vote > 0, word = t(up ? 'js.votes.up' : 'js.votes.down');
+        return el('span', { className: 'pv-thumb ' + (up ? 'pv-thumb-up' : 'pv-thumb-down'), role: 'img', 'aria-label': word, title: word },
+                  el('i', { className: up ? 'bi bi-hand-thumbs-up-fill' : 'bi bi-hand-thumbs-down-fill', 'aria-hidden': 'true' }));
+    }
+
+    function initVotes() {
+        var root = document.getElementById('votes-section');
+        if (!root) return;
+        var byId = function (id) { return document.getElementById(id); };
+        var stars = root.dataset.mode === 'stars';
+        var mine = root.dataset.self === '1';
+        var user = root.dataset.user || '';
+        var trackers = trackersFrom(root);
+        var search = byId('pv-search'), files = byId('pv-files'), totalEl = byId('pv-total'), msg = byId('pv-msg');
+        var wrap = byId('pv-wrap'), table = byId('pv-table'), body = byId('pv-body'), pager = byId('pv-pager');
+        if (!table || !body) return;
+        // The filters of this mode, by the name the endpoint reads them under, and what each one is when
+        // it filters nothing.
+        var ctl = stars
+            ? { own_min: byId('pv-own-min'), own_max: byId('pv-own-max'), avg_min: byId('pv-avg-min'), avg_max: byId('pv-avg-max') }
+            : { vote: byId('pv-vote'), min_votes: byId('pv-min-votes') };
+        var IDLE = stars ? { own_min: '1', own_max: '10', avg_min: '0', avg_max: '500' } : { vote: 'all', min_votes: '0' };
+        // A column's first click sorts the way a reader asks first: names A to Z, everything else the
+        // most, the best or the newest first. A second click turns it round.
+        var FIRST = { name: 'asc' };
+        var heads = Array.prototype.slice.call(root.querySelectorAll('#pv-table .pv-sort'));
+        var sort = 'date', dir = 'desc', page = 1, seq = 0, timer = 0, last = null;
+
+        function valueOf(k) {
+            var c = ctl[k];
+            var v = c ? String(c.value).trim() : '';
+            return v === '' ? IDLE[k] : v;
+        }
+
+        function query(p) {
+            var q = 'user_votes&page=' + p + '&per_page=25&sort=' + sort + '&dir=' + dir;
+            if (user) q += '&user=' + encodeURIComponent(user);
+            var s = search ? search.value.trim() : '';
+            if (s) q += '&search=' + encodeURIComponent(s);
+            // Sent either way, as on a favourites list: the endpoint's own default is "yes", and a box
+            // somebody UNTICKED has to be able to say so.
+            if (files) q += '&files=' + (files.checked ? '1' : '0');
+            Object.keys(ctl).forEach(function (k) { if (ctl[k]) q += '&' + k + '=' + encodeURIComponent(valueOf(k)); });
+            return q;
+        }
+
+        /** Did the answer's own parameters narrow anything? Then an empty table means "nothing matches". */
+        function narrowed(pr) {
+            if (!pr) return false;
+            if (pr.search) return true;
+            return stars ? (pr.own_min > 1 || pr.own_max < 10 || pr.avg_min > 0 || pr.avg_max < 500)
+                         : (pr.vote !== 'all' || pr.min_votes > 0);
+        }
+
+        /** Put the controls on what the server actually used: a range given backwards comes back swapped. */
+        function sync(pr) {
+            if (!pr) return;
+            Object.keys(ctl).forEach(function (k) {
+                var c = ctl[k];
+                if (!c || pr[k] === undefined || c === document.activeElement) return;
+                if (String(c.value) !== String(pr[k])) c.value = String(pr[k]);
+            });
+        }
+
+        function paintSort() {
+            heads.forEach(function (b) {
+                var on = b.dataset.sort === sort;
+                var icon = b.querySelector('.search-sort-icon');
+                // The search table's three arrows (1.68.0): both ways while idle, one way while sorting.
+                if (icon) icon.className = on ? (dir === 'asc' ? 'bi bi-arrow-up search-sort-icon active' : 'bi bi-arrow-down search-sort-icon active')
+                                              : 'bi bi-arrow-down-up search-sort-icon';
+                b.classList.toggle('active', on);
+                var th = b.closest('th');
+                if (th) th.setAttribute('aria-sort', on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none');
+            });
+        }
+
+        /** The header's own words, for the labels a phone shows inside each card (they follow a language switch). */
+        function labels() {
+            var out = {};
+            table.querySelectorAll('thead th[data-col]').forEach(function (th) {
+                var b = th.querySelector('.pv-sort');
+                out[th.dataset.col] = String((b || th).textContent || '').replace(/\s+/g, ' ').trim();
+            });
+            return out;
+        }
+
+        function say(text) {
+            wrap.hidden = true;
+            msg.textContent = text;
+            msg.hidden = false;
+        }
+
+        // A value is one piece: on a phone, where the header's word stands in front of it, a line may
+        // break after that label but never inside the value ("2026-09-" on one line, "11" on the next).
+        function cell(col, lab, value) {
+            var v = typeof value === 'string' ? el('span', { className: 'pv-v', text: value }) : value;
+            return el('td', { className: 'pv-cell pv-' + col, 'data-label': lab[col] || null }, v === undefined ? null : v);
+        }
+
+        function scoreCell(r, lab, min) {
+            var c = cell('score', lab);
+            if (!r.score_shown) {
+                // Below the site's minimum a score is not a score, here as everywhere: a dash, and the
+                // count that is still missing in the tooltip.
+                c.textContent = '—';
+                c.classList.add('text-muted');
+                c.title = t(stars ? 'js.votes.too_few_stars' : 'js.votes.too_few_thumbs', { n: r.votes_count, min: min });
+                return c;
+            }
+            if (stars) {
+                var s = (r.score_x100 / 100).toFixed(1);
+                c.classList.add('search-rep-stars');
+                c.appendChild(document.createTextNode(s + ' '));
+                c.appendChild(el('i', { className: 'bi bi-star-fill', 'aria-hidden': 'true' }));
+                c.title = t('js.votes.avg_title', { stars: s, n: r.votes_count });
+            } else {
+                var pct = Math.round(r.score_x100 / 100);
+                c.classList.add(pct >= 50 ? 'search-rep-up' : 'search-rep-down');
+                c.textContent = pct + '%';
+                c.title = t('js.votes.score_title', { pct: pct, up: r.votes_up, down: r.votes_down });
+            }
+            return c;
+        }
+
+        function rowFor(r, lab, min) {
+            var tr = el('tr');
+            var name = el('td', { className: 'pv-cell pv-name' });
+            if (r.name) {
+                name.appendChild(el('span', { className: 'pv-title', title: r.name, text: r.name }));
+            } else {
+                // Gone from the catalogue (or not the reader's to see): the vote is still theirs.
+                name.appendChild(el('span', { className: 'pf-gone', title: t('js.fav.gone_title'), text: t('js.fav.gone') }));
+            }
+            if (r.banned) name.appendChild(el('span', { className: 'pf-badge pf-badge-bad', text: t('js.fav.blocked') }));
+            tr.appendChild(name);
+            tr.appendChild(cell('size', lab, fmtBytes(r.total_size)));
+            tr.appendChild(cell('sl', lab, r.seeders === null || r.seeders === undefined ? '—'
+                : r.seeders + ' / ' + (r.leechers === null || r.leechers === undefined ? '—' : r.leechers)));
+            tr.appendChild(cell('own', lab, stars ? starsReadOnly(r.own_vote / 2) : thumbFor(r.own_vote)));
+            tr.appendChild(scoreCell(r, lab, min));
+            tr.appendChild(cell('votes', lab, Number(r.votes_count || 0).toLocaleString()));
+            // The date in the cell, the whole moment with its offset in the tooltip — both in the
+            // reader's own zone, as the server wrote them.
+            var when = cell('date', lab, r.voted_at ? String(r.voted_at).slice(0, 10) : '—');
+            if (r.voted_full) when.title = r.voted_full;
+            tr.appendChild(when);
+            var acts = el('div', { className: 'pf-acts pv-acts-in' });
+            addMagnetInfo(acts, r, trackers);
+            tr.appendChild(el('td', { className: 'pv-cell pv-acts' }, acts));
+            return tr;
+        }
+
+        function render() {
+            var j = last;
+            if (!j) return;
+            paintSort();
+            totalEl.textContent = j.total ? t('js.votes.total', { n: Number(j.total).toLocaleString() }) : '';
+            body.textContent = '';
+            if (!j.rows.length) {
+                say(narrowed(j.params) ? t('js.votes.none_match')
+                    : mine ? t(stars ? 'js.votes.none_own_stars' : 'js.votes.none_own_thumbs') : t('js.fav.nothing'));
+                pager.textContent = '';
+                return;
+            }
+            var lab = labels();
+            j.rows.forEach(function (r) { body.appendChild(rowFor(r, lab, j.min_votes)); });
+            msg.hidden = true;
+            wrap.hidden = false;
+            renderPagerInto(pager, j.page, j.pages, load);
+        }
+
+        async function load(p) {
+            var mySeq = ++seq;
+            page = p || 1;
+            // The table stays while the next page is fetched, dimmed as the search table dims — only the
+            // very first load has nothing to show and says so.
+            if (last) table.classList.add('search-loading');
+            var j = await get(query(page));
+            if (mySeq !== seq) return;      // a newer question has been asked since: its answer is the one to draw
+            table.classList.remove('search-loading');
+            if (!j || !j.success) {
+                last = null;
+                totalEl.textContent = '';
+                pager.textContent = '';
+                say(j && j.error === 'login_required' ? t('js.app.search_login_required') : t('js.fav.load_failed'));
+                return;
+            }
+            last = j;
+            page = j.page;
+            sync(j.params);
+            render();
+        }
+
+        heads.forEach(function (b) {
+            b.addEventListener('click', function () {
+                var key = b.dataset.sort;
+                if (key === sort) dir = dir === 'asc' ? 'desc' : 'asc';
+                else { sort = key; dir = FIRST[key] || 'desc'; }
+                paintSort();
+                load(1);
+            });
+        });
+        if (search) search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 350); });
+        if (files) files.addEventListener('change', function () { load(1); });
+        Object.keys(ctl).forEach(function (k) {
+            var c = ctl[k];
+            if (!c) return;
+            if (c.tagName === 'SELECT') c.addEventListener('change', function () { load(1); });
+            else c.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 400); });
+        });
+        // Redrawn from the last answer in the new language — no second request for words. Without one (the
+        // first request failed, or is still on its way) there is nothing to redraw, and the switch has just
+        // put the render's "Loading…" back into the message: ask again, in the new language.
+        document.addEventListener('langswap', function () { if (last) render(); else load(page); });
+        // A vote changed in the Info panel opened from one of these rows (assets/js/app.js): the row is
+        // out of date, and this is the one list on the site that is about exactly that.
+        document.addEventListener('rating:changed', function () { load(page); });
+        load(1);
+    }
+
     /* ────────────────── "who has this in favourites" ────────────────── */
 
     function initWho() {
@@ -1183,13 +1448,18 @@
     function initTabs() {
         var bar = document.getElementById('acc-tabs');
         if (!bar) return;
-        var panes = ['overview', 'favourites', 'uploads', 'lists', 'messages', 'people', 'members', 'sounds'];
+        // Every pane the page may carry: a name missing here falls back to the overview (1.69.0 added
+        // `votes`, the likes / ratings tab right after Favourites).
+        var panes = ['overview', 'favourites', 'votes', 'uploads', 'lists', 'messages', 'people', 'members', 'sounds'];
         function show(name) {
             // `#messages:somebody` opens the inbox AT that conversation — the part before the colon
             // is the pane, the rest belongs to people.js. A tab bar that did not know that fell
             // back to the overview and left the reader looking at their e-mail preferences.
             name = String(name || '').split(':')[0];
-            if (panes.indexOf(name) === -1) name = 'overview';
+            // A name the router knows is not yet a pane THIS page carries: a link kept from before a
+            // feature was switched off (#votes, #sounds, #messages) found no pane by that name and hid
+            // every pane there was — an empty page. It lands on the overview instead (1.69.0).
+            if (panes.indexOf(name) === -1 || !document.getElementById('acc-pane-' + name)) name = 'overview';
             panes.forEach(function (p) {
                 var el2 = document.getElementById('acc-pane-' + p);
                 if (el2) el2.hidden = p !== name;
@@ -1241,7 +1511,7 @@
                 if (!r || !r.success) return;
             });
         }
-        [['acc-fav-public', 'fav_public'], ['acc-fav-listed', 'fav_listed'],
+        [['acc-fav-public', 'fav_public'], ['acc-fav-listed', 'fav_listed'], ['acc-votes-public', 'votes_public'],
          ['acc-lists-public', 'lists_public'], ['acc-profile-listed', 'profile_listed']].forEach(function (pair) {
             var input = document.getElementById(pair[0]);
             if (!input) return;
@@ -1263,6 +1533,7 @@
         initPrivacy();
         initProfile();
         initAccountTabs();
+        initVotes();
         initWho();
         initListPicker();   // before initLists(): the "+" asks whether the picker exists
         initListOverlay();

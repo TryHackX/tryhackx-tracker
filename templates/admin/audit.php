@@ -49,7 +49,7 @@
                     <th class="au-c-when"><?= _h('a.audit.c_when') ?></th>
                     <th class="au-c-who"><?= _h('a.audit.who') ?></th>
                     <th class="au-c-what"><?= _h('a.audit.c_what') ?></th>
-                    <th><?= _h('a.audit.c_summary') ?></th>
+                    <th class="au-c-sum"><?= _h('a.audit.c_summary') ?></th>
                     <th class="au-c-ip"><?= _h('a.audit.c_from') ?></th>
                 </tr></thead>
                 <tbody id="au-rows"></tbody>

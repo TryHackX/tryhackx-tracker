@@ -31,7 +31,9 @@ function auditActionGroups(): array {
         'auth'     => ['login.ok', 'login.fail', 'login.2fa_fail', 'logout', 'password.change', 'twofa.change'],
         // csp.clear is filed under settings, not 'other': it is a button on the Settings page and an
         // operator filtering that group is looking for "what did somebody change in Settings".
-        'settings' => ['settings.save', 'page.edit', 'page.layout', 'language.manage', 'csp.clear'],
+        // iconpack.*: Font Awesome packages (1.69.0) — installed, activated, their styles, deleted.
+        'settings' => ['settings.save', 'page.edit', 'page.layout', 'language.manage', 'csp.clear',
+                       'iconpack.install', 'iconpack.activate', 'iconpack.styles', 'iconpack.delete', 'iconpack.manage'],
         'content'  => ['content.approve', 'content.reject', 'content.clear', 'content.edit_apply', 'content.edit_reject'],
         'hashes'   => ['whitelist.add', 'whitelist.delete', 'whitelist.ban', 'whitelist.unban',
                        'index.delete', 'index.promote', 'blacklist.add', 'blacklist.delete'],
@@ -39,11 +41,13 @@ function auditActionGroups(): array {
         // 'user.create' was mapped from admin/user_create since the log was written and named in no
         // group, so every account the panel made was filed under 'other'. v1/users/provision writes
         // the same action now, which is how it was noticed.
-        'users'    => ['user.create', 'user.update', 'user.delete', 'user.grant', 'user.revoke', 'user.notify', 'group.save', 'group.delete', 'user.media'],
+        'users'    => ['user.create', 'user.update', 'user.delete', 'user.grant', 'user.revoke', 'user.notify', 'group.save', 'group.delete', 'user.media', 'user.bio'],
         'machine'  => ['tracker.mode', 'tracker.restart', 'tracker.reload', 'netlimit.apply', 'iplist.change', 'sysctl.apply',
                        'ot.apply', 'ot.cluster', 'livesync.apply', 'backup.run', 'backup.restore',
                        'backup.delete', 'backup.download', 'tuner.run'],
-        'mail'     => ['bulk.queue', 'bulk.cancel'],
+        // bulk.cancel and bulk.test are named by admin/bulk_send itself (auditNote 'action', 1.69.0):
+        // until then the router filed a cancel and a test copy as bulk.queue too.
+        'mail'     => ['bulk.queue', 'bulk.cancel', 'bulk.test'],
         'api'      => ['api_client.create', 'api_client.update', 'api_client.delete', 'api_ban.add', 'api_ban.lift'],
     ];
 }
@@ -257,6 +261,7 @@ function auditEndpointAction(string $endpoint): ?string {
         'admin/user_create'           => 'user.create',
         'admin/user_update'           => 'user.update',
         'admin/user_media'            => 'user.media',
+        'admin/user_bio'              => 'user.bio',
         'admin/user_delete'           => 'user.delete',
         'admin/user_grant'            => 'user.grant',
         'admin/user_revoke'           => 'user.revoke',
@@ -270,6 +275,9 @@ function auditEndpointAction(string $endpoint): ?string {
         'admin/page_content'          => 'page.edit',
         'admin/home_layout'           => 'page.layout',
         'admin/languages'             => 'language.manage',
+        // The endpoint writes iconpack.install / .activate / .delete itself; this names the line the
+        // router writes when a request stops before that (a wrong password).
+        'admin/iconpacks'             => 'iconpack.manage',
         'admin/net_apply'             => 'netlimit.apply',
         'admin/ip_list_action'        => 'iplist.change',
         'admin/sysctl_apply'          => 'sysctl.apply',
@@ -357,12 +365,15 @@ function auditFinish(array $data, int $code): void {
         if (($cfg['audit_enabled'] ?? '1') !== '1') return;
 
         $ok = $code < 400 && empty($data['error']);
+        $note = (array)($GLOBALS['__audit_note'] ?? []);
+        // An endpoint that does several things names the one this request did (1.69.0: admin/bulk_send
+        // queues, cancels and sends a test copy, and was logged as bulk.queue for all three).
         // A failed sign-in is the one thing worth recording under a different name: it is the line
         // somebody looks for after the fact, and calling it "login.ok that failed" hides it.
-        $action = auditEndpointAction($endpoint) ?? str_replace(['admin/', 'v1/'], ['panel.', 'api.'], $endpoint);
+        $action = (string)($note['action'] ?? '');
+        if ($action === '') $action = auditEndpointAction($endpoint) ?? str_replace(['admin/', 'v1/'], ['panel.', 'api.'], $endpoint);
         if ($action === 'login.ok' && !$ok) $action = 'login.fail';
 
-        $note = (array)($GLOBALS['__audit_note'] ?? []);
         $summary = (string)($note['summary'] ?? '');
         if ($summary === '') {
             $summary = $ok

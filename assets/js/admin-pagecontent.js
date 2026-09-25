@@ -47,10 +47,12 @@
         // The icon font the public page carries, and — with Font Awesome chosen — the same classes the
         // public page would get: the frame runs no script of its own, so the markup is mapped here,
         // before it goes in (assets/js/icons.js; absent with Bootstrap Icons, whose markup it already is).
-        const q = (s) => String(s || '').replace(/"/g, '&quot;');
-        const icons = fr.dataset.iconCss
-            ? '<link rel="stylesheet" href="' + q(fr.dataset.iconCss) + '" integrity="' + q(fr.dataset.iconSri) + '" crossorigin="anonymous">'
-            : '';
+        const q = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+        // A package (1.69.0) is several stylesheets, space-separated (a URL has no space), served by this
+        // site without SRI; the jsDelivr builds are one, with its integrity value.
+        const hrefs = String(fr.dataset.iconCss || '').split(/\s+/).filter(Boolean);
+        const icons = hrefs.map((h) => '<link rel="stylesheet" href="' + q(h) + '"'
+            + (hrefs.length === 1 && fr.dataset.iconSri ? ' integrity="' + q(fr.dataset.iconSri) + '" crossorigin="anonymous"' : '') + '>').join('');
         if (window.IconLibrary) html = window.IconLibrary.html(html);
         fr.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><base href="' + base.replace(/"/g, '&quot;') + '">'
             + icons + '<link rel="stylesheet" href="' + css.replace(/"/g, '&quot;') + '">'

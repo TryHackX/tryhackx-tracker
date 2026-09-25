@@ -39,6 +39,10 @@ require_once __DIR__ . '/includes/sounds.php';
 require_once __DIR__ . '/includes/shout.php';
 // Pictures and profile covers (v69): the pipeline, the stream and userAvatarUrl()/userAvatarHtml().
 require_once __DIR__ . '/includes/usermedia.php';
+// The description on a profile (v74): its renderer, its rules and the save the endpoint runs.
+require_once __DIR__ . '/includes/profilebio.php';
+// A member's likes or ratings on the profile (v75): the gate, the parameters and the one query.
+require_once __DIR__ . '/includes/profilevotes.php';
 require_once __DIR__ . '/includes/lists.php';
 require_once __DIR__ . '/includes/people.php';
 require_once __DIR__ . '/includes/user2fa.php';
@@ -233,6 +237,8 @@ $apiRoutes = [
     'admin/home_layout'          => 'api/admin/home_layout.php',
     'admin/languages'            => 'api/admin/languages.php',
     'admin/sounds'               => 'api/admin/sounds.php',
+    // Font Awesome packages (1.69.0, includes/iconpack.php) — owner only, like the rest of Settings.
+    'admin/iconpacks'            => 'api/admin/iconpacks.php',
 
     'admin/index_poll_now'       => 'api/admin/index_poll_now.php',
     // ── API clients / bans (admin) ──
@@ -295,6 +301,9 @@ $apiRoutes = [
     'shout_emote_upload'         => 'api/shout_emote_upload.php',
     'shout_emote_delete'         => 'api/shout_emote_delete.php',
     'admin/shout_emotes'         => 'api/admin/shout_emotes.php',
+    // Font Awesome's faces for the picker (1.69.0, includes/emoji.php); the ordinary emoji are a static
+    // file under assets/emoji/ and never pass through here.
+    'shout_emoji'                => 'api/shout_emoji.php',
     // Pictures and profile covers (1.63.0, includes/usermedia.php). `user_avatar` / `user_cover` are a
     // member's own (upload + framing in one multipart request, reframe, remove); `user_media` streams
     // one stored image by a hash prefix and a size, and `user_avatar_default` the generated letter —
@@ -305,6 +314,10 @@ $apiRoutes = [
     'user_media'                 => 'api/user_media.php',
     'user_avatar_default'        => 'api/user_avatar_default.php',
     'admin/user_media'           => 'api/admin/user_media.php',
+    // The description on a profile (1.69.0, includes/profilebio.php): a member's own save, and the
+    // panel's clear (panel.users.edit, like taking a picture down).
+    'profile_bio'                => 'api/profile_bio.php',
+    'admin/user_bio'             => 'api/admin/user_bio.php',
     'richtext_preview'           => 'api/richtext_preview.php',
     'rate_hash'                  => 'api/rate_hash.php',
     // ── People reaching each other (includes/people.php) ──
@@ -316,6 +329,9 @@ $apiRoutes = [
     'user_list_items'            => 'api/user_list_items.php',
     // ── Favourites, profiles and uploads (includes/favourites.php) ──
     'user_favourites'            => 'api/user_favourites.php',
+    // A member's likes or ratings (1.69.0, includes/profilevotes.php): GET only, the same 404 for
+    // every no that the favourites list gives.
+    'user_votes'                 => 'api/user_votes.php',
     'hash_favourites'            => 'api/hash_favourites.php',
     'user_uploads'               => 'api/user_uploads.php',
     'user_privacy'               => 'api/user_privacy.php',
@@ -446,6 +462,8 @@ function adminEndpointPermission(string $endpoint): ?string {
         // own default images live on the same endpoint and are Settings, so the endpoint asks the
         // owner question itself for those operations (api/admin/user_media.php).
         'admin/user_media'         => 'panel.users.edit',
+        // Clearing a member's description is the same authority as taking their picture down (1.69.0).
+        'admin/user_bio'           => 'panel.users.edit',
         'admin/user_notify'        => 'panel.users.notify',
         'admin/user_grant'         => 'panel.users.groups',
         'admin/audit_log'          => 'panel.audit.view',

@@ -25,6 +25,12 @@ $op = (string)($input['op'] ?? '');
 if (!in_array($op, ['list', 'approve', 'reject', 'clear', 'edits', 'edit_apply', 'edit_reject'], true)) {
     jsonResponse(['error' => __('api.content.unknown_op')], 400);
 }
+// The Review tab's two reads — the queue and the proposed rewrites — write nothing to the audit log
+// (1.69.0): the router logged each as `content.review`, one line per visit and per page of the queue.
+// A decision is named for what it was (content.approve … content.edit_reject), which is what the log's
+// Content group lists and what nothing wrote until now: every decision was filed under `content.review`.
+if ($op === 'list' || $op === 'edits') auditSuppress();
+else auditNote(['action' => 'content.' . $op]);
 
 /**
  * The picture beside the author's name on a card (1.63.0): an ADDRESS built from the columns the

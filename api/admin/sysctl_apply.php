@@ -27,6 +27,8 @@ $op = (string)($input['op'] ?? '');
 if (!in_array($op, ['preview', 'arm', 'confirm', 'revert'], true)) {
     jsonResponse(['error' => __('api.admin.unknown_op')], 400);
 }
+// A preview is a read (1.69.0), refused or not: the router logged every one as `sysctl.apply`.
+if ($op === 'preview') auditSuppress();
 if (!sysctlEnabled($cfg)) {
     jsonResponse(['error' => __('api.sysctl.not_enabled')], 400);
 }

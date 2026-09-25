@@ -55,6 +55,11 @@
         </div>
 
         <form id="settings-form">
+            <?php /* THE SECTIONS ARE IN THE ORDER OF THE GROUPS (1.69.0). "All settings" is this document's
+                     order (assets/js/admin-settings.js puts a search's reordering back to it), so it reads
+                     group by group, in the sub-menu's order (settingsCatalogGroups()); inside a group the
+                     section holding the group's own switch comes first. A new section goes at the end of
+                     its group — tests/admin_access_test.php holds the page to that. */ ?>
             <!-- Site Configuration -->
             <div class="settings-section" id="section-site" data-group="general" data-title="<?= _h('settings.site_heading') ?>">
                 <h5><?= _h('settings.site_heading') ?></h5>
@@ -115,6 +120,348 @@
                             <option value="fontawesome" <?= $iconLibNow === 'fontawesome' ? 'selected' : '' ?>><?= _h('settings.icon_library_fontawesome') ?></option>
                         </select>
                         <small class="settings-hint"><?= __('settings.icon_library_hint') ?></small>
+                    </div>
+                </div>
+                <?php /* Which Font Awesome (v76): Free 6.7.2 or 7.3.1 from jsDelivr, or a package the owner
+                         installed (includes/iconpack.php) — its style files, the style the site's own icons
+                         use, and the packages themselves. Here, beside the library choice, because it is the
+                         second half of the same question. The selects are settings and save with the page;
+                         the package table, the uploads and the preview are drawn and driven by
+                         assets/js/admin-iconpacks.js and talk to admin/iconpacks (every write there asks for
+                         the password). Nothing below has a name="" that is not a setting. */ ?>
+                <?php
+                $faSetup = iconSetup(['icon_library' => 'fontawesome'] + $cfg);
+                $faPacks = array_values(array_filter(iconpackList(), fn($p) => empty($p['broken'])));
+                $faSourceNow = iconFaSource($cfg);
+                $faPackNow = (string)($cfg['fa_pack'] ?? '');
+                ?>
+                <h6 class="mt-4 mb-1" id="section-site-fontawesome"><i class="bi bi-palette"></i> <?= _h('settings.fa_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.fa_heading_sub') ?></small></h6>
+                <div class="row g-3" id="fa-settings" data-library="<?= sanitize(iconLibrary($cfg)) ?>">
+                    <div class="col-md-4" data-setting="fa_source">
+                        <label class="form-label" for="setting-fa_source"><?= _h('settings.fa_source') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fa_source" id="setting-fa_source">
+                            <option value="cdn6" <?= $faSourceNow === 'cdn6' ? 'selected' : '' ?>><?= _h('settings.fa_source_cdn6') ?></option>
+                            <option value="cdn7" <?= $faSourceNow === 'cdn7' ? 'selected' : '' ?>><?= _h('settings.fa_source_cdn7') ?></option>
+                            <option value="pack" <?= $faSourceNow === 'pack' ? 'selected' : '' ?><?= !$faPacks && $faSourceNow !== 'pack' ? ' disabled' : '' ?>><?= _h('settings.fa_source_pack') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.fa_source_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="fa_pack">
+                        <label class="form-label" for="setting-fa_pack"><?= _h('settings.fa_pack') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fa_pack" id="setting-fa_pack">
+                            <?php if (!$faPacks): ?>
+                            <option value=""><?= _h('settings.fa_pack_none') ?></option>
+                            <?php endif; ?>
+                            <?php foreach ($faPacks as $fp): ?>
+                            <option value="<?= sanitize($fp['id']) ?>" <?= $fp['id'] === $faPackNow ? 'selected' : '' ?>>Font Awesome <?= sanitize(ucfirst($fp['edition']) . ' ' . $fp['version']) ?> — <?= sanitize($fp['id']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.fa_pack_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="fa_style">
+                        <label class="form-label" for="setting-fa_style"><?= _h('settings.fa_style') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fa_style" id="setting-fa_style">
+                            <?php foreach (iconFaStyleChoices($faSetup) as $fk => $fl): ?>
+                            <option value="<?= sanitize($fk) ?>" <?= $fk === $faSetup['style'] ? 'selected' : '' ?>><?= sanitize($fl) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.fa_style_hint') ?></small>
+                    </div>
+                    <?php if ($faSetup['fallback'] === 'pack_missing'): ?>
+                    <div class="col-12"><div class="alert alert-warning py-2 wl-small mb-0"><i class="bi bi-exclamation-triangle"></i> <?= _h('settings.fa_pack_gone', ['id' => $faPackNow]) ?></div></div>
+                    <?php endif; ?>
+                    <div class="col-12" data-setting="fa_pack_styles">
+                        <input type="hidden" name="fa_pack_styles" id="setting-fa_pack_styles" value="<?= sanitize(json_encode(iconFaPackStyles($cfg))) ?>">
+                        <div class="ip-styles" id="ip-styles" hidden>
+                            <div class="ip-styles-head"><label class="form-label mb-0"><?= _h('settings.fa_pack_styles') ?></label>
+                                <span class="settings-hint" id="ip-styles-core"></span></div>
+                            <div class="ip-styles-grid" id="ip-styles-grid"></div>
+                            <small class="settings-hint"><?= __('settings.fa_pack_styles_hint') ?></small>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="ip-preview-head">
+                            <label class="form-label mb-0" for="ip-preview"><?= _h('settings.fa_preview') ?></label>
+                            <span class="settings-hint" id="ip-preview-note"></span>
+                        </div>
+                        <?php // An iframe: a preview of a setup that is not saved yet needs its own stylesheets,
+                              // and Font Awesome 6 and 7 cannot share one document (both define .fa-solid). It
+                              // carries the public stylesheet, as the page-content preview does, so the icon rules
+                              // there are the ones a visitor gets. ?>
+                        <iframe class="ip-preview" id="ip-preview" title="<?= _h('settings.fa_preview_frame') ?>" sandbox="allow-same-origin"
+                                data-css="<?= $baseUrl ?>assets/css/style.css<?= assetVer('assets/css/style.css') ?>" data-base="<?= sanitize($baseUrl) ?>"></iframe>
+                        <div class="ip-coverage" id="ip-coverage" aria-live="polite"></div>
+                    </div>
+                </div>
+                <div class="mt-4 ip-manager" id="admin-iconpacks">
+                    <div class="admin-sounds-head">
+                        <label class="form-label mb-0"><?= _h('settings.fa_packages') ?></label>
+                        <span class="admin-sounds-count" id="ip-count" hidden></span>
+                    </div>
+                    <div id="ip-list" class="mb-3"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
+                    <div class="ip-add">
+                        <h6 class="admin-sound-add-title"><i class="bi bi-plus-circle"></i> <?= _h('settings.fa_add_heading') ?></h6>
+                        <?php /* The same drop zone as the sounds, the languages and the address lists. The file
+                                 input has no name: it never travels with the settings form — the script posts it to
+                                 admin/iconpacks as multipart, with the password it asks for first. */ ?>
+                        <div class="ipl-drop ipl-drop-wide" id="ip-drop" tabindex="0" role="button" aria-label="<?= _h('settings.fa_drop_aria') ?>">
+                            <i class="bi bi-file-earmark-arrow-up ipl-drop-icon"></i>
+                            <span class="ipl-drop-main"><u><?= _h('settings.fa_drop_choose') ?></u> <?= _h('settings.fa_drop_or') ?></span>
+                            <span class="ipl-drop-sub" id="ip-drop-sub"><?= _h('settings.fa_drop_sub') ?></span>
+                            <input type="file" id="ip-file" class="ipl-drop-input" accept=".zip,application/zip">
+                        </div>
+                        <div class="admin-sound-add-row">
+                            <button type="button" class="btn btn-sm btn-info" id="ip-upload"><i class="bi bi-upload"></i> <?= _h('settings.fa_upload') ?></button>
+                        </div>
+                        <div class="admin-sound-add-row ip-path-row">
+                            <input type="text" id="ip-path" class="form-control form-control-sm bg-dark text-light border-secondary"
+                                   placeholder="<?= _h('settings.fa_path_ph') ?>" aria-label="<?= _h('settings.fa_path_label') ?>" autocomplete="off" spellcheck="false">
+                            <button type="button" class="btn btn-sm btn-outline-info" id="ip-install-path"><i class="bi bi-hdd"></i> <?= _h('settings.fa_path_install') ?></button>
+                        </div>
+                        <div class="ip-report" id="ip-report" hidden></div>
+                    </div>
+                    <small class="settings-hint"><?= __('settings.fa_packages_hint') ?></small>
+                </div>
+            </div>
+
+            <!-- Donation Fields -->
+            <div class="settings-section" id="section-donations" data-group="general" data-title="<?= _h('settings.donations_title') ?>">
+                <h5><?= _h('settings.donations_title') ?></h5>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.donations_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="donations_enabled">
+                            <option value="1" <?= ($cfg['donations_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.donations_yes') ?></option>
+                            <option value="0" <?= ($cfg['donations_enabled'] ?? '0') === '0' ? 'selected' : '' ?>><?= _h('settings.donations_no') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <small class="settings-hint"><?= _h('settings.donations_hint') ?></small>
+                    </div>
+                </div>
+                <?php
+                    $donationFields = json_decode($cfg['donation_fields'] ?? '[]', true);
+                    if (!is_array($donationFields)) $donationFields = [];
+                ?>
+                <div id="donation-fields-list" class="mt-2" data-setting="donation_fields">
+                    <?php foreach ($donationFields as $i => $field): ?>
+                    <div class="row g-2 mb-2 donation-field-row">
+                        <div class="col-md-3">
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="<?= _h('settings.donation_field_label_ph') ?>" value="<?= sanitize($field['label'] ?? '') ?>" data-df="label">
+                        </div>
+                        <div class="col">
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="<?= _h('settings.donation_field_value_ph') ?>" value="<?= sanitize($field['value'] ?? '') ?>" data-df="value">
+                        </div>
+                        <div class="col-auto">
+                            <button type="button" class="btn btn-sm btn-outline-danger donation-field-remove" title="<?= _h('settings.donation_field_remove_title') ?>"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-info mt-1" id="donation-field-add" data-setting="donation_fields"><i class="bi bi-plus-lg"></i> <?= _h('settings.donation_field_add') ?></button>
+            </div>
+
+            <!-- Transparency Page -->
+            <div class="settings-section" id="section-transparency" data-group="general" data-title="<?= _h('settings.transparency_title') ?>">
+                <h5><?= _h('settings.transparency_title') ?></h5>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.transparency_enable') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="transparency_enabled">
+                            <option value="1" <?= ($cfg['transparency_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.stats_opt_yes') ?></option>
+                            <option value="0" <?= ($cfg['transparency_enabled'] ?? '0') === '0' ? 'selected' : '' ?>><?= _h('settings.stats_opt_no') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.transparency_per_page') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="transparency_per_page" value="<?= sanitize($cfg['transparency_per_page'] ?? '150') ?>" min="10" max="500">
+                    </div>
+                </div>
+            </div>
+
+            <!-- The home page's own layout — includes/homelayout.php -->
+            <div class="settings-section" id="section-home-layout" data-group="general" data-title="<?= _h('settings.home_title') ?>">
+                <h5><?= _h('settings.home_title') ?></h5>
+                <p class="settings-hint mb-3"><?= __('settings.home_intro') ?></p>
+                <div class="pc-card" data-page="home" data-setting="home_layout">
+                    <div class="pc-head">
+                        <span class="pc-title"><?= _h('settings.home_front_page') ?></span>
+                        <?php if (function_exists('homeLayoutIsDefault') && homeLayoutIsDefault($cfg)): ?>
+                            <span class="wl-badge wl-b-muted"><?= _h('settings.home_badge_builtin') ?></span>
+                        <?php else: ?>
+                            <span class="wl-badge wl-b-ok"><?= _h('settings.home_badge_rearranged') ?></span>
+                        <?php endif; ?>
+                    </div>
+                    <div class="pc-meta">
+                        <?php if (function_exists('homeLayout')):
+                            $hl = homeLayout($cfg);
+                            $hlBits = [];
+                            if ($hl['hidden']) $hlBits[] = count($hl['hidden']) === 1 ? __('settings.home_meta_hidden_one') : __('settings.home_meta_hidden_many', ['n' => count($hl['hidden'])]);
+                            if ($hl['headings']) $hlBits[] = count($hl['headings']) === 1 ? __('settings.home_meta_renamed_one') : __('settings.home_meta_renamed_many', ['n' => count($hl['headings'])]);
+                            if ($hl['tagline'] !== null) $hlBits[] = __('settings.home_meta_tagline');
+                            if ($hl['order'] !== homeSectionKeys()) array_unshift($hlBits, __('settings.home_meta_reordered'));
+                            echo $hlBits ? sanitize(ucfirst(implode(', ', $hlBits))) . '.'
+                                         : _h('settings.home_meta_default');
+                        endif; ?>
+                    </div>
+                    <div class="pc-acts">
+                        <button type="button" class="btn btn-sm btn-outline-info" id="hl-open">
+                            <i class="bi bi-grid-1x2"></i> <?= _h('settings.home_arrange') ?>
+                        </button>
+                        <a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener" href="<?= $baseUrl ?>">
+                            <i class="bi bi-box-arrow-up-right"></i> <?= _h('settings.home_view') ?>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Site pages the operator can rewrite — includes/pagecontent.php -->
+            <div class="settings-section" id="section-pages" data-group="general" data-title="<?= _h('settings.pages_title') ?>">
+                <h5><?= _h('settings.pages_heading_2') ?></h5>
+                <p class="settings-hint mb-2"><?= __('settings.pages_intro1') ?></p>
+                <p class="settings-hint mb-2"><?= __('settings.pages_intro2') ?></p>
+                <p class="settings-hint mb-3"><?= __('settings.pages_intro3') ?></p>
+                <div class="row g-3" id="pc-rows"><?php
+                $pcAll   = function_exists('pageContentAll') ? pageContentAll($db) : [];
+                $pcLangs = function_exists('langAvailable') ? langAvailable() : ['en' => 'English'];
+                foreach (pageContentCatalog() as $pcKey => $pcMeta):
+                    $pcRows = $pcAll[$pcKey] ?? [];
+                    $pcLive = count(array_filter($pcRows, fn($r) => $r['enabled']));
+                ?>
+                    <div class="col-md-6">
+                        <div class="pc-card" data-page="<?= sanitize($pcKey) ?>">
+                            <div class="pc-head">
+                                <span class="pc-title"><?= sanitize($pcMeta['label']) ?></span>
+                                <?php if ($pcLive): ?>
+                                    <span class="wl-badge wl-b-ok"><?= _h('settings.pages_badge_live') ?></span>
+                                <?php elseif ($pcRows): ?>
+                                    <span class="wl-badge wl-b-warn"><?= _h('settings.pages_badge_draft') ?></span>
+                                <?php else: ?>
+                                    <span class="wl-badge wl-b-muted"><?= _h('settings.pages_badge_builtin') ?></span>
+                                <?php endif; ?>
+                            </div>
+                            <div class="pc-meta">
+                                <?php if ($pcRows): ?>
+                                    <?= _h('settings.pages_meta_written', ['n' => count($pcRows), 'total' => count($pcLangs)]) ?>
+                                <?php else: ?>
+                                    <?= _h('settings.pages_meta_never') ?>
+                                <?php endif; ?>
+                            </div>
+                            <?php // One chip per installed language: click it to edit that language directly, and
+                                  // the dot says whether it is live, a draft, or not written yet. ?>
+                            <div class="pc-langrow">
+                                <?php foreach ($pcLangs as $pcCode => $pcName):
+                                    $pcOne = $pcRows[$pcCode] ?? null;
+                                    $pcSt  = $pcOne ? ($pcOne['enabled'] ? 'live' : 'draft') : 'none';
+                                ?>
+                                <button type="button" class="pc-lang pc-edit" data-page="<?= sanitize($pcKey) ?>"
+                                        data-lang="<?= sanitize($pcCode) ?>"
+                                        title="<?= sanitize($pcName) ?> &mdash; <?= $pcSt === 'live' ? _h('settings.pages_lang_live') : ($pcSt === 'draft' ? _h('settings.pages_lang_draft') : _h('settings.pages_lang_none')) ?>">
+                                    <span class="pc-lang-code"><?= sanitize(strtoupper($pcCode)) ?></span>
+                                    <span class="pc-lang-dot pc-dot-<?= $pcSt ?>"></span>
+                                </button>
+                                <?php endforeach; ?>
+                            </div>
+                            <div class="pc-acts">
+                                <button type="button" class="btn btn-sm btn-outline-info pc-edit" data-page="<?= sanitize($pcKey) ?>">
+                                    <i class="bi bi-pencil-square"></i> <?= _h('settings.pages_edit') ?>
+                                </button>
+                                <a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener"
+                                   href="<?= $baseUrl ?>?action=<?= sanitize($pcMeta['route']) ?>">
+                                    <i class="bi bi-box-arrow-up-right"></i> <?= _h('settings.pages_view') ?>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                <?php endforeach; ?></div>
+            </div>
+
+            <!-- Footer -->
+            <div class="settings-section" id="section-footer" data-group="general" data-title="<?= _h('settings.footer_heading') ?>">
+                <h5><?= _h('settings.footer_heading') ?></h5>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.footer_start_year') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="footer_start_year" value="<?= sanitize($cfg['footer_start_year'] ?? date('Y')) ?>" min="2020" max="2099">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.version_where') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="version_display">
+                            <?php foreach (['panel' => 'settings.version_panel', 'public' => 'settings.version_public',
+                                            'both' => 'settings.version_both', 'none' => 'settings.version_none'] as $vOpt => $vKey): ?>
+                            <option value="<?= $vOpt ?>" <?= ($cfg['version_display'] ?? 'panel') === $vOpt ? 'selected' : '' ?>><?= _h($vKey) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.version_where_hint', ['v' => sanitize(TRACKER_VERSION)]) ?></small>
+                    </div>
+                </div>
+
+                <div class="row g-3 mt-2">
+                    <div class="col-12"><small class="text-info"><?= _h('settings.footer_el1') ?></small></div>
+                    <div class="col-md-2">
+                        <label class="form-label"><?= _h('settings.footer_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="footer_brand_enabled">
+                            <option value="1" <?= ($cfg['footer_brand_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.footer_yes') ?></option>
+                            <option value="0" <?= ($cfg['footer_brand_enabled'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.footer_no') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label"><?= _h('settings.footer_name') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_brand_name" value="<?= sanitize($cfg['footer_brand_name'] ?? 'TryHackX') ?>">
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label"><?= _h('settings.footer_url') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_brand_url" value="<?= sanitize($cfg['footer_brand_url'] ?? '') ?>">
+                    </div>
+                </div>
+
+                <div class="row g-3 mt-2">
+                    <div class="col-12"><small class="text-info"><?= _h('settings.footer_el2') ?></small></div>
+                    <div class="col-md-2">
+                        <label class="form-label"><?= _h('settings.footer_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="footer_tracker_enabled">
+                            <option value="1" <?= ($cfg['footer_tracker_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.footer_yes') ?></option>
+                            <option value="0" <?= ($cfg['footer_tracker_enabled'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.footer_no') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label"><?= _h('settings.footer_name') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_tracker_name" value="<?= sanitize($cfg['footer_tracker_name'] ?? 'OpenTracker') ?>">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.footer_url') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_tracker_url" value="<?= sanitize($cfg['footer_tracker_url'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label"><?= _h('settings.footer_author') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_tracker_author" value="<?= sanitize($cfg['footer_tracker_author'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.footer_author_url') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_tracker_author_url" value="<?= sanitize($cfg['footer_tracker_author_url'] ?? '') ?>">
+                    </div>
+                </div>
+
+                <div class="row g-3 mt-2">
+                    <div class="col-12"><small class="text-info"><?= _h('settings.footer_element3') ?></small></div>
+                    <div class="col-md-2">
+                        <label class="form-label"><?= _h('settings.footer_os_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="footer_os_enabled">
+                            <option value="1" <?= ($cfg['footer_os_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.footer_os_yes') ?></option>
+                            <option value="0" <?= ($cfg['footer_os_enabled'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.footer_os_no') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.footer_os_name') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_os_name" value="<?= sanitize($cfg['footer_os_name'] ?? 'Debian') ?>">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.footer_os_url') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_os_url" value="<?= sanitize($cfg['footer_os_url'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.footer_os_since_year') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="footer_os_since_year" value="<?= sanitize($cfg['footer_os_since_year'] ?? date('Y')) ?>" min="2000" max="2099">
                     </div>
                 </div>
             </div>
@@ -179,6 +526,41 @@
                     <div class="col-12">
                         <label class="form-label"><?= _h('settings.mail_hmac') ?></label>
                         <input type="text" class="form-control bg-dark text-light border-secondary" name="hmac_secret" value="<?= sanitize($cfg['hmac_secret'] ?? '') ?>">
+                    </div>
+                </div>
+            </div>
+
+            <?php /* The digest. Its own section rather than a row in "Public pages", because it is the
+                     one mail this site sends to the OPERATOR — everything else goes to a visitor —
+                     and because the queues it reports are the whole reason the panel has a badge.
+                     Under Contact & email since 1.69.0 (it was under Site & pages): what it asks for is
+                     a recipient, an interval and a threshold, which is a question about mail. */ ?>
+            <div class="settings-section" id="section-digest" data-group="mail" data-title="<?= _h('settings.digest_heading') ?>">
+                <h5><i class="bi bi-envelope-paper"></i> <?= _h('settings.digest_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.digest_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="digest_enabled">
+                        <label class="form-label"><?= _h('settings.digest_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="digest_enabled">
+                            <option value="0" <?= ($cfg['digest_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.digest_off') ?></option>
+                            <option value="1" <?= ($cfg['digest_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.digest_on') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.digest_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="digest_to">
+                        <label class="form-label"><?= _h('settings.digest_to') ?></label>
+                        <input type="email" class="form-control bg-dark text-light border-secondary" name="digest_to" value="<?= sanitize($cfg['digest_to'] ?? '') ?>" placeholder="<?= sanitize($cfg['site_email'] ?? 'ops@example.org') ?>">
+                        <small class="settings-hint"><?= _h('settings.digest_to_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="digest_hours">
+                        <label class="form-label"><?= _h('settings.digest_hours') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="digest_hours" value="<?= sanitize($cfg['digest_hours'] ?? '24') ?>" min="1" max="168">
+                        <small class="settings-hint"><?= _h('settings.digest_hours_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="digest_min">
+                        <label class="form-label"><?= _h('settings.digest_min') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="digest_min" value="<?= sanitize($cfg['digest_min'] ?? '1') ?>" min="0" max="10000">
+                        <small class="settings-hint"><?= _h('settings.digest_min_hint') ?></small>
                     </div>
                 </div>
             </div>
@@ -340,1691 +722,13 @@
                 </div>
             </div>
 
-            <!-- Public Pages -->
-            <div class="settings-section" id="section-public-pages" data-group="general" data-title="<?= _h('settings.pages_heading') ?>">
-                <h5><?= _h('settings.pages_heading') ?></h5>
-                <div class="row g-3">
-                    <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.pages_archive_reports') ?> <small class="settings-hint"><?= _h('settings.pages_zero_disabled') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="auto_archive_days" value="<?= sanitize($cfg['auto_archive_days'] ?? '90') ?>" min="0" max="9999">
-                        <small class="settings-hint"><?= _h('settings.pages_archive_reports_hint') ?></small>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.pages_archive_appeals') ?> <small class="settings-hint"><?= _h('settings.pages_zero_disabled') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="auto_archive_appeal_days" value="<?= sanitize($cfg['auto_archive_appeal_days'] ?? '90') ?>" min="0" max="9999">
-                        <small class="settings-hint"><?= _h('settings.pages_archive_appeals_hint') ?></small>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.pages_email_log') ?> <small class="settings-hint"><?= _h('settings.pages_email_log_sub') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="sent_emails_retention_days" value="<?= sanitize($cfg['sent_emails_retention_days'] ?? '0') ?>" min="0" max="9999">
-                        <small class="settings-hint"><?= _h('settings.pages_email_log_hint') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <?php /* The digest. Its own section rather than a row in "Public pages", because it is the
-                     one mail this site sends to the OPERATOR — everything else goes to a visitor —
-                     and because the queues it reports are the whole reason the panel has a badge. */ ?>
-            <div class="settings-section" id="section-digest" data-group="general" data-title="<?= _h('settings.digest_heading') ?>">
-                <h5><i class="bi bi-envelope-paper"></i> <?= _h('settings.digest_heading') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.digest_intro') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-3" data-setting="digest_enabled">
-                        <label class="form-label"><?= _h('settings.digest_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="digest_enabled">
-                            <option value="0" <?= ($cfg['digest_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.digest_off') ?></option>
-                            <option value="1" <?= ($cfg['digest_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.digest_on') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.digest_enabled_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="digest_to">
-                        <label class="form-label"><?= _h('settings.digest_to') ?></label>
-                        <input type="email" class="form-control bg-dark text-light border-secondary" name="digest_to" value="<?= sanitize($cfg['digest_to'] ?? '') ?>" placeholder="<?= sanitize($cfg['site_email'] ?? 'ops@example.org') ?>">
-                        <small class="settings-hint"><?= _h('settings.digest_to_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="digest_hours">
-                        <label class="form-label"><?= _h('settings.digest_hours') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="digest_hours" value="<?= sanitize($cfg['digest_hours'] ?? '24') ?>" min="1" max="168">
-                        <small class="settings-hint"><?= _h('settings.digest_hours_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="digest_min">
-                        <label class="form-label"><?= _h('settings.digest_min') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="digest_min" value="<?= sanitize($cfg['digest_min'] ?? '1') ?>" min="0" max="10000">
-                        <small class="settings-hint"><?= _h('settings.digest_min_hint') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <?php /* The health endpoint. Beside the digest because both answer the same question —
-                     "is anybody going to find out?" — one by mail on a schedule, one to whatever is
-                     watching this machine. */ ?>
-            <div class="settings-section" id="section-health" data-group="general" data-title="<?= _h('settings.health_heading') ?>">
-                <h5><i class="bi bi-activity"></i> <?= _h('settings.health_heading') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.health_intro') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-6" data-setting="health_token">
-                        <label class="form-label"><?= _h('settings.health_token') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="health_token"
-                               value="<?= sanitize($cfg['health_token'] ?? '') ?>" maxlength="128" autocomplete="off"
-                               placeholder="<?= _h('settings.health_token_ph') ?>">
-                        <small class="settings-hint"><?= __('settings.health_token_hint') ?></small>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.health_url') ?></label>
-                        <?php $healthTok = trim((string)($cfg['health_token'] ?? '')); ?>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" readonly
-                               value="<?= sanitize(rtrim((string)($cfg['site_url'] ?? ''), '/') . '/?action=health' . ($healthTok !== '' ? '&token=' . $healthTok : '')) ?>">
-                        <small class="settings-hint"><?= __('settings.health_url_hint') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tracker mode & whitelist -->
-            <div class="settings-section" id="section-reputation" data-group="content" data-title="<?= _h('settings.rep_heading') ?>">
-                <h5><i class="bi bi-hand-thumbs-up"></i> <?= _h('settings.rep_heading') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.rep_intro_1') ?>
-                <br><br><?= __('settings.rep_intro_2') ?>
-                <br><br><?= __('settings.rep_intro_3') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-3" data-setting="rep_enabled">
-                        <label class="form-label"><?= _h('settings.rep_heading') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="rep_enabled">
-                            <option value="0" <?= ($cfg['rep_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.rep_off') ?></option>
-                            <option value="1" <?= ($cfg['rep_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.rep_on') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.rep_enabled_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="rep_mode">
-                        <label class="form-label"><?= _h('settings.rep_mode') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="rep_mode">
-                            <option value="thumbs" <?= repMode($cfg) === 'thumbs' ? 'selected' : '' ?>><?= _h('settings.rep_mode_thumbs') ?></option>
-                            <option value="stars" <?= repMode($cfg) === 'stars' ? 'selected' : '' ?>><?= _h('settings.rep_mode_stars') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.rep_mode_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="rep_who_can_vote">
-                        <label class="form-label"><?= _h('settings.rep_who') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="rep_who_can_vote">
-                            <option value="off" <?= ($cfg['rep_who_can_vote'] ?? 'users') === 'off' ? 'selected' : '' ?>><?= _h('settings.rep_who_off') ?></option>
-                            <option value="users" <?= ($cfg['rep_who_can_vote'] ?? 'users') === 'users' ? 'selected' : '' ?>><?= _h('settings.rep_who_users') ?></option>
-                            <option value="all" <?= ($cfg['rep_who_can_vote'] ?? 'users') === 'all' ? 'selected' : '' ?>><?= _h('settings.rep_who_all') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.rep_who_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="rep_show_in_results">
-                        <label class="form-label"><?= _h('settings.rep_show') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="rep_show_in_results">
-                            <option value="0" <?= ($cfg['rep_show_in_results'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.rep_show_info') ?></option>
-                            <option value="1" <?= ($cfg['rep_show_in_results'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.rep_show_column') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-3" data-setting="rep_min_votes">
-                        <label class="form-label"><?= _h('settings.rep_min_votes') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rep_min_votes" value="<?= sanitize($cfg['rep_min_votes'] ?? '3') ?>" min="1" max="1000">
-                        <small class="settings-hint"><?= _h('settings.rep_min_votes_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="rep_anon_weight">
-                        <label class="form-label"><?= _h('settings.rep_anon_weight') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rep_anon_weight" value="<?= sanitize($cfg['rep_anon_weight'] ?? '25') ?>" min="0" max="100">
-                        <small class="settings-hint"><?= _h('settings.rep_anon_weight_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="rep_rate_per_hour">
-                        <label class="form-label"><?= _h('settings.rep_rate_per_hour') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rep_rate_per_hour" value="<?= sanitize($cfg['rep_rate_per_hour'] ?? '30') ?>" min="1" max="1000">
-                    </div>
-                    <div class="col-md-3" data-setting="captcha_pts_vote">
-                        <label class="form-label"><?= _h('settings.rep_captcha_pts_vote') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="captcha_pts_vote" value="<?= sanitize($cfg['captcha_pts_vote'] ?? '2') ?>" min="0" max="100">
-                        <small class="settings-hint"><?= _h('settings.rep_captcha_pts_vote_hint') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-section" id="section-livesync" data-group="opentracker" data-title="<?= _h('settings.livesync_title') ?>">
-                <h5><i class="bi bi-diagram-3"></i> <?= _h('settings.livesync_title') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.livesync_intro_p1') ?>
-                <br><br><?= __('settings.livesync_intro_p2') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-6" data-setting="livesync_cmd">
-                        <label class="form-label"><?= _h('settings.livesync_cmd') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="livesync_cmd" value="<?= sanitize($cfg['livesync_cmd'] ?? '') ?>" maxlength="255" placeholder="<?= _h('settings.livesync_cmd_ph') ?>">
-                        <small class="settings-hint"><?= __('settings.livesync_cmd_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="livesync_enabled">
-                        <label class="form-label"><?= _h('settings.livesync_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="livesync_enabled">
-                            <option value="0" <?= ($cfg['livesync_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.livesync_no') ?></option>
-                            <option value="1" <?= ($cfg['livesync_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.livesync_yes') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.livesync_enabled_hint') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#livesync-card"><?= _h('settings.livesync_enabled_hint_link') ?></a>.</small>
-                    </div>
-                    <div class="col-md-3" data-setting="livesync_port">
-                        <label class="form-label"><?= _h('settings.livesync_port') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="livesync_port" value="<?= sanitize($cfg['livesync_port'] ?? '9696') ?>" min="1024" max="65535">
-                        <small class="settings-hint"><?= _h('settings.livesync_port_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="livesync_bind_ip">
-                        <label class="form-label"><?= _h('settings.livesync_bind_ip') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="livesync_bind_ip" value="<?= sanitize($cfg['livesync_bind_ip'] ?? '') ?>" maxlength="45" placeholder="<?= _h('settings.livesync_bind_ip_ph') ?>">
-                        <small class="settings-hint"><?= _h('settings.livesync_bind_ip_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="livesync_peer_ip">
-                        <label class="form-label"><?= _h('settings.livesync_peer_ip') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="livesync_peer_ip" value="<?= sanitize($cfg['livesync_peer_ip'] ?? '') ?>" maxlength="45" placeholder="<?= _h('settings.livesync_peer_ip_ph') ?>">
-                    </div>
-                </div>
-                <div class="settings-test mt-3">
-                    <button type="button" class="btn btn-sm btn-outline-info settings-test-btn" data-test="admin/livesync_test" data-ok-text="<?= _h('settings.livesync_test_ok') ?>"><i class="bi bi-diagram-3"></i> <?= _h('settings.livesync_test_btn') ?></button>
-                    <div class="settings-test-out"></div>
-                </div>
-            </div>
-
-            <div class="settings-section" id="section-whitelist" data-group="tracker" data-title="<?= _h('settings.whitelist_title') ?>">
-                <h5><?= _h('settings.whitelist_title') ?></h5>
-                <p class="settings-hint mb-2">
-                    <?= __('settings.whitelist_intro_black') ?>
-                    <?= __('settings.whitelist_intro_white') ?>
-                    <?= __('settings.whitelist_intro_match') ?>
-                </p>
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.whitelist_tracker_mode') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="tracker_mode">
-                            <option value="blacklist" <?= ($cfg['tracker_mode'] ?? 'blacklist') !== 'whitelist' ? 'selected' : '' ?>><?= _h('settings.whitelist_mode_blacklist') ?></option>
-                            <option value="whitelist" <?= ($cfg['tracker_mode'] ?? '') === 'whitelist' ? 'selected' : '' ?>><?= _h('settings.whitelist_mode_whitelist') ?></option>
-                        </select>
-                        <?php if (function_exists('scheduleEnabled') && scheduleEnabled($cfg)): ?>
-                        <small class="settings-hint text-warning d-block mt-1"><i class="bi bi-exclamation-triangle"></i> <?= __('settings.whitelist_mode_sched_warn') ?></small>
-                        <?php else: ?>
-                        <small class="settings-hint d-block mt-1"><?= __('settings.whitelist_mode_hint') ?></small>
-                        <?php endif; ?>
-                    </div>
-                    <div class="col-md-9">
-                        <label class="form-label"><?= _h('settings.whitelist_path') ?> <small class="settings-hint"><?= __('settings.whitelist_path_small') ?></small></label>
-                        <div class="input-group">
-                            <input type="text" class="form-control bg-dark text-light border-secondary" name="whitelist_path" value="<?= sanitize($cfg['whitelist_path'] ?? '') ?>" placeholder="/home/tracker/accesslist/whitelist">
-                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-whitelist"><?= _h('settings.whitelist_test_btn') ?></button>
-                        </div>
-                        <div id="whitelist-result" class="mt-1 blacklist-result"></div>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.whitelist_public_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="whitelist_public_enabled">
-                            <option value="1" <?= ($cfg['whitelist_public_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.whitelist_enabled') ?></option>
-                            <option value="0" <?= ($cfg['whitelist_public_enabled'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.whitelist_disabled') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.whitelist_submit_mode') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="whitelist_submit_mode">
-                            <option value="public" <?= ($cfg['whitelist_submit_mode'] ?? 'public') !== 'users' ? 'selected' : '' ?>><?= _h('settings.whitelist_submit_public') ?></option>
-                            <option value="users" <?= ($cfg['whitelist_submit_mode'] ?? 'public') === 'users' ? 'selected' : '' ?>><?= _h('settings.whitelist_submit_users') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.whitelist_submit_mode_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.whitelist_max_per_submission') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_max_per_submission" value="<?= sanitize($cfg['whitelist_max_per_submission'] ?? '20') ?>" min="1" max="500">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.whitelist_rate_limit') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_whitelist" value="<?= sanitize($cfg['rate_limit_whitelist'] ?? '10') ?>" min="0" max="1000">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.whitelist_ip_daily_max') ?> <small class="settings-hint"><?= _h('settings.whitelist_zero_off') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_ip_daily_max" value="<?= sanitize($cfg['whitelist_ip_daily_max'] ?? '50') ?>" min="0" max="100000">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.whitelist_daily_cap') ?> <small class="settings-hint"><?= _h('settings.whitelist_zero_off') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_daily_cap" value="<?= sanitize($cfg['whitelist_daily_cap'] ?? '2000') ?>" min="0" max="10000000">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.whitelist_reload_min_interval') ?> <small class="settings-hint"><?= _h('settings.whitelist_reload_min_interval_small') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_reload_min_interval" value="<?= sanitize($cfg['whitelist_reload_min_interval'] ?? '45') ?>" min="10" max="3600">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.whitelist_scrape_url') ?> <small class="settings-hint"><?= _h('settings.whitelist_scrape_url_small') ?></small></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="whitelist_scrape_url" value="<?= sanitize($cfg['whitelist_scrape_url'] ?? 'http://127.0.0.1:6969/scrape') ?>" placeholder="http://127.0.0.1:6969/scrape">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.whitelist_require_tracker') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="whitelist_require_tracker">
-                            <option value="0" <?= ($cfg['whitelist_require_tracker'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.whitelist_require_tracker_off') ?></option>
-                            <option value="1" <?= ($cfg['whitelist_require_tracker'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.whitelist_require_tracker_on') ?></option>
-                        </select>
-                        <div class="settings-hint mt-1"><?= __('settings.whitelist_require_tracker_hint') ?></div>
-                    </div>
-                    <div class="col-md-9">
-                        <label class="form-label"><?= _h('settings.whitelist_tracker_hosts') ?> <small class="settings-hint"><?= __('settings.whitelist_tracker_hosts_small') ?></small></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="whitelist_tracker_hosts" value="<?= sanitize($cfg['whitelist_tracker_hosts'] ?? '') ?>" placeholder="tryhackx.org, 203.0.113.10">
-                    </div>
-                </div>
-                <div class="settings-hint mt-2"><?= _h('settings.whitelist_manage_hint') ?> <a href="<?= $baseUrl ?>?action=admin-whitelist"><?= _h('settings.whitelist_manage_link') ?></a>.</div>
-
-                <!-- A submission has to prove itself (includes/wlprobe.php) -->
-            </div>
-
-            <div class="settings-section" id="section-probe" data-group="tracker" data-title="<?= _h('settings.probe_title') ?>">
-                <h5><?= _h('settings.probe_title') ?></h5>
-                <p class="settings-hint mb-2"><?= _h('settings.probe_subtitle') ?></p>
-                <small class="settings-hint d-block mb-3"><?= _h('settings.probe_intro_p1') ?>
-                <br><br><?= __('settings.probe_intro_p2') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-3" data-setting="wl_probe_required">
-                        <label class="form-label"><?= _h('settings.probe_required') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="wl_probe_required">
-                            <option value="0" <?= ($cfg['wl_probe_required'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.probe_disabled') ?></option>
-                            <option value="1" <?= ($cfg['wl_probe_required'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.probe_enabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.probe_required_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_probe_timeout_minutes">
-                        <label class="form-label"><?= _h('settings.probe_timeout') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_probe_timeout_minutes" value="<?= sanitize($cfg['wl_probe_timeout_minutes'] ?? '10') ?>" min="1" max="1440">
-                        <small class="settings-hint"><?= _h('settings.probe_timeout_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_probe_on_fail">
-                        <label class="form-label"><?= _h('settings.probe_on_fail') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="wl_probe_on_fail">
-                            <option value="delete" <?= ($cfg['wl_probe_on_fail'] ?? 'delete') === 'delete' ? 'selected' : '' ?>><?= _h('settings.probe_on_fail_delete') ?></option>
-                            <option value="keep" <?= ($cfg['wl_probe_on_fail'] ?? 'delete') === 'keep' ? 'selected' : '' ?>><?= _h('settings.probe_on_fail_keep') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.probe_on_fail_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_probe_max_batch">
-                        <label class="form-label"><?= _h('settings.probe_max_batch') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_probe_max_batch" value="<?= sanitize($cfg['wl_probe_max_batch'] ?? '') ?>" min="1" max="64" placeholder="<?= _h('settings.probe_max_batch_ph') ?>">
-                        <small class="settings-hint"><?= __('settings.probe_max_batch_hint') ?></small>
-                    </div>
-                </div>
-
-                <!-- Keeping the list honest over time (includes/wlmaint.php) -->
-            </div>
-
-            <div class="settings-section" id="section-wlupkeep" data-group="tracker" data-title="<?= _h('settings.wlupkeep_title') ?>">
-                <h5><?= _h('settings.wlupkeep_title') ?></h5>
-                <p class="settings-hint mb-2"><?= _h('settings.wlupkeep_subtitle') ?></p>
-                <small class="settings-hint d-block mb-3"><?= __('settings.wlupkeep_intro') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-3" data-setting="wl_scrape_every_hours">
-                        <label class="form-label"><?= _h('settings.wlupkeep_scrape_every') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_scrape_every_hours" value="<?= sanitize($cfg['wl_scrape_every_hours'] ?? '0') ?>" min="0" max="8760">
-                        <small class="settings-hint"><?= _h('settings.wlupkeep_scrape_every_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_scrape_batch">
-                        <label class="form-label"><?= _h('settings.wlupkeep_scrape_batch') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_scrape_batch" value="<?= sanitize($cfg['wl_scrape_batch'] ?? '200') ?>" min="1" max="2000">
-                        <small class="settings-hint"><?= _h('settings.wlupkeep_scrape_batch_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_dead_after_days">
-                        <label class="form-label"><?= _h('settings.wlupkeep_dead_after') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_dead_after_days" value="<?= sanitize($cfg['wl_dead_after_days'] ?? '0') ?>" min="0" max="3650">
-                        <small class="settings-hint"><?= __('settings.wlupkeep_dead_after_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_dead_action">
-                        <label class="form-label"><?= _h('settings.wlupkeep_dead_action') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="wl_dead_action">
-                            <option value="mark" <?= ($cfg['wl_dead_action'] ?? 'mark') === 'mark' ? 'selected' : '' ?>><?= _h('settings.wlupkeep_dead_mark') ?></option>
-                            <option value="delete" <?= ($cfg['wl_dead_action'] ?? 'mark') === 'delete' ? 'selected' : '' ?>><?= _h('settings.wlupkeep_dead_delete') ?></option>
-                            <option value="none" <?= ($cfg['wl_dead_action'] ?? 'mark') === 'none' ? 'selected' : '' ?>><?= _h('settings.wlupkeep_dead_none') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.wlupkeep_dead_action_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_dead_every_days">
-                        <label class="form-label"><?= _h('settings.wlupkeep_dead_every') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_dead_every_days" value="<?= sanitize($cfg['wl_dead_every_days'] ?? '30') ?>" min="1" max="365">
-                    </div>
-                    <div class="col-md-9">
-                        <div class="settings-hint mt-4"><?php
-                            $wmCount = function_exists('wlMaintDeadCount') ? wlMaintDeadCount($db, $cfg) : 0;
-                            if (wlMaintDeadDays($cfg) > 0) {
-                                echo $wmCount === 1 ? __('settings.wlupkeep_match_one', ['n' => (int)$wmCount]) : __('settings.wlupkeep_match_many', ['n' => (int)$wmCount]);
-                            } else {
-                                echo _h('settings.wlupkeep_match_unset');
-                            }
-                        ?></div>
-                    </div>
-                </div>
-
-                <!-- Source link + description on a whitelist row (includes/richtext.php) -->
-            </div>
-
-            <div class="settings-section" id="section-content" data-group="content" data-title="<?= _h('settings.content_title') ?>">
-                <h5><?= _h('settings.content_title') ?></h5>
-                <p class="settings-hint mb-2"><?= _h('settings.content_subtitle') ?></p>
-                <small class="settings-hint d-block mb-3"><?= __('settings.content_intro') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-3" data-setting="wl_allow_source_url">
-                        <label class="form-label"><?= _h('settings.content_source_url') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="wl_allow_source_url">
-                            <option value="0" <?= ($cfg['wl_allow_source_url'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_disabled') ?></option>
-                            <option value="1" <?= ($cfg['wl_allow_source_url'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.content_enabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.content_source_url_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_allow_description">
-                        <label class="form-label"><?= _h('settings.content_description') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="wl_allow_description">
-                            <option value="0" <?= ($cfg['wl_allow_description'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_disabled') ?></option>
-                            <option value="1" <?= ($cfg['wl_allow_description'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.content_enabled') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_content_review">
-                        <label class="form-label"><?= _h('settings.content_review') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="wl_content_review">
-                            <option value="1" <?= ($cfg['wl_content_review'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_review_yes') ?></option>
-                            <option value="0" <?= ($cfg['wl_content_review'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_review_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.content_review_hint_pre') ?> <a href="<?= $baseUrl ?>?action=admin-whitelist"><?= _h('settings.content_review_hint_link') ?></a>. <?= _h('settings.content_review_hint_post') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_content_autopublish">
-                        <label class="form-label"><?= _h('settings.content_autopublish') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="wl_content_autopublish">
-                            <option value="0" <?= ($cfg['wl_content_autopublish'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_no') ?></option>
-                            <option value="1" <?= ($cfg['wl_content_autopublish'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.content_autopublish_yes') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.content_autopublish_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="wl_edit_max_pending">
-                        <label class="form-label"><?= _h('settings.content_edit_max_pending') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_edit_max_pending" value="<?= sanitize($cfg['wl_edit_max_pending'] ?? '3') ?>" min="0" max="50">
-                        <small class="settings-hint"><?= __('settings.content_edit_max_pending_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="link_trusted_domains">
-                        <label class="form-label"><?= _h('settings.content_trusted_domains') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="link_trusted_domains" value="<?= sanitize($cfg['link_trusted_domains'] ?? '') ?>" placeholder="<?= _h('settings.content_trusted_domains_ph') ?>">
-                        <small class="settings-hint"><?= _h('settings.content_trusted_domains_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="desc_allow_bbcode">
-                        <label class="form-label"><?= _h('settings.content_allow_bbcode') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="desc_allow_bbcode">
-                            <option value="1" <?= ($cfg['desc_allow_bbcode'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_yes') ?></option>
-                            <option value="0" <?= ($cfg['desc_allow_bbcode'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><code>[b] [i] [u] [s] [code] [quote] [list] [url] [img]</code></small>
-                    </div>
-                    <div class="col-md-3" data-setting="desc_allow_markdown">
-                        <label class="form-label"><?= _h('settings.content_allow_markdown') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="desc_allow_markdown">
-                            <option value="1" <?= ($cfg['desc_allow_markdown'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_yes') ?></option>
-                            <option value="0" <?= ($cfg['desc_allow_markdown'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.content_allow_markdown_hint') ?></small>
-                    </div>
-                    <div class="col-md-2" data-setting="desc_max_chars">
-                        <label class="form-label"><?= _h('settings.content_max_chars') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_chars" value="<?= sanitize($cfg['desc_max_chars'] ?? '4000') ?>" min="200" max="20000">
-                    </div>
-                    <div class="col-md-2" data-setting="desc_max_images">
-                        <label class="form-label"><?= _h('settings.content_max_images') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_images" value="<?= sanitize($cfg['desc_max_images'] ?? '3') ?>" min="0" max="50">
-                        <small class="settings-hint"><?= _h('settings.content_max_images_hint') ?></small>
-                    </div>
-                    <div class="col-md-2" data-setting="desc_max_links">
-                        <label class="form-label"><?= _h('settings.content_max_links') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_links" value="<?= sanitize($cfg['desc_max_links'] ?? '10') ?>" min="0" max="100">
-                    </div>
-                    <div class="col-md-3" data-setting="search_allow_sl_refresh">
-                        <label class="form-label"><?= _h('settings.content_sl_refresh') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="search_allow_sl_refresh">
-                            <option value="0" <?= ($cfg['search_allow_sl_refresh'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_disabled') ?></option>
-                            <option value="1" <?= ($cfg['search_allow_sl_refresh'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.content_enabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.content_sl_refresh_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="search_sl_refresh_seconds">
-                        <label class="form-label"><?= _h('settings.content_sl_refresh_seconds') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="search_sl_refresh_seconds" value="<?= sanitize($cfg['search_sl_refresh_seconds'] ?? '120') ?>" min="10" max="3600">
-                        <small class="settings-hint"><?= _h('settings.content_sl_refresh_seconds_hint') ?></small>
-                    </div>
-                </div>
-
-                <!-- Scheduled mode (whitelist hours) — includes/schedule.php -->
-                <?php
-                $schedDays   = function_exists('scheduleParseJson') ? (scheduleParseJson((string)($cfg['tracker_schedule'] ?? '')) ?? array_fill_keys(SCHEDULE_DAYS, 'none')) : [];
-                $schedTz     = function_exists('scheduleTimezone') ? scheduleTimezone($cfg) : 'Europe/Warsaw';
-                $schedOn     = function_exists('scheduleEnabled') && scheduleEnabled($cfg);
-                $schedSt     = function_exists('scheduleStatus') ? scheduleStatus($cfg) : null;
-                $schedTzList = function_exists('timezone_identifiers_list') ? timezone_identifiers_list() : [$schedTz];
-                $schedTzGroups = [];
-                foreach ($schedTzList as $tzId) { $schedTzGroups[strpos($tzId, '/') !== false ? substr($tzId, 0, strpos($tzId, '/')) : 'Other'][] = $tzId; }
-                ?>
-            </div>
-
-            <?php /* ── The shoutbox (1.58.0, includes/shout.php) ────────────────────────────────
-                     Everything the room needs, and one control that is not a setting: Purge, which
-                     deletes rows and therefore asks for the owner's password (assets/js/admin-shout.js
-                     → admin/shout_purge). Its day box has an id and no name, so it never travels with
-                     the form. */ ?>
-            <div class="settings-section" id="section-shout" data-group="shoutbox" data-title="<?= _h('settings.shout_title') ?>">
-                <h5><i class="bi bi-chat-left-dots"></i> <?= _h('settings.shout_title') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.shout_intro') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-3" data-setting="shout_enabled">
-                        <label class="form-label"><?= _h('settings.shout_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="shout_enabled">
-                            <option value="0" <?= ($cfg['shout_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                            <option value="1" <?= ($cfg['shout_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.shout_enabled_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_placement">
-                        <label class="form-label"><?= _h('settings.shout_placement') ?></label>
-                        <?php $shPlace = function_exists('shoutPlacement') ? shoutPlacement($cfg) : 'home'; ?>
-                        <select class="form-select bg-dark text-light border-secondary" name="shout_placement">
-                            <option value="home" <?= $shPlace === 'home' ? 'selected' : '' ?>><?= _h('settings.shout_placement_home') ?></option>
-                            <option value="page" <?= $shPlace === 'page' ? 'selected' : '' ?>><?= _h('settings.shout_placement_page') ?></option>
-                            <option value="both" <?= $shPlace === 'both' ? 'selected' : '' ?>><?= _h('settings.shout_placement_both') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.shout_placement_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_order">
-                        <label class="form-label" for="setting-shout_order"><?= _h('settings.shout_order') ?></label>
-                        <?php $shOrder = function_exists('shoutOrder') ? shoutOrder($cfg) : 'bottom'; ?>
-                        <select class="form-select bg-dark text-light border-secondary" name="shout_order" id="setting-shout_order">
-                            <option value="bottom" <?= $shOrder === 'bottom' ? 'selected' : '' ?>><?= _h('settings.shout_order_bottom') ?></option>
-                            <option value="top" <?= $shOrder === 'top' ? 'selected' : '' ?>><?= _h('settings.shout_order_top') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.shout_order_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_format">
-                        <label class="form-label"><?= _h('settings.shout_format') ?></label>
-                        <?php $shFmt = function_exists('shoutFormat') ? shoutFormat($cfg) : 'bbcode'; ?>
-                        <select class="form-select bg-dark text-light border-secondary" name="shout_format">
-                            <option value="plain" <?= $shFmt === 'plain' ? 'selected' : '' ?>><?= _h('settings.shout_format_plain') ?></option>
-                            <option value="bbcode" <?= $shFmt === 'bbcode' ? 'selected' : '' ?>><?= _h('settings.shout_format_bbcode') ?></option>
-                            <option value="markdown" <?= $shFmt === 'markdown' ? 'selected' : '' ?>><?= _h('settings.shout_format_markdown') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.shout_format_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_live_seconds">
-                        <label class="form-label"><?= _h('settings.shout_live_seconds') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_live_seconds" value="<?= sanitize($cfg['shout_live_seconds'] ?? '10') ?>" min="0" max="120">
-                        <small class="settings-hint"><?= __('settings.shout_live_seconds_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_widget_rows">
-                        <label class="form-label"><?= _h('settings.shout_widget_rows') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_widget_rows" value="<?= sanitize($cfg['shout_widget_rows'] ?? '25') ?>" min="5" max="100">
-                        <small class="settings-hint"><?= __('settings.shout_widget_rows_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_page_rows">
-                        <label class="form-label"><?= _h('settings.shout_page_rows') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_page_rows" value="<?= sanitize($cfg['shout_page_rows'] ?? '100') ?>" min="20" max="500">
-                        <small class="settings-hint"><?= __('settings.shout_page_rows_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_max_chars">
-                        <label class="form-label"><?= _h('settings.shout_max_chars') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_max_chars" value="<?= sanitize($cfg['shout_max_chars'] ?? '500') ?>" min="1" max="2000">
-                        <small class="settings-hint"><?= __('settings.shout_max_chars_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_flood_seconds">
-                        <label class="form-label"><?= _h('settings.shout_flood_seconds') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_flood_seconds" value="<?= sanitize($cfg['shout_flood_seconds'] ?? '5') ?>" min="0" max="300">
-                        <small class="settings-hint"><?= __('settings.shout_flood_seconds_hint') ?></small>
-                    </div>
-                    <?php /* 1.66.0: the two windows on a member's own line, measured by the server from
-                             when it was said. Each hint says what ITS zero means, because they mean
-                             opposite things: no editing at all, and no limit on taking a line back. */ ?>
-                    <div class="col-md-3" data-setting="shout_edit_minutes">
-                        <label class="form-label" for="setting-shout_edit_minutes"><?= _h('settings.shout_edit_minutes') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_edit_minutes" id="setting-shout_edit_minutes" value="<?= (int)(function_exists('shoutEditMinutes') ? shoutEditMinutes($cfg) : 10) ?>" min="0" max="1440">
-                        <small class="settings-hint"><?= __('settings.shout_edit_minutes_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_delete_own_minutes">
-                        <label class="form-label" for="setting-shout_delete_own_minutes"><?= _h('settings.shout_delete_own_minutes') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_delete_own_minutes" id="setting-shout_delete_own_minutes" value="<?= (int)(function_exists('shoutDeleteOwnMinutes') ? shoutDeleteOwnMinutes($cfg) : 10) ?>" min="0" max="1440">
-                        <small class="settings-hint"><?= __('settings.shout_delete_own_minutes_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_keep_rows">
-                        <label class="form-label"><?= _h('settings.shout_keep_rows') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_keep_rows" value="<?= sanitize($cfg['shout_keep_rows'] ?? '2000') ?>" min="100" max="100000">
-                        <small class="settings-hint"><?= __('settings.shout_keep_rows_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="shout_keep_days">
-                        <label class="form-label"><?= _h('settings.shout_keep_days') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_keep_days" value="<?= sanitize($cfg['shout_keep_days'] ?? '30') ?>" min="1" max="3650">
-                        <small class="settings-hint"><?= __('settings.shout_keep_days_hint') ?></small>
-                    </div>
-                    <div class="col-md-6" data-setting="shout_rules">
-                        <label class="form-label"><?= _h('settings.shout_rules') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="shout_rules" value="<?= sanitize($cfg['shout_rules'] ?? '') ?>" maxlength="500" placeholder="<?= _h('settings.shout_rules_ph') ?>">
-                        <small class="settings-hint"><?= __('settings.shout_rules_hint') ?></small>
-                    </div>
-                </div>
-                <?php /* ── Where it is seen, and who says what (1.60.0) ────────────────────────
-                         An h6 sub-head rather than a section of its own, the way Settings → Network
-                         & limits splits its throttle off: these are three more answers about the
-                         same room, and a second "Shoutbox" chip would be two places to look for one
-                         subject. */ ?>
-                <h6 class="mt-4 mb-1" id="section-shout-nav"><?= _h('settings.shout_nav_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.shout_nav_heading_sub') ?></small></h6>
-                <div class="row g-3">
-                    <div class="col-md-4" data-setting="shout_nav">
-                        <label class="form-label"><?= _h('settings.shout_nav') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="shout_nav">
-                            <option value="0" <?= ($cfg['shout_nav'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                            <option value="1" <?= ($cfg['shout_nav'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.shout_nav_hint') ?></small>
-                    </div>
-                    <div class="col-md-4" data-setting="shout_live_seconds_guest">
-                        <label class="form-label"><?= _h('settings.shout_live_seconds_guest') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_live_seconds_guest" value="<?= sanitize($cfg['shout_live_seconds_guest'] ?? '30') ?>" min="0" max="300">
-                        <small class="settings-hint"><?= __('settings.shout_live_seconds_guest_hint') ?></small>
-                    </div>
-                    <div class="col-md-4" data-setting="shout_system_lines">
-                        <label class="form-label"><?= _h('settings.shout_system_lines') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="shout_system_lines">
-                            <option value="0" <?= ($cfg['shout_system_lines'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                            <option value="1" <?= ($cfg['shout_system_lines'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.shout_system_lines_hint') ?></small>
-                    </div>
-                    <?php /* 1.61.0. Beside the three above because it is the fourth answer to the same
-                             question — where the room is and how somebody reaches it. A name another
-                             page already owns is refused on save and again on read, so the worst an
-                             operator can do here is fail to rename anything. */ ?>
-                    <div class="col-md-4" data-setting="shout_page_action">
-                        <label class="form-label"><?= _h('settings.shout_page_action') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="shout_page_action" value="<?= sanitize($cfg['shout_page_action'] ?? 'shoutbox') ?>" maxlength="32" placeholder="shoutbox" autocomplete="off" spellcheck="false">
-                        <small class="settings-hint"><?= __('settings.shout_page_action_hint') ?></small>
-                    </div>
-                </div>
-                <?php /* Who may read and who may write, per group: the same read-only matrix
-                         Users → Groups draws (renderMatrix in assets/js/admin-users.js), scoped to
-                         the five shout.* ids and fed by the same endpoint — no second idea of what a
-                         permission is, and no new payload. Folded, and filled only when it is
-                         opened: it answers a question that is asked once, usually right after the
-                         room is switched on for the first time. */ ?>
-                <details class="gr-matrix-wrap mt-3" id="shout-matrix-wrap">
-                    <summary class="wl-small text-muted"><i class="bi bi-chevron-right gr-matrix-chev" aria-hidden="true"></i><?= _h('settings.shout_matrix_title') ?></summary>
-                    <small class="settings-hint d-block mt-2"><?= __('settings.shout_matrix_hint') ?></small>
-                    <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="shout-matrix"></table></div>
-                </details>
-                <?php /* ── Emotes and stickers (1.59.0, rebuilt in 1.59.1) ──────────────────────
-                         Its own block rather than six more cells in the grid above: the switches, the
-                         table and the form that adds one are three parts of a single subject, and in
-                         the grid the numbers ended up on a row of their own with `Per member` orphaned
-                         beside two empty cells. Same shape as Settings → Sounds, which is the block
-                         this one was measured against.
-
-                         Emoji are NOT configured here: those are Unicode characters drawn by the
-                         reader's own device font, so there is nothing about them to switch.
-
-                         The file input has no name on purpose — it is not a setting and never travels
-                         with the form; assets/js/admin-shout.js reads the file and posts it to
-                         admin/shout_emotes as base64, and the server decides from the BYTES what it is
-                         (and refuses an SVG carrying anything executable). */ ?>
-                <?php /* No data-approval any more: whether a row is waiting is a fact of the row
-                         (`approved_at` is NULL), not of the setting. Handing the script the switch
-                         as well only let it hide a queue somebody is still waiting on. */ ?>
-                <div class="mt-4" id="admin-emotes"
-                     data-max-kb="<?= (int)(function_exists('shoutEmoteMaxKb') ? shoutEmoteMaxKb($cfg) : 64) ?>">
-                    <h6 class="admin-emotes-title"><i class="bi bi-emoji-smile"></i> <?= _h('settings.shout_emotes_manage') ?></h6>
-                    <small class="settings-hint d-block mb-3"><?= __('settings.shout_emotes_sub') ?></small>
-                    <div class="row g-3">
-                        <div class="col-md-4" data-setting="shout_emotes_enabled">
-                            <label class="form-label"><?= _h('settings.shout_emotes_enabled') ?></label>
-                            <select class="form-select bg-dark text-light border-secondary" name="shout_emotes_enabled">
-                                <option value="1" <?= ($cfg['shout_emotes_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                                <option value="0" <?= ($cfg['shout_emotes_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                            </select>
-                            <small class="settings-hint"><?= __('settings.shout_emotes_enabled_hint') ?></small>
-                        </div>
-                        <div class="col-md-4" data-setting="shout_stickers_enabled">
-                            <label class="form-label"><?= _h('settings.shout_stickers_enabled') ?></label>
-                            <select class="form-select bg-dark text-light border-secondary" name="shout_stickers_enabled">
-                                <option value="1" <?= ($cfg['shout_stickers_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                                <option value="0" <?= ($cfg['shout_stickers_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                            </select>
-                            <small class="settings-hint"><?= __('settings.shout_stickers_enabled_hint') ?></small>
-                        </div>
-                        <?php /* v65. Its place is beside the two switches rather than beside the numbers:
-                                 it answers "who may see this", which is what the other two answer. */ ?>
-                        <div class="col-md-4" data-setting="shout_emote_approval">
-                            <label class="form-label"><?= _h('settings.shout_emote_approval') ?></label>
-                            <select class="form-select bg-dark text-light border-secondary" name="shout_emote_approval">
-                                <option value="1" <?= ($cfg['shout_emote_approval'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                                <option value="0" <?= ($cfg['shout_emote_approval'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                            </select>
-                            <small class="settings-hint"><?= __('settings.shout_emote_approval_hint') ?></small>
-                        </div>
-                        <div class="col-md-4" data-setting="shout_emote_max_kb">
-                            <label class="form-label"><?= _h('settings.shout_emote_max_kb') ?></label>
-                            <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_max_kb" value="<?= sanitize($cfg['shout_emote_max_kb'] ?? '64') ?>" min="8" max="512">
-                            <small class="settings-hint"><?= __('settings.shout_emote_max_kb_hint') ?></small>
-                        </div>
-                        <div class="col-md-4" data-setting="shout_emote_max_px">
-                            <label class="form-label"><?= _h('settings.shout_emote_max_px') ?></label>
-                            <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_max_px" value="<?= sanitize($cfg['shout_emote_max_px'] ?? '128') ?>" min="32" max="512">
-                            <small class="settings-hint"><?= __('settings.shout_emote_max_px_hint') ?></small>
-                        </div>
-                        <div class="col-md-4" data-setting="shout_emote_per_user">
-                            <label class="form-label"><?= _h('settings.shout_emote_per_user') ?></label>
-                            <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_per_user" value="<?= sanitize($cfg['shout_emote_per_user'] ?? '20') ?>" min="1" max="200">
-                            <small class="settings-hint"><?= __('settings.shout_emote_per_user_hint') ?></small>
-                        </div>
-                    </div>
-                    <?php /* The waiting queue, when the gate is on and somebody's picture is in it. Drawn
-                             by the script above the table, because a queue below a list of thirty is a
-                             queue nobody answers. */ ?>
-                    <div id="admin-emotes-waiting" class="admin-emotes-waiting mt-4" hidden></div>
-                    <div class="admin-emotes-head">
-                        <label class="form-label mb-0"><?= _h('settings.shout_emotes_list') ?></label>
-                        <?php /* "4 of 9 switched on": the reason a code somebody typed does nothing is
-                                 very often that its row is off, so the number is beside the heading
-                                 rather than only findable by reading the table. Filled by the script. */ ?>
-                        <span class="admin-emotes-count" id="admin-emotes-count" hidden></span>
-                    </div>
-                    <div id="admin-emotes-list" class="mb-3"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
-                    <div class="admin-emote-add">
-                        <h6 class="admin-emote-add-title"><i class="bi bi-plus-circle"></i> <?= _h('settings.shout_emotes_add_heading') ?></h6>
-                        <?php /* The same drop zone the sounds block and the language install use: the
-                                 <input type=file> stays in the DOM, invisible, over a box that also takes
-                                 a dropped file. Full width and shallow, so the four controls below read as
-                                 one row rather than as a column beside a tall box. */ ?>
-                        <div class="ipl-drop ipl-drop-wide" id="admin-emote-drop" tabindex="0" role="button" aria-label="<?= _h('settings.shout_emote_drop_aria') ?>">
-                            <i class="bi bi-file-earmark-image ipl-drop-icon"></i>
-                            <span class="ipl-drop-main"><u><?= _h('settings.shout_emote_drop_choose') ?></u> <?= _h('settings.shout_emote_drop_or') ?></span>
-                            <span class="ipl-drop-sub"><?= _h('settings.shout_emote_drop_sub') ?></span>
-                            <input type="file" id="admin-emote-file" class="ipl-drop-input" accept=".svg,.png,.gif,.webp,image/svg+xml,image/png,image/gif,image/webp">
-                        </div>
-                        <?php /* Code, Name, the sticker box and Add on one line. Each box says what it is
-                                 for in its own placeholder — the paragraph that used to explain all four
-                                 under the block was read once and then in the way. */ ?>
-                        <div class="admin-emote-add-row">
-                            <input type="text" id="admin-emote-code" class="form-control form-control-sm bg-dark text-light border-secondary admin-emote-code-in"
-                                   maxlength="32" placeholder="<?= _h('settings.shout_emote_code_ph') ?>" aria-label="<?= _h('settings.shout_emote_code_label') ?>"
-                                   autocomplete="off" spellcheck="false">
-                            <input type="text" id="admin-emote-name" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                   maxlength="60" placeholder="<?= _h('settings.shout_emote_name_ph') ?>" aria-label="<?= _h('settings.shout_emote_name_label') ?>"
-                                   autocomplete="off">
-                            <div class="form-check mb-0 admin-emote-stick-check">
-                                <input class="form-check-input" type="checkbox" id="admin-emote-sticker">
-                                <label class="form-check-label small" for="admin-emote-sticker"><?= _h('settings.shout_emote_sticker_label') ?></label>
-                            </div>
-                            <button type="button" class="btn btn-sm btn-info" id="admin-emote-upload"><i class="bi bi-plus-lg"></i> <?= _h('settings.shout_emote_upload') ?></button>
-                        </div>
-                    </div>
-                    <small class="settings-hint"><?= __('settings.shout_emotes_hint') ?></small>
-                </div>
-                <div class="mt-3" id="admin-shout">
-                    <label class="form-label"><?= _h('settings.shout_purge') ?></label>
-                    <div class="row g-2 align-items-end">
-                        <div class="col-md-3">
-                            <input type="number" class="form-control bg-dark text-light border-secondary" id="shout-purge-days" min="0" max="3650" placeholder="<?= _h('settings.shout_purge_days_ph') ?>">
-                        </div>
-                        <div class="col-md-3">
-                            <?php /* Not `btn-sm`: it stands beside a full-height number box in a row
-                                     aligned on its bottom edge, and a small button there was visibly
-                                     shorter than the thing it acts on. */ ?>
-                            <button type="button" class="btn btn-outline-danger w-100" id="shout-purge-run"><i class="bi bi-trash"></i> <?= _h('settings.shout_purge_run') ?></button>
-                        </div>
-                    </div>
-                    <small class="settings-hint"><?= __('settings.shout_purge_hint') ?></small>
-                </div>
-            </div>
-
-            <div class="settings-section" id="section-schedule" data-group="tracker" data-title="<?= _h('settings.schedule_title') ?>">
-                <h5><?= _h('settings.schedule_title') ?></h5>
-                <p class="settings-hint mb-2"><?= _h('settings.schedule_subtitle') ?></p>
-                <p class="settings-hint mb-2">
-                    <?= __('settings.schedule_intro_1') ?>
-                    <?= __('settings.schedule_intro_2') ?>
-                    <?= __('settings.schedule_intro_3') ?>
-                    <?= _h('settings.schedule_intro_4') ?>
-                    <?= _h('settings.schedule_intro_5') ?>
-                </p>
-                <div class="row g-3">
-                    <div class="col-md-2">
-                        <label class="form-label"><?= _h('settings.schedule_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="tracker_schedule_enabled" id="sched-enabled">
-                            <option value="0" <?= !$schedOn ? 'selected' : '' ?>><?= _h('settings.schedule_disabled') ?></option>
-                            <option value="1" <?= $schedOn ? 'selected' : '' ?>><?= _h('settings.schedule_enabled_opt') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.schedule_tz') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="tracker_schedule_tz">
-                            <?php foreach ($schedTzGroups as $grp => $ids): ?>
-                            <optgroup label="<?= sanitize($grp) ?>">
-                                <?php foreach ($ids as $tzId): ?>
-                                <option value="<?= sanitize($tzId) ?>" <?= $tzId === $schedTz ? 'selected' : '' ?>><?= sanitize($tzId) ?></option>
-                                <?php endforeach; ?>
-                            </optgroup>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.schedule_switch_cmd') ?> <small class="settings-hint"><?= __('settings.schedule_switch_cmd_hint') ?></small></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="tracker_mode_switch_cmd" value="<?= sanitize($cfg['tracker_mode_switch_cmd'] ?? 'sudo -n /usr/local/sbin/tracker-mode.sh') ?>" placeholder="<?= _h('settings.schedule_switch_cmd_ph') ?>" maxlength="255">
-                    </div>
-                    <div class="col-12">
-                        <input type="hidden" name="tracker_schedule" id="sched-json" value="<?= sanitize(json_encode($schedDays)) ?>">
-                        <div class="table-responsive">
-                            <table class="table table-dark table-sm align-middle mb-1 sched-table" id="sched-table">
-                                <thead><tr><th style="width:5rem"><?= _h('settings.schedule_th_day') ?></th><th style="width:16rem"><?= _h('settings.schedule_th_rule') ?></th><th style="width:9rem"><?= _h('settings.schedule_th_from') ?></th><th style="width:9rem"><?= _h('settings.schedule_th_to') ?></th><th></th></tr></thead>
-                                <tbody>
-                                <?php foreach (SCHEDULE_DAYS as $d):
-                                    $v = $schedDays[$d] ?? 'none';
-                                    $kind = is_array($v) ? 'window' : $v;
-                                    $from = is_array($v) ? $v['from'] : '10:00';
-                                    $to   = is_array($v) ? $v['to'] : '02:30';
-                                ?>
-                                <tr data-sched-day="<?= $d ?>">
-                                    <td><strong><?= SCHEDULE_DAY_LABELS[$d] ?></strong></td>
-                                    <td>
-                                        <select class="form-select form-select-sm bg-dark text-light border-secondary" data-sched-kind>
-                                            <option value="all" <?= $kind === 'all' ? 'selected' : '' ?>><?= _h('settings.schedule_kind_all') ?></option>
-                                            <option value="window" <?= $kind === 'window' ? 'selected' : '' ?>><?= _h('settings.schedule_kind_window') ?></option>
-                                            <option value="none" <?= $kind === 'none' ? 'selected' : '' ?>><?= _h('settings.schedule_kind_none') ?></option>
-                                        </select>
-                                    </td>
-                                    <td><input type="time" class="form-control form-control-sm bg-dark text-light border-secondary" data-sched-from value="<?= sanitize($from) ?>" step="60"></td>
-                                    <td><input type="time" class="form-control form-control-sm bg-dark text-light border-secondary" data-sched-to value="<?= sanitize($to) ?>" step="60"></td>
-                                    <td class="settings-hint" data-sched-note></td>
-                                </tr>
-                                <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="settings-hint">
-                            <?= __('settings.schedule_window_hint') ?>
-                        </div>
-                        <?php if ($schedSt): ?>
-                        <div class="settings-hint mt-2" id="sched-summary">
-                            <strong><?= _h('settings.schedule_saved') ?></strong> <?= sanitize($schedSt['describe']) ?>.
-                            <?php if ($schedSt['enabled']): ?>
-                                <?= _h('settings.schedule_desired_now') ?> <strong><?= sanitize($schedSt['desired'] ?? __('settings.schedule_invalid')) ?></strong> (<?= _h('settings.schedule_tracker_is_in') ?> <strong><?= sanitize($schedSt['current']) ?></strong>);
-                                <?= _h('settings.schedule_next_change') ?> <strong><?= sanitize($schedSt['next_change_local'] ?? __('settings.schedule_none')) ?></strong> <?= $schedSt['next_change_local'] ? '(' . sanitize($schedSt['tz']) . ')' : '' ?>.
-                                <?php if ($schedSt['last_result']): ?>
-                                    <?= _h('settings.schedule_last_switch') ?> <strong><?= sanitize($schedSt['last_result']) ?></strong><?= $schedSt['last_switch_at'] ? ' ' . __('settings.schedule_switch_at') . ' ' . date('Y-m-d H:i', (int)$schedSt['last_switch_at']) . ' (' . sanitize((string)$schedSt['last_from']) . ' → ' . sanitize((string)$schedSt['last_to']) . ')' : '' ?><?= $schedSt['last_error'] ? ' — <span class="text-danger">' . sanitize($schedSt['last_error']) . '</span>' : '' ?>.
-                                <?php endif; ?>
-                            <?php else: ?>
-                                <?= _h('settings.schedule_off_note') ?>
-                            <?php endif; ?>
-                        </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Server-to-server API -->
-            <div class="settings-section" id="section-api" data-group="integrations" data-title="<?= _h('settings.api_title') ?>">
-                <h5><?= _h('settings.api_title') ?></h5>
-                <p class="settings-hint mb-2">
-                    <?= __('settings.api_intro') ?>
-                    <?= _h('settings.api_managed_on') ?> <a href="<?= $baseUrl ?>?action=admin-whitelist"><?= _h('settings.api_whitelist_page') ?></a>.
-                </p>
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.api_label') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="api_enabled">
-                            <option value="1" <?= ($cfg['api_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['api_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.api_ban_days') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="api_ban_days" value="<?= sanitize($cfg['api_ban_days'] ?? '30') ?>" min="1" max="3650">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.api_exempt_ips') ?> <small class="settings-hint"><?= _h('settings.api_exempt_ips_hint') ?></small></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="api_ban_exempt_ips" value="<?= sanitize($cfg['api_ban_exempt_ips'] ?? '127.0.0.1, ::1') ?>" placeholder="127.0.0.1, ::1, 203.0.113.10">
-                    </div>
-                </div>
-                <p class="settings-hint mt-3 mb-2">
-                    <?= __('settings.api_budgets_intro') ?>
-                </p>
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.api_rpm') ?> <small class="settings-hint"><?= _h('settings.api_per_key') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="api_rate_limit_per_min" value="<?= sanitize($cfg['api_rate_limit_per_min'] ?? '60') ?>" min="0" max="100000">
-                        <small class="settings-hint"><?= _h('settings.api_rpm_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.api_bytes_day') ?> <small class="settings-hint"><?= _h('settings.api_per_key') ?></small></label>
-                        <div class="input-group settings-size">
-                            <input type="number" class="form-control bg-dark text-light border-secondary"
-                                   id="api-rate-limit-bytes-day-num" min="0" step="1" aria-label="<?= _h('settings.api_size_aria') ?>">
-                            <select class="form-select bg-dark text-light border-secondary" id="api-rate-limit-bytes-day-unit" aria-label="<?= _h('settings.api_unit_aria') ?>">
-                                <option value="1"><?= _h('settings.api_unit_bytes') ?></option>
-                                <option value="1024">KiB</option>
-                                <option value="1048576">MiB</option>
-                                <option value="1073741824">GiB</option>
-                                <option value="1099511627776">TiB</option>
-                            </select>
-                        </div>
-                        <!-- The setting itself. Bytes, named literally, never edited by hand:
-                             the pair above writes into it. -->
-                        <input type="hidden" name="api_rate_limit_bytes_day" id="api-rate-limit-bytes-day-raw"
-                               data-size-min="0" data-size-max="1099511627776"
-                               value="<?= sanitize($cfg['api_rate_limit_bytes_day'] ?? '5368709120') ?>">
-                        <small class="settings-hint"><?= __('settings.api_bytes_day_hint') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- User accounts -->
-            <div class="settings-section" id="section-tuner" data-group="network" data-title="<?= _h('settings.tuner_title') ?>">
-                <h5><?= _h('settings.tuner_title') ?></h5>
-                <p class="settings-hint mb-2">
-                    <?= __('settings.tuner_intro') ?>
-                </p>
-                <div class="row g-3">
-                    <div class="col-md-4" data-setting="tuner_enabled">
-                        <label class="form-label"><?= _h('settings.tuner_label') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="tuner_enabled">
-                            <option value="0" <?= ($cfg['tuner_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                            <option value="1" <?= ($cfg['tuner_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.tuner_enabled_opt') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.tuner_enabled_hint') ?></small>
-                    </div>
-                    <div class="col-md-4" data-setting="tuner_python">
-                        <label class="form-label"><?= _h('settings.tuner_python') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="tuner_python" value="<?= sanitize($cfg['tuner_python'] ?? 'python3') ?>" placeholder="python3">
-                        <small class="settings-hint"><?= __('settings.tuner_python_hint') ?></small>
-                    </div>
-                    <div class="col-md-4" data-setting="tuner_load_headroom">
-                        <label class="form-label"><?= _h('settings.tuner_headroom') ?> <small class="settings-hint"><?= _h('settings.tuner_per_core') ?></small></label>
-                        <input type="number" step="0.05" min="0.05" max="4" class="form-control bg-dark text-light border-secondary" name="tuner_load_headroom" value="<?= sanitize($cfg['tuner_load_headroom'] ?? '0.35') ?>">
-                        <small class="settings-hint"><?= __('settings.tuner_headroom_hint') ?></small>
-                    </div>
-                    <div class="col-md-4" data-setting="tuner_load_hard">
-                        <label class="form-label"><?= _h('settings.tuner_hard') ?> <small class="settings-hint"><?= _h('settings.tuner_load_per_core') ?></small></label>
-                        <input type="number" step="0.1" min="0.5" max="20" class="form-control bg-dark text-light border-secondary" name="tuner_load_hard" value="<?= sanitize($cfg['tuner_load_hard'] ?? '2.0') ?>">
-                        <small class="settings-hint"><?= _h('settings.tuner_hard_hint') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-section" id="section-audit" data-group="users" data-title="<?= _h('settings.audit_title') ?>">
-                <h5><?= _h('settings.audit_title') ?></h5>
-                <p class="settings-hint mb-2"><?= _h('settings.audit_intro') ?></p>
-                <div class="row g-3">
-                    <div class="col-md-4" data-setting="audit_enabled">
-                        <label class="form-label"><?= _h('settings.audit_recording') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="audit_enabled">
-                            <option value="1" <?= ($cfg['audit_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.audit_opt_record') ?></option>
-                            <option value="0" <?= ($cfg['audit_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.audit_opt_no_record') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.audit_recording_hint') ?></small>
-                    </div>
-                    <div class="col-md-4" data-setting="audit_keep_days">
-                        <label class="form-label"><?= _h('settings.audit_keep_days') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="audit_keep_days" value="<?= sanitize($cfg['audit_keep_days'] ?? '180') ?>" min="7" max="3650">
-                        <small class="settings-hint"><?= _h('settings.audit_keep_days_hint') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <?php /* A second factor for member accounts. Not beside the panel's own 2FA setting on
-                     purpose: that one is about the operator's own sign-in, this one is a feature the
-                     site offers its members, and putting them together invited the reading that
-                     switching one moves the other. */ ?>
-            <div class="settings-section" id="section-user2fa" data-group="users" data-title="<?= _h('settings.user2fa_heading') ?>">
-                <h5><i class="bi bi-shield-lock"></i> <?= _h('settings.user2fa_heading') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.user2fa_intro') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-4" data-setting="user_2fa_enabled">
-                        <label class="form-label"><?= _h('settings.user2fa_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="user_2fa_enabled">
-                            <option value="0" <?= ($cfg['user_2fa_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.user2fa_off') ?></option>
-                            <option value="1" <?= ($cfg['user_2fa_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.user2fa_on') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.user2fa_enabled_hint') ?></small>
-                    </div>
-                    <div class="col-md-4" data-setting="user_2fa_required">
-                        <label class="form-label"><?= _h('settings.user2fa_required') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="user_2fa_required">
-                            <option value="off" <?= ($cfg['user_2fa_required'] ?? 'off') === 'off' ? 'selected' : '' ?>><?= _h('settings.user2fa_required_none') ?></option>
-                            <option value="panel" <?= ($cfg['user_2fa_required'] ?? 'off') === 'panel' ? 'selected' : '' ?>><?= _h('settings.user2fa_panel') ?></option>
-                            <option value="all" <?= ($cfg['user_2fa_required'] ?? 'off') === 'all' ? 'selected' : '' ?>><?= _h('settings.user2fa_all') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.user2fa_required_hint') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-section" id="section-sounds" data-group="sounds" data-title="<?= _h('settings.sounds_heading') ?>">
-                <h5><i class="bi bi-volume-up"></i> <?= _h('settings.sounds_heading') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.sounds_intro') ?></small>
-                <?php
-                $sndLib = soundLibrary($db, $baseUrl);
-                // Two groups in every select below: what ships with the tracker, and what the owner
-                // added. Grouped here rather than in the script so the page is already right before
-                // anything runs; assets/js/admin-sounds.js only keeps the second group in step as
-                // sounds are added, renamed and removed — inside the group, by name.
-                $sndShipped = []; $sndOwn = [];
-                foreach ($sndLib as $sndE) { if (!empty($sndE['custom'])) $sndOwn[] = $sndE; else $sndShipped[] = $sndE; }
-                usort($sndOwn, fn(array $a, array $b): int => strcasecmp((string)$a['name'], (string)$b['name']));
-                /** One select's option list: "Nothing", then the two groups. $cur is the stored id. */
-                $sndOptions = function (string $cur) use ($sndShipped, $sndOwn): string {
-                    $opt = fn(array $e): string => '<option value="' . sanitize((string)$e['id']) . '"'
-                        . ($cur === $e['id'] ? ' selected' : '') . '>' . sanitize((string)$e['name']) . '</option>';
-                    $html = '<option value=""' . ($cur === '' ? ' selected' : '') . '>' . _h('settings.sounds_none') . '</option>';
-                    if ($sndShipped) $html .= '<optgroup label="' . _h('settings.sounds_group_shipped') . '">' . implode('', array_map($opt, $sndShipped)) . '</optgroup>';
-                    // data-sound-own is what the script looks for when it has a sound to slot in.
-                    if ($sndOwn) $html .= '<optgroup label="' . _h('settings.sounds_group_own') . '" data-sound-own>' . implode('', array_map($opt, $sndOwn)) . '</optgroup>';
-                    return $html;
-                };
-                ?>
-                <div class="row g-3">
-                    <div class="col-md-3" data-setting="sounds_enabled">
-                        <label class="form-label"><?= _h('settings.sounds_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="sounds_enabled">
-                            <option value="1" <?= ($cfg['sounds_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['sounds_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.sounds_enabled_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="sound_default_notification">
-                        <label class="form-label" for="setting-sound_default_notification"><?= _h('settings.sounds_default_notification') ?></label>
-                        <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_notification" id="setting-sound_default_notification" data-snd-label="<?= _h('settings.sounds_ev_notification') ?>">
-                                <?= $sndOptions((string)($cfg['sound_default_notification'] ?? '')) ?>
-                            </select>
-                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_notification" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
-                        </div>
-                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="sound_default_message_friend">
-                        <label class="form-label" for="setting-sound_default_message_friend"><?= _h('settings.sounds_default_message_friend') ?></label>
-                        <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_message_friend" id="setting-sound_default_message_friend" data-snd-label="<?= _h('settings.sounds_ev_message_friend') ?>">
-                                <?= $sndOptions((string)($cfg['sound_default_message_friend'] ?? '')) ?>
-                            </select>
-                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_message_friend" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
-                        </div>
-                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="sound_default_message">
-                        <label class="form-label" for="setting-sound_default_message"><?= _h('settings.sounds_default_message') ?></label>
-                        <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_message" id="setting-sound_default_message" data-snd-label="<?= _h('settings.sounds_ev_message') ?>">
-                                <?= $sndOptions((string)($cfg['sound_default_message'] ?? '')) ?>
-                            </select>
-                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_message" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
-                        </div>
-                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
-                    </div>
-                    <?php /* The shoutbox's three: offered only while the shoutbox is on, like the events themselves. */ ?>
-                    <?php if (function_exists('shoutEnabled') && shoutEnabled($cfg)): ?>
-                    <div class="col-md-3" data-setting="sound_default_shout_friend">
-                        <label class="form-label" for="setting-sound_default_shout_friend"><?= _h('settings.sounds_default_shout_friend') ?></label>
-                        <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_shout_friend" id="setting-sound_default_shout_friend" data-snd-label="<?= _h('settings.sounds_ev_shout_friend') ?>">
-                                <?= $sndOptions((string)($cfg['sound_default_shout_friend'] ?? '')) ?>
-                            </select>
-                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_shout_friend" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
-                        </div>
-                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="sound_default_shout">
-                        <label class="form-label" for="setting-sound_default_shout"><?= _h('settings.sounds_default_shout') ?></label>
-                        <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_shout" id="setting-sound_default_shout" data-snd-label="<?= _h('settings.sounds_ev_shout') ?>">
-                                <?= $sndOptions((string)($cfg['sound_default_shout'] ?? '')) ?>
-                            </select>
-                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_shout" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
-                        </div>
-                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="sound_default_mention">
-                        <label class="form-label" for="setting-sound_default_mention"><?= _h('settings.sounds_default_mention') ?></label>
-                        <div class="d-flex gap-1">
-                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_mention" id="setting-sound_default_mention" data-snd-label="<?= _h('settings.sounds_ev_mention') ?>">
-                                <?= $sndOptions((string)($cfg['sound_default_mention'] ?? '')) ?>
-                            </select>
-                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_mention" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
-                        </div>
-                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
-                    </div>
-                    <?php endif; ?>
-                </div>
-                <?php /* The uploads: drawn and driven by assets/js/admin-sounds.js. The file input has no name on
-                         purpose — it is not a setting and never travels with the form; the script reads the file
-                         and posts it to admin/sounds as base64. */ ?>
-                <div class="mt-4" id="admin-sounds" data-max-bytes="<?= (int)SOUNDS_MAX_BYTES ?>" data-max-count="<?= (int)SOUNDS_MAX_CUSTOM ?>">
-                    <div class="admin-sounds-head">
-                        <label class="form-label mb-0"><?= _h('settings.sounds_custom') ?></label>
-                        <?php /* "3 of 40": the cap is the reason an upload can be refused, so it is beside the
-                                 heading rather than only inside the error that says no. Filled by the script. */ ?>
-                        <span class="admin-sounds-count" id="admin-sounds-count" hidden></span>
-                    </div>
-                    <div id="admin-sounds-list" class="mb-3"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
-                    <div class="admin-sound-add">
-                        <h6 class="admin-sound-add-title"><i class="bi bi-plus-circle"></i> <?= _h('settings.sounds_add_heading') ?></h6>
-                        <?php /* The same drop zone the language install and the address-list import use: the
-                                 <input type=file> stays in the DOM, invisible, over a box that also takes a dropped
-                                 file. Full width and shallow, because the name and the button read as one row below
-                                 it rather than as a column beside a tall box. */ ?>
-                        <div class="ipl-drop ipl-drop-wide" id="admin-sound-drop" tabindex="0" role="button" aria-label="<?= _h('settings.sounds_drop_aria') ?>">
-                            <i class="bi bi-file-earmark-music ipl-drop-icon"></i>
-                            <span class="ipl-drop-main"><u><?= _h('settings.sounds_drop_choose') ?></u> <?= _h('settings.sounds_drop_or') ?></span>
-                            <span class="ipl-drop-sub"><?= _h('settings.sounds_drop_sub') ?></span>
-                            <input type="file" id="admin-sound-file" class="ipl-drop-input" accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav">
-                        </div>
-                        <div class="admin-sound-add-row">
-                            <input type="text" id="admin-sound-name" class="form-control form-control-sm bg-dark text-light border-secondary"
-                                   maxlength="<?= (int)SOUNDS_NAME_MAX ?>" placeholder="<?= _h('settings.sounds_name_ph') ?>"
-                                   aria-label="<?= _h('settings.sounds_name_label') ?>" autocomplete="off" spellcheck="false">
-                            <button type="button" class="btn btn-sm btn-info" id="admin-sound-upload"><i class="bi bi-plus-lg"></i> <?= _h('settings.sounds_upload') ?></button>
-                        </div>
-                    </div>
-                    <small class="settings-hint"><?= __('settings.sounds_custom_hint') ?></small>
-                </div>
-            </div>
-
-            <div class="settings-section" id="section-users" data-group="users" data-title="<?= _h('settings.users_title') ?>">
-                <h5><?= _h('settings.users_title') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.users_intro_a') ?> <a href="<?= $baseUrl ?>?action=admin-users"><?= _h('settings.users_page_link') ?></a>. <?= __('settings.users_intro_b') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_label') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="users_enabled">
-                            <option value="1" <?= ($cfg['users_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['users_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_registration') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="users_registration_enabled">
-                            <option value="1" <?= ($cfg['users_registration_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.users_registration_open') ?></option>
-                            <option value="0" <?= ($cfg['users_registration_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_registration_closed') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.users_registration_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_links') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="users_links_visible">
-                            <option value="1" <?= ($cfg['users_links_visible'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.users_links_visible') ?></option>
-                            <option value="0" <?= ($cfg['users_links_visible'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_links_hidden') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.users_links_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_default_group') ?></label>
-                        <?php
-                        /* THE GROUPS THAT EXIST, not a slug to type from memory. A free-text field
-                           here accepts any well-formed word, including one nobody ever created — and
-                           a default group that does not exist is a setting that looks saved and
-                           quietly grants nothing to every account made afterwards. The current value
-                           is kept in the list even if its group is gone, so opening this page cannot
-                           silently rewrite a setting the operator has not touched. */
-                        $sgDefault = (string)($cfg['users_default_group'] ?? 'member');
-                        $sgGroups = [];
-                        try {
-                            foreach ($db->query("SELECT slug, name FROM user_groups ORDER BY priority DESC, name")->fetchAll(PDO::FETCH_ASSOC) as $g) {
-                                $sgGroups[(string)$g['slug']] = (string)$g['name'];
-                            }
-                        } catch (\Throwable $e) { $sgGroups = []; }
-                        if (!isset($sgGroups[$sgDefault])) $sgGroups[$sgDefault] = $sgDefault;
-                        ?>
-                        <select class="form-select bg-dark text-light border-secondary" name="users_default_group">
-                            <?php foreach ($sgGroups as $slug => $name): ?>
-                            <option value="<?= sanitize($slug) ?>"<?= $slug === $sgDefault ? ' selected' : '' ?>><?= sanitize($name) ?> (<?= sanitize($slug) ?>)</option>
-                            <?php endforeach; ?>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.users_default_group_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_expiry_days') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="users_notify_expiry_days" value="<?= sanitize($cfg['users_notify_expiry_days'] ?? '3') ?>" min="0" max="30">
-                        <small class="settings-hint"><?= _h('settings.users_expiry_days_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="bulk_mail_enabled">
-                        <label class="form-label"><?= _h('settings.bulk_mail_label') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="bulk_mail_enabled">
-                            <option value="0" <?= ($cfg['bulk_mail_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                            <option value="1" <?= ($cfg['bulk_mail_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.bulk_mail_hint_a') ?> <a href="<?= $baseUrl ?>?action=admin-users"><?= _h('settings.users_page_link') ?></a>: <?= __('settings.bulk_mail_hint_b') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="bulk_mail_per_minute">
-                        <label class="form-label"><?= _h('settings.bulk_mail_per_minute') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="bulk_mail_per_minute" value="<?= sanitize($cfg['bulk_mail_per_minute'] ?? '20') ?>" min="1" max="500">
-                        <small class="settings-hint"><?= __('settings.bulk_mail_per_minute_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="bulk_mail_max_attempts">
-                        <label class="form-label"><?= _h('settings.bulk_mail_retries') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="bulk_mail_max_attempts" value="<?= sanitize($cfg['bulk_mail_max_attempts'] ?? '3') ?>" min="1" max="10">
-                        <small class="settings-hint"><?= _h('settings.bulk_mail_retries_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_email_verify') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="users_require_email_verify">
-                            <option value="1" <?= ($cfg['users_require_email_verify'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.users_email_verify_yes') ?></option>
-                            <option value="0" <?= ($cfg['users_require_email_verify'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_email_verify_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.users_email_verify_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_email_cooldown') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="users_email_change_cooldown_days" value="<?= sanitize($cfg['users_email_change_cooldown_days'] ?? '30') ?>" min="0" max="365">
-                        <small class="settings-hint"><?= _h('settings.users_email_cooldown_hint') ?></small>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.users_terms') ?> <small class="settings-hint"><?= __('settings.users_terms_hint') ?></small></label>
-                        <textarea class="form-control bg-dark text-light border-secondary" name="users_terms_text" rows="4" placeholder="<?= _h('settings.users_terms_ph') ?>"><?= sanitize($cfg['users_terms_text'] ?? '') ?></textarea>
-                        <small class="settings-hint"><?= _h('settings.users_terms_note') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_rl_login') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_user_login" value="<?= sanitize($cfg['rate_limit_user_login'] ?? '10') ?>" min="0" max="1000">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_rl_register') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_user_register" value="<?= sanitize($cfg['rate_limit_user_register'] ?? '5') ?>" min="0" max="1000">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_rl_search') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_index_search" value="<?= sanitize($cfg['rate_limit_index_search'] ?? '120') ?>" min="0" max="100000">
-                    </div>
-                    <div class="col-md-3" data-setting="rate_limit_hash_check">
-                        <label class="form-label"><?= _h('settings.users_rl_hashcheck') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_hash_check" value="<?= sanitize($cfg['rate_limit_hash_check'] ?? '120') ?>" min="0" max="100000">
-                        <small class="settings-hint"><?= _h('settings.users_rl_hashcheck_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="rate_limit_preview">
-                        <label class="form-label"><?= _h('settings.users_rl_preview') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_preview" value="<?= sanitize($cfg['rate_limit_preview'] ?? '30') ?>" min="5" max="300">
-                        <small class="settings-hint"><?= _h('settings.users_rl_preview_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_search') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="index_search_enabled">
-                            <option value="1" <?= ($cfg['index_search_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['index_search_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_search_disabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.users_search_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="search_time_budget">
-                        <label class="form-label"><?= _h('settings.users_search_budget') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="search_time_budget" value="<?= sanitize($cfg['search_time_budget'] ?? '60') ?>" min="10" max="300">
-                        <small class="settings-hint"><?= __('settings.users_search_budget_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_share') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="search_share_enabled">
-                            <option value="1" <?= ($cfg['search_share_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['search_share_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.users_share_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.users_search_whitelist') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="index_search_include_whitelist">
-                            <option value="1" <?= ($cfg['index_search_include_whitelist'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.users_search_whitelist_yes') ?></option>
-                            <option value="0" <?= ($cfg['index_search_include_whitelist'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_search_whitelist_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.users_search_whitelist_hint') ?></small>
-                        <small class="settings-hint"><?= __('settings.users_search_note') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <?php
-            // Pictures and profile covers (1.63.0, includes/usermedia.php). The eight settings are
-            // ordinary fields; the site's default picture and default cover are stored images, so
-            // they are two blocks drawn by assets/js/admin-profiles.js from the JSON below — the
-            // upload, the position editor (assets/js/media-editor.js, the same one the account page
-            // uses) and Remove all go through admin/user_media, never through this form.
-            $pmAvSrc = function_exists('userAvatarSourceRow') ? userAvatarSourceRow($db, null) : null;
-            $pmAvSha = strtolower((string)($cfg['avatar_default_sha'] ?? ''));
-            $pmCvSha = strtolower((string)($cfg['cover_default_sha'] ?? ''));
-            $pmState = function_exists('userMediaUrl') ? [
-                'avatar' => ['has' => $pmAvSrc !== null && userMediaValidSha($pmAvSha),
-                             'src' => $pmAvSrc !== null ? userMediaUrl((string)$pmAvSrc['sha1'], 0, $baseUrl) : '',
-                             'preview' => userMediaValidSha($pmAvSha) ? userMediaUrl($pmAvSha, 128, $baseUrl) : '',
-                             'x' => (float)($cfg['avatar_default_x'] ?? 50), 'y' => (float)($cfg['avatar_default_y'] ?? 50),
-                             'zoom' => (float)($cfg['avatar_default_zoom'] ?? 1)],
-                'cover'  => ['has' => userMediaValidSha($pmCvSha),
-                             'src' => userMediaValidSha($pmCvSha) ? userMediaUrl($pmCvSha, 0, $baseUrl) : '',
-                             'x' => (float)($cfg['cover_default_x'] ?? 50), 'y' => (float)($cfg['cover_default_y'] ?? 50),
-                             'zoom' => (float)($cfg['cover_default_zoom'] ?? 1)],
-                'max_bytes' => userMediaMaxBytes($cfg), 'max_mp' => userMediaMaxMp($cfg),
-                'cover_h' => userCoverHeight($cfg), 'cover_hm' => userCoverHeightMobile($cfg),
-                'desk_w' => USER_COVER_DESKTOP_W, 'phone_w' => USER_COVER_PHONE_W,
-            ] : [];
-            ?>
-            <div class="settings-section" id="section-profiles" data-group="profiles" data-title="<?= _h('settings.profiles_heading') ?>">
-                <h5><i class="bi bi-person-badge"></i> <?= _h('settings.profiles_heading') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.profiles_intro') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-3" data-setting="avatars_enabled">
-                        <label class="form-label"><?= _h('settings.profiles_avatars') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="avatars_enabled">
-                            <option value="1" <?= ($cfg['avatars_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['avatars_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.profiles_avatars_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="covers_enabled">
-                        <label class="form-label"><?= _h('settings.profiles_covers') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="covers_enabled">
-                            <option value="1" <?= ($cfg['covers_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['covers_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.profiles_covers_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="avatar_max_kb">
-                        <label class="form-label" for="setting-avatar_max_kb"><?= _h('settings.profiles_max_kb') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="avatar_max_kb" id="setting-avatar_max_kb"
-                               value="<?= sanitize($cfg['avatar_max_kb'] ?? (string)USER_MEDIA_KB_DEFAULT) ?>" min="<?= USER_MEDIA_KB_MIN ?>" max="<?= USER_MEDIA_KB_MAX ?>">
-                        <?php /* The number PHP will actually take, beside the one the owner typed: the lower
-                                 of the two is what every form on the site quotes (userMediaMaxBytes()). */ ?>
-                        <small class="settings-hint"><?= __('settings.profiles_max_kb_hint', [
-                            'min' => USER_MEDIA_KB_MIN, 'max' => USER_MEDIA_KB_MAX,
-                            'eff' => number_format(function_exists('userMediaMaxBytes') ? userMediaMaxBytes($cfg) / 1024 : 0, 0, '.', ' '),
-                            'php' => sanitize((string)ini_get('upload_max_filesize'))]) ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="avatar_max_mp">
-                        <label class="form-label" for="setting-avatar_max_mp"><?= _h('settings.profiles_max_mp') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="avatar_max_mp" id="setting-avatar_max_mp"
-                               value="<?= sanitize($cfg['avatar_max_mp'] ?? (string)USER_MEDIA_MP_DEFAULT) ?>" min="<?= USER_MEDIA_MP_MIN ?>" max="<?= USER_MEDIA_MP_MAX ?>">
-                        <small class="settings-hint"><?= __('settings.profiles_max_mp_hint', ['min' => USER_MEDIA_MP_MIN, 'max' => USER_MEDIA_MP_MAX]) ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="cover_height">
-                        <label class="form-label" for="setting-cover_height"><?= _h('settings.profiles_cover_height') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="cover_height" id="setting-cover_height"
-                               value="<?= sanitize($cfg['cover_height'] ?? '220') ?>" min="<?= USER_COVER_H_MIN ?>" max="<?= USER_COVER_H_MAX ?>">
-                        <small class="settings-hint"><?= __('settings.profiles_cover_height_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="cover_height_mobile">
-                        <label class="form-label" for="setting-cover_height_mobile"><?= _h('settings.profiles_cover_height_mobile') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="cover_height_mobile" id="setting-cover_height_mobile"
-                               value="<?= sanitize($cfg['cover_height_mobile'] ?? '160') ?>" min="<?= USER_COVER_H_MIN ?>" max="<?= USER_COVER_H_MAX ?>">
-                        <small class="settings-hint"><?= __('settings.profiles_cover_height_mobile_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="cover_overlay">
-                        <label class="form-label" for="setting-cover_overlay"><?= _h('settings.profiles_overlay') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="cover_overlay" id="setting-cover_overlay">
-                            <?php $pmOv = function_exists('userCoverOverlay') ? userCoverOverlay($cfg) : 'gradient'; ?>
-                            <option value="gradient" <?= $pmOv === 'gradient' ? 'selected' : '' ?>><?= _h('settings.profiles_overlay_gradient') ?></option>
-                            <option value="darken" <?= $pmOv === 'darken' ? 'selected' : '' ?>><?= _h('settings.profiles_overlay_darken') ?></option>
-                            <option value="none" <?= $pmOv === 'none' ? 'selected' : '' ?>><?= _h('settings.profiles_overlay_none') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.profiles_overlay_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="avatar_default">
-                        <label class="form-label" for="setting-avatar_default"><?= _h('settings.profiles_default_mode') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="avatar_default" id="setting-avatar_default">
-                            <option value="generated" <?= ($cfg['avatar_default'] ?? 'generated') !== 'image' ? 'selected' : '' ?>><?= _h('settings.profiles_default_generated') ?></option>
-                            <option value="image" <?= ($cfg['avatar_default'] ?? 'generated') === 'image' ? 'selected' : '' ?>><?= _h('settings.profiles_default_image') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.profiles_default_mode_hint') ?></small>
-                    </div>
-                    <?php /* 1.66.0: one control per block, in place of the single "Picture and cover on
-                             the account page" (account_media_side, removed by the v72 migration). */ ?>
-                    <div class="col-md-3" data-setting="account_picture_side">
-                        <label class="form-label" for="setting-account_picture_side"><?= _h('settings.account_picture_side') ?></label>
-                        <?php $pmPicSide = function_exists('accountPictureSide') ? accountPictureSide($cfg) : 'left'; ?>
-                        <select class="form-select bg-dark text-light border-secondary" name="account_picture_side" id="setting-account_picture_side">
-                            <option value="left" <?= $pmPicSide === 'left' ? 'selected' : '' ?>><?= _h('settings.account_side_left') ?></option>
-                            <option value="right" <?= $pmPicSide === 'right' ? 'selected' : '' ?>><?= _h('settings.account_side_right') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.account_picture_side_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="account_cover_side">
-                        <label class="form-label" for="setting-account_cover_side"><?= _h('settings.account_cover_side') ?></label>
-                        <?php $pmCovSide = function_exists('accountCoverSide') ? accountCoverSide($cfg) : 'right'; ?>
-                        <select class="form-select bg-dark text-light border-secondary" name="account_cover_side" id="setting-account_cover_side">
-                            <option value="left" <?= $pmCovSide === 'left' ? 'selected' : '' ?>><?= _h('settings.account_side_left') ?></option>
-                            <option value="right" <?= $pmCovSide === 'right' ? 'selected' : '' ?>><?= _h('settings.account_side_right') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.account_cover_side_hint') ?></small>
-                    </div>
-                </div>
-                <?php /* The two stored images. No name="" anywhere in here on purpose: none of this is a
-                         form setting, and the file inputs must never travel with a Settings save. */ ?>
-                <script type="application/json" id="adm-media-data"<?= nonceAttr() ?>><?= json_encode($pmState, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES) ?></script>
-                <div class="row g-3 mt-1">
-                    <div class="col-md-6" data-setting="avatar_default_image">
-                        <label class="form-label"><?= _h('settings.profiles_default_avatar') ?></label>
-                        <div class="adm-media" id="adm-media-avatar" data-kind="avatar">
-                            <div class="adm-media-preview adm-media-preview-avatar" id="adm-media-avatar-preview" aria-hidden="true"></div>
-                            <div class="adm-media-side">
-                                <div class="ipl-drop ipl-drop-wide" id="adm-media-avatar-drop" tabindex="0" role="button" aria-label="<?= _h('settings.profiles_drop_aria') ?>">
-                                    <i class="bi bi-image ipl-drop-icon"></i>
-                                    <span class="ipl-drop-main"><u><?= _h('settings.profiles_drop_choose') ?></u> <?= _h('settings.profiles_drop_or') ?></span>
-                                    <span class="ipl-drop-sub"><?= _h('settings.profiles_drop_sub') ?></span>
-                                    <input type="file" class="ipl-drop-input" id="adm-media-avatar-file" accept="image/jpeg,image/png,image/webp,image/gif">
-                                </div>
-                                <div class="adm-media-acts">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="adm-media-avatar-adjust" hidden><i class="bi bi-arrows-move"></i> <?= _h('settings.profiles_adjust') ?></button>
-                                    <button type="button" class="btn btn-sm btn-outline-danger" id="adm-media-avatar-remove" hidden><i class="bi bi-trash"></i> <?= _h('settings.profiles_remove') ?></button>
-                                </div>
-                            </div>
-                        </div>
-                        <small class="settings-hint"><?= __('settings.profiles_default_avatar_hint') ?></small>
-                    </div>
-                    <div class="col-md-6" data-setting="cover_default_image">
-                        <label class="form-label"><?= _h('settings.profiles_default_cover') ?></label>
-                        <div class="adm-media" id="adm-media-cover" data-kind="cover">
-                            <div class="adm-media-preview adm-media-preview-cover" id="adm-media-cover-preview" aria-hidden="true"></div>
-                            <div class="adm-media-side">
-                                <div class="ipl-drop ipl-drop-wide" id="adm-media-cover-drop" tabindex="0" role="button" aria-label="<?= _h('settings.profiles_drop_aria') ?>">
-                                    <i class="bi bi-image ipl-drop-icon"></i>
-                                    <span class="ipl-drop-main"><u><?= _h('settings.profiles_drop_choose') ?></u> <?= _h('settings.profiles_drop_or') ?></span>
-                                    <span class="ipl-drop-sub"><?= _h('settings.profiles_drop_sub') ?></span>
-                                    <input type="file" class="ipl-drop-input" id="adm-media-cover-file" accept="image/jpeg,image/png,image/webp,image/gif">
-                                </div>
-                                <div class="adm-media-acts">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="adm-media-cover-adjust" hidden><i class="bi bi-arrows-move"></i> <?= _h('settings.profiles_adjust') ?></button>
-                                    <button type="button" class="btn btn-sm btn-outline-danger" id="adm-media-cover-remove" hidden><i class="bi bi-trash"></i> <?= _h('settings.profiles_remove') ?></button>
-                                </div>
-                            </div>
-                        </div>
-                        <small class="settings-hint"><?= __('settings.profiles_default_cover_hint') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- OpenTracker performance -->
-            <div class="settings-section" id="section-ot-perf" data-group="opentracker" data-title="<?= _h('settings.ot_perf_title') ?>">
-                <h5><?= _h('settings.ot_perf_title') ?></h5>
-                <p class="settings-hint mb-2">
-                    <?= __('settings.ot_perf_intro_a') ?>
-                    <a href="<?= $baseUrl ?>?action=admin-traffic#ot-card"><?= _h('settings.ot_perf_traffic_page') ?></a> <?= _h('settings.ot_perf_intro_b') ?>
-                </p>
-                <div class="row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.ot_perf_cmd') ?></label>
-                        <div class="input-group">
-                            <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_perf_cmd" value="<?= sanitize($cfg['ot_perf_cmd'] ?? '') ?>" placeholder="<?= _h('settings.ot_perf_cmd_ph') ?>">
-                            <button class="btn btn-outline-info" type="button" id="btn-ot-test"><i class="bi bi-clipboard-check"></i> <?= _h('settings.ot_perf_test_btn') ?></button>
-                        </div>
-                        <small class="settings-hint"><?= __('settings.ot_perf_cmd_hint') ?></small>
-                        <div id="ot-test-result" class="mt-2"></div>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_nice') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_nice" value="<?= sanitize($cfg['ot_nice'] ?? '-2') ?>" min="-20" max="19">
-                        <small class="settings-hint"><?= _h('settings.ot_nice_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_cpu_weight') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_cpu_weight" value="<?= sanitize($cfg['ot_cpu_weight'] ?? '100') ?>" min="1" max="10000">
-                        <small class="settings-hint"><?= _h('settings.ot_cpu_weight_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_cpu_affinity') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_cpu_affinity" value="<?= sanitize($cfg['ot_cpu_affinity'] ?? '') ?>" placeholder="<?= _h('settings.ot_cpu_affinity_ph') ?>">
-                        <small class="settings-hint"><?= __('settings.ot_cpu_affinity_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_nofile') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_limit_nofile" value="<?= sanitize($cfg['ot_limit_nofile'] ?? '65536') ?>" min="1024" max="1048576">
-                        <small class="settings-hint"><?= __('settings.ot_nofile_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_udp_workers') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_udp_workers" value="<?= sanitize($cfg['ot_udp_workers'] ?? '') ?>" placeholder="<?= _h('settings.ot_udp_workers_ph') ?>">
-                        <small class="settings-hint"><?= __('settings.ot_udp_workers_hint') ?></small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Kernel network buffers -->
-            <!-- Extra opentracker instances -->
-            <div class="settings-section" id="section-cluster" data-group="opentracker" data-title="<?= _h('settings.cluster_title') ?>">
-                <h5><?= _h('settings.cluster_title') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.cluster_intro_a') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#ot-card"><?= _h('settings.cluster_perf_card_link') ?></a> <?= __('settings.cluster_intro_b') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.cluster_cmd') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_cluster_cmd" value="<?= sanitize($cfg['ot_cluster_cmd'] ?? '') ?>" maxlength="255" placeholder="<?= _h('settings.cluster_cmd_ph') ?>">
-                        <small class="settings-hint"><?= __('settings.cluster_cmd_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_cluster_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="ot_cluster_enabled">
-                            <option value="0" <?= ($cfg['ot_cluster_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.ot_cluster_no') ?></option>
-                            <option value="1" <?= ($cfg['ot_cluster_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.ot_cluster_yes') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.ot_cluster_enabled_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_cluster_port_base') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_cluster_port_base" value="<?= sanitize($cfg['ot_cluster_port_base'] ?? '') ?>" min="1024" max="65500" placeholder="<?= _h('settings.ot_cluster_port_base_ph') ?>">
-                        <small class="settings-hint"><?= _h('settings.ot_cluster_port_base_hint') ?></small>
-                    </div>
-                </div>
-                <div class="mt-3">
-                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-cluster-test"><i class="bi bi-plug"></i> <?= _h('settings.ot_cluster_test') ?></button>
-                    <div id="cluster-test-result" class="mt-2"></div>
-                    <small class="settings-hint d-block mt-2"><?= __('settings.ot_cluster_test_hint') ?></small>
-                </div>
-            </div>
-
-
-            <div class="settings-section" id="section-sysctl" data-group="network" data-title="<?= _h('settings.sysctl_title') ?>">
-                <h5><?= _h('settings.sysctl_title') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.sysctl_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#sysctl-card"><?= _h('settings.sysctl_intro_link') ?></a><?= _h('settings.sysctl_intro_tail') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.sysctl_cmd') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="sysctl_cmd" value="<?= sanitize($cfg['sysctl_cmd'] ?? '') ?>" maxlength="255" placeholder="<?= _h('settings.sysctl_cmd_ph') ?>">
-                        <small class="settings-hint"><?= __('settings.sysctl_cmd_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.sysctl_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="sysctl_enabled">
-                            <option value="0" <?= ($cfg['sysctl_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.sysctl_no') ?></option>
-                            <option value="1" <?= ($cfg['sysctl_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.sysctl_yes') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.sysctl_enabled_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.sysctl_confirm_seconds') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="sysctl_confirm_seconds" value="<?= sanitize($cfg['sysctl_confirm_seconds'] ?? '120') ?>" min="60" max="900" step="60">
-                        <small class="settings-hint"><?= _h('settings.sysctl_confirm_seconds_hint') ?></small>
-                    </div>
-                </div>
-                <div class="mt-3">
-                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-sysctl-test"><i class="bi bi-plug"></i> <?= _h('settings.sysctl_test') ?></button>
-                    <div id="sysctl-test-result" class="mt-2"></div>
-                </div>
-            </div>
-
-
-            <!-- Database memory (MariaDB / MySQL) -->
-            <div class="settings-section" id="section-dbmem" data-group="network" data-title="<?= _h('settings.dbmem_title') ?>">
-                <h5><?= _h('settings.dbmem_title') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.dbmem_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#dbmem-card"><?= _h('settings.dbmem_card_link') ?></a></small>
-                <div class="row g-3">
-                    <div class="col-md-8">
-                        <label class="form-label"><?= _h('settings.dbmem_cmd') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="dbmem_cmd" value="<?= sanitize($cfg['dbmem_cmd'] ?? '') ?>" placeholder="sudo -n /usr/local/sbin/tracker-dbmem.sh" autocomplete="off" spellcheck="false">
-                        <small class="settings-hint"><?= __('settings.dbmem_cmd_hint') ?></small>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.dbmem_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="dbmem_enabled">
-                            <option value="0" <?= ($cfg['dbmem_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.sysctl_no') ?></option>
-                            <option value="1" <?= ($cfg['dbmem_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.sysctl_yes') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.dbmem_enabled_hint') ?></small>
-                    </div>
-                </div>
-                <div class="mt-3">
-                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-dbmem-test"><i class="bi bi-plug"></i> <?= _h('settings.dbmem_test') ?></button>
-                    <div id="dbmem-test-result" class="mt-2"></div>
-                </div>
-            </div>
-
-
-            <!-- Federation / cluster -->
-            <div class="settings-section" id="section-federation" data-group="integrations" data-title="<?= _h('settings.federation_title') ?>">
-                <h5><?= _h('settings.federation_title') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.federation_intro') ?></small>
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="fed_enabled">
-                            <option value="1" <?= ($cfg['fed_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.federation_enabled_on') ?></option>
-                            <option value="0" <?= ($cfg['fed_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.federation_enabled_off') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_node_name') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="fed_node_name" value="<?= sanitize($cfg['fed_node_name'] ?? '') ?>" maxlength="64" placeholder="<?= _h('settings.federation_node_name_ph') ?>">
-                        <small class="settings-hint"><?= _h('settings.federation_node_name_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_export_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="fed_export_enabled">
-                            <option value="1" <?= ($cfg['fed_export_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.federation_yes') ?></option>
-                            <option value="0" <?= ($cfg['fed_export_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.federation_export_no') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_export_files') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="fed_export_files">
-                            <option value="1" <?= ($cfg['fed_export_files'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.federation_yes') ?></option>
-                            <option value="0" <?= ($cfg['fed_export_files'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.federation_export_files_no') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_export_max_batch') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_export_max_batch" value="<?= sanitize($cfg['fed_export_max_batch'] ?? '2000') ?>" min="100" max="20000">
-                        <small class="settings-hint"><?= _h('settings.federation_export_max_batch_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_export_max_bytes') ?></label>
-                        <div class="input-group settings-size">
-                            <input type="number" class="form-control bg-dark text-light border-secondary"
-                                   id="fed-export-max-bytes-num" min="0" step="1" aria-label="<?= _h('settings.federation_size_aria') ?>">
-                            <select class="form-select bg-dark text-light border-secondary" id="fed-export-max-bytes-unit" aria-label="<?= _h('settings.federation_unit_aria') ?>">
-                                <option value="1"><?= _h('settings.federation_unit_bytes') ?></option>
-                                <option value="1024">KiB</option>
-                                <option value="1048576">MiB</option>
-                                <option value="1073741824">GiB</option>
-                                <option value="1099511627776">TiB</option>
-                            </select>
-                        </div>
-                        <!-- The setting itself. Bytes, named literally, never edited by hand:
-                             the pair above writes into it. -->
-                        <input type="hidden" name="fed_export_max_bytes" id="fed-export-max-bytes-raw"
-                               data-size-min="0" data-size-max="1073741824"
-                               value="<?= sanitize($cfg['fed_export_max_bytes'] ?? '8388608') ?>">
-                        <small class="settings-hint"><?= _h('settings.federation_export_max_bytes_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_import_batch_rows') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_import_batch_rows" value="<?= sanitize($cfg['fed_import_batch_rows'] ?? '500') ?>" min="25" max="5000">
-                        <small class="settings-hint"><?= _h('settings.federation_import_batch_rows_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_import_batch_bytes') ?></label>
-                        <div class="input-group settings-size">
-                            <input type="number" class="form-control bg-dark text-light border-secondary"
-                                   id="fed-import-batch-bytes-num" min="0" step="1" aria-label="<?= _h('settings.federation_size_aria') ?>">
-                            <select class="form-select bg-dark text-light border-secondary" id="fed-import-batch-bytes-unit" aria-label="<?= _h('settings.federation_unit_aria') ?>">
-                                <option value="1"><?= _h('settings.federation_unit_bytes') ?></option>
-                                <option value="1024">KiB</option>
-                                <option value="1048576">MiB</option>
-                                <option value="1073741824">GiB</option>
-                                <option value="1099511627776">TiB</option>
-                            </select>
-                        </div>
-                        <!-- The setting itself. Bytes, named literally, never edited by hand:
-                             the pair above writes into it. -->
-                        <input type="hidden" name="fed_import_batch_bytes" id="fed-import-batch-bytes-raw"
-                               data-size-min="1048576" data-size-max="268435456"
-                               value="<?= sanitize($cfg['fed_import_batch_bytes'] ?? '33554432') ?>">
-                        <small class="settings-hint"><?= _h('settings.federation_import_batch_bytes_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_import_max_seconds') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_import_max_seconds" value="<?= sanitize($cfg['fed_import_max_seconds'] ?? '600') ?>" min="30" max="21600">
-                        <small class="settings-hint"><?= _h('settings.federation_import_max_seconds_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_worker_mem_mb') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_worker_mem_mb" value="<?= sanitize($cfg['fed_worker_mem_mb'] ?? '256') ?>" min="64" max="4096">
-                        <small class="settings-hint"><?= __('settings.federation_worker_mem_mb_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_export_max_files') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_export_max_files" value="<?= sanitize($cfg['fed_export_max_files'] ?? '200000') ?>" min="0" max="50000000" step="10000">
-                        <small class="settings-hint"><?= _h('settings.federation_export_max_files_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_import_new') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="fed_import_new">
-                            <option value="1" <?= ($cfg['fed_import_new'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.federation_import_new_yes') ?></option>
-                            <option value="0" <?= ($cfg['fed_import_new'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.federation_import_new_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.federation_import_new_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_import_mode') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="fed_import_mode">
-                            <option value="fill" <?= ($cfg['fed_import_mode'] ?? 'fill') !== 'review' ? 'selected' : '' ?>><?= _h('settings.federation_import_mode_fill') ?></option>
-                            <option value="review" <?= ($cfg['fed_import_mode'] ?? 'fill') === 'review' ? 'selected' : '' ?>><?= _h('settings.federation_import_mode_review') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.federation_import_mode_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.federation_pull_minutes') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_pull_minutes" value="<?= sanitize($cfg['fed_pull_minutes'] ?? '60') ?>" min="5" max="1440">
-                        <small class="settings-hint"><?= __('settings.federation_pull_minutes_hint') ?></small>
-                    </div>
-                </div>
-                <div class="mt-3" id="fed-peers-card">
-                    <label class="form-label"><?= _h('settings.federation_peers') ?></label>
-                    <div class="table-responsive">
-                        <table class="table table-dark table-sm align-middle" id="fed-peers-table">
-                            <thead><tr><th><?= _h('settings.federation_th_name') ?></th><th><?= _h('settings.federation_th_base_url') ?></th><th><?= _h('settings.federation_th_pull') ?></th><th><?= _h('settings.federation_th_inbound_key') ?></th><th><?= _h('settings.federation_th_last_pull') ?></th><th><?= _h('settings.federation_th_imported') ?></th><th><?= _h('settings.federation_th_status') ?></th><th></th></tr></thead>
-                            <tbody id="fed-peers-body"><tr><td colspan="8" class="text-muted"><?= _h('settings.federation_loading') ?></td></tr></tbody>
-                        </table>
-                    </div>
-                    <div class="row g-2 align-items-end" id="fed-peer-add">
-                        <div class="col-md-2"><label class="form-label"><?= _h('settings.federation_th_name') ?></label><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="fp-name" maxlength="64" placeholder="<?= _h('settings.federation_peer_name_ph') ?>"></div>
-                        <div class="col-md-3"><label class="form-label"><?= _h('settings.federation_th_base_url') ?></label><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="fp-url" maxlength="255" placeholder="https://tracker.example.org"></div>
-                        <div class="col-md-3"><label class="form-label"><?= _h('settings.federation_peer_bearer') ?> <small class="settings-hint"><?= _h('settings.federation_peer_bearer_note') ?></small></label><input type="password" class="form-control form-control-sm bg-dark text-light border-secondary" id="fp-bearer" autocomplete="off" placeholder="key_id.secret"></div>
-                        <div class="col-md-1"><label class="form-label"><?= _h('settings.federation_th_pull') ?></label><select class="form-select form-select-sm bg-dark text-light border-secondary" id="fp-pull"><option value="1"><?= _h('settings.federation_yes') ?></option><option value="0" selected><?= _h('settings.federation_no') ?></option></select></div>
-                        <div class="col-md-3">
-                            <button type="button" class="btn btn-sm btn-outline-info" id="fp-add"><i class="bi bi-plus-lg"></i> <?= _h('settings.federation_add_peer') ?></button>
-                            <div class="form-check form-check-inline ms-1" title="<?= _h('settings.federation_grant_title') ?>">
-                                <input class="form-check-input" type="checkbox" id="fp-grant">
-                                <label class="form-check-label settings-hint" for="fp-grant"><?= _h('settings.federation_grant_label') ?></label>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="fp-alert" class="mt-2"></div>
-                    <small class="settings-hint d-block mt-1"><?= __('settings.federation_exchange_hint') ?></small>
-                </div>
-
-                <!-- The quarantine queue. Hidden while it is empty AND review mode is off, because a
-                     node that trusts its peers should not have to look at a control it never uses. -->
-                <div class="mt-4 d-hidden" id="fed-review-card">
-                    <label class="form-label"><?= _h('settings.federation_review_title') ?> <span class="badge bg-warning text-dark" id="fr-count">0</span></label>
-                    <small class="settings-hint d-block mb-2"><?= __('settings.federation_review_hint') ?></small>
-                    <div class="d-flex gap-2 align-items-center flex-wrap mb-2">
-                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="fr-peer" style="max-width:14rem;"><option value=""><?= _h('settings.federation_review_all_peers') ?></option></select>
-                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="fr-state" style="max-width:11rem;">
-                            <option value="pending"><?= _h('settings.federation_review_state_pending') ?></option>
-                            <option value="rejected"><?= _h('settings.federation_review_state_rejected') ?></option>
-                        </select>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="fr-refresh"><i class="bi bi-arrow-clockwise"></i> <?= _h('settings.federation_review_refresh') ?></button>
-                        <span class="flex-grow-1"></span>
-                        <button type="button" class="btn btn-sm btn-outline-success" id="fr-accept-sel" disabled><i class="bi bi-check2"></i> <?= _h('settings.federation_review_accept_sel') ?></button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" id="fr-reject-sel" disabled><i class="bi bi-x"></i> <?= _h('settings.federation_review_reject_sel') ?></button>
-                        <button type="button" class="btn btn-sm btn-outline-warning" id="fr-accept-peer" disabled title="<?= _h('settings.federation_review_accept_peer_title') ?>"><i class="bi bi-check2-all"></i> <?= _h('settings.federation_review_accept_peer') ?></button>
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table table-dark table-sm align-middle" id="fed-review-table">
-                            <thead><tr><th style="width:2rem;"><input type="checkbox" class="form-check-input" id="fr-all"></th><th><?= _h('settings.federation_th_name') ?></th><th><?= _h('settings.federation_review_th_size') ?></th><th><?= _h('settings.federation_review_th_files') ?></th><th><?= _h('settings.federation_review_th_peer') ?></th><th><?= _h('settings.federation_review_th_resolved') ?></th><th></th></tr></thead>
-                            <tbody id="fed-review-body"></tbody>
-                        </table>
-                    </div>
-                    <div id="fr-alert" class="mt-2"></div>
-                </div>
-            </div>
-
-            <!-- Rate Limits & Blacklist -->
+            <?php /* Rate & length limits: the per-address hourly limits of the public report, status,
+                     block-check and appeal forms — the same four forms the CAPTCHA sections above guard,
+                     which is why they are here and not under Network & limits (that group is the
+                     tracker's UDP traffic and the machine) — the lengths those forms accept, and two page
+                     sizes of the panel's (reports per page, the "near pages" radius). Until
+                     1.69.0 this was "Rate Limits & Blacklist": the blacklist FILE is the accesslist of the
+                     other tracker mode and sits beside the whitelist file now (#section-whitelist). */ ?>
             <div class="settings-section" id="section-limits" data-group="security" data-title="<?= _h('settings.limits_title') ?>">
                 <h5><?= _h('settings.limits_title') ?></h5>
                 <div class="row g-3">
@@ -2064,16 +768,6 @@
                     <div class="col-md-4">
                         <label class="form-label"><?= _h('settings.limits_max_magnet_link_length') ?> <small class="settings-hint"><?= _h('settings.limits_zero_unlimited') ?></small></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="max_magnet_link_length" value="<?= sanitize($cfg['max_magnet_link_length'] ?? '0') ?>" min="0" max="100000">
-                    </div>
-                </div>
-                <div class="row g-3 mt-1">
-                    <div class="col-md-8">
-                        <label class="form-label"><?= _h('settings.limits_blacklist_path') ?></label>
-                        <div class="input-group">
-                            <input type="text" class="form-control bg-dark text-light border-secondary" name="blacklist_path" value="<?= sanitize($cfg['blacklist_path'] ?? '') ?>" placeholder="/home/tracker/blacklist">
-                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-blacklist"><?= _h('settings.limits_blacklist_test') ?></button>
-                        </div>
-                        <div id="blacklist-result" class="mt-1 blacklist-result"></div>
                     </div>
                 </div>
             </div>
@@ -2328,58 +1022,1327 @@
                 </div>
             </div>
 
-            <!-- Donation Fields -->
-            <div class="settings-section" id="section-donations" data-group="general" data-title="<?= _h('settings.donations_title') ?>">
-                <h5><?= _h('settings.donations_title') ?></h5>
+            <div class="settings-section" id="section-users" data-group="users" data-title="<?= _h('settings.users_title') ?>">
+                <h5><?= _h('settings.users_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.users_intro_a') ?> <a href="<?= $baseUrl ?>?action=admin-users"><?= _h('settings.users_page_link') ?></a>. <?= __('settings.users_intro_b') ?></small>
                 <div class="row g-3">
                     <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.donations_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="donations_enabled">
-                            <option value="1" <?= ($cfg['donations_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.donations_yes') ?></option>
-                            <option value="0" <?= ($cfg['donations_enabled'] ?? '0') === '0' ? 'selected' : '' ?>><?= _h('settings.donations_no') ?></option>
+                        <label class="form-label"><?= _h('settings.users_label') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="users_enabled">
+                            <option value="1" <?= ($cfg['users_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['users_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
                         </select>
                     </div>
-                    <div class="col-12">
-                        <small class="settings-hint"><?= _h('settings.donations_hint') ?></small>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_registration') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="users_registration_enabled">
+                            <option value="1" <?= ($cfg['users_registration_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.users_registration_open') ?></option>
+                            <option value="0" <?= ($cfg['users_registration_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_registration_closed') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.users_registration_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_links') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="users_links_visible">
+                            <option value="1" <?= ($cfg['users_links_visible'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.users_links_visible') ?></option>
+                            <option value="0" <?= ($cfg['users_links_visible'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_links_hidden') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.users_links_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_default_group') ?></label>
+                        <?php
+                        /* THE GROUPS THAT EXIST, not a slug to type from memory. A free-text field
+                           here accepts any well-formed word, including one nobody ever created — and
+                           a default group that does not exist is a setting that looks saved and
+                           quietly grants nothing to every account made afterwards. The current value
+                           is kept in the list even if its group is gone, so opening this page cannot
+                           silently rewrite a setting the operator has not touched. */
+                        $sgDefault = (string)($cfg['users_default_group'] ?? 'member');
+                        $sgGroups = [];
+                        try {
+                            foreach ($db->query("SELECT slug, name FROM user_groups ORDER BY priority DESC, name")->fetchAll(PDO::FETCH_ASSOC) as $g) {
+                                $sgGroups[(string)$g['slug']] = (string)$g['name'];
+                            }
+                        } catch (\Throwable $e) { $sgGroups = []; }
+                        if (!isset($sgGroups[$sgDefault])) $sgGroups[$sgDefault] = $sgDefault;
+                        ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="users_default_group">
+                            <?php foreach ($sgGroups as $slug => $name): ?>
+                            <option value="<?= sanitize($slug) ?>"<?= $slug === $sgDefault ? ' selected' : '' ?>><?= sanitize($name) ?> (<?= sanitize($slug) ?>)</option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.users_default_group_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_expiry_days') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="users_notify_expiry_days" value="<?= sanitize($cfg['users_notify_expiry_days'] ?? '3') ?>" min="0" max="30">
+                        <small class="settings-hint"><?= _h('settings.users_expiry_days_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="bulk_mail_enabled">
+                        <label class="form-label"><?= _h('settings.bulk_mail_label') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="bulk_mail_enabled">
+                            <option value="0" <?= ($cfg['bulk_mail_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            <option value="1" <?= ($cfg['bulk_mail_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.bulk_mail_hint_a') ?> <a href="<?= $baseUrl ?>?action=admin-users"><?= _h('settings.users_page_link') ?></a>: <?= __('settings.bulk_mail_hint_b') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="bulk_mail_per_minute">
+                        <label class="form-label"><?= _h('settings.bulk_mail_per_minute') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="bulk_mail_per_minute" value="<?= sanitize($cfg['bulk_mail_per_minute'] ?? '20') ?>" min="1" max="500">
+                        <small class="settings-hint"><?= __('settings.bulk_mail_per_minute_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="bulk_mail_max_attempts">
+                        <label class="form-label"><?= _h('settings.bulk_mail_retries') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="bulk_mail_max_attempts" value="<?= sanitize($cfg['bulk_mail_max_attempts'] ?? '3') ?>" min="1" max="10">
+                        <small class="settings-hint"><?= _h('settings.bulk_mail_retries_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_email_verify') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="users_require_email_verify">
+                            <option value="1" <?= ($cfg['users_require_email_verify'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.users_email_verify_yes') ?></option>
+                            <option value="0" <?= ($cfg['users_require_email_verify'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_email_verify_no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.users_email_verify_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_email_cooldown') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="users_email_change_cooldown_days" value="<?= sanitize($cfg['users_email_change_cooldown_days'] ?? '30') ?>" min="0" max="365">
+                        <small class="settings-hint"><?= _h('settings.users_email_cooldown_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.users_terms') ?> <small class="settings-hint"><?= __('settings.users_terms_hint') ?></small></label>
+                        <textarea class="form-control bg-dark text-light border-secondary" name="users_terms_text" rows="4" placeholder="<?= _h('settings.users_terms_ph') ?>"><?= sanitize($cfg['users_terms_text'] ?? '') ?></textarea>
+                        <small class="settings-hint"><?= _h('settings.users_terms_note') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_rl_login') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_user_login" value="<?= sanitize($cfg['rate_limit_user_login'] ?? '10') ?>" min="0" max="1000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_rl_register') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_user_register" value="<?= sanitize($cfg['rate_limit_user_register'] ?? '5') ?>" min="0" max="1000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_rl_search') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_index_search" value="<?= sanitize($cfg['rate_limit_index_search'] ?? '120') ?>" min="0" max="100000">
+                    </div>
+                    <div class="col-md-3" data-setting="rate_limit_hash_check">
+                        <label class="form-label"><?= _h('settings.users_rl_hashcheck') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_hash_check" value="<?= sanitize($cfg['rate_limit_hash_check'] ?? '120') ?>" min="0" max="100000">
+                        <small class="settings-hint"><?= _h('settings.users_rl_hashcheck_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="rate_limit_preview">
+                        <label class="form-label"><?= _h('settings.users_rl_preview') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_preview" value="<?= sanitize($cfg['rate_limit_preview'] ?? '30') ?>" min="5" max="300">
+                        <small class="settings-hint"><?= _h('settings.users_rl_preview_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_search') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="index_search_enabled">
+                            <option value="1" <?= ($cfg['index_search_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['index_search_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_search_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.users_search_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="search_time_budget">
+                        <label class="form-label"><?= _h('settings.users_search_budget') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="search_time_budget" value="<?= sanitize($cfg['search_time_budget'] ?? '60') ?>" min="10" max="300">
+                        <small class="settings-hint"><?= __('settings.users_search_budget_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_share') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="search_share_enabled">
+                            <option value="1" <?= ($cfg['search_share_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['search_share_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.users_share_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.users_search_whitelist') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="index_search_include_whitelist">
+                            <option value="1" <?= ($cfg['index_search_include_whitelist'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.users_search_whitelist_yes') ?></option>
+                            <option value="0" <?= ($cfg['index_search_include_whitelist'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_search_whitelist_no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.users_search_whitelist_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.users_search_note') ?></small>
                     </div>
                 </div>
-                <?php
-                    $donationFields = json_decode($cfg['donation_fields'] ?? '[]', true);
-                    if (!is_array($donationFields)) $donationFields = [];
-                ?>
-                <div id="donation-fields-list" class="mt-2" data-setting="donation_fields">
-                    <?php foreach ($donationFields as $i => $field): ?>
-                    <div class="row g-2 mb-2 donation-field-row">
-                        <div class="col-md-3">
-                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="<?= _h('settings.donation_field_label_ph') ?>" value="<?= sanitize($field['label'] ?? '') ?>" data-df="label">
-                        </div>
-                        <div class="col">
-                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="<?= _h('settings.donation_field_value_ph') ?>" value="<?= sanitize($field['value'] ?? '') ?>" data-df="value">
-                        </div>
-                        <div class="col-auto">
-                            <button type="button" class="btn btn-sm btn-outline-danger donation-field-remove" title="<?= _h('settings.donation_field_remove_title') ?>"><i class="bi bi-x-lg"></i></button>
-                        </div>
-                    </div>
-                    <?php endforeach; ?>
-                </div>
-                <button type="button" class="btn btn-sm btn-outline-info mt-1" id="donation-field-add" data-setting="donation_fields"><i class="bi bi-plus-lg"></i> <?= _h('settings.donation_field_add') ?></button>
             </div>
 
-            <!-- Transparency Page -->
-            <div class="settings-section" id="section-transparency" data-group="general" data-title="<?= _h('settings.transparency_title') ?>">
-                <h5><?= _h('settings.transparency_title') ?></h5>
+            <?php /* A second factor for member accounts. Not beside the panel's own 2FA setting on
+                     purpose: that one is about the operator's own sign-in, this one is a feature the
+                     site offers its members, and putting them together invited the reading that
+                     switching one moves the other. */ ?>
+            <div class="settings-section" id="section-user2fa" data-group="users" data-title="<?= _h('settings.user2fa_heading') ?>">
+                <h5><i class="bi bi-shield-lock"></i> <?= _h('settings.user2fa_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.user2fa_intro') ?></small>
                 <div class="row g-3">
-                    <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.transparency_enable') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="transparency_enabled">
-                            <option value="1" <?= ($cfg['transparency_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.stats_opt_yes') ?></option>
-                            <option value="0" <?= ($cfg['transparency_enabled'] ?? '0') === '0' ? 'selected' : '' ?>><?= _h('settings.stats_opt_no') ?></option>
+                    <div class="col-md-4" data-setting="user_2fa_enabled">
+                        <label class="form-label"><?= _h('settings.user2fa_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="user_2fa_enabled">
+                            <option value="0" <?= ($cfg['user_2fa_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.user2fa_off') ?></option>
+                            <option value="1" <?= ($cfg['user_2fa_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.user2fa_on') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.user2fa_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="user_2fa_required">
+                        <label class="form-label"><?= _h('settings.user2fa_required') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="user_2fa_required">
+                            <option value="off" <?= ($cfg['user_2fa_required'] ?? 'off') === 'off' ? 'selected' : '' ?>><?= _h('settings.user2fa_required_none') ?></option>
+                            <option value="panel" <?= ($cfg['user_2fa_required'] ?? 'off') === 'panel' ? 'selected' : '' ?>><?= _h('settings.user2fa_panel') ?></option>
+                            <option value="all" <?= ($cfg['user_2fa_required'] ?? 'off') === 'all' ? 'selected' : '' ?>><?= _h('settings.user2fa_all') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.user2fa_required_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- People: messages, friends, the directory — includes/people.php -->
+            <div class="settings-section" id="section-people" data-group="users" data-title="<?= _h('settings.pm_heading') ?>">
+                <h5><?= _h('settings.pm_heading') ?></h5>
+                <p class="settings-hint mb-3"><?= __('settings.pm_intro') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.pm_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="pm_enabled">
+                            <option value="1" <?= ($cfg['pm_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['pm_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.pm_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.pm_who') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="pm_who">
+                            <option value="all" <?= ($cfg['pm_who'] ?? 'friends') === 'all' ? 'selected' : '' ?>><?= _h('settings.pm_who_all') ?></option>
+                            <option value="friends" <?= ($cfg['pm_who'] ?? 'friends') === 'friends' ? 'selected' : '' ?>><?= _h('settings.pm_who_friends') ?></option>
+                            <option value="nobody" <?= ($cfg['pm_who'] ?? 'friends') === 'nobody' ? 'selected' : '' ?>><?= _h('settings.pm_who_nobody') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.pm_who_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.pm_day') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_max_per_day" value="<?= sanitize($cfg['pm_max_per_day'] ?? '50') ?>" min="1" max="1000">
+                        <small class="settings-hint"><?= _h('settings.pm_day_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.pm_chars') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_max_chars" value="<?= sanitize($cfg['pm_max_chars'] ?? '4000') ?>" min="200" max="20000">
+                        <small class="settings-hint"><?= _h('settings.pm_chars_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="pm_live_seconds">
+                        <label class="form-label"><?= _h('settings.pm_live') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_live_seconds" value="<?= sanitize($cfg['pm_live_seconds'] ?? '0') ?>" min="0" max="60">
+                        <small class="settings-hint"><?= __('settings.pm_live_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="site_live_seconds">
+                        <label class="form-label"><?= _h('settings.site_live') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="site_live_seconds" value="<?= sanitize($cfg['site_live_seconds'] ?? '60') ?>" min="0" max="300">
+                        <small class="settings-hint"><?= __('settings.site_live_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="pm_typing_enabled">
+                        <label class="form-label"><?= _h('settings.pm_typing') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="pm_typing_enabled">
+                            <option value="1" <?= ($cfg['pm_typing_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['pm_typing_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.pm_typing_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.friends_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="friends_enabled">
+                            <option value="1" <?= ($cfg['friends_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['friends_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.friends_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.directory_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="directory_enabled">
+                            <option value="1" <?= ($cfg['directory_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['directory_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.directory_enabled_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- The sign-in bridge — includes/authbridge.php -->
+            <div class="settings-section" id="section-authbridge" data-group="users" data-title="<?= _h('settings.bridge_heading') ?>">
+                <h5><?= _h('settings.bridge_heading') ?></h5>
+                <p class="settings-hint mb-3"><?= __('settings.bridge_intro') ?></p>
+                <?php /* The warning is not decoration. Everything else on this page changes what the
+                         site DOES; this one changes who it believes. */ ?>
+                <div class="alert alert-warning py-2 settings-hint mb-3"><?= __('settings.bridge_warning') ?></div>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.bridge_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_enabled">
+                            <option value="1" <?= ($cfg['auth_bridge_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['auth_bridge_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.bridge_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.bridge_create') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_create">
+                            <option value="1" <?= ($cfg['auth_bridge_create'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['auth_bridge_create'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.bridge_create_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.bridge_merge') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_merge">
+                            <option value="none" <?= ($cfg['auth_bridge_merge'] ?? 'none') !== 'email_verified' ? 'selected' : '' ?>><?= _h('settings.bridge_merge_none') ?></option>
+                            <option value="email_verified" <?= ($cfg['auth_bridge_merge'] ?? 'none') === 'email_verified' ? 'selected' : '' ?>><?= _h('settings.bridge_merge_email') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.bridge_merge_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.bridge_ttl') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="auth_bridge_ttl" value="<?= sanitize($cfg['auth_bridge_ttl'] ?? '120') ?>" min="30" max="900">
+                        <small class="settings-hint"><?= _h('settings.bridge_ttl_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.bridge_login_url') ?></label>
+                        <input type="url" class="form-control bg-dark text-light border-secondary" name="auth_bridge_login_url" value="<?= sanitize($cfg['auth_bridge_login_url'] ?? '') ?>" maxlength="500" placeholder="https://forum.example.org/login">
+                        <small class="settings-hint"><?= _h('settings.bridge_login_url_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.bridge_return_url') ?></label>
+                        <input type="url" class="form-control bg-dark text-light border-secondary" name="auth_bridge_return_url" value="<?= sanitize($cfg['auth_bridge_return_url'] ?? '') ?>" maxlength="500" placeholder="https://forum.example.org/auth/tracker">
+                        <small class="settings-hint"><?= __('settings.bridge_return_url_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.bridge_logout') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_logout">
+                            <option value="1" <?= ($cfg['auth_bridge_logout'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['auth_bridge_logout'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.bridge_logout_hint') ?></small>
+                    </div>
+                </div>
+                <p class="settings-hint mt-3 mb-0"><?= __('settings.bridge_endpoints') ?></p>
+            </div>
+
+            <?php /* Favourites, public profiles and "my torrents" — includes/favourites.php. First under
+                     Profiles (1.69.0; it was under User accounts): it holds the switch for the profile page
+                     itself (profiles_enabled), and the two lists a profile shows, favourites and registered
+                     torrents. */ ?>
+            <div class="settings-section" id="section-favourites" data-group="profiles" data-title="<?= _h('settings.fav_heading') ?>">
+                <h5><?= _h('settings.fav_heading') ?></h5>
+                <p class="settings-hint mb-3"><?= __('settings.fav_intro') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.fav_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fav_enabled">
+                            <option value="1" <?= ($cfg['fav_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['fav_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.fav_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.fav_max') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fav_max_per_user" value="<?= sanitize($cfg['fav_max_per_user'] ?? '500') ?>" min="10" max="5000">
+                        <small class="settings-hint"><?= _h('settings.fav_max_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.fav_public') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fav_public_enabled">
+                            <option value="1" <?= ($cfg['fav_public_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['fav_public_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.fav_public_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.fav_who') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fav_who_enabled">
+                            <option value="1" <?= ($cfg['fav_who_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['fav_who_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.fav_who_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.profiles') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="profiles_enabled">
+                            <option value="1" <?= ($cfg['profiles_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['profiles_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profiles_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.wl_submitter') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_submitter_public">
+                            <option value="1" <?= ($cfg['wl_submitter_public'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['wl_submitter_public'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.wl_submitter_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <?php
+            // Pictures and profile covers (1.63.0, includes/usermedia.php). The eight settings are
+            // ordinary fields; the site's default picture and default cover are stored images, so
+            // they are two blocks drawn by assets/js/admin-profiles.js from the JSON below — the
+            // upload, the position editor (assets/js/media-editor.js, the same one the account page
+            // uses) and Remove all go through admin/user_media, never through this form.
+            $pmAvSrc = function_exists('userAvatarSourceRow') ? userAvatarSourceRow($db, null) : null;
+            $pmAvSha = strtolower((string)($cfg['avatar_default_sha'] ?? ''));
+            $pmCvSha = strtolower((string)($cfg['cover_default_sha'] ?? ''));
+            $pmState = function_exists('userMediaUrl') ? [
+                'avatar' => ['has' => $pmAvSrc !== null && userMediaValidSha($pmAvSha),
+                             'src' => $pmAvSrc !== null ? userMediaUrl((string)$pmAvSrc['sha1'], 0, $baseUrl) : '',
+                             'preview' => userMediaValidSha($pmAvSha) ? userMediaUrl($pmAvSha, 128, $baseUrl) : '',
+                             'x' => (float)($cfg['avatar_default_x'] ?? 50), 'y' => (float)($cfg['avatar_default_y'] ?? 50),
+                             'zoom' => (float)($cfg['avatar_default_zoom'] ?? 1)],
+                'cover'  => ['has' => userMediaValidSha($pmCvSha),
+                             'src' => userMediaValidSha($pmCvSha) ? userMediaUrl($pmCvSha, 0, $baseUrl) : '',
+                             'x' => (float)($cfg['cover_default_x'] ?? 50), 'y' => (float)($cfg['cover_default_y'] ?? 50),
+                             'zoom' => (float)($cfg['cover_default_zoom'] ?? 1)],
+                'max_bytes' => userMediaMaxBytes($cfg), 'max_mp' => userMediaMaxMp($cfg),
+                'cover_h' => userCoverHeight($cfg), 'cover_hm' => userCoverHeightMobile($cfg),
+                'desk_w' => USER_COVER_DESKTOP_W, 'phone_w' => USER_COVER_PHONE_W,
+            ] : [];
+            ?>
+            <div class="settings-section" id="section-profiles" data-group="profiles" data-title="<?= _h('settings.profiles_heading') ?>">
+                <h5><i class="bi bi-person-badge"></i> <?= _h('settings.profiles_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.profiles_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="avatars_enabled">
+                        <label class="form-label"><?= _h('settings.profiles_avatars') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="avatars_enabled">
+                            <option value="1" <?= ($cfg['avatars_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['avatars_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profiles_avatars_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="covers_enabled">
+                        <label class="form-label"><?= _h('settings.profiles_covers') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="covers_enabled">
+                            <option value="1" <?= ($cfg['covers_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['covers_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profiles_covers_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="avatar_max_kb">
+                        <label class="form-label" for="setting-avatar_max_kb"><?= _h('settings.profiles_max_kb') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="avatar_max_kb" id="setting-avatar_max_kb"
+                               value="<?= sanitize($cfg['avatar_max_kb'] ?? (string)USER_MEDIA_KB_DEFAULT) ?>" min="<?= USER_MEDIA_KB_MIN ?>" max="<?= USER_MEDIA_KB_MAX ?>">
+                        <?php /* The number PHP will actually take, beside the one the owner typed: the lower
+                                 of the two is what every form on the site quotes (userMediaMaxBytes()). */ ?>
+                        <small class="settings-hint"><?= __('settings.profiles_max_kb_hint', [
+                            'min' => USER_MEDIA_KB_MIN, 'max' => USER_MEDIA_KB_MAX,
+                            'eff' => number_format(function_exists('userMediaMaxBytes') ? userMediaMaxBytes($cfg) / 1024 : 0, 0, '.', ' '),
+                            'php' => sanitize((string)ini_get('upload_max_filesize'))]) ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="avatar_max_mp">
+                        <label class="form-label" for="setting-avatar_max_mp"><?= _h('settings.profiles_max_mp') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="avatar_max_mp" id="setting-avatar_max_mp"
+                               value="<?= sanitize($cfg['avatar_max_mp'] ?? (string)USER_MEDIA_MP_DEFAULT) ?>" min="<?= USER_MEDIA_MP_MIN ?>" max="<?= USER_MEDIA_MP_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.profiles_max_mp_hint', ['min' => USER_MEDIA_MP_MIN, 'max' => USER_MEDIA_MP_MAX]) ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="cover_height">
+                        <label class="form-label" for="setting-cover_height"><?= _h('settings.profiles_cover_height') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="cover_height" id="setting-cover_height"
+                               value="<?= sanitize($cfg['cover_height'] ?? '220') ?>" min="<?= USER_COVER_H_MIN ?>" max="<?= USER_COVER_H_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.profiles_cover_height_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="cover_height_mobile">
+                        <label class="form-label" for="setting-cover_height_mobile"><?= _h('settings.profiles_cover_height_mobile') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="cover_height_mobile" id="setting-cover_height_mobile"
+                               value="<?= sanitize($cfg['cover_height_mobile'] ?? '160') ?>" min="<?= USER_COVER_H_MIN ?>" max="<?= USER_COVER_H_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.profiles_cover_height_mobile_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="cover_overlay">
+                        <label class="form-label" for="setting-cover_overlay"><?= _h('settings.profiles_overlay') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="cover_overlay" id="setting-cover_overlay">
+                            <?php $pmOv = function_exists('userCoverOverlay') ? userCoverOverlay($cfg) : 'gradient'; ?>
+                            <option value="gradient" <?= $pmOv === 'gradient' ? 'selected' : '' ?>><?= _h('settings.profiles_overlay_gradient') ?></option>
+                            <option value="darken" <?= $pmOv === 'darken' ? 'selected' : '' ?>><?= _h('settings.profiles_overlay_darken') ?></option>
+                            <option value="none" <?= $pmOv === 'none' ? 'selected' : '' ?>><?= _h('settings.profiles_overlay_none') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profiles_overlay_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="avatar_default">
+                        <label class="form-label" for="setting-avatar_default"><?= _h('settings.profiles_default_mode') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="avatar_default" id="setting-avatar_default">
+                            <option value="generated" <?= ($cfg['avatar_default'] ?? 'generated') !== 'image' ? 'selected' : '' ?>><?= _h('settings.profiles_default_generated') ?></option>
+                            <option value="image" <?= ($cfg['avatar_default'] ?? 'generated') === 'image' ? 'selected' : '' ?>><?= _h('settings.profiles_default_image') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profiles_default_mode_hint') ?></small>
+                    </div>
+                    <?php /* 1.66.0: one control per block, in place of the single "Picture and cover on
+                             the account page" (account_media_side, removed by the v72 migration). */ ?>
+                    <div class="col-md-3" data-setting="account_picture_side">
+                        <label class="form-label" for="setting-account_picture_side"><?= _h('settings.account_picture_side') ?></label>
+                        <?php $pmPicSide = function_exists('accountPictureSide') ? accountPictureSide($cfg) : 'left'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="account_picture_side" id="setting-account_picture_side">
+                            <option value="left" <?= $pmPicSide === 'left' ? 'selected' : '' ?>><?= _h('settings.account_side_left') ?></option>
+                            <option value="right" <?= $pmPicSide === 'right' ? 'selected' : '' ?>><?= _h('settings.account_side_right') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.account_picture_side_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="account_cover_side">
+                        <label class="form-label" for="setting-account_cover_side"><?= _h('settings.account_cover_side') ?></label>
+                        <?php $pmCovSide = function_exists('accountCoverSide') ? accountCoverSide($cfg) : 'right'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="account_cover_side" id="setting-account_cover_side">
+                            <option value="left" <?= $pmCovSide === 'left' ? 'selected' : '' ?>><?= _h('settings.account_side_left') ?></option>
+                            <option value="right" <?= $pmCovSide === 'right' ? 'selected' : '' ?>><?= _h('settings.account_side_right') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.account_cover_side_hint') ?></small>
+                    </div>
+                </div>
+                <?php /* The two stored images. No name="" anywhere in here on purpose: none of this is a
+                         form setting, and the file inputs must never travel with a Settings save. */ ?>
+                <script type="application/json" id="adm-media-data"<?= nonceAttr() ?>><?= json_encode($pmState, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES) ?></script>
+                <div class="row g-3 mt-1">
+                    <div class="col-md-6" data-setting="avatar_default_image">
+                        <label class="form-label"><?= _h('settings.profiles_default_avatar') ?></label>
+                        <div class="adm-media" id="adm-media-avatar" data-kind="avatar">
+                            <div class="adm-media-preview adm-media-preview-avatar" id="adm-media-avatar-preview" aria-hidden="true"></div>
+                            <div class="adm-media-side">
+                                <div class="ipl-drop ipl-drop-wide" id="adm-media-avatar-drop" tabindex="0" role="button" aria-label="<?= _h('settings.profiles_drop_aria') ?>">
+                                    <i class="bi bi-image ipl-drop-icon"></i>
+                                    <span class="ipl-drop-main"><u><?= _h('settings.profiles_drop_choose') ?></u> <?= _h('settings.profiles_drop_or') ?></span>
+                                    <span class="ipl-drop-sub"><?= _h('settings.profiles_drop_sub') ?></span>
+                                    <input type="file" class="ipl-drop-input" id="adm-media-avatar-file" accept="image/jpeg,image/png,image/webp,image/gif">
+                                </div>
+                                <div class="adm-media-acts">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="adm-media-avatar-adjust" hidden><i class="bi bi-arrows-move"></i> <?= _h('settings.profiles_adjust') ?></button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" id="adm-media-avatar-remove" hidden><i class="bi bi-trash"></i> <?= _h('settings.profiles_remove') ?></button>
+                                </div>
+                            </div>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.profiles_default_avatar_hint') ?></small>
+                    </div>
+                    <div class="col-md-6" data-setting="cover_default_image">
+                        <label class="form-label"><?= _h('settings.profiles_default_cover') ?></label>
+                        <div class="adm-media" id="adm-media-cover" data-kind="cover">
+                            <div class="adm-media-preview adm-media-preview-cover" id="adm-media-cover-preview" aria-hidden="true"></div>
+                            <div class="adm-media-side">
+                                <div class="ipl-drop ipl-drop-wide" id="adm-media-cover-drop" tabindex="0" role="button" aria-label="<?= _h('settings.profiles_drop_aria') ?>">
+                                    <i class="bi bi-image ipl-drop-icon"></i>
+                                    <span class="ipl-drop-main"><u><?= _h('settings.profiles_drop_choose') ?></u> <?= _h('settings.profiles_drop_or') ?></span>
+                                    <span class="ipl-drop-sub"><?= _h('settings.profiles_drop_sub') ?></span>
+                                    <input type="file" class="ipl-drop-input" id="adm-media-cover-file" accept="image/jpeg,image/png,image/webp,image/gif">
+                                </div>
+                                <div class="adm-media-acts">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="adm-media-cover-adjust" hidden><i class="bi bi-arrows-move"></i> <?= _h('settings.profiles_adjust') ?></button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" id="adm-media-cover-remove" hidden><i class="bi bi-trash"></i> <?= _h('settings.profiles_remove') ?></button>
+                                </div>
+                            </div>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.profiles_default_cover_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <?php /* The description on a profile (1.69.0, includes/profilebio.php): a section of its own
+                     inside Profiles, self-contained (its own heading, intro and two fields), so the
+                     categories can be rearranged around it without taking it apart. */ ?>
+            <div class="settings-section" id="section-profile-bio" data-group="profiles" data-title="<?= _h('settings.profile_bio_heading') ?>">
+                <h5><i class="bi bi-card-text"></i> <?= _h('settings.profile_bio_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.profile_bio_intro', ['links' => PROFILE_BIO_MAX_LINKS, 'lines' => PROFILE_BIO_MAX_LINES]) ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="profile_bio_enabled">
+                        <label class="form-label" for="setting-profile_bio_enabled"><?= _h('settings.profile_bio_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="profile_bio_enabled" id="setting-profile_bio_enabled">
+                            <option value="1" <?= ($cfg['profile_bio_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['profile_bio_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profile_bio_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="profile_bio_max">
+                        <label class="form-label" for="setting-profile_bio_max"><?= _h('settings.profile_bio_max') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="profile_bio_max" id="setting-profile_bio_max"
+                               value="<?= sanitize($cfg['profile_bio_max'] ?? (string)PROFILE_BIO_MAX_DEFAULT) ?>" min="<?= PROFILE_BIO_MAX_MIN ?>" max="<?= PROFILE_BIO_MAX_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.profile_bio_max_hint', [
+                            'min' => PROFILE_BIO_MAX_MIN, 'max' => PROFILE_BIO_MAX_MAX,
+                            'factor' => PROFILE_BIO_SOURCE_FACTOR, 'cap' => number_format(PROFILE_BIO_SOURCE_CHARS, 0, '.', ' ')]) ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <?php /* A member's likes or ratings on the profile (1.69.0, includes/profilevotes.php): a section of
+                     its own inside Profiles, like the description's above it, so the categories can be
+                     rearranged without taking either apart. The one switch sits UNDER the rating system's
+                     own (Descriptions & ratings → Ratings): with ratings off it has nothing to show, and the hint says so
+                     beside the control rather than leaving the operator to wonder why the tab is gone. */ ?>
+            <div class="settings-section" id="section-profile-votes" data-group="profiles" data-title="<?= _h('settings.profile_votes_heading') ?>">
+                <h5><i class="bi bi-hand-thumbs-up"></i> <?= _h('settings.profile_votes_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.profile_votes_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="profile_votes_enabled">
+                        <label class="form-label" for="setting-profile_votes_enabled"><?= _h('settings.profile_votes_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="profile_votes_enabled" id="setting-profile_votes_enabled">
+                            <option value="1" <?= ($cfg['profile_votes_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['profile_votes_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profile_votes_enabled_hint') ?></small>
+                        <?php if (!(function_exists('repEnabled') && repEnabled($cfg))): ?>
+                        <small class="settings-hint d-block text-warning" id="profile-votes-rep-off"><?= __('settings.profile_votes_rep_off') ?></small>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <?php /* Lists — includes/lists.php. Under Profiles since 1.69.0 (User accounts before): a list is
+                     something a member makes and, if they say so, shows on their profile, like the
+                     favourites at the top of this group. */ ?>
+            <div class="settings-section" id="section-lists" data-group="profiles" data-title="<?= _h('settings.lists_heading') ?>">
+                <h5><?= _h('settings.lists_heading') ?></h5>
+                <p class="settings-hint mb-3"><?= __('settings.lists_intro') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.lists_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="lists_enabled">
+                            <option value="1" <?= ($cfg['lists_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['lists_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.lists_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.lists_public') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="lists_public_enabled">
+                            <option value="1" <?= ($cfg['lists_public_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['lists_public_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.lists_public_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.lists_max') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="lists_max_per_user" value="<?= sanitize($cfg['lists_max_per_user'] ?? '20') ?>" min="1" max="200">
+                        <small class="settings-hint"><?= _h('settings.lists_max_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.lists_items') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="lists_max_items" value="<?= sanitize($cfg['lists_max_items'] ?? '500') ?>" min="10" max="5000">
+                        <small class="settings-hint"><?= _h('settings.lists_items_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section" id="section-whitelist" data-group="tracker" data-title="<?= _h('settings.whitelist_title') ?>">
+                <h5><?= _h('settings.whitelist_title') ?></h5>
+                <p class="settings-hint mb-2">
+                    <?= __('settings.whitelist_intro_black') ?>
+                    <?= __('settings.whitelist_intro_white') ?>
+                    <?= __('settings.whitelist_intro_match') ?>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.whitelist_tracker_mode') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="tracker_mode">
+                            <option value="blacklist" <?= ($cfg['tracker_mode'] ?? 'blacklist') !== 'whitelist' ? 'selected' : '' ?>><?= _h('settings.whitelist_mode_blacklist') ?></option>
+                            <option value="whitelist" <?= ($cfg['tracker_mode'] ?? '') === 'whitelist' ? 'selected' : '' ?>><?= _h('settings.whitelist_mode_whitelist') ?></option>
+                        </select>
+                        <?php if (function_exists('scheduleEnabled') && scheduleEnabled($cfg)): ?>
+                        <small class="settings-hint text-warning d-block mt-1"><i class="bi bi-exclamation-triangle"></i> <?= __('settings.whitelist_mode_sched_warn') ?></small>
+                        <?php else: ?>
+                        <small class="settings-hint d-block mt-1"><?= __('settings.whitelist_mode_hint') ?></small>
+                        <?php endif; ?>
+                    </div>
+                    <div class="col-md-9">
+                        <label class="form-label"><?= _h('settings.whitelist_path') ?> <small class="settings-hint"><?= __('settings.whitelist_path_small') ?></small></label>
+                        <div class="input-group">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" name="whitelist_path" value="<?= sanitize($cfg['whitelist_path'] ?? '') ?>" placeholder="/home/tracker/accesslist/whitelist">
+                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-whitelist"><?= _h('settings.whitelist_test_btn') ?></button>
+                        </div>
+                        <div id="whitelist-result" class="mt-1 blacklist-result"></div>
+                        <?php /* The other mode's accesslist, in the same cell under the whitelist's (1.69.0): it
+                                 was the odd field out in Security → "Rate Limits & Blacklist", away from the mode
+                                 that uses it. One cell, not a cell of its own on the next row: the mode's long
+                                 hint beside them would have opened a gap between the two files. Same name, same
+                                 Test button (#btn-test-blacklist) as before. */ ?>
+                        <label class="form-label mt-3"><?= _h('settings.limits_blacklist_path') ?></label>
+                        <div class="input-group">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" name="blacklist_path" value="<?= sanitize($cfg['blacklist_path'] ?? '') ?>" placeholder="/home/tracker/blacklist">
+                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-blacklist"><?= _h('settings.limits_blacklist_test') ?></button>
+                        </div>
+                        <div id="blacklist-result" class="mt-1 blacklist-result"></div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.whitelist_public_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="whitelist_public_enabled">
+                            <option value="1" <?= ($cfg['whitelist_public_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.whitelist_enabled') ?></option>
+                            <option value="0" <?= ($cfg['whitelist_public_enabled'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.whitelist_disabled') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.whitelist_submit_mode') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="whitelist_submit_mode">
+                            <option value="public" <?= ($cfg['whitelist_submit_mode'] ?? 'public') !== 'users' ? 'selected' : '' ?>><?= _h('settings.whitelist_submit_public') ?></option>
+                            <option value="users" <?= ($cfg['whitelist_submit_mode'] ?? 'public') === 'users' ? 'selected' : '' ?>><?= _h('settings.whitelist_submit_users') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.whitelist_submit_mode_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.whitelist_max_per_submission') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_max_per_submission" value="<?= sanitize($cfg['whitelist_max_per_submission'] ?? '20') ?>" min="1" max="500">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.whitelist_rate_limit') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_whitelist" value="<?= sanitize($cfg['rate_limit_whitelist'] ?? '10') ?>" min="0" max="1000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.whitelist_ip_daily_max') ?> <small class="settings-hint"><?= _h('settings.whitelist_zero_off') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_ip_daily_max" value="<?= sanitize($cfg['whitelist_ip_daily_max'] ?? '50') ?>" min="0" max="100000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.whitelist_daily_cap') ?> <small class="settings-hint"><?= _h('settings.whitelist_zero_off') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_daily_cap" value="<?= sanitize($cfg['whitelist_daily_cap'] ?? '2000') ?>" min="0" max="10000000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.whitelist_reload_min_interval') ?> <small class="settings-hint"><?= _h('settings.whitelist_reload_min_interval_small') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="whitelist_reload_min_interval" value="<?= sanitize($cfg['whitelist_reload_min_interval'] ?? '45') ?>" min="10" max="3600">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.whitelist_scrape_url') ?> <small class="settings-hint"><?= _h('settings.whitelist_scrape_url_small') ?></small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="whitelist_scrape_url" value="<?= sanitize($cfg['whitelist_scrape_url'] ?? 'http://127.0.0.1:6969/scrape') ?>" placeholder="http://127.0.0.1:6969/scrape">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.whitelist_require_tracker') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="whitelist_require_tracker">
+                            <option value="0" <?= ($cfg['whitelist_require_tracker'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.whitelist_require_tracker_off') ?></option>
+                            <option value="1" <?= ($cfg['whitelist_require_tracker'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.whitelist_require_tracker_on') ?></option>
+                        </select>
+                        <div class="settings-hint mt-1"><?= __('settings.whitelist_require_tracker_hint') ?></div>
+                    </div>
+                    <div class="col-md-9">
+                        <label class="form-label"><?= _h('settings.whitelist_tracker_hosts') ?> <small class="settings-hint"><?= __('settings.whitelist_tracker_hosts_small') ?></small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="whitelist_tracker_hosts" value="<?= sanitize($cfg['whitelist_tracker_hosts'] ?? '') ?>" placeholder="tryhackx.org, 203.0.113.10">
+                    </div>
+                </div>
+                <div class="settings-hint mt-2"><?= _h('settings.whitelist_manage_hint') ?> <a href="<?= $baseUrl ?>?action=admin-whitelist"><?= _h('settings.whitelist_manage_link') ?></a>.</div>
+            </div>
+
+            <!-- A submission has to prove itself (includes/wlprobe.php) -->
+            <div class="settings-section" id="section-probe" data-group="tracker" data-title="<?= _h('settings.probe_title') ?>">
+                <h5><?= _h('settings.probe_title') ?></h5>
+                <p class="settings-hint mb-2"><?= _h('settings.probe_subtitle') ?></p>
+                <small class="settings-hint d-block mb-3"><?= _h('settings.probe_intro_p1') ?>
+                <br><br><?= __('settings.probe_intro_p2') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="wl_probe_required">
+                        <label class="form-label"><?= _h('settings.probe_required') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_probe_required">
+                            <option value="0" <?= ($cfg['wl_probe_required'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.probe_disabled') ?></option>
+                            <option value="1" <?= ($cfg['wl_probe_required'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.probe_enabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.probe_required_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_probe_timeout_minutes">
+                        <label class="form-label"><?= _h('settings.probe_timeout') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_probe_timeout_minutes" value="<?= sanitize($cfg['wl_probe_timeout_minutes'] ?? '10') ?>" min="1" max="1440">
+                        <small class="settings-hint"><?= _h('settings.probe_timeout_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_probe_on_fail">
+                        <label class="form-label"><?= _h('settings.probe_on_fail') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_probe_on_fail">
+                            <option value="delete" <?= ($cfg['wl_probe_on_fail'] ?? 'delete') === 'delete' ? 'selected' : '' ?>><?= _h('settings.probe_on_fail_delete') ?></option>
+                            <option value="keep" <?= ($cfg['wl_probe_on_fail'] ?? 'delete') === 'keep' ? 'selected' : '' ?>><?= _h('settings.probe_on_fail_keep') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.probe_on_fail_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_probe_max_batch">
+                        <label class="form-label"><?= _h('settings.probe_max_batch') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_probe_max_batch" value="<?= sanitize($cfg['wl_probe_max_batch'] ?? '') ?>" min="1" max="64" placeholder="<?= _h('settings.probe_max_batch_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.probe_max_batch_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Keeping the list honest over time (includes/wlmaint.php) -->
+            <div class="settings-section" id="section-wlupkeep" data-group="tracker" data-title="<?= _h('settings.wlupkeep_title') ?>">
+                <h5><?= _h('settings.wlupkeep_title') ?></h5>
+                <p class="settings-hint mb-2"><?= _h('settings.wlupkeep_subtitle') ?></p>
+                <small class="settings-hint d-block mb-3"><?= __('settings.wlupkeep_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="wl_scrape_every_hours">
+                        <label class="form-label"><?= _h('settings.wlupkeep_scrape_every') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_scrape_every_hours" value="<?= sanitize($cfg['wl_scrape_every_hours'] ?? '0') ?>" min="0" max="8760">
+                        <small class="settings-hint"><?= _h('settings.wlupkeep_scrape_every_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_scrape_batch">
+                        <label class="form-label"><?= _h('settings.wlupkeep_scrape_batch') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_scrape_batch" value="<?= sanitize($cfg['wl_scrape_batch'] ?? '200') ?>" min="1" max="2000">
+                        <small class="settings-hint"><?= _h('settings.wlupkeep_scrape_batch_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_dead_after_days">
+                        <label class="form-label"><?= _h('settings.wlupkeep_dead_after') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_dead_after_days" value="<?= sanitize($cfg['wl_dead_after_days'] ?? '0') ?>" min="0" max="3650">
+                        <small class="settings-hint"><?= __('settings.wlupkeep_dead_after_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_dead_action">
+                        <label class="form-label"><?= _h('settings.wlupkeep_dead_action') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_dead_action">
+                            <option value="mark" <?= ($cfg['wl_dead_action'] ?? 'mark') === 'mark' ? 'selected' : '' ?>><?= _h('settings.wlupkeep_dead_mark') ?></option>
+                            <option value="delete" <?= ($cfg['wl_dead_action'] ?? 'mark') === 'delete' ? 'selected' : '' ?>><?= _h('settings.wlupkeep_dead_delete') ?></option>
+                            <option value="none" <?= ($cfg['wl_dead_action'] ?? 'mark') === 'none' ? 'selected' : '' ?>><?= _h('settings.wlupkeep_dead_none') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.wlupkeep_dead_action_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_dead_every_days">
+                        <label class="form-label"><?= _h('settings.wlupkeep_dead_every') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_dead_every_days" value="<?= sanitize($cfg['wl_dead_every_days'] ?? '30') ?>" min="1" max="365">
+                    </div>
+                    <div class="col-md-9">
+                        <div class="settings-hint mt-4"><?php
+                            $wmCount = function_exists('wlMaintDeadCount') ? wlMaintDeadCount($db, $cfg) : 0;
+                            if (wlMaintDeadDays($cfg) > 0) {
+                                echo $wmCount === 1 ? __('settings.wlupkeep_match_one', ['n' => (int)$wmCount]) : __('settings.wlupkeep_match_many', ['n' => (int)$wmCount]);
+                            } else {
+                                echo _h('settings.wlupkeep_match_unset');
+                            }
+                        ?></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scheduled mode (whitelist hours) — includes/schedule.php. Its state is read here, in
+                 front of the one section that uses it, so the section can move with its data. -->
+            <?php
+            $schedDays   = function_exists('scheduleParseJson') ? (scheduleParseJson((string)($cfg['tracker_schedule'] ?? '')) ?? array_fill_keys(SCHEDULE_DAYS, 'none')) : [];
+            $schedTz     = function_exists('scheduleTimezone') ? scheduleTimezone($cfg) : 'Europe/Warsaw';
+            $schedOn     = function_exists('scheduleEnabled') && scheduleEnabled($cfg);
+            $schedSt     = function_exists('scheduleStatus') ? scheduleStatus($cfg) : null;
+            $schedTzList = function_exists('timezone_identifiers_list') ? timezone_identifiers_list() : [$schedTz];
+            $schedTzGroups = [];
+            foreach ($schedTzList as $tzId) { $schedTzGroups[strpos($tzId, '/') !== false ? substr($tzId, 0, strpos($tzId, '/')) : 'Other'][] = $tzId; }
+            ?>
+            <div class="settings-section" id="section-schedule" data-group="tracker" data-title="<?= _h('settings.schedule_title') ?>">
+                <h5><?= _h('settings.schedule_title') ?></h5>
+                <p class="settings-hint mb-2"><?= _h('settings.schedule_subtitle') ?></p>
+                <p class="settings-hint mb-2">
+                    <?= __('settings.schedule_intro_1') ?>
+                    <?= __('settings.schedule_intro_2') ?>
+                    <?= __('settings.schedule_intro_3') ?>
+                    <?= _h('settings.schedule_intro_4') ?>
+                    <?= _h('settings.schedule_intro_5') ?>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-2">
+                        <label class="form-label"><?= _h('settings.schedule_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="tracker_schedule_enabled" id="sched-enabled">
+                            <option value="0" <?= !$schedOn ? 'selected' : '' ?>><?= _h('settings.schedule_disabled') ?></option>
+                            <option value="1" <?= $schedOn ? 'selected' : '' ?>><?= _h('settings.schedule_enabled_opt') ?></option>
                         </select>
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.transparency_per_page') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="transparency_per_page" value="<?= sanitize($cfg['transparency_per_page'] ?? '150') ?>" min="10" max="500">
+                        <label class="form-label"><?= _h('settings.schedule_tz') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="tracker_schedule_tz">
+                            <?php foreach ($schedTzGroups as $grp => $ids): ?>
+                            <optgroup label="<?= sanitize($grp) ?>">
+                                <?php foreach ($ids as $tzId): ?>
+                                <option value="<?= sanitize($tzId) ?>" <?= $tzId === $schedTz ? 'selected' : '' ?>><?= sanitize($tzId) ?></option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                            <?php endforeach; ?>
+                        </select>
                     </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.schedule_switch_cmd') ?> <small class="settings-hint"><?= __('settings.schedule_switch_cmd_hint') ?></small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="tracker_mode_switch_cmd" value="<?= sanitize($cfg['tracker_mode_switch_cmd'] ?? 'sudo -n /usr/local/sbin/tracker-mode.sh') ?>" placeholder="<?= _h('settings.schedule_switch_cmd_ph') ?>" maxlength="255">
+                    </div>
+                    <div class="col-12">
+                        <input type="hidden" name="tracker_schedule" id="sched-json" value="<?= sanitize(json_encode($schedDays)) ?>">
+                        <div class="table-responsive">
+                            <table class="table table-dark table-sm align-middle mb-1 sched-table" id="sched-table">
+                                <thead><tr><th style="width:5rem"><?= _h('settings.schedule_th_day') ?></th><th style="width:16rem"><?= _h('settings.schedule_th_rule') ?></th><th style="width:9rem"><?= _h('settings.schedule_th_from') ?></th><th style="width:9rem"><?= _h('settings.schedule_th_to') ?></th><th></th></tr></thead>
+                                <tbody>
+                                <?php foreach (SCHEDULE_DAYS as $d):
+                                    $v = $schedDays[$d] ?? 'none';
+                                    $kind = is_array($v) ? 'window' : $v;
+                                    $from = is_array($v) ? $v['from'] : '10:00';
+                                    $to   = is_array($v) ? $v['to'] : '02:30';
+                                ?>
+                                <tr data-sched-day="<?= $d ?>">
+                                    <td><strong><?= SCHEDULE_DAY_LABELS[$d] ?></strong></td>
+                                    <td>
+                                        <select class="form-select form-select-sm bg-dark text-light border-secondary" data-sched-kind>
+                                            <option value="all" <?= $kind === 'all' ? 'selected' : '' ?>><?= _h('settings.schedule_kind_all') ?></option>
+                                            <option value="window" <?= $kind === 'window' ? 'selected' : '' ?>><?= _h('settings.schedule_kind_window') ?></option>
+                                            <option value="none" <?= $kind === 'none' ? 'selected' : '' ?>><?= _h('settings.schedule_kind_none') ?></option>
+                                        </select>
+                                    </td>
+                                    <td><input type="time" class="form-control form-control-sm bg-dark text-light border-secondary" data-sched-from value="<?= sanitize($from) ?>" step="60"></td>
+                                    <td><input type="time" class="form-control form-control-sm bg-dark text-light border-secondary" data-sched-to value="<?= sanitize($to) ?>" step="60"></td>
+                                    <td class="settings-hint" data-sched-note></td>
+                                </tr>
+                                <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="settings-hint">
+                            <?= __('settings.schedule_window_hint') ?>
+                        </div>
+                        <?php if ($schedSt): ?>
+                        <div class="settings-hint mt-2" id="sched-summary">
+                            <strong><?= _h('settings.schedule_saved') ?></strong> <?= sanitize($schedSt['describe']) ?>.
+                            <?php if ($schedSt['enabled']): ?>
+                                <?= _h('settings.schedule_desired_now') ?> <strong><?= sanitize($schedSt['desired'] ?? __('settings.schedule_invalid')) ?></strong> (<?= _h('settings.schedule_tracker_is_in') ?> <strong><?= sanitize($schedSt['current']) ?></strong>);
+                                <?= _h('settings.schedule_next_change') ?> <strong><?= sanitize($schedSt['next_change_local'] ?? __('settings.schedule_none')) ?></strong> <?= $schedSt['next_change_local'] ? '(' . sanitize($schedSt['tz']) . ')' : '' ?>.
+                                <?php if ($schedSt['last_result']): ?>
+                                    <?= _h('settings.schedule_last_switch') ?> <strong><?= sanitize($schedSt['last_result']) ?></strong><?= $schedSt['last_switch_at'] ? ' ' . __('settings.schedule_switch_at') . ' ' . date('Y-m-d H:i', (int)$schedSt['last_switch_at']) . ' (' . sanitize((string)$schedSt['last_from']) . ' → ' . sanitize((string)$schedSt['last_to']) . ')' : '' ?><?= $schedSt['last_error'] ? ' — <span class="text-danger">' . sanitize($schedSt['last_error']) . '</span>' : '' ?>.
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <?= _h('settings.schedule_off_note') ?>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <!-- OpenTracker Service -->
+            <div class="settings-section" id="section-service" data-group="opentracker" data-title="<?= _h('settings.ot_title') ?>">
+                <h5><?= _h('settings.ot_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.ot_intro_1') ?> <span class="text-warning"><?= _h('settings.ot_intro_orange') ?></span> <?= _h('settings.ot_intro_or') ?> <span class="text-danger"><?= _h('settings.ot_intro_red') ?></span> <?= __('settings.ot_intro_2') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.ot_service_name') ?> <small class="settings-hint"><?= _h('settings.ot_service_name_note') ?></small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="opentracker_service_name" value="<?= sanitize($cfg['opentracker_service_name'] ?? '') ?>" placeholder="opentracker" pattern="[A-Za-z0-9._@\-]+" maxlength="128">
+                        <small class="settings-hint"><?= __('settings.ot_service_name_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_sudo') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="opentracker_restart_use_sudo">
+                            <option value="1" <?= ($cfg['opentracker_restart_use_sudo'] ?? '1') === '1' ? 'selected' : '' ?>><?= __('settings.ot_sudo_yes') ?></option>
+                            <option value="0" <?= ($cfg['opentracker_restart_use_sudo'] ?? '1') === '0' ? 'selected' : '' ?>><?= __('settings.ot_sudo_no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.ot_sudo_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_auto_reload') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="opentracker_auto_reload">
+                            <option value="1" <?= ($cfg['opentracker_auto_reload'] ?? '1') === '1' ? 'selected' : '' ?>><?= __('settings.ot_auto_reload_yes') ?></option>
+                            <option value="0" <?= ($cfg['opentracker_auto_reload'] ?? '1') === '0' ? 'selected' : '' ?>><?= __('settings.ot_auto_reload_no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.ot_auto_reload_hint') ?></small>
+                    </div>
+                </div>
+                <div class="row g-3 mt-1">
+                    <div class="col-12">
+                        <label class="form-label d-block"><?= _h('settings.ot_perm_test') ?></label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-restart"><i class="bi bi-shield-check"></i> <?= _h('settings.ot_perm_test_restart') ?></button>
+                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-reload"><i class="bi bi-shield-check"></i> <?= _h('settings.ot_perm_test_reload') ?></button>
+                        </div>
+                        <small class="settings-hint d-block mt-1"><?= __('settings.ot_perm_test_hint') ?></small>
+                        <div id="tracker-perm-result" class="mt-1 blacklist-result"></div>
+                    </div>
+                </div>
+                <div class="row g-3 mt-1">
+                    <div class="col-12"><small class="text-info"><?= _h('settings.ot_thresholds') ?></small></div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_bl_warn') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="tracker_blacklist_warn_count" value="<?= sanitize($cfg['tracker_blacklist_warn_count'] ?? '1') ?>" min="1" max="1000">
+                        <small class="settings-hint"><?= _h('settings.ot_bl_warn_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_bl_danger') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="tracker_blacklist_danger_count" value="<?= sanitize($cfg['tracker_blacklist_danger_count'] ?? '5') ?>" min="1" max="1000">
+                        <small class="settings-hint"><?= _h('settings.ot_bl_danger_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_uptime_warn') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="tracker_uptime_warn_days" value="<?= sanitize($cfg['tracker_uptime_warn_days'] ?? '14') ?>" min="1" max="3650">
+                        <small class="settings-hint"><?= _h('settings.ot_uptime_warn_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_uptime_danger') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="tracker_uptime_danger_days" value="<?= sanitize($cfg['tracker_uptime_danger_days'] ?? '30') ?>" min="1" max="3650">
+                        <small class="settings-hint"><?= _h('settings.ot_uptime_danger_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section" id="section-livesync" data-group="opentracker" data-title="<?= _h('settings.livesync_title') ?>">
+                <h5><i class="bi bi-diagram-3"></i> <?= _h('settings.livesync_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.livesync_intro_p1') ?>
+                <br><br><?= __('settings.livesync_intro_p2') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-6" data-setting="livesync_cmd">
+                        <label class="form-label"><?= _h('settings.livesync_cmd') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="livesync_cmd" value="<?= sanitize($cfg['livesync_cmd'] ?? '') ?>" maxlength="255" placeholder="<?= _h('settings.livesync_cmd_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.livesync_cmd_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="livesync_enabled">
+                        <label class="form-label"><?= _h('settings.livesync_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="livesync_enabled">
+                            <option value="0" <?= ($cfg['livesync_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.livesync_no') ?></option>
+                            <option value="1" <?= ($cfg['livesync_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.livesync_yes') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.livesync_enabled_hint') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#livesync-card"><?= _h('settings.livesync_enabled_hint_link') ?></a>.</small>
+                    </div>
+                    <div class="col-md-3" data-setting="livesync_port">
+                        <label class="form-label"><?= _h('settings.livesync_port') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="livesync_port" value="<?= sanitize($cfg['livesync_port'] ?? '9696') ?>" min="1024" max="65535">
+                        <small class="settings-hint"><?= _h('settings.livesync_port_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="livesync_bind_ip">
+                        <label class="form-label"><?= _h('settings.livesync_bind_ip') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="livesync_bind_ip" value="<?= sanitize($cfg['livesync_bind_ip'] ?? '') ?>" maxlength="45" placeholder="<?= _h('settings.livesync_bind_ip_ph') ?>">
+                        <small class="settings-hint"><?= _h('settings.livesync_bind_ip_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="livesync_peer_ip">
+                        <label class="form-label"><?= _h('settings.livesync_peer_ip') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="livesync_peer_ip" value="<?= sanitize($cfg['livesync_peer_ip'] ?? '') ?>" maxlength="45" placeholder="<?= _h('settings.livesync_peer_ip_ph') ?>">
+                    </div>
+                </div>
+                <div class="settings-test mt-3">
+                    <button type="button" class="btn btn-sm btn-outline-info settings-test-btn" data-test="admin/livesync_test" data-ok-text="<?= _h('settings.livesync_test_ok') ?>"><i class="bi bi-diagram-3"></i> <?= _h('settings.livesync_test_btn') ?></button>
+                    <div class="settings-test-out"></div>
+                </div>
+            </div>
+
+            <!-- OpenTracker performance -->
+            <div class="settings-section" id="section-ot-perf" data-group="opentracker" data-title="<?= _h('settings.ot_perf_title') ?>">
+                <h5><?= _h('settings.ot_perf_title') ?></h5>
+                <p class="settings-hint mb-2">
+                    <?= __('settings.ot_perf_intro_a') ?>
+                    <a href="<?= $baseUrl ?>?action=admin-traffic#ot-card"><?= _h('settings.ot_perf_traffic_page') ?></a> <?= _h('settings.ot_perf_intro_b') ?>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.ot_perf_cmd') ?></label>
+                        <div class="input-group">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_perf_cmd" value="<?= sanitize($cfg['ot_perf_cmd'] ?? '') ?>" placeholder="<?= _h('settings.ot_perf_cmd_ph') ?>">
+                            <button class="btn btn-outline-info" type="button" id="btn-ot-test"><i class="bi bi-clipboard-check"></i> <?= _h('settings.ot_perf_test_btn') ?></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.ot_perf_cmd_hint') ?></small>
+                        <div id="ot-test-result" class="mt-2"></div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_nice') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_nice" value="<?= sanitize($cfg['ot_nice'] ?? '-2') ?>" min="-20" max="19">
+                        <small class="settings-hint"><?= _h('settings.ot_nice_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_cpu_weight') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_cpu_weight" value="<?= sanitize($cfg['ot_cpu_weight'] ?? '100') ?>" min="1" max="10000">
+                        <small class="settings-hint"><?= _h('settings.ot_cpu_weight_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_cpu_affinity') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_cpu_affinity" value="<?= sanitize($cfg['ot_cpu_affinity'] ?? '') ?>" placeholder="<?= _h('settings.ot_cpu_affinity_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.ot_cpu_affinity_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_nofile') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_limit_nofile" value="<?= sanitize($cfg['ot_limit_nofile'] ?? '65536') ?>" min="1024" max="1048576">
+                        <small class="settings-hint"><?= __('settings.ot_nofile_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_udp_workers') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_udp_workers" value="<?= sanitize($cfg['ot_udp_workers'] ?? '') ?>" placeholder="<?= _h('settings.ot_udp_workers_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.ot_udp_workers_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Extra opentracker instances -->
+            <div class="settings-section" id="section-cluster" data-group="opentracker" data-title="<?= _h('settings.cluster_title') ?>">
+                <h5><?= _h('settings.cluster_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.cluster_intro_a') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#ot-card"><?= _h('settings.cluster_perf_card_link') ?></a> <?= __('settings.cluster_intro_b') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.cluster_cmd') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="ot_cluster_cmd" value="<?= sanitize($cfg['ot_cluster_cmd'] ?? '') ?>" maxlength="255" placeholder="<?= _h('settings.cluster_cmd_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.cluster_cmd_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_cluster_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="ot_cluster_enabled">
+                            <option value="0" <?= ($cfg['ot_cluster_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.ot_cluster_no') ?></option>
+                            <option value="1" <?= ($cfg['ot_cluster_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.ot_cluster_yes') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.ot_cluster_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.ot_cluster_port_base') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="ot_cluster_port_base" value="<?= sanitize($cfg['ot_cluster_port_base'] ?? '') ?>" min="1024" max="65500" placeholder="<?= _h('settings.ot_cluster_port_base_ph') ?>">
+                        <small class="settings-hint"><?= _h('settings.ot_cluster_port_base_hint') ?></small>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-cluster-test"><i class="bi bi-plug"></i> <?= _h('settings.ot_cluster_test') ?></button>
+                    <div id="cluster-test-result" class="mt-2"></div>
+                    <small class="settings-hint d-block mt-2"><?= __('settings.ot_cluster_test_hint') ?></small>
+                </div>
+            </div>
+
+            <!-- UDP traffic & rate limit — includes/netlimit.php + tools/opentracker/tracker-netlimit.sh -->
+            <div class="settings-section" id="section-netlimit" data-group="network" data-title="<?= _h('settings.net_title') ?>">
+                <h5><?= _h('settings.net_title') ?></h5>
+                <p class="settings-hint mb-2">
+                    <?= __('settings.net_intro_1') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#net-card"><?= _h('settings.net_intro_link') ?></a>.
+                    <br>
+                    <?= __('settings.net_intro_2') ?>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_monitor') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="net_monitor_enabled">
+                            <option value="0" <?= ($cfg['net_monitor_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.net_monitor_off') ?></option>
+                            <option value="1" <?= ($cfg['net_monitor_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= __('settings.net_monitor_on') ?></option>
+                        </select>
+                        <small class="settings-hint">
+                            <?= __('settings.net_monitor_hint') ?>
+                        </small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_sample') ?> <small class="settings-hint"><?= _h('settings.net_seconds') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_sample_seconds" value="<?= (int)netlimitSampleSeconds($cfg) ?>" min="<?= NET_SAMPLE_MIN ?>" max="<?= NET_SAMPLE_MAX ?>">
+                        <small class="settings-hint"><?= _h('settings.net_sample_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_keep') ?> <small class="settings-hint"><?= _h('settings.index_files_days') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_keep_days" value="<?= (int)netlimitKeepDays($cfg) ?>" min="<?= NET_KEEP_MIN ?>" max="<?= NET_KEEP_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.net_keep_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_port') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_limit_port" value="<?= (int)netlimitPort($cfg) ?>" min="1" max="65535">
+                        <small class="settings-hint"><?= __('settings.net_port_hint') ?></small>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label"><?= _h('settings.net_trusted') ?> <small class="settings-hint"><?= _h('settings.net_trusted_note') ?></small></label>
+                        <textarea class="form-control bg-dark text-light border-secondary" name="net_limit_trusted" rows="2" placeholder="203.0.113.10, 198.51.100.0/24, 2001:db8::/32"><?= sanitize($cfg['net_limit_trusted'] ?? '') ?></textarea>
+<?php $trOk = function_exists('netlimitTrusted') ? netlimitTrusted($cfg) : []; $trBad = function_exists('netlimitTrustedRejected') ? netlimitTrustedRejected($cfg) : []; ?>
+                        <small class="settings-hint">
+                            <?= __('settings.net_trusted_hint') ?>
+                            <?php if ($trOk): ?><span class="text-info"><?= _h('settings.net_in_force', ['n' => count($trOk)]) ?> — <code><?= sanitize(implode(', ', array_slice($trOk, 0, 6))) ?><?= count($trOk) > 6 ? ' …' : '' ?></code>.</span><?php endif; ?>
+                            <?php if ($trBad): ?><span class="text-warning"><?= _h('settings.net_not_address') ?> <code><?= sanitize(implode(', ', array_slice($trBad, 0, 4))) ?></code>.</span><?php endif; ?>
+                            <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.net_trusted_more') ?></summary><?= __('settings.net_trusted_more_body', ['max' => NET_TRUSTED_MAX]) ?></details>
+                        </small>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label"><?= _h('settings.net_blocked') ?> <small class="settings-hint"><?= _h('settings.net_blocked_note') ?></small></label>
+                        <textarea class="form-control bg-dark text-light border-secondary" name="net_limit_blocked" rows="2" placeholder="5.188.1.7, 45.9.148.0/24, 2a02:c207::/32"><?= sanitize($cfg['net_limit_blocked'] ?? '') ?></textarea>
+<?php $blOk = function_exists('netlimitBlocked') ? netlimitBlocked($cfg) : []; $blBad = function_exists('netlimitBlockedRejected') ? netlimitBlockedRejected($cfg) : []; ?>
+                        <small class="settings-hint">
+                            <?= __('settings.net_blocked_hint') ?>
+                            <?php if ($blOk): ?><span class="text-info"><?= _h('settings.net_in_force', ['n' => count($blOk)]) ?> — <code><?= sanitize(implode(', ', array_slice($blOk, 0, 6))) ?><?= count($blOk) > 6 ? ' …' : '' ?></code>.</span><?php endif; ?>
+                            <?php if ($blBad): ?><span class="text-warning"><?= _h('settings.net_not_address') ?> <code><?= sanitize(implode(', ', array_slice($blBad, 0, 4))) ?></code>.</span><?php endif; ?>
+                            <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.net_blocked_more') ?></summary>
+                                <?= __('settings.net_blocked_more_1') ?>
+                                <a href="<?= $baseUrl ?>?action=admin-traffic#iplists-card"><?= _h('settings.net_intro_link') ?></a> <?= __('settings.net_blocked_more_2', ['max' => NET_TRUSTED_MAX]) ?>
+                            </details>
+                        </small>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-netlimit-throttle"><?= _h('settings.net_throttle_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.net_throttle_heading_sub') ?></small></h6>
+                <p class="settings-hint mb-2">
+                    <?= __('settings.net_throttle_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#net-card"><?= _h('settings.net_throttle_intro_link') ?></a><?= _h('settings.net_throttle_intro_after') ?>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_limit_label') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="net_limit_enabled">
+                            <option value="0" <?= ($cfg['net_limit_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.net_limit_off') ?></option>
+                            <option value="1" <?= ($cfg['net_limit_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.net_limit_on') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_pps_label') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_limit_pps" value="<?= (int)netlimitPps($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
+                        <small class="settings-hint"><?= _h('settings.net_pps_hint', ['min' => NET_PPS_MIN, 'max' => NET_PPS_MAX]) ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_burst_label') ?> <small class="settings-hint"><?= _h('settings.net_burst_label_sub') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_limit_burst" value="<?= (int)netlimitBurst($cfg) ?>" min="<?= NET_BURST_MIN ?>" max="<?= NET_BURST_MAX ?>">
+                        <small class="settings-hint"><?= _h('settings.net_burst_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label d-block"><?= _h('settings.net_avail_test_label') ?></label>
+                        <button type="button" class="btn btn-outline-info btn-sm w-100" id="btn-test-netlimit"><i class="bi bi-shield-check"></i> <?= _h('settings.net_avail_test_btn') ?></button>
+                        <small class="settings-hint d-block mt-1"><?= __('settings.net_avail_test_hint') ?></small>
+                    </div>
+                    <div class="col-12">
+                        <div id="netlimit-result" class="blacklist-result"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.net_cmd_label') ?> <small class="settings-hint"><?= _h('settings.net_cmd_label_sub') ?></small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="net_limit_cmd" value="<?= sanitize($cfg['net_limit_cmd'] ?? NET_DEFAULT_CMD) ?>" placeholder="<?= _h('settings.net_cmd_ph', ['cmd' => NET_DEFAULT_CMD]) ?>" maxlength="255">
+                        <small class="settings-hint"><?= __('settings.net_cmd_hint') ?></small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.net_install_once') ?></label>
+                        <pre class="settings-code mb-0"><code>sudo install -m 0755 tools/opentracker/tracker-netlimit.sh /usr/local/sbin/
+echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-netlimit.sh' \
+  | sudo tee /etc/sudoers.d/tracker-netlimit
+sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-netlimit-auto"><?= _h('settings.net_auto_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.net_auto_heading_sub') ?></small></h6>
+                <p class="settings-hint mb-2">
+                    <?= __('settings.net_auto_intro') ?>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_auto_label') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="net_auto_enabled">
+                            <option value="0" <?= ($cfg['net_auto_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.net_auto_off') ?></option>
+                            <option value="1" <?= ($cfg['net_auto_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.net_auto_on') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_auto_target_label') ?> <small class="settings-hint"><?= _h('settings.net_auto_target_label_sub') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_target" value="<?= (int)netlimitAutoTarget($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
+                        <small class="settings-hint"><?= _h('settings.net_auto_target_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_auto_min_label') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_min" value="<?= (int)netlimitAutoMin($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
+                        <small class="settings-hint"><?= _h('settings.net_auto_min_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_auto_max_label') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_max" value="<?= (int)netlimitAutoMax($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
+                        <small class="settings-hint"><?= _h('settings.net_auto_max_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.net_auto_cpu_label') ?> <small class="settings-hint"><?= _h('settings.net_auto_cpu_label_sub') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_target_cpu" value="<?= (int)netlimitAutoTargetCpu($cfg) ?>" min="10" max="100">
+                        <small class="settings-hint">
+                            <?= _h('settings.net_auto_cpu_hint') ?>
+                            <?php $nlCpus = netlimitCpuCount(); if ($nlCpus > 0): ?><?= __('settings.net_auto_cpu_cores_hint', ['cores' => (int)$nlCpus, 'pct' => (int)netlimitAutoTargetCpu($cfg), 'load' => number_format($nlCpus * netlimitAutoTargetCpu($cfg) / 100, 1)]) ?><?php endif; ?>
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <?php /* Address lists — includes/iplist.php. Right under UDP traffic & rate limit and in its group
+                     (1.69.0; it was under Tracker & whitelist): its first words are "Trusted addresses
+                     above", which is a field of that section, and the lists feed the same firewall. */ ?>
+            <div class="settings-section" id="section-iplists" data-group="network" data-title="<?= _h('settings.iplists_heading') ?>">
+                <h5><?= _h('settings.iplists_heading') ?></h5>
+                <p class="settings-hint mb-2">
+                    <?= __('settings.iplists_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#section-iplists-card"><?= _h('settings.iplists_intro_link') ?></a> <?= _h('settings.iplists_intro_after') ?>
+                </p>
+                <p class="settings-hint mb-2">
+                    <?= __('settings.iplists_kinds') ?>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.iplists_label') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="net_lists_enabled">
+                            <option value="0" <?= ($cfg['net_lists_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.iplists_off') ?></option>
+                            <option value="1" <?= ($cfg['net_lists_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.iplists_on') ?></option>
+                        </select>
+                        <small class="settings-hint">
+                            <?= _h('settings.iplists_enabled_hint') ?>
+                        </small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.iplists_ttl_label') ?> <small class="settings-hint"><?= _h('settings.iplists_ttl_label_sub') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_lists_ttl_default"
+                               value="<?= (int)($cfg['net_lists_ttl_default'] ?? IPLIST_TTL_DEFAULT) ?>" min="<?= IPLIST_TTL_MIN ?>" max="<?= IPLIST_TTL_MAX ?>" step="15">
+                        <small class="settings-hint">
+                            <?= _h('settings.iplists_ttl_hint') ?>
+                        </small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.iplists_capacity_label') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" value="<?= _h('settings.iplists_capacity_value', ['n' => number_format(IPLIST_MAX_TOTAL)]) ?>" readonly disabled>
+                        <small class="settings-hint">
+                            <?= __('settings.iplists_capacity_hint') ?>
+                            <a href="<?= $baseUrl ?>?action=admin-traffic#iplists-card"><?= _h('settings.iplists_capacity_hint_link') ?></a>.
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stability probe — includes/tuner.php -->
+            <div class="settings-section" id="section-tuner" data-group="network" data-title="<?= _h('settings.tuner_title') ?>">
+                <h5><?= _h('settings.tuner_title') ?></h5>
+                <p class="settings-hint mb-2">
+                    <?= __('settings.tuner_intro') ?>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-4" data-setting="tuner_enabled">
+                        <label class="form-label"><?= _h('settings.tuner_label') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="tuner_enabled">
+                            <option value="0" <?= ($cfg['tuner_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            <option value="1" <?= ($cfg['tuner_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.tuner_enabled_opt') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.tuner_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="tuner_python">
+                        <label class="form-label"><?= _h('settings.tuner_python') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="tuner_python" value="<?= sanitize($cfg['tuner_python'] ?? 'python3') ?>" placeholder="python3">
+                        <small class="settings-hint"><?= __('settings.tuner_python_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="tuner_load_headroom">
+                        <label class="form-label"><?= _h('settings.tuner_headroom') ?> <small class="settings-hint"><?= _h('settings.tuner_per_core') ?></small></label>
+                        <input type="number" step="0.05" min="0.05" max="4" class="form-control bg-dark text-light border-secondary" name="tuner_load_headroom" value="<?= sanitize($cfg['tuner_load_headroom'] ?? '0.35') ?>">
+                        <small class="settings-hint"><?= __('settings.tuner_headroom_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="tuner_load_hard">
+                        <label class="form-label"><?= _h('settings.tuner_hard') ?> <small class="settings-hint"><?= _h('settings.tuner_load_per_core') ?></small></label>
+                        <input type="number" step="0.1" min="0.5" max="20" class="form-control bg-dark text-light border-secondary" name="tuner_load_hard" value="<?= sanitize($cfg['tuner_load_hard'] ?? '2.0') ?>">
+                        <small class="settings-hint"><?= _h('settings.tuner_hard_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Kernel network buffers — includes/sysctl.php -->
+            <div class="settings-section" id="section-sysctl" data-group="network" data-title="<?= _h('settings.sysctl_title') ?>">
+                <h5><?= _h('settings.sysctl_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.sysctl_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#sysctl-card"><?= _h('settings.sysctl_intro_link') ?></a><?= _h('settings.sysctl_intro_tail') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.sysctl_cmd') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="sysctl_cmd" value="<?= sanitize($cfg['sysctl_cmd'] ?? '') ?>" maxlength="255" placeholder="<?= _h('settings.sysctl_cmd_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.sysctl_cmd_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.sysctl_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="sysctl_enabled">
+                            <option value="0" <?= ($cfg['sysctl_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.sysctl_no') ?></option>
+                            <option value="1" <?= ($cfg['sysctl_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.sysctl_yes') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.sysctl_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.sysctl_confirm_seconds') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="sysctl_confirm_seconds" value="<?= sanitize($cfg['sysctl_confirm_seconds'] ?? '120') ?>" min="60" max="900" step="60">
+                        <small class="settings-hint"><?= _h('settings.sysctl_confirm_seconds_hint') ?></small>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-sysctl-test"><i class="bi bi-plug"></i> <?= _h('settings.sysctl_test') ?></button>
+                    <div id="sysctl-test-result" class="mt-2"></div>
+                </div>
+            </div>
+
+            <!-- Database memory (MariaDB / MySQL) -->
+            <div class="settings-section" id="section-dbmem" data-group="network" data-title="<?= _h('settings.dbmem_title') ?>">
+                <h5><?= _h('settings.dbmem_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.dbmem_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#dbmem-card"><?= _h('settings.dbmem_card_link') ?></a></small>
+                <div class="row g-3">
+                    <div class="col-md-8">
+                        <label class="form-label"><?= _h('settings.dbmem_cmd') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="dbmem_cmd" value="<?= sanitize($cfg['dbmem_cmd'] ?? '') ?>" placeholder="sudo -n /usr/local/sbin/tracker-dbmem.sh" autocomplete="off" spellcheck="false">
+                        <small class="settings-hint"><?= __('settings.dbmem_cmd_hint') ?></small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.dbmem_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="dbmem_enabled">
+                            <option value="0" <?= ($cfg['dbmem_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.sysctl_no') ?></option>
+                            <option value="1" <?= ($cfg['dbmem_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.sysctl_yes') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.dbmem_enabled_hint') ?></small>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button type="button" class="btn btn-sm btn-outline-info" id="btn-dbmem-test"><i class="bi bi-plug"></i> <?= _h('settings.dbmem_test') ?></button>
+                    <div id="dbmem-test-result" class="mt-2"></div>
                 </div>
             </div>
 
@@ -2530,377 +2493,601 @@
                 </div>
             </div>
 
-            <!-- Favourites, public profiles and "my torrents" — includes/favourites.php -->
-            <div class="settings-section" id="section-favourites" data-group="users" data-title="<?= _h('settings.fav_heading') ?>">
-                <h5><?= _h('settings.fav_heading') ?></h5>
-                <p class="settings-hint mb-3"><?= __('settings.fav_intro') ?></p>
+            <!-- Source link + description on a whitelist row (includes/richtext.php) -->
+            <div class="settings-section" id="section-content" data-group="content" data-title="<?= _h('settings.content_title') ?>">
+                <h5><?= _h('settings.content_title') ?></h5>
+                <p class="settings-hint mb-2"><?= _h('settings.content_subtitle') ?></p>
+                <small class="settings-hint d-block mb-3"><?= __('settings.content_intro') ?></small>
                 <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.fav_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="fav_enabled">
-                            <option value="1" <?= ($cfg['fav_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['fav_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-3" data-setting="wl_allow_source_url">
+                        <label class="form-label"><?= _h('settings.content_source_url') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_allow_source_url">
+                            <option value="0" <?= ($cfg['wl_allow_source_url'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_disabled') ?></option>
+                            <option value="1" <?= ($cfg['wl_allow_source_url'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.content_enabled') ?></option>
                         </select>
-                        <small class="settings-hint"><?= _h('settings.fav_enabled_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.content_source_url_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.fav_max') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fav_max_per_user" value="<?= sanitize($cfg['fav_max_per_user'] ?? '500') ?>" min="10" max="5000">
-                        <small class="settings-hint"><?= _h('settings.fav_max_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.fav_public') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="fav_public_enabled">
-                            <option value="1" <?= ($cfg['fav_public_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['fav_public_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-3" data-setting="wl_allow_description">
+                        <label class="form-label"><?= _h('settings.content_description') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_allow_description">
+                            <option value="0" <?= ($cfg['wl_allow_description'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_disabled') ?></option>
+                            <option value="1" <?= ($cfg['wl_allow_description'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.content_enabled') ?></option>
                         </select>
-                        <small class="settings-hint"><?= __('settings.fav_public_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.fav_who') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="fav_who_enabled">
-                            <option value="1" <?= ($cfg['fav_who_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['fav_who_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-3" data-setting="wl_content_review">
+                        <label class="form-label"><?= _h('settings.content_review') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_content_review">
+                            <option value="1" <?= ($cfg['wl_content_review'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_review_yes') ?></option>
+                            <option value="0" <?= ($cfg['wl_content_review'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_review_no') ?></option>
                         </select>
-                        <small class="settings-hint"><?= _h('settings.fav_who_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.content_review_hint_pre') ?> <a href="<?= $baseUrl ?>?action=admin-whitelist"><?= _h('settings.content_review_hint_link') ?></a>. <?= _h('settings.content_review_hint_post') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.profiles') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="profiles_enabled">
-                            <option value="1" <?= ($cfg['profiles_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['profiles_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-3" data-setting="wl_content_autopublish">
+                        <label class="form-label"><?= _h('settings.content_autopublish') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="wl_content_autopublish">
+                            <option value="0" <?= ($cfg['wl_content_autopublish'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_no') ?></option>
+                            <option value="1" <?= ($cfg['wl_content_autopublish'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.content_autopublish_yes') ?></option>
                         </select>
-                        <small class="settings-hint"><?= __('settings.profiles_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.content_autopublish_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.wl_submitter') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="wl_submitter_public">
-                            <option value="1" <?= ($cfg['wl_submitter_public'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['wl_submitter_public'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-3" data-setting="wl_edit_max_pending">
+                        <label class="form-label"><?= _h('settings.content_edit_max_pending') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="wl_edit_max_pending" value="<?= sanitize($cfg['wl_edit_max_pending'] ?? '3') ?>" min="0" max="50">
+                        <small class="settings-hint"><?= __('settings.content_edit_max_pending_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="link_trusted_domains">
+                        <label class="form-label"><?= _h('settings.content_trusted_domains') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="link_trusted_domains" value="<?= sanitize($cfg['link_trusted_domains'] ?? '') ?>" placeholder="<?= _h('settings.content_trusted_domains_ph') ?>">
+                        <small class="settings-hint"><?= _h('settings.content_trusted_domains_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="desc_allow_bbcode">
+                        <label class="form-label"><?= _h('settings.content_allow_bbcode') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="desc_allow_bbcode">
+                            <option value="1" <?= ($cfg['desc_allow_bbcode'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_yes') ?></option>
+                            <option value="0" <?= ($cfg['desc_allow_bbcode'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_no') ?></option>
                         </select>
-                        <small class="settings-hint"><?= _h('settings.wl_submitter_hint') ?></small>
+                        <small class="settings-hint"><code>[b] [i] [u] [s] [code] [quote] [list] [url] [img]</code></small>
+                    </div>
+                    <div class="col-md-3" data-setting="desc_allow_markdown">
+                        <label class="form-label"><?= _h('settings.content_allow_markdown') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="desc_allow_markdown">
+                            <option value="1" <?= ($cfg['desc_allow_markdown'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_yes') ?></option>
+                            <option value="0" <?= ($cfg['desc_allow_markdown'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.content_allow_markdown_hint') ?></small>
+                    </div>
+                    <div class="col-md-2" data-setting="desc_max_chars">
+                        <label class="form-label"><?= _h('settings.content_max_chars') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_chars" value="<?= sanitize($cfg['desc_max_chars'] ?? '4000') ?>" min="200" max="20000">
+                    </div>
+                    <div class="col-md-2" data-setting="desc_max_images">
+                        <label class="form-label"><?= _h('settings.content_max_images') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_images" value="<?= sanitize($cfg['desc_max_images'] ?? '3') ?>" min="0" max="50">
+                        <small class="settings-hint"><?= _h('settings.content_max_images_hint') ?></small>
+                    </div>
+                    <div class="col-md-2" data-setting="desc_max_links">
+                        <label class="form-label"><?= _h('settings.content_max_links') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_links" value="<?= sanitize($cfg['desc_max_links'] ?? '10') ?>" min="0" max="100">
+                    </div>
+                    <div class="col-md-3" data-setting="search_allow_sl_refresh">
+                        <label class="form-label"><?= _h('settings.content_sl_refresh') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="search_allow_sl_refresh">
+                            <option value="0" <?= ($cfg['search_allow_sl_refresh'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_disabled') ?></option>
+                            <option value="1" <?= ($cfg['search_allow_sl_refresh'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.content_enabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.content_sl_refresh_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="search_sl_refresh_seconds">
+                        <label class="form-label"><?= _h('settings.content_sl_refresh_seconds') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="search_sl_refresh_seconds" value="<?= sanitize($cfg['search_sl_refresh_seconds'] ?? '120') ?>" min="10" max="3600">
+                        <small class="settings-hint"><?= _h('settings.content_sl_refresh_seconds_hint') ?></small>
                     </div>
                 </div>
             </div>
 
-            <!-- Lists — includes/lists.php -->
-            <div class="settings-section" id="section-lists" data-group="users" data-title="<?= _h('settings.lists_heading') ?>">
-                <h5><?= _h('settings.lists_heading') ?></h5>
-                <p class="settings-hint mb-3"><?= __('settings.lists_intro') ?></p>
+            <?php /* Ratings — includes/reputation.php. After the descriptions, in the group now called
+                     "Descriptions & ratings" (1.69.0; "Descriptions & review" before, a name nobody looking
+                     for the ratings would open): what members add to a torrent, in words or in votes. */ ?>
+            <div class="settings-section" id="section-reputation" data-group="content" data-title="<?= _h('settings.rep_heading') ?>">
+                <h5><i class="bi bi-hand-thumbs-up"></i> <?= _h('settings.rep_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.rep_intro_1') ?>
+                <br><br><?= __('settings.rep_intro_2') ?>
+                <br><br><?= __('settings.rep_intro_3') ?></small>
                 <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.lists_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="lists_enabled">
-                            <option value="1" <?= ($cfg['lists_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['lists_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-3" data-setting="rep_enabled">
+                        <label class="form-label"><?= _h('settings.rep_heading') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="rep_enabled">
+                            <option value="0" <?= ($cfg['rep_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.rep_off') ?></option>
+                            <option value="1" <?= ($cfg['rep_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.rep_on') ?></option>
                         </select>
-                        <small class="settings-hint"><?= _h('settings.lists_enabled_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.rep_enabled_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.lists_public') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="lists_public_enabled">
-                            <option value="1" <?= ($cfg['lists_public_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['lists_public_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-3" data-setting="rep_mode">
+                        <label class="form-label"><?= _h('settings.rep_mode') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="rep_mode">
+                            <option value="thumbs" <?= repMode($cfg) === 'thumbs' ? 'selected' : '' ?>><?= _h('settings.rep_mode_thumbs') ?></option>
+                            <option value="stars" <?= repMode($cfg) === 'stars' ? 'selected' : '' ?>><?= _h('settings.rep_mode_stars') ?></option>
                         </select>
-                        <small class="settings-hint"><?= __('settings.lists_public_hint') ?></small>
+                        <small class="settings-hint"><?= _h('settings.rep_mode_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.lists_max') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="lists_max_per_user" value="<?= sanitize($cfg['lists_max_per_user'] ?? '20') ?>" min="1" max="200">
-                        <small class="settings-hint"><?= _h('settings.lists_max_hint') ?></small>
+                    <div class="col-md-3" data-setting="rep_who_can_vote">
+                        <label class="form-label"><?= _h('settings.rep_who') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="rep_who_can_vote">
+                            <option value="off" <?= ($cfg['rep_who_can_vote'] ?? 'users') === 'off' ? 'selected' : '' ?>><?= _h('settings.rep_who_off') ?></option>
+                            <option value="users" <?= ($cfg['rep_who_can_vote'] ?? 'users') === 'users' ? 'selected' : '' ?>><?= _h('settings.rep_who_users') ?></option>
+                            <option value="all" <?= ($cfg['rep_who_can_vote'] ?? 'users') === 'all' ? 'selected' : '' ?>><?= _h('settings.rep_who_all') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.rep_who_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.lists_items') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="lists_max_items" value="<?= sanitize($cfg['lists_max_items'] ?? '500') ?>" min="10" max="5000">
-                        <small class="settings-hint"><?= _h('settings.lists_items_hint') ?></small>
+                    <div class="col-md-3" data-setting="rep_show_in_results">
+                        <label class="form-label"><?= _h('settings.rep_show') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="rep_show_in_results">
+                            <option value="0" <?= ($cfg['rep_show_in_results'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.rep_show_info') ?></option>
+                            <option value="1" <?= ($cfg['rep_show_in_results'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.rep_show_column') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-3" data-setting="rep_min_votes">
+                        <label class="form-label"><?= _h('settings.rep_min_votes') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rep_min_votes" value="<?= sanitize($cfg['rep_min_votes'] ?? '3') ?>" min="1" max="1000">
+                        <small class="settings-hint"><?= _h('settings.rep_min_votes_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="rep_anon_weight">
+                        <label class="form-label"><?= _h('settings.rep_anon_weight') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rep_anon_weight" value="<?= sanitize($cfg['rep_anon_weight'] ?? '25') ?>" min="0" max="100">
+                        <small class="settings-hint"><?= _h('settings.rep_anon_weight_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="rep_rate_per_hour">
+                        <label class="form-label"><?= _h('settings.rep_rate_per_hour') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rep_rate_per_hour" value="<?= sanitize($cfg['rep_rate_per_hour'] ?? '30') ?>" min="1" max="1000">
+                    </div>
+                    <div class="col-md-3" data-setting="captcha_pts_vote">
+                        <label class="form-label"><?= _h('settings.rep_captcha_pts_vote') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="captcha_pts_vote" value="<?= sanitize($cfg['captcha_pts_vote'] ?? '2') ?>" min="0" max="100">
+                        <small class="settings-hint"><?= _h('settings.rep_captcha_pts_vote_hint') ?></small>
                     </div>
                 </div>
             </div>
 
-            <!-- People: messages, friends, the directory — includes/people.php -->
-            <div class="settings-section" id="section-people" data-group="users" data-title="<?= _h('settings.pm_heading') ?>">
-                <h5><?= _h('settings.pm_heading') ?></h5>
-                <p class="settings-hint mb-3"><?= __('settings.pm_intro') ?></p>
+            <?php /* ── The shoutbox (1.58.0, includes/shout.php) ────────────────────────────────
+                     Everything the room needs, and one control that is not a setting: Purge, which
+                     deletes rows and therefore asks for the owner's password (assets/js/admin-shout.js
+                     → admin/shout_purge). Its day box has an id and no name, so it never travels with
+                     the form. */ ?>
+            <div class="settings-section" id="section-shout" data-group="shoutbox" data-title="<?= _h('settings.shout_title') ?>">
+                <h5><i class="bi bi-chat-left-dots"></i> <?= _h('settings.shout_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.shout_intro') ?></small>
                 <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.pm_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="pm_enabled">
-                            <option value="1" <?= ($cfg['pm_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['pm_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-3" data-setting="shout_enabled">
+                        <label class="form-label"><?= _h('settings.shout_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_enabled">
+                            <option value="0" <?= ($cfg['shout_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            <option value="1" <?= ($cfg['shout_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
                         </select>
-                        <small class="settings-hint"><?= _h('settings.pm_enabled_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.shout_enabled_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.pm_who') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="pm_who">
-                            <option value="all" <?= ($cfg['pm_who'] ?? 'friends') === 'all' ? 'selected' : '' ?>><?= _h('settings.pm_who_all') ?></option>
-                            <option value="friends" <?= ($cfg['pm_who'] ?? 'friends') === 'friends' ? 'selected' : '' ?>><?= _h('settings.pm_who_friends') ?></option>
-                            <option value="nobody" <?= ($cfg['pm_who'] ?? 'friends') === 'nobody' ? 'selected' : '' ?>><?= _h('settings.pm_who_nobody') ?></option>
+                    <div class="col-md-3" data-setting="shout_placement">
+                        <label class="form-label"><?= _h('settings.shout_placement') ?></label>
+                        <?php $shPlace = function_exists('shoutPlacement') ? shoutPlacement($cfg) : 'home'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_placement">
+                            <option value="home" <?= $shPlace === 'home' ? 'selected' : '' ?>><?= _h('settings.shout_placement_home') ?></option>
+                            <option value="page" <?= $shPlace === 'page' ? 'selected' : '' ?>><?= _h('settings.shout_placement_page') ?></option>
+                            <option value="both" <?= $shPlace === 'both' ? 'selected' : '' ?>><?= _h('settings.shout_placement_both') ?></option>
                         </select>
-                        <small class="settings-hint"><?= _h('settings.pm_who_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.shout_placement_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.pm_day') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_max_per_day" value="<?= sanitize($cfg['pm_max_per_day'] ?? '50') ?>" min="1" max="1000">
-                        <small class="settings-hint"><?= _h('settings.pm_day_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.pm_chars') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_max_chars" value="<?= sanitize($cfg['pm_max_chars'] ?? '4000') ?>" min="200" max="20000">
-                        <small class="settings-hint"><?= _h('settings.pm_chars_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="pm_live_seconds">
-                        <label class="form-label"><?= _h('settings.pm_live') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_live_seconds" value="<?= sanitize($cfg['pm_live_seconds'] ?? '0') ?>" min="0" max="60">
-                        <small class="settings-hint"><?= __('settings.pm_live_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="site_live_seconds">
-                        <label class="form-label"><?= _h('settings.site_live') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="site_live_seconds" value="<?= sanitize($cfg['site_live_seconds'] ?? '60') ?>" min="0" max="300">
-                        <small class="settings-hint"><?= __('settings.site_live_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="pm_typing_enabled">
-                        <label class="form-label"><?= _h('settings.pm_typing') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="pm_typing_enabled">
-                            <option value="1" <?= ($cfg['pm_typing_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['pm_typing_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-3" data-setting="shout_order">
+                        <label class="form-label" for="setting-shout_order"><?= _h('settings.shout_order') ?></label>
+                        <?php $shOrder = function_exists('shoutOrder') ? shoutOrder($cfg) : 'bottom'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_order" id="setting-shout_order">
+                            <option value="bottom" <?= $shOrder === 'bottom' ? 'selected' : '' ?>><?= _h('settings.shout_order_bottom') ?></option>
+                            <option value="top" <?= $shOrder === 'top' ? 'selected' : '' ?>><?= _h('settings.shout_order_top') ?></option>
                         </select>
-                        <small class="settings-hint"><?= __('settings.pm_typing_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.shout_order_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.friends_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="friends_enabled">
-                            <option value="1" <?= ($cfg['friends_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['friends_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-3" data-setting="shout_format">
+                        <label class="form-label"><?= _h('settings.shout_format') ?></label>
+                        <?php $shFmt = function_exists('shoutFormat') ? shoutFormat($cfg) : 'bbcode'; ?>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_format">
+                            <option value="plain" <?= $shFmt === 'plain' ? 'selected' : '' ?>><?= _h('settings.shout_format_plain') ?></option>
+                            <option value="bbcode" <?= $shFmt === 'bbcode' ? 'selected' : '' ?>><?= _h('settings.shout_format_bbcode') ?></option>
+                            <option value="markdown" <?= $shFmt === 'markdown' ? 'selected' : '' ?>><?= _h('settings.shout_format_markdown') ?></option>
                         </select>
-                        <small class="settings-hint"><?= _h('settings.friends_enabled_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.shout_format_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.directory_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="directory_enabled">
-                            <option value="1" <?= ($cfg['directory_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['directory_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.directory_enabled_hint') ?></small>
+                    <div class="col-md-3" data-setting="shout_live_seconds">
+                        <label class="form-label"><?= _h('settings.shout_live_seconds') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_live_seconds" value="<?= sanitize($cfg['shout_live_seconds'] ?? '10') ?>" min="0" max="120">
+                        <small class="settings-hint"><?= __('settings.shout_live_seconds_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_widget_rows">
+                        <label class="form-label"><?= _h('settings.shout_widget_rows') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_widget_rows" value="<?= sanitize($cfg['shout_widget_rows'] ?? '25') ?>" min="5" max="100">
+                        <small class="settings-hint"><?= __('settings.shout_widget_rows_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_page_rows">
+                        <label class="form-label"><?= _h('settings.shout_page_rows') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_page_rows" value="<?= sanitize($cfg['shout_page_rows'] ?? '100') ?>" min="20" max="500">
+                        <small class="settings-hint"><?= __('settings.shout_page_rows_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_max_chars">
+                        <label class="form-label"><?= _h('settings.shout_max_chars') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_max_chars" value="<?= sanitize($cfg['shout_max_chars'] ?? '500') ?>" min="1" max="2000">
+                        <small class="settings-hint"><?= __('settings.shout_max_chars_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_flood_seconds">
+                        <label class="form-label"><?= _h('settings.shout_flood_seconds') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_flood_seconds" value="<?= sanitize($cfg['shout_flood_seconds'] ?? '5') ?>" min="0" max="300">
+                        <small class="settings-hint"><?= __('settings.shout_flood_seconds_hint') ?></small>
+                    </div>
+                    <?php /* 1.66.0: the two windows on a member's own line, measured by the server from
+                             when it was said. Each hint says what ITS zero means, because they mean
+                             opposite things: no editing at all, and no limit on taking a line back. */ ?>
+                    <div class="col-md-3" data-setting="shout_edit_minutes">
+                        <label class="form-label" for="setting-shout_edit_minutes"><?= _h('settings.shout_edit_minutes') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_edit_minutes" id="setting-shout_edit_minutes" value="<?= (int)(function_exists('shoutEditMinutes') ? shoutEditMinutes($cfg) : 10) ?>" min="0" max="1440">
+                        <small class="settings-hint"><?= __('settings.shout_edit_minutes_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_delete_own_minutes">
+                        <label class="form-label" for="setting-shout_delete_own_minutes"><?= _h('settings.shout_delete_own_minutes') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_delete_own_minutes" id="setting-shout_delete_own_minutes" value="<?= (int)(function_exists('shoutDeleteOwnMinutes') ? shoutDeleteOwnMinutes($cfg) : 10) ?>" min="0" max="1440">
+                        <small class="settings-hint"><?= __('settings.shout_delete_own_minutes_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_keep_rows">
+                        <label class="form-label"><?= _h('settings.shout_keep_rows') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_keep_rows" value="<?= sanitize($cfg['shout_keep_rows'] ?? '2000') ?>" min="100" max="100000">
+                        <small class="settings-hint"><?= __('settings.shout_keep_rows_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="shout_keep_days">
+                        <label class="form-label"><?= _h('settings.shout_keep_days') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_keep_days" value="<?= sanitize($cfg['shout_keep_days'] ?? '30') ?>" min="1" max="3650">
+                        <small class="settings-hint"><?= __('settings.shout_keep_days_hint') ?></small>
+                    </div>
+                    <div class="col-md-6" data-setting="shout_rules">
+                        <label class="form-label"><?= _h('settings.shout_rules') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="shout_rules" value="<?= sanitize($cfg['shout_rules'] ?? '') ?>" maxlength="500" placeholder="<?= _h('settings.shout_rules_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.shout_rules_hint') ?></small>
                     </div>
                 </div>
-            </div>
-
-            <!-- The sign-in bridge — includes/authbridge.php -->
-            <div class="settings-section" id="section-authbridge" data-group="users" data-title="<?= _h('settings.bridge_heading') ?>">
-                <h5><?= _h('settings.bridge_heading') ?></h5>
-                <p class="settings-hint mb-3"><?= __('settings.bridge_intro') ?></p>
-                <?php /* The warning is not decoration. Everything else on this page changes what the
-                         site DOES; this one changes who it believes. */ ?>
-                <div class="alert alert-warning py-2 settings-hint mb-3"><?= __('settings.bridge_warning') ?></div>
+                <?php /* ── Where it is seen, and who says what (1.60.0) ────────────────────────
+                         An h6 sub-head rather than a section of its own, the way Settings → Network
+                         & limits splits its throttle off: these are three more answers about the
+                         same room, and a second "Shoutbox" chip would be two places to look for one
+                         subject. */ ?>
+                <h6 class="mt-4 mb-1" id="section-shout-nav"><?= _h('settings.shout_nav_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.shout_nav_heading_sub') ?></small></h6>
                 <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.bridge_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_enabled">
-                            <option value="1" <?= ($cfg['auth_bridge_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['auth_bridge_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-4" data-setting="shout_nav">
+                        <label class="form-label"><?= _h('settings.shout_nav') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_nav">
+                            <option value="0" <?= ($cfg['shout_nav'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            <option value="1" <?= ($cfg['shout_nav'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
                         </select>
-                        <small class="settings-hint"><?= _h('settings.bridge_enabled_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.shout_nav_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.bridge_create') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_create">
-                            <option value="1" <?= ($cfg['auth_bridge_create'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['auth_bridge_create'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                    <div class="col-md-4" data-setting="shout_live_seconds_guest">
+                        <label class="form-label"><?= _h('settings.shout_live_seconds_guest') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_live_seconds_guest" value="<?= sanitize($cfg['shout_live_seconds_guest'] ?? '30') ?>" min="0" max="300">
+                        <small class="settings-hint"><?= __('settings.shout_live_seconds_guest_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="shout_system_lines">
+                        <label class="form-label"><?= _h('settings.shout_system_lines') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="shout_system_lines">
+                            <option value="0" <?= ($cfg['shout_system_lines'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            <option value="1" <?= ($cfg['shout_system_lines'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
                         </select>
-                        <small class="settings-hint"><?= _h('settings.bridge_create_hint') ?></small>
+                        <small class="settings-hint"><?= __('settings.shout_system_lines_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.bridge_merge') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_merge">
-                            <option value="none" <?= ($cfg['auth_bridge_merge'] ?? 'none') !== 'email_verified' ? 'selected' : '' ?>><?= _h('settings.bridge_merge_none') ?></option>
-                            <option value="email_verified" <?= ($cfg['auth_bridge_merge'] ?? 'none') === 'email_verified' ? 'selected' : '' ?>><?= _h('settings.bridge_merge_email') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.bridge_merge_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.bridge_ttl') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="auth_bridge_ttl" value="<?= sanitize($cfg['auth_bridge_ttl'] ?? '120') ?>" min="30" max="900">
-                        <small class="settings-hint"><?= _h('settings.bridge_ttl_hint') ?></small>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.bridge_login_url') ?></label>
-                        <input type="url" class="form-control bg-dark text-light border-secondary" name="auth_bridge_login_url" value="<?= sanitize($cfg['auth_bridge_login_url'] ?? '') ?>" maxlength="500" placeholder="https://forum.example.org/login">
-                        <small class="settings-hint"><?= _h('settings.bridge_login_url_hint') ?></small>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.bridge_return_url') ?></label>
-                        <input type="url" class="form-control bg-dark text-light border-secondary" name="auth_bridge_return_url" value="<?= sanitize($cfg['auth_bridge_return_url'] ?? '') ?>" maxlength="500" placeholder="https://forum.example.org/auth/tracker">
-                        <small class="settings-hint"><?= __('settings.bridge_return_url_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.bridge_logout') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="auth_bridge_logout">
-                            <option value="1" <?= ($cfg['auth_bridge_logout'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
-                            <option value="0" <?= ($cfg['auth_bridge_logout'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.bridge_logout_hint') ?></small>
+                    <?php /* 1.61.0. Beside the three above because it is the fourth answer to the same
+                             question — where the room is and how somebody reaches it. A name another
+                             page already owns is refused on save and again on read, so the worst an
+                             operator can do here is fail to rename anything. */ ?>
+                    <div class="col-md-4" data-setting="shout_page_action">
+                        <label class="form-label"><?= _h('settings.shout_page_action') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="shout_page_action" value="<?= sanitize($cfg['shout_page_action'] ?? 'shoutbox') ?>" maxlength="32" placeholder="shoutbox" autocomplete="off" spellcheck="false">
+                        <small class="settings-hint"><?= __('settings.shout_page_action_hint') ?></small>
                     </div>
                 </div>
-                <p class="settings-hint mt-3 mb-0"><?= __('settings.bridge_endpoints') ?></p>
-            </div>
-
-            <!-- Interface languages — includes/lang.php -->
-            <div class="settings-section" id="section-languages" data-group="languages" data-title="<?= _h('settings.languages_title') ?>">
-                <h5><?= _h('settings.languages_title') ?></h5>
-                <p class="settings-hint mb-3"><?= __('settings.languages_intro1') ?></p>
-                <p class="settings-hint mb-3"><?= __('settings.languages_intro2') ?></p>
-
-                <div class="row g-3 mb-3">
-                    <div class="col-md-6" data-setting="default_language">
-                        <label class="form-label" for="lang-default"><?= _h('settings.languages_default') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" id="lang-default"></select>
-                        <div class="settings-hint"><?= __('settings.languages_default_hint') ?></div>
-                    </div>
-                    <div class="col-md-6" data-setting="language_auto">
-                        <label class="form-label"><?= _h('settings.languages_auto') ?></label>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="lang-auto">
-                            <label class="form-check-label" for="lang-auto"><?= __('settings.languages_auto_check') ?></label>
-                        </div>
-                        <div class="settings-hint"><?= __('settings.languages_auto_hint') ?></div>
-                    </div>
-                </div>
-
-                <div class="row g-3 mb-3">
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.languages_swap') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="lang_swap_enabled">
-                            <option value="1" <?= ($cfg['lang_swap_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.stats_opt_yes') ?></option>
-                            <option value="0" <?= ($cfg['lang_swap_enabled'] ?? '0') === '1' ? '' : 'selected' ?>><?= _h('settings.stats_opt_no') ?></option>
-                        </select>
-                        <div class="settings-hint"><?= __('settings.languages_swap_hint') ?></div>
-                    </div>
-                </div>
-
-                <div class="alert alert-warning py-2 wl-small d-none" id="lang-writable"><?= __('settings.languages_not_writable') ?></div>
-
-                <div class="lang-table-wrap">
-                    <table class="table table-dark table-sm align-middle lang-table">
-                        <thead>
-                            <tr>
-                                <th><?= _h('settings.languages_col_language') ?></th>
-                                <th><?= _h('settings.languages_col_completeness') ?> <span class="wl-small text-muted"><?= _h('settings.languages_col_vs') ?> <span id="lang-ref"></span></span></th>
-                                <th class="lang-col-sw" title="<?= _h('settings.languages_col_offered_title') ?>"><?= _h('settings.languages_col_offered') ?></th>
-                                <th class="lang-col-sw" title="<?= _h('settings.languages_col_switcher_title') ?>"><?= _h('settings.languages_col_switcher') ?></th>
-                                <th class="lang-col-sw" title="<?= _h('settings.languages_col_accounts_title') ?>"><?= _h('settings.languages_col_accounts') ?></th>
-                                <th class="lang-col-acts"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="lang-body"></tbody>
-                    </table>
-                </div>
-
-                <div class="pc-acts mt-2">
-                    <button type="button" class="btn btn-sm btn-outline-info" id="lang-add">
-                        <i class="bi bi-plus-lg"></i> <?= _h('settings.languages_install') ?>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="lang-template">
-                        <i class="bi bi-download"></i> <?= _h('settings.languages_download_template') ?>
-                    </button>
-                </div>
-            </div>
-
-            <!-- The home page's own layout — includes/homelayout.php -->
-            <div class="settings-section" id="section-home-layout" data-group="general" data-title="<?= _h('settings.home_title') ?>">
-                <h5><?= _h('settings.home_title') ?></h5>
-                <p class="settings-hint mb-3"><?= __('settings.home_intro') ?></p>
-                <div class="pc-card" data-page="home" data-setting="home_layout">
-                    <div class="pc-head">
-                        <span class="pc-title"><?= _h('settings.home_front_page') ?></span>
-                        <?php if (function_exists('homeLayoutIsDefault') && homeLayoutIsDefault($cfg)): ?>
-                            <span class="wl-badge wl-b-muted"><?= _h('settings.home_badge_builtin') ?></span>
-                        <?php else: ?>
-                            <span class="wl-badge wl-b-ok"><?= _h('settings.home_badge_rearranged') ?></span>
-                        <?php endif; ?>
-                    </div>
-                    <div class="pc-meta">
-                        <?php if (function_exists('homeLayout')):
-                            $hl = homeLayout($cfg);
-                            $hlBits = [];
-                            if ($hl['hidden']) $hlBits[] = count($hl['hidden']) === 1 ? __('settings.home_meta_hidden_one') : __('settings.home_meta_hidden_many', ['n' => count($hl['hidden'])]);
-                            if ($hl['headings']) $hlBits[] = count($hl['headings']) === 1 ? __('settings.home_meta_renamed_one') : __('settings.home_meta_renamed_many', ['n' => count($hl['headings'])]);
-                            if ($hl['tagline'] !== null) $hlBits[] = __('settings.home_meta_tagline');
-                            if ($hl['order'] !== homeSectionKeys()) array_unshift($hlBits, __('settings.home_meta_reordered'));
-                            echo $hlBits ? sanitize(ucfirst(implode(', ', $hlBits))) . '.'
-                                         : _h('settings.home_meta_default');
-                        endif; ?>
-                    </div>
-                    <div class="pc-acts">
-                        <button type="button" class="btn btn-sm btn-outline-info" id="hl-open">
-                            <i class="bi bi-grid-1x2"></i> <?= _h('settings.home_arrange') ?>
-                        </button>
-                        <a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener" href="<?= $baseUrl ?>">
-                            <i class="bi bi-box-arrow-up-right"></i> <?= _h('settings.home_view') ?>
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Site pages the operator can rewrite — includes/pagecontent.php -->
-            <div class="settings-section" id="section-pages" data-group="general" data-title="<?= _h('settings.pages_title') ?>">
-                <h5><?= _h('settings.pages_heading_2') ?></h5>
-                <p class="settings-hint mb-2"><?= __('settings.pages_intro1') ?></p>
-                <p class="settings-hint mb-2"><?= __('settings.pages_intro2') ?></p>
-                <p class="settings-hint mb-3"><?= __('settings.pages_intro3') ?></p>
-                <div class="row g-3" id="pc-rows"><?php
-                $pcAll   = function_exists('pageContentAll') ? pageContentAll($db) : [];
-                $pcLangs = function_exists('langAvailable') ? langAvailable() : ['en' => 'English'];
-                foreach (pageContentCatalog() as $pcKey => $pcMeta):
-                    $pcRows = $pcAll[$pcKey] ?? [];
-                    $pcLive = count(array_filter($pcRows, fn($r) => $r['enabled']));
-                ?>
-                    <div class="col-md-6">
-                        <div class="pc-card" data-page="<?= sanitize($pcKey) ?>">
-                            <div class="pc-head">
-                                <span class="pc-title"><?= sanitize($pcMeta['label']) ?></span>
-                                <?php if ($pcLive): ?>
-                                    <span class="wl-badge wl-b-ok"><?= _h('settings.pages_badge_live') ?></span>
-                                <?php elseif ($pcRows): ?>
-                                    <span class="wl-badge wl-b-warn"><?= _h('settings.pages_badge_draft') ?></span>
-                                <?php else: ?>
-                                    <span class="wl-badge wl-b-muted"><?= _h('settings.pages_badge_builtin') ?></span>
-                                <?php endif; ?>
-                            </div>
-                            <div class="pc-meta">
-                                <?php if ($pcRows): ?>
-                                    <?= _h('settings.pages_meta_written', ['n' => count($pcRows), 'total' => count($pcLangs)]) ?>
-                                <?php else: ?>
-                                    <?= _h('settings.pages_meta_never') ?>
-                                <?php endif; ?>
-                            </div>
-                            <?php // One chip per installed language: click it to edit that language directly, and
-                                  // the dot says whether it is live, a draft, or not written yet. ?>
-                            <div class="pc-langrow">
-                                <?php foreach ($pcLangs as $pcCode => $pcName):
-                                    $pcOne = $pcRows[$pcCode] ?? null;
-                                    $pcSt  = $pcOne ? ($pcOne['enabled'] ? 'live' : 'draft') : 'none';
-                                ?>
-                                <button type="button" class="pc-lang pc-edit" data-page="<?= sanitize($pcKey) ?>"
-                                        data-lang="<?= sanitize($pcCode) ?>"
-                                        title="<?= sanitize($pcName) ?> &mdash; <?= $pcSt === 'live' ? _h('settings.pages_lang_live') : ($pcSt === 'draft' ? _h('settings.pages_lang_draft') : _h('settings.pages_lang_none')) ?>">
-                                    <span class="pc-lang-code"><?= sanitize(strtoupper($pcCode)) ?></span>
-                                    <span class="pc-lang-dot pc-dot-<?= $pcSt ?>"></span>
-                                </button>
+                <?php /* Who may read and who may write, per group: the same read-only matrix
+                         Users → Groups draws (renderMatrix in assets/js/admin-users.js), scoped to
+                         the five shout.* ids and fed by the same endpoint — no second idea of what a
+                         permission is, and no new payload. Folded, and filled only when it is
+                         opened: it answers a question that is asked once, usually right after the
+                         room is switched on for the first time. */ ?>
+                <details class="gr-matrix-wrap mt-3" id="shout-matrix-wrap">
+                    <summary class="wl-small text-muted"><i class="bi bi-chevron-right gr-matrix-chev" aria-hidden="true"></i><?= _h('settings.shout_matrix_title') ?></summary>
+                    <small class="settings-hint d-block mt-2"><?= __('settings.shout_matrix_hint') ?></small>
+                    <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="shout-matrix"></table></div>
+                </details>
+                <?php /* ── Emoji in the picker (1.69.0, includes/emoji.php) ───────────────────────
+                         The ordinary emoji are Unicode characters drawn by the reader's own device font:
+                         nothing about them to switch, so the block says what the picker offers and has
+                         controls only for Font Awesome's faces — and those only while a Font Awesome Pro
+                         package is the site's icon source, as it is SAVED (emojiFaContext()). Otherwise
+                         the block says how to get there; the two settings keep whatever they held, since
+                         a control that is not drawn is not sent. */
+                      $shoutFa = function_exists('emojiFaContext') ? emojiFaContext($cfg) : ['available' => false];
+                      $shoutFaWant = (string)($cfg['shout_emoji_fa'] ?? 'off');
+                      $shoutFaStyle = (string)($cfg['shout_emoji_fa_style'] ?? ''); ?>
+                <div class="mt-4" id="admin-shout-emoji">
+                    <h6 class="admin-emotes-title"><i class="bi bi-emoji-smile"></i> <?= _h('settings.shout_emoji_heading') ?></h6>
+                    <small class="settings-hint d-block mb-3"><?= __('settings.shout_emoji_sub') ?></small>
+                    <?php if (!empty($shoutFa['available'])): ?>
+                    <div class="row g-3">
+                        <div class="col-md-4" data-setting="shout_emoji_fa">
+                            <label class="form-label" for="setting-shout_emoji_fa"><?= _h('settings.shout_emoji_fa') ?></label>
+                            <select class="form-select bg-dark text-light border-secondary" name="shout_emoji_fa" id="setting-shout_emoji_fa">
+                                <?php foreach (['off', 'fa', 'mixed'] as $fm): ?>
+                                <option value="<?= $fm ?>" <?= $shoutFaWant === $fm ? 'selected' : '' ?>><?= _h('settings.shout_emoji_fa_' . $fm) ?></option>
                                 <?php endforeach; ?>
-                            </div>
-                            <div class="pc-acts">
-                                <button type="button" class="btn btn-sm btn-outline-info pc-edit" data-page="<?= sanitize($pcKey) ?>">
-                                    <i class="bi bi-pencil-square"></i> <?= _h('settings.pages_edit') ?>
-                                </button>
-                                <a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener"
-                                   href="<?= $baseUrl ?>?action=<?= sanitize($pcMeta['route']) ?>">
-                                    <i class="bi bi-box-arrow-up-right"></i> <?= _h('settings.pages_view') ?>
-                                </a>
-                            </div>
+                            </select>
+                            <small class="settings-hint"><?= __('settings.shout_emoji_fa_hint', ['n' => count($shoutFa['faces'])]) ?></small>
+                        </div>
+                        <div class="col-md-4" data-setting="shout_emoji_fa_style">
+                            <label class="form-label" for="setting-shout_emoji_fa_style"><?= _h('settings.shout_emoji_fa_style') ?></label>
+                            <select class="form-select bg-dark text-light border-secondary" name="shout_emoji_fa_style" id="setting-shout_emoji_fa_style">
+                                <option value="" <?= $shoutFaStyle === '' ? 'selected' : '' ?>><?= _h('settings.shout_emoji_fa_style_site', ['style' => (string)($shoutFa['setup']['styles'][$shoutFa['setup']['style']]['label'] ?? 'Solid')]) ?></option>
+                                <?php foreach ($shoutFa['setup']['styles'] as $fk => $fst): if ($fk === 'brands') continue; ?>
+                                <option value="<?= sanitize((string)$fk) ?>" <?= $shoutFaStyle === (string)$fk ? 'selected' : '' ?>><?= sanitize((string)$fst['label']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="settings-hint"><?= __('settings.shout_emoji_fa_style_hint') ?></small>
                         </div>
                     </div>
-                <?php endforeach; ?></div>
+                    <?php else: ?>
+                    <small class="settings-hint d-block" data-setting="shout_emoji_fa"><i class="bi bi-info-circle"></i> <?= _h('settings.shout_emoji_fa_unavailable') ?></small>
+                    <?php endif; ?>
+                </div>
+                <?php /* ── Emotes and stickers (1.59.0, rebuilt in 1.59.1) ──────────────────────
+                         Its own block rather than six more cells in the grid above: the switches, the
+                         table and the form that adds one are three parts of a single subject, and in
+                         the grid the numbers ended up on a row of their own with `Per member` orphaned
+                         beside two empty cells. Same shape as Settings → Sounds, which is the block
+                         this one was measured against.
+
+                         The emoji are the block above: Unicode characters drawn by the reader's own
+                         device font, and — with a Font Awesome Pro package — Font Awesome's faces.
+
+                         The file input has no name on purpose — it is not a setting and never travels
+                         with the form; assets/js/admin-shout.js reads the file and posts it to
+                         admin/shout_emotes as base64, and the server decides from the BYTES what it is
+                         (and refuses an SVG carrying anything executable). */ ?>
+                <?php /* No data-approval any more: whether a row is waiting is a fact of the row
+                         (`approved_at` is NULL), not of the setting. Handing the script the switch
+                         as well only let it hide a queue somebody is still waiting on. */ ?>
+                <div class="mt-4" id="admin-emotes"
+                     data-max-kb="<?= (int)(function_exists('shoutEmoteMaxKb') ? shoutEmoteMaxKb($cfg) : 64) ?>">
+                    <h6 class="admin-emotes-title"><i class="bi bi-emoji-smile"></i> <?= _h('settings.shout_emotes_manage') ?></h6>
+                    <small class="settings-hint d-block mb-3"><?= __('settings.shout_emotes_sub') ?></small>
+                    <div class="row g-3">
+                        <div class="col-md-4" data-setting="shout_emotes_enabled">
+                            <label class="form-label"><?= _h('settings.shout_emotes_enabled') ?></label>
+                            <select class="form-select bg-dark text-light border-secondary" name="shout_emotes_enabled">
+                                <option value="1" <?= ($cfg['shout_emotes_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                                <option value="0" <?= ($cfg['shout_emotes_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            </select>
+                            <small class="settings-hint"><?= __('settings.shout_emotes_enabled_hint') ?></small>
+                        </div>
+                        <div class="col-md-4" data-setting="shout_stickers_enabled">
+                            <label class="form-label"><?= _h('settings.shout_stickers_enabled') ?></label>
+                            <select class="form-select bg-dark text-light border-secondary" name="shout_stickers_enabled">
+                                <option value="1" <?= ($cfg['shout_stickers_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                                <option value="0" <?= ($cfg['shout_stickers_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            </select>
+                            <small class="settings-hint"><?= __('settings.shout_stickers_enabled_hint') ?></small>
+                        </div>
+                        <?php /* v65. Its place is beside the two switches rather than beside the numbers:
+                                 it answers "who may see this", which is what the other two answer. */ ?>
+                        <div class="col-md-4" data-setting="shout_emote_approval">
+                            <label class="form-label"><?= _h('settings.shout_emote_approval') ?></label>
+                            <select class="form-select bg-dark text-light border-secondary" name="shout_emote_approval">
+                                <option value="1" <?= ($cfg['shout_emote_approval'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                                <option value="0" <?= ($cfg['shout_emote_approval'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            </select>
+                            <small class="settings-hint"><?= __('settings.shout_emote_approval_hint') ?></small>
+                        </div>
+                        <div class="col-md-4" data-setting="shout_emote_max_kb">
+                            <label class="form-label"><?= _h('settings.shout_emote_max_kb') ?></label>
+                            <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_max_kb" value="<?= sanitize($cfg['shout_emote_max_kb'] ?? '64') ?>" min="8" max="512">
+                            <small class="settings-hint"><?= __('settings.shout_emote_max_kb_hint') ?></small>
+                        </div>
+                        <div class="col-md-4" data-setting="shout_emote_max_px">
+                            <label class="form-label"><?= _h('settings.shout_emote_max_px') ?></label>
+                            <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_max_px" value="<?= sanitize($cfg['shout_emote_max_px'] ?? '128') ?>" min="32" max="512">
+                            <small class="settings-hint"><?= __('settings.shout_emote_max_px_hint') ?></small>
+                        </div>
+                        <div class="col-md-4" data-setting="shout_emote_per_user">
+                            <label class="form-label"><?= _h('settings.shout_emote_per_user') ?></label>
+                            <input type="number" class="form-control bg-dark text-light border-secondary" name="shout_emote_per_user" value="<?= sanitize($cfg['shout_emote_per_user'] ?? '20') ?>" min="1" max="200">
+                            <small class="settings-hint"><?= __('settings.shout_emote_per_user_hint') ?></small>
+                        </div>
+                    </div>
+                    <?php /* The waiting queue, when the gate is on and somebody's picture is in it. Drawn
+                             by the script above the table, because a queue below a list of thirty is a
+                             queue nobody answers. */ ?>
+                    <div id="admin-emotes-waiting" class="admin-emotes-waiting mt-4" hidden></div>
+                    <div class="admin-emotes-head">
+                        <label class="form-label mb-0"><?= _h('settings.shout_emotes_list') ?></label>
+                        <?php /* "4 of 9 switched on": the reason a code somebody typed does nothing is
+                                 very often that its row is off, so the number is beside the heading
+                                 rather than only findable by reading the table. Filled by the script. */ ?>
+                        <span class="admin-emotes-count" id="admin-emotes-count" hidden></span>
+                    </div>
+                    <div id="admin-emotes-list" class="mb-3"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
+                    <div class="admin-emote-add">
+                        <h6 class="admin-emote-add-title"><i class="bi bi-plus-circle"></i> <?= _h('settings.shout_emotes_add_heading') ?></h6>
+                        <?php /* The same drop zone the sounds block and the language install use: the
+                                 <input type=file> stays in the DOM, invisible, over a box that also takes
+                                 a dropped file. Full width and shallow, so the four controls below read as
+                                 one row rather than as a column beside a tall box. */ ?>
+                        <div class="ipl-drop ipl-drop-wide" id="admin-emote-drop" tabindex="0" role="button" aria-label="<?= _h('settings.shout_emote_drop_aria') ?>">
+                            <i class="bi bi-file-earmark-image ipl-drop-icon"></i>
+                            <span class="ipl-drop-main"><u><?= _h('settings.shout_emote_drop_choose') ?></u> <?= _h('settings.shout_emote_drop_or') ?></span>
+                            <span class="ipl-drop-sub"><?= _h('settings.shout_emote_drop_sub') ?></span>
+                            <input type="file" id="admin-emote-file" class="ipl-drop-input" accept=".svg,.png,.gif,.webp,image/svg+xml,image/png,image/gif,image/webp">
+                        </div>
+                        <?php /* Code, Name, the sticker box and Add on one line. Each box says what it is
+                                 for in its own placeholder — the paragraph that used to explain all four
+                                 under the block was read once and then in the way. */ ?>
+                        <div class="admin-emote-add-row">
+                            <input type="text" id="admin-emote-code" class="form-control form-control-sm bg-dark text-light border-secondary admin-emote-code-in"
+                                   maxlength="32" placeholder="<?= _h('settings.shout_emote_code_ph') ?>" aria-label="<?= _h('settings.shout_emote_code_label') ?>"
+                                   autocomplete="off" spellcheck="false">
+                            <input type="text" id="admin-emote-name" class="form-control form-control-sm bg-dark text-light border-secondary"
+                                   maxlength="60" placeholder="<?= _h('settings.shout_emote_name_ph') ?>" aria-label="<?= _h('settings.shout_emote_name_label') ?>"
+                                   autocomplete="off">
+                            <div class="form-check mb-0 admin-emote-stick-check">
+                                <input class="form-check-input" type="checkbox" id="admin-emote-sticker">
+                                <label class="form-check-label small" for="admin-emote-sticker"><?= _h('settings.shout_emote_sticker_label') ?></label>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-info" id="admin-emote-upload"><i class="bi bi-plus-lg"></i> <?= _h('settings.shout_emote_upload') ?></button>
+                        </div>
+                    </div>
+                    <small class="settings-hint"><?= __('settings.shout_emotes_hint') ?></small>
+                </div>
+                <div class="mt-3" id="admin-shout">
+                    <label class="form-label"><?= _h('settings.shout_purge') ?></label>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <input type="number" class="form-control bg-dark text-light border-secondary" id="shout-purge-days" min="0" max="3650" placeholder="<?= _h('settings.shout_purge_days_ph') ?>">
+                        </div>
+                        <div class="col-md-3">
+                            <?php /* Not `btn-sm`: it stands beside a full-height number box in a row
+                                     aligned on its bottom edge, and a small button there was visibly
+                                     shorter than the thing it acts on. */ ?>
+                            <button type="button" class="btn btn-outline-danger w-100" id="shout-purge-run"><i class="bi bi-trash"></i> <?= _h('settings.shout_purge_run') ?></button>
+                        </div>
+                    </div>
+                    <small class="settings-hint"><?= __('settings.shout_purge_hint') ?></small>
+                </div>
+            </div>
+
+            <div class="settings-section" id="section-sounds" data-group="sounds" data-title="<?= _h('settings.sounds_heading') ?>">
+                <h5><i class="bi bi-volume-up"></i> <?= _h('settings.sounds_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.sounds_intro') ?></small>
+                <?php
+                $sndLib = soundLibrary($db, $baseUrl);
+                // Two groups in every select below: what ships with the tracker, and what the owner
+                // added. Grouped here rather than in the script so the page is already right before
+                // anything runs; assets/js/admin-sounds.js only keeps the second group in step as
+                // sounds are added, renamed and removed — inside the group, by name.
+                $sndShipped = []; $sndOwn = [];
+                foreach ($sndLib as $sndE) { if (!empty($sndE['custom'])) $sndOwn[] = $sndE; else $sndShipped[] = $sndE; }
+                usort($sndOwn, fn(array $a, array $b): int => strcasecmp((string)$a['name'], (string)$b['name']));
+                /** One select's option list: "Nothing", then the two groups. $cur is the stored id. */
+                $sndOptions = function (string $cur) use ($sndShipped, $sndOwn): string {
+                    $opt = fn(array $e): string => '<option value="' . sanitize((string)$e['id']) . '"'
+                        . ($cur === $e['id'] ? ' selected' : '') . '>' . sanitize((string)$e['name']) . '</option>';
+                    $html = '<option value=""' . ($cur === '' ? ' selected' : '') . '>' . _h('settings.sounds_none') . '</option>';
+                    if ($sndShipped) $html .= '<optgroup label="' . _h('settings.sounds_group_shipped') . '">' . implode('', array_map($opt, $sndShipped)) . '</optgroup>';
+                    // data-sound-own is what the script looks for when it has a sound to slot in.
+                    if ($sndOwn) $html .= '<optgroup label="' . _h('settings.sounds_group_own') . '" data-sound-own>' . implode('', array_map($opt, $sndOwn)) . '</optgroup>';
+                    return $html;
+                };
+                ?>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="sounds_enabled">
+                        <label class="form-label"><?= _h('settings.sounds_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="sounds_enabled">
+                            <option value="1" <?= ($cfg['sounds_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['sounds_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.sounds_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_notification">
+                        <label class="form-label" for="setting-sound_default_notification"><?= _h('settings.sounds_default_notification') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_notification" id="setting-sound_default_notification" data-snd-label="<?= _h('settings.sounds_ev_notification') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_notification'] ?? '')) ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_notification" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_message_friend">
+                        <label class="form-label" for="setting-sound_default_message_friend"><?= _h('settings.sounds_default_message_friend') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_message_friend" id="setting-sound_default_message_friend" data-snd-label="<?= _h('settings.sounds_ev_message_friend') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_message_friend'] ?? '')) ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_message_friend" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_message">
+                        <label class="form-label" for="setting-sound_default_message"><?= _h('settings.sounds_default_message') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_message" id="setting-sound_default_message" data-snd-label="<?= _h('settings.sounds_ev_message') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_message'] ?? '')) ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_message" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <?php /* The shoutbox's three: offered only while the shoutbox is on, like the events themselves. */ ?>
+                    <?php if (function_exists('shoutEnabled') && shoutEnabled($cfg)): ?>
+                    <div class="col-md-3" data-setting="sound_default_shout_friend">
+                        <label class="form-label" for="setting-sound_default_shout_friend"><?= _h('settings.sounds_default_shout_friend') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_shout_friend" id="setting-sound_default_shout_friend" data-snd-label="<?= _h('settings.sounds_ev_shout_friend') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_shout_friend'] ?? '')) ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_shout_friend" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_shout">
+                        <label class="form-label" for="setting-sound_default_shout"><?= _h('settings.sounds_default_shout') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_shout" id="setting-sound_default_shout" data-snd-label="<?= _h('settings.sounds_ev_shout') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_shout'] ?? '')) ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_shout" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_mention">
+                        <label class="form-label" for="setting-sound_default_mention"><?= _h('settings.sounds_default_mention') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_mention" id="setting-sound_default_mention" data-snd-label="<?= _h('settings.sounds_ev_mention') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_mention'] ?? '')) ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_mention" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <?php /* The uploads: drawn and driven by assets/js/admin-sounds.js. The file input has no name on
+                         purpose — it is not a setting and never travels with the form; the script reads the file
+                         and posts it to admin/sounds as base64. */ ?>
+                <div class="mt-4" id="admin-sounds" data-max-bytes="<?= (int)SOUNDS_MAX_BYTES ?>" data-max-count="<?= (int)SOUNDS_MAX_CUSTOM ?>">
+                    <div class="admin-sounds-head">
+                        <label class="form-label mb-0"><?= _h('settings.sounds_custom') ?></label>
+                        <?php /* "3 of 40": the cap is the reason an upload can be refused, so it is beside the
+                                 heading rather than only inside the error that says no. Filled by the script. */ ?>
+                        <span class="admin-sounds-count" id="admin-sounds-count" hidden></span>
+                    </div>
+                    <div id="admin-sounds-list" class="mb-3"><span class="text-muted small"><?= _h('js.common.loading') ?></span></div>
+                    <div class="admin-sound-add">
+                        <h6 class="admin-sound-add-title"><i class="bi bi-plus-circle"></i> <?= _h('settings.sounds_add_heading') ?></h6>
+                        <?php /* The same drop zone the language install and the address-list import use: the
+                                 <input type=file> stays in the DOM, invisible, over a box that also takes a dropped
+                                 file. Full width and shallow, because the name and the button read as one row below
+                                 it rather than as a column beside a tall box. */ ?>
+                        <div class="ipl-drop ipl-drop-wide" id="admin-sound-drop" tabindex="0" role="button" aria-label="<?= _h('settings.sounds_drop_aria') ?>">
+                            <i class="bi bi-file-earmark-music ipl-drop-icon"></i>
+                            <span class="ipl-drop-main"><u><?= _h('settings.sounds_drop_choose') ?></u> <?= _h('settings.sounds_drop_or') ?></span>
+                            <span class="ipl-drop-sub"><?= _h('settings.sounds_drop_sub') ?></span>
+                            <input type="file" id="admin-sound-file" class="ipl-drop-input" accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav">
+                        </div>
+                        <div class="admin-sound-add-row">
+                            <input type="text" id="admin-sound-name" class="form-control form-control-sm bg-dark text-light border-secondary"
+                                   maxlength="<?= (int)SOUNDS_NAME_MAX ?>" placeholder="<?= _h('settings.sounds_name_ph') ?>"
+                                   aria-label="<?= _h('settings.sounds_name_label') ?>" autocomplete="off" spellcheck="false">
+                            <button type="button" class="btn btn-sm btn-info" id="admin-sound-upload"><i class="bi bi-plus-lg"></i> <?= _h('settings.sounds_upload') ?></button>
+                        </div>
+                    </div>
+                    <small class="settings-hint"><?= __('settings.sounds_custom_hint') ?></small>
+                </div>
             </div>
 
             <!-- Observed-hash Index -->
@@ -3191,248 +3378,229 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                 </div>
             </div>
 
-            <!-- OpenTracker Service -->
-            <div class="settings-section" id="section-service" data-group="opentracker" data-title="<?= _h('settings.ot_title') ?>">
-                <h5><?= _h('settings.ot_title') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.ot_intro_1') ?> <span class="text-warning"><?= _h('settings.ot_intro_orange') ?></span> <?= _h('settings.ot_intro_or') ?> <span class="text-danger"><?= _h('settings.ot_intro_red') ?></span> <?= __('settings.ot_intro_2') ?></small>
+            <!-- Server-to-server API -->
+            <div class="settings-section" id="section-api" data-group="integrations" data-title="<?= _h('settings.api_title') ?>">
+                <h5><?= _h('settings.api_title') ?></h5>
+                <p class="settings-hint mb-2">
+                    <?= __('settings.api_intro') ?>
+                    <?= _h('settings.api_managed_on') ?> <a href="<?= $baseUrl ?>?action=admin-whitelist"><?= _h('settings.api_whitelist_page') ?></a>.
+                </p>
                 <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.api_label') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="api_enabled">
+                            <option value="1" <?= ($cfg['api_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['api_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.api_ban_days') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="api_ban_days" value="<?= sanitize($cfg['api_ban_days'] ?? '30') ?>" min="1" max="3650">
+                    </div>
                     <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.ot_service_name') ?> <small class="settings-hint"><?= _h('settings.ot_service_name_note') ?></small></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="opentracker_service_name" value="<?= sanitize($cfg['opentracker_service_name'] ?? '') ?>" placeholder="opentracker" pattern="[A-Za-z0-9._@\-]+" maxlength="128">
-                        <small class="settings-hint"><?= __('settings.ot_service_name_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_sudo') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="opentracker_restart_use_sudo">
-                            <option value="1" <?= ($cfg['opentracker_restart_use_sudo'] ?? '1') === '1' ? 'selected' : '' ?>><?= __('settings.ot_sudo_yes') ?></option>
-                            <option value="0" <?= ($cfg['opentracker_restart_use_sudo'] ?? '1') === '0' ? 'selected' : '' ?>><?= __('settings.ot_sudo_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.ot_sudo_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_auto_reload') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="opentracker_auto_reload">
-                            <option value="1" <?= ($cfg['opentracker_auto_reload'] ?? '1') === '1' ? 'selected' : '' ?>><?= __('settings.ot_auto_reload_yes') ?></option>
-                            <option value="0" <?= ($cfg['opentracker_auto_reload'] ?? '1') === '0' ? 'selected' : '' ?>><?= __('settings.ot_auto_reload_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.ot_auto_reload_hint') ?></small>
+                        <label class="form-label"><?= _h('settings.api_exempt_ips') ?> <small class="settings-hint"><?= _h('settings.api_exempt_ips_hint') ?></small></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="api_ban_exempt_ips" value="<?= sanitize($cfg['api_ban_exempt_ips'] ?? '127.0.0.1, ::1') ?>" placeholder="127.0.0.1, ::1, 203.0.113.10">
                     </div>
                 </div>
-                <div class="row g-3 mt-1">
-                    <div class="col-12">
-                        <label class="form-label d-block"><?= _h('settings.ot_perm_test') ?></label>
-                        <div class="d-flex flex-wrap gap-2">
-                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-restart"><i class="bi bi-shield-check"></i> <?= _h('settings.ot_perm_test_restart') ?></button>
-                            <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-reload"><i class="bi bi-shield-check"></i> <?= _h('settings.ot_perm_test_reload') ?></button>
+                <p class="settings-hint mt-3 mb-2">
+                    <?= __('settings.api_budgets_intro') ?>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.api_rpm') ?> <small class="settings-hint"><?= _h('settings.api_per_key') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="api_rate_limit_per_min" value="<?= sanitize($cfg['api_rate_limit_per_min'] ?? '60') ?>" min="0" max="100000">
+                        <small class="settings-hint"><?= _h('settings.api_rpm_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.api_bytes_day') ?> <small class="settings-hint"><?= _h('settings.api_per_key') ?></small></label>
+                        <div class="input-group settings-size">
+                            <input type="number" class="form-control bg-dark text-light border-secondary"
+                                   id="api-rate-limit-bytes-day-num" min="0" step="1" aria-label="<?= _h('settings.api_size_aria') ?>">
+                            <select class="form-select bg-dark text-light border-secondary" id="api-rate-limit-bytes-day-unit" aria-label="<?= _h('settings.api_unit_aria') ?>">
+                                <option value="1"><?= _h('settings.api_unit_bytes') ?></option>
+                                <option value="1024">KiB</option>
+                                <option value="1048576">MiB</option>
+                                <option value="1073741824">GiB</option>
+                                <option value="1099511627776">TiB</option>
+                            </select>
                         </div>
-                        <small class="settings-hint d-block mt-1"><?= __('settings.ot_perm_test_hint') ?></small>
-                        <div id="tracker-perm-result" class="mt-1 blacklist-result"></div>
-                    </div>
-                </div>
-                <div class="row g-3 mt-1">
-                    <div class="col-12"><small class="text-info"><?= _h('settings.ot_thresholds') ?></small></div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_bl_warn') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="tracker_blacklist_warn_count" value="<?= sanitize($cfg['tracker_blacklist_warn_count'] ?? '1') ?>" min="1" max="1000">
-                        <small class="settings-hint"><?= _h('settings.ot_bl_warn_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_bl_danger') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="tracker_blacklist_danger_count" value="<?= sanitize($cfg['tracker_blacklist_danger_count'] ?? '5') ?>" min="1" max="1000">
-                        <small class="settings-hint"><?= _h('settings.ot_bl_danger_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_uptime_warn') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="tracker_uptime_warn_days" value="<?= sanitize($cfg['tracker_uptime_warn_days'] ?? '14') ?>" min="1" max="3650">
-                        <small class="settings-hint"><?= _h('settings.ot_uptime_warn_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.ot_uptime_danger') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="tracker_uptime_danger_days" value="<?= sanitize($cfg['tracker_uptime_danger_days'] ?? '30') ?>" min="1" max="3650">
-                        <small class="settings-hint"><?= _h('settings.ot_uptime_danger_hint') ?></small>
+                        <!-- The setting itself. Bytes, named literally, never edited by hand:
+                             the pair above writes into it. -->
+                        <input type="hidden" name="api_rate_limit_bytes_day" id="api-rate-limit-bytes-day-raw"
+                               data-size-min="0" data-size-max="1099511627776"
+                               value="<?= sanitize($cfg['api_rate_limit_bytes_day'] ?? '5368709120') ?>">
+                        <small class="settings-hint"><?= __('settings.api_bytes_day_hint') ?></small>
                     </div>
                 </div>
             </div>
 
-            <!-- UDP traffic & rate limit — includes/netlimit.php + tools/opentracker/tracker-netlimit.sh -->
-            <div class="settings-section" id="section-netlimit" data-group="network" data-title="<?= _h('settings.net_title') ?>">
-                <h5><?= _h('settings.net_title') ?></h5>
-                <p class="settings-hint mb-2">
-                    <?= __('settings.net_intro_1') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#net-card"><?= _h('settings.net_intro_link') ?></a>.
-                    <br>
-                    <?= __('settings.net_intro_2') ?>
-                </p>
+            <!-- Federation / cluster -->
+            <div class="settings-section" id="section-federation" data-group="integrations" data-title="<?= _h('settings.federation_title') ?>">
+                <h5><?= _h('settings.federation_title') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.federation_intro') ?></small>
                 <div class="row g-3">
                     <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_monitor') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="net_monitor_enabled">
-                            <option value="0" <?= ($cfg['net_monitor_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.net_monitor_off') ?></option>
-                            <option value="1" <?= ($cfg['net_monitor_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= __('settings.net_monitor_on') ?></option>
+                        <label class="form-label"><?= _h('settings.federation_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fed_enabled">
+                            <option value="1" <?= ($cfg['fed_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.federation_enabled_on') ?></option>
+                            <option value="0" <?= ($cfg['fed_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.federation_enabled_off') ?></option>
                         </select>
-                        <small class="settings-hint">
-                            <?= __('settings.net_monitor_hint') ?>
-                        </small>
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_sample') ?> <small class="settings-hint"><?= _h('settings.net_seconds') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_sample_seconds" value="<?= (int)netlimitSampleSeconds($cfg) ?>" min="<?= NET_SAMPLE_MIN ?>" max="<?= NET_SAMPLE_MAX ?>">
-                        <small class="settings-hint"><?= _h('settings.net_sample_hint') ?></small>
+                        <label class="form-label"><?= _h('settings.federation_node_name') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="fed_node_name" value="<?= sanitize($cfg['fed_node_name'] ?? '') ?>" maxlength="64" placeholder="<?= _h('settings.federation_node_name_ph') ?>">
+                        <small class="settings-hint"><?= _h('settings.federation_node_name_hint') ?></small>
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_keep') ?> <small class="settings-hint"><?= _h('settings.index_files_days') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_keep_days" value="<?= (int)netlimitKeepDays($cfg) ?>" min="<?= NET_KEEP_MIN ?>" max="<?= NET_KEEP_MAX ?>">
-                        <small class="settings-hint"><?= __('settings.net_keep_hint') ?></small>
+                        <label class="form-label"><?= _h('settings.federation_export_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fed_export_enabled">
+                            <option value="1" <?= ($cfg['fed_export_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.federation_yes') ?></option>
+                            <option value="0" <?= ($cfg['fed_export_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.federation_export_no') ?></option>
+                        </select>
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_port') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_limit_port" value="<?= (int)netlimitPort($cfg) ?>" min="1" max="65535">
-                        <small class="settings-hint"><?= __('settings.net_port_hint') ?></small>
+                        <label class="form-label"><?= _h('settings.federation_export_files') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fed_export_files">
+                            <option value="1" <?= ($cfg['fed_export_files'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.federation_yes') ?></option>
+                            <option value="0" <?= ($cfg['fed_export_files'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.federation_export_files_no') ?></option>
+                        </select>
                     </div>
-                    <div class="col-12">
-                        <label class="form-label"><?= _h('settings.net_trusted') ?> <small class="settings-hint"><?= _h('settings.net_trusted_note') ?></small></label>
-                        <textarea class="form-control bg-dark text-light border-secondary" name="net_limit_trusted" rows="2" placeholder="203.0.113.10, 198.51.100.0/24, 2001:db8::/32"><?= sanitize($cfg['net_limit_trusted'] ?? '') ?></textarea>
-<?php $trOk = function_exists('netlimitTrusted') ? netlimitTrusted($cfg) : []; $trBad = function_exists('netlimitTrustedRejected') ? netlimitTrustedRejected($cfg) : []; ?>
-                        <small class="settings-hint">
-                            <?= __('settings.net_trusted_hint') ?>
-                            <?php if ($trOk): ?><span class="text-info"><?= _h('settings.net_in_force', ['n' => count($trOk)]) ?> — <code><?= sanitize(implode(', ', array_slice($trOk, 0, 6))) ?><?= count($trOk) > 6 ? ' …' : '' ?></code>.</span><?php endif; ?>
-                            <?php if ($trBad): ?><span class="text-warning"><?= _h('settings.net_not_address') ?> <code><?= sanitize(implode(', ', array_slice($trBad, 0, 4))) ?></code>.</span><?php endif; ?>
-                            <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.net_trusted_more') ?></summary><?= __('settings.net_trusted_more_body', ['max' => NET_TRUSTED_MAX]) ?></details>
-                        </small>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.federation_export_max_batch') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_export_max_batch" value="<?= sanitize($cfg['fed_export_max_batch'] ?? '2000') ?>" min="100" max="20000">
+                        <small class="settings-hint"><?= _h('settings.federation_export_max_batch_hint') ?></small>
                     </div>
-                    <div class="col-12">
-                        <label class="form-label"><?= _h('settings.net_blocked') ?> <small class="settings-hint"><?= _h('settings.net_blocked_note') ?></small></label>
-                        <textarea class="form-control bg-dark text-light border-secondary" name="net_limit_blocked" rows="2" placeholder="5.188.1.7, 45.9.148.0/24, 2a02:c207::/32"><?= sanitize($cfg['net_limit_blocked'] ?? '') ?></textarea>
-<?php $blOk = function_exists('netlimitBlocked') ? netlimitBlocked($cfg) : []; $blBad = function_exists('netlimitBlockedRejected') ? netlimitBlockedRejected($cfg) : []; ?>
-                        <small class="settings-hint">
-                            <?= __('settings.net_blocked_hint') ?>
-                            <?php if ($blOk): ?><span class="text-info"><?= _h('settings.net_in_force', ['n' => count($blOk)]) ?> — <code><?= sanitize(implode(', ', array_slice($blOk, 0, 6))) ?><?= count($blOk) > 6 ? ' …' : '' ?></code>.</span><?php endif; ?>
-                            <?php if ($blBad): ?><span class="text-warning"><?= _h('settings.net_not_address') ?> <code><?= sanitize(implode(', ', array_slice($blBad, 0, 4))) ?></code>.</span><?php endif; ?>
-                            <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.net_blocked_more') ?></summary>
-                                <?= __('settings.net_blocked_more_1') ?>
-                                <a href="<?= $baseUrl ?>?action=admin-traffic#iplists-card"><?= _h('settings.net_intro_link') ?></a> <?= __('settings.net_blocked_more_2', ['max' => NET_TRUSTED_MAX]) ?>
-                            </details>
-                        </small>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.federation_export_max_bytes') ?></label>
+                        <div class="input-group settings-size">
+                            <input type="number" class="form-control bg-dark text-light border-secondary"
+                                   id="fed-export-max-bytes-num" min="0" step="1" aria-label="<?= _h('settings.federation_size_aria') ?>">
+                            <select class="form-select bg-dark text-light border-secondary" id="fed-export-max-bytes-unit" aria-label="<?= _h('settings.federation_unit_aria') ?>">
+                                <option value="1"><?= _h('settings.federation_unit_bytes') ?></option>
+                                <option value="1024">KiB</option>
+                                <option value="1048576">MiB</option>
+                                <option value="1073741824">GiB</option>
+                                <option value="1099511627776">TiB</option>
+                            </select>
+                        </div>
+                        <!-- The setting itself. Bytes, named literally, never edited by hand:
+                             the pair above writes into it. -->
+                        <input type="hidden" name="fed_export_max_bytes" id="fed-export-max-bytes-raw"
+                               data-size-min="0" data-size-max="1073741824"
+                               value="<?= sanitize($cfg['fed_export_max_bytes'] ?? '8388608') ?>">
+                        <small class="settings-hint"><?= _h('settings.federation_export_max_bytes_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.federation_import_batch_rows') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_import_batch_rows" value="<?= sanitize($cfg['fed_import_batch_rows'] ?? '500') ?>" min="25" max="5000">
+                        <small class="settings-hint"><?= _h('settings.federation_import_batch_rows_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.federation_import_batch_bytes') ?></label>
+                        <div class="input-group settings-size">
+                            <input type="number" class="form-control bg-dark text-light border-secondary"
+                                   id="fed-import-batch-bytes-num" min="0" step="1" aria-label="<?= _h('settings.federation_size_aria') ?>">
+                            <select class="form-select bg-dark text-light border-secondary" id="fed-import-batch-bytes-unit" aria-label="<?= _h('settings.federation_unit_aria') ?>">
+                                <option value="1"><?= _h('settings.federation_unit_bytes') ?></option>
+                                <option value="1024">KiB</option>
+                                <option value="1048576">MiB</option>
+                                <option value="1073741824">GiB</option>
+                                <option value="1099511627776">TiB</option>
+                            </select>
+                        </div>
+                        <!-- The setting itself. Bytes, named literally, never edited by hand:
+                             the pair above writes into it. -->
+                        <input type="hidden" name="fed_import_batch_bytes" id="fed-import-batch-bytes-raw"
+                               data-size-min="1048576" data-size-max="268435456"
+                               value="<?= sanitize($cfg['fed_import_batch_bytes'] ?? '33554432') ?>">
+                        <small class="settings-hint"><?= _h('settings.federation_import_batch_bytes_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.federation_import_max_seconds') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_import_max_seconds" value="<?= sanitize($cfg['fed_import_max_seconds'] ?? '600') ?>" min="30" max="21600">
+                        <small class="settings-hint"><?= _h('settings.federation_import_max_seconds_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.federation_worker_mem_mb') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_worker_mem_mb" value="<?= sanitize($cfg['fed_worker_mem_mb'] ?? '256') ?>" min="64" max="4096">
+                        <small class="settings-hint"><?= __('settings.federation_worker_mem_mb_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.federation_export_max_files') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_export_max_files" value="<?= sanitize($cfg['fed_export_max_files'] ?? '200000') ?>" min="0" max="50000000" step="10000">
+                        <small class="settings-hint"><?= _h('settings.federation_export_max_files_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.federation_import_new') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fed_import_new">
+                            <option value="1" <?= ($cfg['fed_import_new'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.federation_import_new_yes') ?></option>
+                            <option value="0" <?= ($cfg['fed_import_new'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.federation_import_new_no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.federation_import_new_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.federation_import_mode') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="fed_import_mode">
+                            <option value="fill" <?= ($cfg['fed_import_mode'] ?? 'fill') !== 'review' ? 'selected' : '' ?>><?= _h('settings.federation_import_mode_fill') ?></option>
+                            <option value="review" <?= ($cfg['fed_import_mode'] ?? 'fill') === 'review' ? 'selected' : '' ?>><?= _h('settings.federation_import_mode_review') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.federation_import_mode_hint') ?></small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label"><?= _h('settings.federation_pull_minutes') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="fed_pull_minutes" value="<?= sanitize($cfg['fed_pull_minutes'] ?? '60') ?>" min="5" max="1440">
+                        <small class="settings-hint"><?= __('settings.federation_pull_minutes_hint') ?></small>
                     </div>
                 </div>
-
-                <h6 class="mt-4 mb-1" id="section-netlimit-throttle"><?= _h('settings.net_throttle_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.net_throttle_heading_sub') ?></small></h6>
-                <p class="settings-hint mb-2">
-                    <?= __('settings.net_throttle_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#net-card"><?= _h('settings.net_throttle_intro_link') ?></a><?= _h('settings.net_throttle_intro_after') ?>
-                </p>
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_limit_label') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="net_limit_enabled">
-                            <option value="0" <?= ($cfg['net_limit_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.net_limit_off') ?></option>
-                            <option value="1" <?= ($cfg['net_limit_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.net_limit_on') ?></option>
-                        </select>
+                <div class="mt-3" id="fed-peers-card">
+                    <label class="form-label"><?= _h('settings.federation_peers') ?></label>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-sm align-middle" id="fed-peers-table">
+                            <thead><tr><th><?= _h('settings.federation_th_name') ?></th><th><?= _h('settings.federation_th_base_url') ?></th><th><?= _h('settings.federation_th_pull') ?></th><th><?= _h('settings.federation_th_inbound_key') ?></th><th><?= _h('settings.federation_th_last_pull') ?></th><th><?= _h('settings.federation_th_imported') ?></th><th><?= _h('settings.federation_th_status') ?></th><th></th></tr></thead>
+                            <tbody id="fed-peers-body"><tr><td colspan="8" class="text-muted"><?= _h('settings.federation_loading') ?></td></tr></tbody>
+                        </table>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_pps_label') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_limit_pps" value="<?= (int)netlimitPps($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
-                        <small class="settings-hint"><?= _h('settings.net_pps_hint', ['min' => NET_PPS_MIN, 'max' => NET_PPS_MAX]) ?></small>
+                    <div class="row g-2 align-items-end" id="fed-peer-add">
+                        <div class="col-md-2"><label class="form-label"><?= _h('settings.federation_th_name') ?></label><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="fp-name" maxlength="64" placeholder="<?= _h('settings.federation_peer_name_ph') ?>"></div>
+                        <div class="col-md-3"><label class="form-label"><?= _h('settings.federation_th_base_url') ?></label><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="fp-url" maxlength="255" placeholder="https://tracker.example.org"></div>
+                        <div class="col-md-3"><label class="form-label"><?= _h('settings.federation_peer_bearer') ?> <small class="settings-hint"><?= _h('settings.federation_peer_bearer_note') ?></small></label><input type="password" class="form-control form-control-sm bg-dark text-light border-secondary" id="fp-bearer" autocomplete="off" placeholder="key_id.secret"></div>
+                        <div class="col-md-1"><label class="form-label"><?= _h('settings.federation_th_pull') ?></label><select class="form-select form-select-sm bg-dark text-light border-secondary" id="fp-pull"><option value="1"><?= _h('settings.federation_yes') ?></option><option value="0" selected><?= _h('settings.federation_no') ?></option></select></div>
+                        <div class="col-md-3">
+                            <button type="button" class="btn btn-sm btn-outline-info" id="fp-add"><i class="bi bi-plus-lg"></i> <?= _h('settings.federation_add_peer') ?></button>
+                            <div class="form-check form-check-inline ms-1" title="<?= _h('settings.federation_grant_title') ?>">
+                                <input class="form-check-input" type="checkbox" id="fp-grant">
+                                <label class="form-check-label settings-hint" for="fp-grant"><?= _h('settings.federation_grant_label') ?></label>
+                            </div>
+                        </div>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_burst_label') ?> <small class="settings-hint"><?= _h('settings.net_burst_label_sub') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_limit_burst" value="<?= (int)netlimitBurst($cfg) ?>" min="<?= NET_BURST_MIN ?>" max="<?= NET_BURST_MAX ?>">
-                        <small class="settings-hint"><?= _h('settings.net_burst_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label d-block"><?= _h('settings.net_avail_test_label') ?></label>
-                        <button type="button" class="btn btn-outline-info btn-sm w-100" id="btn-test-netlimit"><i class="bi bi-shield-check"></i> <?= _h('settings.net_avail_test_btn') ?></button>
-                        <small class="settings-hint d-block mt-1"><?= __('settings.net_avail_test_hint') ?></small>
-                    </div>
-                    <div class="col-12">
-                        <div id="netlimit-result" class="blacklist-result"></div>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.net_cmd_label') ?> <small class="settings-hint"><?= _h('settings.net_cmd_label_sub') ?></small></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="net_limit_cmd" value="<?= sanitize($cfg['net_limit_cmd'] ?? NET_DEFAULT_CMD) ?>" placeholder="<?= _h('settings.net_cmd_ph', ['cmd' => NET_DEFAULT_CMD]) ?>" maxlength="255">
-                        <small class="settings-hint"><?= __('settings.net_cmd_hint') ?></small>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label"><?= _h('settings.net_install_once') ?></label>
-                        <pre class="settings-code mb-0"><code>sudo install -m 0755 tools/opentracker/tracker-netlimit.sh /usr/local/sbin/
-echo 'www-data ALL=(root) NOPASSWD: /usr/local/sbin/tracker-netlimit.sh' \
-  | sudo tee /etc/sudoers.d/tracker-netlimit
-sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
-                    </div>
+                    <div id="fp-alert" class="mt-2"></div>
+                    <small class="settings-hint d-block mt-1"><?= __('settings.federation_exchange_hint') ?></small>
                 </div>
 
-                <h6 class="mt-4 mb-1" id="section-netlimit-auto"><?= _h('settings.net_auto_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.net_auto_heading_sub') ?></small></h6>
-                <p class="settings-hint mb-2">
-                    <?= __('settings.net_auto_intro') ?>
-                </p>
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_auto_label') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="net_auto_enabled">
-                            <option value="0" <?= ($cfg['net_auto_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.net_auto_off') ?></option>
-                            <option value="1" <?= ($cfg['net_auto_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.net_auto_on') ?></option>
+                <!-- The quarantine queue. Hidden while it is empty AND review mode is off, because a
+                     node that trusts its peers should not have to look at a control it never uses. -->
+                <div class="mt-4 d-hidden" id="fed-review-card">
+                    <label class="form-label"><?= _h('settings.federation_review_title') ?> <span class="badge bg-warning text-dark" id="fr-count">0</span></label>
+                    <small class="settings-hint d-block mb-2"><?= __('settings.federation_review_hint') ?></small>
+                    <div class="d-flex gap-2 align-items-center flex-wrap mb-2">
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="fr-peer" style="max-width:14rem;"><option value=""><?= _h('settings.federation_review_all_peers') ?></option></select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="fr-state" style="max-width:11rem;">
+                            <option value="pending"><?= _h('settings.federation_review_state_pending') ?></option>
+                            <option value="rejected"><?= _h('settings.federation_review_state_rejected') ?></option>
                         </select>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="fr-refresh"><i class="bi bi-arrow-clockwise"></i> <?= _h('settings.federation_review_refresh') ?></button>
+                        <span class="flex-grow-1"></span>
+                        <button type="button" class="btn btn-sm btn-outline-success" id="fr-accept-sel" disabled><i class="bi bi-check2"></i> <?= _h('settings.federation_review_accept_sel') ?></button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="fr-reject-sel" disabled><i class="bi bi-x"></i> <?= _h('settings.federation_review_reject_sel') ?></button>
+                        <button type="button" class="btn btn-sm btn-outline-warning" id="fr-accept-peer" disabled title="<?= _h('settings.federation_review_accept_peer_title') ?>"><i class="bi bi-check2-all"></i> <?= _h('settings.federation_review_accept_peer') ?></button>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_auto_target_label') ?> <small class="settings-hint"><?= _h('settings.net_auto_target_label_sub') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_target" value="<?= (int)netlimitAutoTarget($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
-                        <small class="settings-hint"><?= _h('settings.net_auto_target_hint') ?></small>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-sm align-middle" id="fed-review-table">
+                            <thead><tr><th style="width:2rem;"><input type="checkbox" class="form-check-input" id="fr-all"></th><th><?= _h('settings.federation_th_name') ?></th><th><?= _h('settings.federation_review_th_size') ?></th><th><?= _h('settings.federation_review_th_files') ?></th><th><?= _h('settings.federation_review_th_peer') ?></th><th><?= _h('settings.federation_review_th_resolved') ?></th><th></th></tr></thead>
+                            <tbody id="fed-review-body"></tbody>
+                        </table>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_auto_min_label') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_min" value="<?= (int)netlimitAutoMin($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
-                        <small class="settings-hint"><?= _h('settings.net_auto_min_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_auto_max_label') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_max" value="<?= (int)netlimitAutoMax($cfg) ?>" min="<?= NET_PPS_MIN ?>" max="<?= NET_PPS_MAX ?>" step="1000">
-                        <small class="settings-hint"><?= _h('settings.net_auto_max_hint') ?></small>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.net_auto_cpu_label') ?> <small class="settings-hint"><?= _h('settings.net_auto_cpu_label_sub') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_auto_target_cpu" value="<?= (int)netlimitAutoTargetCpu($cfg) ?>" min="10" max="100">
-                        <small class="settings-hint">
-                            <?= _h('settings.net_auto_cpu_hint') ?>
-                            <?php $nlCpus = netlimitCpuCount(); if ($nlCpus > 0): ?><?= __('settings.net_auto_cpu_cores_hint', ['cores' => (int)$nlCpus, 'pct' => (int)netlimitAutoTargetCpu($cfg), 'load' => number_format($nlCpus * netlimitAutoTargetCpu($cfg) / 100, 1)]) ?><?php endif; ?>
-                        </small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Address lists — includes/iplist.php -->
-            <div class="settings-section" id="section-iplists" data-group="tracker" data-title="<?= _h('settings.iplists_heading') ?>">
-                <h5><?= _h('settings.iplists_heading') ?></h5>
-                <p class="settings-hint mb-2">
-                    <?= __('settings.iplists_intro') ?> <a href="<?= $baseUrl ?>?action=admin-traffic#section-iplists-card"><?= _h('settings.iplists_intro_link') ?></a> <?= _h('settings.iplists_intro_after') ?>
-                </p>
-                <p class="settings-hint mb-2">
-                    <?= __('settings.iplists_kinds') ?>
-                </p>
-                <div class="row g-3">
-                    <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.iplists_label') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="net_lists_enabled">
-                            <option value="0" <?= ($cfg['net_lists_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.iplists_off') ?></option>
-                            <option value="1" <?= ($cfg['net_lists_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.iplists_on') ?></option>
-                        </select>
-                        <small class="settings-hint">
-                            <?= _h('settings.iplists_enabled_hint') ?>
-                        </small>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.iplists_ttl_label') ?> <small class="settings-hint"><?= _h('settings.iplists_ttl_label_sub') ?></small></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="net_lists_ttl_default"
-                               value="<?= (int)($cfg['net_lists_ttl_default'] ?? IPLIST_TTL_DEFAULT) ?>" min="<?= IPLIST_TTL_MIN ?>" max="<?= IPLIST_TTL_MAX ?>" step="15">
-                        <small class="settings-hint">
-                            <?= _h('settings.iplists_ttl_hint') ?>
-                        </small>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.iplists_capacity_label') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" value="<?= _h('settings.iplists_capacity_value', ['n' => number_format(IPLIST_MAX_TOTAL)]) ?>" readonly disabled>
-                        <small class="settings-hint">
-                            <?= __('settings.iplists_capacity_hint') ?>
-                            <a href="<?= $baseUrl ?>?action=admin-traffic#iplists-card"><?= _h('settings.iplists_capacity_hint_link') ?></a>.
-                        </small>
-                    </div>
+                    <div id="fr-alert" class="mt-2"></div>
                 </div>
             </div>
 
@@ -3604,93 +3772,136 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 </div>
             </div>
 
-            <!-- Footer -->
-            <div class="settings-section" id="section-footer" data-group="general" data-title="<?= _h('settings.footer_heading') ?>">
-                <h5><?= _h('settings.footer_heading') ?></h5>
+            <?php /* What the janitor archives or deletes after so many days: old reports, old appeals, the
+                     sent-mail log. Titled "Public Pages" and filed under Site & pages until 1.69.0, which
+                     said nothing about any of the three; the id stays for the links into it. */ ?>
+            <div class="settings-section" id="section-public-pages" data-group="maintenance" data-title="<?= _h('settings.pages_heading') ?>">
+                <h5><?= _h('settings.pages_heading') ?></h5>
                 <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.footer_start_year') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="footer_start_year" value="<?= sanitize($cfg['footer_start_year'] ?? date('Y')) ?>" min="2020" max="2099">
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('settings.pages_archive_reports') ?> <small class="settings-hint"><?= _h('settings.pages_zero_disabled') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="auto_archive_days" value="<?= sanitize($cfg['auto_archive_days'] ?? '90') ?>" min="0" max="9999">
+                        <small class="settings-hint"><?= _h('settings.pages_archive_reports_hint') ?></small>
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.version_where') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="version_display">
-                            <?php foreach (['panel' => 'settings.version_panel', 'public' => 'settings.version_public',
-                                            'both' => 'settings.version_both', 'none' => 'settings.version_none'] as $vOpt => $vKey): ?>
-                            <option value="<?= $vOpt ?>" <?= ($cfg['version_display'] ?? 'panel') === $vOpt ? 'selected' : '' ?>><?= _h($vKey) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <small class="settings-hint"><?= __('settings.version_where_hint', ['v' => sanitize(TRACKER_VERSION)]) ?></small>
-                    </div>
-                </div>
-
-                <div class="row g-3 mt-2">
-                    <div class="col-12"><small class="text-info"><?= _h('settings.footer_el1') ?></small></div>
-                    <div class="col-md-2">
-                        <label class="form-label"><?= _h('settings.footer_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="footer_brand_enabled">
-                            <option value="1" <?= ($cfg['footer_brand_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.footer_yes') ?></option>
-                            <option value="0" <?= ($cfg['footer_brand_enabled'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.footer_no') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-5">
-                        <label class="form-label"><?= _h('settings.footer_name') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_brand_name" value="<?= sanitize($cfg['footer_brand_name'] ?? 'TryHackX') ?>">
-                    </div>
-                    <div class="col-md-5">
-                        <label class="form-label"><?= _h('settings.footer_url') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_brand_url" value="<?= sanitize($cfg['footer_brand_url'] ?? '') ?>">
-                    </div>
-                </div>
-
-                <div class="row g-3 mt-2">
-                    <div class="col-12"><small class="text-info"><?= _h('settings.footer_el2') ?></small></div>
-                    <div class="col-md-2">
-                        <label class="form-label"><?= _h('settings.footer_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="footer_tracker_enabled">
-                            <option value="1" <?= ($cfg['footer_tracker_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.footer_yes') ?></option>
-                            <option value="0" <?= ($cfg['footer_tracker_enabled'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.footer_no') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label"><?= _h('settings.footer_name') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_tracker_name" value="<?= sanitize($cfg['footer_tracker_name'] ?? 'OpenTracker') ?>">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.footer_url') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_tracker_url" value="<?= sanitize($cfg['footer_tracker_url'] ?? '') ?>">
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label"><?= _h('settings.footer_author') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_tracker_author" value="<?= sanitize($cfg['footer_tracker_author'] ?? '') ?>">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.footer_author_url') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_tracker_author_url" value="<?= sanitize($cfg['footer_tracker_author_url'] ?? '') ?>">
-                    </div>
-                </div>
-
-                <div class="row g-3 mt-2">
-                    <div class="col-12"><small class="text-info"><?= _h('settings.footer_element3') ?></small></div>
-                    <div class="col-md-2">
-                        <label class="form-label"><?= _h('settings.footer_os_enabled') ?></label>
-                        <select class="form-select bg-dark text-light border-secondary" name="footer_os_enabled">
-                            <option value="1" <?= ($cfg['footer_os_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.footer_os_yes') ?></option>
-                            <option value="0" <?= ($cfg['footer_os_enabled'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.footer_os_no') ?></option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.footer_os_name') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_os_name" value="<?= sanitize($cfg['footer_os_name'] ?? 'Debian') ?>">
+                        <label class="form-label"><?= _h('settings.pages_archive_appeals') ?> <small class="settings-hint"><?= _h('settings.pages_zero_disabled') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="auto_archive_appeal_days" value="<?= sanitize($cfg['auto_archive_appeal_days'] ?? '90') ?>" min="0" max="9999">
+                        <small class="settings-hint"><?= _h('settings.pages_archive_appeals_hint') ?></small>
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label"><?= _h('settings.footer_os_url') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" name="footer_os_url" value="<?= sanitize($cfg['footer_os_url'] ?? '') ?>">
+                        <label class="form-label"><?= _h('settings.pages_email_log') ?> <small class="settings-hint"><?= _h('settings.pages_email_log_sub') ?></small></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="sent_emails_retention_days" value="<?= sanitize($cfg['sent_emails_retention_days'] ?? '0') ?>" min="0" max="9999">
+                        <small class="settings-hint"><?= _h('settings.pages_email_log_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label"><?= _h('settings.footer_os_since_year') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="footer_os_since_year" value="<?= sanitize($cfg['footer_os_since_year'] ?? date('Y')) ?>" min="2000" max="2099">
+                </div>
+            </div>
+
+            <?php /* The health endpoint: one JSON answer for whatever is watching this machine. It stood
+                     beside the digest under Site & pages until 1.69.0 ("is anybody going to find out?");
+                     it is about keeping the site running, not about its pages, so it lives with the
+                     backups now, and the digest — an e-mail — with the mail. */ ?>
+            <div class="settings-section" id="section-health" data-group="maintenance" data-title="<?= _h('settings.health_heading') ?>">
+                <h5><i class="bi bi-activity"></i> <?= _h('settings.health_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.health_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-6" data-setting="health_token">
+                        <label class="form-label"><?= _h('settings.health_token') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="health_token"
+                               value="<?= sanitize($cfg['health_token'] ?? '') ?>" maxlength="128" autocomplete="off"
+                               placeholder="<?= _h('settings.health_token_ph') ?>">
+                        <small class="settings-hint"><?= __('settings.health_token_hint') ?></small>
                     </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.health_url') ?></label>
+                        <?php $healthTok = trim((string)($cfg['health_token'] ?? '')); ?>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" readonly
+                               value="<?= sanitize(rtrim((string)($cfg['site_url'] ?? ''), '/') . '/?action=health' . ($healthTok !== '' ? '&token=' . $healthTok : '')) ?>">
+                        <small class="settings-hint"><?= __('settings.health_url_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <?php /* The panel's own log (the Log page): who did what in the panel, and how long that is
+                     kept. Under User accounts until 1.69.0, though it records nothing a member does to
+                     their account; its recording and its retention are upkeep, like the rest here. */ ?>
+            <div class="settings-section" id="section-audit" data-group="maintenance" data-title="<?= _h('settings.audit_title') ?>">
+                <h5><?= _h('settings.audit_title') ?></h5>
+                <p class="settings-hint mb-2"><?= _h('settings.audit_intro') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-4" data-setting="audit_enabled">
+                        <label class="form-label"><?= _h('settings.audit_recording') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="audit_enabled">
+                            <option value="1" <?= ($cfg['audit_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.audit_opt_record') ?></option>
+                            <option value="0" <?= ($cfg['audit_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.audit_opt_no_record') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.audit_recording_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="audit_keep_days">
+                        <label class="form-label"><?= _h('settings.audit_keep_days') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="audit_keep_days" value="<?= sanitize($cfg['audit_keep_days'] ?? '180') ?>" min="7" max="3650">
+                        <small class="settings-hint"><?= _h('settings.audit_keep_days_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interface languages — includes/lang.php -->
+            <div class="settings-section" id="section-languages" data-group="languages" data-title="<?= _h('settings.languages_title') ?>">
+                <h5><?= _h('settings.languages_title') ?></h5>
+                <p class="settings-hint mb-3"><?= __('settings.languages_intro1') ?></p>
+                <p class="settings-hint mb-3"><?= __('settings.languages_intro2') ?></p>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6" data-setting="default_language">
+                        <label class="form-label" for="lang-default"><?= _h('settings.languages_default') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" id="lang-default"></select>
+                        <div class="settings-hint"><?= __('settings.languages_default_hint') ?></div>
+                    </div>
+                    <div class="col-md-6" data-setting="language_auto">
+                        <label class="form-label"><?= _h('settings.languages_auto') ?></label>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="lang-auto">
+                            <label class="form-check-label" for="lang-auto"><?= __('settings.languages_auto_check') ?></label>
+                        </div>
+                        <div class="settings-hint"><?= __('settings.languages_auto_hint') ?></div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label"><?= _h('settings.languages_swap') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="lang_swap_enabled">
+                            <option value="1" <?= ($cfg['lang_swap_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.stats_opt_yes') ?></option>
+                            <option value="0" <?= ($cfg['lang_swap_enabled'] ?? '0') === '1' ? '' : 'selected' ?>><?= _h('settings.stats_opt_no') ?></option>
+                        </select>
+                        <div class="settings-hint"><?= __('settings.languages_swap_hint') ?></div>
+                    </div>
+                </div>
+
+                <div class="alert alert-warning py-2 wl-small d-none" id="lang-writable"><?= __('settings.languages_not_writable') ?></div>
+
+                <div class="lang-table-wrap">
+                    <table class="table table-dark table-sm align-middle lang-table">
+                        <thead>
+                            <tr>
+                                <th><?= _h('settings.languages_col_language') ?></th>
+                                <th><?= _h('settings.languages_col_completeness') ?> <span class="wl-small text-muted"><?= _h('settings.languages_col_vs') ?> <span id="lang-ref"></span></span></th>
+                                <th class="lang-col-sw" title="<?= _h('settings.languages_col_offered_title') ?>"><?= _h('settings.languages_col_offered') ?></th>
+                                <th class="lang-col-sw" title="<?= _h('settings.languages_col_switcher_title') ?>"><?= _h('settings.languages_col_switcher') ?></th>
+                                <th class="lang-col-sw" title="<?= _h('settings.languages_col_accounts_title') ?>"><?= _h('settings.languages_col_accounts') ?></th>
+                                <th class="lang-col-acts"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="lang-body"></tbody>
+                    </table>
+                </div>
+
+                <div class="pc-acts mt-2">
+                    <button type="button" class="btn btn-sm btn-outline-info" id="lang-add">
+                        <i class="bi bi-plus-lg"></i> <?= _h('settings.languages_install') ?>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="lang-template">
+                        <i class="bi bi-download"></i> <?= _h('settings.languages_download_template') ?>
+                    </button>
                 </div>
             </div>
 
@@ -4014,6 +4225,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-twofa.js<?= assetVer('assets/js/admin-twofa.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-sounds.js<?= assetVer('assets/js/admin-sounds.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-iconpacks.js<?= assetVer('assets/js/admin-iconpacks.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/media-editor.js<?= assetVer('assets/js/media-editor.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-profiles.js<?= assetVer('assets/js/admin-profiles.js') ?>"></script>
     <?php /* The picture beside an uploader's name in the emote manager (1.63.0). */ ?>

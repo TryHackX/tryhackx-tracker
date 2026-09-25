@@ -168,6 +168,20 @@ $shoutEmotesOn   = function_exists('shoutEmotesEnabled')
     ? shoutEmotesEnabled($cfg) : ((string)($cfg['shout_emotes_enabled'] ?? '1') === '1');
 $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
     ? shoutStickersEnabled($cfg) : ((string)($cfg['shout_stickers_enabled'] ?? '1') === '1'));
+
+// The picker's emoji (1.69.0, includes/emoji.php). The ordinary ones are a file per language, asked
+// for the first time the picker opens — so the page carries only WHERE they are: every language that
+// has a file, since the language can change in place (assets/js/lang-swap.js) and the picker then
+// takes the new one's. Font Awesome's faces: the mode the reader gets (off unless a Pro package is the
+// icon source) and the fingerprint their answer is cached under.
+$shoutEmojiFiles = [];
+if (function_exists('emojiDataUrl')) {
+    foreach (glob(dirname(__DIR__, 2) . '/assets/emoji/emoji-*.json') ?: [] as $ef) {
+        if (preg_match('/emoji-([a-z]{2,3}(?:-[a-z0-9]{2,8})?)\.json$/', $ef, $em)) $shoutEmojiFiles[$em[1]] = emojiDataUrl($baseUrl, $em[1]);
+    }
+}
+$shoutFaMode = function_exists('emojiFaContext') ? emojiFaContext($cfg)['mode'] : 'off';
+$shoutFaVer  = $shoutFaMode !== 'off' ? emojiFaVersion($cfg) : '';
 ?>
 <div id="shoutbox" class="shoutbox<?= $shoutOnPage ? ' shoutbox-page' : '' ?>"
      data-newest="<?= $shoutNewest ?>"
@@ -181,6 +195,9 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
      data-closed="<?= sanitize($shoutWhy) ?>"
      data-emotes="<?= $shoutEmotesOn ? '1' : '0' ?>"
      data-stickers="<?= $shoutStickersOn ? '1' : '0' ?>"
+     data-emoji-files="<?= sanitize((string)json_encode($shoutEmojiFiles, JSON_UNESCAPED_SLASHES)) ?>"
+     data-emoji-fa="<?= sanitize($shoutFaMode) ?>"
+     data-emoji-fa-v="<?= sanitize($shoutFaVer) ?>"
      data-order="<?= sanitize($shoutOrder) ?>"
      data-page="<?= $shoutOnPage ? '1' : '0' ?>"
      <?php /* Which element holds THIS widget's token (1.67.0). The shared editor in assets/js/app.js

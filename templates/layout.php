@@ -92,7 +92,10 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
              for the same reason app.js is: the star is delegated from `document` and has to be there
              before the first row is drawn. Every entry point inside it asks whether its own markup
              exists first, so a page without any of this costs one querySelector. */ ?>
-    <?php if (favEnabled($cfg) || profilesEnabled($cfg) || listsEnabled($cfg) || soundsEnabled($cfg)): ?>
+    <?php /* …and the likes / ratings table (1.69.0) with the account page's tab router, which lives in
+             the same file: a site with ratings and nothing else still has that tab to switch to. */ ?>
+    <?php if (favEnabled($cfg) || profilesEnabled($cfg) || listsEnabled($cfg) || soundsEnabled($cfg)
+              || (function_exists('profileVotesEnabled') && profileVotesEnabled($cfg))): ?>
     <script src="<?= $baseUrl ?>assets/js/favourites.js<?= assetVer('assets/js/favourites.js') ?>"></script>
     <?php endif; ?>
     <?php /* People: the inbox, friends and blocks, the directory, and the buttons a public profile
@@ -120,6 +123,11 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     <?php /* The picture and cover editor: the account page only, and only while either feature is on. */ ?>
     <?php if ($mediaEditor): ?>
     <script src="<?= $baseUrl ?>assets/js/media-editor.js<?= assetVer('assets/js/media-editor.js') ?>"></script>
+    <?php endif; ?>
+    <?php /* The description's editor in place (1.69.0): a profile page only, while the feature is on. It
+             begins by asking whether this page is its reader's own editable one. */ ?>
+    <?php if ($action === 'u' && function_exists('profileBioEnabled') && profileBioEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/js/profile-bio.js<?= assetVer('assets/js/profile-bio.js') ?>"></script>
     <?php endif; ?>
     <?php if ($timelineNeeded): ?>
     <script src="<?= $baseUrl ?>assets/vendor/uplot/uPlot.iife.min.js<?= assetVer('assets/vendor/uplot/uPlot.iife.min.js') ?>"></script>

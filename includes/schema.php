@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 73;  // 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
+const TRACKER_SCHEMA_VERSION = 77;  // 77 = Font Awesome's faces in the shoutbox picker (includes/emoji.php): `shout_emoji_fa` ('off' | 'fa' instead of the ordinary emoji | 'mixed' beside them, default off; offered only while a Font Awesome Pro package is the icon source) and `shout_emoji_fa_style` (the faces' default style key, '' = the site's fa_style) — settings only; 76 = which Font Awesome draws the icons: `fa_source` ('cdn6' Free 6.7.2 | 'cdn7' Free 7.3.1 | 'pack', default cdn6), `fa_pack` (an installed package's id, ''), `fa_pack_styles` (JSON list of its extra style files, '[]'), `fa_style` (the style the site's icons use, 'solid') — settings only, packages live on disk in config/iconpacks/; 75 = a member's likes or ratings listed on the account page and the profile (includes/profilevotes.php): users.votes_public (TINYINT, 0 = shown to nobody else until they say so), `profile_votes_enabled` (1; shows nothing while rep_enabled is off), and `rating.public` granted once to the member group (v75_rating_public); 74 = a description on the profile: users.bio (TEXT, the BBCode source as typed) + users.bio_updated_at, `profile_bio_enabled` (1) / `profile_bio_max` (300, clamped 20-1000), and `profile.bio` granted once to the member group (v74_profile_bio); 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
                                     // 71 = the default permission matrix, a `premium` group and a shop's order book: `user_group_orders` (UNIQUE(client_id, order_id) is what makes a retried purchase webhook grant one month instead of two), the seeded `premium` group (profile.cover + shout.upload_emote, no panel id, so a key may sell it), `member` brought up to the shipped matrix (index.view/index.files/index.magnet/whitelist.add, which its index.files_all grant had been paging without), `profile.cover` taken OFF member — the one removal this project has shipped, and the image is KEPT — and `content.view` added to `moderator`, which had been approving descriptions it could not read
                                     // 70 = "delete this conversation, for me" and two settings: `message_threads`.u_low_cleared_id / u_high_cleared_id (BIGINT UNSIGNED, 0 = nothing deleted — every read path filters `m.id >` the reader's own, so a thread goes for one side and stays whole for the other, and a new message brings it back showing only what came after), plus `shout_order` (top | bottom — which end of the room the newest line is at) and `account_media_side` (left | right — which card of the account page holds Picture and Cover)
                                     // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
@@ -506,6 +506,11 @@ function trackerSchemaStatements(): array {
             -- not covered by fav_public — somebody may be happy to show what they starred and not
             -- what they collected — and each list carries its own is_public underneath it.
             `lists_public` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v75, and a fourth question of the same kind: may a stranger see what I liked or rated
+            -- (includes/profilevotes.php)? Its own flag, because the list shows the thumbs down and
+            -- the low stars as well, and somebody happy to publish their favourites has not said yes
+            -- to that. 0 like the others: shown to nobody but its owner until they say so.
+            `votes_public` TINYINT(1) NOT NULL DEFAULT 0,
             -- v55. Two answers a moderator can give that are not 'delete the line': silence this
             -- account's MESSAGES until a date, and ban the account until a date. Both are NULL for
             -- everybody, both are a moment rather than a flag, and a moment that has passed needs
@@ -539,6 +544,14 @@ function trackerSchemaStatements(): array {
             `cover_x` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
             `cover_y` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
             `cover_zoom` DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+            -- v74: the description on the profile (includes/profilebio.php), AS TYPED: the BBCode
+            -- source, rendered when a page is drawn, so a fix to the renderer reaches every text
+            -- already stored. Small by construction -- the save caps the source at four times the
+            -- visible limit and never above 8 KB -- which is what lets it ride on a row that is read
+            -- with SELECT * on nearly every request. NULL is 'none written'. The stamp is the last
+            -- write, a clear by the owner or a moderator included.
+            `bio` TEXT DEFAULT NULL,
+            `bio_updated_at` DATETIME DEFAULT NULL,
             -- v53. The instant every OTHER session of this account stopped counting: a unix time,
             -- stamped by 'sign out everywhere else' and by a password change. A UNIX TIMESTAMP and
             -- not a DATETIME on purpose — it is compared against the session login time, which
@@ -1400,6 +1413,9 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaColumnExists($db, 'users', 'fav_listed')) $uparts[] = "ADD COLUMN `fav_listed` TINYINT(1) NOT NULL DEFAULT 0";
     // v51: the same rule, one flag lower — see the CREATE above.
     if (!schemaColumnExists($db, 'users', 'lists_public')) $uparts[] = "ADD COLUMN `lists_public` TINYINT(1) NOT NULL DEFAULT 0";
+    // v75: may a stranger see my likes or ratings — see the CREATE above. 0 for every existing
+    // account: an upgrade publishes nobody's votes.
+    if (!schemaColumnExists($db, 'users', 'votes_public')) $uparts[] = "ADD COLUMN `votes_public` TINYINT(1) NOT NULL DEFAULT 0";
     // v52: who may write to me, and may strangers find me by browsing.
     if (!schemaColumnExists($db, 'users', 'pm_who')) $uparts[] = "ADD COLUMN `pm_who` ENUM('all','friends','nobody') DEFAULT NULL";
     if (!schemaColumnExists($db, 'users', 'profile_listed')) $uparts[] = "ADD COLUMN `profile_listed` TINYINT(1) NOT NULL DEFAULT 0";
@@ -1432,6 +1448,10 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     ] as $mcol => $msql) {
         if (!schemaColumnExists($db, 'users', $mcol)) $uparts[] = $msql;
     }
+    // v74: the description on the profile and when it was last written — see the CREATE above. NULL
+    // for every existing account, which is "none written": an upgrade puts words on nobody's page.
+    if (!schemaColumnExists($db, 'users', 'bio')) $uparts[] = "ADD COLUMN `bio` TEXT DEFAULT NULL";
+    if (!schemaColumnExists($db, 'users', 'bio_updated_at')) $uparts[] = "ADD COLUMN `bio_updated_at` DATETIME DEFAULT NULL";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
 
     // v56: a message no longer leaves a notification behind.
@@ -2292,6 +2312,24 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
         'moderator' => ['shout.edit_any'],
     ]);
 
+    // v74: a description on your own profile, to members — the owner's answer to "who may": on by
+    // default, like the feature switch beside it. GUEST GETS NOTHING: the text belongs to an account,
+    // and an unverified account sits at guest level until its address is confirmed, so a throwaway
+    // registration cannot put words on a profile page. ONCE: an operator who takes it away from
+    // members afterwards keeps it taken away.
+    schemaGrantOnce($db, 'v74_profile_bio', [
+        'member' => ['profile.bio'],
+    ]);
+
+    // v75: a member's likes or ratings on their profile (includes/profilevotes.php) — the group half
+    // of a three-part yes: the site's switch, this grant, and the member's own users.votes_public,
+    // which starts as no. A grant about what others may SEE, like favourites.public, so it is read
+    // with userIdHasGrantedPermission() and the admin group's blanket does not count. GUEST GETS
+    // NOTHING: the list belongs to an account. ONCE: an operator who takes it away keeps it away.
+    schemaGrantOnce($db, 'v75_rating_public', [
+        'member' => ['rating.public'],
+    ]);
+
     // `shout_order` back to 'bottom' where it says 'top'. Changing the DEFAULT does nothing to a row
     // that already exists, and every install that ran 1.64.0 got the row: 'top' was the shipped
     // default for one afternoon, the owner used it and rejected it, and nobody else can have chosen
@@ -2919,6 +2957,15 @@ function trackerSchemaDefaultSettings(): array {
         'shout_nav'                   => '0',
         'shout_live_seconds_guest'    => '30',  // clamped [0, 300], read as 0 or 3..300
         'shout_system_lines'          => '0',
+        // ── Font Awesome's faces in the picker (v77, includes/emoji.php) ───────────────────────────
+        // Off: the picker's emoji are the ordinary ones, every one Unicode has up to what the readers'
+        // fonts draw. 'fa' shows the Font Awesome Pro package's faces instead of them, 'mixed' beside
+        // them — read only while such a package is the site's icon source (the panel offers the choice
+        // only then). A face travels as a :fa-NAME: token and falls back to the ordinary emoji it stands
+        // for wherever Font Awesome cannot draw it. `shout_emoji_fa_style` is the style a face is drawn
+        // in by default: '' follows the site's own fa_style.
+        'shout_emoji_fa'              => 'off',
+        'shout_emoji_fa_style'        => '',
         // ── The address the room answers on (v67) ───────────────────────────────────────────────
         // The action name, so an operator who calls the thing a chat can have `?action=chat`. It
         // ships as the literal it has always been, which is what makes this setting invisible until
@@ -2969,6 +3016,18 @@ function trackerSchemaDefaultSettings(): array {
         'cover_default_x'             => '50',
         'cover_default_y'             => '50',
         'cover_default_zoom'          => '1',
+        // ── The description on a profile (v74, includes/profilebio.php) ────────────────────────
+        // ON, like the pictures: the owner wants members to have it from the day it ships, and the
+        // `profile.bio` permission (granted to members) is what an operator narrows. The maximum
+        // counts what a READER sees — the words, not the tags around them — clamped [20, 1000]; the
+        // source as typed may be four times that, and never more than 4000 characters (8 KB).
+        'profile_bio_enabled'         => '1',
+        'profile_bio_max'             => '300',
+        // ── A member's likes or ratings on the profile (v75, includes/profilevotes.php) ─────────
+        // ON: the tab and the section exist for everybody the moment ratings do. It shows nothing
+        // anywhere while `rep_enabled` is off, and another member's list only with their group's
+        // `rating.public` and their own users.votes_public — which is where the privacy lives.
+        'profile_votes_enabled'       => '1',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a
@@ -3002,6 +3061,16 @@ function trackerSchemaDefaultSettings(): array {
         // markup from the start and with it chosen nothing on a page changes; Font Awesome is laid
         // over that same markup through one name map (includes/icons.php).
         'icon_library'                => 'bootstrap',
+        // ── Which Font Awesome (v76, includes/icons.php + includes/iconpack.php) ─────────────────
+        // Read only while icon_library is 'fontawesome'. 'cdn6' (Free 6.7.2 from jsDelivr, what 1.68
+        // drew) | 'cdn7' (Free 7.3.1) | 'pack' (an installed package, `fa_pack` = its id). The package's
+        // extra style files to load are a JSON list (`fa_pack_styles`; its all.css styles load anyway),
+        // and `fa_style` is the style the site's own icons use — solid, which is 1.68's look on every
+        // source. All four are checked against what is installed on every save.
+        'fa_source'                   => 'cdn6',
+        'fa_pack'                     => '',
+        'fa_pack_styles'              => '[]',
+        'fa_style'                    => 'solid',
         // ── The sign-in bridge (v49) ────────────────────────────────────────────────────────
         // Off. It lets somebody holding a key say "this is user 412 and I vouch for them", which is
         // the strongest thing any credential on this site can say — it must be a switch an operator

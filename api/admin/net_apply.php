@@ -22,6 +22,8 @@ $known = ['apply', 'monitor', 'off', 'panic', 'restore', 'egress', 'preview'];
 if (!in_array($op, $known, true)) {
     jsonResponse(['error' => __('api.admin.unknown_op_list', ['ops' => implode(', ', $known)])], 400);
 }
+// A preview is a read (1.69.0), refused or not: the router logged every one as `netlimit.apply`.
+if ($op === 'preview') auditSuppress();
 
 if (netlimitCommand($cfg) === '') {
     jsonResponse(['error' => __('api.net.no_helper')], 400);

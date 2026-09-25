@@ -890,10 +890,14 @@ add('js.reports', {
         'Info hash'),
     'col_ip': ('IP',
         'IP'),
+    # One set of headers for both paths (1.69.0): templates/admin/dashboard.php draws the first row with
+    # these too. The name column holds whoever wrote the report OR the appeal, so it is the form's own
+    # "Imię i nazwisko" and not "Zgłaszający"; the object is the work reported, "Utwór", as the report
+    # form ("Tytuł utworu") and the status page call it.
     'col_name': ('Name',
         'Imię i nazwisko'),
     'col_object': ('Object',
-        'Obiekt'),
+        'Utwór'),
     'col_report': ('Report',
         'Zgłoszenie'),
     'col_status': ('Status',
@@ -4642,17 +4646,14 @@ add('js.sndadmin', {
 })
 
 # ── 1.59.0: the picker, and the emotes page ─────────────────────────────────
-# The emoji themselves are characters written into assets/js/shoutbox.js, so nothing here names
-# one: these are the four tab labels, the two the server fills, and everything the upload form on
-# ?action=emotes has to say. Same `js.shout.` area as the box, because it is the same script and
-# the same bundle (LANG_JS_PUBLIC in includes/lang.php carries that prefix and no other).
+# The emoji themselves are characters from a generated data file (assets/emoji/, 1.69.0), so nothing
+# here names one: the page labels live with the rest of the 1.69.0 picker in shout_emoji.py; these are
+# the two the server fills, and everything the upload form on ?action=emotes has to say. Same
+# `js.shout.` area as the box, because it is the same script and the same bundle (LANG_JS_PUBLIC in
+# includes/lang.php carries that prefix and no other).
 add('js.shout', {
     'emoji':          ('Emoji, emotes and stickers', 'Emotki, emote i naklejki'),
     'all_emotes':     ('All emotes', 'Wszystkie emote'),
-    'tab_smileys':    ('Smileys', 'Buźki'),
-    'tab_gestures':   ('People', 'Ludzie'),
-    'tab_hearts':     ('Hearts and symbols', 'Serca i symbole'),
-    'tab_objects':    ('Things', 'Rzeczy'),
     'tab_emotes':     ('Emotes', 'Emote'),
     'tab_stickers':   ('Stickers', 'Naklejki'),
     'sticker_hint':   ('A sticker is sent on its own, the moment you pick it.',

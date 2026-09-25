@@ -4,6 +4,814 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.69.0] — 2026-09-25
+
+Schema 77 (74 is the description's, 75 the list's, 76 the icons' source, 77 the picker's Font Awesome
+faces). The owner asked for a description on the
+profile — a few lines of a member's own under their name, written where they are read, the way the
+owner's Flarum does it — behind a switch and a permission that are both on by default, with a maximum
+the operator sets and nothing but basic BBCode. And for what a member liked or rated, listed right
+after their favourites — on the account page and, if they say so, on their profile — in a table that
+sorts, filters and pages, under the site's switch, a group permission and the member's own yes. And,
+with those settings in place, for Settings' categories to be reorganised wherever they still needed it:
+each group now answers one question, the page reads group by group, and two groups have names that say
+what they hold. And for Font Awesome 6.7.2 or 7.3.1, Free or the owner's own Pro, chosen in the panel —
+the Pro copies installed from a zip or a folder, however they were packed, checked file by file, served
+by the site itself and never anywhere near the repository — with the styles that load and the one the
+site's icons use chosen too, because Font Awesome no longer puts everything in all.css. And, with Font
+Awesome on in production, for every icon to stand level with its words and at one distance from them:
+they hung low in some buttons and high in others, and "Fetch metadata"'s cloud all but touched its
+word. And for the shoutbox's picker to hold every emoji, the way a phone's keyboard does — Unicode's own
+pages, a search in the reader's language, the ones used last, the skin tones on an emoji held down —
+with Font Awesome's faces beside them or in their place once the owner's Pro draws the site, and for the
+site's own icons to take the closer glyphs Pro has. Alongside, what the 1.68.1 audit and this release's
+own work found: a hash a reader is not shown could be read back through a search, the account page
+scrolled sideways on phones, the name row of a profile was unreadable over a bright cover, the verified
+badge was a starburst in Font Awesome Free, opening the bulk-mail tab, Settings or the Whitelist's
+Review tab wrote to the audit log, and four small things in the panel.
+
+### Added — a description on the profile ("about me")
+
+* **Where it is.** Under the name on a public profile, in the head's text column beside the picture.
+  With a cover it sits over the photograph on a translucent backing of its own, and the band grows to
+  hold it instead of clipping it; without one the picture stands at the top of the column. Long words
+  break rather than widen the page, and a phone gets the same column. Another member's empty
+  description draws nothing at all.
+* **Written in place.** On your own profile an empty description is a dashed "Write something about
+  yourself…" box. A click on it — or on the text, or Enter on either: to the keyboard it is a button,
+  with a focus ring for the keyboard only — opens the editor where the text was: B, I, U, S and link
+  above a textarea (the same icons and titles as every other toolbar on the site), a counter, Save and
+  Cancel. Esc cancels and puts the old text back, Ctrl/Cmd+Enter saves, Ctrl+B / I / K wrap the
+  selection; the link button wraps an address as `[url]…[/url]` and anything else as
+  `[url=https://]…[/url]` with the caret where the address goes. Save puts the SERVER's rendering in
+  place — the page never turns BBCode into markup itself — and a click on a link inside the text is the
+  link's, not the editor's.
+* **Five tags and not one more**: `[b] [i] [u] [s] [url]address[/url] [url=address]words[/url]`, in any
+  case. Every other tag — `[img]`, `[color]`, `[quote]`, `[table]`, `[size]`, `[spoiler]`, a Markdown
+  `**` — is shown as the text it is; a bare address is not made into a link and a `:shortcode:` is not
+  an emoji; HTML is always text. A tag left open is closed at the end, a closer with nothing to close is
+  text, a closer that crosses another tag closes it and opens it again after itself (a link is never
+  reopened: one link must not become two), a link inside a link is text. At most three links, each
+  through the checks and the `rel="nofollow noopener noreferrer ugc"` every link on the site gets (http
+  or https with a host; the leave-the-site question for a domain not on the trusted list); at most eight
+  lines, at most two line breaks in a row.
+* **Its own renderer** (`includes/profilebio.php`), not an allow-list switch on the shared one. The
+  shared renderer is thirty-odd regex passes that also link bare addresses, turn shortcodes into emoji,
+  build paragraphs and pair each opener with the next closer, so a switch would have had to reach into
+  every pass, the description would still have inherited the passes that are not tags, and "an unclosed
+  tag is closed" is not something a pair of regexes can do. This one walks the tags with a stack over
+  the raw text and escapes every run of text on its way out. Descriptions, messages and shouts render
+  exactly as before: nothing they use was touched.
+* **Characters are what a reader sees** — the words, not the tags round them; an emoji is one
+  character and so is a Polish letter; a line break is one. The counter under the box (amber near the
+  limit, red past it) runs a twin of the server's rules, and a browser check holds the two to each
+  other string by string. The source as typed has a ceiling of its own — four times the visible limit,
+  never more than 4000 characters or 8 KB — so tags cannot be used to store a novel.
+* **The save** (`api/profile_bio.php`, POST `{csrf_token, bio}` → `{success, html, text, chars}`) asks,
+  in order: the token, a session, the switch, `profile.bio` of the ACCOUNT (a panel session in the same
+  browser is not the member's grant), a moderator's mute (the messages and the room already obey it),
+  twenty saves an hour per account — and only then the text: valid UTF-8; control characters, bidi
+  overrides and isolates and characters that draw nothing taken out (the zero-width joiners an emoji
+  family and some scripts need stay, and the block is `dir="auto"`); line breaks made one kind; the
+  visible limit, the source limit, the lines, the links; and an address that is not one is refused
+  rather than left to be found on the page. An empty text clears it, and clearing your own words is
+  never behind the permission or the mute. Every refusal is in the reader's language. There is no word
+  filter to apply — shouts and messages have none either.
+* **Settings → Profiles → Profile description**: `profile_bio_enabled` (on) and `profile_bio_max` (300,
+  20–1000), in a section of their own so the categories can be rearranged round it, explained in both
+  languages.
+* **The permission `profile.bio`** ("Write a description on their profile"), in the member preset and
+  granted once to the member group (`v74_profile_bio`: an operator who takes it away keeps it taken
+  away). What a profile shows is asked of the account the words belong to, the way a cover is: a member
+  whose groups lose it has the text hidden, not deleted, and back the moment the grant is; the admin
+  group's blanket counts, so the owner's own profile keeps its text.
+* **Stored as typed**: `users.bio` (TEXT) and `users.bio_updated_at`, in the CREATE and in a guarded
+  ALTER. The source is rendered when a page is drawn, so a fix to the renderer reaches every text
+  already written.
+* **The account page**: the Profile card has a Description row — the text, or "Not written yet" — and
+  "Edit on your profile", which opens the profile with the editor already open (`#bio`).
+* **The panel**: a member's edit window (Users) shows their description as the profile draws it, says
+  so when the profile is not showing it, and has **Clear description**: asked first, done at once, the
+  text deleted for good, the member told in a notification, one `user.bio` line in the audit log (Users
+  group) with the first few hundred characters of what was there. Clearing what is already gone changes
+  nothing and writes nothing. Gated like editing a user (`panel.users.edit`, `admin/user_bio`).
+* With a description (and on your own profile, where the dashed box stands in for one) the head is the
+  picture and a text column — the name row, then the words. A head without one is laid out exactly as
+  it was, on a phone too: its wrappers step aside (`display: contents`) and nothing moves.
+* The in-place language switch leaves the words and an unsaved draft alone and turns every label of
+  an open editor, which rebuilds its own from the new dictionary.
+
+### Added — a member's likes or ratings, on the account page and the profile
+
+* **What it lists.** The torrents a member voted on, in whichever mode the rating system is in: with
+  thumbs they are "Likes" / "Polubienia" (up and down alike), with stars "Ratings" / "Oceny" — the tab,
+  the section and every label follow the mode. Only the votes that mean something in that mode are
+  listed, ±1 or 1–10 half stars: a switch of mode leaves the other mode's votes in the table, and a
+  star rating is not a thumb. One value belongs to both (a 1 is a thumb up and half a star, and nothing
+  records which mode it was cast in), so it is read the way the current mode reads it. A vote cast
+  without an account is never on anybody's list.
+* **Where.** A tab on the account page right after Favourites, and a section on a public profile right
+  after Favourites, before Registered torrents and Lists. One partial draws both
+  (`templates/partials/votes_section.php`) and one component in `assets/js/favourites.js` fills both
+  from one endpoint, with the Magnet and Info a favourites row has (now one function for both).
+* **A table that sorts.** Name, size, seeders / leechers, the member's own vote — a thumb, or the Info
+  panel's read-only stars in half steps — the score (a percentage, or the average and a star), the
+  number of votes, and the date of the vote. Every header is a button, so the keyboard reaches it, with
+  the search table's arrows; the first click sorts the way a reader asks first (names A to Z, everything
+  else the most, the best or the newest first), the second turns it round. Newest vote first to begin
+  with. A header too long for its column wraps between its words and keeps its arrow on the last one.
+* **A score below the minimum is not a score here either.** It is a dash, with the count still missing
+  in its tooltip, and the row carries no number for it. Sorted by the score, those torrents come after
+  every shown one in BOTH directions, and among themselves they are ordered by nothing the page hides,
+  so their order cannot be read back as the number.
+* **Filters.** A search by name or hash — and inside file names, through the favourites list's own
+  helper, over the member's newest votes up to the favourites limit (bounded like a favourites list, and
+  charged to the search page's hourly bucket). In star mode: their (your) rating from – to, and the
+  average from – to, both in half stars; a range on the average leaves out a torrent that has no
+  average. In thumbs mode: their (your) vote — up and down, up, down — and a minimum number of votes.
+  A count, and the favourites pager; the filters and the sort survive paging, and changing either goes
+  back to page 1. A range picked backwards is swapped, and the selects show what was used. An empty
+  table says which kind of empty it is: nothing matches these filters, or nothing yet (and how to fill
+  it, on your own).
+* **The date** is the vote's own last change, read as an instant and written in the reader's own zone,
+  like every other time on the site: the day in the cell, the whole moment with its offset in the tooltip.
+* **Who may see it.** Your own list, always, while the feature is on — on the account page and on your
+  own profile, public or not, as your favourites are. Somebody else's needs every one of: the site's
+  switch, ratings on, their profile open to you at all (profiles on, `favourites.view_others` on your
+  account, no block that hides it), their account active, a group of theirs that GRANTS `rating.public`
+  (the admin group's blanket is about what somebody may fix, not what may be shown of them: an
+  administrator who wants theirs shown grants it to their group like anybody else), and their own yes.
+  Every no is the same "not found" a favourites list gives. One function answers it for the page and the
+  endpoint alike (`profileVotesShownTo()`, `includes/profilevotes.php`).
+* **Their own yes**: a switch in Privacy on the account page, right after the favourites one and shown
+  exactly where that one is — "Show my likes on my profile" / "Show my ratings on my profile", saying
+  that thumbs down / low ratings are shown too. Off for everybody to begin with (`users.votes_public`,
+  0, in the CREATE and a guarded ALTER), saved with the other privacy flags. Without the grant it stays
+  on the page with the sentence that names the missing permission.
+* **Settings → Profiles**, a section of its own: `profile_votes_enabled`, on. It shows nothing anywhere
+  while ratings are off (`rep_enabled`), and says so beside the control.
+* **The permission `rating.public`** ("Let their likes/ratings be shown on their public profile"), in
+  the member preset and granted once to members (`v75_rating_public`). With accounts switched off it is
+  no: unlike `rating.vote` it is consent to a list on a profile, and there is no profile to consent to.
+* **The endpoint** `api.php?endpoint=user_votes` (GET): `page`, `per_page` (25, at most 100), `search`,
+  `files`, `sort` (date, own, score, votes, name, size, seeders), `dir`, `own_min` / `own_max` (1–10),
+  `avg_min` / `avg_max` (0–500 hundredths of a star), `vote`, `min_votes`. A number outside its range is
+  clamped, anything that is not one of the allowed words is the default, and the answer says what was
+  used. One statement for the page and one for the count, from a fixed map of orders: the member's votes
+  through `idx_votes_voter`, each joined to its catalogue row by that row's own unique key (the whitelist
+  row winning where both exist, as a favourites row reads it; nothing of a whitelisted torrent for a
+  reader without `whitelist.view`; a banned one on your own list only), no query per row. Three thousand
+  votes of one member: 8–32 ms a page.
+* **In place.** The live language switch redraws the rows from the last answer — the switch cannot reach
+  rows a script drew — and a vote changed in the Info panel opened from a row reloads the list's page
+  (`assets/js/app.js` now says `rating:changed` when a vote lands).
+* **An old link to a tab that is gone** (`?action=account#votes` after the feature was switched off, or
+  `#sounds`, `#messages` on a site without them) opens the overview. The tab bar knew the name, found no
+  pane by it, and hid every pane it had: an empty page.
+* **The account page's tabs wrap at every width**, not only on a phone: with this one there are nine,
+  and between 641px and about 900px the Polish row ran 100px past the page's edge (820px of tabs in a
+  720px bar, measured at 768). Where they fit, they stay one row.
+* **On a phone** (under 960px) a row is a card: the name, then the facts in fixed columns, each with its
+  header's word in front of it and never broken inside, the buttons last; the header becomes a row of
+  sort buttons. Nothing scrolls sideways at 375px. The icons are written once and drawn by either
+  library; the filled thumbs are new names in the Font Awesome map.
+
+### Added — Font Awesome 6 or 7, Free or the owner's Pro, and the packages Pro comes in
+
+* **Where it is chosen.** Settings → Site, under the icon library, a Font Awesome block: the source —
+  Free 6.7.2 from jsDelivr (1.68's, and the default), Free 7.3.1 from jsDelivr (SRI from jsDelivr's
+  metadata, the policy unchanged), or an installed package; the package; the style the site's icons
+  are drawn in; for a package, which of its style files load; a live preview; the packages themselves.
+  Four settings in their four places — `fa_source` (`cdn6` | `cdn7` | `pack`), `fa_pack`,
+  `fa_pack_styles` (a JSON list) and `fa_style` — shipped as cdn6 / solid, so nothing looks different
+  until somebody chooses. A save is judged against what is installed: a package that is not there is
+  refused, a tick that means nothing is dropped, a style that does not load with the chosen files
+  becomes solid; a package that disappears from the disk under a stored choice makes the site draw
+  Free 6.7.2 and the panel say so, never draw nothing. Moving the site onto a package, or to another
+  one, asks for the password. Nothing here is drawn until Icon library says Font Awesome.
+* **One import, three doors** (`includes/iconpack.php`): a zip dropped or chosen in the panel, a zip or
+  a folder named by its path on the server, and `php tools/iconpack.php import | list | activate |
+  styles | verify | delete` for the operator with a shell (as the web user, so the panel can delete
+  what the shell installed; it warns otherwise). However the download was packed — its contents, the
+  folder, the folder inside two more — the root is the one directory, at any depth, whose `css/` holds
+  a Font Awesome stylesheet beside a `webfonts/`; two such directories are refused, not guessed
+  between. Kept: `css/`, `webfonts/`, `metadata/` (JSON and YAML, without the sponsors and shims
+  lists) and a licence text. The SVGs, scripts and sources of a full download are listed and never
+  extracted, and the report says what was skipped and from where.
+* **Nothing in a package is trusted for where it came from.** Every entry name is read from the zip's
+  own central directory (libzip turns a NUL into a space) and checked — no `..`, absolute path, drive
+  letter, backslash, control character, symlink, duplicate or two names one case apart; counts, sizes,
+  the total and the compression ratio are bounded before a byte is inflated, and the bytes actually read
+  are counted again; a font must begin with its format's signature; a stylesheet must be UTF-8 and say
+  it is Font Awesome, of one edition and version, and may reference nothing but its own package's
+  fonts — no `@import`, no other URL, no `expression(`, `behavior:`, `javascript:` or escaped
+  identifier; a style file may set nothing for everybody that the core does not already say, and may
+  not redefine another family or claim its face. Any of it refuses the whole package. It is unpacked
+  beside the store, checked, given its manifest (every file's size and SHA-256, the styles, the
+  names), and renamed into place: a package appears whole or not at all. Twenty at most.
+* **A full download, as the owner's two Pro copies are, is understood as one.** Its core is
+  `fontawesome.css` where there is one (else `all.css`); a style is every file that declares a face;
+  the compatibility sheets — `v4-shims`, `v4-font-face`, `v5-font-face` and 6.7.2's `svg-with-js` —
+  are checked like the rest and then left out, the report saying why (for sites moving up from 4 or 5,
+  and for the SVG + JS build, which this site never loads). Pro 6.7.2: 23 stylesheets, 17 styles, 4
+  left out, 55 files kept. Pro 7.3.1: 41 stylesheets, 37 styles — Sharp, Duotone, Jelly, Slab, Notdog,
+  Thumbprint and the rest — 2 left out, 77 files, 7.5 MB. Each installs in under a second.
+* **What a page loads**: Bootstrap; or Free 6 / 7 from jsDelivr; or a package's core and exactly the
+  style files chosen. With `fontawesome.css` as the core Solid, Regular and Brands always come too —
+  every style's last resort, the site's outlines (an empty star beside a full one) and its one brand —
+  and anything else when ticked. The output filter and the observer draw every icon in `fa_style`,
+  with outlines kept outlines, fills kept filled and brands brands.
+* **Served by the site** (`iconpack.php`, beside index.php: no session, no database, one manifest
+  read): only the css and font files a manifest lists, with their exact type, `nosniff`,
+  `Cross-Origin-Resource-Policy: same-origin` (another site cannot hotlink the licensed fonts), an
+  ETag, 304s and a year's immutable cache keyed by the package's hash. A stylesheet's
+  `url(../webfonts/…)` is rewritten on the way out into the endpoint's own address — a query string,
+  where PATH_INFO would depend on the web server (php -S, Apache and nginx each treat it their own
+  way). Metadata and the licence are never served.
+* **The map is names now** (`iconFaEntries()`, 183 Bootstrap names): an icon's Font Awesome NAME and
+  its part — follows the chosen style, stays an outline, stays filled, a brand — with a Pro twin where
+  the Pro set has the very icon (`patch-check` → `badge-check`, the octagons, the shields,
+  `collection`, `person-square`, `activity`, the sort pair, the server stack; Pro 7's angled pin and
+  dot; the megaphone, the bubbles and the calendar range below), and a name per version where 6 and 7
+  differ. An entry whose icon the loaded set lacks falls back to its Free name. The panel counts it:
+  exact, Pro twins, approximations, fallbacks — Free 157 / 0 / 26 / 0, Pro 6 173 / 20 / 10 / 0, Pro 7
+  175 / 23 / 8 / 0 in solid. A Pro 7 family that is a subset (Jelly, Utility, Slab…) draws what it has
+  and the classic family the rest at the same weight — known from the package's index where it came
+  with one (Jelly Regular: 90 of the 183, below), measured by the preview where it did not.
+* **Every style draws, and stays the size 1.68.1 made it.** The glyph's face is read from Font
+  Awesome's own variables (7.x works the family out on the icon, 6.x names each on `:root`), with the
+  classic family after it; each style class pins its weight on both layers. A two-layer icon (Duotone,
+  Sharp Duotone, the 7.x "duo" families, Thumbprint, Vellum) is drawn in one grid cell, where its
+  layers had come out at two heights, and without Font Awesome 7's 1.25em fixed width — inert on the
+  site's inline icons, it made every two-layer icon-only button 0.25em wider than its Bootstrap twin
+  (32 → 35.5 px). Measured: every icon-only button of five pages as wide as with Bootstrap and as tall
+  as with Free 6, in Free 6 and 7, Pro 6 solid and Sharp Solid, Pro 7 solid and Duotone Light.
+* **The preview** draws a row of the site's icons with the unsaved choice, in a frame of its own
+  (6 and 7 cannot share a document: both define `.fa-solid`), and says which entries fall back.
+* **The packages table**: edition and version (and which is in use), styles, size and icons, when and
+  by whom it was installed; Use, Verify (every file against its manifest's hash) and Delete — never the
+  package in use. Each install (or refusal), activation and delete, and a change of styles from the
+  shell, is one line in the audit log's Settings group, by the panel's user or `cli:<user>`.
+* **Kept out of git and out of backups.** `config/iconpacks/` is in `.gitignore` (`git check-ignore`
+  agrees for every file under it), refused over HTTP with the rest of `config/`, and outside every
+  deploy. The panel's Backups archive the database only; the server's backup toolkit (outside this
+  repository) copies `config/` whole and would take the packages with it — they are re-installable,
+  so leave them out there.
+
+### Fixed — every icon level with its words, and at one distance from them, in either library
+
+* **What the owner saw, measured.** With Font Awesome on, the icons stood lower than their words in
+  some buttons and higher in others, "Fetch metadata"'s cloud all but touched its word while the bin of
+  "Delete" beside it stood back, and the verified badge was a starburst. Measured on the ink, not on the
+  boxes — every icon that has words beside it, on every public page, panel page and tab, account tab,
+  menu, bulk bar and dialog, in English and Polish, on a desktop and a phone, photographed at twice the
+  pixels with only the icons, only the words and neither, nothing moved in between — the middle of each
+  icon's ink against the middle of its words' capitals: half the cap height above their baseline, the
+  height both icon sets are drawn to centre on, and a property of the font rather than of which letters
+  a label happens to have. Before, English on a desktop: Bootstrap +0.08px on the median with 88 of 727
+  icons more than a pixel off, Free 6 +1.84 with 657 of 724, Free 7 +1.81 with 649 — and in either
+  library a button a pixel off its twin a few rows up.
+* **Font Awesome hung 0.125em low.** Its em starts 0.125em below the baseline — its own stylesheet
+  draws the webfont at vertical-align 0 — and 1.68.0 lowered it by 0.125em more, the way Bootstrap's
+  stylesheet lowers Bootstrap's glyphs (the 1.68.0 comment that a glyph "sits at the same height whichever
+  library draws it" was off by exactly that). Its box now stands on its own baseline, which is where
+  Bootstrap's box is, so both libraries lay every line out alike: a button whose line-height is 1 (the
+  panel's search-clear crosses) is Bootstrap's 20×20.5 in every mode, where any Font Awesome, 1.68.1's
+  stylesheets included, made it 20×22.5 — the Font Awesome block above measured those at Free 6's
+  height. Free and Pro, 6 and 7, centre their glyphs at the same 0.375em once their box is 1em high, so
+  one correction serves every version; 7's fixed 1.25em width, inert on an inline icon, is switched off
+  where the rows below would make it live.
+* **A fraction of a pixel came out as a whole one, either way.** At 14px a glyph stood 1.75px from its
+  words' baseline, and Chrome puts each run of text on a whole pixel — the label's and the glyph's
+  separately — so the same button showed its icon a pixel higher or lower depending only on where it sat:
+  the Index page's Fetch metadata stood a pixel higher in the bulk bar than in the toolbar above it, in
+  Bootstrap too. Moved down 1/16px at a time, a button's offset jumped by exactly 1.00px; placed a whole
+  number of pixels from the baseline, it did not move at all (at 1x and 2x, in both libraries). The glyph
+  is now painted the whole number of pixels from its words that brings its middle nearest their cap
+  middle, read in THEIR font and size (`cap` on the icon's parent: a sort arrow is smaller than its
+  header), and its box stays where it was, so no line and no button changes size. Bootstrap's own box is
+  kept to 1/64px, the unit Chrome lays boxes out in, so box and move add up to exactly a whole pixel — a
+  1.8px box and a 0.2px move still came apart for one position in sixteen. On the public site the cap
+  middle is Courier New's, whose capitals are short: Bootstrap's icons sat a pixel high there as well. The
+  Settings page's drop zones (a picture, an emote, a sound, a zip) set their icon, a size larger than
+  its words, in a row centred by the boxes — the same fraction, one zone a pixel off the next; they
+  stand on the baseline too, in their words' size. An icon laid out as a box of its own — a star of a
+  rating, the shoutbox's and the messages' small round controls — stands on no line of words and keeps
+  its place (moved, a star came out 2px low and its layer cut it off). A browser without `cap` or
+  `round()` moves nothing.
+* **A glyph drawn off the middle of its square** is centred by its ink. Bootstrap's list-check stands
+  high in its square and the person with a gear low (1.3px at the page titles' 22px): 25 glyphs, read off
+  the pinned font's own glyph bounds into the stylesheets. Font Awesome's differ by version and, in Pro 7,
+  by family — Jelly, Slab and the rest draw the same names their own way — so assets/js/icons.js
+  measures each glyph that stands beside words, once per face, on a canvas when that face has loaded,
+  and the icon carries its own middle (chevron-up and -down are drawn 0.06em off the middle, 7's star
+  0.05em high; 30 of 7's glyphs are 0.03em or more off).
+* **One distance from the words.** The space was whatever the markup had: a space; a space AND 0.2rem
+  when the words were in a `<span>` (`.btn i` had a margin that `.btn i:only-child` took away again, and
+  `:only-child` counts elements, not text — "Refresh S/L" stood 8.4px from its icon, "Fetch metadata"
+  4.8px beside it); 0.3rem more in the tabs, 0.35rem in the Whitelist's menus; nothing where a script
+  built a button without a space. A button, link button, tab, menu item or pager button that holds an
+  icon is now a row, baseline-aligned, with one gap: a space at either end of the words is not drawn,
+  words that wrap start right after their icon, and a button a script builds — the bulk bars,
+  admin-common's pagers, iconBtn / mkBtn, the account and profile scripts — comes out as the page's own
+  do, because the rule is on the control, not in the builder. Each kind keeps the gap it had: a space in
+  the panel's face (0.275em) and in Courier New on the public site (0.6em), the tabs' 0.3rem and the
+  menus' 0.35rem on top. With Font Awesome an icon-only button is not a row — as one, a two-layer icon
+  (a grid of line-height 1) left its button 6px shorter than its Bootstrap twin — and is exactly as it
+  was; Bootstrap's icons are all inline, and its icon-only buttons are the size they were either way.
+* **"Fetch metadata" hugging its word.** The fixed box that keeps an icon-only button one size in Font
+  Awesome (1.68.1: 1.25em wide, taking 1em of the line) was chosen by `:only-child`, so every icon
+  before bare text got it too: the cloud, 1.25em wide, reached 0.125em into the space before its word;
+  the bin, 0.875em, stood 0.19em back — 3.1px against 5.9 at 14px. An icon with words beside it now
+  carries `data-label` — the server's output filter marks what it sends, assets/js/icons.js what scripts
+  build, and follows words set later — and keeps its glyph's own width. The box is for icon-only
+  buttons, which are exactly as they were.
+* **The room inside a glyph's square** came on top of the gap: a Bootstrap glyph stands in a 1em square
+  with room of its own on either side — none for the cloud, 0.12em for the cross and the plus, 0.21em for
+  the arrows, 0.27em for a single chevron — so one row of buttons ran from 3.7px to 7.3px. The room on
+  the words' side (for the pagers' Next and Last, the side before them) is taken off the gap:
+  Bootstrap's from its glyph bounds, in the stylesheets; Font Awesome's measured with its middle. Only
+  there, so an icon-only button is not touched. A word counts from where its first letter stands: an
+  "I" sits further into its box than a "W", and that is how the font spaces the letter everywhere.
+* **An open disclosure's chevron dropped below its words.** It was the same chevron turned a quarter,
+  and a turned glyph is not drawn the way text is: every glyph of text stands on a whole pixel — which is
+  what lets the placement above put an icon level with its words — and a turned one exactly where its
+  box's geometry says, which Chrome lays out rounded its own way (the turned <i> of 1.68 turned about a box
+  as high as the line, as well). An open folder's chevron in the Info panel's file list stood 1–2.5px
+  under its name, 0.6–1px apart from the same chevron shut, depending on the size and the face. An open
+  <details> now draws the chevron that points down, the library's own glyph (Bootstrap Icons \f282,
+  Font Awesome 6 and 7 \f078, through the variables Font Awesome draws both duotone layers from), placed
+  like every other icon; assets/js/icons.js measures it again when a <details> opens or shuts. The
+  quarter-turn animation is gone with the turn.
+* **After**, in every mode, in both languages, on a desktop and a phone — 1,176 to 2,666 icons beside
+  words per mode (a mode that changes only the style takes the busiest pages): none more than 0.87px
+  from its words' cap middle — Bootstrap 0.87, Free 6 0.78, Free 7 0.71, Pro 6 0.71 and 0.70 in light,
+  Pro 7 0.78, 0.77 in light and 0.78 in Jelly, the medians between -0.13 and +0.19 — and in each of the
+  170 kinds of button every gap within 0.9px of the kind's middle. The same check over the stylesheets
+  this part started from: the medians +0.08 in Bootstrap and +1.68 to +1.81 in every Font Awesome mode;
+  344 of 2,668 icons more than a pixel off in Bootstrap and 1,038 to 2,403 in each Font Awesome mode
+  (of 1,179 to 2,661), the worst 1.93px in Bootstrap and 2.84 to 3.30 in Font Awesome; 115 to 531
+  button icons outside their kind's two-pixel band, the worst 2.2 to 3.1px out.
+* **The map, by eye.** A sheet of all 179 entries — Bootstrap beside Free 6 and 7 and Pro 6 and 7 in
+  solid and light (`scratchpad/shots1690/icons-map-*.png`) — and the one that read wrong: `patch-check`
+  (verified) was Font Awesome Free's `certificate`, the badge WITHOUT its tick, a starburst. It is the
+  tick in a circle now (`circle-check`, outlined and filled as Bootstrap's pair are); Pro keeps
+  `badge-check`. The other approximations read as what they stand for, each with its reason in the map.
+* **The audit log's summaries wrap** instead of stopping at "…": the summary is what a line is for, and
+  `.au-summary { overflow-wrap: anywhere }` could never apply while 1.68.1's one-line cells cut it off.
+* **Opening the bulk-mail tab writes nothing to the audit log.** The tab asks admin/bulk_send for the
+  audience's preview and the recent batches by POST, and the router logged every POST to an admin
+  endpoint under the endpoint's action, `bulk.queue` — two lines a visit, nothing queued. The four reads
+  (preview, render, batches, status) write none; a cancel is `bulk.cancel` and a test copy `bulk.test`
+  (the Mail group already listed bulk.cancel, which nothing wrote), and an endpoint may name the action
+  it performed (`auditNote(['action' => …])`).
+
+### Added — every emoji in the shoutbox's picker, a search, the variants a phone offers, and Font Awesome's faces
+
+* **Every emoji Unicode has, up to Emoji 16.0**: 1,906, on Unicode's own nine pages — Smileys & emotion
+  169, People & body 386, Animals & nature 159, Food & drink 131, Travel & places 218, Activities 85,
+  Objects 264, Symbols 224, Flags 270 — where the picker had 170 on four pages of its own. The cap is the
+  newest set Windows 11, Android and iOS all draw: Windows 11 since its September 2025 update, Android and
+  iOS since March 2025. 17.0 reached iOS and Android in March 2026 but Windows 11 only in a Release
+  Preview, so on a stable Windows its new characters would be empty boxes — and so would the skin tones
+  17.0 gave the people with bunny ears and the wrestlers, who are offered without tones. Windows draws no
+  country flag at all, here or anywhere (two letters, by Microsoft's choice); the page stays for
+  everybody else.
+* **The data is a file per language, fetched once.** No page carries it; the shoutbox widget says only
+  where it is. The picker asks for the reader's language the first time it opens (English 179 KB, 51 KB
+  compressed; Polish 183 KB, 52 KB), once per page, at an address carrying the file's version, so a
+  regenerated file is a new address — and with Font Awesome's faces in place of the ordinary emoji it is
+  not fetched at all. A
+  long page is drawn a slice at a time, 120 cells at once and 200 a frame after that, so a phone never
+  waits on People & body. Generated by `tools/emoji_data.php` from emojibase-data 17.0.0 (MIT), whose
+  names and keywords are Unicode's CLDR 48 annotations (Unicode License v3): both licences in full in
+  `assets/emoji/LICENSE.txt`, the attribution in each file's first key and in the README; regenerated
+  from the same package, the files come out byte for byte as committed. One emoji per line, both files in
+  one order (row N is the same emoji in both; the search's English fallback reads it so). Each emoji is
+  written as a shout should carry it: one that is an emoji by default without the presentation selector
+  emojibase puts after it (👍 alone), one that is text by default with it (☺ is a black glyph without);
+  the parts — the tone swatches, hair on its own, the regional letters — are left out; GitHub's
+  shortcodes join the English keywords (":tada:" and ":joy:" are what people coming from chat type).
+* **Recently used** comes first: the last 36 picks in this browser — emoji in the tone chosen, faces,
+  emotes — newest first, and the picker opens on it once it holds anything. The tabs are icons of the
+  site's icon library, named on hover and to a screen reader, and scroll sideways where they do not fit;
+  five of them are new names in the map (`tree`, `cup-hot`, `car-front`, `lightbulb`, `trophy`), so with
+  Font Awesome they are drawn in the site's style.
+* **A search at the top**, over every page: the reader's language first — CLDR's names and keywords,
+  accents optional ("usmiech" finds the smiles, ł read as l) — then what only English finds, from the
+  English file fetched the first time somebody searches in another language. Every word typed must
+  start a word of the emoji's; a name that starts with the query comes first, then a word of the name,
+  then a keyword; the faces are found by their words in both languages and the emotes by code and name;
+  up to 300, and how many. The keyboard: type, the arrows walk into the grid, Enter inserts, Esc clears
+  the search and then closes the picker, the focus back on its button.
+* **Variants, as a phone offers them.** Hold an emoji down — a finger or the mouse, 450 ms, a move of
+  more than 8px cancelling — or right-click it, or press Shift+Enter or the menu key on it: a bubble over
+  it offers no tone and the five tones. A cell with variants carries a small mark in its corner. The tone
+  chosen is remembered by the browser and from then on the grid draws every emoji that has tones in it,
+  so a plain click inserts it at once; the hold itself inserts nothing. On a touch screen the search box
+  does not take the focus when the picker opens, so no keyboard comes up over it.
+* **Font Awesome's faces** — Settings → Shoutbox → *Emoji in the picker*, offered only while a Font
+  Awesome Pro package is the site's icon source (a note says so otherwise): `shout_emoji_fa` off (as
+  shipped) / fa, the faces instead of the ordinary emoji / mixed, both; and `shout_emoji_fa_style`, the
+  style a click inserts (empty: the site's own `fa_style`; a save turns a style that does not load, or
+  brands, back to empty). The faces are the `emoji` category of the ACTIVE package's own index — 113 in
+  7.3.1, 110 in 6.7.2 — on four pages of this project's grouping (smiles and laughter; calm and
+  thoughtful; worried and sad; angry and unwell), each tab one of its faces. Held down, a face offers
+  every style it is drawn in among those the site loads — the index says which families have it; Jelly,
+  Slab and the other 7.x families draw only some — the default first: the chosen style where the face
+  has it, else the classic family at that weight. The English labels and keywords are the index's; the
+  Polish ones, and the ordinary emoji each face stands for, this project wrote
+  (`assets/emoji/fa-faces.json`: names and words, nothing of Font Awesome's files). The picker asks
+  `api.php?endpoint=shout_emoji` for them — a reader who may see the room, in the language asked for —
+  cached for a day under a fingerprint of the mode, the style, the package and what loads, so any change
+  is a new address.
+* **A face travels as a token**: `:fa-face-grin-tears:` in the default style, or
+  `:fa-face-grin-tears/duotone-light:` in one of its own — the style key being the package's style file
+  (solid, sharp-light, jelly-regular…). It can never be an emote code (those have no hyphen) or one of
+  the `:shortcode:` emoji (a fixed list, none starting with `fa-`; the `/` is outside their characters),
+  and `~` is not the separator because Markdown makes `~x~` a subscript. The server draws it in the TEXT
+  of the finished HTML — never in an attribute, a link's address or a code block — wherever the rich
+  text draws `:shortcode:` emoji (shouts in every format, plain included; descriptions; messages): an
+  `<i>` with the style's classes from the package's manifest, `role="img"` and a label in the reader's
+  language, only when the package has the face and that style loads. Anywhere else — the faces switched
+  off, another icon source, the package deleted, the style unticked, and in every e-mail — it is the
+  ordinary emoji the face stands for, or the face's name in brackets where there is none: never nothing.
+  A token whose name is no face stays the text that was typed. A face stands on the line as an emoji
+  does, in an emoji's yellow (a two-layer style with a dark line over it).
+* **The package importer reads the index a download carries** — Font Awesome's own `icon-families.json`
+  (with `categories.yml` for the emoji category), the compact `metadata/icons-search-vX.Y.Z.json` the
+  owner's download script writes, or the older `icons.json` — and keeps what the site needs beside the
+  package: `index.json` (each icon's label, search words and the styles that have it) and `emoji.json`.
+  The owner's 6.7.2: 3,814 icons in 4 families, 110 faces; 7.3.1: 4,349 icons in 24 families, 113 faces
+  (its ten digit icons were nearly lost: PHP turns the key "0" into a number). The report says so on a
+  line of its own; an install takes about 1.4 s from the shell with the index read. An index is trusted
+  only when it describes the package's own edition: Free metadata inside a Pro download says nothing
+  about Pro's styles.
+* **Found on the way**: `assets/js/icons.js` stripped every `fa-` class from any element it met — a face
+  appended to a live grid lost its classes the moment it arrived; it leaves alone anything without `bi`
+  now. And a line holding nothing but a face was dropped as empty by the paragraph splitter.
+
+### Changed — the site's icons with the owner's Pro: closer glyphs, and what a family lacks known in advance
+
+* **Searched in the owner's own indexes** — both Pro versions' `icons-search` files, every icon's name,
+  label and search words — for the eight entries that stayed approximate even with Pro
+  (`bootstrap-reboot`, `database-down`, `database-gear`, `envelope-paper`, `grid-1x2`, `hdd-network`,
+  `send-check`, `ui-checks-grid`) and for every entry whose Pro choice might be bettered, the candidates
+  drawn beside Bootstrap in solid and light and judged by eye where the site uses them; the result is one
+  sheet, `scratchpad/shots1690/icons-pro-map.png` (untracked: it shows Pro's glyphs). Taken:
+
+  | Bootstrap | Free (unchanged) | Pro now | |
+  |-----------|------------------|---------|---|
+  | `ui-checks-grid` | `table-cells-large` | `grid-2`, outlined | still approximate: its four boxes, without their ticks |
+  | `grid-1x2` | `table-columns` | `rectangles-mixed`, outlined | still approximate: the very tiles, mirrored |
+  | `megaphone` (the Appeals tab) | `bullhorn` | `megaphone`, outlined | Bootstrap's cone |
+  | `chat-left-text` | `message` | `message-lines` | the square bubble with its lines of text |
+  | `chat-left-dots` | `comment-dots` | `message-dots` | the square bubble, not the round one |
+  | `calendar-range` (the menus' "last 14 days") | `calendar-days` | `calendar-range` | the range itself |
+
+  A Pro glyph that is closer and still not the very icon is marked `proapprox` and counted as the
+  approximation it is, never as a twin. Left as they were, the reason beside each in the map:
+  `bootstrap-reboot` (Pro has no power sign with an arrow either; its circular arrows are the site's
+  Refresh), `database-down` and `database-gear` (no database with an arrow or a gear in 6 or 7),
+  `envelope-paper` (Pro already draws it as the open envelope's outline), `hdd-network` (7's `nas` is a
+  drive box without a network), `send-check` (no paper plane with a tick). Looked at and refused:
+  `box-arrow-in-down` → `inbox-in` (6's is the download glyph), `files` → Pro's `files` (`copy` says the
+  same), `people` → Pro's `people` (whole figures, not Bootstrap's busts).
+* **183 entries** — the picker's tabs added five and `balloon`, which only the old picker used, is gone:
+  Free 157 exact and 26 approximations, Pro 6 173 exact (20 of them Pro twins) and 10, Pro 7 175 (23)
+  and 8, in solid, no fallback.
+* **What a Pro family lacks is known before it is drawn.** Pro 7's Jelly, Slab, Notdog, Utility and the
+  rest draw a few hundred icons each. An icon the chosen family lacked was handed to the browser's font
+  chain, which drew the classic glyph — a two-layer family drew it twice — and nothing on the server knew.
+  With the package's index the map draws such an icon in the classic family at the same weight itself
+  (an outline stays an outline) and the panel's coverage lists it: Jelly Regular 90 of the 183, Slab
+  Regular 99, Notdog Solid 69. The preview's measurement, which found this out by drawing, now speaks
+  only of what the index got wrong (for Jelly and Slab, nothing); without an index, all is as before.
+
+### Changed — Settings: one question per group, and the page reads group by group
+
+* **A group answers one question an admin asks, and a section lives where that admin looks first** —
+  judged by its fields, not its id or an old title. What moved, and why:
+
+  | What | Before | After | Why |
+  |------|--------|-------|-----|
+  | Operator digest (`#section-digest`) | Site & pages | **Contact & email** | It is an e-mail — a recipient, an interval, a threshold — and that group is how mail goes out. |
+  | Health check (`#section-health`) | Site & pages | **Backups & maintenance** | One JSON answer for an uptime monitor: keeping the site running, not one of its pages. |
+  | "Public Pages" (`#section-public-pages`), retitled **Archiving & the e-mail log** | Site & pages | **Backups & maintenance** | Its three fields are what the janitor archives or deletes after so many days — old reports, old appeals, the sent-mail log. Nothing in it was about pages. |
+  | Audit log (`#section-audit`) | User accounts | **Backups & maintenance** | The panel's own log — who did what in the panel — and how long it is kept; nothing a member does to an account. |
+  | Favourites and profiles (`#section-favourites`) | User accounts | **Profiles**, first | It holds the switch for the profile page itself, and the two lists a profile shows (favourites, registered torrents). |
+  | Lists (`#section-lists`) | User accounts | **Profiles**, last | A member's collections, shown on their profile if they say so. |
+  | Address lists (`#section-iplists`) | Tracker & whitelist | **Network & limits**, right under UDP traffic & rate limit | Its first words are "Trusted addresses above" — a field of that section — and the lists feed the same firewall. |
+  | The blacklist file path (a field, with its Test) | Security → Rate Limits & Blacklist | **Tracker & whitelist** → Tracker mode & the accesslist file, under the whitelist file | It is the other mode's accesslist; the section's own intro already names both config lines. |
+  | "Rate Limits & Blacklist" (`#section-limits`), retitled **Rate & length limits** | Security & CAPTCHA | Security & CAPTCHA (kept) | Per-address hourly limits of the report, status, block-check and appeal forms — the same four forms the CAPTCHA sections above guard — and the lengths they accept. Network & limits is the tracker's UDP traffic and the machine it runs on: another layer, another question. |
+  | Ratings (`#section-reputation`) | Descriptions & review | **Descriptions & ratings**, after the descriptions | Nothing in the old group's name said ratings. What members add to a torrent — words, links, a vote — is one question. |
+  | Group "Backups" | | **Backups & maintenance** / "Kopie zapasowe i utrzymanie" | It holds the health check, the audit log and the archiving now. |
+  | Group "Descriptions & review" | | **Descriptions & ratings** / "Opisy i oceny" | So the ratings are found by the group's name. |
+
+* **Kept or refused, with the reason.** *Pictures and profile covers* stays one section: every field
+  in it is a picture/cover pair or shared by the two (one upload-size and one megapixel limit for
+  both), and a split would strand the shared limits in one half. No new group: once two groups were
+  renamed, every section had an honest home. *User Accounts* keeps its member-search and bulk e-mail
+  fields — the search is the member system's own feature (its intro says so) and exists only with
+  accounts on, and the bulk mail tool lives on the Users page, whose "switched off" note links straight
+  to this section; moving either would need a section of its own, which is a decision for another
+  release, as are the panel's two page-size fields in Rate & length limits and the Info panel's S/L
+  refresh among the descriptions.
+* **"All settings" follows the group order.** It is the page's own order, and the template had grown by
+  accretion (site, mail, CAPTCHA, public pages, digest, health, ratings, live peer sync, …). The
+  sections are laid out group by group now, and inside a group the one with the group's own switch
+  comes first (User Accounts before the members' 2FA, OpenTracker Service before its tuning, UDP
+  traffic before the address lists, Backups before the rest). A pure move: every section rendered
+  before and after it byte for byte the same (comments aside), with no PHP warning — the schedule's
+  state, which was computed at the end of the descriptions' section and read two sections later, is
+  read in front of the schedule now, and four "next section" comments that had been left inside the
+  previous one moved with the sections they describe. The section ids did not change: every
+  `#section-…` link and bookmark still opens, now in its new group.
+* The chip counts, the breadcrumbs of All settings and of a search, "Show me where" and the group
+  keywords all follow the page, and the keyword catalogue (`settingsCatalogKeywords()`) is laid out the
+  way the page is — group by group, `// #section-…` by section — with the same 375 key → words pairs:
+  its headers had drifted (the "User accounts" block held the ratings, live peer sync and the
+  description rules).
+
+### Fixed — a hash a reader is not shown could be read back through a search
+
+* **A profile's favourites** leave out a row's hash for a reader without `index.magnet` — and matched a
+  search against that hash first. Searching somebody's public favourites for a prefix and reading the
+  count spelt a hidden hash out sixteen answers per digit. The same order of operations was in **the
+  registered torrents** (whose hash also goes out for no banned row, and whose hash half turned a `%`
+  typed into the box into a wildcard) and **a list** (a substring match, even), and in **the catalogue
+  search** for a group given `index.view` without `index.magnet`. The rule the likes / ratings list was
+  built with, everywhere: the hash half of a search only where the hash is shown to this reader — your
+  own favourites always, otherwise `index.magnet` and not a banned row — asked before anything is
+  counted; the name half for everybody. In the catalogue a hex term is searched as a name for such a
+  reader (`indexSearchCatalogue()` takes `hash_search`; absent means yes, so nothing else changes).
+  None of the shipped groups is affected: guest has neither permission and member has both.
+
+### Fixed — the panel
+
+* **The reports table's header** was two dictionaries: the page drew it with `a.reports.c_*` and a tab
+  switch redrew it with `js.reports.col_*`, and in Polish they disagreed — the first column said
+  "Zgłaszający" until a tab was clicked and "Imię i nazwisko" after, the object column "Utwór" then
+  "Obiekt". One set now, for both paths (`js.reports.col_*`; the nine `a.reports.c_*` keys are gone):
+  "Imię i nazwisko", because the column holds an appellant's name as well as a reporter's and is the
+  form's own word for it, and "Utwór", the word the report form and the status page use for the work
+  reported. The English pair was one wording already.
+* **The appeals' Type badge** fits its column: the Polish "Odblokowanie" badge measures 91.3px and the
+  cell had 68 of content box. The column is 112px — the longest badge in either language plus the
+  cell's padding, and a few pixels for a system font a little wider than the one it was measured in.
+* **A select looks like a select.** The toolbars' filters (Reports, Whitelist, Index, Users, Log) had no
+  arrow at all — a `background` shorthand with `!important` reset the image Bootstrap draws it with —
+  and every other select in the panel had Bootstrap's arrow for a LIGHT field, #343a40 on #212529:
+  1.3:1, there and not there. The filters set the colour alone now, and the panel's selects carry
+  Bootstrap's own dark-theme arrow (#dee2e6, a `data:` image the policy allows): 11.8:1 against the
+  field, measured, in both icon libraries (it is not an icon, so it is the same in either).
+* **Favourites rows** said "Magnet" as a literal; they use the dictionary's word (`js.app.magnet`), as
+  the search results do, so a translation reaches them too.
+
+### Fixed — opening Settings, or the Whitelist's Review tab, wrote to the audit log
+
+* **Found by walking the panel** — every page and every tab of each, the log read after every step.
+  Settings wrote `twofa.change` (the members' 2FA section asks for its status) and `panel.fed_review`
+  (the federation queue's list) on every visit, and the Whitelist's Review and Rewrites tabs
+  `content.review` (the queue, and a row's edits): the router logs each POST to an admin endpoint under
+  the endpoint's action, and these reads are POSTs. A `twofa.change` line on a mere visit would alarm
+  anybody reading the log. The reads write nothing now (`auditSuppress()`, as the bulk-mail tab's
+  reads above), and a content decision is logged as what it was — `content.approve`, `content.reject`,
+  `content.clear`, `content.edit_apply`, `content.edit_reject`, the names the log's Content filter
+  already listed and nothing wrote.
+* **The same kind of read, found by going through every panel POST that only asks**: the tracker mode's
+  status, live peer sync's status and plan, the network, sysctl and OpenTracker previews, the cluster's
+  plan and the federation purge's count. Each is silent from the moment the endpoint knows it is a read,
+  so one refused because its feature is off is silent too.
+* **Seven garbled dashes in the stylesheets' comments** — an em dash whose three bytes were once read as
+  Windows-1252 and written back, four in `assets/css/style.css` and three in `assets/css/admin.css` —
+  are dashes again; no other file this release changed carries such a sequence or a stray control
+  character.
+
+### Fixed — the account page scrolled sideways on a phone
+
+* **Four causes, found by measuring every tab** at every width from 320 to 1440 in both languages
+  (with the ratings on and off): the messages default is a select, and a select is as wide as its
+  longest option — 392px, 433 in Polish, in a card as narrow as 260, from 320 to ~900px wide; the
+  account table (a label column that never wraps beside the e-mail address and an "Edit on your
+  profile" link that could not break) was 369px wide where its card had about 300, at 375 in Polish;
+  a list's card grid asked for a 320px column at 320; and the People tab's four sub-tabs never wrapped
+  (98px too wide in Polish at 320). The select is at most its card's width, a value in the table breaks
+  before it widens the card and on a phone the labels and the link wrap, the grid's column is never
+  wider than its space, and the sub-tabs wrap. Nothing scrolls sideways at any width from 320 up.
+
+### Changed — a profile's name row over a cover, and the line on your own profile
+
+* **Readable over any cover.** Over a bright cover the name row was grey on light stripes — the name,
+  "member since", "this is your profile" and the outlined Message / Add as friend / Block / Share. The
+  row now has the description's translucent backing (the same geometry, one shade for both, 0.55: the
+  description's was 0.42 and a shadow was the row's only help), the name is white, the date and the line
+  a light grey, and the buttons (and a friendship badge) are filled, so no label meets the photograph.
+  Measured on the striped test cover the description's check paints, text against the worst pixel
+  behind it: 1.1–1.8:1 at 1280 and down to 1.0:1 on a phone before, 5.76:1 at the least now, on your own
+  profile and somebody else's, with a description and without, desktop and phone, English and Polish,
+  in both icon libraries. Without a cover nothing changed. Over one, the row's wrappers stay boxes even
+  with no description (the picture is out of the flow there, so nothing moves) — they have to, to
+  carry the backing.
+* **"this is your profile, as others see it"** had stopped being true twice over: your own profile draws
+  the description's edit box, which nobody else gets — and it always showed your favourites, likes,
+  registered torrents and lists whether or not you had made them public. It now says **"this is your
+  profile — others see only what you show"** / **"to twój profil — inni widzą tylko to, co
+  pokazujesz"**: true in every case, and two lines on a phone as before.
+
+### Tests
+
+* `tests/profile_bio_test.php` (new): both schema paths on a scratch database, the two settings in their
+  four places, the permission and its one-time grant, the renderer (each tag, every other tag literal,
+  nesting, crossed, unclosed and stray tags, `javascript:`/`data:`/`vbscript:`/`//host`, a quote and an
+  event handler inside an address, `<script>`, `&lt;`, bidi/zero-width/control characters, a four-byte
+  emoji, and a hostile mix read back through a DOM: only strong/em/u/s/a/br, an `<a>` only
+  href/rel/target/data-external), the four caps, every refusal of the save and its success, the
+  endpoint file run as a request in a child process (session, token), hidden-when-the-grant-is-lost and
+  back, the admin blanket, and the panel's clear run the same way: text gone, member told, one audit
+  line, a second clear that does nothing.
+* `scratchpad/shots/profile_bio_check.js` (new, in `browsersweep.sh`), under an enforced policy: the
+  placeholder, the toolbar, the counter (and its twin against the server on 23 strings), Save, reload,
+  another member's view, Esc / Cancel / Enter / Ctrl+Enter, a click on a link, the account row and
+  `#bio`, the in-place language switch, the head at 1280 and 375 with and without a cover, both icon
+  libraries, the setting off and the permission taken away (nothing shows, the endpoint refuses), the
+  panel's Clear. Screenshots in `scratchpad/shots1690/`.
+* `tests/groups_matrix_test.php`: the member row of the matrix carries `profile.bio`, and the
+  existing-install pass predates the v74 grant as well.
+* `scratchpad/shots/media_check.js`: on a phone the band's FLOOR is `cover_height_mobile` (its computed
+  min-height), no longer "under 220 px" — the head it holds may grow it, and on your own profile it now
+  holds the description's box.
+* `tests/profile_votes_test.php` (new): `users.votes_public` on both schema paths (a scratch database);
+  the setting in its four places; `rating.public` registered, in the member preset, granted once, no
+  with accounts off; the gate one flag at a time (the switch, ratings, accounts, profiles, the owner's
+  flag, a group without the grant, an owner only in the admin group — not shown, until that group is
+  granted it — a reader who may not open profiles, a block that hides the profile and one that does not,
+  a suspended owner, nobody signed in) and the account page's context; the list: an anonymous vote
+  carrying the owner's id as its key never listed, each mode's values only, every sort both ways with
+  the too-few after every shown score in both, each filter, the whitelist arm, a banned row, the hash
+  withheld, pagination (a page past the end is the last one), the reader's zone, every parameter clamped
+  and defaulted; EXPLAIN and a stopwatch on three thousand votes; the endpoint and the privacy save, each
+  run as a request in a child process with a session and its token.
+* `scratchpad/shots/profile_votes_check.js` (new, in `browsersweep.sh`), in both modes under an enforced
+  policy: the tab after Favourites; header sorting against the order the database implies; each filter,
+  the pager keeping it, a filter change going back to page 1; another member seeing nothing (and a 404)
+  until the privacy switch is ticked, then the section after Favourites in "their" words; the live
+  switch to Polish redrawing the rows; 375px (cards aligned, no value broken, nothing sideways) and
+  768px (three columns, the tab bar wrapping);
+  no header spilling out of its column or leaving its arrow alone, at 1280 in both languages; Font
+  Awesome; the switches above it (and an old link to `#votes` landing on the overview); the Settings
+  section. Screenshots `scratchpad/shots1690/votes-*.png`.
+* `tests/groups_matrix_test.php`: the member row carries `rating.public`, and the existing-install pass
+  predates the v75 grant as well.
+* `tests/admin_access_test.php`: the template lays its sections out group by group in the sub-menu's
+  order (so a section added at the end of the file under an early group fails), each section 1.69.0
+  moved is under its group, the blacklist file path is in the accesslist section beside the whitelist
+  file (and nowhere else), and the two renamed groups carry their names.
+* `tests/favourites_test.php` §12: the favourites, registered-torrents, list and catalogue-search
+  endpoint FILES run as requests in a child process, with the sessions of three scratch accounts each in
+  one scratch group (no panel session): a hash prefix / piece finds nothing for a reader without
+  `index.magnet`, the name still does (without the hash), a reader with it finds the row, a banned row is
+  found by no one's hash, a `%` is no wildcard, your own favourites keep theirs. Against the endpoints as
+  they were, seven of these fail.
+* `scratchpad/shots/settings_groups_check.js` (new, in `browsersweep.sh`), in English and Polish: every
+  chip's count is what it shows and it shows exactly its own sections, its switch first; All settings
+  reads group by group in the chip order; every breadcrumb names its section's group; a search finds each
+  moved setting under its new group and the new group names find their sections; "Show me where" and
+  every moved section's `#section-…` link open the new group; the two accesslist files sit together.
+  Screenshots `scratchpad/shots1690/settings-*.png`.
+* `scratchpad/shots/panel_fixes_check.js` (new, in `browsersweep.sh`): all 156 visible selects on eight
+  panel pages carry the light arrow, and it measures 11.8:1 on a toolbar filter, a Whitelist filter and a
+  Settings select, in both icon libraries; the reports header is the same words drawn by PHP and redrawn
+  by admin.js, in both languages; both appeal badges fit their column at 1440 and 1280, in both languages;
+  a favourites row's Magnet is `js.app.magnet`.
+* `scratchpad/shots/account_width_check.js` (new, in `browsersweep.sh`): every tab of the account page,
+  English and Polish, ratings off and on, at 37 widths from 320 to 1440 and on five emulated phones —
+  `scrollWidth` never above `clientWidth`; it names what sticks out when it is. Its first run named the
+  four causes above.
+* `scratchpad/shots/profile_head_check.js` (new, in `browsersweep.sh`): the contrast measurement above —
+  a screenshot with the row's text made transparent, decoded, each text's colour against the worst pixel
+  under its line boxes — in 32 combinations, the line on your own profile in two lines at 375, and
+  without a cover nothing changed. `scratchpad/shots/profile_bio_check.js` expects the description's
+  backing at 0.55.
+* `tests/iconpack_test.php` (new), on synthetic packages made in the temp directory (fonts that are a
+  signature and padding — never a Font Awesome file): the names; every way of nesting a download and the
+  two-root refusal; hostile archives (traversal, absolute, drive letter, backslash, a NUL, control
+  characters, a symlink, duplicates, a case collision, a bomb by ratio, sizes that lie, too many files);
+  hostile stylesheets and fonts; detection and the manifest; a full download with and without
+  `metadata/` (`fontawesome.css` as the core, the compatibility sheets left out and a tampered one
+  refusing the package, Solid / Regular / Brands always loaded); the served files and their headers over
+  HTTP against the local site; setups, maps and the settings' judgement; the store; `.gitignore` and
+  `git check-ignore`; the CLI and the panel endpoint run as child processes, with their audit lines.
+  Where `TRACKER_FA_PRO_DIR` (default the owner's Fonts folder) holds Pro folders, each is found by
+  looking, zipped into the temp directory and installed, and what detection makes of it is held to
+  what the folder holds — every face-declaring sheet a style, the core, the left-out sheets and their
+  reasons, which styles all.css covers (read off the faces: Pro 6.7.2 11 of its 17 outside, Pro 7.3.1 31
+  of 37, every family 7.x added among them) — the names counted a second way, the sheets a page links,
+  the coverage; then deleted.
+  Without them: a SKIP line that says why.
+* `tests/icons_test.php`: the four settings in their four places, Free 7's tag and SRI, a missing
+  package's fallback, a package's stylesheets, every map entry's shape, the approximations (26 now) each
+  with its reason, the per-setup maps, the pins (the grid's width too), the filter drawing the page's
+  setup.
+* `scratchpad/shots/icons_check.js`, in seven modes: Bootstrap, Free 6, Free 7 and — where the owner's
+  folders are — Pro 6 and Pro 7 installed through the CLI, each in solid and in one style of a file of
+  its own (Sharp Solid, Duotone Light); per mode the glyph test, the fonts, the sheets, the icon-only
+  buttons against Bootstrap's widths and heights, and every map entry drawn. The glyph test
+  reads the FIRST string of the computed content: 7.x writes `var(--fa) / ""`, which computes to
+  `"X" / ""`, and the old way of stripping the quotes drew three extra characters beside a missing
+  glyph's box — every 7.x glyph would have passed (shown with a code point no font has). The panel's
+  preview reads it the same way.
+* `scratchpad/shots/iconpack_check.js` (new, in `browsersweep.sh`): a synthetic Pro package zipped two
+  folders deep, through the panel — a refused upload, the install and its report, Use with the password,
+  the style ticks, the preview, the save, the served headers, Verify, Delete refused while in use, back
+  to Free 6, Delete — and the audit lines it leaves. A Save writes every field of the form (a row for
+  each setting that had none, the time zone the select shows), so the check puts the whole settings
+  table back, row for row. Screenshots `scratchpad/shots1690/iconpack-*.png`.
+* `scratchpad/shots/icons_align_check.js` (new, in `browsersweep.sh` after icons_check): the measurement
+  above as a check — every icon beside words on every public page, panel page and tab, account tab,
+  menu, bulk bar and dialog, in eight modes (Bootstrap; Free 6 and 7; and, where the owner's folders
+  are, Pro 6 and 7 solid and light and Pro 7 Jelly, installed through the CLI for the run and deleted
+  after), in English and Polish, at 1280/1440 and 390: each icon's ink middle within a pixel of its
+  words' cap middle, and the gaps of one kind of button within a pixel of one another, the worst
+  offenders named. A pair it cannot see whole — cut by a scroller's edge or the window's, behind a
+  dialog, moved between being found and being photographed — is scrolled into view on its own or left
+  out and counted, never measured as a sliver. With 1.68.1's stylesheets served in place of the
+  repository's (request interception; the repository untouched) it fails 32 of the 44 states of the
+  owner's places (the Whitelist page with its tabs, menus, dialogs and bulk bar; the Index page with its
+  menus and bulk bar; the Transparency table) in Bootstrap and Free 6 — in Bootstrap Refresh S/L 1.8px
+  further from its word than its kind's middle and Fetch metadata 1.5px nearer, the Index bulk bar's
+  Delete 1.4px high; in Free 6 the icons 0.8 to 2.7px low, the Transparency headers' arrows 1.5px, and
+  the bulk bar's Fetch metadata 5.1px nearer its word than Clear.
+  `scratchpad/shots/align_shots.js` (new) photographs the owner's three places — the Whitelist's
+  navigation, status, tabs, toolbar, bulk bar and rows; the Index toolbar and bulk bar; the public
+  Transparency table's sort headers — in every mode, before and after:
+  `scratchpad/shots1690/align-<mode>-{before,after}.png`.
+* `scratchpad/shots/icons_check.js`: the icon-only buttons are held to Bootstrap's heights as well as its
+  widths — Free 6's ruler is gone, Font Awesome's box being Bootstrap's now — and `data-label` is not a
+  difference in the markup.
+* `tests/icons_test.php`: the placement (the cap-middle rule on the parent's `cap`, Bootstrap's box to
+  1/64px, Font Awesome's at vertical-align 0 and width auto), the fixed box only without `data-label`,
+  the rows and their one gap — their display at one class's weight and before `.d-hidden`, so a hidden
+  icon button stays hidden (a row that outweighed it showed Backups' "Cancel run" and, on a phone, the
+  pagers' First and Last; a probe comparing every control's display with the old stylesheets' on every
+  page found them) — the output filter's `data-label` (bare text, a `<span>`, icon-only, words
+  after, twice, an unknown name), the observer following words and measuring Font Awesome's glyphs, the
+  open disclosure's chevron that points down and nothing turned; `patch-check` is the circled tick.
+* `tests/audit_test.php` §4b: admin/bulk_send run as a request in a child process — its four reads write
+  no line; a queue, a cancel and a test copy write bulk.queue, bulk.cancel and bulk.test.
+* `tests/iconpack_test.php`: a folder as the owner's download script leaves it — a root `manifest.json`
+  of its own, `metadata/icons-search-*.json`, 7.3.1's `svg.css` — installs: the manifest skipped, the
+  index kept (and, since the importer reads it — the emoji picker below — described as the Pro index it
+  is), svg.css left out as the SVG build; the verified badge's Free fallback.
+* `tests/emoji_test.php` (new): the data files — the same 1,906 emoji in the same order in both
+  languages, each group's count, every name and keyword list filled in both (the Polish in Polish), the
+  keywords one lower-case word list, each toned variant the emoji with one tone's modifier and nothing
+  else changed, nothing newer than 16.0 by Unicode's own ages (ICU) and by the lists of what 16.0 and 17.0
+  added, no part on its own, the presentation selector only where it belongs, the attribution and the
+  licences, the generator; the faces' file (113, four pages, an emoji each, names and words only); the
+  token's grammar, that no emote code or shortcode can be one, and the picker's twin of it; the fallback
+  through every renderer (descriptions, messages, a shout in each format, a mail), a face in `[code]` and
+  in an address, hostile input; the two settings in their four places and their words in both languages;
+  the script and the widget (no emoji in the script, the data asked for when the picker opens); and
+  api/shout_emoji.php run as a request in a child process — refused with the room off, off for Bootstrap,
+  and, where a Pro package is installed, the faces in the language asked for.
+* `tests/iconpack_test.php` §12 (new), on synthetic packages: an index in the owner's shape and in Font
+  Awesome's own (`icon-families.json` with `categories.yml`) recognised, `index.json` and `emoji.json`
+  beside the package and Verify still clean, a family lacking icons drawing them in classic by knowledge,
+  Free metadata inside a Pro package not trusted; the faces' context and every token case (the default
+  style, a style of its own, a style not loaded, a name that is no face, the faces off, brands, hostile),
+  a line of faces only, the shared renderer and a mail, the picker's data. §11, with the owner's folders:
+  the index read from his own file — 110 and 113 faces, the style sets, Jelly Regular's knowledge held to
+  the file itself.
+* `tests/icons_test.php`: the 183 entries' shapes, `proapprox` only where a Pro twin is drawn and the
+  entry stays `approx`, the item-by-item choices above; the picker's tabs are names in the map; the
+  shoutbox script is no longer the exception to the no-emoji rule — its emoji are data now.
+* `tests/audit_test.php` §4b: the child-process runner takes any admin endpoint; thirteen reads (2FA
+  status, the federation queue's counts and list, the content queue and a row's edits, the tracker mode's
+  status, live peer sync's status and plan, the three previews, the cluster's plan, the purge's count)
+  write no line, and four decisions write theirs — a 2FA change, a federation decision, a content
+  approval in the Content group, a mode change — refused here, as the test sends no password, and logged
+  all the same. `api/admin/ot_apply.php` reads its body with `readJsonBody()`, as its neighbours do, so the
+  runner can reach it.
+* `scratchpad/shots/emoji_picker_check.js` (new, in `browsersweep.sh` after shout_check), under an
+  enforced policy: nothing fetched before the picker opens; Recent, then Unicode's nine pages, every emoji
+  of each (the data file counted, not trusted) and the long ones drawn in slices; the search in English
+  and Polish, without accents, English as the fallback asked for only by a search; the keyboard; the
+  variants held with a mouse and with a finger (touch emulation), a right click and Shift+Enter, the tone
+  remembered and drawn in the grid, a plain click inserting at once, exactly what lands in the box; a
+  posted shout drawing it; on a phone nothing sideways and no keyboard over the picker. Where the owner's
+  Pro folders are: the package installed through the CLI unless it already is, `mixed` and `fa`, a face
+  held for its styles, one posted in Light drawn by that style's font beside one in the default style,
+  the Polish names, then the faces switched off and the same shout showing the emoji each stands for.
+  Settings and groups put back row by row, its shouts deleted, a package it installed deleted with its
+  audit lines. Screenshots `scratchpad/shots1690/emoji-*.png` — those with Pro glyphs untracked with the
+  rest of the scratchpad.
+* `scratchpad/shots/shout_check.js`: the picker loads its data when it opens — the check waits for it,
+  starts from an empty Recent, and expects Recent and Unicode's pages, in order, before the emotes.
+* `scratchpad/shots/icons_check.js` removes its audit lines by id above the log's last one before the
+  run, as `icons_align_check.js` does, not by a window of time, which the mysql client's clock two hours
+  ahead of the app's broke.
+
 ## [1.68.1] — 2026-09-24
 
 No schema change (still 73). Three things the owner found with Font Awesome switched on in production,
