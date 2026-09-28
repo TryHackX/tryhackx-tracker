@@ -403,9 +403,13 @@ function peopleContext(PDO $db, array $cfg, ?array $viewer): array
  *
  * The same sanitizer the public descriptions use, and for the same reason: a message is a stranger's
  * text, and there is exactly one place in this codebase that knows what is safe to let through.
+ *
+ * With `$db`, the site's emotes and stickers too (1.70.0, richtextRenderIn('message')): a sticker at the
+ * room's size, a message being a conversation with one person. The whole thread's emotes are one query.
  */
-function pmRenderBody(string $body, string $format, array $cfg, bool $signedIn = true): string
+function pmRenderBody(string $body, string $format, array $cfg, bool $signedIn = true, ?PDO $db = null): string
 {
+    if (function_exists('richtextRenderIn')) return richtextRenderIn('message', $db, $body, $format, $cfg, $signedIn);
     if (function_exists('richtextRender')) return richtextRender($body, $format, $cfg, $signedIn);
     return nl2br(sanitize($body));
 }

@@ -227,8 +227,16 @@ function profileBioParse(string $s, array $cfg): array
  * changed, restored from a backup or typed into a MySQL client has never been through the endpoint.
  * Lines past the last one allowed are joined with a space rather than dropped, so nothing written is
  * lost from view, only its line breaks.
+ *
+ * THE TOKEN STAGE (1.70.0) — the one addition to the allow-list, and nothing else: the tokens the emoji
+ * picker writes are drawn on the finished text, the way every other renderer draws them — a Font Awesome
+ * icon's `:fa-NAME:` (emojiFaRenderHtml()) and, with `$db`, the site's `:code:` emotes (emoteRenderHtml()
+ * with the `bio` map: a sticker drawn as an emote, a line or two under a name having no room for one).
+ * Both walk the text between tags only, so a link's address keeps its bytes; the characters a reader
+ * sees are still counted as typed (a token counts as its letters — profileBioParse() is unchanged).
+ * The shortcode emoji of descriptions (`:fire:`) are still not here: the picker never writes them.
  */
-function profileBioRender(?string $source, array $cfg): string
+function profileBioRender(?string $source, array $cfg, ?PDO $db = null): string
 {
     $c = profileBioClean((string)$source);
     if ($c === '') return '';
@@ -238,7 +246,18 @@ function profileBioRender(?string $source, array $cfg): string
         $c = implode("\n", array_slice($lines, 0, PROFILE_BIO_MAX_LINES - 1)) . "\n"
            . implode(' ', array_filter(array_slice($lines, PROFILE_BIO_MAX_LINES - 1), fn($l) => $l !== ''));
     }
-    return profileBioParse($c, $cfg)['html'];
+    return profileBioTokens(profileBioParse($c, $cfg)['html'], $cfg, $db);
+}
+
+/** The token stage of profileBioRender(), on its finished HTML: Font Awesome's icons, then the emotes. */
+function profileBioTokens(string $html, array $cfg, ?PDO $db = null): string
+{
+    if ($html === '' || !str_contains($html, ':')) return $html;
+    if (function_exists('emojiFaRenderHtml')) $html = emojiFaRenderHtml($html, $cfg);
+    if ($db !== null && function_exists('emoteMapFor') && function_exists('emoteRenderHtml')) {
+        $html = emoteRenderHtml($html, emoteMapFor($db, $cfg, 'bio'));
+    }
+    return $html;
 }
 
 /**
@@ -286,7 +305,7 @@ function profileBioFor(PDO $db, array $cfg, array $owner): string
     if (trim($src) === '') return '';
     $uid = (int)($owner['id'] ?? 0);
     if ($uid <= 0 || !userIdHasPermission($db, $cfg, $uid, 'profile.bio')) return '';
-    return profileBioRender($src, $cfg);
+    return profileBioRender($src, $cfg, $db);
 }
 
 /** Write it: the cleaned text, or NULL for none. The stamp moves either way. */
@@ -358,7 +377,7 @@ function profileBioSaveRequest(PDO $db, array $cfg, ?array $me, array $input, st
     return ['status' => 200, 'body' => [
         'success' => true,
         // The server's own HTML — the page puts exactly this in place and renders nothing itself.
-        'html'    => $clearing ? '' : profileBioRender($clean, $cfg),
+        'html'    => $clearing ? '' : profileBioRender($clean, $cfg, $db),
         'text'    => $clean,
         'chars'   => (int)$p['chars'],
         'max'     => profileBioMax($cfg),

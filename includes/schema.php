@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 77;  // 77 = Font Awesome's faces in the shoutbox picker (includes/emoji.php): `shout_emoji_fa` ('off' | 'fa' instead of the ordinary emoji | 'mixed' beside them, default off; offered only while a Font Awesome Pro package is the icon source) and `shout_emoji_fa_style` (the faces' default style key, '' = the site's fa_style) — settings only; 76 = which Font Awesome draws the icons: `fa_source` ('cdn6' Free 6.7.2 | 'cdn7' Free 7.3.1 | 'pack', default cdn6), `fa_pack` (an installed package's id, ''), `fa_pack_styles` (JSON list of its extra style files, '[]'), `fa_style` (the style the site's icons use, 'solid') — settings only, packages live on disk in config/iconpacks/; 75 = a member's likes or ratings listed on the account page and the profile (includes/profilevotes.php): users.votes_public (TINYINT, 0 = shown to nobody else until they say so), `profile_votes_enabled` (1; shows nothing while rep_enabled is off), and `rating.public` granted once to the member group (v75_rating_public); 74 = a description on the profile: users.bio (TEXT, the BBCode source as typed) + users.bio_updated_at, `profile_bio_enabled` (1) / `profile_bio_max` (300, clamped 20-1000), and `profile.bio` granted once to the member group (v74_profile_bio); 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
+const TRACKER_SCHEMA_VERSION = 82;  // 82 = a torrent's "who has this" in three sections (includes/who.php): users.votes_listed (0 — the likes' and ratings' twin of fav_listed: may my name and my vote appear there; votes_public is needed as well), `who_votes_enabled` and `who_lists_enabled` (1), and on wl_content_edits KEY idx_edits_wl_status (whitelist_id, status) + KEY idx_edits_hc_status (hash_content_id, status) for the pending count of one description — keys only: the replaced versions already kept are trimmed one description at a time when a proposal on it is applied (contentArchivePrune(), the newest ten kept), never by the migration; 81 = a torrent's description can be deleted, edited and credited (includes/content.php, includes/profiledescs.php): `whitelist.content_credits` / `hash_content.content_credits` (TEXT, the compact JSON credit chain — who wrote it first, who edited it since and by what share; initialised from content_user_id, an author whose account is gone as u=0, and such a dangling author id let go), `wl_content_edits.kind` ENUM('rewrite','edit') DEFAULT 'rewrite' + KEY idx_edits_user, users.content_credit_public (1: names are shown as they always were) and users.descriptions_public (0), `profile_descriptions_enabled` (1), and granted once (v81_content) `content.delete_own` + `content.public` to member and `content.delete_any` to moderator; 80 = a list's description as rich text (includes/lists.php): `user_lists.description` VARCHAR(500) → TEXT (NULL = none; MySQL 5.7 cannot default a TEXT), `user_lists.description_format` ENUM('bbcode','markdown') DEFAULT 'bbcode', the plain descriptions written until now rewritten as BBCode that reads the same (schemaListDescPlainToBbcode(), guarded on the format column's absence, so exactly once), and `lists_desc_max` (the longest description, in characters a reader sees; 1000); 79 = the room's emotes and stickers beyond the room (includes/shout.php, emotesEverywhere()): `emotes_everywhere` (1 = also in messages, torrent descriptions and the proposals that rewrite them, list descriptions and the profile's description; 0 = the room only) — a setting only; the emote store, its approval and its image endpoint are the room's own; 78 = how much of the Font Awesome Pro package the shoutbox picker offers (includes/emoji.php): `shout_emoji_fa_scope` ('faces' the faces only, the default | 'search' the faces and a search that finds every icon | 'all' every icon on the pages of Font Awesome's categories) — a setting only; the catalogue it needs is a file beside the package (config/iconpacks/<id>/catalog.json); 77 = Font Awesome's faces in the shoutbox picker (includes/emoji.php): `shout_emoji_fa` ('off' | 'fa' instead of the ordinary emoji | 'mixed' beside them, default off; offered only while a Font Awesome Pro package is the icon source) and `shout_emoji_fa_style` (the faces' default style key, '' = the site's fa_style) — settings only; 76 = which Font Awesome draws the icons: `fa_source` ('cdn6' Free 6.7.2 | 'cdn7' Free 7.3.1 | 'pack', default cdn6), `fa_pack` (an installed package's id, ''), `fa_pack_styles` (JSON list of its extra style files, '[]'), `fa_style` (the style the site's icons use, 'solid') — settings only, packages live on disk in config/iconpacks/; 75 = a member's likes or ratings listed on the account page and the profile (includes/profilevotes.php): users.votes_public (TINYINT, 0 = shown to nobody else until they say so), `profile_votes_enabled` (1; shows nothing while rep_enabled is off), and `rating.public` granted once to the member group (v75_rating_public); 74 = a description on the profile: users.bio (TEXT, the BBCode source as typed) + users.bio_updated_at, `profile_bio_enabled` (1) / `profile_bio_max` (300, clamped 20-1000), and `profile.bio` granted once to the member group (v74_profile_bio); 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
                                     // 71 = the default permission matrix, a `premium` group and a shop's order book: `user_group_orders` (UNIQUE(client_id, order_id) is what makes a retried purchase webhook grant one month instead of two), the seeded `premium` group (profile.cover + shout.upload_emote, no panel id, so a key may sell it), `member` brought up to the shipped matrix (index.view/index.files/index.magnet/whitelist.add, which its index.files_all grant had been paging without), `profile.cover` taken OFF member — the one removal this project has shipped, and the image is KEPT — and `content.view` added to `moderator`, which had been approving descriptions it could not read
                                     // 70 = "delete this conversation, for me" and two settings: `message_threads`.u_low_cleared_id / u_high_cleared_id (BIGINT UNSIGNED, 0 = nothing deleted — every read path filters `m.id >` the reader's own, so a thread goes for one side and stays whole for the other, and a new message brings it back showing only what came after), plus `shout_order` (top | bottom — which end of the room the newest line is at) and `account_media_side` (left | right — which card of the account page holds Picture and Cover)
                                     // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
@@ -150,6 +150,10 @@ function trackerSchemaStatements(): array {
             `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
             `content_reviewed_at` DATETIME DEFAULT NULL,
             `content_rejected_note` VARCHAR(255) DEFAULT NULL,
+            -- v81: who wrote the words and who edited them since, in order — the credit chain the Info
+            -- panel draws under the description: by A (first), then B (25% edit). Compact JSON written
+            -- only by includes/content.php (contentCreditsEncode()); NULL = nobody credited.
+            `content_credits` TEXT DEFAULT NULL,
             -- 'none' = never asked to prove anything, which is what every row starts as.
             `probe_status` ENUM('none','probing','passed','failed') NOT NULL DEFAULT 'none',
             `probe_started_at` DATETIME DEFAULT NULL,
@@ -511,6 +515,18 @@ function trackerSchemaStatements(): array {
             -- the low stars as well, and somebody happy to publish their favourites has not said yes
             -- to that. 0 like the others: shown to nobody but its owner until they say so.
             `votes_public` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v82, the likes' and ratings' twin of fav_listed (includes/who.php): may my name, with my vote
+            -- beside it, appear in a torrent's “who has this”? Its own question, as fav_listed is beside
+            -- fav_public: somebody who shows their likes on a profile they chose to publish has not said
+            -- yes to being named from every torrent's page. 0 like the others, and both are needed.
+            `votes_listed` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v81, two more (includes/content.php, includes/profiledescs.php). The first is the one
+            -- privacy flag in this table that ships ON, and on purpose: names have always been shown under
+            -- the descriptions people write, and an upgrade must not silently take every name away —
+            -- off, every place that credits this account says 'a member' instead. The second is the
+            -- ordinary kind: may a stranger see the list of descriptions I wrote? No, until I say so.
+            `content_credit_public` TINYINT(1) NOT NULL DEFAULT 1,
+            `descriptions_public` TINYINT(1) NOT NULL DEFAULT 0,
             -- v55. Two answers a moderator can give that are not 'delete the line': silence this
             -- account's MESSAGES until a date, and ban the account until a date. Both are NULL for
             -- everybody, both are a moment rather than a flag, and a moment that has passed needs
@@ -735,6 +751,10 @@ function trackerSchemaStatements(): array {
             `description` MEDIUMTEXT DEFAULT NULL,
             `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode',
             `status` ENUM('pending','applied','rejected') NOT NULL DEFAULT 'pending',
+            -- v81: a REWRITE replaces the author (the proposer becomes it); an EDIT keeps the author and
+            -- credits the proposer beside them with the share of the text it changed, measured when a
+            -- moderator applies it (includes/content.php, contentEditShare()).
+            `kind` ENUM('rewrite','edit') NOT NULL DEFAULT 'rewrite',
             `ip` VARCHAR(45) NOT NULL DEFAULT '',
             `user_id` INT UNSIGNED DEFAULT NULL,
             `note` VARCHAR(255) DEFAULT NULL,
@@ -742,7 +762,14 @@ function trackerSchemaStatements(): array {
             `reviewed_at` DATETIME DEFAULT NULL,
             KEY `idx_edits_status` (`status`, `created_at`),
             KEY `idx_edits_hash` (`info_hash`),
-            KEY `idx_edits_hc` (`hash_content_id`)
+            KEY `idx_edits_hc` (`hash_content_id`),
+            -- v81: a member's own proposals, for their list of descriptions (includes/profiledescs.php)
+            KEY `idx_edits_user` (`user_id`, `created_at`),
+            -- v82: the proposals still waiting on ONE description, counted before a new one is taken
+            -- (wl_edit_max_pending) and withdrawn with a delete — on either home. Without these the count
+            -- read every row the description ever had, the replaced versions kept on apply included.
+            KEY `idx_edits_wl_status` (`whitelist_id`, `status`),
+            KEY `idx_edits_hc_status` (`hash_content_id`, `status`)
         ) $engine",
 
         // ── Words about a torrent the tracker has only SEEN (v58) ─────────
@@ -761,6 +788,8 @@ function trackerSchemaStatements(): array {
             `content_reviewed_at` DATETIME DEFAULT NULL,
             `content_rejected_note` VARCHAR(255) DEFAULT NULL,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            -- v81: the credit chain, as on the whitelist row (see there)
+            `content_credits` TEXT DEFAULT NULL,
             UNIQUE KEY `uq_hc_hash` (`info_hash`),
             KEY `idx_hc_status` (`content_status`, `created_at`)
         ) $engine",
@@ -812,7 +841,11 @@ function trackerSchemaStatements(): array {
             -- the address a public list is reachable at, chosen from the name and kept stable when
             -- the name is edited: a link somebody sent must not stop working because of a rename
             `slug` VARCHAR(90) NOT NULL,
-            `description` VARCHAR(500) NOT NULL DEFAULT '',
+            -- v80: the description as TYPED, in `description_format` (the site's two syntaxes), drawn
+            -- by the description renderer with the room's emotes (listDescRender(), includes/lists.php).
+            -- TEXT, so NULL means none as well as '' — MySQL 5.7 cannot give a TEXT column a default.
+            `description` TEXT DEFAULT NULL,
+            `description_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode',
             -- 0, like every other privacy flag in this schema. A list that ships public is not a
             -- choice anybody made.
             `is_public` TINYINT(1) NOT NULL DEFAULT 0,
@@ -1416,6 +1449,13 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // v75: may a stranger see my likes or ratings — see the CREATE above. 0 for every existing
     // account: an upgrade publishes nobody's votes.
     if (!schemaColumnExists($db, 'users', 'votes_public')) $uparts[] = "ADD COLUMN `votes_public` TINYINT(1) NOT NULL DEFAULT 0";
+    // v82: may my name and my vote appear in a torrent's "who has this" — see the CREATE above. 0 for every
+    // existing account: an upgrade names nobody.
+    if (!schemaColumnExists($db, 'users', 'votes_listed')) $uparts[] = "ADD COLUMN `votes_listed` TINYINT(1) NOT NULL DEFAULT 0";
+    // v81: my name on the descriptions I write (1 for every existing account: names were shown until
+    // now, and an upgrade hides nobody's), and my list of them on my profile (0: shown to nobody else).
+    if (!schemaColumnExists($db, 'users', 'content_credit_public')) $uparts[] = "ADD COLUMN `content_credit_public` TINYINT(1) NOT NULL DEFAULT 1";
+    if (!schemaColumnExists($db, 'users', 'descriptions_public')) $uparts[] = "ADD COLUMN `descriptions_public` TINYINT(1) NOT NULL DEFAULT 0";
     // v52: who may write to me, and may strangers find me by browsing.
     if (!schemaColumnExists($db, 'users', 'pm_who')) $uparts[] = "ADD COLUMN `pm_who` ENUM('all','friends','nobody') DEFAULT NULL";
     if (!schemaColumnExists($db, 'users', 'profile_listed')) $uparts[] = "ADD COLUMN `profile_listed` TINYINT(1) NOT NULL DEFAULT 0";
@@ -1594,6 +1634,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
             `content_reviewed_at` DATETIME DEFAULT NULL,
             `content_rejected_note` VARCHAR(255) DEFAULT NULL,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `content_credits` TEXT DEFAULT NULL,
             UNIQUE KEY `uq_hc_hash` (`info_hash`),
             KEY `idx_hc_status` (`content_status`, `created_at`)
         ) $engine";
@@ -1765,7 +1806,8 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `user_id` INT UNSIGNED NOT NULL,
         `name` VARCHAR(80) NOT NULL,
         `slug` VARCHAR(90) NOT NULL,
-        `description` VARCHAR(500) NOT NULL DEFAULT '',
+        `description` TEXT DEFAULT NULL,
+        `description_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode',
         `is_public` TINYINT(1) NOT NULL DEFAULT 0,
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1783,6 +1825,10 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         KEY `idx_list_added` (`list_id`, `added_at`),
         KEY `idx_item_hash` (`info_hash`)
     ) $engine";
+    // v80: a list's description becomes rich text (1.70.0). The CREATEs carry the new shape for a table
+    // made today; an existing one is brought to it here, its plain texts rewritten as BBCode that reads
+    // the same — schemaListDescMigration() says why the order is what makes it safe to stop anywhere.
+    foreach (schemaListDescMigration($db) as $sql) $out[] = $sql;
 
     // v50: a report can now arrive from a partner's key instead of from the public form, and the
     // queue has to say which. The column is NULLABLE and has no default: every report that exists
@@ -1905,6 +1951,40 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         $wparts[] = "ADD KEY `idx_whitelist_content` (`content_status`, `created_at`)";
     }
     if ($wparts) $out[] = "ALTER TABLE `whitelist` " . implode(', ', $wparts);
+
+    // v81: the credit chain on both homes, the kind of a proposal, and a member's proposals by member
+    // (includes/content.php, includes/profiledescs.php). Here, after the block above, because the
+    // chain is initialised from the content columns that block adds on an old enough install. Same
+    // definitions as the CREATEs.
+    foreach (['whitelist', 'hash_content'] as $ct) {
+        if (!schemaColumnExists($db, $ct, 'content_credits')) $out[] = "ALTER TABLE `$ct` ADD COLUMN `content_credits` TEXT DEFAULT NULL";
+    }
+    $eparts = [];
+    if (!schemaColumnExists($db, 'wl_content_edits', 'kind')) $eparts[] = "ADD COLUMN `kind` ENUM('rewrite','edit') NOT NULL DEFAULT 'rewrite'";
+    if (!schemaIndexExists($db, 'wl_content_edits', 'idx_edits_user')) $eparts[] = "ADD KEY `idx_edits_user` (`user_id`, `created_at`)";
+    if ($eparts) $out[] = "ALTER TABLE `wl_content_edits` " . implode(', ', $eparts);
+    // v82: the pending count of one description, on both homes — see the CREATE above. After the v58 block,
+    // which adds hash_content_id on an old enough install. Keys only: the replaced versions an install
+    // already keeps are NOT deleted here; contentArchivePrune() trims one description at a time, when a
+    // proposal on it is applied (includes/content.php).
+    $kparts = [];
+    if (!schemaIndexExists($db, 'wl_content_edits', 'idx_edits_wl_status')) $kparts[] = "ADD KEY `idx_edits_wl_status` (`whitelist_id`, `status`)";
+    if (!schemaIndexExists($db, 'wl_content_edits', 'idx_edits_hc_status')) $kparts[] = "ADD KEY `idx_edits_hc_status` (`hash_content_id`, `status`)";
+    if ($kparts) $out[] = "ALTER TABLE `wl_content_edits` " . implode(', ', $kparts);
+    // Every described row that has an author and no chain starts one: that author, as the first — or,
+    // where their account is already gone, "a deleted account" (u = 0). The text is exactly what
+    // contentCreditsEncode() writes for such a chain, so the member search (a LIKE on it) finds these
+    // too. Only NULL chains, so it is idempotent and runs harmlessly at every later bump; after it, an
+    // author id that names no account is let go (the next account MySQL 5.7 hands the same id after a
+    // restart must not become the author of record of somebody else's words).
+    foreach (['whitelist', 'hash_content'] as $ct) {
+        $out[] = "UPDATE `$ct` t LEFT JOIN `users` u ON u.id = t.content_user_id
+                     SET t.content_credits = CONCAT('[{\"u\":', IF(u.id IS NULL, 0, t.content_user_id), ',\"k\":\"f\",\"t\":',
+                                                    UNIX_TIMESTAMP(COALESCE(t.content_reviewed_at, t.created_at)), '}]')
+                   WHERE t.content_credits IS NULL AND t.content_user_id > 0 AND t.content_status <> 'none'";
+        $out[] = "UPDATE `$ct` t LEFT JOIN `users` u ON u.id = t.content_user_id SET t.content_user_id = NULL
+                   WHERE t.content_user_id IS NOT NULL AND u.id IS NULL";
+    }
 
     // v21: the rating totals, kept on the row. A listing that showed a score for fifty rows would
     // otherwise be fifty aggregate queries, and this project has already been bitten once by a
@@ -2328,6 +2408,18 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     // NOTHING: the list belongs to an account. ONCE: an operator who takes it away keeps it away.
     schemaGrantOnce($db, 'v75_rating_public', [
         'member' => ['rating.public'],
+    ]);
+
+    // v81: descriptions (includes/content.php, includes/profiledescs.php). Members may delete a
+    // description they are the author of, and may let the list of descriptions they wrote be shown on
+    // their profile — `content.public` is a grant about what others may SEE, read with
+    // userIdHasGrantedPermission() like rating.public above, and the member's own
+    // users.descriptions_public still has to say yes. Deleting ANYBODY's published description is the
+    // moderator's, and only the moderator's. GUEST GETS NOTHING. ONCE: an operator who takes any of
+    // them away afterwards keeps it away.
+    schemaGrantOnce($db, 'v81_content', [
+        'member'    => ['content.delete_own', 'content.public'],
+        'moderator' => ['content.delete_any'],
     ]);
 
     // `shout_order` back to 'bottom' where it says 'top'. Changing the DEFAULT does nothing to a row
@@ -2840,6 +2932,10 @@ function trackerSchemaDefaultSettings(): array {
         'lists_public_enabled'        => '0',   // may any list be public at all
         'lists_max_per_user'          => '20',  // clamped [1, 200]
         'lists_max_items'             => '500', // rows in one list; clamped [10, 5000]
+        // v80 (1.70.0): the longest description a list may have, in the characters a READER sees —
+        // the words, not the tags (listDescVisible(), includes/lists.php); clamped [50, 5000]. The text
+        // as typed may be four times that, and never more than 16 000 characters.
+        'lists_desc_max'              => '1000',
         // What the janitor does with a hash somebody kept: off | forever | extend (see
         // indexKeepSavedClause()). 'off' by default — the lifecycle an install already has is not
         // something to change under an operator who has not asked.
@@ -2941,6 +3037,13 @@ function trackerSchemaDefaultSettings(): array {
         // switched off and shows in the manager's waiting queue; the panel's own never waits, and
         // with this off the behaviour is what it was in 1.59.0 — visible to everybody at once.
         'shout_emote_approval'        => '1',
+        // ── The emotes beyond the room (v79, 1.70.0) ────────────────────────────────────────────
+        // ON: the owner asked for them in messages, torrent descriptions (and the proposals that
+        // rewrite them), list descriptions and the profile's description, and every one of those
+        // needs the room's emotes on as well — this is their store (emotesEverywhere(), includes/
+        // shout.php). Off, a `:code:` there is the text it was typed as and those pickers offer none;
+        // the room is not affected either way.
+        'emotes_everywhere'           => '1',
         // ── The room in the navigation, a guest's own cadence, and the site's own lines (v66) ──
         // All three off or conservative, like everything new here. `shout_nav` puts a Shoutbox link
         // in the bar with a counter of its OWN — never folded into the account badge, which means
@@ -2966,6 +3069,13 @@ function trackerSchemaDefaultSettings(): array {
         // in by default: '' follows the site's own fa_style.
         'shout_emoji_fa'              => 'off',
         'shout_emoji_fa_style'        => '',
+        // ── How much of the package the picker offers (v78) ──────────────────────────────────────
+        // 'faces': the faces and nothing more, as 1.69.0 had it (and what anything else reads as);
+        // 'search': the faces, and a search box that finds every icon of the package; 'all': every
+        // icon, on the pages of Font Awesome's own categories. How the picker OFFERS icons, not what
+        // a stored message may show: a :fa-NAME: token for any icon of the package is drawn whatever
+        // this says. The two wider ones need the package's index (its catalogue is built from it).
+        'shout_emoji_fa_scope'        => 'faces',
         // ── The address the room answers on (v67) ───────────────────────────────────────────────
         // The action name, so an operator who calls the thing a chat can have `?action=chat`. It
         // ships as the literal it has always been, which is what makes this setting invisible until
@@ -3028,6 +3138,18 @@ function trackerSchemaDefaultSettings(): array {
         // anywhere while `rep_enabled` is off, and another member's list only with their group's
         // `rating.public` and their own users.votes_public — which is where the privacy lives.
         'profile_votes_enabled'       => '1',
+        // ── "Who has this" beyond the favourites (v82, includes/who.php) ─────────────────────────
+        // ON, like the two features they belong to: a section shows nothing until the feature under it
+        // is on (ratings and the likes on profiles; public lists), nobody is named among the likes until
+        // they tick users.votes_listed (0) as well as votes_public, and a list is exactly as public there
+        // as it already is on its owner's profile.
+        'who_votes_enabled'           => '1',
+        'who_lists_enabled'           => '1',
+        // ── The descriptions a member wrote, on the profile (v81, includes/profiledescs.php) ─────
+        // ON, as the likes above: it shows nothing anywhere while descriptions and source links are
+        // both off, and another member's list only with their group's `content.public`, their own
+        // users.descriptions_public (0 until they say so) and their name shown on their descriptions.
+        'profile_descriptions_enabled' => '1',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a
@@ -3134,6 +3256,64 @@ function schemaIndexExists(PDO $db, string $table, string $index): bool {
     $st = $db->prepare("SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1");
     $st->execute([$table, $index]);
     return (bool)$st->fetchColumn();
+}
+
+/**
+ * v80 (1.70.0): an existing `user_lists` brought to the rich-text shape — the statements, in order, or
+ * none when the table already has it (or is not there: the CREATE list then makes it new-shaped).
+ *
+ * Guarded on the ABSENCE of `description_format`, not on a marker. That column is what makes a
+ * description anything but plain text, so while it is missing every stored description is known to be
+ * the plain text the old `describe` op kept — and the step runs exactly then, never over a text somebody
+ * has since written as BBCode (a marker is wiped by the local bootstrap, and a second run of an escape
+ * over real markup would take the markup away). The ORDER is what makes every stopping point safe:
+ *   1. the column becomes TEXT — the rewritten text can be longer than the 500 it was cut to;
+ *   2. each non-empty description is rewritten as BBCode that reads the same (schemaListDescPlainToBbcode()),
+ *      `updated_at` held where it was, so no list moves on anybody's shelf;
+ *   3. only then the format column arrives — and with it the first chance to store real markup.
+ * A run that stops after 1 or 2 finds the format column still missing and does it again: 1 is the same
+ * definition, and 2 is idempotent (its output has nothing left to escape).
+ *
+ * $table is for tests/lists_test.php, which walks this upgrade on a scratch table of the old shape.
+ */
+function schemaListDescMigration(PDO $db, string $table = 'user_lists'): array {
+    if (!preg_match('/^[a-z0-9_]{1,64}$/', $table)) return [];
+    if (!schemaTableExists($db, $table) || schemaColumnExists($db, $table, 'description_format')) return [];
+    $out = ["ALTER TABLE `$table` MODIFY COLUMN `description` TEXT DEFAULT NULL"];
+    $rows = $db->query("SELECT `id`, `description` FROM `$table` WHERE `description` IS NOT NULL AND `description` <> ''")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $r) {
+        $was = (string)$r['description'];
+        $now = schemaListDescPlainToBbcode($was);
+        if ($now !== $was) {
+            $out[] = "UPDATE `$table` SET `description` = " . $db->quote($now) . ", `updated_at` = `updated_at` WHERE `id` = " . (int)$r['id'];
+        }
+    }
+    $out[] = "ALTER TABLE `$table` ADD COLUMN `description_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode'";
+    return $out;
+}
+
+/**
+ * A plain text as BBCode that READS THE SAME (v80) — what a list's description was until 1.70.0 (the old
+ * `describe` op kept whatever it was given, and the card showed it with textContent), made safe to hand
+ * to the description renderer, where it would otherwise have become markup by accident: `[b]` bold,
+ * `:fire:` an emoji, `:fa-rocket:` an icon, `:flame:` an emote, a pasted address a link.
+ *
+ * The site's BBCode has no escape, so this is the one it can have: U+2060 WORD JOINER, which draws
+ * nothing and joins what is on either side of it, put where each of those rules would begin — after a
+ * `[` that opens something tag-shaped (a letter, `/` or `*`: every tag the renderer knows, `[hide]`
+ * included), after a `:` that opens something token-shaped (`:` + the tokens' own letters + `:` — the
+ * shortcodes, Font Awesome's `:fa-…:` and the emotes), and between `http(s)` and `://` (the bare-address
+ * linker). The words, their line breaks and any HTML (the renderer escapes that anyway) stay as they
+ * were; the C0 control characters but tab and the line breaks go — they are no text, and three of them
+ * are the renderer's own placeholders. Byte-safe (every pattern is ASCII), and idempotent: its output
+ * has no such place left, so a second run changes nothing.
+ */
+function schemaListDescPlainToBbcode(string $plain): string {
+    $wj = "\u{2060}";
+    $s = (string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $plain);
+    $s = (string)preg_replace('/\[(?=\/?[A-Za-z*])/', '[' . $wj, $s);
+    $s = (string)preg_replace('/:(?=[a-z0-9_+\/-]+:)/', ':' . $wj, $s);
+    return (string)preg_replace('/(https?)(?=:\/\/)/i', '$1' . $wj, $s);
 }
 
 /**

@@ -138,9 +138,33 @@
     }
 
     /**
+     * Move the window NOW, whatever the stylesheet says about scrolling.
+     *
+     * Bootstrap's reboot gives the panel `scroll-behavior: smooth` on :root, which turns every bare
+     * scrollTo() / scrollBy() into an animation — and the restore below scrolls up to the whole
+     * length of Settings and then corrects itself on every change of height, so after a reload the
+     * reader watched the page glide towards their place for about 1.8 s (1.70.0). A place kept is a
+     * place you are already at. `behavior: 'instant'` says so for these calls alone, so smooth
+     * scrolling everywhere else is left as it is. A browser that does not know the word throws on the
+     * options object; for that one the rule is lifted from <html> for the length of the call.
+     */
+    function jump(method, top) {        // method: 'scrollBy' or 'scrollTo'
+        try {
+            window[method]({ top: top, left: 0, behavior: 'instant' });
+            return;
+        } catch (e) { /* an older ScrollBehavior without 'instant': below */ }
+        var root = document.documentElement, was = root.style.scrollBehavior;
+        root.style.scrollBehavior = 'auto';
+        window[method](0, top);
+        root.style.scrollBehavior = was;
+    }
+
+    /**
      * Put the reader back where they were, and KEEP putting them back while the page is still
      * changing height. One shot at DOMContentLoaded is what made the old version land beside the
      * mark: at that moment the settings search has not filtered yet and the panel's tables are empty.
+     * Every move is a jump (see jump()): the loop corrects a page that is still growing, and a
+     * correction that animated was a page that never stood still.
      */
     function restorePlace(place, settleMs) {
         var settle = settleMs || SETTLE_MS;
@@ -179,11 +203,11 @@
                 var el = resolve(place.anchor);
                 if (el) {
                     var delta = el.getBoundingClientRect().top - place.top;
-                    if (Math.abs(delta) > 0.5) window.scrollBy(0, delta);
+                    if (Math.abs(delta) > 0.5) jump('scrollBy', delta);
                     return;
                 }
             }
-            window.scrollTo(0, place.y || 0);   // the element is gone: the pixel is all we have left
+            jump('scrollTo', place.y || 0);   // the element is gone: the pixel is all we have left
         };
         apply();
         if (window.ResizeObserver) {

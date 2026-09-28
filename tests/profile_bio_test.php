@@ -515,10 +515,68 @@ $j = $run('admin/user_bio', 'api/admin/user_bio.php', ['op' => 'wipe', 'id' => $
 check('an unknown operation is refused', !empty($j['error']) && empty($j['success']), json_encode($j));
 check('profileBioClear() answers whether it cleared anything', profileBioClear($db, $bobId) === false);
 $fu = $src('api/admin/fetch_users.php');
-check('the user list carries the rendered description for the edit modal, made by the profile\'s own function',
-      str_contains($fu, "\$r['bio_html'] = \$bioSrc !== '' ? profileBioRender(\$bioSrc, \$cfg) : '';") && str_contains($fu, 'unset($r[\'avatar_sha\'], $r[\'cover_sha\'], $r[\'bio\']);'));
+check('the user list carries the rendered description for the edit modal, made by the profile\'s own function (1.70.0: with the database, for its emotes)',
+      str_contains($fu, "\$r['bio_html'] = \$bioSrc !== '' ? profileBioRender(\$bioSrc, \$cfg, \$db) : '';") && str_contains($fu, 'unset($r[\'avatar_sha\'], $r[\'cover_sha\'], $r[\'bio\']);'));
 $ut = $src('templates/admin/users.php');
 check('the edit modal has the description and a Clear with a Bootstrap icon', str_contains($ut, 'id="ue-bio"') && str_contains($ut, 'id="ue-bio-clear"><i class="bi bi-eraser"></i>'));
+
+/* ══ 9. the token stage (1.70.0): what the emoji picker writes is drawn — and nothing else is added ══
+ * The owner asked for the emoji and the emotes in the profile's description too. The five tags are
+ * unchanged; the only addition is the stage every other renderer has: a Font Awesome icon's `:fa-NAME:`
+ * and the site's `:code:` emotes, drawn on the finished text (profileBioTokens()). A sticker is drawn as
+ * an emote here — a line or two under a name. */
+require_once $root . '/includes/shout.php';
+$db->exec("DELETE FROM shout_emotes WHERE code LIKE 'pbtok%'");
+$tokSvg = fn(string $t): string => '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect width="24" height="24" fill="#246"/><title>' . $t . '</title></svg>';
+$cfgTok = array_merge($cfgOn, ['shout_enabled' => '1', 'shout_emotes_enabled' => '1', 'shout_stickers_enabled' => '1', 'emotes_everywhere' => '1',
+                                'shout_emote_approval' => '1', 'icon_library' => 'bootstrap', 'shout_emoji_fa' => 'off']);
+try {
+    $e1 = shoutEmoteStore($db, $cfgTok, 'pbtok_hi', 'Pb token hi', $tokSvg('pbtok hi'), null, false);
+    $e2 = shoutEmoteStore($db, $cfgTok, 'pbtok_big', 'Pb token big', $tokSvg('pbtok big'), null, true);
+    $e3 = shoutEmoteStore($db, $cfgTok, 'pbtok_wait', 'Pb token wait', $tokSvg('pbtok wait'), $aliceId, false);
+    shoutEmotesInvalidate();
+    check('1.70.0 the fixtures: an emote and a sticker of the site\'s, and a member\'s still waiting',
+          !empty($e1['ok']) && !empty($e2['ok']) && !empty($e3['ok']) && !empty($e3['pending']), json_encode([$e1['error'] ?? null, $e2['error'] ?? null, $e3['error'] ?? null]));
+    $grinEmoji = emojiFaFaces()['faces']['face-grin'][1] ?? '';
+    $tok = profileBioRender("[b]hi[/b] :pbtok_hi: :pbtok_big: :pbtok_wait: :fa-face-grin: :fire:", $cfgTok, $db);
+    check('an emote is a picture of the room\'s endpoint, a sticker drawn as an emote, a waiting one text; a face its ordinary emoji with Font Awesome off; :fire: stays text',
+          preg_match('#<strong>hi</strong> <img class="rt-emote" src="[^"]*api\.php\?endpoint=shout_emote&amp;id=\d+&amp;v=[0-9a-f]+" alt=":pbtok_hi:" title="Pb token hi"#', $tok) === 1
+          && preg_match('#<img class="rt-emote"[^>]* alt=":pbtok_big:"#', $tok) === 1 && !str_contains($tok, 'rt-sticker')
+          && str_contains($tok, ':pbtok_wait:') && $grinEmoji !== '' && str_contains($tok, $grinEmoji) && !str_contains($tok, ':fa-face-grin:') && str_contains($tok, ':fire:'), $tok);
+    check('… without the database the emotes are text (the Font Awesome stage needs none)',
+          !str_contains(profileBioRender(':pbtok_hi: :fa-face-grin:', $cfgTok), '<img') && str_contains(profileBioRender(':pbtok_hi: :fa-face-grin:', $cfgTok), $grinEmoji));
+    check('… and with `emotes_everywhere` off, text too — the profile follows the switch',
+          !str_contains(profileBioRender(':pbtok_hi:', array_merge($cfgTok, ['emotes_everywhere' => '0']), $db), '<img'));
+    $inLink = profileBioRender('[url=https://example.org/:pbtok_hi:/]go[/url] [url=https://example.org]:pbtok_hi:[/url]', $cfgTok, $db);
+    check('an address keeps its bytes; an emote as a link\'s words is a picture inside the link',
+          str_contains($inLink, 'href="https://example.org/:pbtok_hi:/"') && preg_match('#<a href="https://example.org"[^>]*><img class="rt-emote"[^>]*></a>#', $inLink) === 1, $inLink);
+    check('the count is unchanged: a token counts as the characters it is typed as',
+          profileBioParse(profileBioClean(':pbtok_hi:'), $cfgTok)['chars'] === 10);
+    $domT = new DOMDocument();
+    @$domT->loadHTML('<?xml encoding="UTF-8"><div id="root">' . profileBioRender(implode("\n", [':pbtok_hi: :pbtok_big:', '[url=https://example.org]:pbtok_hi:[/url]', '<img src=x> :pbtok_hi:']), $cfgTok, $db) . '</div>', LIBXML_NOERROR | LIBXML_NOWARNING);
+    $badT = [];
+    foreach ((new DOMXPath($domT))->query('//div[@id="root"]//*') as $el) {
+        if (!in_array($el->nodeName, ['strong', 'em', 'u', 's', 'a', 'br', 'img'], true)) $badT[] = $el->nodeName;
+        foreach ($el->attributes as $at) {
+            $okAttr = $el->nodeName === 'img' ? in_array($at->name, ['class', 'src', 'alt', 'title', 'loading', 'decoding', 'width', 'height'], true)
+                                              : ($el->nodeName === 'a' && in_array($at->name, ['href', 'rel', 'target', 'data-external'], true));
+            if (!$okAttr) $badT[] = $el->nodeName . '@' . $at->name;
+        }
+        if ($el->nodeName === 'img' && ($el->getAttribute('class') !== 'rt-emote' || !str_contains($el->getAttribute('src'), 'endpoint=shout_emote'))) $badT[] = 'img:' . $el->getAttribute('class');
+    }
+    check('read through a DOM: the five tags, and only the picker\'s pictures added — rt-emote, the room\'s endpoint, nothing else',
+          $badT === [], implode(', ', array_unique($badT)));
+    check('the page and the endpoint draw it with the database (profileBioFor(), the save\'s answer)',
+          str_contains($src('includes/profilebio.php'), 'return profileBioRender($src, $cfg, $db);')
+          && str_contains($src('includes/profilebio.php'), "'html'    => \$clearing ? '' : profileBioRender(\$clean, \$cfg, \$db),"));
+    check('the editor has the picker: its button is the sixth, and the page tells it what this reader may use (no stickers)',
+          str_contains($src('assets/js/profile-bio.js'), "window.EmojiPicker.attach({ textarea: ta, button: emojiBtn, data: root.dataset })")
+          && str_contains($src('templates/pages/profile.php'), "emojiPickerAttrs(emojiPickerData(\$db, \$cfg, \$baseUrl, 'bio'))")
+          && emoteStickerMode('bio', $cfgTok) === 'emote');
+} finally {
+    $db->exec("DELETE FROM shout_emotes WHERE code LIKE 'pbtok%'");
+    shoutEmotesInvalidate();
+}
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

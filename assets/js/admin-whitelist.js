@@ -402,9 +402,17 @@
      */
     function rvBy(row) {
         const span = el('span', { className: 'wl-small text-muted' });
-        if (typeof window.userAvatarPhrase !== 'function') { span.textContent = t('js.wl.rv_by', {user: row.author}); return span; }
-        const pic = window.userAvatarImg({ username: row.author, avatar: String(row.author_avatar || '') }, 20, 'avatar rv-av');
-        span.appendChild(window.userAvatarPhrase(t('js.wl.rv_by', {user: window.userAvatarSlot(0)}), [[pic, row.author]]));
+        if (typeof window.userAvatarPhrase !== 'function') span.textContent = t('js.wl.rv_by', {user: row.author});
+        else {
+            const pic = window.userAvatarImg({ username: row.author, avatar: String(row.author_avatar || '') }, 20, 'avatar rv-av');
+            span.appendChild(window.userAvatarPhrase(t('js.wl.rv_by', {user: window.userAvatarSlot(0)}), [[pic, row.author]]));
+        }
+        // 1.70.0: the member hides their name on descriptions — the public pages say "a member"; the
+        // panel still shows who it is (moderating somebody is not showing them), and says so.
+        if (row.author_hidden) {
+            span.appendChild(document.createTextNode(' '));
+            span.appendChild(el('span', { className: 'wl-badge wl-b-muted rv-name-hidden', title: t('js.wl.name_hidden_title'), text: t('js.wl.name_hidden') }));
+        }
         return span;
     }
 
@@ -530,11 +538,18 @@
     }
 
     function editCard(row) {
-        const card = el('div', { className: 'rv-card rv-st-wait' });
+        // 1.70.0: a proposal is a REWRITE (applied, its proposer becomes the author) or an EDIT (applied, the
+        // author stays and the proposer is credited with the share of the text it changes). An edit of a
+        // description that has since been cleared goes in as a rewrite would, and the card says so.
+        const isEdit = row.edit_kind === 'edit' && !row.as_rewrite;
+        const card = el('div', { className: 'rv-card rv-st-wait' + (isEdit ? ' rv-kind-edit' : ' rv-kind-rewrite') });
         card.appendChild(el('div', { className: 'rv-head' }, [
             el('div', { className: 'rv-title' }, [
-                el('span', { className: 'rv-state', title: t('js.wl.rewrite_title') },
-                   [el('i', { className: 'bi bi-pencil-square' }), ' ' + t('js.wl.rewrite')]),
+                isEdit
+                    ? el('span', { className: 'rv-state rv-state-edit', title: t('js.wl.edit_kind_title') },
+                         [el('i', { className: 'bi bi-pencil' }), ' ' + t('js.wl.edit_kind')])
+                    : el('span', { className: 'rv-state', title: t('js.wl.rewrite_title') },
+                         [el('i', { className: 'bi bi-pencil-square' }), ' ' + t('js.wl.rewrite')]),
                 el('strong', { className: 'rv-name', text: row.name || t('js.wl.no_name_yet') }),
             ]),
             el('div', { className: 'rv-meta' }, [
@@ -544,6 +559,14 @@
                 row.author ? rvBy(row) : '',
                 row.kind === 'idx' ? el('span', { className: 'wl-badge wl-b-warn', text: t('js.wl.rv_index_only') }) : '',
             ]),
+        ]));
+        // What applying it now does to the credits, measured against the text as it stands.
+        card.appendChild(el('div', { className: 'rv-kind-line wl-small' }, [
+            isEdit
+                ? el('span', { className: 'rv-share', text: t('js.wl.edit_share', { pct: row.share }) })
+                : el('span', { className: 'text-muted', text: row.edit_kind === 'edit' ? t('js.wl.edit_as_rewrite') : t('js.wl.rewrite_line') }),
+            isEdit && row.cur_author
+                ? el('span', { className: 'text-muted', text: ' ' + t('js.wl.edit_author_stays', { user: row.cur_author }) }) : '',
         ]));
 
         // Side by side, both rendered. A rewrite that reads tamer in source and worse on screen is
@@ -575,8 +598,8 @@
             title: t('js.wl.apply_title') },
             [el('i', { className: 'bi bi-check-lg' }), ' ' + t('js.wl.apply')]);
         ok.addEventListener('click', async () => {
-            if (!await confirmAction(t('js.wl.apply_rewrite_title'),
-                t('js.wl.apply_rewrite_body'),
+            if (!await confirmAction(isEdit ? t('js.wl.apply_edit_title') : t('js.wl.apply_rewrite_title'),
+                isEdit ? t('js.wl.apply_edit_body', { pct: row.share }) : t('js.wl.apply_rewrite_body'),
                 { code: row.info_hash, after: t('js.wl.apply_rewrite_after'), okLabel: t('js.wl.apply') })) return;
             const r = await apiCall('admin/wl_content', 'POST', { op: 'edit_apply', id: row.id });
             showToast((r && (r.message || r.error)) || t('js.wl.failed'), r && r.success ? 'success' : 'error');

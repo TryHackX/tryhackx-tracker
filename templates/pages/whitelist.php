@@ -220,6 +220,9 @@ if ($wlSched) {
                         <button type="button" data-md="center" title="<?= _h('rt.center') ?>"><i class="bi bi-text-center" aria-hidden="true"></i></button>
                         <button type="button" data-md="hr" title="<?= _h('rt.hr') ?>"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
                     </span>
+                    <?php /* The emoji, the emotes and the stickers (1.70.0): the picker every editor has,
+                             at the end of the rail, with what this reader may use in a description. */ ?>
+                    <?= function_exists('emojiPickerButton') ? emojiPickerButton($db, $cfg, $baseUrl, 'description', 'wl-desc-emoji') : '' ?>
                 </div>
                 <textarea id="wl-desc" name="description" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
                 <div class="rt-preview rt-body" id="wl-desc-preview" hidden></div>
@@ -234,6 +237,8 @@ if ($wlSched) {
         <?php if ($wlReview): ?>
         <p class="form-hint"><?= __('whitelist.review_note') ?></p>
         <?php endif; ?>
+        <?php /* 1.70.0: that a description is public, and whether this reader's name goes with it. */ ?>
+        <p class="form-hint wl-desc-public" id="wl-desc-public"><?= contentPublicLine($wlMe, $baseUrl) ?></p>
     </div>
 <?php endif; ?>
     <div class="form-center">

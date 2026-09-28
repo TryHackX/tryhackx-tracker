@@ -66,10 +66,12 @@ add('a.wl', {
     'rv_edits_head':    ('Proposed rewrites', 'Proponowane poprawki'),
     'rv_edits_note':    ('Someone has suggested different wording for a description that is already published. '
                          '<strong>Nothing changes until you apply one</strong> &mdash; and applying keeps the '
-                         'version it replaces, so an accepted rewrite can be undone by accepting the old text back.',
+                         'version it replaces in the database (the newest ten of each description), though nothing '
+                         'here puts one back: an old text returns only by being proposed again.',
                          'Ktoś zaproponował inne brzmienie opisu, który jest już opublikowany. <strong>Nic się nie '
                          'zmienia, dopóki którejś nie zatwierdzisz</strong> &mdash; a zatwierdzenie zachowuje '
-                         'zastąpioną wersję, więc przyjętą poprawkę można cofnąć, przyjmując z powrotem stary tekst.'),
+                         'zastąpioną wersję w bazie danych (dziesięć najnowszych każdego opisu), choć nic tutaj jej '
+                         'nie przywraca: stary tekst wraca tylko wtedy, gdy ktoś zaproponuje go ponownie.'),
 
     # ── whitelist toolbar ───────────────────────────────────────────────────
     'wl_search_ph':     ('Search hash prefix, IP, name...', 'Szukaj prefiksu hasha, IP, nazwy...'),

@@ -241,7 +241,7 @@ if ((string)($_GET['poll'] ?? '') === '1') {
         'rows'      => array_map(static fn($m) => [
             'id'      => (int)$m['id'],
             'mine'    => (int)$m['sender_id'] === $uid,
-            'html'    => pmRenderBody((string)$m['body'], (string)$m['body_format'], $cfg),
+            'html'    => pmRenderBody((string)$m['body'], (string)$m['body_format'], $cfg, true, $db),
             'created' => (string)$m['created_at'],
             'read'    => $m['read_at'] !== null,
             'reported' => (int)$m['reported'] === 1,
@@ -289,7 +289,7 @@ if ($with !== '') {
         $rows[] = [
             'id'       => (int)$m['id'],
             'mine'     => (int)$m['sender_id'] === $uid,
-            'html'     => pmRenderBody((string)$m['body'], (string)$m['body_format'], $cfg),
+            'html'     => pmRenderBody((string)$m['body'], (string)$m['body_format'], $cfg, true, $db),
             'created'  => (string)$m['created_at'],
             'read'     => $m['read_at'] !== null,
             'reported' => (int)$m['reported'] === 1,

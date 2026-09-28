@@ -44,6 +44,8 @@ $allowed = [
     // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
     'fav_enabled', 'fav_max_per_user', 'fav_public_enabled', 'fav_who_enabled', 'profiles_enabled',
     'lists_enabled', 'lists_public_enabled', 'lists_max_per_user', 'lists_max_items',
+    // a list's description, in characters a reader sees (1.70.0, includes/lists.php)
+    'lists_desc_max',
     'index_keep_saved', 'index_keep_saved_days',
     'digest_enabled', 'digest_to', 'digest_hours', 'digest_min', 'health_token',
     'user_2fa_enabled', 'user_2fa_required',
@@ -56,11 +58,12 @@ $allowed = [
     'shout_format', 'shout_rules',
     // the two windows on a member's own line (1.66.0)
     'shout_edit_minutes', 'shout_delete_own_minutes',
-    // its emotes and stickers (1.59.0)
+    // its emotes and stickers (1.59.0), and the same emotes in messages and descriptions (1.70.0)
     'shout_emotes_enabled', 'shout_emote_max_kb', 'shout_emote_max_px', 'shout_emote_per_user',
-    'shout_stickers_enabled', 'shout_emote_approval',
-    // Font Awesome's faces in its picker, and the style they are drawn in (1.69.0, includes/emoji.php)
-    'shout_emoji_fa', 'shout_emoji_fa_style',
+    'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',
+    // Font Awesome's faces in its picker, and the style they are drawn in (1.69.0, includes/emoji.php),
+    // and how much more of the package the picker offers (1.70.0)
+    'shout_emoji_fa', 'shout_emoji_fa_style', 'shout_emoji_fa_scope',
     // in the navigation, a cadence of its own for guests, and the site's own lines (1.60.0)
     'shout_nav', 'shout_live_seconds_guest', 'shout_system_lines',
     // the action name the room answers on (1.61.0)
@@ -75,6 +78,10 @@ $allowed = [
     'profile_bio_enabled', 'profile_bio_max',
     // a member's likes or ratings on the profile (1.69.0, includes/profilevotes.php)
     'profile_votes_enabled',
+    // the descriptions a member wrote, on the profile (1.70.0, includes/profiledescs.php)
+    'profile_descriptions_enabled',
+    // "who has this": its likes / ratings and its lists sections (1.70.0, includes/who.php)
+    'who_votes_enabled', 'who_lists_enabled',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
@@ -362,6 +369,8 @@ $intClamp = [
     // Lists (v51). The same shape as fav_max_per_user: a ceiling that keeps one person's collection
     // from becoming everybody's query cost, clamped rather than refused.
     'lists_max_per_user' => [1, 200, 20], 'lists_max_items' => [10, 5000, 500],
+    // A list's description, counted as a reader sees it (1.70.0) — the ceilings are includes/lists.php's.
+    'lists_desc_max' => [LIST_DESC_MAX_MIN, LIST_DESC_MAX_MAX, LIST_DESC_MAX_DEFAULT],
     'fav_max_per_user' => [10, 5000, 500], 'auth_bridge_ttl' => [30, 900, 120],
     'pm_max_per_day' => [1, 1000, 50], 'pm_max_chars' => [200, 20000, 4000],
     'index_keep_saved_days' => [1, 3650, 90],
@@ -460,8 +469,9 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
-          'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval',
-          'shout_nav', 'shout_system_lines', 'profile_votes_enabled', 'avatars_enabled', 'covers_enabled', 'profile_bio_enabled'] as $k) {
+          'who_votes_enabled', 'who_lists_enabled',
+          'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',
+          'profile_descriptions_enabled', 'shout_nav', 'shout_system_lines', 'profile_votes_enabled', 'avatars_enabled', 'covers_enabled', 'profile_bio_enabled'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
 }
 // ── The shoutbox ──
@@ -483,6 +493,11 @@ if (isset($data['shout_order']) && !in_array($data['shout_order'], ['top', 'bott
 // above by iconSettingsNormalise()), brands never; anything else is '' — the site's own style.
 if (isset($data['shout_emoji_fa']) && !in_array($data['shout_emoji_fa'], EMOJI_FA_MODES, true)) {
     $data['shout_emoji_fa'] = 'off';
+}
+// How much of the package the picker offers (1.70.0): the same kind of closed set; anything else is
+// the faces alone, which is what the picker had before it.
+if (isset($data['shout_emoji_fa_scope']) && !in_array($data['shout_emoji_fa_scope'], EMOJI_FA_SCOPES, true)) {
+    $data['shout_emoji_fa_scope'] = 'faces';
 }
 if (isset($data['shout_emoji_fa_style'])) {
     $v = (string)$data['shout_emoji_fa_style'];

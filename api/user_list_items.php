@@ -229,8 +229,14 @@ unset($row);
 
 jsonResponse([
     'success'  => true,
+    // The description drawn (1.70.0): the server's own HTML — the description renderer, the room's emotes,
+    // no picture from elsewhere (listDescRender()) — which the list's window puts under the name as it is.
+    // Behind every gate above: a reader who gets the rows gets the words, and nobody else gets either.
     'list'     => ['id' => (int)$list['id'], 'name' => (string)$list['name'], 'slug' => (string)$list['slug'],
-                   'description' => (string)$list['description'], 'is_public' => (int)$list['is_public'] === 1,
+                   'description' => (string)($list['description'] ?? ''),
+                   'description_format' => listDescFormatOf($list['description_format'] ?? null),
+                   'description_html' => listDescRender($db, $cfg, $list['description'] ?? '', $list['description_format'] ?? null),
+                   'is_public' => (int)$list['is_public'] === 1,
                    'owner' => (string)$list['username'], 'own' => $isOwn],
     'rows'     => $slice,
     'total'    => $total,

@@ -89,6 +89,15 @@ function userPermissionList(): array {
         // signed-in readers. With accounts switched off the legacy fallback answers true for every
         // content.* id, so nothing changes on an install that never had groups.
         'content.view'    => 'See published descriptions and source links in the Info panel',
+        // v81 (includes/content.php). Taking words down is two authorities, like a shout's delete: your
+        // own description (as its author of record — the co-authors of an edit are credited, not owners)
+        // and anybody's published one, which is the moderator's. Both are asked of the ACCOUNT
+        // (userIdHasPermission) and are NO with accounts off, where there is nobody to be an author.
+        'content.delete_own' => 'Delete a description they are the author of',
+        'content.delete_any' => 'Delete anybody\'s published description from the Info panel',
+        // v81 (includes/profiledescs.php). About what others may SEE, like rating.public: read with
+        // userIdHasGrantedPermission(), and the member's own users.descriptions_public still says yes.
+        'content.public'  => 'Let the descriptions they wrote be listed on their public profile',
         // ── favourites, profiles and uploads (v47) ──
         // Four ids for four separate decisions, because "may they keep a list" and "may that list be
         // read by a stranger" are not the same question and an operator will want to answer them
@@ -251,6 +260,8 @@ function userGroupPresets(): array {
                         'rating.vote', 'content.submit', 'content.propose',
                         // Approving a description you are not allowed to READ is not a job (v71).
                         'content.view',
+                        // v81: taking down anybody's published description from the Info panel.
+                        'content.delete_any',
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         // The room is moderated from the room, not from a panel page (1.58.0), so the
                         // reading ids come with it — see the v63 grant in includes/schema.php. Editing
@@ -286,9 +297,9 @@ function userGroupPresets(): array {
                         'lists.use', 'lists.public',
                         'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check', 'sounds.use',
                         // shout.edit_own is v72's, beside the delete it mirrors; profile.bio is v74's,
-                        // rating.public v75's.
+                        // rating.public v75's; content.delete_own and content.public v81's.
                         'shout.view', 'shout.post', 'shout.delete_own', 'shout.edit_own', 'profile.avatar', 'profile.bio',
-                        'rating.public'],
+                        'rating.public', 'content.delete_own', 'content.public'],
         ],
         // v71. ONLY the extras: a premium account is a member as well (the default group is granted
         // at registration and `v1/users/provision` puts a bought account in it), so repeating the
@@ -329,6 +340,10 @@ function userLegacyDefault(string $perm): bool {
     // a PROFILE, and without accounts there is no profile and nobody to consent — so it answers no,
     // like favourites.public, before the rule for the rest of rating.* says yes.
     if ($perm === 'rating.public') return false;
+    // The same for the three content ids of v81: content.public is consent to a list on a profile, and
+    // deleting is an author's or a moderator's — without accounts there is neither, and the rule below
+    // would otherwise let every passer-by take any description down.
+    if (in_array($perm, ['content.public', 'content.delete_own', 'content.delete_any'], true)) return false;
     if (str_starts_with($perm, 'rating.') || str_starts_with($perm, 'content.')) return true;
     // The other way round from rating.* and content.*, and for the reason that decides both: those
     // two work without accounts, so answering false would switch them off for every install that
@@ -935,6 +950,13 @@ function userDeleteCascade(PDO $db, int $userId): array {
     // account is not a reason to stop serving it. The attribution goes, so it stops appearing on a
     // profile that no longer exists.
     $del("UPDATE whitelist SET submitter_id = NULL, submitter_public = 0 WHERE submitter_id = ?", [$userId], 'submissions_unlinked');
+    // Descriptions are not deleted either (1.70.0) — they are the torrent's — but the account stops
+    // being their author of record, its credits read "a deleted account", and its proposals stop naming
+    // it (includes/content.php). An id MySQL 5.7 hands out again after a restart inherits none of it.
+    if (function_exists('contentForgetAccount')) {
+        $n = contentForgetAccount($db, $userId);
+        if ($n > 0) $gone['descriptions_unlinked'] = $n;
+    }
     $del("DELETE FROM users WHERE id = ?", [$userId], 'user');
     return $gone;
 }

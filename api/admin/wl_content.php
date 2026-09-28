@@ -6,8 +6,15 @@
  *   {"op":"approve","id":123,"kind":"wl|idx"}                                      — publish it
  *   {"op":"reject","id":123,"kind":"wl|idx","note":"…"}                            — do not, and remember why
  *   {"op":"clear","id":123,"kind":"wl|idx","password":"…"}                         — delete the words outright
- *   {"op":"edits"}                                                                 — proposed rewrites
+ *   {"op":"edits"}                                                                 — proposed rewrites and edits
  *   {"op":"edit_apply","id":45} / {"op":"edit_reject","id":45}                     — decide one
+ *
+ * 1.70.0: a proposal is a rewrite (applied, the proposer becomes the author) or an edit (applied, the
+ * author stays and the proposer is credited with the share of the text it changed). The Rewrites tab
+ * gets each one's kind, the author of record, and for an edit the share it would be credited with if
+ * applied now (contentEditPreview(), measured against the text as it stands — what the apply measures).
+ * A name the author hid publicly is still shown here, with `author_hidden`: moderating somebody is not
+ * showing them to the public.
  *
  * `kind` says which home the row is in: 'wl' is a registered torrent's whitelist row, 'idx' a
  * hash_content row for a torrent the tracker has only seen (includes/content.php). Since 1.53.0 the
@@ -83,12 +90,13 @@ if ($op === 'list') {
         "SELECT * FROM (
             SELECT 'wl' AS kind, w.id, w.info_hash, w.name, w.source, w.source_url, w.description, w.description_format,
                    w.content_status, w.content_rejected_note, w.created_at, w.votes_up, w.votes_down,
-                   w.votes_count, w.score_x100, w.content_user_id, u.username AS author, u.avatar_sha AS author_avatar_sha
+                   w.votes_count, w.score_x100, w.content_user_id, u.username AS author, u.avatar_sha AS author_avatar_sha,
+                   u.content_credit_public AS author_credit_public
               FROM whitelist w LEFT JOIN users u ON u.id = w.content_user_id WHERE $whereW
             UNION ALL
             SELECT 'idx' AS kind, c.id, c.info_hash, i.name, 'index' AS source, c.source_url, c.description, c.description_format,
                    c.content_status, c.content_rejected_note, c.created_at, 0, 0, 0, 0, c.content_user_id, u.username AS author,
-                   u.avatar_sha AS author_avatar_sha
+                   u.avatar_sha AS author_avatar_sha, u.content_credit_public AS author_credit_public
               FROM hash_content c LEFT JOIN index_hashes i ON i.info_hash = c.info_hash
                                   LEFT JOIN users u ON u.id = c.content_user_id WHERE $whereC
          ) q
@@ -102,11 +110,12 @@ if ($op === 'list') {
     // image that only appears after rendering would be easy to wave through.
     foreach ($rows as &$r) {
         // A moderator must see what they are approving, hidden parts included.
-        $r['description_html'] = richtextRender($r['description'] ?? '', (string)$r['description_format'], $cfg, true);
+        $r['description_html'] = richtextRenderIn('description', $db, $r['description'] ?? '', (string)$r['description_format'], $cfg, true);
         $r['source_trusted'] = $r['source_url'] ? richtextIsTrusted((string)$r['source_url'], $cfg) : false;
         $r['id'] = (int)$r['id'];
         $r['author_avatar'] = $wlcFace($r);
-        unset($r['author_avatar_sha']);
+        $r['author_hidden'] = $r['author'] !== null && (int)($r['author_credit_public'] ?? 1) !== 1;
+        unset($r['author_avatar_sha'], $r['author_credit_public']);
     }
     unset($r);
     $edits = (int)$db->query("SELECT COUNT(*) FROM wl_content_edits WHERE status = 'pending'")->fetchColumn();
@@ -123,27 +132,40 @@ if ($op === 'list') {
 if ($op === 'edits') {
     $st = $db->query(
         "SELECT e.id, e.whitelist_id, e.hash_content_id, e.info_hash, e.source_url, e.description, e.description_format,
-                e.created_at, e.ip, e.user_id, u.username AS author, u.avatar_sha AS author_avatar_sha,
+                e.kind AS edit_kind, e.created_at, e.ip, e.user_id, u.username AS author, u.avatar_sha AS author_avatar_sha,
+                u.content_credit_public AS author_credit_public,
                 COALESCE(w.name, i.name) AS name,
                 COALESCE(w.source_url, c.source_url) AS cur_source_url,
                 COALESCE(w.description, c.description) AS cur_description,
                 COALESCE(w.description_format, c.description_format, 'bbcode') AS cur_format,
+                COALESCE(w.content_status, c.content_status, 'none') AS cur_status,
+                ua.username AS cur_author,
                 CASE WHEN e.whitelist_id IS NOT NULL THEN 'wl' ELSE 'idx' END AS kind
            FROM wl_content_edits e
            LEFT JOIN whitelist w ON w.id = e.whitelist_id
            LEFT JOIN hash_content c ON c.id = e.hash_content_id
            LEFT JOIN index_hashes i ON i.info_hash = e.info_hash
            LEFT JOIN users u ON u.id = e.user_id
+           LEFT JOIN users ua ON ua.id = COALESCE(w.content_user_id, c.content_user_id)
           WHERE e.status = 'pending' ORDER BY e.created_at ASC LIMIT 50");
     $rows = $st->fetchAll();
     // Both versions rendered, so the moderator compares what people will SEE rather than two blobs
     // of markup. A rewrite that looks tamer in source and worse on screen is the whole risk here.
     foreach ($rows as &$r) {
-        $r['new_html'] = richtextRender($r['description'] ?? '', (string)$r['description_format'], $cfg, true);
-        $r['cur_html'] = richtextRender($r['cur_description'] ?? '', (string)$r['cur_format'], $cfg, true);
+        $r['new_html'] = richtextRenderIn('description', $db, $r['description'] ?? '', (string)$r['description_format'], $cfg, true);
+        $r['cur_html'] = richtextRenderIn('description', $db, $r['cur_description'] ?? '', (string)$r['cur_format'], $cfg, true);
         $r['new_trusted'] = $r['source_url'] ? richtextIsTrusted((string)$r['source_url'], $cfg) : false;
         $r['author_avatar'] = $wlcFace($r);
-        unset($r['author_avatar_sha']);
+        $r['author_hidden'] = $r['author'] !== null && (int)($r['author_credit_public'] ?? 1) !== 1;
+        // What applying it now would do: the kind, and an edit's share against the text as it stands.
+        $pv = contentEditPreview(['description' => $r['cur_description'], 'description_format' => $r['cur_format'],
+                                  'source_url' => $r['cur_source_url'], 'content_status' => $r['cur_status']],
+                                 ['edit_kind' => $r['edit_kind'], 'description' => $r['description'],
+                                  'description_format' => $r['description_format'], 'source_url' => $r['source_url']]);
+        $r['edit_kind'] = $pv['kind'];
+        $r['share'] = $pv['share'];
+        $r['as_rewrite'] = $pv['as_rewrite'];
+        unset($r['author_avatar_sha'], $r['author_credit_public'], $r['cur_status']);
     }
     unset($r);
     jsonResponse(['success' => true, 'rows' => $rows, 'total' => count($rows)]);
@@ -154,12 +176,20 @@ if ($op === 'edit_apply' || $op === 'edit_reject') {
     if ($eid < 1) jsonResponse(['error' => __('api.content.invalid_id')], 400);
     $e = contentEditById($db, $eid);
     if (!$e) jsonResponse(['error' => __('api.content.proposal_gone')], 404);
+    auditNote(['target_type' => $e['kind'] === 'wl' ? 'whitelist' : 'hash', 'target_id' => (string)$e['info_hash']]);
     if ($op === 'edit_reject') {
         contentEditReject($db, $cfg, $e);
+        auditNote(['detail' => ['proposal' => $eid, 'kind' => $e['edit_kind']]]);
         jsonResponse(['success' => true, 'message' => __('api.content.proposal_rejected')]);
     }
+    // Measured before it goes in, against the text as it stands — the share the apply itself credits.
+    $cur = contentRowById($db, (string)$e['kind'], (int)$e['target_id']);
+    $pv = $cur ? contentEditPreview($cur, $e) : ['kind' => $e['edit_kind'], 'share' => 0, 'as_rewrite' => false];
     if (!contentEditApply($db, $cfg, $e)) jsonResponse(['error' => __('api.content.proposal_gone')], 404);
-    jsonResponse(['success' => true, 'message' => __('api.content.proposal_applied')]);
+    $asEdit = $pv['kind'] === 'edit' && !$pv['as_rewrite'];
+    auditNote(['detail' => ['proposal' => $eid, 'kind' => $asEdit ? 'edit' : 'rewrite', 'share' => $asEdit ? $pv['share'] : null]]);
+    jsonResponse(['success' => true, 'kind' => $asEdit ? 'edit' : 'rewrite', 'share' => $asEdit ? $pv['share'] : null,
+                  'message' => $asEdit ? __('api.content.edit_applied', ['pct' => $pv['share']]) : __('api.content.proposal_applied')]);
 }
 
 $id = (int)($input['id'] ?? 0);

@@ -10,7 +10,29 @@
  * a second request, and `may_upload` is the one thing here that depends on WHO is asking.
  *
  * A read path: the session lock goes before the first query, like shout_list's.
+ *
+ * ── by context (1.70.0) ─────────────────────────────────────────────────────────────────────────
+ * `for` = message | description | bio | list: the picker of that editor (assets/js/emoji-picker.js),
+ * gated by the permission that writes that text (emojiPickerGate(), includes/emoji.php) and by
+ * `emotes_everywhere` (emotesEverywhere(), includes/shout.php) — not by the room's view. It offers what
+ * that context DRAWS (emotePickerRows()): the approved, switched-on emotes, and the stickers only where
+ * they are drawn as stickers — none in a profile's description. {success, emotes, stickers}; no upload
+ * limits, which belong to the room's page. Absent, the room's answer, exactly as before.
  */
+$for = emojiPickerFor($_GET['for'] ?? null);
+if ($for === null) jsonResponse(['error' => 'bad_for'], 400);
+if ($for !== 'shout') {
+    if (($gate = emojiPickerGate($db, $cfg, $for)) !== null) jsonResponse(['error' => $gate['error']], $gate['status']);
+    if (!emotesEverywhere($cfg)) jsonResponse(['error' => 'disabled'], 403);
+    if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+    header('Cache-Control: private, no-store');
+    jsonResponse([
+        'success'  => true,
+        'emotes'   => emotePickerRows($db, $cfg, $for, getBaseUrl()),
+        'stickers' => emoteStickerMode($for, $cfg) !== 'emote',
+    ]);
+}
+
 if (!shoutEmotesEnabled($cfg)) jsonResponse(['error' => 'disabled'], 403);
 $me = currentUser($db);
 if (!shoutMayView($db, $cfg)) {

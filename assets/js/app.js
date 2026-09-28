@@ -1888,6 +1888,45 @@ const closeOnBackdrop = (box, close) => {
 };
 
 /**
+ * One Esc closes one layer — the top one (1.70.0).
+ *
+ * These windows open on top of each other: a list's window, the Info panel from a row in it, "Who has this"
+ * or "Put this in a list" from the panel's head, and the "you are leaving" dialog from a link in any of them.
+ * Each heard Esc on the document, in the order they had opened, so one Esc closed the dialog AND everything
+ * under it. Now an open window listens on the WINDOW, in the capture phase — before anything on the page
+ * hears the key — and acts only while it is the top layer: no "you are leaving" dialog and no emoji picker
+ * open (each keeps its own Esc), and no other open window drawn over it (a higher z-index, or the same one
+ * later in the page). The one that acts takes the key, so nothing under it hears it. The list's Edit window
+ * (1.70.0) was the first to stand aside like this, and keeps its own listener.
+ *
+ * escLayer(box, close) → { on(), off() }: on() as the window opens, off() as it closes.
+ */
+const escLayerZ = (n) => { const z = parseInt(getComputedStyle(n).zIndex, 10); return Number.isFinite(z) ? z : 0; };
+const escLayerTop = (box) => {
+    if (document.querySelector('.leave-modal')) return false;
+    if ([...document.querySelectorAll('.shout-picker')].some((p) => !p.hidden)) return false;
+    const mine = escLayerZ(box);
+    for (const o of document.querySelectorAll('.files-overlay')) {
+        if (o === box || o.hidden) continue;
+        const z = escLayerZ(o);
+        if (z > mine || (z === mine && (box.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING))) return false;
+    }
+    return true;
+};
+const escLayer = (box, close) => {
+    const onKey = (e) => {
+        if (e.key !== 'Escape' || e.isComposing || box.hidden || !escLayerTop(box)) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        close();
+    };
+    return {
+        on: () => window.addEventListener('keydown', onKey, true),
+        off: () => window.removeEventListener('keydown', onKey, true),
+    };
+};
+
+/**
  * "Are you sure?", asked in the place the button was.
  *
  * A question with a yes and a no, IN the row it is about. window.confirm() would ask from outside
@@ -2761,6 +2800,9 @@ window.askInPlace = askInPlace;
     // The search page rewrites its address when the panel opens and closes, so a link to a
     // torrent is a link to the panel. Nowhere else has an address that means anything here.
     let infoOnOpen = null;
+    // Esc closes the panel only while it is the top layer (escLayer(), 1.70.0): "Who has this", the list
+    // picker, an emoji picker or the "you are leaving" dialog over it take their Esc first.
+    let infoLayer = null;
 
     function closeInfo() {
         if (!infoOverlay) return;
@@ -2769,9 +2811,8 @@ window.askInPlace = askInPlace;
         // Every open panel used to leave an observer behind, holding its sentinel and its file list.
         if (infoFilesObserver) { infoFilesObserver.disconnect(); infoFilesObserver = null; }
         if (infoOnOpen) infoOnOpen();
-        document.removeEventListener('keydown', escInfo);
+        if (infoLayer) infoLayer.off();
     }
-    function escInfo(e) { if (e.key === 'Escape') closeInfo(); }
 
     function infoRow(label, value, cls) {
         const d = document.createElement('div');
@@ -2954,7 +2995,7 @@ window.askInPlace = askInPlace;
         title.textContent = name || t('js.app.details');
         body.textContent = t('js.common.loading');
         infoOverlay.hidden = false;
-        document.addEventListener('keydown', escInfo);
+        if (infoLayer) infoLayer.on();
         const json = await getJson('index_info&hash=' + encodeURIComponent(hash));
         if (infoOverlay.hidden || infoHash !== hash) return;
         body.textContent = '';
@@ -3525,33 +3566,99 @@ window.askInPlace = askInPlace;
         return el ? el.value : '';
     }
 
+    /** The address of a member's profile, built from this page's own (the panel runs on several pages). */
+    function profileHref(name) {
+        try {
+            const u = new URL(location.href);
+            u.search = ''; u.hash = '';
+            u.searchParams.set('action', 'u');
+            u.searchParams.set('name', name);
+            return u.href;
+        } catch (e) { return '#'; }
+    }
+
     /**
-     * Under the description: the author, a note when the reader may not see the words, what became
-     * of the reader's own words, and the one button they may press about it — add, or propose a
-     * rewrite. The server decided all of that (api/index_info.php); this only draws it.
+     * "Description by TryHackX (first) → dominikk26 (25% edit) → Majkel (6% edit)" (1.70.0): the credit
+     * chain the server sent (content_credits, api/index_info.php), entry by entry — a name with its picture
+     * (a link where the profile opens), "a member" where its owner hid it (their own reader is told it is
+     * them), "a deleted account". "(first)" only when somebody edited it after; more than four entries fold
+     * to the first and the last three around a "+N" that opens the rest in place. The arrows are the icon
+     * library's, not a character.
+     */
+    function creditLine(credits) {
+        const by = document.createElement('p');
+        by.className = 'info-desc-by text-muted info-section';
+        const many = credits.length > 1;
+        by.appendChild(document.createTextNode(t(many ? 'js.app.desc_by_many' : 'js.app.desc_by') + ' '));
+        const entry = (c) => {
+            const shown = c.state === 'shown' && c.name;
+            // `.av-who`: the picture and the name are one unit that a line never breaks inside.
+            const who = document.createElement(shown && c.profile ? 'a' : 'span');
+            who.className = 'av-who info-credit-who' + (shown ? '' : ' info-credit-' + (c.state === 'hidden' ? 'hidden' : 'deleted'));
+            if (shown) {
+                if (c.profile) who.href = profileHref(c.name);
+                const pic = typeof window.userAvatarImg === 'function'
+                    ? window.userAvatarImg({ username: c.name, avatar: String(c.avatar || '') }, 20, 'avatar info-av') : null;
+                if (pic) who.appendChild(pic);
+                who.appendChild(document.createTextNode(c.name));
+            } else {
+                who.appendChild(document.createTextNode(c.state === 'hidden'
+                    ? t(c.you ? 'js.app.credit_hidden_you' : 'js.app.credit_hidden') : t('js.app.credit_deleted')));
+            }
+            const one = document.createElement('span');
+            one.className = 'info-credit';
+            one.appendChild(who);
+            const role = c.kind === 'edit' ? t('js.app.credit_edit', { pct: c.pct }) : (many ? t('js.app.credit_first') : '');
+            if (role) one.appendChild(document.createTextNode(' (' + role + ')'));
+            return one;
+        };
+        const sep = () => {
+            const s = document.createElement('span');
+            s.className = 'info-credit-sep';
+            const i = document.createElement('i');
+            i.className = 'bi bi-arrow-right';
+            i.setAttribute('aria-hidden', 'true');
+            s.appendChild(i);
+            // What a screen reader says where the eye sees an arrow.
+            const sr = document.createElement('span');
+            sr.className = 'pv-sr';
+            sr.textContent = ', ';
+            s.appendChild(sr);
+            return s;
+        };
+        const draw = (all) => {
+            while (by.childNodes.length > 1) by.removeChild(by.lastChild);
+            const fold = !all && credits.length > 4;
+            const list = fold ? [credits[0], null].concat(credits.slice(-3)) : credits;
+            list.forEach((c, k) => {
+                if (k) by.appendChild(sep());
+                if (c) { by.appendChild(entry(c)); return; }
+                const more = document.createElement('button');
+                more.type = 'button';
+                more.className = 'info-credit-more';
+                more.textContent = '+' + (credits.length - 4);
+                more.title = t('js.app.credit_more_title');
+                more.addEventListener('click', () => draw(true));
+                by.appendChild(more);
+            });
+        };
+        draw(false);
+        return by;
+    }
+
+    /**
+     * Under the description: who wrote it, a note when the reader may not see the words, what became of
+     * the reader's own words, and what they may do about it — add, propose a rewrite, edit, delete. The
+     * server decided all of that (api/index_info.php); this only draws it.
      */
     function renderContentExtras(json, body, hash) {
-        if (json.content_author) {
-            const by = document.createElement('p');
-            by.className = 'info-desc-by text-muted info-section';
-            by.appendChild(document.createTextNode(t('js.app.desc_by') + ' '));
-            // The author's picture right before their name (1.63.0), from the ADDRESS the server
-            // built — this answer carries the name and never the author's id. Null while pictures
-            // are switched off (assets/js/avatar.js).
-            const pic = typeof window.userAvatarImg === 'function'
-                ? window.userAvatarImg({ username: json.content_author, avatar: String(json.content_author_avatar || '') }, 20, 'avatar info-av') : null;
-            // `.av-who`: the picture and the name are one unit that a line never breaks inside.
-            const who = document.createElement(json.content_author_profile ? 'a' : 'span');
-            who.className = 'av-who';
-            if (json.content_author_profile) {
-                let u = null;
-                try { u = new URL(location.href); u.search = ''; u.hash = ''; u.searchParams.set('action', 'u'); u.searchParams.set('name', json.content_author); } catch (e) { u = null; }
-                who.href = u ? u.href : '#';
-            }
-            if (pic) who.appendChild(pic);
-            who.appendChild(document.createTextNode(json.content_author));
-            by.appendChild(who);
-            body.appendChild(by);
+        const credits = Array.isArray(json.content_credits) ? json.content_credits : [];
+        if (credits.length) {
+            body.appendChild(creditLine(credits));
+        } else if (json.content_author) {
+            // An answer without the chain (what the panel was sent before 1.70.0): the author alone.
+            body.appendChild(creditLine([{ kind: 'first', state: 'shown', name: json.content_author,
+                                           avatar: json.content_author_avatar || '', profile: !!json.content_author_profile }]));
         }
         const note = (key, vars, cls) => {
             const p = document.createElement('p');
@@ -3562,44 +3669,111 @@ window.askInPlace = askInPlace;
         if (json.content_hidden) note('js.app.content_hidden');
         if (json.content_mine === 'pending') note('js.app.content_mine_pending');
         if (json.content_mine === 'rejected') note(json.content_mine_note ? 'js.app.content_mine_rejected_note' : 'js.app.content_mine_rejected', {note: json.content_mine_note || ''});
+        if (!csrfForContent()) return;
         const canAdd = !!json.can_content_submit, canPropose = !!json.can_content_propose;
-        if ((canAdd || canPropose) && $id('info-desc-tpl') && csrfForContent()) {
-            const row = document.createElement('div');
-            row.className = 'info-desc-acts info-section';
+        const canEdit = !!json.can_content_edit && !!json.content_edit;
+        const del = json.can_content_delete === 'own' || json.can_content_delete === 'any' ? json.can_content_delete : null;
+        const tpl = $id('info-desc-tpl');
+        const row = document.createElement('div');
+        row.className = 'info-desc-acts info-section';
+        const button = (cls, text, title) => {
             const b = document.createElement('button');
             b.type = 'button';
-            b.className = 'btn btn-secondary btn-small info-desc-open';
-            b.textContent = canAdd ? t('js.app.desc_add') : t('js.app.desc_propose');
-            b.addEventListener('click', () => openContentEditor(json, row, hash, b));
+            b.className = 'btn btn-secondary btn-small ' + cls;
+            b.textContent = text;
+            if (title) b.title = title;
             row.appendChild(b);
-            body.appendChild(row);
+            return b;
+        };
+        if ((canAdd || canPropose) && tpl) {
+            button('info-desc-open', canAdd ? t('js.app.desc_add') : t('js.app.desc_propose'), canAdd ? '' : t('js.app.desc_propose_title'))
+                .addEventListener('click', () => openContentEditor(json, row, hash, canAdd ? 'add' : 'rewrite'));
         }
+        // Edit (1.70.0), beside Propose a rewrite: the same editor, opened with the text as it stands.
+        if (canEdit && tpl) {
+            button('info-desc-edit', t('js.app.desc_edit'), t('js.app.desc_edit_title'))
+                .addEventListener('click', () => openContentEditor(json, row, hash, 'edit'));
+        }
+        // Delete (1.70.0): two clicks, no dialog — the second is the confirmation, and the button says so in
+        // between, as a list's Delete does.
+        if (del) {
+            const d = button('info-desc-delete', t('js.app.desc_delete'), t(del === 'own' ? 'js.app.desc_delete_title_own' : 'js.app.desc_delete_title_any'));
+            const say = document.createElement('span');
+            say.className = 'text-muted info-desc-msg info-desc-delete-msg';
+            say.setAttribute('aria-live', 'polite');
+            let armTimer = 0;
+            const disarm = () => { clearTimeout(armTimer); d.dataset.armed = '0'; d.classList.remove('is-armed'); d.textContent = t('js.app.desc_delete'); };
+            d.addEventListener('click', async () => {
+                if (d.dataset.armed !== '1') {
+                    d.dataset.armed = '1';
+                    d.classList.add('is-armed');
+                    d.textContent = t('js.app.desc_delete_sure');
+                    armTimer = setTimeout(disarm, 4000);
+                    return;
+                }
+                clearTimeout(armTimer);
+                d.disabled = true;
+                const r = await postJson('content_delete', { csrf_token: csrfForContent(), hash });
+                if (!r || !r.success) {
+                    d.disabled = false;
+                    disarm();
+                    say.textContent = !r ? t('js.app.desc_failed') : (r.error === 'rate_limit' ? t('js.app.desc_rate_limited') : (r.error || t('js.app.desc_failed')));
+                    return;
+                }
+                say.textContent = r.message || t('js.app.desc_deleted');
+                // The words are gone: draw the panel again as it is now.
+                setTimeout(() => openInfo(hash, json.name), 900);
+            });
+            row.appendChild(say);
+        }
+        if (row.children.length) body.appendChild(row);
     }
 
-    /** The whitelist form's editor, cloned into the panel, mounted by the same code, sent to content_submit. */
-    function openContentEditor(json, host, hash, opener) {
+    /**
+     * The whitelist form's editor, cloned into the panel, mounted by the same code, sent to content_submit.
+     * `mode`: 'add' (first words), 'rewrite' (a proposal that replaces the author) or 'edit' (1.70.0: the
+     * editor opened with the current text, format and source link, filed as an edit — the author stays).
+     */
+    function openContentEditor(json, host, hash, mode) {
         if ($id('info-desc') || $id('info-desc-editor')) return;   // one at a time
         const tpl = $id('info-desc-tpl');
         if (!tpl) return;
+        // The row's buttons step aside while the editor is open, and come back with Cancel.
+        const opened = Array.prototype.filter.call(host.children, (n) => n.tagName === 'BUTTON' && !n.hidden);
         host.appendChild(tpl.content.cloneNode(true));
-        opener.hidden = true;
+        opened.forEach((b) => { b.hidden = true; });
         const ta = $id('info-desc');
+        const src = $id('info-desc-source');
+        const fmtEl = $id('info-desc-format');
+        const editor = $id('info-desc-editor');
+        if (editor) editor.dataset.mode = mode;
         if (ta && json.content_max) ta.maxLength = json.content_max;
+        const pre = mode === 'edit' ? json.content_edit : null;
+        if (pre) {
+            if (ta) ta.value = String(pre.description || '');
+            if (src) src.value = String(pre.source_url || '');
+            // A format that is still offered; one switched off since stays what the select can say.
+            if (fmtEl && pre.description_format && (fmtEl.tagName !== 'SELECT'
+                || Array.prototype.some.call(fmtEl.options, (o) => o.value === pre.description_format))) {
+                fmtEl.value = pre.description_format;
+            }
+        }
         if (ta && window.RichText && typeof window.RichText.mount === 'function') {
             window.RichText.mount('info-desc', { previewFor: 'description' });
+            // The toolbar and the counter follow the text and the format put in above.
+            if (pre && fmtEl && fmtEl.tagName === 'SELECT') fmtEl.dispatchEvent(new Event('change'));
+            if (pre) ta.dispatchEvent(new Event('input', { bubbles: true }));
         }
-        const src = $id('info-desc-source');
         const send = $id('info-desc-send'), cancel = $id('info-desc-cancel'), msg = $id('info-desc-msg');
-        const editor = $id('info-desc-editor');
-        cancel.addEventListener('click', () => { editor.remove(); opener.hidden = false; });
+        cancel.addEventListener('click', () => { editor.remove(); opened.forEach((b) => { b.hidden = false; }); });
         send.addEventListener('click', async () => {
             const text = ta ? ta.value.trim() : '';
             const sUrl = src ? src.value.trim() : '';
             if (!text && !sUrl) { msg.textContent = t('js.app.desc_empty'); return; }
             send.disabled = true;
-            const fmtEl = $id('info-desc-format');
             const r = await postJson('content_submit', { csrf_token: csrfForContent(), hash,
-                description: text, description_format: fmtEl ? fmtEl.value : 'bbcode', source_url: sUrl });
+                description: text, description_format: fmtEl ? fmtEl.value : 'bbcode', source_url: sUrl,
+                kind: mode === 'edit' ? 'edit' : 'rewrite' });
             send.disabled = false;
             if (!r || !r.success) {
                 msg.textContent = !r ? t('js.app.desc_failed') : (r.error === 'rate_limit' ? t('js.app.desc_rate_limited') : (r.error || t('js.app.desc_failed')));
@@ -3611,7 +3785,11 @@ window.askInPlace = askInPlace;
             // Published at once: draw the panel again with the words on it.
             if (r.saved && !r.pending) setTimeout(() => openInfo(hash, json.name), 1200);
         });
-        if (ta) ta.focus();
+        if (ta) {
+            ta.focus();
+            // An edit starts where the text ends, not above it.
+            if (pre) { try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) { /* not a text box */ } }
+        }
     }
 
     /** Wire the panel up wherever its markup is on the page, and hand it to whoever needs it. */
@@ -3621,7 +3799,10 @@ window.askInPlace = askInPlace;
         const d = infoOverlay.dataset;
         infoFilesMode = ['scroll', 'button', 'all'].includes(d.filesMode) ? d.filesMode : 'scroll';
         infoCanFav = d.fav === '1';
+        // "Who has this" (1.70.0): drawn when ANY of its sections — favourites, likes / ratings, lists — is
+        // open to this reader (templates/partials/info_overlay.php asks includes/who.php).
         infoCanFavWho = d.favWho === '1';
+        infoLayer = escLayer(infoOverlay, closeInfo);
         closeOnBackdrop(infoOverlay, closeInfo);
         const ic = $id('info-close');
         if (ic) ic.addEventListener('click', closeInfo);
@@ -3665,7 +3846,6 @@ window.askInPlace = askInPlace;
         // Opening the panel is a change of view here, and the address says so — nowhere else does.
         if (window.TorrentInfo) window.TorrentInfo.setOnOpen(() => writeUrl(curPage, 'push'));
         const canFav = form.dataset.fav === '1';
-        const canFavWho = form.dataset.favWho === '1';
         // Every port, not just the first. Extra opentracker instances listen on their own ports and
         // share nothing between them, so a magnet that names one port is only ever answered by one
         // process. The attribute is empty without the cluster, which leaves this unchanged.
@@ -3726,7 +3906,12 @@ window.askInPlace = askInPlace;
             updateSortIcons();
             runSortDebounced();
         }));
-        if (bestBox) bestBox.addEventListener('change', () => run(1, 'push'));   // a sort change, like the column headers
+        // A sort change, like the column headers — but a sort BY RELEVANCE, which only a search has: with
+        // nothing in the box the rows come back in the same order either way (includes/index.php leaves
+        // the score out of an unscored query), so ticking it with an empty box asks nothing new. The
+        // address still takes the box's state, so a reload or a shared link keeps it (1.70.0, see
+        // searchOptionChanged() below).
+        if (bestBox) bestBox.addEventListener('change', () => searchOptionChanged('push'));
         const perPageSel = $id('search-perpage');
         try { const saved = localStorage.getItem('thx_search_perpage'); if (saved && perPageSel && [...perPageSel.options].some(o => o.value === saved)) perPageSel.value = saved; } catch (e) {}
         if (perPageSel) perPageSel.addEventListener('change', () => { try { localStorage.setItem('thx_search_perpage', perPageSel.value); } catch (e) {} run(1); });
@@ -3924,7 +4109,9 @@ window.askInPlace = askInPlace;
             if (perPageSel) qs.set('per_page', perPageSel.value);
             if (q) qs.set('search', q);
             const filesOn = !!(filesBox && filesBox.checked);
-            if (filesOn) qs.set('search_files', '1');
+            // Only with something to look for (1.70.0): without a term the answer is the same, and the
+            // flag alone kept the server from reusing its cached count of the whole catalogue.
+            if (filesOn && q) qs.set('search_files', '1');
             if (contentSel && contentSel.value) qs.set('content', contentSel.value);
             const json = await getJson('index_search&' + qs.toString());
             if (my !== seq) return;
@@ -4308,7 +4495,18 @@ window.askInPlace = askInPlace;
         input.addEventListener('input', () => { syncClear(); runDebounced(); });
         if (clearBtn) clearBtn.addEventListener('click', () => animatedClearPub(input, () => { syncClear(); input.focus(); run(1); }));
         form.addEventListener('submit', (e) => { e.preventDefault(); run(1); });
-        if (filesBox) filesBox.addEventListener('change', () => run(1));
+        /**
+         * "Also search file names" and "Best match" are options of a SEARCH (1.70.0). With nothing in
+         * the box there is nothing for either to change — the catalogue's first page comes back row
+         * for row — and running it again only dimmed the table and drew it back. So with an empty box
+         * a tick is remembered (in the box, and in the address, so a reload or a shared link keeps it)
+         * and acts on the next search; with words in the box it runs the search, as it always did.
+         */
+        function searchOptionChanged(urlMode) {
+            if (input.value.trim() === '') { writeUrl(curPage, 'replace'); return; }
+            run(1, urlMode);
+        }
+        if (filesBox) filesBox.addEventListener('change', () => searchOptionChanged());
         if (contentSel) contentSel.addEventListener('change', () => run(1));
         updateSortIcons();
         // Whatever the address says, before the first request — so a link into a sorted page 3 of a
@@ -4395,7 +4593,17 @@ window.askInPlace = askInPlace;
         document.removeEventListener('keydown', onEsc, true);
     }
     let openBox = null;
-    function onEsc(e) { if (e.key === 'Escape') { closeLeave(openBox); openBox = null; } }
+    // The dialog is always the top layer, and its Esc is its own (1.70.0): it closes the dialog and goes no
+    // further — the window it was opened from (the Info panel, a list's window) stays open, and a second Esc
+    // closes that. The windows that hear keys before the document (escLayer() and the list's Edit window)
+    // stand aside while it is open.
+    function onEsc(e) {
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        closeLeave(openBox);
+        openBox = null;
+    }
 
     function askBeforeLeaving(url) {
         const box = document.createElement('div');
@@ -4488,6 +4696,11 @@ window.askInPlace = askInPlace;
     function mountRichtext(id, opts) {
     opts = opts || {};
     const previewFor = opts.previewFor || 'description';
+    // What the counter counts while somebody types (1.70.0). By default the characters in the box against
+    // its maxlength; an editor whose limit is counted another way hands in `measure(text, format)` →
+    // {used, limit} — a list's description counts what a READER will see (assets/js/favourites.js), the
+    // same number its Preview and its save give.
+    const measure = typeof opts.measure === 'function' ? opts.measure : null;
     const ta = document.getElementById(id);
     if (!ta || ta.dataset.rtMounted === '1') return;
     ta.dataset.rtMounted = '1';
@@ -4526,6 +4739,13 @@ window.askInPlace = askInPlace;
     };
     let timer = null;
     let lastShown = null;          // {key, ok} — what the box is currently displaying
+    // The emoji, the emotes and the stickers (1.70.0, assets/js/emoji-picker.js): the picker on the
+    // toolbar's `<id>-emoji` button, which the template draws with what this reader may use here
+    // (emojiPickerButton() in includes/emoji.php). What it picks goes in at the caret as text and fires
+    // `input`, so the counter and the preview below follow it like a keystroke.
+    const emojiBtn = document.getElementById(id + '-emoji');
+    const picker = emojiBtn && window.EmojiPicker && typeof window.EmojiPicker.attach === 'function'
+        ? window.EmojiPicker.attach({ textarea: ta, button: emojiBtn }) : null;
 
     // What each button inserts, per format. A kind missing from a format's table means the format
     // cannot express it, and the button hides — Markdown has no colour and no font size, and a
@@ -4596,6 +4816,8 @@ window.askInPlace = askInPlace;
         ta.hidden = which !== 'write';
         if (tools) tools.hidden = which !== 'write';
         box.hidden = which !== 'preview';
+        // The picker belongs to the box being written in: the Preview tab puts it away with the toolbar.
+        if (which !== 'write' && picker) picker.close();
         if (which === 'preview') render();
     }
 
@@ -4636,17 +4858,32 @@ window.askInPlace = askInPlace;
         }
     }
 
+    /** The counter while writing: measure() when the editor has one, else the box against its maxlength. */
+    function countTyping() {
+        if (!counter) return;
+        if (measure) {
+            const m = measure(ta.value, fmt()) || {};
+            counter.textContent = t('js.app.count_characters', {used: Number(m.used) || 0, limit: Number(m.limit) || 0});
+        } else if (ta.maxLength > 0) {
+            counter.textContent = t('js.app.count_characters', {used: ta.value.length, limit: ta.maxLength});
+        }
+    }
+
     function syncFormat() {
         if (syntax) syntax.textContent = HINT[fmt()];
-        // Hide the buttons this format has no syntax for, and the group that empties with them.
+        // Hide the buttons this format has no syntax for, and the group that empties with them. A group
+        // with no syntax buttons at all — the picker's (1.70.0) — is the same in every format and stays.
         if (tools) {
             const syn = SYNTAX[fmt()] || {};
             tools.querySelectorAll('[data-md]').forEach(b => { b.hidden = !syn[b.dataset.md]; });
             tools.querySelectorAll('.rt-tool-group').forEach(g => {
-                g.hidden = ![...g.querySelectorAll('[data-md]')].some(b => !b.hidden);
+                const marks = [...g.querySelectorAll('[data-md]')];
+                if (marks.length) g.hidden = !marks.some(b => !b.hidden);
             });
         }
         lastShown = null;                       // the same text renders differently in the other syntax
+        // …and a measured count may differ too: a tag of one syntax is words in the other.
+        if (measure) countTyping();
         if (!box.hidden) render();
     }
 
@@ -4666,12 +4903,12 @@ window.askInPlace = askInPlace;
         clearTimeout(timer);
         // The counter is worth having while WRITING too, not only after a preview — it is the only
         // thing that tells somebody they are near the character limit before the form refuses them.
-        if (counter && ta.maxLength > 0) counter.textContent = t('js.app.count_characters', {used: ta.value.length, limit: ta.maxLength});
+        countTyping();
         if (!box.hidden) timer = setTimeout(render, 400);
     });
     if (fmtEl && fmtEl.tagName === 'SELECT') fmtEl.addEventListener('change', syncFormat);
     syncFormat();
-    if (counter && ta.maxLength > 0) counter.textContent = t('js.app.count_characters', {used: 0, limit: ta.maxLength});
+    countTyping();
     }
 
     mountRichtext('wl-desc');

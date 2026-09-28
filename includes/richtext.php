@@ -243,9 +243,30 @@ function richtextViewerSignedIn(?PDO $db = null): bool {
     return false;
 }
 
+/**
+ * richtextRender() for a text that is READ somewhere with the site's emotes (1.70.0): a private message
+ * (`message`), a torrent's description and a proposed rewrite of one (`description`), a list's
+ * description (`list`). The same HTML, and then the room's `:code:` emotes and stickers drawn on its text
+ * (emoteRenderHtml(), includes/emoji.php) from the context's map (emoteMapFor(), includes/shout.php):
+ * approved, switched-on emotes only, a sticker at the size that context gives it, nothing at all where
+ * `emotes_everywhere` is off.
+ *
+ * A stage AFTER the renderer, not inside it, and on purpose: richtextCount() counts the images of the
+ * rendered output against the description's picture limit, and an emote is a word, not one of those —
+ * and richtextRenderForEmail() calls the renderer alone, so in a mail a token stays its text. Without a
+ * database (a caller that has none, the CLI) it is richtextRender().
+ */
+function richtextRenderIn(string $for, ?PDO $db, ?string $text, string $format, array $cfg, bool $signedIn = false): string {
+    $html = richtextRender($text, $format, $cfg, $signedIn);
+    if ($html === '' || $db === null || !function_exists('emoteMapFor') || !str_contains($html, ':')) return $html;
+    return emoteRenderHtml($html, emoteMapFor($db, $cfg, $for));
+}
+
 function richtextRenderForEmail(?string $text, string $format, array $cfg): string {
     // A Font Awesome face is a glyph of a web font no mail client loads: in a mail, a :fa-NAME: token is
     // the ordinary emoji it stands for, as it is wherever Font Awesome is switched off (1.69.0).
+    // The site's emotes are not drawn in a mail at all (1.70.0): `:code:` stays the text it was typed as —
+    // the renderer alone never draws them (richtextRenderIn() does, for the pages).
     $html = richtextRender($text, $format, array_merge($cfg, ['shout_emoji_fa' => 'off']));
     if ($html === '') return '';
     $style = [
@@ -873,8 +894,9 @@ function richtextParagraphs(string $html): string {
             }, $chunk) ?? $chunk;
             $plain = trim(str_replace(['<br>', '&nbsp;'], ' ', strip_tags($chunk)));
             // A paragraph of pictures and nothing else is still a paragraph — and so is one of Font
-            // Awesome's faces (1.69.0): a line that was nothing but :fa-face-grin: came out empty.
-            if ($plain === '' && strpos($chunk, '<img') === false && strpos($chunk, '<i class="fae ') === false) continue;
+            // Awesome's faces (1.69.0): a line that was nothing but :fa-face-grin: came out empty; and
+            // (1.70.0) one of its other icons, drawn `fai` (a shout of nothing but :fa-rocket:).
+            if ($plain === '' && strpos($chunk, '<img') === false && strpos($chunk, '<i class="fae ') === false && strpos($chunk, '<i class="fai ') === false) continue;
             $out .= '<p>' . $openList($before) . trim($chunk, ' ') . $closeList($carry) . '</p>';
             // The paragraph closed the anchor and the next one will not resume it, so it is not
             // "still open" either — the same rule the block branch below applies.
@@ -1001,7 +1023,8 @@ function richtextExcerpt(?string $text, int $len = 160): string {
 function richtextContentFor(PDO $db, array $cfg, string $hash, bool $asAdmin = false): array {
     $out = ['source_url' => null, 'source_trusted' => false, 'description_html' => '',
             'content_status' => 'none', 'format' => 'bbcode', 'rejected_note' => null,
-            'kind' => null, 'author' => null, 'author_id' => null, 'author_avatar' => ''];
+            'kind' => null, 'author' => null, 'author_id' => null, 'author_avatar' => '',
+            'credits' => [], 'author_hidden' => false];
     // Both homes (includes/content.php): the whitelist row of a registered torrent, or the
     // hash_content row of one the tracker has only seen.
     $rec = contentRecordFor($db, $hash);
@@ -1020,14 +1043,26 @@ function richtextContentFor(PDO $db, array $cfg, string $hash, bool $asAdmin = f
 
     $out['source_url'] = $rec['source_url'] ?: null;
     $out['source_trusted'] = $out['source_url'] ? richtextIsTrusted((string)$out['source_url'], $cfg) : false;
-    $out['description_html'] = richtextRender($rec['description'] ?? '', $out['format'], $cfg,
-                                              richtextViewerSignedIn($db));
+    // With the site's emotes (1.70.0): the public Info panel and the panel's detail panels alike.
+    $out['description_html'] = richtextRenderIn('description', $db, $rec['description'] ?? '', $out['format'], $cfg,
+                                                richtextViewerSignedIn($db));
     $out['author_id'] = $rec['content_user_id'];
     $author = contentAuthorRow($db, $rec['content_user_id']);
+    // The author's own switch (1.70.0, users.content_credit_public): off, the public answer carries no
+    // name and no picture — the page says "a member". A moderator (the panel's detail panels) still
+    // sees who wrote it, with the fact that it is hidden: reviewing somebody is not showing them.
+    $out['author_hidden'] = $author !== null && !$author['credit_public'];
+    if ($out['author_hidden'] && !$asAdmin) $author = null;
     $out['author'] = $author !== null ? $author['username'] : null;
     // The picture beside the author's name (1.63.0), as an ADDRESS: the public Info panel sends the
     // name and never this id, so this is what it sends instead. '' while pictures are switched off.
     $out['author_avatar'] = ($author !== null && function_exists('userAvatarField'))
         ? userAvatarField($author, 20, function_exists('getBaseUrl') ? getBaseUrl() : '/', $cfg) : '';
+    // Who wrote it and who edited it since, as the reader is shown them (1.70.0, contentCreditsForDisplay()).
+    if (!$asAdmin && function_exists('contentCreditsForDisplay')) {
+        $viewer = function_exists('currentUser') ? currentUser($db) : null;
+        $out['credits'] = contentCreditsForDisplay($db, $cfg, contentCreditsDecode($rec['content_credits'] ?? null, $rec['content_user_id']),
+                                                   $viewer !== null ? (int)$viewer['id'] : null);
+    }
     return $out;
 }

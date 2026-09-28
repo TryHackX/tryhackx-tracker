@@ -53,8 +53,9 @@
         if (!cl) return;
         var name = nameOf(cl);
         // Only the site's own icons (`bi`) are this map's. A Font Awesome face in a shout or in the emoji
-        // picker (1.69.0, `fae`) is written with Font Awesome's classes directly, and taking away every
-        // fa- class the map does not want took the face away the moment one was added to the page.
+        // picker (1.69.0, `fae`) — or any other icon of the package there (1.70.0, `fai`) — is written with
+        // Font Awesome's classes directly, and taking away every fa- class the map does not want took the
+        // face away the moment one was added to the page.
         if (!name && !cl.contains('bi')) return;
         var want = name ? MAP[name].split(' ') : [];
         var drop = [], i;

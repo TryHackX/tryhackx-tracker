@@ -807,10 +807,22 @@ function iconpackReportLines(array $r): array {
     $md = $r['metadata'] ?? null;
     if (is_array($md) && !empty($md['index'])) {
         $lines[] = '  ' . __('api.iconpack.index_line', ['file' => (string)$md['index'], 'icons' => (int)$md['icons'],
-                                                         'families' => (int)$md['families'], 'emoji' => (int)$md['emoji']])
+                                                         'families' => (int)$md['families'], 'emoji' => (int)$md['emoji'],
+                                                         'cats' => (int)($md['categories'] ?? 0)])
                  . ' (' . (string)$md['describes'] . ')';
     }
     return $lines;
+}
+
+/**
+ * A re-index (1.70.0, iconpackReindex()) as one line — what the CLI prints and the panel's toast says —
+ * or the refusal in words. The size is the catalogue's as stored (gzip takes it to about a quarter).
+ */
+function iconpackReindexLine(string $id, array $r): string {
+    if (empty($r['ok'])) return iconpackMessage((string)($r['error'] ?? 'no_index'));
+    $c = (array)($r['catalog'] ?? []);
+    return __('api.iconpack.reindexed', ['id' => $id, 'icons' => count((array)($c['icons'] ?? [])), 'cats' => count((array)($c['cats'] ?? [])),
+                                         'kb' => (string)round((int)($r['bytes'] ?? 0) / 1024)]);
 }
 
 /**

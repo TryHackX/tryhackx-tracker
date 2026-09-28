@@ -17,7 +17,11 @@
  */
 $ioViewer = currentUser($db);
 $ioFav    = $favCtx ?? favContext($db, $cfg, $ioViewer);
-$ioWho    = !empty($ioFav['who_ok']) && !empty($ioFav['may_view']);
+// "Who has this" (1.70.0, includes/who.php): which of its three sections — favourites, likes / ratings,
+// lists — THIS reader may open. The panel draws the button when any of them can show them something; the
+// overlay carries exactly those sections, and api/hash_who.php answers 404 for the others.
+$ioWhoSecs = function_exists('whoSections') ? whoSections($db, $cfg, $ioViewer) : ['fav' => false, 'votes' => false, 'lists' => false];
+$ioWho    = in_array(true, $ioWhoSecs, true);
 $ioShare  = ($cfg['search_share_enabled'] ?? '1') === '1';
 $ioLists  = listsContext($db, $cfg, $ioViewer);
 ?>
@@ -108,19 +112,36 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
 <?php endif; ?>
 
 <?php if ($ioWho): ?>
-<?php /* The fourth instance of this shell (search results, the file list, the Info panel, this).
-         Its pager and its search box are its own; the list inside is usernames, and every one of
-         them is somebody who said yes to being here — see api/hash_favourites.php. */ ?>
+<?php /* "Who has this" (1.70.0): the fourth instance of this shell (search results, the file list, the Info
+         panel, this), now in up to three sections — Favourites, Likes or Ratings (the rating mode's word),
+         Lists — only those THIS reader may open ($ioWhoSecs, includes/who.php). Each has its own count, its own
+         search by name and its own "Show more"; assets/js/favourites.js (initWho()) asks api/hash_who.php for
+         every section's first twenty at once when the overlay opens. Every word here is the server's and has an
+         id, so the in-place language switch swaps it by name; what the script writes — the rows, the counts, the
+         buttons — is data-lang-keep and written again on `langswap`. Every name in it is somebody who said yes
+         to being here. */ ?>
+<?php $ioWhoMode = function_exists('repMode') && repMode($cfg) === 'stars' ? 'stars' : 'thumbs'; ?>
 <div class="files-overlay" id="who-overlay" hidden>
-    <div class="files-box" role="dialog" aria-modal="true" aria-labelledby="who-title">
+    <div class="files-box who-box" role="dialog" aria-modal="true" aria-labelledby="who-title">
         <div class="files-head">
-            <h3 id="who-title"><?= _h('js.fav.who') ?> <span class="text-muted" id="who-total"></span></h3>
+            <h3 id="who-title"><?= _h('js.fav.who') ?></h3>
             <button type="button" class="files-close" id="who-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         </div>
-        <div class="files-body">
-            <input type="text" class="profile-search" id="who-search" maxlength="60" placeholder="<?= _h('profile.search_ph') ?>" autocomplete="off">
-            <div id="who-body"></div>
-            <div class="trans-pagination" id="who-pager"></div>
+        <div class="files-body" id="who-body">
+<?php foreach ($ioWhoSecs as $ioSec => $ioOpen): if (!$ioOpen) continue; ?>
+<?php     $ioSecTitle = $ioSec === 'votes' ? 'who.votes_' . $ioWhoMode : 'who.' . $ioSec; ?>
+            <section class="who-sec" id="who-sec-<?= $ioSec ?>" data-sec="<?= $ioSec ?>"<?= $ioSec === 'votes' ? ' data-mode="' . $ioWhoMode . '"' : '' ?> aria-labelledby="who-<?= $ioSec ?>-title">
+                <div class="who-sec-head">
+                    <h4 class="who-sec-title" id="who-<?= $ioSec ?>-title"><?= _h($ioSecTitle) ?></h4>
+                    <span class="who-sec-count text-muted" id="who-<?= $ioSec ?>-count" aria-live="polite" data-lang-keep></span>
+                    <input type="text" class="profile-search who-sec-search" id="who-<?= $ioSec ?>-search" maxlength="<?= (int)WHO_SEARCH_MAX ?>"
+                           placeholder="<?= _h('who.search_' . $ioSec) ?>" aria-label="<?= _h('who.search_' . $ioSec) ?>" autocomplete="off" hidden>
+                </div>
+                <div class="who-sec-body" id="who-<?= $ioSec ?>-body" data-lang-keep></div>
+                <button type="button" class="btn btn-secondary btn-small who-more" id="who-<?= $ioSec ?>-more" data-lang-keep hidden></button>
+            </section>
+<?php endforeach; ?>
+            <p class="text-muted who-why" id="who-why"><?= _h('who.why') ?></p>
         </div>
     </div>
 </div>
@@ -187,6 +208,8 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
                     <button type="button" data-md="center" title="<?= _h('rt.center') ?>"><i class="bi bi-text-center" aria-hidden="true"></i></button>
                     <button type="button" data-md="hr" title="<?= _h('rt.hr') ?>"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
                 </span>
+                <?php /* The picker (1.70.0) — a first description and a proposed rewrite alike. */ ?>
+                <?= function_exists('emojiPickerButton') ? emojiPickerButton($db, $cfg, $baseUrl, 'description', 'info-desc-emoji') : '' ?>
             </div>
             <textarea id="info-desc" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
             <div class="rt-preview rt-body" id="info-desc-preview" hidden></div>
@@ -201,6 +224,9 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
 <?php if (($cfg['wl_content_review'] ?? '1') === '1' && ($cfg['wl_content_autopublish'] ?? '0') !== '1'): ?>
     <p class="form-hint"><?= __('whitelist.review_note') ?></p>
 <?php endif; ?>
+    <?php /* Before anything is sent — a first description, an edit, a rewrite (1.70.0): that the words are
+             public, and whether this reader's name goes with them, as their own switch says (Privacy). */ ?>
+    <p class="form-hint info-desc-public" id="info-desc-public"><?= contentPublicLine($ioViewer, $baseUrl) ?></p>
     <div class="info-desc-foot">
         <button type="button" class="btn btn-small" id="info-desc-send"><?= _h('search.desc_send') ?></button>
         <button type="button" class="btn btn-secondary btn-small" id="info-desc-cancel"><?= _h('common.cancel') ?></button>

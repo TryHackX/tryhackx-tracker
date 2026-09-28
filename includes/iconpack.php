@@ -52,6 +52,12 @@ const ICONPACK_FORMAT = 1;
  * that rewrite must reach browsers that cached last year's output for a year, immutable.
  */
 const ICONPACK_SERVE_REV = '1';
+/**
+ * The shape of `catalog.json` (1.70.0, iconpackCatalogBuild()). A catalogue written by another format is
+ * rebuilt from the package's own metadata the first time it is asked for (iconpackCatalogOf()), and the
+ * number is part of the address the picker fetches it from, so no browser keeps an older shape.
+ */
+const ICONPACK_CATALOG_FORMAT = 1;
 
 // Limits. What a real package needs, with room: the Pro 7.3.1 download is 41 stylesheets (all.css the
 // biggest, 175 KB), 38 fonts (the biggest woff2 600 KB), 7.5 MB; Pro 6.7.2 is 23 stylesheets and 36
@@ -504,8 +510,10 @@ function iconpackImport(string $source, array $opts = []): array {
     $flagsJ = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
     $okIdx = $a['index'] === null || @file_put_contents($tmp . '/index.json', json_encode($a['index'], $flagsJ)) !== false;
     $okEmo = $a['emoji'] === null || @file_put_contents($tmp . '/emoji.json', json_encode($a['emoji'], $flagsJ)) !== false;
+    // And (1.70.0) the catalogue of every icon the shoutbox picker may offer: iconpackCatalogBuild().
+    $okCat = $a['catalog'] === null || @file_put_contents($tmp . '/catalog.json', json_encode($a['catalog'], $flagsJ)) !== false;
     $okMan = @file_put_contents($tmp . '/manifest.json', json_encode($manifest, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)) !== false;
-    if (!$okNames || !$okIdx || !$okEmo || !$okMan || !@rename($tmp, $final)) {
+    if (!$okNames || !$okIdx || !$okEmo || !$okCat || !$okMan || !@rename($tmp, $final)) {
         iconpackRemoveTree($tmp);
         if (is_dir($final)) { $report['ok'] = true; $report['already'] = true; return $report; }   // a twin import won the race
         return $fail('write_failed', $id);
@@ -704,7 +712,7 @@ function iconpackAnalyse(string $dir, array $kept): array {
     return ['ok' => true, 'edition' => $h0['edition'], 'version' => $h0['version'], 'major' => $h0['major'],
             'core' => $core, 'families' => $famOut, 'styles' => array_values($styles),
             'aux' => array_values(array_unique($aux)), 'names' => $names,
-            'metadata' => $index['summary'], 'index' => $index['index'], 'emoji' => $index['emoji'],
+            'metadata' => $index['summary'], 'index' => $index['index'], 'emoji' => $index['emoji'], 'catalog' => $index['catalog'],
             'notes' => $notes, 'drop' => $drop];
 }
 
@@ -1064,24 +1072,26 @@ function iconpackLayers(array $rules, array $info, array $ownClasses): bool {
  *   * Font Awesome's older `icons.json` (the classic styles only).
  *
  * Normalised to name => {l: label, t: [terms], free, c: [categories], f: {family: [styles]}} and kept as
- * two small files beside the manifest (iconpackImport()): `index.json`, every icon's style keys as a
+ * small files beside the manifest (iconpackImport()): `index.json`, every icon's style keys as a
  * dictionary of the few distinct sets (the site-icon map's question: does the loaded Jelly draw a
- * gear?), and `emoji.json`, the `emoji` category with its labels and words (what the shoutbox picker
- * offers and the :fa-NAME: token draws). Both hold only names the package's own CSS declares.
+ * gear?), `emoji.json`, the `emoji` category with its labels and words (the shoutbox picker's faces),
+ * and — 1.70.0 — `catalog.json`, EVERY icon with its label, its English words, its categories and its
+ * set (iconpackCatalogBuild(): what the picker offers beyond the faces, and what a :fa-NAME: token may
+ * name). All three hold only names the package's own CSS declares.
  *
  * The summary in the manifest says what the metadata describes, so nobody takes Free metadata for Pro
  * coverage: Font Awesome Free's own files describe no Pro icon and no Pro style (the owner's first two
  * folders carried exactly those); a folder whose metadata is none of the three is 'unknown'.
  *
- * @return array{summary: array, index: ?array, emoji: ?array}
+ * @return array{summary: array, index: ?array, emoji: ?array, catalog: ?array}
  */
 function iconpackIndexBuild(array $meta, array $cssNames): array {
     $files = array_keys($meta);
     sort($files);
     $summary = ['files' => $files, 'describes' => $meta ? 'unknown' : 'none', 'icons' => 0, 'css_names_covered' => 0,
                 'css_names' => count($cssNames), 'pro_styles' => false, 'pro_only_icons' => 0,
-                'kind' => null, 'index' => null, 'families' => 0, 'emoji' => 0];
-    $none = ['summary' => $summary, 'index' => null, 'emoji' => null];
+                'kind' => null, 'index' => null, 'families' => 0, 'emoji' => 0, 'categories' => 0];
+    $none = ['summary' => $summary, 'index' => null, 'emoji' => null, 'catalog' => null];
     $src = iconpackIndexSource($meta);
     if ($src === null) return $none;
     $icons = iconpackIndexRead($src);
@@ -1089,7 +1099,7 @@ function iconpackIndexBuild(array $meta, array $cssNames): array {
 
     $covered = 0; $proOnly = 0; $proStyles = false; $families = [];
     $sets = []; $setOf = [];                  // "k1,k2" => index into $sets
-    $styles = []; $emoji = [];
+    $styles = []; $emoji = []; $rows = [];     // $rows: name => [entry, set index], for the catalogue
     $setIdx = function (array $fam) use (&$sets, &$setOf): int {
         $keys = [];
         foreach ($fam as $family => $sts) foreach ((array)$sts as $st) {
@@ -1112,9 +1122,11 @@ function iconpackIndexBuild(array $meta, array $cssNames): array {
         $i = $setIdx($e['f']);
         $styles[$name] = $i;
         if (in_array('emoji', $e['c'], true)) $emoji[$name] = [$e['l'], $e['t'], $i];
+        $rows[$name] = [$e, $i];
     }
     ksort($styles, SORT_STRING);
     ksort($emoji, SORT_STRING);
+    $catalog = $rows ? iconpackCatalogBuild($rows, $sets, $src) : null;
     $summary['icons'] = count($icons);
     $summary['css_names_covered'] = $covered;
     $summary['pro_only_icons'] = $proOnly;
@@ -1124,9 +1136,96 @@ function iconpackIndexBuild(array $meta, array $cssNames): array {
     $summary['index'] = $src['rel'];
     $summary['families'] = count($families);
     $summary['emoji'] = count($emoji);
+    $summary['categories'] = $catalog !== null ? count($catalog['cats']) : 0;
     return ['summary' => $summary,
             'index' => ['format' => 1, 'kind' => $src['kind'], 'file' => $src['rel'], 'sets' => $sets, 'styles' => $styles],
-            'emoji' => $emoji ? ['format' => 1, 'kind' => $src['kind'], 'sets' => $sets, 'faces' => $emoji] : null];
+            'emoji' => $emoji ? ['format' => 1, 'kind' => $src['kind'], 'sets' => $sets, 'faces' => $emoji] : null,
+            'catalog' => $catalog];
+}
+
+/**
+ * THE CATALOGUE (1.70.0): every icon of the package, for the shoutbox picker's two wider scopes — Font
+ * Awesome's categories as pages, and a search that finds any icon — and for the :fa-NAME: token, whose
+ * allow-list it is (includes/emoji.php). Written once, at import or on a re-index (iconpackReindex()),
+ * as `catalog.json` beside the manifest; the picker fetches it only when its scope needs it, at an
+ * address that carries the package's hash, and the browser keeps it.
+ *
+ *   {format, kind, file, count, cats: [category ids], sets: [[style keys]…],
+ *    icons: [[name, label, words, [category indexes], set index], …]}      one row per icon, by name
+ *
+ * Compact on purpose — the owner's 7.3.1 index describes 4,349 icons with 57,278 search terms:
+ *   * `label` is 0 when it is the name read as words ("arrow-up-right" → "Arrow Up Right", which is every
+ *     label in 7.3.1 and most in 6.7.2), else the label itself;
+ *   * `words` are the terms as one string of distinct lower-case words, without the words of the name
+ *     and the label and without a word that merely begins another one ("arrow" beside "arrows"): the
+ *     picker's search asks whether every word typed BEGINS some word of an icon, and the words kept
+ *     answer that question exactly as the full list would;
+ *   * categories are indexes into `cats` (Font Awesome's own ids, sorted); an icon the index files under
+ *     no category is put under `brands` (a brand logo — Font Awesome files none of them) or `other`, so
+ *     that the category pages hold every icon;
+ *   * the set is an index into `sets`, the families and styles the icon is drawn in (index.json's).
+ * Only names the package's CSS declares, and only names the token can spell.
+ */
+function iconpackCatalogBuild(array $rows, array $sets, array $src): array {
+    $ids = [];
+    $synthetic = [];
+    foreach ($rows as [$e, $si]) {
+        $mine = array_values(array_filter($e['c'], fn($c) => is_string($c) && preg_match('/^[a-z0-9]+(-[a-z0-9]+)*$/', $c)));
+        foreach ($mine as $c) $ids[$c] = true;
+        if (!$mine) $synthetic[in_array('brands', (array)($sets[$si] ?? []), true) ? 'brands' : 'other'] = true;
+    }
+    $ids = array_map('strval', array_keys($ids));
+    sort($ids, SORT_STRING);
+    // The two made-up pages come last, and only when something is on them.
+    foreach (['brands', 'other'] as $x) if (isset($synthetic[$x]) && !in_array($x, $ids, true)) $ids[] = $x;
+    $ci = array_flip($ids);
+    $names = array_map('strval', array_keys($rows));
+    sort($names, SORT_STRING);
+    $icons = [];
+    foreach ($names as $name) {
+        if (!preg_match('/^[a-z0-9]+(?:-[a-z0-9]+){0,9}$/', $name)) continue;   // EMOJI_FA_TOKEN_RE's names
+        [$e, $si] = $rows[$name];
+        $c = [];
+        foreach ($e['c'] as $x) if (is_string($x) && isset($ci[$x])) $c[] = $ci[$x];
+        if (!$c) $c[] = $ci[in_array('brands', (array)($sets[$si] ?? []), true) ? 'brands' : 'other'];
+        $label = (string)$e['l'];
+        $icons[] = [$name, $label === iconpackCatalogLabel($name) ? 0 : $label, iconpackCatalogWords($name, $label, (array)$e['t']),
+                    array_values(array_unique($c)), (int)$si];
+    }
+    return ['format' => ICONPACK_CATALOG_FORMAT, 'kind' => (string)$src['kind'], 'file' => (string)$src['rel'], 'count' => count($icons),
+            'cats' => $ids, 'sets' => $sets, 'icons' => $icons];
+}
+
+/** An icon's name read as its label: "arrow-up-right" → "Arrow Up Right" (assets/js/shoutbox.js has the twin). */
+function iconpackCatalogLabel(string $name): string {
+    return ucwords(str_replace('-', ' ', $name));
+}
+
+/**
+ * An icon's search terms as the few words the picker's search needs (iconpackCatalogBuild() says why):
+ * distinct, lower case, sorted; none of the name's or the label's words; none that only begins another.
+ */
+function iconpackCatalogWords(string $name, string $label, array $terms): string {
+    // One split for all the terms (57,000 of them in 7.3.1: a Unicode regex per term was a third of a
+    // second), and the byte-wise split for the text that is ASCII, which nearly all of it is.
+    $split = fn(string $s) => (preg_match('/[\x80-\xFF]/', $s)
+        ? preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($s, 'UTF-8'), -1, PREG_SPLIT_NO_EMPTY)
+        : preg_split('/[^a-z0-9]+/', strtolower($s), -1, PREG_SPLIT_NO_EMPTY)) ?: [];
+    $base = [];
+    foreach (array_merge(explode('-', $name), $split($label)) as $w) $base[(string)$w] = true;
+    $words = [];
+    foreach ($split(implode(' ', array_filter($terms, 'is_string'))) as $w) $words[(string)$w] = true;
+    // Sorted as strings, a word that begins another is followed by one that begins with it.
+    $all = array_map('strval', array_keys($base + $words));
+    sort($all, SORT_STRING);
+    $prefixOfNext = [];
+    for ($i = 0, $n = count($all) - 1; $i < $n; $i++) if (str_starts_with($all[$i + 1], $all[$i])) $prefixOfNext[$all[$i]] = true;
+    $keep = [];
+    foreach (array_map('strval', array_keys($words)) as $w) {
+        if (!isset($base[$w]) && !isset($prefixOfNext[$w])) $keep[] = $w;
+    }
+    sort($keep, SORT_STRING);
+    return implode(' ', $keep);
 }
 
 /**
@@ -1262,6 +1361,106 @@ function iconpackEmojiOf(string $id): ?array {
     return $cache[$id] = (is_array($j) && is_array($j['sets'] ?? null) && is_array($j['faces'] ?? null)) ? $j : null;
 }
 
+/** Where a package's catalogue (1.70.0, iconpackCatalogBuild()) lives. */
+function iconpackCatalogPath(string $id): string {
+    return iconpackDir() . DIRECTORY_SEPARATOR . $id . DIRECTORY_SEPARATOR . 'catalog.json';
+}
+
+/** The catalogue as stored, or null when there is none of this format. */
+function iconpackCatalogRead(string $id): ?array {
+    if (!iconpackValidId($id)) return null;
+    $raw = @file_get_contents(iconpackCatalogPath($id));
+    $j = $raw !== false ? json_decode($raw, true) : null;
+    return (is_array($j) && ($j['format'] ?? 0) === ICONPACK_CATALOG_FORMAT && is_array($j['icons'] ?? null)
+            && is_array($j['sets'] ?? null) && is_array($j['cats'] ?? null)) ? $j : null;
+}
+
+/**
+ * The package's catalogue — BUILT when it has none yet. A package installed by 1.69.0 has an index and
+ * no catalogue (the owner's production has both of his packages installed that way), and asking him to
+ * install them again would be asking for nothing: the package keeps its own metadata file, so the first
+ * request that needs the catalogue reads it and writes `catalog.json` (iconpackReindex()); `php
+ * tools/iconpack.php reindex` and the panel's Rebuild button do the same on purpose. When the store
+ * cannot be written the catalogue is still returned, built in memory for this request. Null for a
+ * package whose metadata is not an index this file reads (a package without metadata/).
+ */
+function iconpackCatalogOf(string $id): ?array {
+    static $cache = [];
+    if (array_key_exists($id, $cache)) return $cache[$id];
+    if (!iconpackValidId($id)) return $cache[$id] = null;
+    $j = iconpackCatalogRead($id);
+    if ($j === null) {
+        $m = iconpackManifest($id);
+        if ($m === null || empty($m['metadata']['index'])) return $cache[$id] = null;
+        $r = iconpackReindex($id);
+        $j = $r['catalog'] ?? null;
+        if (!empty($r['ok']) && empty($r['written'])) error_log('[tracker iconpack] ' . $id . ': the catalogue could not be written to ' . iconpackCatalogPath($id) . ' — built in memory; run php tools/iconpack.php reindex as the web user');
+    }
+    return $cache[$id] = $j;
+}
+
+/**
+ * Part of the address the catalogue is fetched from: the package's content hash — the metadata the
+ * catalogue is read from is one of the files it hashes — and the catalogue's format.
+ */
+function iconpackCatalogVersion(array $m): string {
+    return substr((string)$m['hash'], 0, 16) . '-c' . ICONPACK_CATALOG_FORMAT;
+}
+
+/**
+ * Read a package's index again from the metadata it keeps, and write the sidecars it makes — index.json,
+ * emoji.json and catalog.json — beside the manifest (a file that would come out the same is left alone).
+ * For a package installed before this release had a catalogue, or by a build whose catalogue was of
+ * another format. The package's files, its id and its manifest are not touched: what the site loads is
+ * exactly what it was.
+ *
+ * @return array{ok:bool, error?:string, written?:bool, catalog?:?array, summary?:array, bytes?:int}
+ */
+function iconpackReindex(string $id): array {
+    if (!iconpackValidId($id)) return ['ok' => false, 'error' => 'unknown_package'];
+    $m = iconpackManifest($id);
+    $dir = iconpackDir() . DIRECTORY_SEPARATOR . $id;
+    if ($m === null) return ['ok' => false, 'error' => is_dir($dir) ? 'broken_manifest' : 'unknown_package'];
+    $meta = [];
+    foreach ($m['files'] as $rel => $f) {
+        if (($f['kind'] ?? '') === 'metadata' && preg_match('#^metadata/[A-Za-z0-9._-]+$#', (string)$rel) && is_file($dir . '/' . $rel)) $meta[(string)$rel] = $dir . '/' . $rel;
+    }
+    $names = iconpackNamesOf($id);
+    if (!$meta || !$names) return ['ok' => false, 'error' => 'no_index'];
+    $b = iconpackIndexBuild($meta, $names);
+    if ($b['index'] === null || $b['catalog'] === null) return ['ok' => false, 'error' => 'no_index'];
+    $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+    $cat = (string)json_encode($b['catalog'], $flags);
+    $written = iconpackWriteSidecar($dir, 'index.json', (string)json_encode($b['index'], $flags))
+             & ($b['emoji'] === null || iconpackWriteSidecar($dir, 'emoji.json', (string)json_encode($b['emoji'], $flags)))
+             & iconpackWriteSidecar($dir, 'catalog.json', $cat);
+    return ['ok' => true, 'written' => (bool)$written, 'catalog' => $b['catalog'], 'summary' => $b['summary'], 'bytes' => strlen($cat)];
+}
+
+/** One sidecar, written whole or not at all (a temporary file renamed over it); unchanged bytes are not rewritten. */
+function iconpackWriteSidecar(string $dir, string $name, string $bytes): bool {
+    $path = $dir . DIRECTORY_SEPARATOR . $name;
+    if (is_file($path) && (string)@file_get_contents($path) === $bytes) return true;
+    $tmp = $dir . DIRECTORY_SEPARATOR . '.' . $name . '.' . bin2hex(random_bytes(4)) . '.tmp';
+    if (@file_put_contents($tmp, $bytes) !== strlen($bytes)) { @unlink($tmp); return false; }
+    if (!@rename($tmp, $path)) { @unlink($tmp); return false; }
+    return true;
+}
+
+/**
+ * What the package list says about a catalogue without reading all of it: its icons and categories, from
+ * the head of the file (iconpackCatalogBuild() writes both before the rows), and its size. Null: none yet.
+ */
+function iconpackCatalogSummary(string $id): ?array {
+    $p = iconpackCatalogPath($id);
+    if (!iconpackValidId($id) || !is_file($p)) return null;
+    $head = (string)@file_get_contents($p, false, null, 0, 4096);
+    if (!preg_match('/^\{"format":' . ICONPACK_CATALOG_FORMAT . ',.*?"count":(\d+),"cats":\[([^\]]*)\]/s', $head, $mm)) return null;
+    $ids = $mm[2] === '' ? [] : array_map(fn($s) => trim($s, '"'), explode(',', $mm[2]));
+    if (array_filter($ids, fn($s) => !preg_match('/^[a-z0-9]+(-[a-z0-9]+)*$/', $s))) return null;
+    return ['icons' => (int)$mm[1], 'categories' => count($ids), 'ids' => $ids, 'bytes' => (int)filesize($p)];
+}
+
 /* ── the store ────────────────────────────────────────────────────────────────── */
 
 /** The ids of the installed packages (directories of the right shape; a broken one is still listed). */
@@ -1301,7 +1500,9 @@ function iconpackList(): array {
                   'styles' => count($m['styles']), 'outside_all' => $outside, 'core' => $m['core']['kind'] ?? 'all',
                   'bytes' => (int)$m['bytes'], 'files' => count($m['files']), 'installed_at' => $m['installed_at'],
                   'installed_by' => $m['installed_by'], 'source' => $m['source'], 'root' => $m['root'],
-                  'icons' => (int)($m['icons']['names'] ?? 0), 'metadata' => $m['metadata']['describes'] ?? 'none'];
+                  'icons' => (int)($m['icons']['names'] ?? 0), 'metadata' => $m['metadata']['describes'] ?? 'none',
+                  // 1.70.0: whether its metadata is an index, and the catalogue made of it (null: none yet).
+                  'index' => !empty($m['metadata']['index']), 'catalog' => iconpackCatalogSummary($id)];
     }
     // Newest version first; a broken directory last.
     usort($out, fn($a, $b) => (empty($a['broken']) <=> empty($b['broken'])) * -1

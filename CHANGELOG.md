@@ -4,6 +4,758 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.70.0] — 2026-09-28
+
+The owner's list after a few days with 1.69.0, as one release. It opens with three small things he
+found while using it: ticking a search option — "Search inside messages", "Also search file names" —
+with nothing typed reloaded the list for nothing, and the list flashed; the browser drew its own parts
+of the site's form controls for a light page, so the Likes filter's spinner was two white boxes on the
+dark one; and after a language change that reloaded the page, the page glided for almost two seconds to
+the place it was keeping for the reader instead of simply being there. Schema 77, unchanged by these
+three. Then Font Awesome in the shoutbox's picker as the owner expected it to be: his site runs on his
+Pro 7.3.1 with the picker's Font Awesome on "mixed", he took that to mean any icon in any style, and
+found only the faces — so the operator now chooses how much of the package the picker offers: the
+faces alone, as before; the faces, and a search that finds every icon; or every icon, on the pages of
+Font Awesome's own categories. Schema 78 is that choice. And the picker is no longer the shoutbox's
+alone: every editor on the site has it — the message composer, a torrent's description (the first one
+and a proposed rewrite), the whitelist form, the profile's description — and the room's emotes and
+stickers are drawn where those texts are read. Schema 79 is the switch for that, on by default. And a
+list gets a description: the card's "Rename" is "Edit" now, a window with the name and the description —
+BBCode or Markdown, with the emoji, the emotes and the stickers — saved in one request, and drawn under
+the list's name when it is opened. Schema 80 is that description's column, its format and its length.
+And a torrent's description gets what the owner asked for next: it can be deleted — its author's own, or
+anybody's published one by a moderator — its author can keep their name off it (the page says "a
+member"), "Edit" opens the editor with the text as it stands, and an applied edit keeps the author and
+credits the editor with the share of the text it changed: "Description by TryHackX (first) → dominikk26
+(25% edit) → Majkel (6% edit)". The descriptions a member wrote are listed on their account page and, if
+they say so, on their profile. Schema 81 is the credit chain, a proposal's kind, the two switches, the
+setting and the three permissions. And last, "Who has this" answers the whole question the owner asked
+of it: beside who keeps a torrent in their favourites, who liked or rated it — with the vote — and the
+public lists it is on, three sections that load twenty each the moment it opens, each with its own
+search and "Show more". Schema 82 is the consent that puts a member's name among the likes, the two
+sections' switches, and two keys for the proposals waiting on a description — whose replaced versions
+are now kept ten to a description, where every applied proposal used to keep one more for ever. One Esc
+now closes one window, the top one; and the picker check's clock compares the picker with itself. And a
+picker asks for the emotes only when it first opens — once a page for each kind of text, the room's
+included — where every picker used to ask the moment it was put on the page, opened or not (the account
+page asked twice as it loaded).
+
+### Fixed — a search option no longer reloads a list when there is nothing to search
+
+* **What the owner saw.** In the inbox, ticking "Search inside messages" with the search box empty
+  refreshed the list; the same on Favourites. Nothing listened to the box itself: what reloaded was the
+  checkbox beside it, whose change fetched the list again — the very same list, because an option only
+  changes how WORDS are matched, and with no words it has nothing to change. Measured in the browser
+  before the fix: one request for every tick and untick with the box empty (and, in the inbox, with a
+  single letter, where a search inside the messages needs two), none for clicking into the box.
+* **The rule now, wherever a list has such an option**: the option is remembered, and a tick reloads
+  only when it changes what is actually asked. Each list keeps the question it last asked — the words,
+  and the options that apply to them — and a tick that asks the same question asks nothing; one that
+  asks a new one asks at once, taking over a keystroke still waiting to ask rather than letting both go.
+  The inbox (`assets/js/people.js`); the account page's and a profile's Favourites, a list's window,
+  the account's shelf of lists ("…what is on them", "Also search file names") and the likes and ratings
+  table (`assets/js/favourites.js`); the search page's "Also search file names" and "Best match"
+  (`assets/js/app.js`), which with an empty box still write themselves into the address — replaced, not
+  pushed — so a reload or a shared link keeps the tick; and the panel's Index (`assets/js/admin-index.js`),
+  which now does what the Whitelist's box has always done. Filters and sorts — a status, a minimum
+  number of votes, an order — narrow or reorder the rows whatever the box says, and still ask at once.
+  Uploads, People and the members directory have no search option and are unchanged.
+* **The search page sends the file flag only with a query.** Without one the answer is the same rows,
+  and the flag alone kept the server from using its cached count of the whole catalogue — a reader who
+  had ticked the box and browsed without a query paid for a full count on every page.
+
+### Fixed — the browser's own parts of a control were drawn for a light page
+
+* **The Likes filter's "Min. votes" spinner was two white boxes on the dark page**, and in the panel
+  the clock of every time field (Settings: the schedules, the backup time) was black on a black field.
+  Both stylesheets left `color-scheme` at `normal`, so everything the browser draws itself — a number
+  field's spinner, a date or time picker and its popup, the list a `<select>` drops down, the scrollbar
+  inside a field, an autofilled field's tint — was drawn for a light page. Only the account page's
+  language select said otherwise.
+* `color-scheme: dark` on the root of `assets/css/style.css` (every page it styles is dark; the language
+  select's own line is gone) and of `assets/css/admin.css` (every panel page is dark, and Bootstrap's
+  light theme sets nothing). Checked on every public page and every panel page with its tabs open: all
+  of the thousand-odd controls drawn there are dark now, and forcing the old scheme back changes the
+  size of none of them — the scheme is colours only. The panel's number fields (153 in Settings alone)
+  and the pagers' page fields keep their spinners hidden as before; the Likes filter's is the one spinner
+  the site draws, and it is dark. The Index's row checkboxes — the browser's own, white squares on the
+  dark rows until now — are drawn dark as well; every other checkbox on the site draws its own box.
+
+### Fixed — the likes and ratings table's headers can no longer run into each other
+
+* Measured here, they did not touch: from 1920 down to 960px the table is 944–976px wide (the page's
+  62em), and in both languages and both modes, on the account tab and on a profile, with Bootstrap Icons
+  and with Font Awesome, the closest two headers stand 18–19.5px apart, ink to ink. What does make them
+  touch is text drawn larger than the columns were measured for: the columns are fixed, and a header
+  that did not fit ran on into the next one. With the header drawn at 16px instead of 12.8 (which a
+  browser's minimum font size does) VOTES / GŁOSY came within 8px of the date's header, AVERAGE /
+  ŚREDNIA within 4.8px of VOTES, ROZMIAR ran into S / L's side of the gap, and "GŁOS UŻYTKOWNIKA" lay
+  over "WYNIK".
+* A header that does not fit its column now wraps inside it, where its line runs out — before its arrow
+  while the word still fits, inside the word once even that does not (`overflow-wrap: anywhere` on
+  `.pv-sort`) — instead of running into the next one. Where it fits, which is everywhere the widths were
+  measured, nothing wraps that did not already; at 16px every header keeps to its own column, 16px from
+  the next.
+
+### Changed — "keep your place" after a language change lands at once
+
+* With the in-place switch off (`lang_swap_enabled`, the default everywhere but the owner's site) every
+  language link is a plain navigation, and the switch itself falls back to one when its request fails,
+  runs out of time or finds nothing to change; either way the next page puts the reader back where they
+  were. Bootstrap's reboot gives the panel `scroll-behavior: smooth`, so that restore — a scroll of up to
+  the whole length of Settings, corrected again on every change of height while the page fills in — was
+  an animation, and the page glided for about 1.8 seconds. It jumps now (`behavior: 'instant'` on the
+  restore's own scrolls, `assets/js/lang-swap.js`), the settle loop's corrections and the short settle
+  after an in-place switch included; smooth scrolling everywhere else is left as it was. With a Settings
+  category chosen — whose button scrolls smoothly to the top — the restore still lands in its first frame.
+
+### Added — Font Awesome in the picker: the faces, the faces and a search of every icon, or every icon by category
+
+* **What the owner asked.** "I thought we would be able to use any icon in any style from Font Awesome":
+  his production draws with his Pro 7.3.1 and has the picker's Font Awesome on "mixed", and the picker
+  had only the `emoji` category — the faces. He asked for three modes: every Font Awesome category a page
+  of the picker, its icons in every style; the faces only, as now; and as now, but with a search that
+  finds any Font Awesome icon.
+* **The setting**: `shout_emoji_fa_scope` — `faces` (as shipped: the picker of 1.69.0), `search`, `all` —
+  in Settings → Shoutbox → Emoji in the picker, beside the mode and the style, and like them offered only
+  while a Font Awesome Pro package is the icon source; shown only while the faces are on at all
+  (`assets/js/admin-shout.js`; hidden, it still saves what it holds). Its hint counts the package's
+  catalogue — 4,349 icons in 70 categories with 7.3.1 — and says how the icons beyond the faces are found:
+  by their English names and words, or by their category's name in either language. A package without an
+  index to read offers the faces only, and the hint says that instead. Schema 78 (the default before the
+  bump), the save's allow-list (anything else is `faces`), the Settings search's words, the control; the
+  block's own line now says that what can be chosen is Font Awesome — its faces, and how much more of it.
+* **The catalogue** (`includes/iconpack.php`, `iconpackCatalogBuild()`): every icon of the package, read
+  from the index the package already carries, kept beside its manifest as `catalog.json` — `{format, kind,
+  file, count, cats, sets, icons: [[name, label, words, [categories], set], …]}`, one row per icon in name
+  order, only names the package's CSS declares. Compact on purpose (the owner's 7.3.1 index gives its
+  4,349 icons 57,278 search terms): a label that is only the name read as words is `0` (every label in
+  7.3.1, all but 170 in 6.7.2); the terms are one string of their distinct lower-case words without the
+  name's and the label's and without a word that only begins another ("arrow" beside "arrows") — the
+  search asks whether each word typed begins some word of an icon, and these answer exactly as the full
+  list would; categories are indexes into `cats` (Font Awesome's own ids); the set is index.json's (the
+  families and styles the icon is drawn in). An icon the index files under no category is put under
+  `brands` (a brand logo — Font Awesome files none of them) or `other` (in 7.3.1, `padel`), so the pages
+  hold every icon. Pro 7.3.1: 4,349 icons, 68 categories + Brands + Other, 468 KB, **133 KB gzipped**;
+  Pro 6.7.2: 3,814 icons, 68 + Brands, 255 KB, **71 KB gzipped**.
+* **For the packages already installed** — production has both, installed by 1.69.0 without a catalogue —
+  nothing needs installing again: the first request that needs a catalogue (the picker, a token, the
+  Settings page) builds it from the metadata the package keeps and writes it (`iconpackCatalogOf()`; built
+  in memory for that request when the store cannot be written, and the error log says how to fix it),
+  and it can be done on purpose: `php tools/iconpack.php reindex <id>|--all`, and the new "Read the index
+  again" button in the package table (Settings → Site → Font Awesome; no password — it changes nothing the
+  site loads — and one `iconpack.reindex` line in the audit log's Settings group). All three write the
+  same bytes, leave a sidecar that would come out the same alone, and leave the package's files, id and
+  hash as they were. The table and `list` say what each catalogue holds.
+* **Served** at `api.php?endpoint=shout_emoji&part=catalog&v=<package hash>-c1` to whoever may read the
+  room, the file as stored, compressed when the browser takes gzip, and kept by the browser for a year
+  (`immutable`: the address changes with the package and with the catalogue's format); 404 with the scope
+  at `faces` or the faces off. The faces' answer says where it is, how many icons it holds, and the
+  categories' names in the reader's language — seventy names in English and Polish, this project's own
+  words (`emoji.facat.*`), sent with that answer rather than carried by every page.
+* **Asked for only when the scope needs it**: with `all`, once the picker has drawn its first page (in
+  idle time), so the picker opens as fast as it did; with `search`, by the first search; with either, at
+  once when Recent holds an icon beyond the faces (drawn from its token until the catalogue says more).
+  Measured with 7.3.1 in headless Chrome here, over three runs: the first opening takes 103–127 ms in
+  every scope, the faces alone as much as the other two (most of it the faces' answer and the emoji
+  file), every one after it 5–7 ms; the page's JS heap is 1.9 MB with the picker open on the faces,
+  3.0 MB with the catalogue, 3.2 MB after drawing all seventy categories.
+* **Every icon, category by category (`all`)**: one more tab after the faces' pages, "Font Awesome — every
+  icon" (the package's own `icons` glyph); its page has Font Awesome's categories as a strip of chips over
+  the grid — seventy do not fit a row of tabs — in the reader's alphabet, Brands and Other last, the one
+  looked at last remembered by the browser. The chips are the site's pill (as the search page's), the strip
+  scrolls sideways and a mouse wheel scrolls it; one Tab stop, Left/Right/Home/End to choose, Down into the
+  icons, Up back. A category is drawn in slices like any long page (Brands' 517 icons: 120 at once, the
+  rest on the next frames); the `emoji` category's icons are the faces, with their words; the line under
+  the grid names the category and counts it.
+* **The search finds any icon (`search` and `all`)**: after the emoji, faces and emotes, a "Font Awesome"
+  group — every icon that every word typed begins a word of: the exact name first, then a label that
+  begins with what was typed, then the label's words, then Font Awesome's English terms, then the name of
+  a category the icon is in, in the reader's language or Font Awesome's own id — which is how a Polish
+  reader finds the icons beyond the faces ("zwierz" brings the 72 animals); shorter labels first within a
+  rank, up to 300, the faces not repeated. The line under the grid gives both counts ("Found: 4 · Font
+  Awesome: 7"). The arrows walk over the group's heading: up and down now go to the nearest cell of the
+  next row, measured, not counted.
+* **Every icon has variants**: held down (a finger or the mouse), right-clicked, Shift+Enter or the menu
+  key — the styles the icon is drawn in among those the site loads, the default first by the server's own
+  rule: the chosen emoji style when the icon has it, else the classic family at that weight, else the
+  first loaded style that has it (`faVariants()` in `assets/js/shoutbox.js`, `emojiFaVariants()` in
+  `includes/emoji.php`); a brand logo's is Brands, its only style.
+* **The token** (`includes/emoji.php`): `:fa-NAME:` and `:fa-NAME/STYLE:` now name any icon of the active
+  package — the allow-list is its catalogue, so a name its CSS declares that its index does not describe
+  (an old alias) stays the text it was typed as, as does any name the package does not have — and
+  whatever the scope: the scope is how the picker offers icons, not what a stored message may show. A
+  style counts only among the icon's families and the styles that load. Such an icon is drawn as
+  `<i class="fai …">` in the colour of the words round it (a face stays `fae`, an emoji's yellow), with
+  `role="img"` and its label. Where it cannot be drawn — the faces off, another icon source or Bootstrap
+  Icons while Settings still names the package, a style it lacks or that does not load, every e-mail —
+  it is its label in brackets, `[Rocket]`; a face keeps its ordinary emoji. The grammar takes up to ten
+  parts (Font Awesome's longest names have nine), in the script's twin too, and Recent keeps entries of
+  up to 96 characters.
+* **Found on the way**: a line of nothing but such icons was dropped by the paragraph pass as empty —
+  1.69.0 had taught it the faces only (`includes/richtext.php`).
+
+### Added — the emoji, the emotes and the stickers in every editor, not only the shoutbox
+
+* **What the owner asked.** "I would add the emotes and stickers to messages too, and to descriptions,
+  and to the proposals that edit those descriptions, and to the description editor." So: the picker in
+  every editor a member writes in, and the room's `:code:` emotes and stickers drawn wherever those texts
+  are read — a private message's thread, the Info panel, the panel's review queue, a profile.
+* **One picker** (`assets/js/emoji-picker.js`, `window.EmojiPicker`). The shoutbox's, moved out of
+  `assets/js/shoutbox.js` byte for byte and taught four things: which context it serves, an id of its own
+  (`<textarea id>-picker`; the room keeps `shout-picker`), a panel that floats where an editor needs it
+  to, and a sticker that goes in as its code where there is nothing to send it with. The room mounts it
+  exactly as it did — its host, its ids, its sticker sender, its requests — and looks and behaves as it
+  did. `templates/layout.php` loads it on every public page, before `app.js`.
+  * `EmojiPicker.mount(opts)` — the picker on any button: `{button, host?, insert(text) → bool,
+    sticker(code)?, emotes, stickers, emotesPage?, files, fa, faVer, for?, id?}`; the handle has
+    `close()`, `say(text)`, `destroy()` and the checks' `state()`.
+  * `EmojiPicker.attach({textarea, button, data?})` — what an editor calls: the settings from the
+    button's `data-emoji-*`, whatever is picked put in at the caret. `window.RichText.mount()` calls it
+    for a `<id>-emoji` button in the editor's toolbar, so the whitelist form, the Info panel's
+    description editor and the message composer needed only the button; the profile's editor
+    (`assets/js/profile-bio.js`) builds a sixth button of its own. A list's description editor (1.70.0 D)
+    draws `emojiPickerButton($db, $cfg, $baseUrl, 'list', '<id>-emoji')` in its toolbar, or calls
+    `attach()` with `emojiPickerAttrs(emojiPickerData(…, 'list'))`.
+  * `EmojiPicker.isToken(text)` (the spacing rule the room's insert and every editor's share) and
+    `EmojiPicker.forgetEmotes()` (the emotes page, after an upload or a delete).
+* **The button** is the last group of each toolbar, the site's smiling-face icon, lit while its picker is
+  open, and titled with what it offers there — "Emoji, emotes and stickers", "Emoji and emotes" (a
+  profile), "Emoji" (the emotes kept to the room); `emojiPickerButton()` in `includes/emoji.php` draws it
+  with what THIS reader may use in THIS context. The format select keeps it: the toolbar's group-hiding
+  now hides only groups of syntax buttons (`assets/js/app.js`).
+* **What a pick does**: the character, `:code:` or `:fa-NAME:` at the caret, a token spaced from the words
+  round it, nothing past the box's own maxlength (the picker says why instead of cutting the text), and an
+  `input` event — the counter, the Preview, the profile's live count follow a pick as they follow a
+  keystroke. The picker stays open for the next one. A sticker in an editor is its code (the room sends
+  one the moment it is picked) and Recent, which is the room's row too, never holds one.
+* **Where it opens.** The room's panel is absolute in the field's wrapper, as it was. An editor's box
+  clips what is inside it (`.rt-editor` rounds its corners with overflow hidden; the Info panel's body
+  scrolls), so there the panel FLOATS: `position: fixed` against its button by the room's own rules
+  (right edges together, above when it fits, inside the window), in the button's dialog — the Info panel
+  keeps its picker and its `aria-modal` — or on the page, above every overlay (z-index 1300), placed again
+  as the page or the panel scrolls, and closed when its button leaves the window, is not drawn (the editor
+  on Preview) or is gone (an editor drawn again replaces its picker: one panel per id). Esc is the
+  picker's alone: its capture listener keeps it, so the Info panel no longer closed with the picker.
+* **Its data by context**: `for` on `api/shout_emoji.php` and `api/shout_emotes.php` — absent, the room's
+  answer and gate as before; `message` (`pm.send`), `description` (`content.submit` or `content.propose`
+  — a guest by the guest group's own grant, the whitelist form being public), `bio` (`profile.bio`),
+  `list` (`lists.use`) — `emojiPickerGate()` in `includes/emoji.php`. A feature switched off is 403
+  `disabled`, somebody signed out where an account is needed 401, any other `for` 400. The caching is the
+  room's: the faces' answer a day under its fingerprint, the catalogue a year, the emote list never. A
+  context's emote list is what that context draws (`emotePickerRows()`): approved, switched on, the
+  stickers only where they are drawn as stickers, no upload limits. A reader a context refuses is offered
+  the ordinary emoji alone, and the picker then asks the server nothing. Font Awesome's faces and icons
+  are offered in every editor whether the room is on or not — their tokens were already drawn everywhere.
+* **Drawn where they are read** (`emoteRenderHtml()`, `includes/emoji.php`): the third token on the
+  walk the other two take — the text between tags only, so an address, a class or any attribute keeps its
+  bytes and text in `<code>`, `<pre>`, `<kbd>`, `<textarea>`, `<script>` or `<style>` stays as typed;
+  only a code the context's map names; every attribute escaped; the address held to the room's image
+  endpoint (`emoteSafeUrl()` — anything else and the token stays text), which is unchanged. The map
+  (`emoteMapFor()`, `includes/shout.php`) is shoutEmotes()'s rows, cached per request — ONE query however
+  many messages a thread shows — switched on and approved: a row somebody switched on by hand without an
+  approval is not drawn outside the room (the room keeps its own rule). `richtextRenderIn($for, $db, …)`
+  is the renderer and then the stage — after it, on purpose: a description's picture limit counts the
+  renderer's `<img>`s and an emote is a word, not one of them, and the mail renderer calls the renderer
+  alone, so in an e-mail a token stays its code. Through it: a message (the thread, the panel's reported
+  messages — `pmRenderBody(…, $db)`), a description (the Info panel and the panel's detail panels —
+  `richtextContentFor()` — and both sides of a proposal in the review queue), the Preview of either.
+* **At what size, per context, and why**: a message — the emote inline, the sticker at the room's size
+  (128 px): a conversation with one person is what a sticker is for; a description and a list's — the
+  sticker bounded (96 px, `.rt-sticker-small`): a page about a torrent, read in the Info panel down to a
+  phone's width, where a picture belongs beside the words; the profile's description — a sticker drawn as
+  an emote, and none offered: a line or two under a name; an e-mail — the code. With stickers switched off
+  a sticker is an emote everywhere, as in the room. `.rt-emote` / `.rt-sticker` in `assets/css/style.css`
+  and in `assets/css/admin.css`, for what the panel reviews.
+* **The profile's description** (`includes/profilebio.php`): its allow-list gets the token stage and
+  nothing else — a Font Awesome icon's `:fa-NAME:` and the emotes, drawn on the finished text
+  (`profileBioTokens()`); the five tags, the link rules and the count are what they were (a token counts
+  as the characters it is typed as). The descriptions' `:shortcode:` emoji stay out — the picker never
+  writes them.
+* **The switch**: `emotes_everywhere` (schema 79, on) — Settings → Shoutbox → Emotes, "Beyond the
+  shoutbox", beside the emotes' own switch (the four switches share a row now, the three numbers the
+  next). The emotes are the room's — its store, its manager, its page — so they reach the other texts only
+  while its emotes are on; off, a `:code:` there is the text it was typed as and those pickers offer the
+  emoji alone. The room is not affected by it.
+* **Found on the way**: the Preview of a description answered 403 to a reader who may propose a rewrite
+  and not submit one, in the very editor they were given for it — either permission is enough now
+  (`api/richtext_preview.php`).
+
+### Added — a list's description, and "Edit" where the card said "Rename"
+
+* **What the owner asked.** "Add descriptions to lists — the Rename button I would rename to Edit, and
+  there a window for editing the description, with BBCode, Markdown and of course the emoji." A list
+  has had a `description` column since 1.44.0 (500 characters, plain text, an API op nothing on the
+  page ever called); now it is written, and read.
+* **Edit** (Edytuj) on every list card of your own — the account page's Lists tab and your own
+  profile — where Rename was. It opens a window in the site's style (`templates/partials/list_edit.php`,
+  drawn by the server with an id on everything that carries a word, so the in-place language switch
+  swaps each by name): the name (80 characters, the slug never rebuilt — a link somebody was given
+  keeps working) and the description in the site's shared editor — Write and Preview, the format
+  select, the rail, the counter (`window.RichText.mount()`, `assets/js/app.js`) — with the picker on its
+  last button (`emojiPickerButton(…, 'list', …)`: emoji, Font Awesome's faces, the room's emotes and
+  stickers) and no picture button. Save sends name, description and format as ONE request; Ctrl+Enter
+  saves, Enter in the name does. Leaving it follows the picture editor's rules (1.64.0): with nothing
+  changed, Cancel, Esc and the backdrop — a press that started on it — close at once; with something
+  changed they ask "Discard the changes?" in the footer (Esc again is "keep editing"), the × arms
+  itself for three seconds and says so beside itself, and leaving the page asks the browser's own
+  question. Esc is the window's last: the picker open in it and the "you are leaving" dialog a link in
+  the Preview opens take theirs first (one listener on the window, in the capture phase, that stands
+  aside for both). The card's other buttons are as they were; `renameInline()` is gone.
+* **Schema 80** (`includes/schema.php`): `user_lists.description` TEXT (NULL or '' is none; MySQL 5.7
+  cannot default a TEXT), `description_format` ENUM('bbcode', 'markdown') DEFAULT 'bbcode' — the site's
+  two syntaxes, `richtextFormats()` — and `lists_desc_max` (1000) in Settings → Profiles → Lists, a row
+  of its own under the four the section had: the longest description in the characters a READER sees,
+  clamped 50–5000.
+* **What counts** (`includes/lists.php`): the profile description's rule — the words, not the tags that
+  format them; an emoji is one character; a token (`:fire:`, `:fa-rocket:`, an emote's `:code:`) counts
+  as it is typed; a run of white space is one. It is counted by a strip of the syntax
+  (`listDescStrip()`, `listDescVisible()`) rather than a render, because the browser has to count it
+  the same way while somebody types: `assets/js/favourites.js` carries the twin, pattern for pattern,
+  and the shared editor takes it as a new `measure(text, format)` option — so the counter under the box,
+  the Preview's (`richtext_preview` with `for: 'list'`) and the save give one number. The text as typed
+  has a ceiling of its own, four times the limit and never more than 16 000 characters (the box's
+  maxlength, and the save's), so tags cannot store a novel in a field of a thousand.
+* **The descriptions already written stay what they said.** They were plain text, shown with
+  textContent; handed to the renderer as BBCode, `[b]` would have become bold, `:fire:` an emoji,
+  `:fa-face-grin-tears:` a face, `:flame:` an emote and a pasted address a link. The site's BBCode has
+  no escape, so the migration uses the one it can have — U+2060 WORD JOINER, which draws nothing, put
+  where each of those rules would begin: after a `[` that opens something tag-shaped, after the `:`
+  that opens something token-shaped, between `http(s)` and `://` (`schemaListDescPlainToBbcode()`; the C0
+  controls go, being no text and, three of them, the renderer's own placeholders). Rendered, such a text
+  is exactly its words; it counts as its words; a second rewrite changes nothing. The step is guarded on
+  the ABSENCE of the format column — while that is missing every description is known to be plain,
+  and a marker would be wiped by the local bootstrap and run the escape over real markup — and ordered
+  so that it can stop anywhere: the column made TEXT (a rewrite can outgrow 500), the rewrites (holding
+  `updated_at`, so no list moves on its owner's shelf), the format column last (`schemaListDescMigration()`).
+* **One request** — `op: 'edit'` on `api/user_lists.php`, `{id, name, description, format}`, judged by
+  `listEditRequest()`: after the gates every list write has (the token, a session, `lists.use`, the
+  hourly `listedit` limit, the row found by id AND owner) — the name (required, 80 at most: refused, not
+  cut as the old rename cut it), the text's size before anything walks it (64 KiB a request, 413),
+  UTF-8, the format among the site's, and then only if the description CHANGED: a moderator's mute (the
+  profile description's rule — clearing never waits), the visible limit, the typed ceiling, no picture,
+  the description's link limit. What is not changed is not judged again, so a rename of a list written
+  under a longer limit, or in a syntax since switched off, is still a rename. Kept cleaned: one kind of
+  line break, no bidi override, no control character; U+2060 stays (it is the escape above). A request
+  that says nothing about the description does not wipe it. `describe` is the same request without the
+  name — no second path writes a description any more; `rename` is untouched.
+* **Where it is read.** The card shows a line or two of it (`.list-desc`, two lines by the stylesheet):
+  a plain excerpt of what a reader sees, [hide] and spoiler bodies left out, the shortcodes as their
+  emoji, a Font Awesome token as a mail shows it, an emote as its code (`listDescExcerpt()`, in the
+  shelf's answer). The list's window draws the whole of it under the name, above the rows
+  (`description_html` in `api/user_list_items.php`: `listDescRender()` — the description renderer, the
+  room's emotes inline and its stickers bounded to 96 px, as C made it for a list). A public list shows
+  it to another member exactly where the list's five gates already show the list; a private one's words
+  are in no answer anybody else gets. Nothing new is exposed: the text rides the two answers that were
+  already gated.
+* **No pictures from elsewhere, and why stricter than a torrent's description**: a torrent's description
+  waits in the review queue before anybody reads it; a list's is published by its owner the moment it is
+  saved, and a picture from another host is a request from every reader's browser to whoever runs that
+  host. So `[img]` and `![](…)` are refused by the save, the editor offers no picture button, and a row
+  that has one anyway (a database client, an old backup) draws none. The room's emotes and stickers are
+  the pictures a list may have: the site's own, approved, from its own endpoint. Links keep the
+  description's rules — http and https, `rel="nofollow noopener noreferrer ugc"`, a new tab, the leaving
+  warning, `desc_max_links`.
+
+### Added — a torrent's description: delete, the author's name, Edit, co-authors, and "Descriptions" on the profile
+
+* **What the owner asked.** Once a description was added it could not be taken down: a permission and a
+  way to delete it. A privacy switch for "Description by" — the member decides whether their name shows.
+  Like the likes and the favourites, a list of the descriptions a member added, on their profile, with a
+  privacy switch of its own and the setting above everything, paged, in the site's style; and a line
+  telling the writer that a description makes them publicly visible when their switch says so. Beside
+  "Propose a rewrite", an "Edit" that puts the text into the editor: a rewrite changes the author, an edit
+  shows the editor beside the author as a co-author with the percentage they changed — no history of
+  versions kept, the comparison made when a moderator accepts it, each later edit compared with the text
+  as it then stands: "TryHackX (first) --> dominikk26 (25% edit) --> Majkel (6% edit)".
+* **Delete** (Usuń opis), in the Info panel beside Propose and Edit, for whoever may: its author of record
+  with `content.delete_own` — whatever the state, so a description still waiting or turned down can be
+  withdrawn too — or a holder of `content.delete_any`, for a PUBLISHED description of a hash that is not
+  banned (what waits is the review queue's business; the admin group's blanket passes it). Both are asked
+  of the signed-in ACCOUNT (`contentDeleteRight()`, `includes/content.php`), are no with accounts off
+  (where the legacy answer for `content.*` would otherwise have let every passer-by delete), and are
+  granted once by v81 — `content.delete_own` to members, `content.delete_any` to moderators only; a
+  co-author is credited, not an owner, and gets neither. Two clicks, no dialog, as a list's Delete: the
+  first arms the button ("Click again to delete", red) for four seconds, the second posts
+  `api/content_delete.php` (the session's token, 30 an hour per account), and the panel is drawn again.
+  The words go the way the panel's Clear takes them — text, source link, author and credits
+  (`contentDelete()`); every proposal still waiting on them is withdrawn (`rejected`, note "withdrawn: the
+  description was deleted") and its proposer told; one line goes to the audit log, `content.delete` in the
+  Content group, with the right used and the author; and the author is told when it was somebody else. It
+  does not wait for descriptions being switched on: taking your own words down must not depend on new
+  ones being accepted.
+* **The author's name** (`users.content_credit_public`, ON — names have always been shown there, and an
+  upgrade hides nobody's): "Show my name on the descriptions I write and edit" in Privacy. Off, every
+  place that credits the member says "a member" — no name, no picture, no link — in the credit line under
+  the description, in the Info panel's answer itself (the name is nowhere in it), and their list of
+  descriptions is shown to nobody else (the switch beside it says so while the name is off). Their own
+  reader is told "a member (you)". The panel's review queue, Rewrites tab and detail panels keep the real
+  name, marked "name hidden publicly": moderating somebody is not showing them. Before anything is sent —
+  a first description, an edit, a rewrite, in the Info panel and on the whitelist form — the editor says
+  so: "A description is public: whoever can open this torrent reads it, with your name beside it —
+  'Description by X'. You can hide your name in Privacy." (or that the name is hidden, or, signed out, the
+  first sentence alone; `contentPublicLine()`).
+* **Edit** (Edytuj), beside Propose a rewrite: the same editor, opened with the text, its format and its
+  source link as they stand (`content_edit` in `api/index_info.php`), the other buttons stepping aside until
+  Cancel; filed as a proposal of kind `edit` (`wl_content_edits.kind`, `rewrite` by default). Offered for a
+  PUBLISHED description to a signed-in member whose account may propose and read it — the prefill is the
+  source, and a `[hide]` block's words are in it — and `contentAttach()` asks the same again; an edit that
+  changes nothing is refused. The panel's Rewrites tab says which each proposal is — an EDIT pill of its
+  own colour, or the REWRITE one — and for an edit "Changes 25% of the text as it stands now. The author (X)
+  stays; the editor is credited beside them."; the confirmation and the toast say the share, and the audit
+  line records it. An edit of a description cleared since it was written goes in as a rewrite, and the card
+  says so.
+* **Co-authors: the credit chain** (`whitelist.content_credits`, `hash_content.content_credits`): who wrote
+  it first and who edited it since, as compact JSON on the home row (`{"u": id, "k": "f"|"e", "p": share,
+  "t": time}`, `contentCreditsEncode()`). A first description starts it with its author; an applied REWRITE
+  starts it again with the proposer (who becomes the author, as before); an applied EDIT keeps the author
+  of record and adds the editor with the share. Merging: an edit by the member who is LAST in the chain is
+  not a new entry — after their own first text nothing is added (the author refining their own words stays
+  its first), after their own edit the two shares add up (at most 100); 0% adds nothing; only accounts are
+  credited. At most 100 entries (the first and the newest). v81 starts a chain for every described row from
+  `content_user_id` — an author whose account is gone as "a deleted account" (u = 0), and that dangling id
+  let go — and deleting an account now does the same (`contentForgetAccount()` from `userDeleteCascade()`):
+  MySQL 5.7 hands the highest deleted id out again after a restart, and with Delete that account would
+  otherwise inherit somebody's words.
+* **Under the description**: "Description by TryHackX (first) → dominikk26 (25% edit) → Majkel (6% edit)"
+  — "(first)" only when somebody edited it after; the arrow the icon library's (`bi-arrow-right`, Font
+  Awesome's in that mode), which a screen reader hears as a comma; each name with its picture, linking to
+  the profile where profiles are on; "a member", "a deleted account". More than four fold to the first, a
+  "+N" and the last three, and open in place. In Polish "Autorzy opisu: … (pierwsza wersja) → … (edycja
+  25%)"; the single line reads "Autor opisu:" now (it was "Opis dodał(a)", which cannot stand before
+  "użytkownik" or "usunięte konto").
+* **The share** (`contentEditShare()`): the words of the text as it stands (A) and of the edited text (B) —
+  the source as typed (formatting a person added is part of what they wrote), line breaks made one kind,
+  NFC, lower case, zero-width characters out, split on white space; L = their longest common subsequence;
+  **share = round(100 × max(|A| − L, |B| − L) / max(|A|, |B|))**, at least 1% whenever the text, the format
+  or the link differ at all, 0% (and no credit) for the same text. 25 words of 100 replaced is 25%; 100
+  added to 100 is 50%; 6 of 100 removed is 6%. L is exact: the common beginning and end set aside, then
+  Myers' O(ND) difference algorithm, whose cost grows with what changed, not with the text — three words
+  fixed across a thousand take milliseconds — within 200 000 steps (texts that differ by up to 631 words);
+  past that, which only a text replaced nearly whole reaches, the words both texts have, held under what
+  the search proved (at most ~70 ms). Measured again at the moment it is applied, against the text as it
+  stands then — the figure the Rewrites tab previews.
+* **Who is told**: the editor, that their edit went in and its share; the author, that their description
+  was edited — not replaced — and that it is still theirs; an edit turned down says "edit"; the author of a
+  description somebody else deleted; the proposers whose proposals a delete withdrew.
+* **"Descriptions" — the list** (`includes/profiledescs.php`, `api/user_descriptions.php`,
+  `templates/partials/descs_section.php`, `initDescs()` in `assets/js/favourites.js`): a tab of the
+  account page right after Likes / Ratings ("Your descriptions") and a section of the profile right after
+  Likes / Ratings — the likes table's look and rules: the name with a line of what the description says
+  under it (`listDescExcerpt()`: [hide] and spoilers left out), the member's role ("Author", "Co-author,
+  25%"), the date, Magnet and Info; headers that sort (name, role, date), a search by name (and a hash
+  prefix where the hash is shown), the pager, cards on a phone. The owner sees every state of theirs and,
+  beside them, their own proposals still waiting or turned down (the version a rewrite replaced is not a
+  proposal and is left out); anybody else only what is published, of a hash that is not banned, a
+  registered torrent's only with `whitelist.view`, the hash only with `index.magnet`. Who may see
+  somebody's list is `profileDescsShownTo()` — asked by the page and the endpoint alike, one 404 for every
+  no: the setting `profile_descriptions_enabled` (Settings → Profiles, a section of its own, on), descriptions
+  or source links on at all, profiles on, the reader's account holding `favourites.view_others` and
+  `content.view`, no block, an active owner who ticked "Show the descriptions I wrote on my profile"
+  (`users.descriptions_public`, off until then, in Privacy right after the likes switch), whose name is
+  shown, and whose group GRANTS `content.public` (members, once, by v81; the admin blanket is not
+  consent). The chain is JSON and this project reads JSON in PHP: each home is asked for the rows whose
+  author is the member or whose chain's text names them (a LIKE on the fixed form, then decoded), at most
+  2,000 of each, newest first; the order and the page are then one array's, so the count and the page
+  agree.
+
+### Added — "Who has this": the favourites, the likes and ratings, and the lists — twenty at a time each
+
+* **What the owner asked.** "Who has this" should show a person's likes or ratings and their values as
+  well, and the favourites and the lists: three sections, loaded by themselves, twenty or so, then paging
+  with a search — "all of it according to the users' preferences, the settings and the permissions, of
+  course".
+* **Three sections, in this order** (`templates/partials/info_overlay.php`, `initWho()` in
+  `assets/js/favourites.js`): **Favourites**, as before; **Likes** or **Ratings** — the rating mode's
+  word, as the account's tab is named — each name with its thumb up or down, or with its stars, half
+  stars included (the likes table's own marks: `thumbFor()`, `starsReadOnly()`, read out as "Thumbs up",
+  "3.5 of 5 stars"), the highest first; **Lists** — a list's name, "by" its owner with their picture,
+  opening the list on the owner's profile (`#list:<slug>`, the address its Share button hands out), the
+  most recently changed first. Each section has its count ("25 people", "3 lists"), asks for its first
+  twenty the moment the overlay opens — all three requests at once, each drawn as it lands — and then has
+  a search of its own by name (a person's; a list's or its owner's), shown once there is more than one page
+  to search, and "Show 20 more" for the next page. An empty section says so in its own words ("Nobody who
+  shows their name has liked or disliked this.", "It is not on any public list."), a search that finds
+  nobody says that, and the line under the sections says why a section can be empty while many people
+  have the torrent. The page carries only the sections this reader may open, and the Info panel draws the
+  button whenever ANY of them can show them something — it needed the favourites' list until now.
+* **The gates — all of them SQL, so the count obeys them as the rows do** (`includes/who.php`,
+  `whoSql()`): the rule 1.69.0 wrote for the favourites (api/hash_favourites.php) — somebody appears only
+  when every gate says yes, and any single no takes them out of the rows AND the count ("14 people have
+  this, 3 shown" is a leak with a delay). For every section: a group of theirs GRANTS the section's
+  permission (userGroupIdsWithPermission(); the administrator's blanket is power, not consent), the
+  membership is in force today, the account is active, verified where the site asks for it, and has not
+  hidden its profile from this reader (`hide_profile`). **Favourites**: as in 1.69.0 — public favourites
+  and the list on, `favourites.public`, the member's `fav_public` and `fav_listed`. **Likes / ratings**:
+  ratings and the likes on profiles on (`profileVotesEnabled()`) and the section's switch;
+  `rating.public`; the member's `votes_public` (their likes on their profile) AND the new `votes_listed`;
+  only a vote cast from an ACCOUNT — one cast from an address is nobody's and never listed — and only a
+  value the current mode has: ±1 for thumbs, 1–10 half stars for stars (a mode switch clears nothing;
+  a 1 is in both, read as the mode reads it). No score is made of them: each is its owner's vote, shown as
+  their own profile shows it — whatever the torrent's number of votes, as there — and the count beside the
+  section is of the people named, not a score.
+  **Lists**: public lists on and the section's switch, then the five gates a public list has everywhere
+  (`tests/lists_test.php`): the owner's group grants `lists.public`, the owner shows the section
+  (`lists_public`), the list is public (`is_public`). **The reader**, for every section: signed in, with an
+  ACCOUNT holding `index.view` and `favourites.view_others` (asked of the account, as the likes' profile
+  section asks it — a panel session in the same browser is not the member's grant).
+* **The consent** (`users.votes_listed`, schema 82, 0 for everybody): "Let my name, with my thumb, appear
+  in a torrent's "who has this"" ("… with my rating …" in star mode) — Privacy, right under "Show my likes
+  on my profile", drawn while the section exists at all; the likes' twin of the favourites' "Let my name
+  appear". Both are needed, and the hint says so. Saved without a password like its neighbours
+  (`api/user_privacy.php`, which also says whether the section exists).
+* **Settings → Profiles**: `who_votes_enabled` — "Likes and ratings in "Who has this"", in the likes'
+  section — and `who_lists_enabled` — "Lists in "Who has this"", in the lists' — both on (each shows nothing
+  until the feature under it is on); the favourites' `fav_who_enabled` stays where it was. Schema 82 (the
+  defaults before the bump), the save's allow-list and 0/1, the Settings search's words in both languages.
+* **The endpoint** (`api/hash_who.php`, `hash_who&hash=…&section=fav|votes|lists[&page=][&per_page=][&search=]`):
+  GET only; twenty a page, at most fifty, a page past the end empty with the true total (so "Show more"
+  never repeats a row); the search's `%`, `_` and `\` are characters, not wildcards. One 404 for every no
+  — a section switched off, nobody signed in, an account that may not, a section that does not exist —
+  before the hash is even read. An hourly bucket of its own (`hashwho`, three times
+  `rate_limit_index_search`: three sections to one look, as many looks as the 1.69.0 overlay allowed), so
+  opening the overlay does not spend the reader's catalogue searches. Rows carry a name and a picture's
+  address (a vote's value, a list's name, slug and size) — never an id, never a time.
+  `api/hash_favourites.php` keeps the 1.69.0 answer, read from the same functions (its lists now obey
+  `who_lists_enabled` too), and `listsContainingHash()` is the lists section's first page — one query each,
+  not two to keep in step.
+* **Measured**: each section drives through its hash's own index — `uq_vote_once` / `idx_votes_hash`,
+  `idx_fav_hash`, `idx_item_hash` — and reaches the account by its key (EXPLAIN in `tests/who_test.php`,
+  among three thousand other votes and list rows).
+* **A live language switch** swaps the server's words by their ids (the headings, the boxes' placeholders,
+  the line under them); what the script writes — the rows, the counts, "Show more" — is `data-lang-keep`
+  and drawn again from what each section holds, the names already loaded kept. Polish counts sit where
+  Polish need not agree with them: "Liczba osób: 25", "Liczba list: 3", "Pokaż kolejne (20)".
+
+### Fixed — one Esc closes one window: the top one
+
+* **What part D found**: over every window but a list's Edit window, one Esc closed the "you are leaving"
+  dialog AND the window under it — the dialog heard the key first (in the capture phase), closed, and let
+  it go on to the window's own listener. It was the general case: one Esc closed every window of a stack —
+  "Who has this" or "Put this in a list" together with the Info panel under it, the Info panel together
+  with the list's window it was opened from.
+* **The dialog keeps its Esc** (`assets/js/app.js`, and the panel's own copy in `assets/js/admin-common.js`):
+  it closes and takes the key, so the Info panel, a list's window — and in the panel the Index's and the
+  Whitelist's detail windows, Bootstrap's, which close on any Esc that reaches them — stay open, and the
+  next Esc closes them.
+* **The windows take turns** (`escLayer()`, `assets/js/app.js` — the Edit window's approach, made one
+  helper): an open window listens on the WINDOW, in the capture phase, and acts only while it is the top
+  layer — no "you are leaving" dialog and no emoji picker open (each keeps its own Esc), no other window
+  drawn over it (a higher z-index, or the same one later in the page) — and the one that acts takes the
+  key. The Info panel, a list's window, "Put this in a list" and "Who has this" use it; the Edit window
+  keeps its own listener, which did this first. Closing "Who has this" hands the focus back to its button.
+
+### Changed — a description keeps its ten newest replaced versions, and its waiting proposals have a key
+
+* **What part E found**: every applied proposal copies the text it replaced into `wl_content_edits`, as a
+  `rejected` row noted "replaced by a later proposal" — a full copy, for ever, and nothing ever reads one
+  back; and the count of the proposals still waiting on one description, asked before every new one is
+  taken (`wl_edit_max_pending`) and again by a delete, had no key for it, so it read every row the
+  description ever had, the copies included. The owner: "we do not keep every edit".
+* **Ten** (`contentArchivePrune()`, `includes/content.php`): right after an applied proposal's copy goes in,
+  the newest ten copies of THAT description are kept and its older ones deleted — two statements through
+  the new key. Only those copies: a proposal still waiting, one applied, one a moderator turned down and one
+  a delete withdrew are never touched, nor any other description's copies, and the migration deletes
+  nothing — an install's history shrinks one description at a time, as each is edited again.
+* **Keys** (schema 82, both schema paths, guarded): `idx_edits_wl_status (whitelist_id, status)` and
+  `idx_edits_hc_status (hash_content_id, status)`.
+* **What was said and was not true**: "Applying keeps the version it replaces, so it can be undone" (the
+  README) and, in the panel, "… so this can be undone", "… you can put it back by accepting it later",
+  "… can be undone by accepting the old text back". Nothing reads a kept version back
+  (`contentEditById()` takes waiting proposals only); the words now say what is true, in both languages.
+* **What an install can lose, at most, on its next applies**: a description with N kept copies loses
+  N − 9 at its next apply (the apply adds one and keeps ten); one that is never edited again loses
+  nothing. Counted, before upgrading, by:
+
+  ```sql
+  SELECT COUNT(*) AS descriptions, COALESCE(SUM(n - 9), 0) AS rows_at_most
+    FROM (SELECT COUNT(*) AS n FROM wl_content_edits
+           WHERE status = 'rejected' AND note = 'replaced by a later proposal'
+           GROUP BY whitelist_id, hash_content_id HAVING COUNT(*) > 9) t;
+  ```
+
+### Tests
+
+* `scratchpad/shots/people_check.js`: the inbox's option counted in requests — none for clicking into
+  the empty field, none for ticking and unticking it empty or with one letter, exactly one (inside the
+  messages, for "th") with two.
+* `scratchpad/shots/fav_check.js`, `lists_check.js`, `profile_votes_check.js`, `share_check.js` and
+  `panel_hash_check.js`: the same count for every other option — the account's and a profile's
+  Favourites, the shelf's two boxes and a list window's, the likes table, the search page's two (and the
+  address that still records them, and no file flag without a query), the panel Index's (as the dimming
+  of its table, which the live refresh of pending rows does not do).
+* `profile_votes_check.js`: the header row at nine widths from 1920 to 960, English and Polish, own and
+  somebody else's, both modes, both icon libraries — every pair of neighbours 12px or more apart, none
+  past its column, no arrow alone — and again at 1180 with the header drawn at 16px; the "Min. votes"
+  field is drawn in the dark scheme.
+* `scratchpad/shots/langswap_check.js`: the fallback reload is watched from its first frame — the section
+  must already be in its place in its first frames and all of the first 300ms, not on its way there
+  (1.69.0's restore, run against it: 575 of the 25 060 pixels travelled 215ms in).
+* `tests/iconpack_test.php` (200 checks), a new section 13: the catalogue a synthetic package gets at
+  import — its shape, index.json's sets, the words and labels made compact, Brands and Other — the
+  package list's counts read off the file's head; built on the first need for a package without one (the
+  very same bytes), not read when of another format, `iconpackReindex()`, a package without metadata; the
+  CLI's and the panel's re-index with their audit lines; never served by iconpack.php. The token for an
+  icon that is no face: its styles among those that load with the default first, `fai`, `[Label]` for a
+  style it lacks or that does not load, the allow-list (a name in the CSS but not the index is text),
+  whatever the scope, the faces off, Bootstrap Icons, another source, a mail, the package gone, hostile
+  input, a line of nothing but icons; what the picker is told per scope. And with the owner's Pro 6.7.2
+  and 7.3.1 (section 11): each catalogue held to his own index — every icon, his 68 categories and no
+  other, none empty, every icon's styles — with its size raw and gzipped, and a rocket and a brand logo as
+  tokens.
+* `tests/emoji_test.php` (62 checks): the grammar with Font Awesome's nine-part names; the third setting
+  in its four places and its words in both languages; the seventy category names, sent with the answer
+  and not in the pages' bundle; the script asking for the catalogue only as the scope needs it; the
+  endpoint's `part=catalog` — the file as stored, 404 with the faces alone or off, the room's own gate.
+* `scratchpad/shots/emoji_picker_check.js` (72 checks) with the owner's Pro 7.3.1: `faces` never asks for
+  the catalogue; `search` asks by its first search, finds a "Font Awesome" group with the rocket first,
+  gzip and `immutable` on the answer, the arrows over the heading, the rocket's five styles held down,
+  Sharp Solid inserted, posted and drawn by the Sharp font in the words' colour, Recent keeping it, and
+  "zwierz" finding the 72 animals in Polish; `all` asks after its first page, every one of the 70
+  categories counted against the catalogue (7,032 cells for 4,349 icons, the emoji as faces), Brands in
+  slices, the chips in the English and the Polish alphabet, the keyboard, a variant inserted, a phone (the
+  chips scroll, the page does not, a finger opens the styles); the open times and the JS heap in each
+  scope; Settings → Shoutbox in both languages; then the faces off and the rocket's shout reading
+  `[Rocket] [Rocket]`. Screenshots in the untracked `scratchpad/shots1700/`.
+* `tests/richtext_test.php` (121 checks): the emote stage on its own, fed a map — an emote and the two
+  sticker sizes, a code nobody has, upper case and one letter left alone, a hostile name only ever a
+  title, an address that is not the image endpoint (or would leave its attribute) no picture at all,
+  nothing in a link's href or a picture's src, `[code]`, inline code and `<kbd>` kept, a line of nothing
+  but an emote still a paragraph, the `:shortcode:` emoji first, beside a Font Awesome face, no database
+  no stage, none counted against the picture limit, an e-mail its code; the whole hostile set read back
+  through a DOM.
+* `tests/shout_emotes_test.php` (184 checks): the switch (and the room's emotes it needs), the sticker
+  per context, the map — approved and switched on only, a row switched on and never approved kept out,
+  a row as the browser may see it — one query (a second context reads the cached rows), what each
+  picker offers, and a message, a description, a list's description and a mail drawn with the store's
+  own rows; the two token rules one.
+* `tests/profile_bio_test.php` (114 checks): the token stage — an emote, a sticker as an emote, a waiting
+  one as text, a face with Font Awesome off, `:fire:` still text, without the database, with the switch
+  off, inside a link and its address, the count unchanged, the DOM of the result; the editor's sixth
+  button and the page's data.
+* `tests/emoji_test.php` (82 checks) §8: `emotes_everywhere` in its four places and its words in both
+  languages; the module and every editor wired to it (the room's requests unchanged, the floating panel,
+  Esc, the sticker as its code, the maxlength); `for`; the button and its escaped data; and the endpoints
+  run as requests by context — refused `for`, a message's answer with the room off, a message's emotes
+  with the sticker marked, a profile's without it, nothing with the switch off, the room's own answer
+  untouched, each context's own gate. `tests/icons_test.php` and `tests/shout_test.php` read the picker
+  where it lives now.
+* `scratchpad/shots/picker_everywhere_check.js` (new, in the sweep; 54 checks) under an enforced policy:
+  the message composer, the Info panel's editor (a first description, approved; a proposed rewrite, in
+  the panel's review queue and applied), the whitelist form, the profile's description — in each the
+  button, the picker against it and never clipped (inside the Info panel's dialog, following its body's
+  scroll), an emoji, an emote and a sticker where the context has them, the Preview, and the text sent
+  or saved and read where it is read: the thread's sticker at the room's size, the description's bounded,
+  the profile's emote inline; Esc closing only the picker; a phone; Polish; the switch off; Settings →
+  Shoutbox → Emotes; the room's own picker as it was. `scratchpad/shots/profile_bio_check.js` counts six
+  toolbar buttons. Screenshots `scratchpad/shots1700/picker-*.png`.
+* `tests/lists_test.php` (114 checks): schema 80 on the fresh path and on the upgrade path — a scratch
+  table of 1.69.0's shape with a hostile text, a 500-character one and line breaks walked through
+  `schemaListDescMigration()` (the column first, one rewrite per text, `updated_at` held, the format
+  column last; stopped before the last and run again: no second rewrite), then held to a table today's
+  CREATE makes, column by column; `lists_desc_max` in its four places and the dictionary, clamped; the
+  rewrite's promise over nine hostile plain texts — only paragraphs and breaks, exactly their words,
+  their count — against the same texts not rewritten, which do become markup; `listEditRequest()`: every
+  refusal and its code, the visible limit (tags not counted), the typed ceiling, no picture, the links,
+  the mute, what is kept and cleaned, an absent description kept, `describe`, the unchanged not judged
+  again, the write keyed by id and owner and blind to the slug; the endpoints run as requests —
+  without the token 403, signed out 401, without `lists.use` 403, somebody else's list 404, the owner's
+  edit, the hourly limit's 429, the shelf's excerpt and format, the window's drawing, another member
+  seeing the public list's words and never the private one's, public lists switched off, the Preview as
+  a list's; hostile BBCode and Markdown through `listDescRender()`, read back through a DOM; and the
+  counter's twin in `assets/js/favourites.js`, run by node, giving the server's strip and count.
+* `scratchpad/shots/lists_check.js` (82 checks): the card's Edit (Edytuj); the window — the name
+  focused, 0 of 1000, no picture button, the picker as a list's, Esc and the backdrop's press rule; a new
+  name and a description with bold, italic, an emote and a sticker from the picker (asked for as
+  `for=list`), the counter at 19 and 38 while typing and 38 in the Preview, which draws the sticker at
+  most 96 px; Esc closing the picker alone; the unsaved guard (Esc, the backdrop, the armed ×,
+  beforeunload); Save as ONE request, stored as typed, the slug kept; the card's plain excerpt folded to
+  two lines; the list's window drawing it under the name; Markdown (the rail, the count, the save);
+  another member reading the public list's description on the profile, with the link's rel, target and
+  warning, and not a word of a private one — by page or by id; a phone; Polish switched in place (the
+  window's words swapped by their ids); each card's Edit opening its own list; the Settings row. It now
+  puts the settings and the groups back row by row whichever way it ends. Screenshots
+  `scratchpad/shots1700/lists-edit-*.png`.
+* `tests/content_test.php` (184 checks), a second half for 1.70.0: the three permissions registered, in
+  their presets, no with accounts off, granted once by v81 (and not again once taken away); schema 81 on
+  a scratch database on both paths — a fresh install's columns and defaults, and a v80-shaped install with
+  a live author, a gone one (u = 0, the id let go) and an empty row, run twice with nothing changing the
+  second time; the setting in its four places and the words in both languages; the share on known texts
+  (25, 50, 6, 100, the 1% rule, markup, rounding), three words fixed across a thousand in milliseconds, the
+  bound past the budget, and the exact claim held to the textbook longest common subsequence on 300 random
+  pairs; the chain — started, the author's own edit, a merge, a new entry, the cap, a stored chain checked
+  field by field, a row from before v81, the member search's text; the whole flow — a first description,
+  an unchanged edit and an anonymous one refused, an edit of 25% applied (the author stays, both told, the
+  replaced version kept), a merge (35%), a third member (6%); the name hidden everywhere it is shown (the
+  public answer carries it nowhere, the moderator's does, "you"), the editor's line; a rewrite resetting the
+  chain and an edit of a cleared record going in as one; delete own / any / refused (a waiting description,
+  a moderator, a member, nobody, accounts off, an author without the permission), withdrawn proposals and
+  their notices, the audit line; an account deleted leaving "a deleted account" and nothing to a new owner of
+  its id; the list's gate one flag at a time (the setting, descriptions off, accounts, profiles, the list
+  switch, the name, the grant, the admin blanket, the reader's content.view and favourites.view_others, a
+  block, a suspended owner, nobody signed in) and the privacy context; the rows (every state, proposals,
+  not the kept archive, not an id that only starts like theirs), the others' view, whitelist.view and
+  index.magnet, every sort both ways, the search, the pager, the clamping, the time; and the endpoints as
+  requests in a child process — the Info panel's chain, Edit's prefill and Delete's right for each reader,
+  content_submit's kind, the panel's Rewrites preview and apply, content_delete's refusals and its 200 and
+  404, the list for its owner, a stranger (404 like a name nobody has), after the yes, with the name hidden,
+  and the privacy save; then the pages and scripts that carry it.
+* `scratchpad/shots/descriptions_check.js` (new, in the sweep; 53 checks) under an enforced policy, as
+  smokeuser, smokepeer, a plain member and the panel: the editor's public line with the name and Privacy; a
+  first description; Edit opening FILLED (text, link, format, counter) with the other buttons aside, and who
+  is offered what (a plain member no Delete; the admin group's smokepeer Delete as a moderator); the Rewrites
+  tab's EDIT pill, "Changes 25% …", "The author (smokeuser) stays", the confirmation, applied with the share;
+  the chain under the description with the icon's arrow and both names linked, in Polish, six credits
+  folded to "+2" and opened; the name hidden ("a member", no link, not in the answer; "a member (you)") and
+  shown again; the Descriptions tab right after Likes (Author, "Co-author, 25%", the excerpt, sorting,
+  search, a phone's cards); the profile section only after the list switch, gone while the name is hidden
+  (the sentence beside the switch), back again; a rewrite starting the chain again; Delete's two clicks, the
+  panel redrawn empty, the record empty, one audit line. Screenshots `scratchpad/shots1700/descs-*.png`.
+* `tests/groups_matrix_test.php`: the member row gains `content.delete_own` and `content.public`, the
+  moderator row and its seed-plus-grants `content.delete_any`, and the simulated upgrade forgets the v81
+  marker too.
+* `tests/who_test.php` (new, 97 checks): schema 82 on both paths on a scratch database — `votes_listed`
+  and the two keys, an upgraded account named nowhere, fifteen kept versions still fifteen after the
+  migration, nothing asked twice; the two settings in their four places and every word in both languages;
+  who may open which section — each switch closing its own and no other, the reader's account, nobody
+  signed in; the likes' truth table ONE flag at a time, each taking the member out of the rows AND the
+  count — `votes_listed`, `votes_public`, a group without the grant, the administrator's blanket alone (and
+  the grant given to that group putting them back), suspended, unverified (and counted where the site does
+  not ask), a membership not yet and no longer in force, a block that hides the profile (and one that does
+  not); anonymous votes never, the mode's values only (stars: 10, 7, then the thumbs up as half stars, no
+  thumb down); the lists against the five gates and the account's, their search by a list's name or its
+  owner's, `listsContainingHash()` the same query's first page; the favourites' gates; paging (20, 5, an
+  empty page past the end with the true total), clamping, the search's wildcards taken literally, totals
+  equal to the rows; EXPLAIN among three thousand other votes and list rows; and the endpoints as requests
+  in a child process — each section's shape, the same 404 for every no, 400, 405, the hourly limit (the 4th
+  of three), `hash_favourites`'s 1.69.0 answer, the privacy save — then the pages and scripts that carry it.
+* `tests/content_test.php` (199 checks) §16: the newest ten of a description's kept versions — fourteen
+  become ten after an apply (the five oldest gone), then still ten; the turned-down, withdrawn, applied and
+  waiting proposals and another description's copies untouched; the other home the same; fewer than ten
+  lose none; the query the notes give counts 10 rows over 3 descriptions on its fixtures; the waiting count
+  can use each home's key; the README and the panel's words no longer promise an undo.
+* `scratchpad/shots/who_check.js` (new, in the sweep; 48 checks) under an enforced policy, as smokeuser with
+  twenty-five members who said yes and one who has not yet: the button and its title; the three sections in
+  order, their three requests in the air at once; 20 of 25 each, "Show 5 more" asking for page 2 alone; each
+  section's search (a name, a list's name, its owner's, nobody) leaving the others as they were; Esc closing
+  the overlay and not the Info panel, the focus back on its button; the new Privacy switch under the likes'
+  own, ticked (the member appears, 26 people) and unticked (gone, 25); star mode (5, 3½ read as "3.5 of 5
+  stars", 2, ½; no thumb down); Polish on a Polish page and switched in place with the overlay open; a phone;
+  the button with only some sections on, gone with none; Settings → Profiles in both languages. Screenshots
+  `scratchpad/shots1700/who-*.png`. `scratchpad/shots/fav_check.js` reads the Favourites section by its ids.
+* `scratchpad/shots/layers_check.js` (new, in the sweep; 33 checks): one Esc, one layer — the Info panel's
+  description link and source link (the dialog, then the panel), "Put this in a list" over the panel, a
+  list's window (its description's link; the Info panel from its row: three layers, three Escs), and the
+  panel's Index and Whitelist detail windows (Bootstrap's) under their source links.
+* `scratchpad/shots/emoji_picker_check.js`: "as fast in every scope" no longer measured against a fixed
+  margin, which a busy machine broke (288 ms in a batch run, 121 ms alone) — five rounds, the faces first
+  and the other scopes in turned order, each scope's median held to the faces' median of the same run
+  (at most 1.5 times it plus 20 ms); and the rule is proved able to fail in every run: an opening of `all`
+  slowed on purpose inside its click (twice the faces' time, +100 ms reopening) must fail it, and does.
+* `scratchpad/shots/picker_everywhere_check.js`: the message composer's emote request is counted by its
+  context — with lists on (as `polish_check.js`, earlier in the sweep, leaves them), a list's Edit window on
+  the same account page asks for its own (`for=list`), and the check read that as the composer's second.
+
 ## [1.69.0] — 2026-09-25
 
 Schema 77 (74 is the description's, 75 the list's, 76 the icons' source, 77 the picker's Font Awesome

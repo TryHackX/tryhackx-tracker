@@ -302,6 +302,23 @@
         return { label: lab, box: cb };
     }
 
+    /**
+     * What a search box is asking, together with the options beside it, as one string to compare — or ''
+     * while the box is empty.
+     *
+     * An option ("also search file names", "also search what is on them") widens or narrows what the
+     * WORDS match, so with no words it asks nothing new: the list is the one already on screen, and
+     * reloading it for a tick only made it flash (1.70.0 — the owner saw Favourites and the inbox
+     * refresh "for no reason"). Each list keeps the key it last asked with, and an option reloads only
+     * when the key it makes is a different one. The option itself is kept as ticked and acts on the
+     * next search.
+     */
+    function searchKey(input, options) {
+        var s = input ? String(input.value || '').trim() : '';
+        if (s === '') return '';
+        return JSON.stringify([s].concat((options || []).map(function (o) { return !!(o && o.checked); })));
+    }
+
     function renderPagerInto(box, page, pages, go) {
         box.textContent = '';
         if (pages <= 1) return;
@@ -330,10 +347,11 @@
         var sortEl = document.getElementById(cfg.sort);
         var statusEl = cfg.status ? document.getElementById(cfg.status) : null;
         var filesEl = cfg.files ? document.getElementById(cfg.files) : null;
-        var page = 1, timer = 0;
+        var page = 1, timer = 0, asked = null;
 
         async function load(p) {
             page = p || 1;
+            asked = searchKey(searchEl, [filesEl]);
             listEl.textContent = '';
             listEl.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
             var qs = cfg.endpoint + '&page=' + page + '&per_page=25';
@@ -365,7 +383,13 @@
         if (searchEl) searchEl.addEventListener('input', reload);
         if (sortEl) sortEl.addEventListener('change', function () { load(1); });
         if (statusEl) statusEl.addEventListener('change', function () { load(1); });
-        if (filesEl) filesEl.addEventListener('change', function () { load(1); });
+        // A search option: only when it changes what is asked (searchKey()), and then at once, taking over
+        // a keystroke that is still waiting to ask.
+        if (filesEl) filesEl.addEventListener('change', function () {
+            if (searchKey(searchEl, [filesEl]) === asked) return;
+            clearTimeout(timer);
+            load(1);
+        });
         // Un-starring on your own list should take the row away, not leave a dead star behind.
         if (cfg.reloadOnChange) document.addEventListener('favourites:changed', function () { load(page); });
         load(1);
@@ -442,9 +466,11 @@
      */
 
     function listCardsInto(box, cfg) {
-        var state = { lists: [], openId: 0, ctx: {} };
+        var state = { lists: [], openId: 0, ctx: {}, loaded: false };
 
-        function itemsBox(countHolder, list) {
+        // `hooks.onList(info)` (1.70.0): what the rows' answer says about the list itself — its description,
+        // drawn by the server — for the window that shows it under the name.
+        function itemsBox(countHolder, list, hooks) {
             var wrap = el('div', { className: 'list-items' });
             var tools = el('div', { className: 'profile-toolbar list-items-tools' });
             var search = el('input', { type: 'text', className: 'profile-search', maxlength: 120,
@@ -537,8 +563,9 @@
             var pager = el('div', { className: 'trans-pagination' });
             wrap.appendChild(rows); wrap.appendChild(pager);
 
-            var timer = 0;
+            var timer = 0, asked = null;
             async function load(p) {
+                asked = searchKey(search, [files && files.box]);
                 rows.textContent = '';
                 rows.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
                 var qs = 'user_list_items&list=' + list.id + '&page=' + (p || 1) + '&per_page=25'
@@ -551,6 +578,7 @@
                     rows.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') }));
                     return;
                 }
+                if (hooks && typeof hooks.onList === 'function' && j.list) hooks.onList(j.list);
                 if (!j.rows.length) rows.appendChild(el('div', { className: 'pf-empty', text: t('js.lists.empty') }));
                 j.rows.forEach(function (r) {
                     var row = torrentRow(r, { trackers: cfg.trackers, star: false });
@@ -582,13 +610,18 @@
             }
             search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 350); });
             sort.addEventListener('change', function () { load(1); });
-            if (files) files.box.addEventListener('change', function () { load(1); });
+            // A search option: only when it changes what is asked (searchKey()).
+            if (files) files.box.addEventListener('change', function () {
+                if (searchKey(search, [files.box]) === asked) return;
+                clearTimeout(timer);
+                load(1);
+            });
             load(1);
             return wrap;
         }
 
         function card(list) {
-            var c = el('div', { className: 'list-card' + (list.is_public ? ' list-card-public' : '') });
+            var c = el('div', { className: 'list-card' + (list.is_public ? ' list-card-public' : ''), dataset: { listId: String(list.id) } });
             // The whole card opens it. A name that happens to be a link is a target somebody has to
             // aim at; the card is the thing on the screen that IS the list.
             c.addEventListener('click', function (e) {
@@ -602,7 +635,9 @@
                 text: t(list.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: list.items }) }));
             if (list.is_public) head.appendChild(el('span', { className: 'pf-badge list-badge-public', text: t('js.lists.public') }));
             c.appendChild(head);
-            if (list.description) c.appendChild(el('div', { className: 'list-desc text-muted', text: list.description }));
+            // The description's first line or two (1.70.0): the server's plain excerpt of what a reader sees,
+            // no markup — the whole of it, drawn, is in the list's window. The stylesheet folds it to two lines.
+            if (list.excerpt) c.appendChild(el('div', { className: 'list-desc text-muted', text: String(list.excerpt) }));
 
             var acts = el('div', { className: 'list-card-acts' });
             // A public list has an address, and the address can be handed over — with the button the
@@ -625,9 +660,25 @@
                     });
                     acts.appendChild(vis);
                 }
-                var ren = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t('js.lists.rename') });
-                ren.addEventListener('click', function () { renameInline(c, list); });
-                acts.appendChild(ren);
+                // "Edit" (1.70.0 — it was "Rename", an inline box for the name): a window with the name and the
+                // description, saved together. Only where that window is on the page (your own cards).
+                if (listEdit) {
+                    var edit = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-edit',
+                                              text: t('js.lists.edit'), title: t('js.lists.edit_title') });
+                    edit.addEventListener('click', function () {
+                        listEdit.open(list, {
+                            returnTo: edit,
+                            // The card says what was saved — its name, its excerpt — drawn again from the answer,
+                            // with no second request; the focus goes back to the Edit button of the new card.
+                            onSaved: function () {
+                                render();
+                                var again = box.querySelector('.list-card[data-list-id="' + String(list.id) + '"] .list-edit');
+                                if (again) again.focus();
+                            },
+                        });
+                    });
+                    acts.appendChild(edit);
+                }
                 var del = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-del', text: t('js.lists.delete') });
                 del.addEventListener('click', async function () {
                     // Two clicks, no dialog: the second click is the confirmation, and the button
@@ -651,25 +702,6 @@
             return c;
         }
 
-        function renameInline(c, list) {
-            var row = el('div', { className: 'list-rename' });
-            var input = el('input', { type: 'text', className: 'profile-search', maxlength: 80, value: list.name });
-            var go = el('button', { type: 'button', className: 'btn btn-small', text: t('js.lists.save') });
-            go.addEventListener('click', async function () {
-                var v = input.value.trim();
-                if (!v) return;
-                go.disabled = true;
-                var r = await post('user_lists', { op: 'rename', id: list.id, name: v });
-                go.disabled = false;
-                if (!r || !r.success) return;
-                list.name = r.name;
-                render();
-            });
-            row.appendChild(input); row.appendChild(go);
-            c.appendChild(row);
-            input.focus();
-        }
-
         function render() {
             box.textContent = '';
             if (!state.lists.length) {
@@ -679,19 +711,23 @@
             state.lists.forEach(function (l) { box.appendChild(card(l)); });
         }
 
+        // The two switches that widen what "matches" means, when this shelf has them (the account
+        // page's does; a profile's has neither): the torrents on a list, and the file names inside
+        // those torrents. Search options — see searchKey().
+        function options() { return [document.getElementById('ul-items'), document.getElementById('ul-files')]; }
+        var asked = null;
+
         async function load() {
+            asked = searchKey(cfg.searchEl, options());
             box.textContent = '';
             box.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
             var qs = 'user_lists';
             if (cfg.user) qs += '&user=' + encodeURIComponent(cfg.user);
             if (cfg.searchEl && cfg.searchEl.value.trim()) {
                 qs += '&search=' + encodeURIComponent(cfg.searchEl.value.trim());
-                // …and, when this shelf has them, the two switches that widen what "matches" means:
-                // the torrents on a list, and the file names inside those torrents.
-                var it = document.getElementById('ul-items');
-                var fi = document.getElementById('ul-files');
-                if (it && it.checked) qs += '&items=1';
-                if (fi && fi.checked) qs += '&files=1';
+                var opt = options();
+                if (opt[0] && opt[0].checked) qs += '&items=1';
+                if (opt[1] && opt[1].checked) qs += '&files=1';
             }
             var j = await get(qs);
             if (!j || !j.success) {
@@ -702,18 +738,32 @@
             state.ctx = { mayPublish: !!j.may_publish, maxLists: j.max_lists, maxItems: j.max_items };
             state.owner = String(j.owner || '');
             state.lists = (j.lists || []).map(function (l) { return Object.assign({}, l, { own: !!j.own }); });
-            if (cfg.totalEl) {
-                cfg.totalEl.textContent = state.lists.length
-                    ? t(state.lists.length === 1 ? 'js.lists.count_lists_one' : 'js.lists.count_lists_many', { n: state.lists.length })
-                    : '';
-            }
+            state.loaded = true;
+            paintTotal();
             render();
         }
+        function paintTotal() {
+            if (!cfg.totalEl) return;
+            cfg.totalEl.textContent = state.lists.length
+                ? t(state.lists.length === 1 ? 'js.lists.count_lists_one' : 'js.lists.count_lists_many', { n: state.lists.length })
+                : '';
+        }
+        // A live language switch (assets/js/lang-swap.js): the cards are drawn by this script, so the walk
+        // has nothing to put their words against — they are drawn again from the answer the shelf already
+        // has, in the new language ("Edit" / "Edytuj"), with no request. Not before the first answer.
+        document.addEventListener('langswap', function () {
+            if (!state.loaded) return;
+            paintTotal();
+            render();
+        });
 
         // The overlay borrows this shelf's renderer: same trackers, same permissions, same rows.
-        itemsBoxFor = function (holder, list) { return itemsBox(holder, list); };
+        itemsBoxFor = function (holder, list, hooks) { return itemsBox(holder, list, hooks); };
         state.reload = load;
-        return { load: load, create: async function (name) {
+        return { load: load, changed: function () {
+            // Whether the search box and its options now ask what the shelf on screen was NOT asked.
+            return searchKey(cfg.searchEl, options()) !== asked;
+        }, create: async function (name) {
             var r = await post('user_lists', { op: 'create', name: name });
             if (r && r.success) await load();
             return r;
@@ -774,10 +824,23 @@
         if (list.is_public) head.appendChild(el('span', { className: 'pf-badge list-badge-public', text: t('js.lists.public') }));
         if (list.is_public && shareEnabled()) head.appendChild(shareButton(list, state));
         body.textContent = '';
-        if (list.description) body.appendChild(el('div', { className: 'list-desc text-muted', text: list.description }));
-        body.appendChild(itemsBoxFor(head, list, cfg));
+        // The description (1.70.0), under the name: the server's own drawing of it (listDescRender() —
+        // the renderer, the room's emotes, no picture from elsewhere), which comes with the rows. Nothing
+        // is shown before it, and nothing at all for a list without one.
+        var desc = el('div', { className: 'list-desc-full rt-body', hidden: true });
+        var shownHtml = null;
+        body.appendChild(desc);
+        body.appendChild(itemsBoxFor(head, list, { onList: function (info) {
+            var html = typeof info.description_html === 'string' ? info.description_html : '';
+            if (html === shownHtml) return;           // every page of rows carries it; draw it once
+            shownHtml = html;
+            // The server built this from fully escaped input with a fixed set of tags (includes/richtext.php),
+            // exactly as the Info panel's description is put in.
+            desc.innerHTML = html;
+            desc.hidden = html === '';
+        } }));
         box.hidden = false;
-        document.addEventListener('keydown', escList);
+        if (listLayer) listLayer.on();
         // The shelf behind it has to agree when this closes — the count on the card is the number
         // somebody may change in here — but only if something IS changed in here (1.67.0): a fresh
         // opening starts clean, and a list write marks it (post() above). A reload the last closing
@@ -785,12 +848,23 @@
         listDirty = false;
         window.__listReload = state && state.reload ? state.reload : null;
     }
-    function escList(e) { if (e.key === 'Escape') closeListOverlay(); }
+    /**
+     * One Esc, one layer (escLayer(), assets/js/app.js, 1.70.0): a window here closes on Esc only while it is
+     * the top one — the Info panel opened from a list's row, the list picker or "Who has this" over the panel,
+     * the "you are leaving" dialog over any of them close first. On a page without app.js, the document's Esc.
+     */
+    function layerFor(box, close) {
+        if (typeof escLayer === 'function') return escLayer(box, close);
+        var onKey = function (e) { if (e.key === 'Escape') close(); };
+        return { on: function () { document.addEventListener('keydown', onKey); },
+                 off: function () { document.removeEventListener('keydown', onKey); } };
+    }
+    var listLayer = null;
     function closeListOverlay() {
         var box = document.getElementById('list-overlay');
         if (!box) return;
         box.hidden = true;
-        document.removeEventListener('keydown', escList);
+        if (listLayer) listLayer.off();
         // Clean: read and closed, nothing to fetch. Dirty: the shelf once — after any write still on
         // its way has landed, so the card counts what the server now holds rather than what it held a
         // moment before the add arrived.
@@ -804,6 +878,7 @@
     function initListOverlay() {
         var box = document.getElementById('list-overlay');
         if (!box) return;
+        listLayer = layerFor(box, closeListOverlay);
         // Only when the press began on the backdrop (1.64.0, assets/js/app.js): a click goes to the
         // common ancestor of the press and the release, so a drag off the dialog raises one here.
         closeOnBackdrop(box, closeListOverlay);
@@ -812,6 +887,233 @@
     }
     // Set by listCardsInto() so the overlay can build its rows with that shelf's own settings.
     var itemsBoxFor = function () { return el('div'); };
+
+    /* ─────────────────── a list's description, and its Edit window (1.70.0) ─────────────────── */
+
+    /**
+     * The text a reader sees, as a strip of the syntax — the TWIN of listDescStrip() in includes/lists.php,
+     * pattern for pattern: change one, change both (tests/lists_test.php reads this one against that one,
+     * and scratchpad/shots/lists_check.js holds the counter to the server's number). BBCode: a picture goes
+     * whole, every tag the renderer knows goes and its words stay. Markdown: a picture goes, a link is its
+     * words, the marks at the start of a line and the paired ones go. Both: U+2060 (the escape of the texts
+     * v80 rewrote) draws nothing — taken out AFTER the syntax, so an escaped tag counts as the text it is —
+     * and every run of white space is one character, as a page draws it.
+     */
+    function listDescStrip(text, fmt) {
+        var s = String(text || '').replace(/\r\n?/g, '\n');
+        if (fmt === 'markdown') {
+            s = s.replace(/!\[[^\]\n]*\]\([^) \t\n\x0B\f\r]*\)/g, '');
+            s = s.replace(/\[([^\]\n]*)\]\([^) \t\n\x0B\f\r]*\)/g, '$1');
+            s = s.replace(/(^|\n)[ \t]*(?:#{1,6}|>|[-*+]|\d{1,3}[.)])[ \t]+/g, '$1');
+            s = s.replace(/==/g, '');
+            s = s.replace(/[*~^`|]/g, '');
+        } else {
+            s = s.replace(/\[img(?:=[^\]\n]*)?\][\s\S]*?\[\/img\]/gi, '');
+            s = s.replace(/\[\/?(?:b|i|u|s|sub|sup|color|size|font|highlight|mark|center|right|left|quote|spoiler|url|email|list|table|tr|th|td|code|hide|postshide|youtube|yt|hr|\*)(?:=[^\]\n]*)?\]/gi, '');
+        }
+        return s.replace(/⁠/g, '').replace(/[ \t\n\x0B\f]+/g, ' ').replace(/^ +| +$/g, '');
+    }
+    /** How many characters a reader sees: code points (an emoji is one, a token counts as it is typed). */
+    function listDescVisible(text, fmt) { return Array.from(listDescStrip(text, fmt)).length; }
+
+    /**
+     * The Edit window (templates/partials/list_edit.php): the name and the description, saved in ONE request
+     * (op `edit`). The editor is the site's shared one, mounted once (window.RichText.mount(), assets/js/app.js)
+     * with the picker on its last button and a counter that counts what a reader will see (the twin above) —
+     * the same number its Preview and its save give. Nothing is saved until Save.
+     *
+     * Leaving it, the picture editor's rules (assets/js/media-editor.js, 1.64.0): Cancel, Esc and the backdrop
+     * — a press that STARTED on the backdrop (closeOnBackdrop(), assets/js/app.js) — close at once when nothing
+     * is changed, and ask "Discard the changes?" in the footer when something is; the × closes at once, or
+     * with something unsaved arms itself for three seconds and says so beside itself; leaving the page asks
+     * the browser's own question. Esc is the window's LAST: the picker open in it and the "you are leaving"
+     * dialog over it take theirs first.
+     */
+    var listEdit = null;
+    function initListEdit() {
+        var box = document.getElementById('le-overlay');
+        if (!box) return null;
+        var $ = function (id) { return document.getElementById(id); };
+        var nameIn = $('le-name'), ta = $('le-desc'), fmtEl = $('le-desc-format');
+        var save = $('le-save'), cancel = $('le-cancel'), x = $('le-close'), msg = $('le-msg');
+        var ask = $('le-ask'), discard = $('le-discard'), keep = $('le-keep'), hint = $('le-close-hint');
+        var help = $('le-desc-help'), writeTab = $('le-desc-tab-write');
+        if (!nameIn || !ta || !save) return null;
+        var max = Number(box.dataset.descMax) || 1000;
+        if (window.RichText && typeof window.RichText.mount === 'function') {
+            window.RichText.mount('le-desc', {
+                previewFor: 'list',
+                measure: function (text, f) { return { used: listDescVisible(text, f), limit: max }; },
+            });
+        }
+        var cur = null;                 // {list, start, onSaved, returnTo} while the window is open
+        var saving = false, armed = 0;
+
+        function fmtNow() { return fmtEl && fmtEl.value === 'markdown' ? 'markdown' : 'bbcode'; }
+        function now() { return { name: nameIn.value.trim(), desc: ta.value.trim(), fmt: fmtNow() }; }
+        function dirty() {
+            if (!cur) return false;
+            var a = cur.start, b = now();
+            return a.name !== b.name || a.desc !== b.desc || (b.desc !== '' && a.fmt !== b.fmt);
+        }
+        function say(text, bad) {
+            msg.textContent = text || '';
+            msg.classList.toggle('le-msg-bad', !!bad);
+        }
+        function asking(on) {
+            ask.hidden = !on;
+            save.hidden = on;
+            cancel.hidden = on;
+        }
+        function disarm() {
+            if (!armed) return;
+            clearTimeout(armed);
+            armed = 0;
+            hint.hidden = true;
+            hint.textContent = '';
+        }
+        function picker() {
+            var all = window.EmojiPicker && typeof window.EmojiPicker.attached === 'function' ? window.EmojiPicker.attached() : {};
+            return all['le-desc-picker'] || null;
+        }
+        function guard(e) { if (dirty() && !saving) { e.preventDefault(); e.returnValue = ''; } }
+
+        function finish() {
+            if (!cur) return;
+            var back = cur.returnTo;
+            disarm();
+            asking(false);
+            var p = picker();
+            if (p) p.close();
+            box.hidden = true;
+            window.removeEventListener('keydown', onKey, true);
+            window.removeEventListener('beforeunload', guard);
+            cur = null;
+            if (back && back.isConnected) { try { back.focus(); } catch (e) { /* gone */ } }
+        }
+        function tryClose() {
+            if (!cur || saving) return;
+            disarm();
+            if (dirty()) { asking(true); keep.focus(); return; }
+            finish();
+        }
+        function closeX() {
+            if (!cur || saving) return;
+            if (!dirty() || armed) { finish(); return; }
+            hint.textContent = t('js.lists.close_again');
+            hint.hidden = false;
+            armed = setTimeout(disarm, 3000);
+        }
+        /**
+         * One listener, on the WINDOW in the capture phase, so it hears a key before anything on the page —
+         * and then stands aside for what sits above the window: the picker open in it (its own capture
+         * listener closes its variants, clears its search, closes itself) and the "you are leaving" dialog
+         * a link in the Preview opens. Neither of those keeps its Esc from a listener further out.
+         */
+        function onKey(e) {
+            if (!cur) return;
+            var p = document.getElementById('le-desc-picker');
+            if (e.key === 'Escape') {
+                if ((p && !p.hidden) || document.querySelector('.leave-modal')) return;
+                e.preventDefault();
+                if (!ask.hidden) { keep.click(); return; }
+                tryClose();
+                return;
+            }
+            // Ctrl+Enter saves from anywhere in the window (the profile's editor's key).
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && box.contains(e.target) && !(p && p.contains(e.target))) {
+                e.preventDefault();
+                doSave();
+                return;
+            }
+            // Any other key takes an armed × back: an armed control that is still armed later is a trap.
+            if (armed && e.key !== 'Enter' && e.key !== ' ') disarm();
+        }
+
+        async function doSave() {
+            if (!cur || saving) return;
+            var s = now();
+            if (!s.name) { say(t('js.lists.name_required'), true); nameIn.focus(); return; }
+            saving = true;
+            save.disabled = true;
+            cancel.disabled = true;
+            disarm();
+            say(t('js.lists.saving'));
+            var r = await post('user_lists', { op: 'edit', id: cur.list.id, name: s.name, description: s.desc, format: s.fmt });
+            saving = false;
+            save.disabled = false;
+            cancel.disabled = false;
+            if (!cur) return;
+            if (!r || !r.success) {
+                say((r && r.message) || t(r && r.error === 'rate_limit' ? 'js.lists.rate_limited' : 'js.lists.edit_failed'), true);
+                return;
+            }
+            var l = cur.list, done = cur.onSaved;
+            l.name = String(r.name || s.name);
+            l.description = String(r.description || '');
+            l.description_format = r.description_format === 'markdown' ? 'markdown' : 'bbcode';
+            l.excerpt = String(r.excerpt || '');
+            cur.start = now();          // nothing unsaved any more: leaving asks nothing
+            finish();
+            if (typeof done === 'function') done(l);
+        }
+
+        function open(list, o) {
+            if (!list || !list.own) return;
+            if (cur) finish();
+            o = o || {};
+            cur = { list: list, start: null, onSaved: o.onSaved || null, returnTo: o.returnTo || null };
+            if (writeTab) writeTab.click();              // Write, whatever the last opening was left on
+            nameIn.value = String(list.name || '');
+            ta.value = String(list.description || '');
+            if (fmtEl && fmtEl.tagName === 'SELECT') {
+                fmtEl.value = list.description_format === 'markdown' ? 'markdown' : 'bbcode';
+                fmtEl.dispatchEvent(new Event('change'));   // the rail for this syntax
+            }
+            ta.dispatchEvent(new Event('input', { bubbles: true }));   // the counter, for this text
+            if (help) { help.textContent = ''; help.classList.remove('form-hint-bad'); }
+            say('');
+            asking(false);
+            disarm();
+            saving = false;
+            save.disabled = false;
+            cancel.disabled = false;
+            cur.start = now();
+            box.hidden = false;
+            window.addEventListener('keydown', onKey, true);
+            window.addEventListener('beforeunload', guard);
+            nameIn.focus();
+            try { nameIn.setSelectionRange(nameIn.value.length, nameIn.value.length); } catch (e) { /* not a text box */ }
+        }
+
+        save.addEventListener('click', doSave);
+        cancel.addEventListener('click', tryClose);
+        x.addEventListener('click', closeX);
+        discard.addEventListener('click', finish);
+        keep.addEventListener('click', function () {
+            asking(false);
+            (ta.hidden ? (writeTab || nameIn) : ta).focus();
+        });
+        nameIn.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.isComposing) { e.preventDefault(); doSave(); }
+        });
+        // A press anywhere but on the × takes its arming away, like any other key.
+        box.addEventListener('pointerdown', function (e) { if (armed && !x.contains(e.target)) disarm(); }, true);
+        closeOnBackdrop(box, tryClose);
+        // A live language switch: the window's own words are the server's and are swapped by id; the two
+        // this script wrote (the counter, a message) are written again or dropped.
+        document.addEventListener('langswap', function () {
+            disarm();
+            if (!cur) return;
+            if (!saving) say('');
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        return { open: open, close: finish, state: function () {
+            // For the browser check: what the window holds and whether leaving it would ask.
+            return { open: !!cur, dirty: dirty(), saving: saving, asking: !ask.hidden, armed: !!armed,
+                     name: nameIn.value, desc: ta.value, fmt: fmtNow(), visible: listDescVisible(ta.value, fmtNow()), max: max };
+        }, visible: listDescVisible, strip: listDescStrip };
+    }
 
     function initLists() {
         var own = document.getElementById('account-lists');
@@ -826,7 +1128,14 @@
             var timer = 0;
             var wider = [document.getElementById('ul-items'), document.getElementById('ul-files')];
             if (searchEl) searchEl.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(api.load, 350); });
-            wider.forEach(function (c) { if (c) c.addEventListener('change', function () { api.load(); }); });
+            // Search options: only when they change what is asked (searchKey()).
+            wider.forEach(function (c) {
+                if (c) c.addEventListener('change', function () {
+                    if (!api.changed()) return;
+                    clearTimeout(timer);
+                    api.load();
+                });
+            });
             var mk = document.getElementById('ul-new');
             if (mk) mk.addEventListener('click', function () { newListInline(own, api); });
             api.load();
@@ -908,8 +1217,9 @@
         var hash = null, name = null;
         var all = [], page = 1, PER = 8;
 
-        function close() { box.hidden = true; document.removeEventListener('keydown', esc); }
-        function esc(e) { if (e.key === 'Escape') close(); }
+        // Over the Info panel it was opened from: its Esc closes it and not the panel (1.70.0, layerFor()).
+        var layer = layerFor(box, close);
+        function close() { box.hidden = true; layer.off(); }
         closeOnBackdrop(box, close);        // the press has to have STARTED on the backdrop (1.64.0)
         var x = document.getElementById('lp-close');
         if (x) x.addEventListener('click', close);
@@ -1025,7 +1335,7 @@
             msg.textContent = '';
             if (nameIn) nameIn.value = '';
             box.hidden = false;
-            document.addEventListener('keydown', esc);
+            layer.on();
             load();
             if (nameIn) nameIn.focus();
         };
@@ -1157,7 +1467,7 @@
         // most, the best or the newest first. A second click turns it round.
         var FIRST = { name: 'asc' };
         var heads = Array.prototype.slice.call(root.querySelectorAll('#pv-table .pv-sort'));
-        var sort = 'date', dir = 'desc', page = 1, seq = 0, timer = 0, last = null;
+        var sort = 'date', dir = 'desc', page = 1, seq = 0, timer = 0, last = null, asked = null;
 
         function valueOf(k) {
             var c = ctl[k];
@@ -1306,6 +1616,7 @@
         async function load(p) {
             var mySeq = ++seq;
             page = p || 1;
+            asked = searchKey(search, [files]);
             // The table stays while the next page is fetched, dimmed as the search table dims — only the
             // very first load has nothing to show and says so.
             if (last) table.classList.add('search-loading');
@@ -1335,7 +1646,13 @@
             });
         });
         if (search) search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 350); });
-        if (files) files.addEventListener('change', function () { load(1); });
+        // A search option, not a filter: only when it changes what is asked (searchKey()). The filters
+        // below narrow the rows whatever the box says, so every change of theirs asks again.
+        if (files) files.addEventListener('change', function () {
+            if (searchKey(search, [files]) === asked) return;
+            clearTimeout(timer);
+            load(1);
+        });
         Object.keys(ctl).forEach(function (k) {
             var c = ctl[k];
             if (!c) return;
@@ -1352,95 +1669,315 @@
         load(1);
     }
 
-    /* ────────────────── "who has this in favourites" ────────────────── */
+    /* ───────────── the descriptions a member wrote: the account tab and the profile section ─────────────
+     *
+     * The torrents a member described, or co-wrote with an edit (1.70.0, includes/profiledescs.php): the
+     * likes table's look and its rules — one component for both places, fed by api/user_descriptions.php,
+     * inside the shell templates/partials/descs_section.php renders; the header sorts (one column at a
+     * time: the name A to Z first, the part and the date biggest / newest first), the search box narrows,
+     * the pager pages and keeps both. Each row: the name and a line of what the description says, the
+     * member's part in it — "Author", "Co-author, 25%", or (their own list only) an edit or a rewrite of
+     * theirs still waiting or turned down — its state where it is not simply published, the date in the
+     * reader's zone, Magnet and Info. Drawn with textContent; redrawn from the last answer on a live
+     * language switch.
+     */
+    function initDescs() {
+        var root = document.getElementById('descs-section');
+        if (!root) return;
+        var byId = function (id) { return document.getElementById(id); };
+        var mine = root.dataset.self === '1';
+        var user = root.dataset.user || '';
+        var trackers = trackersFrom(root);
+        var search = byId('pd-search'), totalEl = byId('pd-total'), msg = byId('pd-msg');
+        var wrap = byId('pd-wrap'), table = byId('pd-table'), body = byId('pd-body'), pager = byId('pd-pager');
+        if (!table || !body) return;
+        var FIRST = { name: 'asc' };
+        var heads = Array.prototype.slice.call(root.querySelectorAll('#pd-table .pv-sort'));
+        var sort = 'date', dir = 'desc', page = 1, seq = 0, timer = 0, last = null;
 
+        function query(p) {
+            var q = 'user_descriptions&page=' + p + '&per_page=25&sort=' + sort + '&dir=' + dir;
+            if (user) q += '&user=' + encodeURIComponent(user);
+            var s = search ? search.value.trim() : '';
+            if (s) q += '&search=' + encodeURIComponent(s);
+            return q;
+        }
+        function paintSort() {
+            heads.forEach(function (b) {
+                var on = b.dataset.sort === sort;
+                var icon = b.querySelector('.search-sort-icon');
+                if (icon) icon.className = on ? (dir === 'asc' ? 'bi bi-arrow-up search-sort-icon active' : 'bi bi-arrow-down search-sort-icon active')
+                                              : 'bi bi-arrow-down-up search-sort-icon';
+                b.classList.toggle('active', on);
+                var th = b.closest('th');
+                if (th) th.setAttribute('aria-sort', on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none');
+            });
+        }
+        function labels() {
+            var out = {};
+            table.querySelectorAll('thead th[data-col]').forEach(function (th) {
+                var b = th.querySelector('.pv-sort');
+                out[th.dataset.col] = String((b || th).textContent || '').replace(/\s+/g, ' ').trim();
+            });
+            return out;
+        }
+        function say(text) { wrap.hidden = true; msg.textContent = text; msg.hidden = false; }
+        function roleText(r) {
+            if (r.role === 'author') return t('js.descs.role_author');
+            if (r.role === 'coauthor') return t('js.descs.role_coauthor', { pct: r.share });
+            return t(r.role === 'edit' ? 'js.descs.role_edit' : 'js.descs.role_rewrite');
+        }
+        function rowFor(r, lab) {
+            var tr = el('tr');
+            var name = el('td', { className: 'pv-cell pv-name pd-name' });
+            var head = el('div', { className: 'pd-head' });
+            if (r.name) head.appendChild(el('span', { className: 'pv-title', title: r.name, text: r.name }));
+            else head.appendChild(el('span', { className: 'pf-gone', title: t('js.fav.gone_title'), text: t('js.fav.gone') }));
+            if (r.banned) head.appendChild(el('span', { className: 'pf-badge pf-badge-bad', text: t('js.fav.blocked') }));
+            // Its state, where it is anything but published (only its own reader is ever sent one).
+            if (r.status && r.status !== 'published') {
+                head.appendChild(el('span', { className: 'pf-badge pd-st pd-st-' + r.status, text: t('js.descs.st_' + r.status) }));
+            }
+            name.appendChild(head);
+            // What it says, a line or two — or, for a description that is a source link alone, the link.
+            var ex = r.excerpt ? r.excerpt : (r.source_url ? t('js.descs.excerpt_source', { url: r.source_url }) : '');
+            if (ex) name.appendChild(el('div', { className: 'pd-excerpt text-muted', title: ex, text: ex }));
+            tr.appendChild(name);
+            tr.appendChild(el('td', { className: 'pv-cell pd-role', 'data-label': lab.role || null },
+                              el('span', { className: 'pv-v', text: roleText(r) })));
+            var when = el('td', { className: 'pv-cell pv-date pd-date', 'data-label': lab.date || null },
+                          el('span', { className: 'pv-v', text: r.at ? String(r.at).slice(0, 10) : '—' }));
+            if (r.at_full) when.title = r.at_full;
+            tr.appendChild(when);
+            var acts = el('div', { className: 'pf-acts pv-acts-in' });
+            addMagnetInfo(acts, r, trackers);
+            tr.appendChild(el('td', { className: 'pv-cell pv-acts' }, acts));
+            return tr;
+        }
+        function render() {
+            var j = last;
+            if (!j) return;
+            paintSort();
+            totalEl.textContent = j.total ? t('js.descs.total', { n: Number(j.total).toLocaleString() }) : '';
+            body.textContent = '';
+            if (!j.rows.length) {
+                say(j.params && j.params.search ? t('js.descs.none_match') : (mine ? t('js.descs.none_own') : t('js.fav.nothing')));
+                pager.textContent = '';
+                return;
+            }
+            var lab = labels();
+            j.rows.forEach(function (r) { body.appendChild(rowFor(r, lab)); });
+            msg.hidden = true;
+            wrap.hidden = false;
+            renderPagerInto(pager, j.page, j.pages, load);
+        }
+        async function load(p) {
+            var mySeq = ++seq;
+            page = p || 1;
+            if (last) table.classList.add('search-loading');
+            var j = await get(query(page));
+            if (mySeq !== seq) return;
+            table.classList.remove('search-loading');
+            if (!j || !j.success) {
+                last = null;
+                totalEl.textContent = '';
+                pager.textContent = '';
+                say(j && j.error === 'login_required' ? t('js.app.search_login_required') : t('js.fav.load_failed'));
+                return;
+            }
+            last = j;
+            page = j.page;
+            render();
+        }
+        heads.forEach(function (b) {
+            b.addEventListener('click', function () {
+                var key = b.dataset.sort;
+                if (key === sort) dir = dir === 'asc' ? 'desc' : 'asc';
+                else { sort = key; dir = FIRST[key] || 'desc'; }
+                paintSort();
+                load(1);
+            });
+        });
+        if (search) search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 350); });
+        document.addEventListener('langswap', function () { if (last) render(); else load(page); });
+        load(1);
+    }
+
+    /* ──────── "who has this in favourites" — and, since 1.70.0, who liked or rated it, and its lists ──────── */
+
+    /**
+     * "Who has this" (templates/partials/info_overlay.php, api/hash_who.php, includes/who.php): up to three
+     * sections, in this order, each drawn only where the server says this reader may open it — Favourites, Likes
+     * or Ratings (by the rating mode: a thumb beside each name, or their stars, half stars included), Lists (the
+     * list's name, "by" its owner, opening it on the owner's profile as a list's Share link does). When the
+     * overlay opens every section asks for its first 20 at once — in parallel, each on its own; then each has a
+     * search of its own (by name, shown once there is more than one page to search) and "Show more" for the next
+     * 20. An empty section says so, in its own words; one the server no longer opens (switched off since the page
+     * was drawn) is hidden. Everything is drawn with textContent, a name being a stranger's text, and drawn again
+     * from what it holds on a live language switch (lang-swap.js leaves these containers alone: data-lang-keep).
+     */
     function initWho() {
         var box = document.getElementById('who-overlay');
         if (!box) return;
-        var body = document.getElementById('who-body');
-        var pager = document.getElementById('who-pager');
-        var search = document.getElementById('who-search');
-        var hash = null, page = 1, timer = 0;
+        var PER = 20;
+        var secs = Array.prototype.slice.call(box.querySelectorAll('.who-sec[data-sec]')).map(function (root) {
+            var name = root.dataset.sec;
+            return {
+                name: name, root: root, mode: root.dataset.mode === 'stars' ? 'stars' : 'thumbs',
+                body: document.getElementById('who-' + name + '-body'), count: document.getElementById('who-' + name + '-count'),
+                search: document.getElementById('who-' + name + '-search'), more: document.getElementById('who-' + name + '-more'),
+                rows: [], total: 0, page: 0, q: '', seq: 0, state: 'idle', many: false, timer: 0,
+            };
+        }).filter(function (s) { return s.body && s.count && s.more; });
+        var hash = null, returnTo = null;
+        var layer = layerFor(box, close);   // one Esc, one layer: the Info panel under it stays
 
-        function close() { box.hidden = true; document.removeEventListener('keydown', esc); }
-        function esc(e) { if (e.key === 'Escape') close(); }
+        function close() {
+            box.hidden = true;
+            layer.off();
+            // An answer still in the air belongs to this opening, not to the next.
+            secs.forEach(function (s) { clearTimeout(s.timer); s.seq++; });
+            if (returnTo && returnTo.isConnected) { try { returnTo.focus(); } catch (e) { /* gone */ } }
+            returnTo = null;
+        }
         closeOnBackdrop(box, close);        // the press has to have STARTED on the backdrop (1.64.0)
         var x = document.getElementById('who-close');
         if (x) x.addEventListener('click', close);
 
-        async function load(p) {
-            page = p || 1;
-            body.textContent = '';
-            body.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
-            var qs = 'hash_favourites&hash=' + encodeURIComponent(hash) + '&page=' + page + '&per_page=50';
-            if (search && search.value.trim()) qs += '&search=' + encodeURIComponent(search.value.trim());
-            var j = await get(qs);
-            body.textContent = '';
-            if (!j || !j.success) { body.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
-            var head = document.getElementById('who-total');
-            if (head) head.textContent = j.total === 1 ? t('js.fav.who_one') : t('js.fav.who_count', { n: j.total.toLocaleString() });
-            // An empty list here is a decision, not a failure, and it has to say so. The count above
-            // is the whole truth about how many people hold this; the names below are only those who
-            // agreed to be named. Without the second line the overlay reads as broken.
-            if (!j.rows.length) {
-                body.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.who_none') }));
-                body.appendChild(el('p', { className: 'text-muted who-why', text: t('js.fav.who_why') }));
-            }
-            // The picture beside each name (1.63.0) is the first thing inside its chip, from the ADDRESS
-            // the server built (these rows never carry an id); window.userAvatarImg() is
-            // assets/js/avatar.js, and answers null while pictures are switched off.
-            var face = function (name, address) {
-                return typeof window.userAvatarImg === 'function'
-                    ? window.userAvatarImg({ username: name, avatar: String(address || '') }, 20, 'avatar who-av') : null;
-            };
-            var ul = el('div', { className: 'who-names' });
-            j.rows.forEach(function (r) {
-                ul.appendChild(el('a', { className: 'who-name', href: BASE + '?action=u&name=' + encodeURIComponent(r.username) },
-                                  [face(r.username, r.avatar), r.username]));
-            });
-            body.appendChild(ul);
-            // The public LISTS it is on. A different answer to the same question, and often the
-            // more useful one: it says what somebody keeps this WITH.
-            if (j.lists && j.lists.length) {
-                body.appendChild(el('div', { className: 'who-lists-head text-muted', text: t('js.lists.who_head') }));
-                var lb = el('div', { className: 'who-names who-lists' });
-                j.lists.forEach(function (l) {
-                    // NOT .who-name: that class means "a person on this list", and a chip that is a
-                    // collection is a different kind of answer. They share a look, not a meaning.
-                    // The address is the LIST, not the shelf it sits on: `#lists` landed the reader
-                    // on a profile full of cards to find the one they had just clicked, while
-                    // `#list:<slug>` is the address the Share button hands out and the profile page
-                    // already knows how to open.
-                    var a = el('a', { className: 'who-list',
-                                      href: BASE + '?action=u&name=' + encodeURIComponent(l.username)
-                                          + '#list:' + encodeURIComponent(l.slug || '') });
-                    a.appendChild(el('span', { className: 'who-list-name', text: l.name }));
-                    // The owner's picture right before their NAME inside "by <name>" — wherever the
-                    // language puts the name — not at the start of the chip: the chip is the LIST, and
-                    // the face belongs to the person who keeps it.
-                    var by = el('span', { className: 'who-list-by text-muted' });
-                    if (typeof window.userAvatarPhrase === 'function') {
-                        by.appendChild(window.userAvatarPhrase(t('js.lists.who_by', { user: window.userAvatarSlot(0) }),
-                                                               [[face(l.username, l.avatar), l.username]]));
-                    } else {
-                        by.textContent = t('js.lists.who_by', { user: l.username });
-                    }
-                    a.appendChild(by);
-                    lb.appendChild(a);
-                });
-                body.appendChild(lb);
-            }
-            if (pager) renderPagerInto(pager, j.page, j.pages, load);
+        var lang = function () { return document.documentElement.lang || undefined; };
+        var num = function (n) { return Number(n).toLocaleString(lang()); };
+        // The picture beside each name (1.63.0), from the ADDRESS the server built (these rows never carry an
+        // id); window.userAvatarImg() is assets/js/avatar.js, and answers null while pictures are switched off.
+        var face = function (name, address) {
+            return typeof window.userAvatarImg === 'function'
+                ? window.userAvatarImg({ username: name, avatar: String(address || '') }, 20, 'avatar who-av') : null;
+        };
+
+        /** A person: their picture and name, a link to their profile — and, among the likes, their vote. */
+        function personChip(s, r) {
+            var a = el('a', { className: 'who-name' + (s.name === 'votes' ? ' who-voter' : ''),
+                              href: BASE + '?action=u&name=' + encodeURIComponent(r.username) },
+                       [face(r.username, r.avatar), el('span', { className: 'who-name-text', text: r.username })]);
+            if (s.name === 'votes') a.appendChild(s.mode === 'stars' ? starsReadOnly(Number(r.vote) / 2) : thumbFor(Number(r.vote)));
+            return a;
         }
-        if (search) search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 350); });
+        /**
+         * A list: NOT .who-name — that class means "a person on this list", and a chip that is a collection is a
+         * different kind of answer; they share a look, not a meaning. The address is the LIST (`#list:<slug>`,
+         * the address its Share button hands out and the profile page opens), not the shelf it sits on. The
+         * owner's picture sits right before their NAME inside "by <name>", wherever the language puts the name.
+         */
+        function listChip(r) {
+            var a = el('a', { className: 'who-list',
+                              href: BASE + '?action=u&name=' + encodeURIComponent(r.username) + '#list:' + encodeURIComponent(r.slug || '') });
+            a.appendChild(el('span', { className: 'who-list-name', text: r.name }));
+            var by = el('span', { className: 'who-list-by text-muted' });
+            if (typeof window.userAvatarPhrase === 'function') {
+                by.appendChild(window.userAvatarPhrase(t('js.lists.who_by', { user: window.userAvatarSlot(0) }),
+                                                       [[face(r.username, r.avatar), r.username]]));
+            } else {
+                by.textContent = t('js.lists.who_by', { user: r.username });
+            }
+            a.appendChild(by);
+            return a;
+        }
+        function countText(s) {
+            if (s.q !== '') return t('js.who.found', { n: num(s.total) });
+            if (s.name === 'lists') return s.total === 1 ? t('js.who.lists_one') : t('js.who.lists_n', { n: num(s.total) });
+            return s.total === 1 ? t('js.who.people_one') : t('js.who.people_n', { n: num(s.total) });
+        }
+        // An empty section is a decision, not a failure, and says so in its own words; the line under the
+        // sections (#who-why, the server's) says why a section can be empty.
+        function emptyText(s) {
+            if (s.q !== '') return t('js.who.no_match');
+            if (s.name === 'fav') return t('js.who.fav_none');
+            if (s.name === 'lists') return t('js.who.lists_none');
+            return s.mode === 'stars' ? t('js.who.votes_none_stars') : t('js.who.votes_none_thumbs');
+        }
+
+        /** The section as it stands: its rows, its count, its "Show more", its search box. */
+        function draw(s) {
+            s.body.textContent = '';
+            var busyFirst = s.state === 'loading' && !s.rows.length;
+            if (busyFirst) s.body.appendChild(el('div', { className: 'pf-loading who-msg', text: t('js.common.loading') }));
+            else if (s.state === 'error') s.body.appendChild(el('div', { className: 'pf-empty who-msg', text: t('js.fav.load_failed') }));
+            else if (s.state === 'limited') s.body.appendChild(el('div', { className: 'pf-empty who-msg', text: t('js.who.rate_limited') }));
+            else if (!s.rows.length) s.body.appendChild(el('div', { className: 'pf-empty who-msg', text: emptyText(s) }));
+            else {
+                var wrap = el('div', { className: 'who-names' + (s.name === 'lists' ? ' who-lists' : '') });
+                s.rows.forEach(function (r) { wrap.appendChild(s.name === 'lists' ? listChip(r) : personChip(s, r)); });
+                s.body.appendChild(wrap);
+            }
+            s.count.textContent = s.state === 'ok' || (s.state === 'loading' && s.rows.length) ? countText(s) : '';
+            var left = s.total - s.rows.length;
+            s.more.hidden = !(left > 0 && (s.state === 'ok' || s.state === 'loading'));
+            s.more.disabled = s.state === 'loading';
+            s.more.textContent = s.state === 'loading' ? t('js.common.loading') : t('js.who.more', { n: num(Math.min(left, PER)) });
+            // Something to search: more than one page of it, or a search already typed (so it can be cleared).
+            if (s.search) s.search.hidden = !(s.many || s.q !== '' || s.search.value !== '');
+        }
+
+        /** Page one (a new question) or the next page (append). The newest question wins; an older answer is dropped. */
+        async function load(s, append) {
+            var mine = ++s.seq;
+            var page = append ? s.page + 1 : 1;
+            if (!append) { s.rows = []; s.total = 0; s.page = 0; }
+            s.state = 'loading';
+            draw(s);
+            var qs = 'hash_who&section=' + s.name + '&hash=' + encodeURIComponent(hash) + '&page=' + page + '&per_page=' + PER;
+            if (s.q !== '') qs += '&search=' + encodeURIComponent(s.q);
+            var j = await get(qs);
+            if (mine !== s.seq) return;
+            if (j && j.error === 'not_found') { s.state = 'gone'; s.root.hidden = true; return; }
+            if (j && j.error === 'rate_limit') { s.state = 'limited'; draw(s); return; }
+            if (!j || !j.success || !Array.isArray(j.rows)) { s.state = 'error'; draw(s); return; }
+            if (s.name === 'votes' && (j.mode === 'stars' || j.mode === 'thumbs')) s.mode = j.mode;
+            s.rows = append ? s.rows.concat(j.rows) : j.rows.slice();
+            s.total = Number(j.total) || 0;
+            s.page = Number(j.page) || page;
+            if (s.q === '' && s.total > PER) s.many = true;
+            s.state = 'ok';
+            draw(s);
+        }
+
+        secs.forEach(function (s) {
+            s.more.addEventListener('click', function () { if (s.state === 'ok') load(s, true); });
+            if (!s.search) return;
+            // Every keystroke (debounced) asks again, as the 1.69.0 box did — the rows may have changed under an
+            // unchanged word — and Enter asks at once.
+            s.search.addEventListener('input', function () {
+                clearTimeout(s.timer);
+                s.timer = setTimeout(function () { s.q = s.search.value.trim(); load(s, false); }, 350);
+            });
+            s.search.addEventListener('keydown', function (e) {
+                if (e.key !== 'Enter' || e.isComposing) return;
+                e.preventDefault();
+                clearTimeout(s.timer);
+                s.q = s.search.value.trim();
+                load(s, false);
+            });
+        });
+        // A live language switch: the server's words (the headings, the placeholders, the line under them) are
+        // swapped by id; the ones written here are written again from what each section holds.
+        document.addEventListener('langswap', function () { secs.forEach(draw); });
 
         window.openWhoFavourited = function (h) {
             hash = h;
+            returnTo = document.activeElement;
+            secs.forEach(function (s) {
+                clearTimeout(s.timer);
+                s.q = ''; s.many = false; s.root.hidden = false;
+                if (s.search) s.search.value = '';
+            });
             box.hidden = false;
-            document.addEventListener('keydown', esc);
-            if (search) search.value = '';
-            load(1);
+            layer.on();
+            // All the sections' first pages at once: three requests in the air together, each drawn as it lands.
+            secs.forEach(function (s) { load(s, false); });
         };
+        // For the browser checks: what each section holds.
+        window.WhoHas = { state: function () {
+            return secs.map(function (s) { return { sec: s.name, state: s.state, rows: s.rows.length, total: s.total, page: s.page, q: s.q, mode: s.mode, hidden: s.root.hidden }; });
+        } };
     }
 
     /* ─────────────────── the account page's tab bar ─────────────────── */
@@ -1449,8 +1986,9 @@
         var bar = document.getElementById('acc-tabs');
         if (!bar) return;
         // Every pane the page may carry: a name missing here falls back to the overview (1.69.0 added
-        // `votes`, the likes / ratings tab right after Favourites).
-        var panes = ['overview', 'favourites', 'votes', 'uploads', 'lists', 'messages', 'people', 'members', 'sounds'];
+        // `votes`, the likes / ratings tab right after Favourites; 1.70.0 `descriptions`, whose TAB sits
+        // right after that one — the order of the tabs is the template's, this list is only who exists).
+        var panes = ['overview', 'favourites', 'votes', 'uploads', 'lists', 'messages', 'people', 'members', 'sounds', 'descriptions'];
         function show(name) {
             // `#messages:somebody` opens the inbox AT that conversation — the part before the colon
             // is the pane, the rest belongs to people.js. A tab bar that did not know that fell
@@ -1511,7 +2049,8 @@
                 if (!r || !r.success) return;
             });
         }
-        [['acc-fav-public', 'fav_public'], ['acc-fav-listed', 'fav_listed'], ['acc-votes-public', 'votes_public'],
+        [['acc-fav-public', 'fav_public'], ['acc-fav-listed', 'fav_listed'], ['acc-votes-public', 'votes_public'], ['acc-votes-listed', 'votes_listed'],
+         ['acc-descs-public', 'descriptions_public'], ['acc-credit-public', 'content_credit_public'],
          ['acc-lists-public', 'lists_public'], ['acc-profile-listed', 'profile_listed']].forEach(function (pair) {
             var input = document.getElementById(pair[0]);
             if (!input) return;
@@ -1523,7 +2062,11 @@
                 input.disabled = false;
                 // Put the box back if the server disagreed: a checkbox that shows a state the server
                 // does not hold is worse than one that refuses to move.
-                if (!r || !r.success) input.checked = !input.checked;
+                if (!r || !r.success) { input.checked = !input.checked; return; }
+                // With the name hidden the descriptions list is shown to nobody else either (1.70.0): the
+                // sentence under that switch follows the name switch as the server now holds it.
+                var hiddenNote = document.getElementById('acc-descs-name-hidden');
+                if (hiddenNote && typeof r.content_credit_public === 'boolean') hiddenNote.hidden = r.content_credit_public;
             });
         });
     }
@@ -1534,13 +2077,17 @@
         initProfile();
         initAccountTabs();
         initVotes();
+        initDescs();
         initWho();
         initListPicker();   // before initLists(): the "+" asks whether the picker exists
         initListOverlay();
+        listEdit = initListEdit();  // before initLists() too: a card draws Edit only where the window is
         initLists();
     });
 
     window.Favourites = { makeStar: makeStar, paintStar: paintStar };
+    // The Edit window, for the browser checks (its state and the counter's twin).
+    window.ListEdit = { get: function () { return listEdit; }, visible: listDescVisible, strip: listDescStrip };
     // The Info panel asks for this button the way it asks for the star — app.js owns the panel and
     // knows nothing about lists, which is the point.
     window.Lists = { makeAddButton: makeListButton };

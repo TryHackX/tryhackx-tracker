@@ -44,6 +44,23 @@
 })();
 
 /**
+ * Settings → Shoutbox → Emoji in the picker (1.70.0): how much of the Font Awesome package the picker
+ * offers — the faces, the faces and a search of every icon, every icon by category — means something
+ * only while the faces are on at all, so its control is shown only then. Hidden, it still saves what it
+ * holds (a hidden field is part of the form), so switching the faces off and on again keeps the choice.
+ * The server draws it hidden when the page opens with the faces off; this follows the select after that.
+ */
+(function () {
+    'use strict';
+    const mode = document.getElementById('setting-shout_emoji_fa');
+    const cell = document.querySelector('#admin-shout-emoji [data-setting="shout_emoji_fa_scope"]');
+    if (!mode || !cell) return;
+    const sync = () => { cell.hidden = mode.value === 'off'; };
+    mode.addEventListener('change', sync);
+    sync();
+})();
+
+/**
  * Settings → Shoutbox → the emote manager (1.59.0, rebuilt in 1.59.1).
  *
  * The switches beside it are ordinary settings saved with the form. This is the other half: the

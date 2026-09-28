@@ -670,7 +670,14 @@
         const go = el('a', { className: 'btn btn-sm btn-outline-warning', href: url, target: '_blank',
                              rel: 'nofollow noopener noreferrer ugc', text: t('js.common.leave_open') });
         const close = () => { if (box.parentNode) box.parentNode.removeChild(box); document.removeEventListener('keydown', onEsc, true); };
-        function onEsc(e) { if (e.key === 'Escape') close(); }
+        // Its Esc is its own (1.70.0): heard in the capture phase and taken, so the detail modal it was opened
+        // from — Bootstrap's, which closes on an Esc that reaches it — stays open, and a second Esc closes that.
+        function onEsc(e) {
+            if (e.key !== 'Escape') return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            close();
+        }
         cancel.addEventListener('click', close);
         go.addEventListener('click', close);
         acts.appendChild(cancel); acts.appendChild(go);

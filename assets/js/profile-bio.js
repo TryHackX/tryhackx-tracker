@@ -11,7 +11,9 @@
  * Not window.RichText.mount(): that editor is built around a preview round trip, a format switch and
  * a counter of raw source length, and throws without a preview box. This one needs five buttons, a
  * counter of what a READER will see, and Esc / Ctrl+Enter. The buttons follow its convention
- * (`data-tag` here, the same icons and titles as the other toolbars).
+ * (`data-tag` here, the same icons and titles as the other toolbars). From 1.70.0 a sixth, the emoji
+ * picker every editor has (assets/js/emoji-picker.js): the emoji, Font Awesome's icons and the emotes,
+ * which the server draws here too (profileBioRender()); a token counts as the characters it is typed as.
  *
  * The counter is a twin of profileBioClean() and of the counting half of profileBioParse() — same
  * character classes, same tag grammar, same rules for links — so the number under the box is the
@@ -169,6 +171,10 @@
     ];
     var editor = null, tools = null, ta = null, count = null, err = null, saveBtn = null, cancelBtn = null;
     var busy = false;
+    // The emoji and the emotes (1.70.0, assets/js/emoji-picker.js): a sixth button at the end of the
+    // toolbar when the page says this reader may use the picker here (data-emoji-* on #profile-bio, from
+    // emojiPickerAttrs() in includes/emoji.php). No stickers: a description is a line or two under a name.
+    var emojiBtn = null, picker = null;
 
     function node(tag, cls, id) {
         var n = document.createElement(tag);
@@ -191,6 +197,16 @@
             b.appendChild(i);
             tools.appendChild(b);
         });
+        if (root.getAttribute('data-emoji-for') && window.EmojiPicker && typeof window.EmojiPicker.attach === 'function') {
+            emojiBtn = node('button', 'profile-bio-tool profile-bio-emoji', 'profile-bio-tool-emoji');
+            emojiBtn.type = 'button';
+            emojiBtn.setAttribute('aria-haspopup', 'dialog');
+            emojiBtn.setAttribute('aria-expanded', 'false');
+            var ei = node('i', 'bi bi-emoji-smile');
+            ei.setAttribute('aria-hidden', 'true');
+            emojiBtn.appendChild(ei);
+            tools.appendChild(emojiBtn);
+        }
         ta = node('textarea', 'profile-bio-input', 'profile-bio-input');
         ta.rows = 3;
         ta.maxLength = cap;
@@ -213,6 +229,8 @@
         editor.appendChild(err);
         editor.appendChild(foot);
         root.appendChild(editor);
+        // What it picks goes in at the caret and fires `input`: the counter and the box's height follow.
+        if (emojiBtn) picker = window.EmojiPicker.attach({ textarea: ta, button: emojiBtn, data: root.dataset });
 
         tools.addEventListener('click', function (e) {
             var b = e.target.closest ? e.target.closest('[data-tag]') : null;
@@ -242,6 +260,11 @@
             var b = document.getElementById('profile-bio-tool-' + d.tag);
             if (b) { b.title = T(d.label); b.setAttribute('aria-label', T(d.label)); }
         });
+        if (emojiBtn) {
+            var lab = T(root.getAttribute('data-emotes') === '1' ? 'js.bio.emoji_emotes' : 'js.bio.emoji');
+            emojiBtn.title = lab;
+            emojiBtn.setAttribute('aria-label', lab);
+        }
         ta.setAttribute('aria-label', T('js.bio.input'));
         ta.placeholder = T('js.bio.input_ph');
         saveBtn.textContent = busy ? T('js.bio.saving') : T('js.bio.save');
@@ -317,6 +340,7 @@
     /** Back to what the page shows: the text when there is one, the dashed box when there is none. */
     function close() {
         var had = editor && editor.contains(document.activeElement);
+        if (picker) picker.close();
         if (editor) editor.hidden = true;
         var empty = !textEl || textEl.innerHTML.trim() === '';
         if (textEl) textEl.hidden = empty;

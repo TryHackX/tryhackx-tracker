@@ -8,7 +8,13 @@
  *   sudo -u www-data php tools/iconpack.php activate <id> [--styles=a,b] [--style=NAME]
  *   sudo -u www-data php tools/iconpack.php styles <id> [<file|key>,…] [--style=NAME]
  *   sudo -u www-data php tools/iconpack.php verify <id>
+ *   sudo -u www-data php tools/iconpack.php reindex <id>|--all
  *   sudo -u www-data php tools/iconpack.php delete <id>
+ *
+ * `reindex` (1.70.0) reads a package's index again from the metadata it keeps and writes what is made of
+ * it beside the manifest — above all the catalogue of every icon the shoutbox picker offers, which a
+ * package installed by 1.69.0 does not have yet (the site builds it by itself the first time it needs
+ * it; this does it now, and says what it made). Nothing the site loads changes.
  *
  * AS THE WEB USER: a package is written into config/iconpacks/, which the web server owns and must be
  * able to read and later delete; installed as root it would be a directory the panel cannot remove.
@@ -88,9 +94,12 @@ switch ($cmd) {
         if (!$list) { $out('no packages installed in ' . iconpackDir()); $state(); exit(0); }
         foreach ($list as $p) {
             if (!empty($p['broken'])) { $out(sprintf('  %-26s BROKEN (no readable manifest) — delete it and import it again', $p['id'])); continue; }
-            $out(sprintf('%s %-26s %-4s %-7s %2d styles (%d outside all.css)  %9s  %4d icons  installed %s by %s%s',
+            $out(sprintf('%s %-26s %-4s %-7s %2d styles (%d outside all.css)  %9s  %4d icons  installed %s by %s%s%s',
                 iconpackIsActive($p['id'], $c) ? '*' : ' ', $p['id'], $p['edition'], $p['version'], $p['styles'], $p['outside_all'],
-                $bytes((int)$p['bytes']), $p['icons'], $p['installed_at'], $p['installed_by'], $p['metadata'] !== 'none' ? '  metadata: ' . $p['metadata'] : ''));
+                $bytes((int)$p['bytes']), $p['icons'], $p['installed_at'], $p['installed_by'], $p['metadata'] !== 'none' ? '  metadata: ' . $p['metadata'] : '',
+                // 1.70.0: the catalogue of every icon, or that it is still to be built (reindex).
+                !empty($p['catalog']) ? '  catalogue: ' . $p['catalog']['icons'] . ' icons, ' . $p['catalog']['categories'] . ' categories'
+                    : (!empty($p['index']) ? '  catalogue: not built yet (reindex)' : '')));
         }
         $state();
         exit(0);
@@ -141,6 +150,29 @@ switch ($cmd) {
         $state();
         exit(0);
 
+    case 'reindex':
+        $ids = !empty($opts['all']) ? iconpackInstalledIds() : [$args[1] ?? ''];
+        if ($ids === [''] || (!empty($opts['all']) && !$ids)) {
+            if (!empty($opts['all'])) { $out('no packages installed in ' . iconpackDir()); exit(0); }
+            fwrite(STDERR, "usage: php tools/iconpack.php reindex <id>|--all\n");
+            exit(2);
+        }
+        $bad = 0;
+        foreach ($ids as $id) {
+            $r = iconpackReindex((string)$id);
+            if (empty($r['ok'])) {
+                $bad++;
+                fwrite(STDERR, $id . ': ' . iconpackReindexLine((string)$id, $r) . "\n");
+                continue;
+            }
+            $out(iconpackReindexLine((string)$id, $r) . (empty($r['written']) ? ' — NOT written: the web user must own ' . iconpackDir() : ''));
+            if (empty($r['written'])) $bad++;
+            auditLog($db, 'iconpack.reindex', ['actor' => $actor, 'ok' => !empty($r['written']), 'target_type' => 'iconpack', 'target_id' => (string)$id,
+                'summary' => 'read the index of ' . iconpackTitle(iconpackManifest((string)$id), (string)$id) . ' again, from the shell',
+                'detail' => ['icons' => count((array)($r['catalog']['icons'] ?? [])), 'categories' => count((array)($r['catalog']['cats'] ?? [])), 'bytes' => (int)($r['bytes'] ?? 0)]]);
+        }
+        exit($bad ? 1 : 0);
+
     case 'verify':
         $id = $args[1] ?? '';
         $v = iconpackVerify($id);
@@ -166,6 +198,6 @@ switch ($cmd) {
 
     default:
         fwrite(STDERR, "usage: php tools/iconpack.php import <zip|dir> | list | activate <id> [--styles=a,b] [--style=NAME]"
-            . " | styles <id> [<file|key>,…] [--style=NAME] | verify <id> | delete <id>\n");
+            . " | styles <id> [<file|key>,…] [--style=NAME] | verify <id> | reindex <id>|--all | delete <id>\n");
         exit(2);
 }

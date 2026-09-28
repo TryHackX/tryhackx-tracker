@@ -18,7 +18,7 @@ requirePost();
 $bioState = function (array $u) use ($db, $cfg): array {
     $src = profileBioClean((string)($u['bio'] ?? ''));
     return ['id' => (int)$u['id'], 'username' => (string)$u['username'], 'has_bio' => $src !== '',
-            'html' => profileBioRender($src, $cfg), 'shown' => profileBioFor($db, $cfg, $u) !== ''];
+            'html' => profileBioRender($src, $cfg, $db), 'shown' => profileBioFor($db, $cfg, $u) !== ''];
 };
 
 $input = readJsonBody();

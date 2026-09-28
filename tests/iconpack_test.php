@@ -934,6 +934,42 @@ if (!$proFolders) {
             sort($emoSet);
             check("Pro $v: a face's styles in emoji.json are the ones the owner's index gives it ($ownFace: " . count($famsOf($ownFace)) . ')',
                   $ownFace !== '' && $emoSet === $famsOf($ownFace), json_encode([$emoSet, $famsOf($ownFace)]));
+            // 1.70.0: the catalogue of every icon, held against the owner's index read here from his file —
+            // every icon his CSS declares, every one of his categories and no other (but the two pages of
+            // its own), none of them empty, each icon's styles his — and its size, raw and as it travels.
+            $pid = (string)$pm['id'];
+            if (iconpackCatalogRead($pid) === null) iconpackCatalogOf($pid);           // a copy from 1.69.0: built now
+            $catP = iconpackCatalogRead($pid);
+            $rawCat = (string)@file_get_contents(iconpackCatalogPath($pid));
+            $ownCats = [];
+            foreach ($ownNames as $nm) if (isset($cssN[$nm])) foreach ((array)($own[$nm]['categories'] ?? []) as $cc) $ownCats[(string)$cc] = true;
+            $ownCats = array_map('strval', array_keys($ownCats));
+            sort($ownCats, SORT_STRING);
+            $realCats = array_values(array_diff((array)($catP['cats'] ?? []), ['brands', 'other']));
+            $perCat = array_fill(0, count((array)($catP['cats'] ?? [])), 0);
+            $wrongSet = [];
+            foreach ((array)($catP['icons'] ?? []) as $row) {
+                foreach ((array)$row[3] as $ci) $perCat[$ci] = ($perCat[$ci] ?? 0) + 1;
+                $keys = (array)($catP['sets'][$row[4]] ?? []);
+                sort($keys);
+                if ($keys !== $famsOf((string)$row[0])) $wrongSet[] = $row[0];
+            }
+            $gz = strlen(gzencode($rawCat, 6));
+            check("Pro $v: the catalogue — " . ($catP['count'] ?? 0) . ' icons, ' . count($realCats) . ' of Font Awesome\'s categories and '
+                  . (count((array)($catP['cats'] ?? [])) - count($realCats)) . ' of its own (' . implode(', ', array_diff((array)($catP['cats'] ?? []), $realCats)) . '), '
+                  . number_format(strlen($rawCat) / 1024, 0) . ' KB, ' . number_format($gz / 1024, 0) . ' KB gzipped',
+                  $catP !== null && $catP['count'] === count(array_filter($ownNames, fn($nm) => isset($cssN[$nm]))) && $realCats === $ownCats
+                  && !in_array(0, $perCat, true) && $wrongSet === [] && $gz < 204800,
+                  json_encode(['count' => $catP['count'] ?? null, 'cats' => count($realCats), 'own' => count($ownCats), 'wrong' => array_slice($wrongSet, 0, 5)]));
+            // A token for an icon that is no face, with this very package drawing the site.
+            require_once $root . '/includes/richtext.php';
+            $cfgO = $cfgPack($pid, [], 'solid') + ['shout_emoji_fa' => 'mixed', 'shout_emoji_fa_scope' => 'all'];
+            $brand = (string)(array_values(array_filter($ownNames, fn($nm) => isset($cssN[$nm]) && ($own[$nm]['families'] ?? []) === ['classic' => ['brands']]))[0] ?? '');
+            check("Pro $v: any icon of it is a token — :fa-rocket: in the site's style, :fa-$brand: in Brands (its only style), a style it does not load its name in brackets",
+                  emojiFaRenderHtml(':fa-rocket:', $cfgO, 'en') === '<i class="fai fa-solid fa-rocket" role="img" aria-label="Rocket" title="Rocket"></i>'
+                  && str_starts_with(emojiFaRenderHtml(':fa-' . $brand . ':', $cfgO, 'en'), '<i class="fai fa-brands fa-' . $brand . '" role="img"')
+                  && emojiFaRenderHtml(':fa-rocket/sharp-duotone-thin:', $cfgO, 'en') === '[Rocket]',
+                  emojiFaRenderHtml(':fa-rocket: :fa-' . $brand . ':', $cfgO, 'en'));
             if (isset($pStyles['jelly-regular'])) {
                 $sJ = iconSetup($cfgPack((string)$pm['id'], ['jelly-regular'], 'jelly-regular'));
                 $xJ = iconFaMap($sJ, true);
@@ -1045,8 +1081,9 @@ check('… and its label in the reader\'s language: Polish from this project\'s 
 check('a style that does not load, or that the face is not drawn in, is the ordinary emoji the face stands for',
       $r(':fa-face-grin/thin:') === $faFaces['face-grin'][1] && $r(':fa-face-grin/brands:') === $faFaces['face-grin'][1]
       && $r(':fa-face-grin/nonsense-style:') === $faFaces['face-grin'][1], $r(':fa-face-grin/thin:'));
-check('a face this package does not have is its emoji; a name that is no face is the text as typed',
-      $r(':fa-face-zany:') === $faFaces['face-zany'][1] && $r(':fa-rocket:') === ':fa-rocket:' && $r(':fa-gear/solid:') === ':fa-gear/solid:');
+// 1.70.0: any icon the package's catalogue has is drawn too (section 13); a name it does not have is text.
+check('a face this package does not have is its emoji; a name the package does not have is the text as typed',
+      $r(':fa-face-zany:') === $faFaces['face-zany'][1] && $r(':fa-no-such-icon:') === ':fa-no-such-icon:' && $r(':fa-no-such-icon/solid:') === ':fa-no-such-icon/solid:');
 check('Font Awesome\'s faces switched off, the icon library Bootstrap, the package gone: the emoji, never nothing',
       $r(':fa-face-grin:', ['shout_emoji_fa' => 'off']) === $faFaces['face-grin'][1]
       && $r(':fa-face-grin:', ['icon_library' => 'bootstrap']) === $faFaces['face-grin'][1]
@@ -1078,7 +1115,8 @@ check('what the picker is told: the mode, the default style, each loaded style w
       && ($cdGrin['v'] ?? null) === $wantV && ($cdGrin['e'] ?? '') === $faFaces['face-grin'][1] && ($cdGrin['l'] ?? '') === $faFaces['face-grin'][2]
       && str_contains((string)($cdGrin['k'] ?? ''), 'radość') && str_contains((string)($cdGrin['k'] ?? ''), 'face grin'),
       json_encode(['pages' => $cd['pages'], 'grin' => $cdGrin]));
-check('… and with the faces off it is told nothing', emojiFaClientData($cfgS(['shout_emoji_fa' => 'off']), 'en') === ['mode' => 'off', 'style' => 'duotone', 'known' => true, 'styles' => [], 'pages' => [], 'faces' => []]);
+check('… and with the faces off it is told nothing', emojiFaClientData($cfgS(['shout_emoji_fa' => 'off']), 'en')
+      === ['mode' => 'off', 'scope' => 'faces', 'style' => 'duotone', 'classic' => 'solid', 'known' => true, 'styles' => [], 'pages' => [], 'faces' => []]);
 // Font Awesome's own format, and Free metadata that may not speak for a Pro package's styles.
 $fp = $import(iptWriteDir($tmp('famfaces'), iptPackage(['version' => '7.9.7', 'metadata' => 'pro', 'faces' => $faceNames, 'extra' => ['duotone', 'sharp-solid']])));
 $fid = (string)($fp['id'] ?? '');
@@ -1094,6 +1132,133 @@ check('Free metadata on a Pro package does not speak for its styles: no knowledg
       !empty($ff['ok']) && ($ffm['metadata']['describes'] ?? '') === 'free' && iconPackStyleKnowledge($ffm) === null && !isset($ffm['present']['sets'])
       && !$ffctx['known'] && count($ffctx['faces']) === 6 && ($ffctx['faces']['face-grin'][2] ?? null) === ['solid', 'regular', 'light', 'duotone', 'sharp-solid'],
       json_encode([$ffctx['faces']['face-grin'] ?? null, $ffm['metadata'] ?? null]));
+
+/* ══ 13. the catalogue of every icon, and a token for any of them (1.70.0) ═══════ */
+// The package from section 12 (the owner's index shape): its catalogue as written at import, built again
+// when it is missing or of another format — lazily, by the CLI, by the panel — and what a :fa-NAME: token
+// for an icon that is not a face becomes: drawn in the styles the icon has among those that load, its
+// label in brackets where it cannot be, the text as typed for a name the package does not have.
+$catPath = iconpackCatalogPath($sid);
+$catRaw = (string)@file_get_contents($catPath);
+$catJ = json_decode($catRaw, true);
+$ixS = iconpackIndexOf($sid);
+$badRows = [];
+foreach ((array)($catJ['icons'] ?? []) as $row) {
+    [$nm, $lab, $words, $cs, $si] = $row + [null, null, null, null, null];
+    if (!is_string($nm) || !isset($ixS['styles'][$nm]) || (int)$ixS['styles'][$nm] !== $si) $badRows[] = "$nm: set";
+    if ($lab !== 0) $badRows[] = "$nm: label stored though it is the name read as words";
+    if (!is_array($cs) || !$cs || array_filter($cs, fn($c) => !isset($catJ['cats'][$c]))) $badRows[] = "$nm: categories";
+    if (!is_string($words) || preg_match('/[A-Z|]/', $words) || array_intersect(explode(' ', $words), explode('-', $nm))) $badRows[] = "$nm: words " . json_encode($words);
+}
+$gridIdx = (int)array_search('face-grin', array_column((array)($catJ['icons'] ?? []), 0), true);
+check('import writes catalog.json beside index.json: format 1, every icon of the index the CSS declares, in name order, each with its words, categories and index.json\'s set',
+      is_array($catJ) && $catJ['format'] === ICONPACK_CATALOG_FORMAT && $catJ['kind'] === 'icons-search' && $catJ['count'] === count($synNames)
+      && count($catJ['icons']) === count($synNames) && $catJ['sets'] === $ixS['sets'] && $catJ['cats'] === ['emoji', 'synthetic']
+      && array_column($catJ['icons'], 0) === (function () use ($synNames) { $s = $synNames; sort($s, SORT_STRING); return $s; })() && $badRows === []
+      && $catJ['icons'][$gridIdx][3] === [0, 1] && !isset($sm['files']['catalog.json']),
+      json_encode(['count' => $catJ['count'] ?? null, 'cats' => $catJ['cats'] ?? null, 'bad' => array_slice($badRows, 0, 5)]));
+check('… its words are the terms made few: distinct, lower case, none of the name\'s, none that only begins another one',
+      iconpackCatalogWords('arrow-up', 'Arrow Up', ['Arrow pointing up', 'arrows', 'arr', 'Direction', 'direction', 'UP', 'ÉLAN vital']) === 'arrows direction pointing vital élan',
+      iconpackCatalogWords('arrow-up', 'Arrow Up', ['Arrow pointing up', 'arrows', 'arr', 'Direction', 'direction', 'UP', 'ÉLAN vital']));
+check('… and a label that is the name read as words is not stored (0); another one is', iconpackCatalogLabel('arrow-up-right') === 'Arrow Up Right'
+      && iconpackCatalogBuild(['cc-visa' => [['l' => 'Visa Credit Card', 't' => [], 'c' => [], 'f' => []], 0]], [['brands']], ['kind' => 'x', 'rel' => 'y'])['icons'][0][1] === 'Visa Credit Card');
+$synth = iconpackCatalogBuild(['logo-x' => [['l' => 'Logo X', 't' => [], 'c' => [], 'f' => []], 0], 'thing' => [['l' => 'Thing', 't' => [], 'c' => [], 'f' => []], 1],
+                               'star' => [['l' => 'Star', 't' => ['night'], 'c' => ['shapes'], 'f' => []], 1]], [['brands'], ['solid']], ['kind' => 'x', 'rel' => 'y']);
+check('… an icon filed under no category is put under `brands` (a brand logo) or `other`, so the pages hold every icon; those two come last',
+      $synth['cats'] === ['shapes', 'brands', 'other'] && array_column($synth['icons'], 3) === [[1], [0], [2]], json_encode($synth));
+$sumS = iconpackCatalogSummary($sid);
+check('the package list reads the catalogue\'s counts off the head of the file (no second copy in memory)',
+      $sumS === ['icons' => count($synNames), 'categories' => 2, 'ids' => ['emoji', 'synthetic'], 'bytes' => strlen($catRaw)]
+      && (array_values(array_filter(iconpackList(), fn($p) => $p['id'] === $sid))[0]['catalog'] ?? null) === $sumS, json_encode($sumS));
+// Built again: removed, of another format — by iconpackCatalogOf() (lazily, on the first need), the CLI, the panel.
+// The lazy case on a package nothing in this run has read yet (iconpackCatalogOf() keeps what it read).
+$md5Cat = md5($catRaw);
+$lp = $import(iptWriteDir($tmp('lazy'), iptPackage(['version' => '7.9.4', 'metadata' => 'search', 'faces' => $faceNames])));
+$lid = (string)($lp['id'] ?? '');
+$lPath = iconpackCatalogPath($lid);
+$lMd5 = md5((string)@file_get_contents($lPath));
+@unlink($lPath);
+$lazy = $lid !== '' ? iconpackCatalogOf($lid) : null;
+check('a package without its catalogue (installed by 1.69.0) gets it on the first need, written beside it, the very same file',
+      $lazy !== null && is_file($lPath) && md5((string)file_get_contents($lPath)) === $lMd5 && count($lazy['icons']) === count($synNames));
+file_put_contents($catPath, str_replace('{"format":' . ICONPACK_CATALOG_FORMAT . ',', '{"format":0,', $catRaw));
+check('… one of another format is not read (it is built again)', iconpackCatalogRead($sid) === null && iconpackCatalogSummary($sid) === null);
+$ri = iconpackReindex($sid);
+check('iconpackReindex(): the index read again from the metadata the package keeps, the sidecars written, the package itself untouched',
+      !empty($ri['ok']) && !empty($ri['written']) && md5((string)file_get_contents($catPath)) === $md5Cat && ($ri['summary']['categories'] ?? 0) === 2
+      && iconpackVerify($sid)['ok'] && iconpackManifest($sid)['hash'] === $sm['hash'], json_encode(array_diff_key($ri, ['catalog' => 1])));
+check('… and a package without metadata has nothing to read: no_index, no catalogue',
+      ($noIdx = $import(iptWriteDir($tmp('noidx'), iptPackage(['version' => '7.9.5', 'metadata' => null]))))['ok']
+      && (iconpackReindex((string)$noIdx['id'])['error'] ?? '') === 'no_index' && iconpackCatalogOf((string)$noIdx['id']) === null
+      && !is_file(iconpackCatalogPath((string)$noIdx['id'])) && (array_values(array_filter(iconpackList(), fn($p) => $p['id'] === $noIdx['id']))[0]['index'] ?? null) === false);
+@unlink($catPath);
+$c = $cli('reindex ' . $sid);
+check('CLI reindex <id>: the catalogue written again, the line says what it holds, exit 0', $c['code'] === 0 && md5((string)@file_get_contents($catPath)) === $md5Cat
+      && str_contains($c['out'], $sid) && str_contains($c['out'], (string)count($synNames)), $c['out']);
+$c = $cli('reindex fa-pro-9.9.9-deadbeef');
+$c2 = $cli('reindex');
+check('… an unknown package is refused (exit 1), no id is the usage (exit 2)', $c['code'] === 1 && $c2['code'] === 2 && str_contains($c2['out'], 'usage'), $c['out'] . ' | ' . $c2['out']);
+$c = $cli('list');
+check('… and CLI list shows every package\'s catalogue', $c['code'] === 0 && str_contains($c['out'], 'catalogue: ' . count($synNames) . ' icons, 2 categories'), $c['out']);
+@unlink($catPath);
+$j = $panel('POST', [], ['op' => 'reindex', 'id' => $sid]);
+$jBad = $panel('POST', [], ['op' => 'reindex', 'id' => 'fa-pro-9.9.9-deadbeef']);
+check('panel reindex: written, the fresh list says the catalogue is there; an unknown package is a 404 answer',
+      !empty($j['success']) && is_file($catPath) && (array_values(array_filter($j['packages'] ?? [], fn($p) => $p['id'] === $sid))[0]['catalog']['icons'] ?? 0) === count($synNames)
+      && empty($jBad['success']), json_encode([$j['error'] ?? null, $jBad]));
+$auditR = $db->query("SELECT action, ok, actor_name, action_group FROM audit_log WHERE id > " . (int)$auditFloor . " AND action = 'iconpack.reindex' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+check('… each re-index is an audit line in the settings group (the shell\'s as cli:<user>)',
+      count($auditR) === 2 && str_starts_with((string)$auditR[0]['actor_name'], 'cli:') && !array_filter($auditR, fn($a) => $a['action_group'] !== 'settings' || !$a['ok']), json_encode($auditR));
+check('the catalogue is never served by iconpack.php (only the manifest\'s css/ and webfonts/ files are)',
+      iconpackServeRequest(['p' => $sid, 'v' => iconpackAssetVersion($sm), 'f' => 'catalog.json'], ['REQUEST_METHOD' => 'GET'])['status'] === 404);
+
+// The token for an icon that is not a face (the package of section 12, faces on, default style Duotone).
+$gearPos = (int)array_search('gear', $synNames, true);
+$gearFam = array_merge(['solid', 'regular', 'light', 'duotone', 'sharp-solid'], $gearPos % 3 === 0 ? ['jelly-regular'] : []);
+$loadedS = array_keys(iconSetup($cfgS())['styles']);
+$wantGear = array_values(array_unique(array_merge(['duotone'], array_values(array_intersect($loadedS, $gearFam)))));
+$ctxS = emojiFaContext($cfgS());
+check('an icon of the catalogue is drawn in the styles it has among those that load, the default first (the chosen style when it has it)',
+      (emojiFaIconOf('gear', $ctxS)['v'] ?? null) === $wantGear && (emojiFaIconOf('gear', $ctxS)['l'] ?? '') === 'Gear' && emojiFaIconOf('no-such-icon', $ctxS) === null,
+      json_encode([emojiFaIconOf('gear', $ctxS), $wantGear]));
+check('… a token names it: an <i> of its own class (`fai`, the colour of the words), role="img" and its label',
+      $r(':fa-gear:') === '<i class="fai fa-duotone fa-solid fa-gear" role="img" aria-label="Gear" title="Gear"></i>'
+      && $r(':fa-gear/light:') === '<i class="fai fa-light fa-gear" role="img" aria-label="Gear" title="Gear"></i>'
+      && $r(':fa-gear/sharp-solid:') === '<i class="fai fa-sharp fa-solid fa-gear" role="img" aria-label="Gear" title="Gear"></i>', $r(':fa-gear:'));
+check('… a style it lacks or that does not load (Jelly draws every third icon here; Thin is not loaded) is its label in brackets',
+      $r(':fa-gear/thin:') === '[Gear]' && $r(':fa-gear/brands:') === '[Gear]'
+      && $r(':fa-gear/jelly-regular:') === ($gearPos % 3 === 0 ? '<i class="fai fa-jelly fa-regular fa-gear" role="img" aria-label="Gear" title="Gear"></i>' : '[Gear]'),
+      $r(':fa-gear/jelly-regular:'));
+check('… the allow-list is the catalogue: a name the CSS declares but the index does not describe (youtube here) is text, as is one it lacks',
+      $r(':fa-youtube:') === ':fa-youtube:' && $r(':fa-trash-alt:') === ':fa-trash-alt:' && isset(iconpackNamesOf($sid)['youtube'], iconpackNamesOf($sid)['trash-alt']));
+check('whatever the scope: the scope is how the picker offers icons, not what a message may show',
+      $r(':fa-gear:', ['shout_emoji_fa_scope' => 'faces']) === $r(':fa-gear:', ['shout_emoji_fa_scope' => 'all']));
+check('a line of nothing but icons is a paragraph, as one of nothing but faces is (the paragraph pass dropped it as empty)',
+      richtextRender(':fa-gear: :fa-gear/light:', 'bbcode', $cfgS()) === '<p><i class="fai fa-duotone fa-solid fa-gear" role="img" aria-label="Gear" title="Gear"></i> '
+                                                                    . '<i class="fai fa-light fa-gear" role="img" aria-label="Gear" title="Gear"></i></p>',
+      richtextRender(':fa-gear: :fa-gear/light:', 'bbcode', $cfgS()));
+check('where Font Awesome cannot draw it — the faces off, Bootstrap Icons with the package still named, a mail — its label in brackets; the package gone: the text',
+      $r(':fa-gear:', ['shout_emoji_fa' => 'off']) === '[Gear]' && $r(':fa-gear:', ['icon_library' => 'bootstrap']) === '[Gear]'
+      && $r(':fa-gear:', ['fa_source' => 'cdn7']) === '[Gear]' && $r(':fa-gear:', ['fa_pack' => 'fa-pro-9.9.9-deadbeef', 'fa_source' => 'cdn6']) === ':fa-gear:'
+      && richtextRenderForEmail('a :fa-gear: b', 'bbcode', $cfgS()) === '<p>a [Gear] b</p>', richtextRenderForEmail('a :fa-gear: b', 'bbcode', $cfgS()));
+$hostI = array_map(fn($h) => $r($h), [':fa-gear" onclick="x:', ':fa-gear/solid" style="x:', ':fa-gear/:', ':fa-Gear:', ':fa-gear/sharp_solid:']);
+check('hostile or malformed tokens for any icon are text', !array_filter($hostI, fn($o) => str_contains($o, '<i') || str_contains($o, '" on') || str_contains($o, '" style')), json_encode($hostI));
+check('Free metadata on a Pro package names no icon: its tokens stay text (only the faces this project knows fall back)',
+      emojiFaRenderHtml(':fa-gear: :fa-face-grin:', ['icon_library' => 'fontawesome', 'fa_source' => 'pack', 'fa_pack' => $ffid, 'fa_pack_styles' => '[]', 'fa_style' => 'solid', 'shout_emoji_fa' => 'fa'], 'en')
+      === ':fa-gear: <i class="fae fa-solid fa-face-grin" role="img" aria-label="Face grin" title="Face grin"></i>');
+// What the picker is told, per scope.
+$cdAll = emojiFaClientData($cfgS(['shout_emoji_fa_scope' => 'all']), 'pl');
+$cdSearch = emojiFaClientData($cfgS(['shout_emoji_fa_scope' => 'search']), 'en');
+$cdFaces = emojiFaClientData($cfgS(['shout_emoji_fa_scope' => 'faces']), 'en');
+check('with `all` or `search` the picker is told where the catalogue is (the package\'s hash), how many icons, the categories in the reader\'s language, and Brands\' classes',
+      $cdAll['scope'] === 'all' && ($cdAll['catalog']['v'] ?? '') === iconpackCatalogVersion($sm) && ($cdAll['catalog']['n'] ?? 0) === count($synNames)
+      && ($cdAll['catalog']['cats'] ?? null) === [['emoji', 'Emoji'], ['synthetic', 'Synthetic']] && isset($cdAll['styles']['brands']) && $cdAll['classic'] === 'solid'
+      && $cdSearch['scope'] === 'search' && isset($cdSearch['catalog']) && !isset($cdFaces['catalog']) && $cdFaces['scope'] === 'faces' && !isset($cdFaces['styles']['brands']),
+      json_encode(['all' => array_diff_key($cdAll, ['faces' => 1, 'styles' => 1]), 'faces' => array_diff_key($cdFaces, ['faces' => 1, 'styles' => 1])]));
+check('… the scope is part of the answer\'s fingerprint; a package without a trusted index is `faces` whatever the setting',
+      emojiFaVersion($cfgS(['shout_emoji_fa_scope' => 'all'])) !== emojiFaVersion($cfgS(['shout_emoji_fa_scope' => 'faces']))
+      && emojiFaContext(['icon_library' => 'fontawesome', 'fa_source' => 'pack', 'fa_pack' => $ffid, 'fa_pack_styles' => '[]', 'fa_style' => 'solid', 'shout_emoji_fa' => 'fa', 'shout_emoji_fa_scope' => 'all'])['scope'] === 'faces'
+      && emojiFaScope(['shout_emoji_fa_scope' => 'ALL']) === 'faces' && emojiFaScope([]) === 'faces');
 
 /** The permission api.php's map gives an admin endpoint, read from the source (the map is a function-local static). */
 function adminEndpointPermissionOf(string $endpoint, string $apiSrc): ?string {

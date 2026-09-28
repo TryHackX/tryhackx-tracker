@@ -285,11 +285,16 @@ function settingsCatalogKeywords(): array {
         'profile_bio_max'           => 'profile description about me bio length limit maximum characters letters short text opis dlugosc znaki limit',
         // #section-profile-votes
         'profile_votes_enabled'     => 'profile likes ratings votes thumbs stars rated liked list tab section public privacy polubienia oceny glosy lajki profil',
+        'who_votes_enabled'         => 'who has this likes ratings votes thumbs stars voters people names overlay torrent info panel privacy kto ma to polubienia oceny glosujacy',
+        // #section-profile-descs
+        'profile_descriptions_enabled' => 'profile descriptions written wrote author co-author edits credits list tab section public privacy opisy autor wspolautor edycje profil',
         // #section-lists
         'lists_enabled'             => 'lists collections packs playlist folders bundle own list member',
         'lists_public_enabled'      => 'lists public share profile visible privacy collection',
         'lists_max_per_user'        => 'lists limit maximum how many collections per user cap',
         'lists_max_items'           => 'list items limit maximum hashes in one list cap size',
+        'lists_desc_max'            => 'list description length limit maximum characters letters text bbcode markdown emotes opis listy dlugosc znaki limit',
+        'who_lists_enabled'         => 'who has this lists public collections packs overlay torrent info panel owners kto ma to listy publiczne',
 
         // ── Tracker & whitelist ──
         // #section-whitelist
@@ -453,8 +458,10 @@ function settingsCatalogKeywords(): array {
         'shout_page_action'         => 'shoutbox address action name url link route chat czat adres nazwa strony rename where it lives',
         'shout_emotes_enabled'      => 'shoutbox emotes emoticons smileys custom images pictures svg png gif webp emotki obrazki master switch',
         'shout_stickers_enabled'    => 'shoutbox stickers big emote whole message naklejki large image sticker',
+        'emotes_everywhere'         => 'emotes stickers everywhere outside the shoutbox private messages descriptions proposals lists profile bio emotki naklejki wiadomosci opisy listy profil wszedzie poza shoutboxem',
         'shout_emoji_fa'            => 'shoutbox emoji picker font awesome pro faces smileys icons mixed instead of ordinary emotikony buzki twarze mieszane',
         'shout_emoji_fa_style'      => 'shoutbox emoji font awesome faces style family duotone sharp light thin solid default styl rodzina',
+        'shout_emoji_fa_scope'      => 'shoutbox emoji picker font awesome every any icon icons all categories category search find catalogue pro wszystkie ikony kategorie wyszukiwarka zakres',
         'shout_emote_approval'      => 'shoutbox emote approval approve waiting queue moderation review member upload hold pending zatwierdzanie kolejka',
         'shout_emote_max_kb'        => 'shoutbox emote size limit kilobytes kb upload maximum picture file',
         'shout_emote_max_px'        => 'shoutbox emote pixels width height dimensions limit maximum picture size',

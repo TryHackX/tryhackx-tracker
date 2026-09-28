@@ -552,6 +552,94 @@ try {
           str_contains((string)($offById[$rowId]['html'] ?? ''), ':zzfire:')
           && !str_contains((string)($offById[$rowId]['html'] ?? ''), '<img'), (string)($offById[$rowId]['html'] ?? ''));
 
+    // ── beyond the room (1.70.0): messages, descriptions, lists, a profile's description ─────────
+    // The switch, the sticker rule per context, the map (one query, the second wall against a row
+    // nobody approved), and the texts drawn with it. The room's own path above is not touched by any of it.
+    $every = array_merge($cfgOn, ['emotes_everywhere' => '1']);
+    $noDefault = $every;
+    unset($noDefault['emotes_everywhere']);
+    check('1.70.0 the switch: on by default, off by its own setting — and off whenever the room\'s emotes or the room are',
+          emotesEverywhere($every) && emotesEverywhere($noDefault) && !emotesEverywhere(array_merge($every, ['emotes_everywhere' => '0']))
+          && !emotesEverywhere(array_merge($every, ['shout_emotes_enabled' => '0'])) && !emotesEverywhere(array_merge($every, ['shout_enabled' => '0']))
+          && (trackerSchemaDefaultSettings()['emotes_everywhere'] ?? null) === '1');
+    check('… the room is not affected by it: its emotes stay on with the switch off',
+          emoteContextOn('shout', array_merge($every, ['emotes_everywhere' => '0'])) && !emoteContextOn('message', array_merge($every, ['emotes_everywhere' => '0'])));
+    $modes = array_map(fn($f) => emoteStickerMode($f, $every), ['shout', 'message', 'description', 'list', 'bio']);
+    $modesOff = array_map(fn($f) => emoteStickerMode($f, array_merge($every, ['shout_stickers_enabled' => '0'])), ['shout', 'message', 'description', 'list', 'bio']);
+    check('a sticker per context: the room\'s own rule, the room\'s size in a message, bounded in a description and a list, an emote in a profile — and an emote everywhere with stickers off',
+          $modes === ['room', 'sticker', 'small', 'small', 'emote'] && $modesOff === ['emote', 'emote', 'emote', 'emote', 'emote'], json_encode([$modes, $modesOff]));
+    // Two rows the other contexts must not draw: one waiting for the operator (switched off while it
+    // waits), and one somebody switched on by hand without ever approving it.
+    $r = shoutEmoteStore($db, $gateOn, 'zzctxwait', 'Zz ctx wait', $svg('<title>ctxwait</title>'), $me, false);
+    $r2 = shoutEmoteStore($db, $gateOn, 'zzctxlimbo', 'Zz ctx limbo', $svg('<title>ctxlimbo</title>'), $me, false);
+    $db->prepare("UPDATE shout_emotes SET enabled = 1 WHERE id = ?")->execute([(int)($r2['row']['id'] ?? 0)]);
+    $r3 = shoutEmoteStore($db, $cfgOn, 'zzctxevil', '"><img src=x onerror=alert(1)>', $svg('<title>ctxevil</title>'), null, false);
+    shoutEmotesInvalidate();
+    check('the two fixtures are what they should be: one waiting, one switched on and never approved, one with a hostile name',
+          !empty($r['pending']) && !empty($r2['pending']) && !empty($r3['ok'])
+          && (shoutEmotes($db, $cfgOn, false)['zzctxlimbo']['enabled'] ?? false) === true && (shoutEmotes($db, $cfgOn, false)['zzctxlimbo']['waiting'] ?? false) === true,
+          json_encode([$r['pending'] ?? null, $r2['pending'] ?? null, $r3['error'] ?? null]));
+    $mMsg = emoteMapFor($db, $every, 'message', '');
+    $mDesc = emoteMapFor($db, $every, 'description', '');
+    $mList = emoteMapFor($db, $every, 'list', '');
+    $mBio = emoteMapFor($db, $every, 'bio', '');
+    check('a message\'s map: approved, switched-on emotes only — the waiting one, the never-approved one and the one switched off are not in it',
+          isset($mMsg['zzfire'], $mMsg['zzpng']) && !isset($mMsg['zzctxwait']) && !isset($mMsg['zzctxlimbo']) && !isset($mMsg['zzlegacy']),
+          implode(',', array_keys($mMsg)));
+    check('… (the room\'s own list keeps its rule: switched on is shown there — this is the second wall, for the other contexts)',
+          isset(shoutEmotes($db, $cfgOn)['zzctxlimbo']));
+    check('… an emote is drawn as an emote everywhere; the sticker at the room\'s size in a message, small in a description and a list, as an emote in a profile',
+          $mMsg['zzfire']['draw'] === 'emote' && $mMsg['zzpng']['draw'] === 'sticker' && $mDesc['zzpng']['draw'] === 'small'
+          && $mList['zzpng']['draw'] === 'small' && $mBio['zzpng']['draw'] === 'emote', json_encode([$mMsg['zzpng'] ?? null, $mBio['zzpng'] ?? null]));
+    check('… each row as the browser may see it — the address, the code, the name, the size; no sha1, uploader or bytes',
+          array_keys($mMsg['zzfire']) === ['id', 'code', 'name', 'url', 'sticker', 'w', 'h', 'draw'] && $mMsg['zzfire']['url'] === shoutEmoteUrl($em['zzfire'], ''),
+          json_encode($mMsg['zzfire']));
+    check('… nothing with the switch off, nothing without a database — and the room keeps its own either way',
+          emoteMapFor($db, array_merge($every, ['emotes_everywhere' => '0']), 'message') === [] && emoteMapFor(null, $every, 'message') === []
+          && isset(shoutEmotes($db, array_merge($every, ['emotes_everywhere' => '0']))['zzfire']));
+    // ONE query however many texts a page draws: the rows are shoutEmotes()'s, cached for the request.
+    $db->exec("UPDATE shout_emotes SET name = 'Zz renamed under the cache' WHERE code = 'zzfire'");
+    $cached = emoteMapFor($db, $every, 'description', '')['zzfire']['name'] ?? '';
+    shoutEmotesInvalidate();
+    $fresh = emoteMapFor($db, $every, 'description', '')['zzfire']['name'] ?? '';
+    $db->exec("UPDATE shout_emotes SET name = 'My fire' WHERE code = 'zzfire'");
+    shoutEmotesInvalidate();
+    check('one query per request: a second context reads the rows the first one asked for, until they are written again',
+          $cached === 'My fire' && $fresh === 'Zz renamed under the cache', json_encode([$cached, $fresh]));
+    $rowsMsg = emotePickerRows($db, $every, 'message', '');
+    $rowsBio = emotePickerRows($db, $every, 'bio', '');
+    $codes = fn(array $rows) => array_column($rows, 'code');
+    check('what a picker offers: a message\'s the stickers too, a profile\'s none of them — and never the waiting ones',
+          in_array('zzpng', $codes($rowsMsg), true) && !in_array('zzpng', $codes($rowsBio), true) && in_array('zzfire', $codes($rowsBio), true)
+          && !in_array('zzctxwait', $codes($rowsMsg), true) && !in_array('zzctxlimbo', $codes($rowsMsg), true) && !isset($rowsMsg[0]['draw']),
+          json_encode([$codes($rowsMsg), $codes($rowsBio)]));
+    // The texts, drawn.
+    $fireSrc = htmlspecialchars(shoutEmoteUrl($em['zzfire'], ''), ENT_QUOTES, 'UTF-8');
+    $pngSrc = htmlspecialchars(shoutEmoteUrl($em['zzpng'], ''), ENT_QUOTES, 'UTF-8');
+    $body = 'hi :zzfire: and :zzpng: and :zzctxwait: :zzctxlimbo: :zzlegacy: :zzctxevil:';
+    // richtextRenderIn() reads the site's base itself; '' here, so the addresses are compared as built.
+    $pm = emoteRenderHtml(richtextRender($body, 'bbcode', $every, true), emoteMapFor($db, $every, 'message', ''));
+    check('a MESSAGE: the emote inline, the sticker at the room\'s size, the waiting, never-approved and switched-off codes the text they are',
+          str_contains($pm, '<img class="rt-emote" src="' . $fireSrc . '" alt=":zzfire:" title="My fire"') && str_contains($pm, '<img class="rt-sticker" src="' . $pngSrc . '"')
+          && str_contains($pm, ':zzctxwait: :zzctxlimbo: :zzlegacy:'), $pm);
+    check('… a hostile name is only ever an escaped title', str_contains($pm, 'title="&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"') && substr_count($pm, '<img') === 3, $pm);
+    $pmBody = pmRenderBody('hi :zzfire:', 'bbcode', $every, true, $db);
+    check('pmRenderBody() with the database draws them (the thread, the panel\'s reports), without it the words stay as typed',
+          str_contains($pmBody, 'class="rt-emote"') && str_contains(pmRenderBody('hi :zzfire:', 'bbcode', $every), ':zzfire:')
+          && !str_contains(pmRenderBody('hi :zzfire:', 'bbcode', $every), '<img'), $pmBody);
+    check('… and with the switch off a message is words again',
+          !str_contains(pmRenderBody('hi :zzfire: :zzpng:', 'bbcode', array_merge($every, ['emotes_everywhere' => '0']), true, $db), '<img'));
+    $desc = richtextRenderIn('description', $db, ':zzpng: beside :zzfire:', 'bbcode', $every);
+    check('a DESCRIPTION: the sticker bounded (.rt-sticker-small), the emote inline — and neither counted against the picture limit',
+          str_contains($desc, 'class="rt-sticker rt-sticker-small"') && str_contains($desc, 'class="rt-emote"')
+          && richtextCount(':zzpng: :zzpng: :zzpng: :zzpng: :zzfire:', 'bbcode', array_merge($every, ['desc_max_images' => '3']))['images'] === 0, $desc);
+    check('a LIST\'s description is drawn the same way (1.70.0 D renders it through richtextRenderIn(\'list\'))',
+          str_contains(richtextRenderIn('list', $db, ':zzpng:', 'bbcode', $every), 'rt-sticker-small'));
+    check('in an E-MAIL an emote is its code', str_contains(richtextRenderForEmail('hi :zzfire: :zzpng:', 'bbcode', $every), ':zzfire: :zzpng:')
+          && !str_contains(richtextRenderForEmail('hi :zzfire:', 'bbcode', $every), '<img'));
+    check('the two token rules are one: the one this file keeps and the one the other renderers draw with',
+          EMOTE_TOKEN_RE === SHOUT_EMOTE_TOKEN_RE);
+
     // ── removing one ─────────────────────────────────────────────────────────
     $r = shoutEmoteDelete($db, $firstId, $uid['emtother']);
     check('somebody else\'s upload is not yours to remove',

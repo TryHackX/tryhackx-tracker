@@ -1627,6 +1627,97 @@ function shoutRenderEmotes(string $html, array $emotes, string $baseUrl = '', bo
     return implode('', $parts);
 }
 
+/* ── the emotes outside the room (1.70.0) ──────────────────────────────────────
+ *
+ * The owner asked for the emotes and stickers in private messages, in torrent descriptions (and the
+ * proposals that rewrite them, and the editor that writes them), and the profile's description; a list's
+ * description (1.70.0 D) renders through the same path. The store is this one, the address is the same
+ * image endpoint, and the drawing is emoteRenderHtml() (includes/emoji.php) on the finished HTML of
+ * each — the room's own pipeline (shoutRenderEmotes() above) is not touched.
+ *
+ * Per context, and why:
+ *   message      emotes, and a sticker at the room's sticker size (128 px): a message is a conversation
+ *                with one person, the thing a sticker is for;
+ *   description  emotes, and a sticker BOUNDED (96 px): a description is a page about a torrent, read in
+ *   list         the Info panel down to a phone's width — a picture beside the words, not instead of them;
+ *   bio          emotes, and a sticker drawn as an emote: a profile's description is a line or two under a
+ *                name, and a 128-pixel picture would be the whole of it. Its picker offers no stickers;
+ *   e-mail       nothing — a token stays the text it was typed as (richtextRenderForEmail() never calls
+ *                the stage; the images would be fetched from this site by somebody's mail client).
+ * With `shout_stickers_enabled` off a sticker is an emote everywhere, as it is in the room.
+ */
+
+/**
+ * The emotes beyond the room at all: the room's own emotes on (the room, and its emotes — this is their
+ * store and their manager) and `emotes_everywhere` (v79, on by default). Off, a `:code:` in a message, a
+ * description, a list's or a profile's description is the text it was typed as, and those pickers offer
+ * no emotes; the room itself is not affected.
+ */
+function emotesEverywhere(array $cfg): bool
+{
+    return shoutEmotesEnabled($cfg) && (($cfg['emotes_everywhere'] ?? '1') === '1');
+}
+
+/** Does this context draw (and its picker offer) emotes? The room by its own switch, the rest by the one above. */
+function emoteContextOn(string $for, array $cfg): bool
+{
+    return $for === 'shout' ? shoutEmotesEnabled($cfg) : emotesEverywhere($cfg);
+}
+
+/**
+ * How a context draws a sticker (see the table above): `room` (the room's own rule — alone, the whole
+ * line; in a sentence, an emote), `sticker` (the room's size), `small` (bounded) or `emote` (inline, the
+ * size of the words — and not offered by the picker).
+ */
+function emoteStickerMode(string $for, array $cfg): string
+{
+    if (!shoutStickersEnabled($cfg)) return 'emote';
+    return match ($for) {
+        'shout'               => 'room',
+        'message'             => 'sticker',
+        'description', 'list' => 'small',
+        default               => 'emote',
+    };
+}
+
+/**
+ * The emotes a context draws, KEYED BY CODE, as the browser may see them (shoutEmoteForClient()) plus
+ * `draw` (emote | sticker | small) — the map emoteRenderHtml() takes. Built from shoutEmotes(), whose
+ * per-request cache is the ONE query however many messages a thread shows; the switched-off rows are not
+ * in it, and a row still WAITING for the operator is dropped here as well (it is switched off while it
+ * waits; this is the second wall). Empty when the context has no emotes.
+ */
+function emoteMapFor(?PDO $db, array $cfg, string $for, ?string $baseUrl = null): array
+{
+    if ($db === null || !emoteContextOn($for, $cfg)) return [];
+    $base = $baseUrl ?? (function_exists('getBaseUrl') ? getBaseUrl() : '');
+    $mode = emoteStickerMode($for, $cfg);
+    $out = [];
+    foreach (shoutEmotes($db, $cfg) as $code => $e) {
+        if (!empty($e['waiting']) || empty($e['enabled'])) continue;
+        $row = shoutEmoteForClient($e, $base);
+        $row['draw'] = !empty($e['is_sticker']) && in_array($mode, ['sticker', 'small'], true) ? $mode : 'emote';
+        $out[(string)$code] = $row;
+    }
+    return $out;
+}
+
+/**
+ * What a picker in this context offers (api/shout_emotes.php with `for`): the rows of the map above, a
+ * sticker only where the context draws stickers as stickers — so a profile's picker has no Stickers page.
+ */
+function emotePickerRows(PDO $db, array $cfg, string $for, ?string $baseUrl = null): array
+{
+    $stickers = emoteStickerMode($for, $cfg) !== 'emote';
+    $rows = [];
+    foreach (emoteMapFor($db, $cfg, $for, $baseUrl) as $r) {
+        if ($r['sticker'] && !$stickers) continue;
+        unset($r['draw']);
+        $rows[] = $r;
+    }
+    return $rows;
+}
+
 /* ── what an upload is ─────────────────────────────────────────────────────── */
 
 /**

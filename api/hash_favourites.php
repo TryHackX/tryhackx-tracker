@@ -1,6 +1,9 @@
 <?php
 /**
- * GET hash_favourites&hash=<40 hex>[&page=][&per_page=][&search=] — who has this in their favourites.
+ * GET hash_favourites&hash=<40 hex>[&page=][&per_page=][&search=] — who has this in their favourites: the
+ * 1.69.0 answer, kept as it was for whoever reads it. The overlay itself asks api/hash_who.php since 1.70.0,
+ * one section at a time (favourites, likes / ratings, lists), and the queries are that endpoint's: this file
+ * and that one read the same functions (includes/who.php), so the two can never disagree about who is shown.
  *
  * ── the rule, and why the count obeys it too ───────────────────────────────────────────────────
  *
@@ -35,76 +38,31 @@ if (!rateLimitAllow('idxsearch', ipBucket(getClientIp($cfg)), $perHour, 3600)) {
     jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
 }
 
-$hash = strtolower(trim((string)($_GET['hash'] ?? '')));
+$hash = strtolower(trim(is_string($_GET['hash'] ?? null) ? (string)$_GET['hash'] : ''));
 if (!preg_match('/^[0-9a-f]{40}$/', $hash)) jsonResponse(['error' => __('api.common.invalid_hash')], 400);
 
 // After the checks, before the queries — the pattern api/index_search.php documents at length.
 if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 header('Cache-Control: private, no-store');
 
-$groupIds = userGroupIdsWithPermission($db, 'favourites.public');
-if (!$groupIds) jsonResponse(['success' => true, 'rows' => [], 'total' => 0, 'page' => 1, 'pages' => 1, 'per_page' => 25]);
+// This answer's own paging, as 1.69.0 had it: 25 a page by default, 100 at most.
+$p = whoParams($_GET, 25, 100);
+$fav = whoFavPage($db, $cfg, $hash, (int)$me['id'], $p);
 
-$page = max(1, (int)($_GET['page'] ?? 1));
-$perPage = max(1, min(100, (int)($_GET['per_page'] ?? 25)));
-$search = trim((string)($_GET['search'] ?? ''));
-
-$in = implode(',', array_map('intval', $groupIds));
-$where = ["f.info_hash = ?", "u.status = 'active'", "u.fav_public = 1", "u.fav_listed = 1",
-          // `granted_at <= NOW()` for the same reason userGroups() has it (includes/users.php): a
-          // membership that starts next week is not a membership today, and a list that counted it
-          // would publish somebody a week before their group says it may.
-          "EXISTS (SELECT 1 FROM user_group_members m WHERE m.user_id = u.id AND m.group_id IN ($in)
-                     AND m.granted_at <= NOW() AND (m.expires_at IS NULL OR m.expires_at > NOW()))",
-          // And the directory's clause: a `hide_profile` block closes that person's profile to THIS
-          // reader, so their name does not appear on a list this reader can read either. In the
-          // WHERE rather than in PHP, because the count obeys every gate the rows do.
-          "NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id = u.id AND b.blocked_id = ? AND b.hide_profile = 1)"];
-$params = [$hash, (int)$me['id']];
-// An unverified account runs at guest level (v9), so its membership cannot count towards a list its
-// group would otherwise allow. No exception for administrators: appearing on this list is consent,
-// not authority — see userIdHasGrantedPermission() in includes/favourites.php.
-if (userEmailVerifyRequired($cfg)) $where[] = "u.email_verified = 1";
-if ($search !== '') {
-    // A LIKE with a leading wildcard, ACCEPTABLE HERE AND ONLY HERE: the driving set is the people
-    // who favourited ONE hash, reached through idx_fav_hash — never a table scan. Do not copy this
-    // to anything whose driving set is a table.
-    $where[] = "u.username LIKE ?";
-    $params[] = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
-}
-$w = 'WHERE ' . implode(' AND ', $where);
-
-$cnt = $db->prepare("SELECT COUNT(*) FROM user_favourites f JOIN users u ON u.id = f.user_id $w");
-$cnt->execute($params);
-$total = (int)$cnt->fetchColumn();
-
-// username ASC, and NO timestamp in the reply. `created_at DESC` over the people who favourited one
-// hash is a timeline of who got interested when, which is a fact about them and not about the hash.
-$st = $db->prepare("SELECT u.username, u.avatar_sha FROM user_favourites f JOIN users u ON u.id = f.user_id
-                    $w ORDER BY u.username ASC LIMIT ? OFFSET ?");
-$i = 1;
-foreach ($params as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
-$st->bindValue($i++, $perPage, PDO::PARAM_INT);
-$st->bindValue($i, ($page - 1) * $perPage, PDO::PARAM_INT);
-$st->execute();
-
-// The public LISTS this hash is on, with the same gates applied in the same query — a collection
-// somebody published is another honest answer to "who has this", and the one that says why they
-// have it. Only on the first page: it is context for the overlay, not a second paginated thing.
-$lists = $page === 1 && function_exists('listsContainingHash')
-    ? listsContainingHash($db, $cfg, $hash, 20, (int)$me['id']) : [];
+// The public LISTS this hash is on — the overlay's Lists section, its first twenty, with the same gates
+// (and its own switch, who_lists_enabled). Only on the first page: it is context for the answer, not a
+// second paginated thing here; api/hash_who.php pages it.
+$lists = $fav['page'] === 1 && whoListsEnabled($cfg)
+    ? whoListsPage($db, $cfg, $hash, (int)$me['id'], ['page' => 1, 'per_page' => WHO_PER_PAGE, 'search' => ''])['rows'] : [];
 
 jsonResponse([
     'success'  => true,
     'lists'    => $lists,
-    // A name and the picture beside it (1.63.0) — as an ADDRESS built here from the join above. Still
-    // no id, and still no timestamp: what this reply says about a person is that they agreed to be
-    // named, and nothing else.
-    'rows'     => array_map(static fn($r) => ['username' => $r['username'],
-                                              'avatar' => function_exists('userAvatarField') ? userAvatarField($r, 20, getBaseUrl(), $cfg) : ''],
-                            $st->fetchAll(PDO::FETCH_ASSOC)),
-    'total'    => $total,
-    'page'     => $page,
-    'pages'    => max(1, (int)ceil($total / $perPage)),
-    'per_page' => $perPage,
+    // A name and the picture beside it (1.63.0) — as an ADDRESS, never an id, and no timestamp: what this
+    // reply says about a person is that they agreed to be named, and nothing else.
+    'rows'     => $fav['rows'],
+    'total'    => $fav['total'],
+    'page'     => $fav['page'],
+    'pages'    => $fav['pages'],
+    'per_page' => $fav['per_page'],
 ]);

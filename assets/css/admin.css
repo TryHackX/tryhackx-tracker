@@ -1,3 +1,11 @@
+/* The browser's own parts of a control — a time field's clock and its picker, the list a <select>
+   drops down, a scrollbar inside a field, an autofilled field's tint — drawn for a dark page (1.70.0).
+   Every panel page is dark (.admin-body, below), but Bootstrap's light theme leaves the scheme at
+   "normal", so those parts were drawn for a light one: the time fields in Settings showed a black
+   clock on a black field. The number fields' spinners stay hidden (further down). Only colours
+   change: no control is a pixel bigger or smaller for it. */
+:root { color-scheme: dark; }
+
 .admin-body {
     background: #121212;
     color: #959ca1;
@@ -1930,6 +1938,18 @@ input[type="number"] {
     --fa-secondary-color: #f7c948; --fa-secondary-opacity: 1;
     color: #f7c948; font-size: 1.15em; line-height: 1; vertical-align: -0.125em;
 }
+/* Any other icon of the package in such a token (1.70.0, .fai): the colour of the words round it. */
+.fai { font-size: 1.15em; line-height: 1; vertical-align: -0.125em; }
+/* The room's emotes and stickers in the texts the panel reviews (1.70.0, emoteRenderHtml()) — a
+   description and a proposed rewrite in the queue, a reported message, a profile's description — drawn
+   as the public pages draw them (assets/css/style.css, .rt-emote / .rt-sticker): an emote the height of
+   the words, a sticker at the room's size in a message and bounded in a description. */
+.rt-emote { height: 1.4em; width: auto; max-width: 8em; vertical-align: -0.28em; margin: 0 0.1em; }
+.rt-sticker { display: inline-block; max-width: min(128px, 100%); max-height: 128px; height: auto; width: auto; margin: 0.15rem 0; vertical-align: bottom; }
+.rt-sticker.rt-sticker-small { max-width: min(96px, 100%); max-height: 96px; }
+/* Settings → Shoutbox → Emoji in the picker: the scope, shown only while the faces are on
+   (assets/js/admin-shout.js). Bootstrap's columns set no display, but a later rule could. */
+#admin-shout-emoji [data-setting][hidden] { display: none !important; }
 /* Review queue.
    A card used to be a run-on line: name, hash, date and then the text, with nothing saying what the
    card WAS. Now the state leads — a coloured left edge plus an icon and a word, because a colour on
@@ -1958,6 +1978,12 @@ input[type="number"] {
 .rv-note { margin: 0.5rem 0; padding: 0.45rem 0.65rem; border-radius: 4px; background: rgba(180,67,60,0.12); font-size: 0.82rem; }
 .rv-acts { display: flex; gap: 0.35rem; flex-wrap: wrap; padding-top: 0.6rem; border-top: 1px solid rgba(255,255,255,0.07); }
 .rv-explain { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #262b31; line-height: 1.5; }
+/* 1.70.0: an EDIT (the author stays, the editor is credited with a share) against a REWRITE (the proposer
+   becomes the author) — its own colour on the pill, and one line saying what applying it does. */
+.rv-st-wait .rv-state.rv-state-edit { color: #7fb6ff; }
+.rv-kind-line { margin: 0 0 0.35rem; }
+.rv-share { color: #9ec9ff; font-weight: 600; }
+.rv-name-hidden { font-size: 0.68rem; }
 /* Old and new next to each other; stacked when there is not room for two readable columns. */
 .rv-diff { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 0.9rem; margin: 0.5rem 0; }
 .rv-diff-col { padding: 0.6rem 0.7rem; border: 1px solid rgba(255,255,255,0.08); border-radius: 5px; background: rgba(0,0,0,0.18); }

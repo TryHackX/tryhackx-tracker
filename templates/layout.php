@@ -87,6 +87,11 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     <script src="<?= $baseUrl ?>assets/js/captcha.js<?= assetVer('assets/js/captcha.js') ?>"></script>
     <?php /* The picture beside every name (1.63.0), before everything that draws a row of people. */ ?>
     <script src="<?= $baseUrl ?>assets/js/avatar.js<?= assetVer('assets/js/avatar.js') ?>"></script>
+    <?php /* The emoji picker (1.70.0): the shoutbox's and every editor's — the whitelist form, the Info
+             panel's description editor, the message composer, the profile's description. On every page,
+             like app.js, and BEFORE it: app.js mounts the whitelist form's editor as it loads, and that
+             mount attaches the picker. It asks the server nothing until somebody opens it. */ ?>
+    <script src="<?= $baseUrl ?>assets/js/emoji-picker.js<?= assetVer('assets/js/emoji-picker.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/app.js<?= assetVer('assets/js/app.js') ?>"></script>
     <?php /* The star, the profile lists and the "who has this" overlay. Loaded on every public page
              for the same reason app.js is: the star is delegated from `document` and has to be there
@@ -94,7 +99,10 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
              exists first, so a page without any of this costs one querySelector. */ ?>
     <?php /* …and the likes / ratings table (1.69.0) with the account page's tab router, which lives in
              the same file: a site with ratings and nothing else still has that tab to switch to. */ ?>
+    <?php /* …and (1.70.0) the descriptions a member wrote and the switch for their name on them: with accounts
+             and descriptions on, the account page carries at least that switch, which this file posts. */ ?>
     <?php if (favEnabled($cfg) || profilesEnabled($cfg) || listsEnabled($cfg) || soundsEnabled($cfg)
+              || (usersEnabled($cfg) && function_exists('contentEnabled') && contentEnabled($cfg))
               || (function_exists('profileVotesEnabled') && profileVotesEnabled($cfg))): ?>
     <script src="<?= $baseUrl ?>assets/js/favourites.js<?= assetVer('assets/js/favourites.js') ?>"></script>
     <?php endif; ?>

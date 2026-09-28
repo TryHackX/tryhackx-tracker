@@ -174,12 +174,8 @@ $shoutStickersOn = $shoutEmotesOn && (function_exists('shoutStickersEnabled')
 // has a file, since the language can change in place (assets/js/lang-swap.js) and the picker then
 // takes the new one's. Font Awesome's faces: the mode the reader gets (off unless a Pro package is the
 // icon source) and the fingerprint their answer is cached under.
-$shoutEmojiFiles = [];
-if (function_exists('emojiDataUrl')) {
-    foreach (glob(dirname(__DIR__, 2) . '/assets/emoji/emoji-*.json') ?: [] as $ef) {
-        if (preg_match('/emoji-([a-z]{2,3}(?:-[a-z0-9]{2,8})?)\.json$/', $ef, $em)) $shoutEmojiFiles[$em[1]] = emojiDataUrl($baseUrl, $em[1]);
-    }
-}
+// (1.70.0: the list is emojiDataFiles(), which every editor's picker button is told as well.)
+$shoutEmojiFiles = function_exists('emojiDataFiles') ? emojiDataFiles($baseUrl) : [];
 $shoutFaMode = function_exists('emojiFaContext') ? emojiFaContext($cfg)['mode'] : 'off';
 $shoutFaVer  = $shoutFaMode !== 'off' ? emojiFaVersion($cfg) : '';
 ?>

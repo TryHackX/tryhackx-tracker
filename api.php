@@ -43,7 +43,11 @@ require_once __DIR__ . '/includes/usermedia.php';
 require_once __DIR__ . '/includes/profilebio.php';
 // A member's likes or ratings on the profile (v75): the gate, the parameters and the one query.
 require_once __DIR__ . '/includes/profilevotes.php';
+// The descriptions a member wrote, on the profile (v81): the gate, the parameters and the bounded read.
+require_once __DIR__ . '/includes/profiledescs.php';
 require_once __DIR__ . '/includes/lists.php';
+// "Who has this" (1.70.0): the favourites, the likes / ratings and the lists of one torrent, every gate in SQL.
+require_once __DIR__ . '/includes/who.php';
 require_once __DIR__ . '/includes/people.php';
 require_once __DIR__ . '/includes/user2fa.php';
 require_once __DIR__ . '/includes/authbridge.php';
@@ -270,6 +274,9 @@ $apiRoutes = [
     'index_info'                 => 'api/index_info.php',
     'hash_check'                 => 'api/hash_check.php',
     'content_submit'             => 'api/content_submit.php',
+    // Taking a description down from the Info panel (1.70.0, includes/content.php): the author's own or,
+    // with content.delete_any, anybody's published one.
+    'content_delete'             => 'api/content_delete.php',
     'user_pulse'                 => 'api/user_pulse.php',
     // Sounds (1.56.0): the library and a reader's choices; `sound` streams one of the owner's uploads.
     'sounds'                     => 'api/sounds.php',
@@ -332,7 +339,13 @@ $apiRoutes = [
     // A member's likes or ratings (1.69.0, includes/profilevotes.php): GET only, the same 404 for
     // every no that the favourites list gives.
     'user_votes'                 => 'api/user_votes.php',
+    // The descriptions a member wrote (1.70.0, includes/profiledescs.php): GET only, the same 404 for
+    // every no.
+    'user_descriptions'          => 'api/user_descriptions.php',
     'hash_favourites'            => 'api/hash_favourites.php',
+    // "Who has this" (1.70.0, includes/who.php): favourites, likes / ratings and lists, one section a
+    // request, GET only, the same 404 for every no.
+    'hash_who'                   => 'api/hash_who.php',
     'user_uploads'               => 'api/user_uploads.php',
     'user_privacy'               => 'api/user_privacy.php',
     'whitelist_probe'            => 'api/whitelist_probe.php',

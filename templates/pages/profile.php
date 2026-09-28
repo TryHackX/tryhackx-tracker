@@ -54,6 +54,10 @@ $showFav = favPublicEnabled($cfg)
 // asks as well: the site's switch and ratings on; for somebody else, their group's GRANT of
 // rating.public (not the admin blanket) and their own yes. Your own profile shows yours either way.
 $showVotes = function_exists('profileVotesShownTo') && profileVotesShownTo($db, $cfg, $profile, $viewer);
+// The descriptions they wrote (1.70.0, includes/profiledescs.php) — the one gate api/user_descriptions.php
+// asks too: the site's switch and descriptions on; for somebody else, the reader may read descriptions,
+// their group's GRANT of content.public, their own yes, and their name shown on their descriptions.
+$showDescs = function_exists('profileDescsShownTo') && profileDescsShownTo($db, $cfg, $profile, $viewer);
 $showUploads = uploadsPossible($cfg) && uploadsPublicEnabled($cfg)
     && ($isSelf || userIdHasGrantedPermission($db, $cfg, (int)$profile['id'], 'uploads.public'));
 $canMagnet = userCan($db, $cfg, 'index.magnet');
@@ -160,9 +164,11 @@ if ($profCover !== null) {
              language, and the words are the same in both renders, so the switch finds nothing in them
              to change. The source travels in data-source, for its owner's page only. Every node here
              has an id, because lang-swap.js pairs by id. */ ?>
+    <?php /* 1.70.0: and what the editor's emoji picker may offer this reader here (emojiPickerAttrs():
+             the emoji, Font Awesome's icons, the emotes — no stickers in a line or two under a name). */ ?>
     <div class="profile-bio<?= $bioEdit ? ' is-editable' : '' ?>" id="profile-bio"
          <?php if ($bioEdit): ?>data-edit="1" data-max="<?= profileBioMax($cfg) ?>" data-cap="<?= profileBioSourceCap($cfg) ?>"
-         data-source="<?= sanitize(profileBioClean((string)($profile['bio'] ?? ''))) ?>"<?php endif; ?>>
+         data-source="<?= sanitize(profileBioClean((string)($profile['bio'] ?? ''))) ?>"<?= function_exists('emojiPickerData') ? emojiPickerAttrs(emojiPickerData($db, $cfg, $baseUrl, 'bio')) : '' ?><?php endif; ?>>
         <?php if ($bioEdit): ?>
         <?php /* Named by its own words (a screen reader reads the description), described as the way
                  to edit it — an aria-label would have replaced the text it is a button for. */ ?>
@@ -179,7 +185,7 @@ if ($profCover !== null) {
 </div>
 </div><?php /* /#profile-top */ ?>
 
-<?php if (!$showFav && !$showVotes && !$showUploads && !$showLists): ?>
+<?php if (!$showFav && !$showVotes && !$showDescs && !$showUploads && !$showLists): ?>
 <p class="text-muted"><?= _h('profile.nothing_shared') ?></p>
 <?php endif; ?>
 
@@ -225,6 +231,16 @@ if ($profCover !== null) {
     </section>
     <?php endif; ?>
 
+    <?php if ($showDescs): ?>
+    <?php /* The descriptions they wrote (1.70.0): right after Likes / Ratings. The same partial as the account
+             page's tab; on your own profile it is your own list (every state), on anybody else's the
+             published ones. */ ?>
+    <section class="profile-section" id="profile-descs">
+        <h2 id="profile-descs-heading"><?= _h('profile.descriptions') ?></h2>
+        <?php $pdUser = (string)$profile['username']; $pdSelf = $isSelf; $pdExtra = $profExtra; include __DIR__ . '/../partials/descs_section.php'; ?>
+    </section>
+    <?php endif; ?>
+
     <?php if ($showUploads): ?>
     <section class="profile-section" id="profile-uploads">
         <h2><?= _h('profile.uploads') ?></h2>
@@ -263,6 +279,9 @@ if ($profCover !== null) {
     </section>
     <?php endif; ?>
 </div>
+<?php /* On your OWN profile your cards are your own (the endpoint says so) and carry Edit, as they do on
+         the account page (1.70.0) — so the window they open is here too. */ ?>
+<?php if ($showLists && $isSelf && !empty($profLists['may_use'])) include __DIR__ . '/../partials/list_edit.php'; ?>
 
 <?php /* The Info panel, so a row on these lists can answer "what IS this?" without sending the
          reader back to the search page. Same markup, same script, same overlay — see the partial. */ ?>

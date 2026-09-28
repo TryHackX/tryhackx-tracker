@@ -484,5 +484,89 @@ check('nesting stays valid and balanced for every shape', $bad === [], implode('
 check('an inline run interrupted by a block is closed and resumed, and a link is not duplicated',
       substr_count(richtextRender('[url=https://e.org]l[center]x[/center]d[/url]', 'bbcode', $cfg, false), '<a ') === 1);
 
+/* ── the site's emotes and stickers, outside the room (1.70.0) ─────────────────
+ *
+ * emoteRenderHtml() (includes/emoji.php) is a stage AFTER the renderer, over its finished HTML, fed a map
+ * of the store's approved, switched-on rows for the context (emoteMapFor(), includes/shout.php — the
+ * database half is tests/shout_emotes_test.php). Here the map is handed in, so every rule is about the
+ * OUTPUT: only a code the map names, only in text, never in an address, an attribute or a code block,
+ * every attribute escaped, the address held to the room's image endpoint, and nothing that decides what
+ * a description may contain (its picture limit, a mail) is touched by it. */
+$emap = [
+    'wave'   => ['id' => 7, 'code' => 'wave', 'name' => 'Wave', 'url' => '/api.php?endpoint=shout_emote&id=7&v=0a1b2c3d', 'w' => 64, 'h' => 64, 'sticker' => false, 'draw' => 'emote'],
+    'party'  => ['id' => 8, 'code' => 'party', 'name' => 'Party', 'url' => '/api.php?endpoint=shout_emote&id=8&v=0a1b2c3e', 'w' => 128, 'h' => 128, 'sticker' => true, 'draw' => 'sticker'],
+    'cake'   => ['id' => 9, 'code' => 'cake', 'name' => 'Cake', 'url' => 'https://t.example/sub/api.php?endpoint=shout_emote&id=9&v=ff', 'w' => 0, 'h' => 0, 'sticker' => true, 'draw' => 'small'],
+    'evil'   => ['id' => 10, 'code' => 'evil', 'name' => '"><script>alert(1)</script>', 'url' => '/api.php?endpoint=shout_emote&id=10&v=aa', 'w' => 16, 'h' => 16, 'sticker' => false, 'draw' => 'emote'],
+    'away'   => ['id' => 11, 'code' => 'away', 'name' => 'Away', 'url' => 'https://evil.example/x.svg', 'w' => 16, 'h' => 16, 'sticker' => false, 'draw' => 'emote'],
+    'quote'  => ['id' => 12, 'code' => 'quote', 'name' => 'Q', 'url' => '/api.php?endpoint=shout_emote&id=12&v=aa" onerror="alert(1)', 'w' => 16, 'h' => 16, 'sticker' => false, 'draw' => 'emote'],
+];
+$er = fn(string $src, string $fmt = 'bbcode') => emoteRenderHtml(richtextRender($src, $fmt, $cfg, true), $emap);
+$h1 = $er('hello :wave: world');
+check('an emote in a sentence is an image of the room\'s endpoint, the sentence kept round it',
+      str_contains($h1, 'hello <img class="rt-emote" src="/api.php?endpoint=shout_emote&amp;id=7&amp;v=0a1b2c3d" alt=":wave:" title="Wave" loading="lazy" decoding="async" width="64" height="64"> world'), $h1);
+$h2 = $er(':party: and :cake:');
+check('a sticker at the size its context gives it: .rt-sticker, and .rt-sticker-small where it is bounded',
+      str_contains($h2, '<img class="rt-sticker" src="/api.php?endpoint=shout_emote&amp;id=8&amp;v=0a1b2c3e"')
+      && str_contains($h2, '<img class="rt-sticker rt-sticker-small" src="https://t.example/sub/api.php?endpoint=shout_emote&amp;id=9&amp;v=ff"')
+      && !preg_match('/id=9[^>]*width=/', $h2), $h2);
+check('a code the map does not name, an upper-case one and a one-letter one stay the text they are',
+      $er(':nobody: :WAVE: :w:') === richtextRender(':nobody: :WAVE: :w:', 'bbcode', $cfg, true));
+$h3 = $er(':evil:');
+check('every attribute escaped: a hostile name stays inside title, no tag of its own',
+      str_contains($h3, 'title="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"') && !str_contains($h3, '<script'), $h3);
+check('an address that is not the room\'s image endpoint — or would leave its attribute — is no picture: the token stays text',
+      !str_contains($er(':away:'), '<img') && str_contains($er(':away:'), ':away:')
+      && !str_contains($er(':quote:'), '<img') && !str_contains($er(':quote:'), 'onerror="'));
+$hLink = $er('[url=https://e.org/x/:wave:/y]see[/url] [img]https://e.org/:wave:.png[/img]');
+check('never inside an address: a link\'s href and a picture\'s src keep their bytes',
+      str_contains($hLink, 'href="https://e.org/x/:wave:/y"') && str_contains($hLink, 'src="https://e.org/:wave:.png"') && substr_count($hLink, 'rt-emote') === 0, $hLink);
+check('… while an emote as a link\'s words is a picture inside the link, as it is in a shout',
+      preg_match('#<a [^>]*>\s*<img class="rt-emote"[^>]*>\s*</a>#', $er('[url=https://e.org]:wave:[/url]')) === 1, $er('[url=https://e.org]:wave:[/url]'));
+$hCode = $er("[code]:wave:[/code] and [b]:wave:[/b]");
+check('a code block keeps the token as typed; the words after it are drawn',
+      str_contains($hCode, '<code>:wave:</code>') && substr_count($hCode, 'rt-emote') === 1, $hCode);
+$hMd = $er("`:wave:` and <kbd>:wave:</kbd> and **:wave:**", 'markdown');
+check('in Markdown too: inline code and <kbd> keep it, bold draws it',
+      str_contains($hMd, '<code class="rt-inline">:wave:</code>') && str_contains($hMd, '<kbd>:wave:</kbd>') && substr_count($hMd, 'rt-emote') === 1, $hMd);
+check('a line of nothing but an emote is still a paragraph with its picture in it',
+      preg_match('#^<p><img class="rt-emote"[^>]*></p>$#', $er(':wave:')) === 1, $er(':wave:'));
+check('the fixed :shortcode: emoji run first and stay characters: :fire: is the flame, never looked up',
+      str_contains(emoteRenderHtml(richtextRender(':fire:', 'bbcode', $cfg), ['fire' => $emap['wave']]), "\u{1F525}")
+      && !str_contains(emoteRenderHtml(richtextRender(':fire:', 'bbcode', $cfg), ['fire' => $emap['wave']]), '<img'));
+check('a Font Awesome face and an emote side by side: each its own stage, neither eats the other',
+      str_contains($er(':fa-face-grin: :wave:'), 'rt-emote') && !str_contains($er(':fa-face-grin: :wave:'), ':fa-face-grin:'));
+check('an empty map, or no colon at all, is the renderer\'s HTML untouched (the cheap path)',
+      emoteRenderHtml('<p>a :wave: b</p>', []) === '<p>a :wave: b</p>' && emoteRenderHtml('<p>no tokens</p>', $emap) === '<p>no tokens</p>');
+check('the stage is outside the renderer: richtextRenderIn() without a database is richtextRender(), and the picture limit counts none of them',
+      richtextRenderIn('message', null, 'x :wave: y', 'bbcode', $cfg) === richtextRender('x :wave: y', 'bbcode', $cfg)
+      && richtextCount(':wave: :wave: :wave: :wave:', 'bbcode', $cfg)['images'] === 0
+      && richtextValidate(':wave: :wave: :wave: :wave: :wave:', 'bbcode', $cfg) === null);
+check('in an e-mail an emote is always its code (the mail renderer never draws them)',
+      str_contains(richtextRenderForEmail('hi :wave:', 'bbcode', $cfg), ':wave:') && !str_contains(richtextRenderForEmail('hi :wave:', 'bbcode', $cfg), '<img'));
+check('the token grammar: two to thirty-two of [a-z0-9_] between colons, nothing looser',
+      EMOTE_TOKEN_RE === '/:([a-z0-9_]{2,32}):/' && preg_match(EMOTE_TOKEN_RE, ':fa-face-grin:') === 0 && preg_match(EMOTE_TOKEN_RE, ':a-b:') === 0);
+check('the address rule: the room\'s endpoint under any base, and nothing else',
+      emoteSafeUrl('api.php?endpoint=shout_emote&id=1&v=abc') && emoteSafeUrl('/t/api.php?endpoint=shout_emote&id=12&v=') && emoteSafeUrl('https://h.example/api.php?endpoint=shout_emote&id=3&v=0f')
+      && !emoteSafeUrl('api.php?endpoint=shout_emote&id=0&v=a') && !emoteSafeUrl('api.php?endpoint=user_media&id=1&v=a') && !emoteSafeUrl('javascript:alert(1)//api.php?endpoint=shout_emote&id=1&v=a b')
+      && !emoteSafeUrl("/api.php?endpoint=shout_emote&id=1&v=a'") && !emoteSafeUrl('/api.php?endpoint=shout_emote&id=1&v=a&x=1'));
+// Read back through a DOM: whatever the input, the stage adds <img> with these attributes and nothing else.
+$hostileAll = implode("\n", [':evil: :quote: :away:', '<img src=x onerror=alert(1)> :wave:', '[url=https://e.org/":wave:"]x[/url]',
+                             '[color=red]:wave:[/color] [quote=":party:"]:cake:[/quote]', '[spoiler=:wave:]:wave:[/spoiler]']);
+$hd = emoteRenderHtml(richtextRender($hostileAll, 'bbcode', $cfg, true), $emap);
+$dom = new DOMDocument();
+@$dom->loadHTML('<?xml encoding="UTF-8"><div id="root">' . $hd . '</div>', LIBXML_NOERROR | LIBXML_NOWARNING);
+$imgBad = [];
+$xp = new DOMXPath($dom);
+foreach ($xp->query('//img') as $im) {
+    foreach ($im->attributes as $at) if (!in_array($at->name, ['class', 'src', 'alt', 'title', 'loading', 'decoding', 'width', 'height', 'referrerpolicy'], true)) $imgBad[] = $at->name;
+    if (!preg_match('#^(rt-img|rt-emote|rt-sticker( rt-sticker-small)?)$#', $im->getAttribute('class'))) $imgBad[] = 'class:' . $im->getAttribute('class');
+}
+foreach ($xp->query('//*') as $any) {
+    if ($any->nodeName === 'script') $imgBad[] = 'script';
+    foreach ($any->attributes as $at) if (str_starts_with(strtolower($at->name), 'on')) $imgBad[] = $any->nodeName . '@' . $at->name;
+}
+check('read through a DOM, hostile input yields pictures with only their own attributes and classes, and no element anywhere a script or a handler',
+      $imgBad === [] && $xp->query('//img[@class="rt-emote"]')->length >= 3, implode(', ', $imgBad) . ' | ' . substr($hd, 0, 300));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

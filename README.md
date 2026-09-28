@@ -794,13 +794,18 @@ default — with it off, everything behaves exactly like the classic single-admi
 - **Lists** (1.44.0, `lists_enabled`, off by default): a **collection somebody makes on purpose** —
   a name, the torrents they put in it, and their own answer to who may see it. Useful in blacklist
   mode, where there is no whitelist to group anything by: a reader can still gather a pack and hand
-  it to somebody. Cards on the account page (make, rename, publish, delete, manage the torrents
+  it to somebody. Cards on the account page (make, **edit**, publish, delete, manage the torrents
   inside), a section on the public profile, a **“put this in a list”** picker in the Info panel, and
   adding straight **by info hash or magnet link** — a hash this tracker has never seen still builds a
   working magnet, so it can still be collected. A list is visible to a stranger only when **five**
   answers agree: `lists_enabled`, `lists_public_enabled`, the owner's group holding `lists.public`,
   the owner's own “show my lists” flag and the list's own. `tests/lists_test.php` walks that table
-  one flag at a time against the real query.
+  one flag at a time against the real query. **A description** (1.70.0): a card's **Edit** opens a window
+  with the name and the description — BBCode or Markdown in the site's editor, with the emoji picker's
+  emoji, emotes and stickers — saved in one request; the card shows a line or two of it as plain text,
+  and the list's window draws it under the name. Its limit (`lists_desc_max`, 1000) counts what a
+  reader sees, not the tags; it shows no pictures from other sites (only the site's own emotes and
+  stickers), because unlike a torrent's description nobody reviews it before it is read.
 - **Abuse reports from a rights holder** (1.43.0): an API key with the **abuse** scope may call
   `v1/blacklist/submit` — the same claim the public *Report* page files, in batches, from their own
   system. A report lands in the Reports queue labelled with the partner that filed it, and **nothing
@@ -1024,6 +1029,31 @@ the package gone, a style no longer loaded, an e-mail). The package importer rea
 carries — Font Awesome's own `icon-families.json`, or the compact `icons-search-vX.Y.Z.json` of the
 owner's download script — and keeps what the site needs of it beside the package.
 
+**How much more of the package the picker offers** (1.70.0, `shout_emoji_fa_scope`, shown while the
+faces are on): the faces alone (as shipped); the faces, and a search that also finds **any icon** of the
+package, in a "Font Awesome" group after the emoji; or **every icon**, on one more page navigated by Font
+Awesome's own categories (a strip of chips, in the reader's language). Held down, every icon offers the
+styles it is drawn in among those the site loads, and any icon travels as the same token —
+`:fa-rocket:`, `:fa-rocket/sharp-solid:` — drawn in the colour of the words, or as `[Rocket]` where Font
+Awesome cannot draw it. The icons beyond the faces are found by their English names and words, or by
+their category's name in English or Polish. All of it comes from the package's **catalogue**
+(`catalog.json` beside it: 4,349 icons, 133 KB compressed, for Pro 7.3.1), which the picker fetches only
+when the scope needs it and the browser keeps; a package installed before 1.70.0 gets its catalogue the
+first time it is needed, or at once with `php tools/iconpack.php reindex <id>|--all` or the package
+table's "Read the index again".
+
+**The picker in every editor, and the emotes beyond the room** (1.70.0, `emotes_everywhere`, on): the
+message composer, a torrent's description editor (a first description and a proposed rewrite), the
+whitelist form and the profile's description each have the picker's button at the end of their toolbar
+(`assets/js/emoji-picker.js`, the room's own picker, shared). What is picked goes in at the caret as text;
+the room's `:code:` emotes and stickers are then drawn where the text is read — in a message the sticker
+at the room's size, in a description or a list's bounded to 96 px, in a profile's description as an emote
+(no stickers there), in an e-mail as its code. Approved, switched-on emotes only, from the same image
+address. Each editor asks for the picker's data as its own context (`for` = message | description | bio |
+list), under the permission that writes that text. The emotes are the room's: with the shoutbox or its
+emotes off, or `emotes_everywhere` off (Settings → Shoutbox → Emotes, "Beyond the shoutbox"), a code
+there is its text again and those pickers offer the emoji alone.
+
 ### The shoutbox in the bar, a pinned line, and lines from the site (1.60.0)
 
 `shout_nav` adds a **Shoutbox** link to the navigation with a counter of its own — separate from the
@@ -1104,6 +1134,45 @@ is marked), and one set of switches. The author is recorded and shown (*Descript
 told when their words are published, turned down, or replaced. Reading descriptions is
 `content.view` (members as shipped); a reader without it is told there is a description for members.
 
+### Delete, Edit, co-authors, and "Descriptions" on the profile (1.70.0)
+
+- **Delete description** in the Info panel, two clicks: its author with `content.delete_own` (members),
+  anybody's published one with `content.delete_any` (moderators). The text and its source link go as the
+  panel's Clear takes them, the proposals waiting on it are withdrawn, one `content.delete` audit line is
+  written, and the author is told when it was somebody else.
+- **Edit**, beside *Propose a rewrite*: the editor opens with the text, its format and its link as they
+  stand, and files an **edit**. Applied, a rewrite makes its proposer the author (and starts the credits
+  again); an edit keeps the author and credits the editor with the share of the text it changed — the
+  words of the two versions compared when the moderator applies it (their longest common subsequence;
+  `share = round(100 × max(taken out, put in) / the longer text)`, at least 1% for any change) —
+  so the line under the description reads *Description by TryHackX (first) → dominikk26 (25% edit) →
+  Majkel (6% edit)*. The **Rewrites** tab says which kind each proposal is and, for an edit, the share
+  before it is applied.
+- **Your name**: *Show my name on the descriptions I write and edit* (Privacy, on). Off, every credit
+  of yours reads "a member", with no picture and no link; moderators still see who it is. Every editor
+  says, before anything is sent, that a description is public and whether your name goes with it.
+- **Descriptions**: a tab of the account page and — with *Show the descriptions I wrote on my profile*
+  ticked, your name shown and your group granted `content.public` — a section of the profile, right
+  after Likes / Ratings: each torrent you wrote or co-wrote, your role in it, the date; sortable,
+  searchable, paged. Settings → Profiles → *Descriptions on profiles* switches it off everywhere.
+
+### "Who has this": favourites, likes / ratings, lists (1.70.0)
+
+The Info panel's **Who has this** opens three sections, each loaded twenty at a time when it opens (all
+three at once), each with its own count, its own search by name past one page, and *Show more*:
+**Favourites** (as before), **Likes** or **Ratings** — by the rating mode: each name with its thumb up or
+down, or with its stars, half stars included — and **Lists** (the public lists the torrent is on, by their
+owners, each opening the list on the owner's profile). Somebody appears only when every gate says yes, and
+a gate that says no takes them out of the count too: for the likes, *Show my likes on my profile* **and**
+the new *Let my name, with my thumb, appear in a torrent's "who has this"* (Privacy, right under it, off
+until ticked), a group that grants `rating.public` (not the administrator's blanket), an active account,
+verified where the site asks for it, no block hiding their profile from the reader; only votes cast from
+an account, only values the current mode has. A list is shown exactly where it is public on its owner's
+profile. Settings → Profiles: *Likes and ratings in "Who has this"* (in the likes' section) and *Lists in
+"Who has this"* (in the lists'); the favourites' own switch is where it was. The button appears whenever
+any section can show the reader something. `api.php?endpoint=hash_who&hash=…&section=fav|votes|lists`
+answers one section a page (20, at most 50); `hash_favourites` still gives the 1.69.0 answer.
+
 ### What does this tracker know about a hash? (1.52.0)
 
 **Status page**, for a reader with `status.hash_check` (members, as shipped). Paste an info hash,
@@ -1164,7 +1233,10 @@ published — searchable by hash, name, link or a word from the text, and filter
 published or rejected, so "why is this public" can be answered without reading the database.
 **Rewrites** are proposed replacements for text that is already published, shown side by side with
 the current version, both rendered: a rewrite that reads tamer in source and worse on screen is the
-whole risk of accepting one. Applying keeps the version it replaces, so it can be undone.
+whole risk of accepting one. Applying keeps the version it replaces — the newest ten per description
+(1.70.0: the older ones of a description are deleted when a proposal on it is applied), as rows of
+`wl_content_edits` marked `replaced by a later proposal` — but nothing in the panel reads them back or puts one back:
+an old text returns only by being copied out of the database and proposed again.
 
 Everything is shown **rendered**, never as source. Reviewing markup means waving through whatever an
 image tag turns out to point at.

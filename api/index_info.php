@@ -126,7 +126,7 @@ $canContent = userCan($db, $cfg, 'content.view');
 $content = richtextContentFor($db, $cfg, $hash);
 if (($content['kind'] ?? null) === 'wl' && !$wl) {
     $content = ['source_url' => null, 'source_trusted' => false, 'description_html' => '', 'content_status' => 'none',
-                'kind' => null, 'author' => null, 'author_id' => null, 'author_avatar' => ''];
+                'kind' => null, 'author' => null, 'author_id' => null, 'author_avatar' => '', 'credits' => []];
 }
 $hasWords = ($content['content_status'] ?? 'none') === 'approved'
          && (($content['description_html'] ?? '') !== '' || ($content['source_url'] ?? null) !== null);
@@ -163,6 +163,14 @@ if ($me !== null && $rec !== null && $rec['content_user_id'] === (int)$me['id']
     $mine = $rec['content_status'];
     $mineNote = $rec['content_rejected_note'];
 }
+// Edit (1.70.0): the proposal editor opened with the text as it stands — so only a PUBLISHED text, to a
+// signed-in member whose account may propose AND read it: the source carries what [hide] keeps from a
+// guest, which is exactly who must not get it. contentAttach() asks the same again when it arrives.
+$meId = $me !== null ? (int)$me['id'] : 0;
+$canEdit = $canPropose && $meId > 0 && $rec !== null && $rec['content_status'] === 'approved'
+        && userIdHasPermission($db, $cfg, $meId, 'content.propose') && userIdHasPermission($db, $cfg, $meId, 'content.view');
+// Delete (1.70.0): 'own' | 'any' | null — contentDeleteRight(), the one api/content_delete.php asks.
+$deleteRight = contentDeleteRight($db, $cfg, $rec, $me);
 
 jsonResponse([
     'success'   => true,
@@ -192,11 +200,21 @@ jsonResponse([
     // never carried; shown exactly where the name is and nowhere else.
     'content_author_avatar' => ($canContent && ($content['author'] ?? null) !== null) ? (string)($content['author_avatar'] ?? '') : '',
     'content_author_profile' => function_exists('profilesEnabled') && profilesEnabled($cfg),
+    // Who wrote it and who edited it since (1.70.0): the chain, entry by entry, as THIS reader is shown
+    // it — a name its owner hid is "a member" (no name, no picture, no link in the answer at all), a
+    // deleted account is one. The panel draws it under the description; content_author above is the
+    // first entry's name, kept for what read it before.
+    'content_credits'   => $canContent ? array_values((array)($content['credits'] ?? [])) : [],
     'content_hidden'    => !$canContent && $hasWords,
     'content_mine'      => $mine,
     'content_mine_note' => $mineNote,
     'can_content_submit'  => $canAdd,
     'can_content_propose' => $canPropose,
+    'can_content_edit'    => $canEdit,
+    'content_edit'        => $canEdit ? ['description' => (string)($rec['description'] ?? ''),
+                                         'description_format' => (string)$rec['description_format'],
+                                         'source_url' => (string)($rec['source_url'] ?? '')] : null,
+    'can_content_delete'  => $deleteRight,
     'content_formats'   => richtextFormats($cfg),
     'content_max'       => richtextMaxChars($cfg),
     'stats' => [

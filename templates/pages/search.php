@@ -43,7 +43,7 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
                the browser can never be talked into ignoring. Both overlays live in this file and
                read this attribute inside initSearch()'s closure, so they cannot drift apart. */ ?>
       data-files-mode="<?= sanitize(indexFilesMode($cfg)) ?>"
-      data-fav="<?= $favCtx['may_use'] ? '1' : '0' ?>" data-fav-who="<?= ($favCtx['who_ok'] && $favCtx['may_view']) ? '1' : '0' ?>"
+      data-fav="<?= $favCtx['may_use'] ? '1' : '0' ?>"
       data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
       <?php $sExtra = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
                                               array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')]))); ?>

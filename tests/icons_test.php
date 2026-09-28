@@ -548,9 +548,15 @@ $spot = [
     'templates/pages/register.php'          => ['bi bi-x-lg'],
     'templates/pages/search.php'            => ['bi bi-x-lg'],
     'includes/richtext.php'                 => ['bi bi-youtube', 'bi bi-check-square', 'bi bi-square', 'disc-chev'],
-    // 1.69.0: the picker's tabs are Unicode's nine pages, Recent, and the search box's two controls.
-    'assets/js/shoutbox.js'                 => ['bi bi-emoji-smile', 'bi bi-person', 'bi bi-tree', 'bi bi-cup-hot', 'bi bi-car-front', 'bi bi-trophy',
+    // 1.69.0: the picker's tabs are Unicode's nine pages, Recent, and the search box's two controls — in
+    // assets/js/emoji-picker.js from 1.70.0, where the picker moved when every editor got it; the room
+    // keeps its own controls (the lightbox, the row's pencil, pin and bin).
+    'assets/js/emoji-picker.js'             => ['bi bi-emoji-smile', 'bi bi-person', 'bi bi-tree', 'bi bi-cup-hot', 'bi bi-car-front', 'bi bi-trophy',
                                                 'bi bi-lightbulb', 'bi bi-heart', 'bi bi-flag', 'bi bi-clock-history', 'bi bi-search', 'bi bi-x-lg'],
+    'assets/js/shoutbox.js'                 => ['bi bi-x-lg', 'bi bi-box-arrow-up-right', 'bi bi-pencil', 'bi bi-pin-angle-fill', 'bi bi-trash'],
+    // 1.70.0: the picker's button on every rich-text toolbar, and on the profile's own.
+    'includes/emoji.php'                    => ['<i class="bi bi-emoji-smile" aria-hidden="true"></i>'],
+    'assets/js/profile-bio.js'              => ["node('i', 'bi bi-emoji-smile')"],
     'assets/js/favourites.js'               => ['bi bi-star-fill', 'bi bi-star', 'bi bi-x-lg', 'bi bi-plus-lg'],
     'assets/js/people.js'                   => ['bi bi-flag-fill', 'bi bi-flag'],
     'assets/js/app.js'                      => ['bi bi-x-lg pw-req-ic', 'bi bi-check-lg pw-req-ic', 'bi bi-hand-thumbs-up', 'bi bi-hand-thumbs-down',

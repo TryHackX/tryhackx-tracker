@@ -159,14 +159,31 @@
             else { inboxStamp = j.stamp; inboxUnread = j.unread; }
         }
 
+        /**
+         * What the list is being asked for: names matching the filter, or — with the box ticked and at
+         * least two characters to look for — conversations holding those words.
+         *
+         * `key` is that question as one string, and `asked` is the key of the list on screen. "Search
+         * inside messages" is an OPTION of the search, not a search: with nothing (or one character)
+         * in the box it asks the same question as before, and ticking it reloaded that same list
+         * anyway — the flash the owner saw in 1.69.0. So the box is remembered for the next search, and
+         * ticking it reloads only when the question really changes (1.70.0).
+         */
+        var asked = null;
+        function inboxQuery() {
+            var q = (searchEl && searchEl.value.trim()) || '';
+            var deep = !!(deepEl && deepEl.checked) && q.length >= 2;
+            return { q: q, deep: deep, key: (deep ? 'deep:' : 'name:') + q };
+        }
+
         async function loadInbox() {
             list.textContent = '';
             list.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
             // Names are filtered here, because the list is already in the browser. Looking inside
             // the messages is the server's job and costs a request, so it only happens when the
             // box beside the filter is ticked and there is something to look for.
-            var q = (searchEl && searchEl.value.trim()) || '';
-            var deep = !!(deepEl && deepEl.checked) && q.length >= 2;
+            var ask = inboxQuery(), q = ask.q, deep = ask.deep;
+            asked = ask.key;
             var j = await get('user_messages' + (deep ? '&deep=1&search=' + encodeURIComponent(q) : ''));
             list.textContent = '';
             if (!j || !j.success) {
@@ -485,7 +502,13 @@
             clearTimeout(timer);
             timer = setTimeout(loadInbox, deepEl && deepEl.checked ? 600 : 300);
         });
-        if (deepEl) deepEl.addEventListener('change', loadInbox);
+        // Only when it changes the question (see inboxQuery()). When it does, it asks now and takes over
+        // a keystroke still waiting to ask, rather than letting that one ask the same thing again.
+        if (deepEl) deepEl.addEventListener('change', function () {
+            if (inboxQuery().key === asked) return;
+            clearTimeout(timer);
+            loadInbox();
+        });
         // The tab bar shows this pane without reloading the page — a hash change is a same-document
         // navigation, and clicking a tab is not a navigation at all. Without a hook the inbox stayed
         // whatever it was when the page first loaded, which is exactly when somebody has come back

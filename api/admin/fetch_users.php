@@ -103,7 +103,7 @@ foreach ($rows as &$r) {
     // that have one pay for either question.
     $bioSrc = function_exists('profileBioClean') ? profileBioClean((string)($r['bio'] ?? '')) : '';
     $r['has_bio'] = $bioSrc !== '';
-    $r['bio_html'] = $bioSrc !== '' ? profileBioRender($bioSrc, $cfg) : '';
+    $r['bio_html'] = $bioSrc !== '' ? profileBioRender($bioSrc, $cfg, $db) : '';
     $r['bio_shown'] = $bioSrc !== '' && profileBioFor($db, $cfg, $r) !== '';
     unset($r['avatar_sha'], $r['cover_sha'], $r['bio']);
 }

@@ -299,6 +299,10 @@
         use.hidden = !!p.active;
         const ver = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t('js.iconpack.verify'), 'aria-label': t('js.iconpack.verify') }, [el('i', { className: 'bi bi-shield-check' })]);
         ver.addEventListener('click', () => verify(p, ver));
+        // 1.70.0: a package whose metadata is an index can have it read again — the catalogue of every icon
+        // the shoutbox picker offers is written from it (the picker builds it itself when it first needs it).
+        const rei = p.index ? el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t('js.iconpack.reindex'), 'aria-label': t('js.iconpack.reindex') }, [el('i', { className: 'bi bi-arrow-repeat' })]) : null;
+        if (rei) rei.addEventListener('click', () => reindex(p, rei));
         const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', title: p.active ? t('js.iconpack.delete_active') : t('js.iconpack.delete'), 'aria-label': t('js.iconpack.delete') }, [el('i', { className: 'bi bi-trash' })]);
         del.disabled = !!p.active;
         del.addEventListener('click', () => remove(p));
@@ -312,9 +316,10 @@
         const size = el('td', { className: 'small text-nowrap' }, [fmtBytes(p.bytes), el('div', { className: 'text-muted' }, t('js.iconpack.n_icons', { n: p.icons }))]);
         const when = el('td', { className: 'small' }, [String(p.installed_at || '').replace('T', ' ').replace('Z', ' UTC'),
             el('div', { className: 'text-muted' }, t('js.iconpack.by', { who: p.installed_by || '?' })
-                + (p.metadata && p.metadata !== 'none' ? ' · ' + t('js.iconpack.meta_' + (p.metadata === 'pro' ? 'pro' : p.metadata === 'free' ? 'free' : 'unknown')) : ''))]);
+                + (p.metadata && p.metadata !== 'none' ? ' · ' + t('js.iconpack.meta_' + (p.metadata === 'pro' ? 'pro' : p.metadata === 'free' ? 'free' : 'unknown')) : '')),
+            p.index ? el('div', { className: 'text-muted ip-catalog' }, p.catalog ? t('js.iconpack.catalog', { n: p.catalog.icons, c: p.catalog.categories }) : t('js.iconpack.catalog_none')) : null]);
         return el('tr', { className: p.active ? 'ip-row-active' : '' }, [name, styles, size, when,
-            el('td', { className: 'text-end text-nowrap' }, [el('div', { className: 'd-inline-flex gap-1' }, [use, ver, del])])]);
+            el('td', { className: 'text-end text-nowrap' }, [el('div', { className: 'd-inline-flex gap-1' }, [use, ver, rei, del])])]);
     }
 
     /** The package select follows the table: a new package appears in it, a deleted one leaves it. */
@@ -356,6 +361,17 @@
         const v = j.verify;
         if (v.ok) showToast(t('js.iconpack.verify_ok', { n: v.files }), 'success');
         else showToast(t('js.iconpack.verify_bad', { missing: v.missing.length, changed: v.changed.length }), 'danger');
+    }
+
+    /** Read a package's index again (1.70.0): the catalogue written, the table told what it holds now. */
+    async function reindex(p, btn) {
+        btn.disabled = true;
+        let j;
+        try { j = await apiCall('admin/iconpacks', 'POST', { op: 'reindex', id: p.id }); } catch (e) { j = { error: t('js.iconpack.failed') }; }
+        btn.disabled = false;
+        if (j && Array.isArray(j.packages)) { state = j; renderList(); }
+        if (!j || !j.success) { showToast((j && j.error) || t('js.iconpack.failed'), 'danger'); return; }
+        showToast(j.message || 'OK', 'success');
     }
 
     async function remove(p) {

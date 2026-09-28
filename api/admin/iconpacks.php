@@ -13,6 +13,11 @@
  * POST {op: install_path, path, confirm_password}   a zip or a directory ON THE SERVER
  * POST {op: activate, id, confirm_password}         the four Font Awesome settings, as the CLI writes them
  * POST {op: delete, id, confirm_password}           never the active one
+ * POST {op: reindex, id}                            (1.70.0) the package's index read again from the
+ *                                                   metadata it keeps: the catalogue of every icon the
+ *                                                   shoutbox picker offers, written beside it. No password:
+ *                                                   it changes nothing the site loads or trusts, only
+ *                                                   derives files from the package's own; audited all the same
  *
  * Owner only: not in adminEndpointPermission(), like every Settings endpoint — there is no panel
  * permission that edits settings, so "a permission that lets an operator edit settings" is the
@@ -169,6 +174,22 @@ if ($op === 'activate') {
     $s = $state();
     $msg = $s['library'] === 'fontawesome' ? __('api.iconpack.msg_activated', ['id' => $id]) : __('api.iconpack.msg_activated_bi', ['id' => $id]);
     jsonResponse(['message' => $msg, 'reload' => true] + $s);
+}
+
+if ($op === 'reindex') {
+    $id = (string)($input['id'] ?? '');
+    if (!iconpackValidId($id) || iconpackManifest($id) === null) {
+        auditSuppress();
+        jsonResponse(['success' => false, 'error' => iconpackMessage('unknown_package')], 404);
+    }
+    $r = iconpackReindex($id);
+    if (empty($r['ok']) || empty($r['written'])) {
+        $audit('iconpack.reindex', false, $id, 'refused: ' . (empty($r['ok']) ? (string)($r['error'] ?? 'no_index') : 'write_failed'));
+        jsonResponse(['success' => false, 'error' => empty($r['ok']) ? iconpackReindexLine($id, $r) : iconpackMessage('store_not_writable', iconpackDir())] + $state(), 422);
+    }
+    $audit('iconpack.reindex', true, $id, 'read the index of ' . iconpackTitle(iconpackManifest($id), $id) . ' again',
+           ['icons' => count((array)($r['catalog']['icons'] ?? [])), 'categories' => count((array)($r['catalog']['cats'] ?? [])), 'bytes' => (int)($r['bytes'] ?? 0)]);
+    jsonResponse(['message' => iconpackReindexLine($id, $r)] + $state());
 }
 
 if ($op === 'delete') {

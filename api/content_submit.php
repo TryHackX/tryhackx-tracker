@@ -2,7 +2,12 @@
 /**
  * POST content_submit — attach a description (and/or a source link) to a hash from the Info panel.
  *
- *   {"csrf_token":"…","hash":"<hex40 | base32 | magnet>","description":"…","description_format":"bbcode|markdown","source_url":"…"}
+ *   {"csrf_token":"…","hash":"<hex40 | base32 | magnet>","description":"…","description_format":"bbcode|markdown","source_url":"…",
+ *    "kind":"rewrite|edit"}
+ *
+ * `kind` (1.70.0) is what a proposal on a described torrent is: a rewrite (the default — applied, the
+ * proposer becomes the author) or an edit from the Info panel's Edit (applied, the author stays and
+ * the proposer is credited with their share). See contentAttach().
  *
  * The same door the whitelist form's optional fields go through (contentAttach in includes/content.php),
  * reachable in either tracker mode and for a torrent the tracker has only SEEN: the whitelist form
@@ -33,6 +38,7 @@ $r = contentAttach($db, $cfg, $p['hash'], [
     'description'        => (string)($input['description'] ?? ''),
     'description_format' => (string)($input['description_format'] ?? 'bbcode'),
     'source_url'         => (string)($input['source_url'] ?? ''),
+    'kind'               => (string)($input['kind'] ?? 'rewrite'),
 ], $me, getClientIp($cfg));
 if (empty($r['ok'])) jsonResponse(['error' => (string)$r['error']], (int)($r['code'] ?? 400));
 

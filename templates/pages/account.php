@@ -22,6 +22,10 @@ $accFav = favContext($db, $cfg, $meUser);
 // Likes or ratings (1.69.0, includes/profilevotes.php): the tab after Favourites and the privacy switch.
 $accVotes = function_exists('profileVotesContext') ? profileVotesContext($db, $cfg, $meUser)
     : ['enabled' => false, 'mode' => 'thumbs', 'public_ok' => false, 'may_publish' => false, 'publish_blocked' => false];
+// The descriptions this account wrote (1.70.0, includes/profiledescs.php): the tab after Likes / Ratings,
+// the list's privacy switch after the likes one, and the name switch every credit of theirs follows.
+$accDescs = function_exists('profileDescsContext') ? profileDescsContext($db, $cfg, $meUser)
+    : ['credit_ok' => false, 'enabled' => false, 'public_ok' => false, 'may_publish' => false, 'publish_blocked' => false, 'name_hidden' => false];
 $accLists = listsContext($db, $cfg, $meUser);
 $accPeople = peopleContext($db, $cfg, $meUser);
 // Whether this reader may search inside file names — the same permission the search page asks, and
@@ -42,7 +46,7 @@ if ($accTwofa['feature']) {
 // can only ever be empty teaches people the feature is broken rather than absent.
 $accShowUploads = $accFav['uploads'] && uploadsPublicEnabled($cfg);
 $accSounds = soundsEnabled($cfg) && userCan($db, $cfg, 'sounds.use');
-$accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accShowUploads || $accLists['may_use']
+$accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] || $accShowUploads || $accLists['may_use']
         || $accPeople['may_message'] || $accPeople['may_friend'] || $accSounds;
 ?>
 <div class="account-head">
@@ -91,6 +95,11 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accShowUploads || $acc
     <?php /* Named by the rating system's mode: thumbs are likes, stars are ratings. Right after
              Favourites, as the owner asked — the router's list in assets/js/favourites.js names it too. */ ?>
     <button type="button" class="rt-tab" data-pane="votes"><?= _h('account.tab_votes_' . $accVotes['mode']) ?></button>
+    <?php endif; ?>
+    <?php if ($accDescs['enabled']): ?>
+    <?php /* The descriptions this account wrote (1.70.0), right after Likes / Ratings — the router's list
+             in assets/js/favourites.js names it too. */ ?>
+    <button type="button" class="rt-tab" data-pane="descriptions"><?= _h('account.tab_descriptions') ?></button>
     <?php endif; ?>
     <?php if ($accShowUploads): ?>
     <button type="button" class="rt-tab" data-pane="uploads"><?= _h('account.tab_uploads') ?></button>
@@ -432,7 +441,7 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
          Gating it on favourites alone hid the lists switch on an install that runs lists without
          them. */ ?>
 <?php if (($accFav['may_use'] && ($accFav['public_ok'] || $accFav['who_ok']))
-          || $accVotes['public_ok']
+          || $accVotes['public_ok'] || $accDescs['public_ok'] || $accDescs['credit_ok']
           || ($accLists['may_use'] && $accLists['public_ok'])
           || $accPeople['pm'] || $accPeople['directory']): ?>
         <?php /* In the card that already holds the mail and language preferences, not a card of its
@@ -460,6 +469,33 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
             <?php if ($accVotes['publish_blocked']): ?>
             <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'rating.public']) ?></p>
             <?php endif; ?>
+            <?php /* …and my name, with my vote, in a torrent's "Who has this" (1.70.0, includes/who.php) — the twin
+                     of the favourites' "let my name appear", right under the switch it needs: drawn while that
+                     section exists at all, and named by the mode like the switch above. */ ?>
+            <?php if (function_exists('whoVotesEnabled') && whoVotesEnabled($cfg)): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-votes-listed"<?= (int)($meUser['votes_listed'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.votes_listed_label_' . $accVotes['mode']) ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.votes_listed_hint_' . $accVotes['mode']) ?></p>
+            <?php endif; ?>
+            <?php endif; ?>
+            <?php /* The descriptions I wrote on my profile (1.70.0), right after the likes: drawn the way that
+                     switch is, with the grant warning, and — while my name is hidden on my descriptions —
+                     the sentence that says the list is then shown to nobody else either. */ ?>
+            <?php if ($accDescs['may_publish'] || $accDescs['publish_blocked']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-descs-public"<?= (int)($meUser['descriptions_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.descs_public_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.descs_public_hint') ?></p>
+            <p class="acc-perm-warn" id="acc-descs-name-hidden"<?= $accDescs['name_hidden'] ? '' : ' hidden' ?>><?= __('account.descs_public_name_hidden') ?></p>
+            <?php if ($accDescs['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'content.public']) ?></p>
+            <?php endif; ?>
+            <?php endif; ?>
+            <?php /* My name on the descriptions I write and edit (1.70.0): ON unless I say otherwise — names
+                     have always been shown there. Off, every credit of mine says "a member". */ ?>
+            <?php if ($accDescs['credit_ok']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-credit-public"<?= (int)($meUser['content_credit_public'] ?? 1) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.credit_public_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.credit_public_hint') ?></p>
             <?php endif; ?>
             <?php if ($accLists['may_use'] && ($accLists['may_publish'] || $accLists['publish_blocked'])): ?>
             <label class="search-check acc-check"><input type="checkbox" id="acc-lists-public"<?= (int)($meUser['lists_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
@@ -581,6 +617,18 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
 </div>
 <?php endif; ?>
 
+<?php if ($accDescs['enabled']): ?>
+<?php /* The descriptions this account wrote (1.70.0): every state of its own, and its own proposals still
+         waiting or turned down. One partial with the profile's section; assets/js/favourites.js fills it
+         from api/user_descriptions.php. */ ?>
+<div class="acc-pane" id="acc-pane-descriptions" hidden>
+    <h2 class="section-heading-spaced" id="acc-descs-heading"><?= _h('account.descs_heading') ?></h2>
+    <div id="account-descs" class="profile-section">
+        <?php $pdUser = ''; $pdSelf = true; $pdExtra = $accExtra; include __DIR__ . '/../partials/descs_section.php'; ?>
+    </div>
+</div>
+<?php endif; ?>
+
 <?php if ($accShowUploads): ?>
 <div class="acc-pane" id="acc-pane-uploads" hidden>
     <h2 class="section-heading-spaced"><?= _h('account.tab_uploads') ?></h2>
@@ -695,6 +743,9 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
         <div class="lists-cards" id="ul-cards"></div>
     </div>
 </div>
+<?php /* A card's Edit window (1.70.0): the name and the description. Outside the pane, so a pane that is
+         hidden never hides the window with it. */ ?>
+<?php include __DIR__ . '/../partials/list_edit.php'; ?>
 <?php endif; ?>
 
 <?php if ($accPeople['may_message']): ?>
@@ -794,6 +845,8 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
                     <button type="button" data-md="center" title="<?= _h('rt.center') ?>"><i class="bi bi-text-center" aria-hidden="true"></i></button>
                     <button type="button" data-md="hr" title="<?= _h('rt.hr') ?>"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
                 </span>
+                <?php /* The picker (1.70.0): emoji, emotes, and stickers at the room's own size. */ ?>
+                <?= function_exists('emojiPickerButton') ? emojiPickerButton($db, $cfg, $baseUrl, 'message', 'pm-body-emoji') : '' ?>
             </div>
             <textarea id="pm-body" class="pm-input" rows="6" maxlength="<?= (int)$accPeople['max_chars'] ?>" placeholder="<?= _h('js.pm.write_ph') ?>"></textarea>
             <div class="rt-preview rt-body" id="pm-body-preview" hidden></div>

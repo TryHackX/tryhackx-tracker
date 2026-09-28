@@ -31,10 +31,13 @@ function auditActionGroups(): array {
         'auth'     => ['login.ok', 'login.fail', 'login.2fa_fail', 'logout', 'password.change', 'twofa.change'],
         // csp.clear is filed under settings, not 'other': it is a button on the Settings page and an
         // operator filtering that group is looking for "what did somebody change in Settings".
-        // iconpack.*: Font Awesome packages (1.69.0) — installed, activated, their styles, deleted.
+        // iconpack.*: Font Awesome packages (1.69.0) — installed, activated, their styles, deleted — and
+        // (1.70.0) their index read again, which writes the catalogue of every icon beside them.
         'settings' => ['settings.save', 'page.edit', 'page.layout', 'language.manage', 'csp.clear',
-                       'iconpack.install', 'iconpack.activate', 'iconpack.styles', 'iconpack.delete', 'iconpack.manage'],
-        'content'  => ['content.approve', 'content.reject', 'content.clear', 'content.edit_apply', 'content.edit_reject'],
+                       'iconpack.install', 'iconpack.activate', 'iconpack.styles', 'iconpack.delete', 'iconpack.manage', 'iconpack.reindex'],
+        // content.delete (1.70.0): a description taken down from the Info panel — its author's own, or
+        // anybody's by a holder of content.delete_any (includes/content.php, contentDelete()).
+        'content'  => ['content.approve', 'content.reject', 'content.clear', 'content.edit_apply', 'content.edit_reject', 'content.delete'],
         'hashes'   => ['whitelist.add', 'whitelist.delete', 'whitelist.ban', 'whitelist.unban',
                        'index.delete', 'index.promote', 'blacklist.add', 'blacklist.delete'],
         'reports'  => ['report.status', 'report.delete', 'report.restore', 'report.email', 'appeal.resolve'],

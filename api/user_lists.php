@@ -3,7 +3,12 @@
  * The lists themselves: the owner's own, or a profile's as a stranger may see them.
  *
  *   GET  user_lists[&user=<name>][&search=][&hash=<40 hex>]
- *   POST user_lists {op:'create'|'rename'|'describe'|'visibility'|'delete', id, name, value, csrf_token}
+ *   POST user_lists {op:'create'|'rename'|'edit'|'describe'|'visibility'|'delete', id, name, value, csrf_token}
+ *
+ * `edit` (1.70.0) is the Edit window's one request: {id, name, description, format} — the name (the slug
+ * is never rebuilt) and the description, rich text in one of the site's syntaxes, judged by
+ * listEditRequest() in includes/lists.php. `describe` is the same without the name, so no second path
+ * writes a description; `rename` is the name alone, as it always was.
  *
  * With `hash=`, a signed-in reader's OWN lists come back each carrying `has` — which of them the
  * torrent is already in. That is what the "add to a list" picker needs, and it is one query rather
@@ -91,10 +96,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         jsonResponse(['success' => true, 'name' => $name, 'slug' => (string)$own['slug']]);
     }
 
-    if ($op === 'describe') {
-        $desc = mb_substr(trim((string)($input['value'] ?? '')), 0, 500);
-        $db->prepare("UPDATE user_lists SET description = ? WHERE id = ? AND user_id = ?")->execute([$desc, $id, $uid]);
-        jsonResponse(['success' => true, 'description' => $desc]);
+    if ($op === 'edit' || $op === 'describe') {
+        // Validated, limited and stored in one place (includes/lists.php): the name when it is `edit`,
+        // the description either way. The rate limit above counts it like every other list write.
+        $r = listEditRequest($db, $cfg, $me, $own, $input, $op === 'edit');
+        jsonResponse($r['body'], $r['status']);
     }
 
     if ($op === 'visibility') {
@@ -218,7 +224,7 @@ $w = 'WHERE ' . implode(' AND ', $where);
 
 // The count comes from a correlated subquery rather than a GROUP BY: the driving set is at most
 // lists_max_per_user rows, and a join would sort every item of every list to produce a number.
-$st = $db->prepare("SELECT l.id, l.name, l.slug, l.description, l.is_public, l.created_at, l.updated_at,
+$st = $db->prepare("SELECT l.id, l.name, l.slug, l.description, l.description_format, l.is_public, l.created_at, l.updated_at,
                            (SELECT COUNT(*) FROM user_list_items i WHERE i.list_id = l.id) AS items
                       FROM user_lists l $w ORDER BY l.updated_at DESC, l.id DESC LIMIT 200");
 $st->execute($params);
@@ -245,14 +251,16 @@ jsonResponse([
                      && userIdHasGrantedPermission($db, $cfg, (int)($me['id'] ?? 0), 'lists.public'),
     'max_lists' => listsMaxPerUser($cfg),
     'max_items' => listsMaxItems($cfg),
+    // The description as typed and its format (the Edit window starts from them) and the card's plain
+    // excerpt (1.70.0). Only the rows the gates above let through, so nothing is shown that was not.
+    'desc_max'  => listsDescMax($cfg),
     'lists'     => array_map(static fn($r) => [
         'id'          => (int)$r['id'],
         'name'        => (string)$r['name'],
         'slug'        => (string)$r['slug'],
-        'description' => (string)$r['description'],
         'is_public'   => (int)$r['is_public'] === 1,
         'items'       => (int)$r['items'],
         'updated_at'  => (string)$r['updated_at'],
         'has'         => isset($inLists[(int)$r['id']]),
-    ], $rows),
+    ] + listDescForClient($r, $cfg), $rows),
 ]);

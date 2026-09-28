@@ -1585,6 +1585,38 @@
                         <small class="settings-hint d-block text-warning" id="profile-votes-rep-off"><?= __('settings.profile_votes_rep_off') ?></small>
                         <?php endif; ?>
                     </div>
+                    <?php /* 1.70.0: the same likes and ratings in a torrent's "Who has this" (includes/who.php) — the
+                             members who said yes to both, each with their vote. */ ?>
+                    <div class="col-md-3" data-setting="who_votes_enabled">
+                        <label class="form-label" for="setting-who_votes_enabled"><?= _h('settings.who_votes_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="who_votes_enabled" id="setting-who_votes_enabled">
+                            <option value="1" <?= ($cfg['who_votes_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['who_votes_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.who_votes_enabled_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <?php /* The descriptions a member wrote, on the profile (1.70.0, includes/profiledescs.php): a
+                     section of its own inside Profiles, like the likes' above it. The one switch sits UNDER
+                     descriptions themselves (Descriptions & ratings): with descriptions and source links
+                     both off there is nothing to list, and the hint says so beside the control. */ ?>
+            <div class="settings-section" id="section-profile-descs" data-group="profiles" data-title="<?= _h('settings.profile_descs_heading') ?>">
+                <h5><i class="bi bi-journal-text"></i> <?= _h('settings.profile_descs_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.profile_descs_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="profile_descriptions_enabled">
+                        <label class="form-label" for="setting-profile_descriptions_enabled"><?= _h('settings.profile_descriptions_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="profile_descriptions_enabled" id="setting-profile_descriptions_enabled">
+                            <option value="1" <?= ($cfg['profile_descriptions_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['profile_descriptions_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.profile_descriptions_enabled_hint') ?></small>
+                        <?php if (!(function_exists('contentEnabled') && contentEnabled($cfg))): ?>
+                        <small class="settings-hint d-block text-warning" id="profile-descs-content-off"><?= __('settings.profile_descs_content_off') ?></small>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </div>
 
@@ -1620,6 +1652,28 @@
                         <label class="form-label"><?= _h('settings.lists_items') ?></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="lists_max_items" value="<?= sanitize($cfg['lists_max_items'] ?? '500') ?>" min="10" max="5000">
                         <small class="settings-hint"><?= _h('settings.lists_items_hint') ?></small>
+                    </div>
+                </div>
+                <?php /* A list's description (1.70.0): rich text, counted as a reader sees it — the second row,
+                         because the first holds the four switches and ceilings a list itself has. */ ?>
+                <div class="row g-3 mt-1">
+                    <div class="col-md-3" data-setting="lists_desc_max">
+                        <label class="form-label" for="setting-lists_desc_max"><?= _h('settings.lists_desc_max') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="lists_desc_max" id="setting-lists_desc_max"
+                               value="<?= sanitize($cfg['lists_desc_max'] ?? (string)LIST_DESC_MAX_DEFAULT) ?>" min="<?= LIST_DESC_MAX_MIN ?>" max="<?= LIST_DESC_MAX_MAX ?>">
+                        <small class="settings-hint" id="setting-lists_desc_max-hint"><?= __('settings.lists_desc_max_hint', [
+                            'min' => LIST_DESC_MAX_MIN, 'max' => LIST_DESC_MAX_MAX,
+                            'factor' => LIST_DESC_SOURCE_FACTOR, 'cap' => number_format(LIST_DESC_SOURCE_CHARS, 0, '.', ' '),
+                        ]) ?></small>
+                    </div>
+                    <?php /* 1.70.0: the public lists a torrent is on, in its "Who has this" (includes/who.php). */ ?>
+                    <div class="col-md-3" data-setting="who_lists_enabled">
+                        <label class="form-label" for="setting-who_lists_enabled"><?= _h('settings.who_lists_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="who_lists_enabled" id="setting-who_lists_enabled">
+                            <option value="1" <?= ($cfg['who_lists_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['who_lists_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.who_lists_enabled_hint') ?></small>
                     </div>
                 </div>
             </div>
@@ -2806,7 +2860,14 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                          a control that is not drawn is not sent. */
                       $shoutFa = function_exists('emojiFaContext') ? emojiFaContext($cfg) : ['available' => false];
                       $shoutFaWant = (string)($cfg['shout_emoji_fa'] ?? 'off');
-                      $shoutFaStyle = (string)($cfg['shout_emoji_fa_style'] ?? ''); ?>
+                      $shoutFaStyle = (string)($cfg['shout_emoji_fa_style'] ?? '');
+                      /* 1.70.0: how much more of the package the picker offers. The select is drawn with the
+                         other two and shown only while the faces are on (assets/js/admin-shout.js hides it
+                         for "off"; hidden, it still saves what it holds). Its note counts the catalogue —
+                         built here from the package's own index when the package came from 1.69.0
+                         without one (emojiFaCatalogInfo()). */
+                      $shoutFaScope = function_exists('emojiFaScope') ? emojiFaScope($cfg) : 'faces';
+                      $shoutFaCat = !empty($shoutFa['available']) && function_exists('emojiFaCatalogInfo') ? emojiFaCatalogInfo($shoutFa) : null; ?>
                 <div class="mt-4" id="admin-shout-emoji">
                     <h6 class="admin-emotes-title"><i class="bi bi-emoji-smile"></i> <?= _h('settings.shout_emoji_heading') ?></h6>
                     <small class="settings-hint d-block mb-3"><?= __('settings.shout_emoji_sub') ?></small>
@@ -2830,6 +2891,21 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                                 <?php endforeach; ?>
                             </select>
                             <small class="settings-hint"><?= __('settings.shout_emoji_fa_style_hint') ?></small>
+                        </div>
+                        <div class="col-md-4" data-setting="shout_emoji_fa_scope"<?= $shoutFaWant === 'off' ? ' hidden' : '' ?>>
+                            <label class="form-label" for="setting-shout_emoji_fa_scope"><?= _h('settings.shout_emoji_fa_scope') ?></label>
+                            <select class="form-select bg-dark text-light border-secondary" name="shout_emoji_fa_scope" id="setting-shout_emoji_fa_scope">
+                                <?php foreach (EMOJI_FA_SCOPES as $fsc): ?>
+                                <option value="<?= $fsc ?>" <?= $shoutFaScope === $fsc ? 'selected' : '' ?>><?= _h('settings.shout_emoji_fa_scope_' . $fsc) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if ($shoutFaCat !== null): ?>
+                            <?php /* 4,349 in English, 4 349 (a no-break space) in Polish. */
+                                  $shoutFaN = number_format((int)$shoutFaCat['icons'], 0, '.', (function_exists('langCurrent') && langCurrent() === 'pl') ? "\xC2\xA0" : ','); ?>
+                            <small class="settings-hint"><?= __('settings.shout_emoji_fa_scope_hint', ['n' => $shoutFaN, 'c' => (int)$shoutFaCat['categories']]) ?></small>
+                            <?php else: ?>
+                            <small class="settings-hint"><?= __('settings.shout_emoji_fa_scope_noindex') ?></small>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <?php else: ?>
@@ -2857,8 +2933,11 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                      data-max-kb="<?= (int)(function_exists('shoutEmoteMaxKb') ? shoutEmoteMaxKb($cfg) : 64) ?>">
                     <h6 class="admin-emotes-title"><i class="bi bi-emoji-smile"></i> <?= _h('settings.shout_emotes_manage') ?></h6>
                     <small class="settings-hint d-block mb-3"><?= __('settings.shout_emotes_sub') ?></small>
+                    <?php /* 1.70.0: four switches on the first row (the emotes, beyond the room, the
+                             stickers, the approval) and the three numbers on the second — col-md-3 and
+                             col-md-4, so neither row leaves a cell orphaned. */ ?>
                     <div class="row g-3">
-                        <div class="col-md-4" data-setting="shout_emotes_enabled">
+                        <div class="col-md-3" data-setting="shout_emotes_enabled">
                             <label class="form-label"><?= _h('settings.shout_emotes_enabled') ?></label>
                             <select class="form-select bg-dark text-light border-secondary" name="shout_emotes_enabled">
                                 <option value="1" <?= ($cfg['shout_emotes_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
@@ -2866,7 +2945,18 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                             </select>
                             <small class="settings-hint"><?= __('settings.shout_emotes_enabled_hint') ?></small>
                         </div>
-                        <div class="col-md-4" data-setting="shout_stickers_enabled">
+                        <?php /* v79: the same emotes and stickers in messages, descriptions (and the
+                                 proposals that rewrite them), list descriptions and the profile's
+                                 description — beside the switch it depends on. */ ?>
+                        <div class="col-md-3" data-setting="emotes_everywhere">
+                            <label class="form-label" for="setting-emotes_everywhere"><?= _h('settings.emotes_everywhere') ?></label>
+                            <select class="form-select bg-dark text-light border-secondary" name="emotes_everywhere" id="setting-emotes_everywhere">
+                                <option value="1" <?= ($cfg['emotes_everywhere'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                                <option value="0" <?= ($cfg['emotes_everywhere'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            </select>
+                            <small class="settings-hint"><?= __('settings.emotes_everywhere_hint') ?></small>
+                        </div>
+                        <div class="col-md-3" data-setting="shout_stickers_enabled">
                             <label class="form-label"><?= _h('settings.shout_stickers_enabled') ?></label>
                             <select class="form-select bg-dark text-light border-secondary" name="shout_stickers_enabled">
                                 <option value="1" <?= ($cfg['shout_stickers_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
@@ -2876,7 +2966,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         </div>
                         <?php /* v65. Its place is beside the two switches rather than beside the numbers:
                                  it answers "who may see this", which is what the other two answer. */ ?>
-                        <div class="col-md-4" data-setting="shout_emote_approval">
+                        <div class="col-md-3" data-setting="shout_emote_approval">
                             <label class="form-label"><?= _h('settings.shout_emote_approval') ?></label>
                             <select class="form-select bg-dark text-light border-secondary" name="shout_emote_approval">
                                 <option value="1" <?= ($cfg['shout_emote_approval'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>

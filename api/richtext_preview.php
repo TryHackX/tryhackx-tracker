@@ -26,8 +26,12 @@ if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
  * on the whitelist's description switch answered 404 on a tracker that has descriptions off and
  * messages on. One renderer, one rate limit, and the gate that matches the text.
  */
-$for = in_array($input['for'] ?? '', ['message', 'shout'], true) ? (string)$input['for'] : 'description';
-if ($for === 'message') {
+$for = in_array($input['for'] ?? '', ['message', 'shout', 'list'], true) ? (string)$input['for'] : 'description';
+if ($for === 'list') {
+    // A list's description (1.70.0): the permission that writes one, like its save (api/user_lists.php).
+    if (!function_exists('listsEnabled') || !listsEnabled($cfg)) jsonResponse(['error' => 'lists_disabled'], 404);
+    if (!currentUser($db) || !userCan($db, $cfg, 'lists.use')) jsonResponse(['error' => __('api.content.access_required')], 403);
+} elseif ($for === 'message') {
     if (!pmEnabled($cfg)) jsonResponse(['error' => 'pm_disabled'], 404);
     if (!userCan($db, $cfg, 'pm.send')) jsonResponse(['error' => __('api.content.access_required')], 403);
 } elseif ($for === 'shout') {
@@ -40,8 +44,10 @@ if ($for === 'message') {
         jsonResponse(['error' => __('api.content.descriptions_disabled')], 404);
     }
     // Same permission as writing one: a preview is a parser, and handing it to somebody who may not
-    // submit is handing out the parser for nothing.
-    if (!userCan($db, $cfg, 'content.submit')) {
+    // submit is handing out the parser for nothing. Writing one includes PROPOSING one (1.70.0): the
+    // Info panel's editor is also the "propose a rewrite" box, and a reader who may propose and not
+    // submit was refused the Preview tab of the very editor they were given.
+    if (!userCan($db, $cfg, 'content.submit') && !userCan($db, $cfg, 'content.propose')) {
         jsonResponse(['error' => __('api.content.access_required')], 403);
     }
 }
@@ -63,8 +69,10 @@ if (!in_array($fmt, $fmtChoices, true)) $fmt = $fmtChoices[0];
 // cheaper than rendering it and then deciding it was too long.
 // A message is capped by the message setting, a description by the description one — the counter
 // under the box has to say the number the send would actually be judged against.
+// A list's is capped by the text as typed (listDescSourceCap()) — its own limit is counted as a reader
+// sees it, below.
 $max = $for === 'message' ? pmMaxChars($cfg)
-     : ($for === 'shout' ? shoutMaxChars($cfg) : richtextMaxChars($cfg));
+     : ($for === 'shout' ? shoutMaxChars($cfg) : ($for === 'list' ? listDescSourceCap($cfg) : richtextMaxChars($cfg)));
 if ($max > 0 && mb_strlen($text) > $max) {
     jsonResponse(['error' => __('api.content.description_too_long', ['length' => mb_strlen($text), 'limit' => $max]),
                   'too_long' => true, 'length' => mb_strlen($text), 'limit' => $max], 400);
@@ -83,10 +91,31 @@ if ($for === 'shout') {
     $me = currentUser($db);
     $html = shoutBodyHtml($text, $fmt, $cfg, shoutRenderContext($db, $cfg, is_array($me) ? $me : [], [$text]));
     $problem = shoutBodyProblem($cfg, $text, $fmt);
+} elseif ($for === 'list') {
+    // A LIST's description (1.70.0) previews as its window draws it (listDescRender(): the renderer, the
+    // room's emotes, no picture from elsewhere) and is judged by what its save refuses (listDescProblem()).
+    // Its counter counts what a reader sees (listDescVisible(), the twin of the one the editor counts
+    // with while typing) against its own limit, and no picture is allowed at all.
+    $clean = listDescClean($text);
+    $html = listDescRender($db, $cfg, $clean, $fmt);
+    $bad = listDescProblem($clean, $fmt, $cfg);
+    $problem = $bad !== null ? __('api.lists.' . $bad['code'], $bad['vars']) : null;
+    jsonResponse([
+        'success' => true,
+        'html'    => $html,
+        'format'  => $fmt,
+        'length'  => listDescVisible($clean, $fmt),
+        'limit'   => listsDescMax($cfg),
+        'images'  => ['used' => $counts['images'], 'limit' => 0],
+        'links'   => ['used' => $counts['links'], 'limit' => richtextMaxLinks($cfg)],
+        'problem' => $problem,
+    ]);
 } else {
     // The author previewing their own text sees their own hidden block; that is the only way to
     // check it before submitting. A message is judged against the message limit, as its send is.
-    $html = richtextRender($text, $fmt, $cfg, richtextViewerSignedIn($db));
+    // The site's emotes and stickers as the page that shows it will draw them (1.70.0) — and not
+    // counted as pictures: the counts above are the renderer's own.
+    $html = richtextRenderIn($for, $db, $text, $fmt, $cfg, richtextViewerSignedIn($db));
     $problem = richtextValidate($text, $fmt, $for === 'message' ? array_merge($cfg, ['desc_max_chars' => (string)$max]) : $cfg);
 }
 jsonResponse([

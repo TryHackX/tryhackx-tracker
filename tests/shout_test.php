@@ -1175,8 +1175,11 @@ check('a picture opens the lightbox on a PLAIN click only; every modifier is lef
 check('… and the lightbox has its way out, its link to the original and its focus handling',
       str_contains($boxJs, "'shout-lb-close'") && str_contains($boxJs, "'shout-lb-orig'")
       && str_contains($boxJs, "e.key === 'Escape'") && str_contains($boxJs, 'back.focus('));
+// The picker is assets/js/emoji-picker.js from 1.70.0 (every editor has it; the room mounts it).
+$pickJs = (string)file_get_contents($root . '/assets/js/emoji-picker.js');
 check('the picker is placed against its button, above when it fits and clamped to the window',
-      str_contains($boxJs, 'function place()') && str_contains($boxJs, 'Math.max(EDGE, Math.min(b.right - pw, vw - EDGE - pw))')
+      str_contains($pickJs, 'function place()') && str_contains($pickJs, 'Math.max(EDGE, Math.min(b.right - pw, vw - EDGE - pw))')
+      && str_contains($boxJs, 'picker = Picker.mount({')
       && !str_contains($css, "position: absolute; left: 0; bottom: 100%; z-index: 40;"));
 check('the format select drops its ring after a pointer, and keeps it for the keyboard',
       str_contains($appJs, "sel.classList.add('rt-pointer')") && str_contains($appJs, "s.classList.remove('rt-pointer')")
@@ -1247,7 +1250,9 @@ check('the lightbox\'s controls are inside the picture, revealed on hover, and a
 check('every overlay closes on the backdrop only when the press STARTED there',
       substr_count($appJs, 'closeOnBackdrop(') === 5
       && str_contains($appJs, "box.addEventListener('pointerdown', (e) => { fromBackdrop = e.target === box; });")
-      && substr_count($favJs, 'closeOnBackdrop(') === 3
+      // Calls with arguments only — a comment that names the helper is not an overlay. The fourth is the
+      // list's Edit window (1.70.0), which closes through the same helper.
+      && preg_match_all('/closeOnBackdrop\(\s*[A-Za-z_$][\w$.]*\s*,/', $favJs) === 4
       && substr_count($peopleJs, 'box.onpointerdown = function (e) { fromBackdrop = e.target === box; };') === 2
       && str_contains($boxJs, 'root.addEventListener(\'pointerdown\', function (e) { lbFromBackdrop = onBackdrop(e.target); });')
       && str_contains((string)file_get_contents($root . '/assets/js/admin-common.js'), 'fromBackdrop = e.target === box;'));

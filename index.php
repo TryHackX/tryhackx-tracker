@@ -35,7 +35,11 @@ require_once __DIR__ . '/includes/usermedia.php';
 require_once __DIR__ . '/includes/profilebio.php';
 // A member's likes or ratings on the profile and the account page (v75): the one gate both ask.
 require_once __DIR__ . '/includes/profilevotes.php';
+// The descriptions a member wrote, on the profile and the account page (v81): the same shape.
+require_once __DIR__ . '/includes/profiledescs.php';
 require_once __DIR__ . '/includes/lists.php';
+// "Who has this" (1.70.0): which of its three sections the Info panel's overlay carries for this reader.
+require_once __DIR__ . '/includes/who.php';
 require_once __DIR__ . '/includes/people.php';
 require_once __DIR__ . '/includes/user2fa.php';
 // The partner guide (?action=apidocs) cleans its own query string through the SAME function

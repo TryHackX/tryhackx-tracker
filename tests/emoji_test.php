@@ -142,8 +142,11 @@ check('… and the file holds names and words only: no glyph, no code point, not
       !preg_match('/\\\\u[ef][0-9a-f]{3}|[\x{E000}-\x{F8FF}]|@font-face|url\(/iu', $faJson));
 
 /* ══ 3. the token ═══════════════════════════════════════════════════════════════ */
-$ok = [':fa-face-grin:', ':fa-face-grin-tears/duotone-light:', ':fa-face-smile/sharp-duotone-solid:', ':fa-0:'];
-$no = [':fa_face:', ':fa-:', ':fa-Face-grin:', ':fa-face--grin:', ':fa-face-grin/:', ':fa-face-grin/Solid:', ':fa face:', 'fa-face-grin:', ':face-grin:'];
+// 1.70.0: any icon, so the longest names Font Awesome has (nine parts) — and still nothing looser.
+$ok = [':fa-face-grin:', ':fa-face-grin-tears/duotone-light:', ':fa-face-smile/sharp-duotone-solid:', ':fa-0:',
+       ':fa-arrow-up-right-and-arrow-down-left-from-center:', ':fa-rocket/slab-press-duo-regular:'];
+$no = [':fa_face:', ':fa-:', ':fa-Face-grin:', ':fa-face--grin:', ':fa-face-grin/:', ':fa-face-grin/Solid:', ':fa face:', 'fa-face-grin:', ':face-grin:',
+       ':fa-a-b-c-d-e-f-g-h-i-j-k:', ':fa-rocket/a-b-c-d-e-f:'];
 check('the token is `:fa-NAME:` or `:fa-NAME/STYLE:` in Font Awesome\'s own grammar, and nothing looser',
       !array_filter($ok, fn($t) => preg_match(EMOJI_FA_TOKEN_RE, $t, $m) !== 1 || $m[0] !== $t) && !array_filter($no, fn($t) => preg_match(EMOJI_FA_TOKEN_RE, $t) === 1));
 check('… no emote code can be one ([a-z0-9_], no hyphen) and none of the shortcodes starts with fa-',
@@ -151,7 +154,10 @@ check('… no emote code can be one ([a-z0-9_], no hyphen) and none of the short
       && !preg_match(SHOUT_EMOTE_CODE_RE, 'fa-face-grin') && preg_match(EMOJI_FA_TOKEN_RE, ':fa_face_grin:') === 0);
 check('… and the style form is outside the shortcodes\' characters: a shortcode pass never reads it',
       preg_match('/:([a-z0-9_+-]{1,24}):/', ':fa-face-grin/solid:') === 0);
-$sjs = (string)file_get_contents($root . '/assets/js/shoutbox.js');
+// The picker is assets/js/emoji-picker.js from 1.70.0 — moved out of shoutbox.js, which mounts it, when every
+// editor got it. Both are read: the picker's code in the one, the room's mount of it in the other.
+$pjs = (string)file_get_contents($root . '/assets/js/emoji-picker.js');
+$sjs = $pjs . "\n" . (string)file_get_contents($root . '/assets/js/shoutbox.js');
 check('the picker\'s twin of the grammar is the same expression, held to the whole token',
       preg_match('#var FA_TOKEN = /\^(.+)\$/;#', $sjs, $jm) === 1 && '/' . $jm[1] . '/' === EMOJI_FA_TOKEN_RE, $jm[1] ?? '');
 
@@ -184,25 +190,34 @@ check('a face the package would lack, or a style that no longer loads, falls bac
 check('no text is lost when nothing can be drawn and no emoji is known: the face\'s label, in brackets',
       emojiFaTokenHtml(':fa-face-new:', 'face-new', null, ['mode' => 'off', 'faces' => ['face-new' => ['Face New', [], ['solid']]], 'setup' => null], 'en') === '[Face New]');
 
-/* ══ 5. the two settings, in their four places ═══════════════════════════════════ */
+/* ══ 5. the three settings, in their four places ═════════════════════════════════ */
 $defs = trackerSchemaDefaultSettings();
-check('the schema is at 77 or later, and the two settings ship off / the site\'s style', TRACKER_SCHEMA_VERSION >= 77
-      && ($defs['shout_emoji_fa'] ?? null) === 'off' && ($defs['shout_emoji_fa_style'] ?? null) === '' && EMOJI_FA_MODES === ['off', 'fa', 'mixed']);
-check('… read the careful way: anything but the three words is off', emojiFaSetting([]) === 'off' && emojiFaSetting(['shout_emoji_fa' => 'FA']) === 'off'
-      && emojiFaSetting(['shout_emoji_fa' => 'mixed']) === 'mixed');
+check('the schema is at 78 or later, and the three settings ship off / the site\'s style / the faces alone (1.70.0: the scope)', TRACKER_SCHEMA_VERSION >= 78
+      && ($defs['shout_emoji_fa'] ?? null) === 'off' && ($defs['shout_emoji_fa_style'] ?? null) === '' && ($defs['shout_emoji_fa_scope'] ?? null) === 'faces'
+      && EMOJI_FA_MODES === ['off', 'fa', 'mixed'] && EMOJI_FA_SCOPES === ['faces', 'search', 'all']);
+check('… read the careful way: anything but the three words is off, and faces', emojiFaSetting([]) === 'off' && emojiFaSetting(['shout_emoji_fa' => 'FA']) === 'off'
+      && emojiFaSetting(['shout_emoji_fa' => 'mixed']) === 'mixed' && emojiFaScope([]) === 'faces' && emojiFaScope(['shout_emoji_fa_scope' => 'every']) === 'faces'
+      && emojiFaScope(['shout_emoji_fa_scope' => 'search']) === 'search');
 $save = (string)file_get_contents($root . '/api/admin/save_settings.php');
-check('… in the save allow-list, the mode coerced like the room\'s other closed sets, the style judged against what loads',
-      str_contains($save, "'shout_emoji_fa', 'shout_emoji_fa_style',") && str_contains($save, "!in_array(\$data['shout_emoji_fa'], EMOJI_FA_MODES, true)")
+check('… in the save allow-list, the mode and the scope coerced like the room\'s other closed sets, the style judged against what loads',
+      str_contains($save, "'shout_emoji_fa', 'shout_emoji_fa_style', 'shout_emoji_fa_scope',") && str_contains($save, "!in_array(\$data['shout_emoji_fa'], EMOJI_FA_MODES, true)")
+      && str_contains($save, "!in_array(\$data['shout_emoji_fa_scope'], EMOJI_FA_SCOPES, true)") && str_contains($save, "\$data['shout_emoji_fa_scope'] = 'faces';")
       && str_contains($save, "if (\$v === 'brands' || !isset(\$loads[\$v])) \$v = '';"));
 $kw = settingsCatalogKeywords();
-check('… with search words', !empty($kw['shout_emoji_fa']) && !empty($kw['shout_emoji_fa_style']));
+check('… with search words', !empty($kw['shout_emoji_fa']) && !empty($kw['shout_emoji_fa_style']) && str_contains((string)($kw['shout_emoji_fa_scope'] ?? ''), 'kategorie'));
 $tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
 $sp = strpos($tpl, 'id="section-shout"');
 $sec = $sp !== false ? substr($tpl, $sp, (int)strpos($tpl, 'class="settings-section"', $sp + 20) - $sp) : '';
-check('… and in Settings → Shoutbox: both controls, offered only while a Pro package is the icon source, a note otherwise',
+check('… and in Settings → Shoutbox: the three controls, offered only while a Pro package is the icon source, a note otherwise',
       str_contains($sec, 'name="shout_emoji_fa"') && str_contains($sec, 'name="shout_emoji_fa_style"') && str_contains($sec, "!empty(\$shoutFa['available'])")
       && str_contains($sec, "__('settings.shout_emoji_fa_hint'") && str_contains($sec, "_h('settings.shout_emoji_fa_unavailable')")
       && strpos($sec, 'id="admin-shout-emoji"') < strpos($sec, 'id="admin-emotes"'));
+$adminShout = (string)file_get_contents($root . '/assets/js/admin-shout.js');
+check('… the scope beside them, drawn hidden while the faces are off and shown by the mode select (a hidden field still saves), its hint counting the catalogue',
+      str_contains($sec, 'name="shout_emoji_fa_scope"') && str_contains($sec, "data-setting=\"shout_emoji_fa_scope\"<?= \$shoutFaWant === 'off' ? ' hidden' : '' ?>")
+      && str_contains($sec, 'foreach (EMOJI_FA_SCOPES as $fsc)') && str_contains($sec, "__('settings.shout_emoji_fa_scope_hint', ['n' =>")
+      && str_contains($sec, "__('settings.shout_emoji_fa_scope_noindex')")
+      && str_contains($adminShout, "cell.hidden = mode.value === 'off';") && str_contains((string)file_get_contents($root . '/assets/css/admin.css'), '#admin-shout-emoji [data-setting][hidden] { display: none !important; }'));
 foreach (['en', 'pl'] as $lc) {
     $d = include $root . '/lang/' . $lc . '.php';
     $hint = (string)($d['settings.shout_emoji_fa_hint'] ?? '');
@@ -212,11 +227,39 @@ foreach (['en', 'pl'] as $lc) {
     foreach (array_merge(['recent', 'emotes', 'stickers'], $wantGroups, array_map(fn($p) => str_replace('-', '_', $p), $F['pages'])) as $tab) {
         if (trim((string)($d['js.shout.tab_' . $tab] ?? '')) === '') $miss[] = $tab;
     }
-    foreach (['search', 'search_clear', 'search_none', 'search_found', 'recent_empty', 'emoji_failed', 'variants', 'variants_hint', 'tone_0', 'tone_5'] as $k) {
+    foreach (['search', 'search_clear', 'search_none', 'search_found', 'recent_empty', 'emoji_failed', 'variants', 'variants_hint', 'tone_0', 'tone_5',
+              'tab_fa_all', 'search_icons', 'fa_cats', 'fa_cat_title', 'fa_cat_status', 'fa_group', 'search_found_fa', 'fa_loading', 'fa_failed'] as $k) {
         if (trim((string)($d['js.shout.' . $k] ?? '')) === '') $miss[] = $k;
     }
     check("… and the picker says every page and control in $lc", $miss === [], implode(', ', $miss));
+    // 1.70.0: the three scopes, and the hint that says how the other icons are found (by their English names).
+    $sh = (string)($d['settings.shout_emoji_fa_scope_hint'] ?? '');
+    check("the $lc words for the scope: three choices, and a hint that says the icons beyond the faces are found by their English names and their category",
+          trim((string)($d['settings.shout_emoji_fa_scope_faces'] ?? '')) !== '' && trim((string)($d['settings.shout_emoji_fa_scope_search'] ?? '')) !== ''
+          && trim((string)($d['settings.shout_emoji_fa_scope_all'] ?? '')) !== '' && str_contains($sh, ':n') && str_contains($sh, ':c')
+          && ($lc === 'en' ? str_contains($sh, 'by its English name') && str_contains($sh, 'category') : str_contains($sh, 'po angielskiej nazwie') && str_contains($sh, 'kategorii')), $sh);
 }
+// Font Awesome's categories named in both languages (1.70.0): every id of the owner's two indexes — the
+// same 68 in 6.7.2 and 7.3.1 — and the catalogue's own two pages; this project's words, not Font Awesome's.
+$ownCatIds = ['accessibility', 'alert', 'alphabet', 'animals', 'arrows', 'astronomy', 'automotive', 'buildings', 'business', 'camping', 'charity',
+              'charts-diagrams', 'childhood', 'clothing-fashion', 'coding', 'communication', 'connectivity', 'construction', 'design', 'devices-hardware',
+              'disaster', 'editing', 'education', 'emoji', 'energy', 'files', 'film-video', 'food-beverage', 'fruits-vegetables', 'gaming', 'gender',
+              'halloween', 'hands', 'holidays', 'household', 'humanitarian', 'logistics', 'maps', 'maritime', 'marketing', 'mathematics', 'media-playback',
+              'medical-health', 'money', 'moving', 'music-audio', 'nature', 'numbers', 'photos-images', 'political', 'punctuation-symbols', 'religion',
+              'science', 'science-fiction', 'security', 'shapes', 'shopping', 'social', 'spinners', 'sports-fitness', 'text-formatting', 'time', 'toggle',
+              'transportation', 'travel-hotel', 'users-people', 'weather', 'writing'];
+$enD = include $root . '/lang/en.php'; $plD = include $root . '/lang/pl.php';
+$noName = []; $samePl = 0;
+foreach (array_merge($ownCatIds, ['brands', 'other']) as $cid) {
+    $k = 'emoji.facat.' . str_replace('-', '_', $cid);
+    if (trim((string)($enD[$k] ?? '')) === '' || trim((string)($plD[$k] ?? '')) === '') $noName[] = $cid;
+    elseif ($enD[$k] === $plD[$k]) $samePl++;
+}
+check('all 68 of Font Awesome\'s categories and the two pages of the catalogue\'s own are named in English and in Polish (' . $samePl . ' the same word in both: Emoji, Halloween, Marketing, Transport)',
+      count($ownCatIds) === 68 && $noName === [] && $samePl <= 4 && emojiFaCategoryLabel('animals', 'pl') === 'Zwierzęta' && emojiFaCategoryLabel('food-beverage', 'en') === 'Food & drink'
+      && emojiFaCategoryLabel('a-new-one', 'pl') === 'A new one', implode(', ', $noName));
+check('… sent with the faces\' answer in the reader\'s language, not carried by every page (no emoji.* in the public bundle)',
+      !array_filter(LANG_JS_PUBLIC, fn($p) => str_starts_with($p, 'emoji.')) && str_contains((string)file_get_contents($root . '/includes/emoji.php'), "'cats' => array_map(fn(\$id) => [\$id, emojiFaCategoryLabel(\$id, \$lang)], \$cat['ids'])"));
 
 /* ══ 6. the picker's script, and the widget ═══════════════════════════════════════ */
 check('the script carries no emoji: the grid is data, asked for when the picker opens (ensureData(), from the widget\'s data-emoji-files)',
@@ -232,6 +275,15 @@ check('… the variants open on a long press, a right click, the context-menu ke
 $wid = (string)file_get_contents($root . '/templates/partials/shoutbox_widget.php');
 check('the widget says where the files are and whether the faces are on — and carries no emoji data of its own',
       str_contains($wid, 'data-emoji-files="') && str_contains($wid, 'data-emoji-fa="') && str_contains($wid, 'data-emoji-fa-v="') && !str_contains($wid, 'emoji-en.json'));
+check('1.70.0: the catalogue of every icon is asked for only when the scope needs it — with `all` once the first page is drawn (in idle time), with `search` by the first search, at once only when Recent holds an icon — at the package\'s address',
+      str_contains($sjs, "API + 'shout_emoji&part=catalog&v=' + encodeURIComponent(v)") && str_contains($sjs, "if (fa && !cat && (recentWaits || fa.scope === 'all')) {")
+      && str_contains($sjs, 'window.requestIdleCallback(function () { if (!panel.hidden) catalogLoad(); }') && str_contains($sjs, 'if (cat) faList = faSearch(q, words, raw);')
+      && str_contains($sjs, "if (!fa || !fa.catalog || fa.scope === 'faces') return Promise.resolve(null);"));
+check('… its categories on chips over the grid, the search\'s group after the emoji, and every icon\'s variants by the server\'s own rule (faVariants() / emojiFaVariants())',
+      str_contains($sjs, "className: 'shout-picker-cats'") && str_contains($sjs, 'function faSearch(q, words, raw) {') && str_contains($sjs, 'function faVariants(fa, has) {')
+      && str_contains($sjs, "if (it.kind === 'h') return el('div', { className: 'shout-picker-group'")
+      && str_contains($styleCss = (string)file_get_contents($root . '/assets/css/style.css'), '.shout-picker-cat.active {') && str_contains($styleCss, '.fai { font-size: 1.15em;')
+      && str_contains((string)file_get_contents($root . '/includes/emoji.php'), 'function emojiFaVariants(array $has, array $ctx): array {'));
 check('the script that marks the site\'s icons leaves Font Awesome\'s faces alone (an element without `bi` is not its)',
       str_contains((string)file_get_contents($root . '/assets/js/icons.js'), "if (!name && !cl.contains('bi')) return;"));
 $css = (string)file_get_contents($root . '/assets/css/style.css');
@@ -289,6 +341,25 @@ if ($uid > 0) {
               ($j['mode'] ?? '') === 'fa' && count($j['faces'] ?? []) === count(iconpackEmojiOf($m['id'])['faces'])
               && ($grinPl['l'] ?? '') === $F['faces']['face-grin'][2] && (array_values(array_filter($jEn['faces'] ?? [], fn($f) => $f['n'] === 'face-grin'))[0]['l'] ?? '') !== $grinPl['l'],
               json_encode(['mode' => $j['mode'] ?? null, 'n' => count($j['faces'] ?? []), 'grin' => $grinPl]));
+        // 1.70.0: the scope, and the catalogue of every icon behind `part=catalog`.
+        $cfgAll = ['shout_emoji_fa_scope' => 'all'] + $cfgPro;
+        $jAll = $get($cfgAll, $sess, ['lang' => 'pl']);
+        $catFile = (string)@file_get_contents(iconpackCatalogPath($m['id']));
+        $catJ = json_decode($catFile, true) ?: [];
+        check('with the scope at `all` the answer says so, where the catalogue is and how many icons it holds, its categories in Polish',
+              ($jAll['scope'] ?? '') === 'all' && ($jAll['catalog']['v'] ?? '') === iconpackCatalogVersion($m) && ($jAll['catalog']['n'] ?? 0) === ($catJ['count'] ?? -1)
+              && in_array(['animals', 'Zwierzęta'], (array)($jAll['catalog']['cats'] ?? []), true) && isset($jAll['styles']['brands']),
+              json_encode(['scope' => $jAll['scope'] ?? null, 'catalog' => array_diff_key((array)($jAll['catalog'] ?? []), ['cats' => 1])]));
+        $jc = $get($cfgAll, $sess, ['part' => 'catalog', 'v' => iconpackCatalogVersion($m)]);
+        check('?part=catalog: the package\'s catalogue as stored (' . ($catJ['count'] ?? 0) . ' icons in ' . count((array)($catJ['cats'] ?? [])) . ' categories)',
+              ($jc['count'] ?? null) === ($catJ['count'] ?? -1) && ($jc['icons'] ?? null) === ($catJ['icons'] ?? []) && ($jc['cats'] ?? null) === ($catJ['cats'] ?? []),
+              substr(json_encode($jc), 0, 200));
+        $jFaces = $get(['shout_emoji_fa_scope' => 'faces'] + $cfgPro, $sess, ['part' => 'catalog']);
+        $jOff = $get(['shout_emoji_fa' => 'off'] + $cfgAll, $sess, ['part' => 'catalog']);
+        $jSearch = $get(['shout_emoji_fa_scope' => 'search'] + $cfgPro, $sess, ['part' => 'catalog']);
+        check('… with `search` too, and never with the scope at `faces` or the faces off (404)', ($jFaces['error'] ?? '') === 'off' && ($jOff['error'] ?? '') === 'off'
+              && ($jSearch['count'] ?? null) === ($catJ['count'] ?? -1), json_encode([$jFaces, $jOff, array_keys($jSearch)]));
+        check('… and for nobody who may not read the room', ($get(['shout_enabled' => '0'] + $cfgAll, $sess, ['part' => 'catalog'])['error'] ?? '') === 'disabled');
     } else {
         echo "SKIP the endpoint with a Pro package: none with an index is installed here (tests/iconpack_test.php §12 covers it synthetically)\n";
     }
@@ -296,6 +367,160 @@ if ($uid > 0) {
     echo "SKIP the endpoint as a member: no smokeuser here (run deploy/local_bootstrap.php and the smokes)\n";
 }
 @unlink($runner);
+
+/* ══ 8. the picker in every editor, and its data by context (1.70.0) ══════════════════════════════════
+ * One module (assets/js/emoji-picker.js) for the room and every editor; its data asked for as the context
+ * it serves (`for`), each gated by the permission that writes THAT text; the emotes beyond the room behind
+ * `emotes_everywhere`. The rendering itself: tests/richtext_test.php (pure), tests/shout_emotes_test.php
+ * (the store), tests/profile_bio_test.php (the profile). The browser: scratchpad/shots/picker_everywhere_check.js. */
+$db = getDb();
+$cfg = getSettings($db, true);
+$defs = trackerSchemaDefaultSettings();
+check('1.70.0 the schema is at 79 or later, and `emotes_everywhere` ships on', TRACKER_SCHEMA_VERSION >= 79 && ($defs['emotes_everywhere'] ?? null) === '1');
+check('… in the save allow-list and among the switches coerced to 0/1',
+      str_contains($save, "'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',") && str_contains($save, "'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',"));
+check('… with search words, in both languages', str_contains((string)(settingsCatalogKeywords()['emotes_everywhere'] ?? ''), 'messages') && str_contains((string)(settingsCatalogKeywords()['emotes_everywhere'] ?? ''), 'wiadomosci'));
+$emSec = substr($tpl, (int)strpos($tpl, 'id="admin-emotes"'), 6000);
+check('… and in Settings → Shoutbox → Emotes, beside the switch it depends on (four switches to a row, the numbers on the next)',
+      str_contains($emSec, 'data-setting="emotes_everywhere"') && str_contains($emSec, 'name="emotes_everywhere"')
+      && strpos($emSec, 'name="shout_emotes_enabled"') < strpos($emSec, 'name="emotes_everywhere"') && strpos($emSec, 'name="emotes_everywhere"') < strpos($emSec, 'name="shout_stickers_enabled"')
+      && substr_count(substr($emSec, 0, (int)strpos($emSec, 'data-setting="shout_emote_max_kb"')), 'class="col-md-3"') === 4);
+foreach (['en', 'pl'] as $lc) {
+    $d = include $root . '/lang/' . $lc . '.php';
+    $hint = (string)($d['settings.emotes_everywhere_hint'] ?? '');
+    check("the $lc words: the switch, a hint naming the places and the e-mail, the toolbar titles, the picker's sticker line",
+          trim((string)($d['settings.emotes_everywhere'] ?? '')) !== '' && str_contains($hint, '<code>:code:</code>')
+          && ($lc === 'en' ? str_contains($hint, 'private messages') && str_contains($hint, 'e-mail') : str_contains($hint, 'prywatnych wiadomościach') && str_contains($hint, 'e-mailu'))
+          && trim((string)($d['rt.emoji'] ?? '')) !== '' && trim((string)($d['rt.emoji_emotes'] ?? '')) !== '' && trim((string)($d['rt.emoji_stickers'] ?? '')) !== ''
+          && trim((string)($d['js.bio.emoji'] ?? '')) !== '' && trim((string)($d['js.bio.emoji_emotes'] ?? '')) !== '' && trim((string)($d['js.shout.sticker_insert_hint'] ?? '')) !== '', $hint);
+}
+// The module, and every editor wired to it.
+$boxOnly = (string)file_get_contents($root . '/assets/js/shoutbox.js');
+check('one picker: assets/js/emoji-picker.js is window.EmojiPicker (mount, attach, isToken, forgetEmotes), and the room mounts it with no copy of its own',
+      str_contains($pjs, 'window.EmojiPicker = {') && str_contains($pjs, 'mount: mountPicker,') && str_contains($pjs, 'attach: attach,') && str_contains($pjs, 'isToken: isToken,')
+      && str_contains($boxOnly, 'picker = Picker.mount({') && !str_contains($boxOnly, 'function mountPicker') && !str_contains($boxOnly, 'var FA_TOKEN')
+      && str_contains($boxOnly, 'Picker.isToken(text)') && substr_count($boxOnly, 'Picker.forgetEmotes()') === 2);
+check('… the room\'s requests are the ones it always made (no `for`), every other context says which it is',
+      str_contains($pjs, "var forQ = ctx === 'shout' ? '' : '&for=' + ctx;") && str_contains($pjs, "get('shout_emotes' + (ctx === 'shout' ? '' : '&for=' + encodeURIComponent(ctx)))")
+      && str_contains($pjs, "+ '&lang=' + encodeURIComponent(want) + forQ") && str_contains($pjs, "'shout_emoji&part=catalog&v=' + encodeURIComponent(v) + forQ"));
+check('… an editor\'s panel floats (fixed, in the button\'s dialog or on the page) and follows what scrolls; one Esc is the picker\'s alone',
+      str_contains($pjs, "var host = opts.host || (btn.closest && btn.closest('[role=\"dialog\"]')) || document.body;")
+      && str_contains($pjs, "if (floating) window.addEventListener('scroll', onScroll, true);") && str_contains($pjs, 'e.stopPropagation();')
+      && str_contains((string)file_get_contents($root . '/assets/css/style.css'), '.shout-picker.shout-picker-float { position: fixed; z-index: 1300; }'));
+check('… a sticker in an editor goes in as its code (the room sends it), and a pick past the box\'s maxlength is refused, not cut',
+      str_contains($pjs, "if (it.kind === 's' && typeof opts.sticker === 'function') { close(); opts.sticker(it.code); return; }")
+      && str_contains($pjs, "if (max && before.length + add.length + after.length > max) {") && str_contains($pjs, "ta.dispatchEvent(new Event('input', { bubbles: true }));"));
+$layoutSrc = (string)file_get_contents($root . '/templates/layout.php');
+$appSrc = (string)file_get_contents($root . '/assets/js/app.js');
+check('the page loads it on every public page, before app.js (which mounts the whitelist form\'s editor as it loads)',
+      ($lp = strpos($layoutSrc, "assets/js/emoji-picker.js<?= assetVer('assets/js/emoji-picker.js') ?>")) !== false
+      && $lp < strpos($layoutSrc, "assets/js/app.js<?= assetVer('assets/js/app.js') ?>") && $lp < strpos($layoutSrc, 'assets/js/shoutbox.js'));
+check('window.RichText.mount() attaches it to the toolbar\'s `<id>-emoji`, puts it away on Preview, and keeps its group whatever the format',
+      str_contains($appSrc, "const emojiBtn = document.getElementById(id + '-emoji');") && str_contains($appSrc, "window.EmojiPicker.attach({ textarea: ta, button: emojiBtn })")
+      && str_contains($appSrc, "if (which !== 'write' && picker) picker.close();") && str_contains($appSrc, 'if (marks.length) g.hidden = !marks.some(b => !b.hidden);'));
+$tplW = (string)file_get_contents($root . '/templates/pages/whitelist.php');
+$tplI = (string)file_get_contents($root . '/templates/partials/info_overlay.php');
+$tplA = (string)file_get_contents($root . '/templates/pages/account.php');
+check('every editor\'s toolbar has the button, as its own context: the whitelist form and the Info panel (a description, first or proposed), the message composer',
+      str_contains($tplW, "emojiPickerButton(\$db, \$cfg, \$baseUrl, 'description', 'wl-desc-emoji')") && str_contains($tplI, "emojiPickerButton(\$db, \$cfg, \$baseUrl, 'description', 'info-desc-emoji')")
+      && str_contains($tplA, "emojiPickerButton(\$db, \$cfg, \$baseUrl, 'message', 'pm-body-emoji')")
+      && strpos($tplW, 'wl-desc-emoji') > strpos($tplW, 'id="wl-desc-tools"') && strpos($tplW, 'wl-desc-emoji') < strpos($tplW, '<textarea id="wl-desc"'));
+check('`for`: absent or empty is the room, a context is itself, anything else nothing (refused, never read as another)',
+      emojiPickerFor(null) === 'shout' && emojiPickerFor('') === 'shout' && emojiPickerFor('message') === 'message' && emojiPickerFor('list') === 'list'
+      && emojiPickerFor('MESSAGE') === null && emojiPickerFor('panel') === null && emojiPickerFor(['message']) === null && EMOJI_PICKER_CONTEXTS === ['shout', 'message', 'description', 'bio', 'list']);
+$attrs = emojiPickerAttrs(['for' => 'message', 'files' => ['en' => '/a"b.json'], 'fa' => 'mixed"><x', 'fa_v' => 'v1', 'emotes' => true, 'stickers' => false, 'emotes_page' => true]);
+check('the button\'s data, escaped: the context, the files, Font Awesome\'s mode and fingerprint, what is offered',
+      $attrs === ' data-emoji-for="message" data-emoji-files="{&quot;en&quot;:&quot;/a\&quot;b.json&quot;}" data-emoji-fa="mixed&quot;&gt;&lt;x" data-emoji-fa-v="v1" data-emotes="1" data-stickers="0" data-emotes-page="1"', $attrs);
+$btnHtml = emojiPickerButton($db, $cfg, '/', 'message', 'pm-body-emoji');
+check('the toolbar button: a real button of its own group, the site\'s face icon, a title that says what it offers, the data above',
+      str_starts_with($btnHtml, '<span class="rt-tool-group rt-tool-emoji"><button type="button" class="rt-emoji-btn" id="pm-body-emoji" title="')
+      && str_contains($btnHtml, 'aria-haspopup="dialog" aria-expanded="false" data-emoji-for="message"') && str_contains($btnHtml, '<i class="bi bi-emoji-smile" aria-hidden="true"></i></button></span>'), $btnHtml);
+
+// The endpoints, as requests, by context.
+$runner2 = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'emt_runner2_' . bin2hex(random_bytes(4)) . '.php';
+file_put_contents($runner2, '<?php
+$a = json_decode((string)file_get_contents($argv[1]), true);
+chdir($a["root"]);
+$_SERVER["REQUEST_METHOD"] = "GET";
+$_SERVER["REMOTE_ADDR"] = "127.0.0.1";
+$_GET = $a["get"];
+foreach (["config/app.php", "config/database.php", "includes/settings.php", "includes/functions.php", "includes/schema.php", "includes/richtext.php",
+          "includes/users.php", "includes/favourites.php", "includes/lists.php", "includes/people.php", "includes/profilebio.php", "includes/shout.php",
+          "includes/audit.php", "includes/auth.php", "includes/lang.php"] as $f) require_once $f;
+$db = getDb();
+$cfg = array_merge(getSettings($db), $a["cfg"]);
+$GLOBALS["db"] = $db; $GLOBALS["cfg"] = $cfg;
+session_id($a["sid"]);
+session_start();
+foreach ($a["session"] as $k => $v) $_SESSION[$k] = $v;
+register_shutdown_function(function () { if (session_status() === PHP_SESSION_ACTIVE) session_destroy(); });
+langInit($cfg, null);
+$GLOBALS["__audit_endpoint"] = $a["endpoint"];
+require "api/" . $a["endpoint"] . ".php";
+');
+$ask = function (string $endpoint, array $cfgX, array $session, array $q = []) use ($root, $runner2): array {
+    $arg = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'emt_args2_' . bin2hex(random_bytes(4)) . '.json';
+    file_put_contents($arg, json_encode(['root' => $root, 'endpoint' => $endpoint, 'get' => $q, 'cfg' => $cfgX, 'session' => $session, 'sid' => 'emtest2' . bin2hex(random_bytes(8))]));
+    $out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' -d display_errors=0 -d xdebug.mode=off ' . escapeshellarg($runner2) . ' ' . escapeshellarg($arg) . ' 2>&1');
+    @unlink($arg);
+    $j = json_decode(trim($out), true);
+    return is_array($j) ? $j : ['__raw' => substr($out, 0, 300)];
+};
+if ($uid > 0) {
+    $sessU = ['user_id' => $uid, 'user_login_time' => time(), 'csrf_token' => 'emt'];
+    $open = ['users_enabled' => '1', 'shout_enabled' => '0', 'shout_emotes_enabled' => '1', 'shout_stickers_enabled' => '1', 'emotes_everywhere' => '1',
+             'pm_enabled' => '1', 'wl_allow_description' => '1', 'profiles_enabled' => '1', 'profile_bio_enabled' => '1', 'lists_enabled' => '1',
+             'icon_library' => 'bootstrap', 'shout_emoji_fa' => 'off'];
+    $roomOn2 = ['shout_enabled' => '1'] + $open;
+    // A sticker of the site's for the run, and back out again.
+    $db->exec("DELETE FROM shout_emotes WHERE code = 'emtctx_big'");
+    $stk = shoutEmoteStore($db, $roomOn2, 'emtctx_big', 'Emt ctx big', '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" fill="#468"/><title>emtctx</title></svg>', null, true);
+    shoutEmotesInvalidate();
+    try {
+        check('the endpoints refuse a `for` that is no context (400), both of them',
+              ($ask('shout_emoji', $roomOn2, $sessU, ['for' => 'panel'])['error'] ?? '') === 'bad_for' && ($ask('shout_emotes', $roomOn2, $sessU, ['for' => 'x'])['error'] ?? '') === 'bad_for');
+        $jm = $ask('shout_emoji', $open, $sessU, ['for' => 'message', 'lang' => 'en']);
+        check('a MESSAGE\'s picker is answered with the room switched off — its gate is pm.send, not the room\'s view',
+              ($jm['success'] ?? false) === true && ($jm['mode'] ?? '') === 'off' && ($ask('shout_emoji', $open, $sessU, [])['error'] ?? '') === 'disabled', json_encode($jm));
+        check('… refused where messages are off, and to somebody signed out',
+              ($ask('shout_emoji', ['pm_enabled' => '0'] + $open, $sessU, ['for' => 'message'])['error'] ?? '') === 'disabled'
+              && ($ask('shout_emoji', $open, [], ['for' => 'message'])['error'] ?? '') === 'login_required');
+        // The emotes are the ROOM's (their store, their manager, their page): beyond it only while its emotes
+        // are on — the room switched off takes them everywhere, the faces and the emoji stay.
+        check('… but the emotes are the room\'s: with the room off a message\'s picker has none (403), its faces and emoji still do',
+              ($ask('shout_emotes', $open, $sessU, ['for' => 'message'])['error'] ?? '') === 'disabled');
+        $em = $ask('shout_emotes', $roomOn2, $sessU, ['for' => 'message']);
+        $emCodes = array_column((array)($em['emotes'] ?? []), 'code');
+        $emBig = array_values(array_filter((array)($em['emotes'] ?? []), fn($r) => ($r['code'] ?? '') === 'emtctx_big'))[0] ?? [];
+        check('a message\'s emotes: the store\'s, the sticker among them marked as one — and no upload limits, which are the room page\'s',
+              ($em['success'] ?? false) === true && in_array('emtctx_big', $emCodes, true) && ($emBig['sticker'] ?? false) === true && ($em['stickers'] ?? false) === true
+              && !array_key_exists('may_upload', $em) && !isset($emBig['draw']) && str_contains((string)($emBig['url'] ?? ''), 'endpoint=shout_emote&id='), json_encode(array_slice($em, 0, 3)));
+        $eb = $ask('shout_emotes', $roomOn2, $sessU, ['for' => 'bio']);
+        check('a profile\'s: no stickers at all', ($eb['success'] ?? false) === true && !in_array('emtctx_big', array_column((array)($eb['emotes'] ?? []), 'code'), true)
+              && ($eb['stickers'] ?? true) === false && in_array('flame', array_column((array)($eb['emotes'] ?? []), 'code'), true), json_encode(array_column((array)($eb['emotes'] ?? []), 'code')));
+        check('… nothing where `emotes_everywhere` is off (403) — the room\'s own answer unchanged by it',
+              ($ask('shout_emotes', ['emotes_everywhere' => '0'] + $roomOn2, $sessU, ['for' => 'message'])['error'] ?? '') === 'disabled'
+              && ($ask('shout_emotes', ['emotes_everywhere' => '0'] + $roomOn2, $sessU, [])['success'] ?? false) === true
+              && array_key_exists('may_upload', $ask('shout_emotes', $roomOn2, $sessU, [])));
+        $desc = $ask('shout_emotes', $roomOn2, $sessU, ['for' => 'description']);
+        check('a DESCRIPTION\'s (content.submit or content.propose), a LIST\'s (lists.use), a PROFILE\'s (profile.bio) — each its own gate, each switched off refused',
+              ($desc['success'] ?? false) === true && ($ask('shout_emoji', $open, $sessU, ['for' => 'list'])['success'] ?? false) === true
+              && ($ask('shout_emoji', $open, $sessU, ['for' => 'bio'])['success'] ?? false) === true
+              && ($ask('shout_emoji', ['wl_allow_description' => '0'] + $open, $sessU, ['for' => 'description'])['error'] ?? '') === 'disabled'
+              && ($ask('shout_emoji', ['lists_enabled' => '0'] + $open, $sessU, ['for' => 'list'])['error'] ?? '') === 'disabled'
+              && ($ask('shout_emoji', ['profile_bio_enabled' => '0'] + $open, $sessU, ['for' => 'bio'])['error'] ?? '') === 'disabled', json_encode(array_slice($desc, 0, 2)));
+        $guestMay = !empty(userEffectivePermissions($db, null, array_merge($cfg, $open))['content.submit']) || !empty(userEffectivePermissions($db, null, array_merge($cfg, $open))['content.propose']);
+        $jg = $ask('shout_emoji', $open, [], ['for' => 'description']);
+        check('… a guest by the guest group\'s own grant (the whitelist form is public): ' . ($guestMay ? 'this one holds it' : 'this one holds neither, so it is asked to sign in'),
+              $guestMay ? (($jg['success'] ?? false) === true) : (($jg['error'] ?? '') === 'login_required'), json_encode($jg));
+    } finally {
+        $db->exec("DELETE FROM shout_emotes WHERE code = 'emtctx_big'");
+        shoutEmotesInvalidate();
+    }
+} else {
+    echo "SKIP the endpoints by context: no smokeuser here (run deploy/local_bootstrap.php and the smokes)\n";
+}
+@unlink($runner2);
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

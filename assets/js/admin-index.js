@@ -596,7 +596,15 @@
         makeSortStack({ table: $('idx-table'), defaultSort: [{ col: 'last', dir: 'desc' }], onChange: (stack) => { state.sort = stack; state.page = 1; loadDebounced(); } }).bindHeaders();
         $('idx-search').addEventListener('input', debounce(() => { state.search = $('idx-search').value.trim(); state.page = 1; load(); }, window.AdminCommon.DEBOUNCE.search));
         bindSearchClear($('idx-search'), $('idx-search-clear'), () => { state.search = ''; state.page = 1; load(); });
-        $('idx-search-files').addEventListener('change', () => { state.searchFiles = $('idx-search-files').checked; state.page = 1; load(); });
+        // An option of the search, not a filter: with nothing searched it changes nothing, so it is only
+        // remembered for the next search — reloading the same page for it made the table flash (1.70.0).
+        // The Whitelist's own box has worked this way since it was added (admin-whitelist.js).
+        $('idx-search-files').addEventListener('change', () => {
+            state.searchFiles = $('idx-search-files').checked;
+            if (!state.search) return;
+            state.page = 1;
+            load();
+        });
         $('idx-filter-meta').addEventListener('change', () => { state.meta = $('idx-filter-meta').value; state.page = 1; load(); });
         $('idx-filter-life').addEventListener('change', () => { state.life = $('idx-filter-life').value; state.page = 1; load(); });
         const idxPp = $('idx-perpage');

@@ -24,6 +24,10 @@
  * the reason the per-list flag is never rewritten by a settings change.
  */
 
+// The lists a hash is on — "who has this" (1.70.0) — are asked there, one query for the overlay and for
+// listsContainingHash() below.
+require_once __DIR__ . '/who.php';
+
 /** The master switch. Off, every endpoint answers 404 and no page draws anything about lists. */
 function listsEnabled(array $cfg): bool
 {
@@ -46,6 +50,256 @@ function listsMaxPerUser(array $cfg): int
 function listsMaxItems(array $cfg): int
 {
     return max(10, min(5000, (int)($cfg['lists_max_items'] ?? 500) ?: 500));
+}
+
+/* ── the description (v80, 1.70.0) ────────────────────────────────────────────────────────────────
+ *
+ * The site's rich text — BBCode or Markdown, whichever Settings allows (richtextFormats()) — kept as
+ * typed with its format, and drawn by the description renderer with the room's emotes and stickers
+ * (richtextRenderIn('list', …): an emote inline, a sticker bounded to 96 px — includes/shout.php says why).
+ *
+ * WHAT COUNTS. The limit Settings sets (`lists_desc_max`) is what a READER sees — the words, not the tags
+ * that format them — the way the profile's description counts (includes/profilebio.php); a token
+ * (`:fire:`, `:fa-rocket:`, an emote's `:code:`) counts as the characters it is typed as. It is counted
+ * by a STRIP of the syntax (listDescVisible()), not by a render, because the browser has to count it the
+ * same way while somebody types: assets/js/favourites.js carries its twin, so the counter under the box,
+ * the Preview's counter and the save all say one number. The text as typed has a ceiling of its own —
+ * four times the visible limit, never more than 16 000 characters — so tags cannot store a novel in a
+ * field whose visible limit is a thousand.
+ *
+ * NO PICTURES — stricter than a torrent's description, on purpose. A torrent's description waits in the
+ * review queue before anybody reads it; a list's is published by its owner the moment it is saved, and a
+ * picture from another host is a request from every reader's browser to whoever runs that host (their
+ * address, their time, which list they opened). The room's emotes and stickers are the pictures a list
+ * may have: the site's own images, approved by its operator, from its own endpoint. So `[img]` and
+ * `![](…)` are refused by the save, drawn as nothing if a row has one anyway, and the editor offers no
+ * picture button. Links keep the description's rules: http and https only, rel="nofollow noopener
+ * noreferrer ugc", a new tab, the "you are leaving" warning, at most `desc_max_links` of them.
+ */
+const LIST_NAME_MAX           = 80;
+const LIST_DESC_MAX_MIN       = 50;
+const LIST_DESC_MAX_MAX       = 5000;
+const LIST_DESC_MAX_DEFAULT   = 1000;
+const LIST_DESC_SOURCE_FACTOR = 4;         // the text as typed may be this many times the visible limit…
+const LIST_DESC_SOURCE_CHARS  = 16000;     // …and never more characters than this (four bytes each still fit a TEXT)
+const LIST_DESC_SOURCE_BYTES  = 65000;     // …nor more bytes than a TEXT column holds, with room to spare
+const LIST_DESC_RAW_BYTES     = 65536;     // what a request may carry at all, before any work is done
+const LIST_DESC_EXCERPT       = 200;       // the card's excerpt, before the stylesheet folds it to two lines
+
+/** The longest description, in characters a reader sees, as Settings says — clamped. */
+function listsDescMax(array $cfg): int
+{
+    $v = (int)($cfg['lists_desc_max'] ?? LIST_DESC_MAX_DEFAULT);
+    return max(LIST_DESC_MAX_MIN, min(LIST_DESC_MAX_MAX, $v ?: LIST_DESC_MAX_DEFAULT));
+}
+
+/** The most characters the text AS TYPED may hold, tags included. */
+function listDescSourceCap(array $cfg): int
+{
+    return min(listsDescMax($cfg) * LIST_DESC_SOURCE_FACTOR, LIST_DESC_SOURCE_CHARS);
+}
+
+/** A stored format as the renderer takes it: one of the two syntaxes, BBCode for anything else. */
+function listDescFormatOf($format): string
+{
+    return $format === 'markdown' ? 'markdown' : 'bbcode';
+}
+
+/**
+ * A description as it is kept and judged: one kind of line break, trimmed, and without what is no text at
+ * all — the C0 and C1 controls but the tab and the line break (three C0 ones are the renderer's own
+ * placeholders) and the bidi embeddings, overrides and isolates, which make a link's words read backwards
+ * (profileBioClean()'s reasons; its folding of spaces is not taken — a code block here keeps its own).
+ * U+2060 stays: it is the escape of the texts v80 rewrote (schemaListDescPlainToBbcode()).
+ */
+function listDescClean(string $raw): string
+{
+    $s = str_replace(["\r\n", "\r"], "\n", $raw);
+    $s = preg_replace('/[\x{0000}-\x{0008}\x{000B}-\x{001F}\x{007F}-\x{009F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $s) ?? $s;
+    return trim($s);
+}
+
+/**
+ * The text a reader sees, as a strip of the syntax — what listDescVisible() counts and the excerpt is cut
+ * from. The TWIN of listDescStrip() in assets/js/favourites.js, pattern for pattern: change one, change
+ * both (tests/lists_test.php holds them to the same answers). BBCode: a picture goes whole, every tag the
+ * renderer knows goes and its words stay. Markdown: a picture goes, a link is its words, the marks at the
+ * start of a line (a heading, a quote, a bullet, a number) and the paired ones (** ~~ == || ` ^ ~ *) go.
+ * Both: U+2060 draws nothing — taken out AFTER the syntax, so a tag v80 escaped (`[⁠b]`, shown as the
+ * text it is) is counted as the text it is — and every run of white space is one character, as a page
+ * draws it. ($keepJoiner is the excerpt's: it draws the tokens after this, and an escaped token must not
+ * become one there.)
+ */
+function listDescStrip(string $text, string $format, bool $keepJoiner = false): string
+{
+    $s = str_replace(["\r\n", "\r"], "\n", $text);
+    if ($format === 'markdown') {
+        $s = preg_replace('/!\[[^\]\n]*\]\([^) \t\n\x0B\f\r]*\)/u', '', $s) ?? $s;
+        $s = preg_replace('/\[([^\]\n]*)\]\([^) \t\n\x0B\f\r]*\)/u', '$1', $s) ?? $s;
+        $s = preg_replace('/(^|\n)[ \t]*(?:#{1,6}|>|[-*+]|\d{1,3}[.)])[ \t]+/u', '$1', $s) ?? $s;
+        $s = preg_replace('/==/u', '', $s) ?? $s;
+        $s = preg_replace('/[*~^`|]/u', '', $s) ?? $s;
+    } else {
+        $s = preg_replace('/\[img(?:=[^\]\n]*)?\][\s\S]*?\[\/img\]/iu', '', $s) ?? $s;
+        $s = preg_replace('/\[\/?(?:b|i|u|s|sub|sup|color|size|font|highlight|mark|center|right|left|quote|spoiler|url|email|list|table|tr|th|td|code|hide|postshide|youtube|yt|hr|\*)(?:=[^\]\n]*)?\]/iu', '', $s) ?? $s;
+    }
+    if (!$keepJoiner) $s = str_replace("\u{2060}", '', $s);
+    $s = preg_replace('/[ \t\n\x0B\f]+/u', ' ', $s) ?? $s;
+    return trim($s, ' ');
+}
+
+/** How many characters a reader sees: code points of the strip above (an emoji is one, a token as typed). */
+function listDescVisible(string $text, string $format): int
+{
+    return mb_strlen(listDescStrip($text, listDescFormatOf($format)), 'UTF-8');
+}
+
+/**
+ * Everything wrong with a CLEANED description, as ['code' => …, 'vars' => […]] for api.lists.<code>, or
+ * null. The cheap, bounding questions first: the text's size before it is walked, the syntax before it is
+ * rendered — and one render, by richtextCount(), for the pictures and the links.
+ */
+function listDescProblem(string $clean, string $format, array $cfg): ?array
+{
+    if ($clean === '') return null;
+    $cap = listDescSourceCap($cfg);
+    if (mb_strlen($clean, 'UTF-8') > $cap || strlen($clean) > LIST_DESC_SOURCE_BYTES) {
+        return ['code' => 'too_long_source', 'vars' => ['max' => $cap]];
+    }
+    if (!in_array($format, richtextFormats($cfg), true)) return ['code' => 'bad_format', 'vars' => []];
+    $n = listDescVisible($clean, $format);
+    $max = listsDescMax($cfg);
+    if ($n > $max) return ['code' => 'too_long', 'vars' => ['n' => $n, 'max' => $max]];
+    $c = richtextCount($clean, $format, $cfg);
+    if ($c['images'] > 0) return ['code' => 'no_images', 'vars' => []];
+    $maxLinks = richtextMaxLinks($cfg);
+    if ($c['links'] > $maxLinks) return ['code' => 'too_many_links', 'vars' => ['n' => $c['links'], 'max' => $maxLinks]];
+    return null;
+}
+
+/**
+ * A stored description as the list's window draws it — '' for none. The description renderer and the
+ * room's emotes (richtextRenderIn('list', …)), and then no picture from elsewhere: the renderer's own
+ * `<img class="rt-img">` dropped with a paragraph that held nothing else — a row the save would refuse
+ * (typed into a database client, restored from an old backup) still shows none. The emotes are
+ * `rt-emote` / `rt-sticker` and stay. The format as stored: a description written as Markdown stays
+ * Markdown after the operator allows BBCode only, as a torrent's does.
+ */
+function listDescRender(?PDO $db, array $cfg, ?string $text, $format): string
+{
+    $text = (string)$text;
+    if (trim($text) === '') return '';
+    $html = richtextRenderIn('list', $db, $text, listDescFormatOf($format), $cfg,
+                             function_exists('richtextViewerSignedIn') ? richtextViewerSignedIn($db) : false);
+    $html = preg_replace('#<img class="rt-img"[^>]*>#', '', $html) ?? $html;
+    return preg_replace('#<p>\s*</p>#', '', $html) ?? $html;
+}
+
+/**
+ * The card's line or two: the text a reader sees (listDescStrip()), without what is hidden or folded —
+ * a [hide] block's words (a summary is not the place for them, whoever reads it), a spoiler's (that is
+ * its point), and nothing at all past a hide fence that does not close (the renderer's own rule) — the
+ * shortcodes as their emoji and Font Awesome's tokens as what a mail shows (a face's emoji, `[Rocket]`),
+ * an emote as its code. Plain text: the page puts it in with textContent.
+ */
+function listDescExcerpt(?string $text, $format, array $cfg, int $len = LIST_DESC_EXCERPT): string
+{
+    // U+2060 kept until the tokens are drawn: in a text v80 rewrote it is what keeps `[hide]`, `:fire:` or
+    // `:fa-rocket:` the words they were — here as in the window.
+    $s = (string)$text;
+    if (trim(str_replace("\u{2060}", '', $s)) === '') return '';
+    $fmt = listDescFormatOf($format);
+    $s = preg_replace('/\[(hide|postshide)(?:=[^\]]*)?\][\s\S]*?\[\/\1\]/i', ' ', $s) ?? $s;
+    if (preg_match('/\[\/?(?:hide|postshide)\b/i', $s)) return '';
+    $s = $fmt === 'markdown'
+        ? (preg_replace('/\|\|[\s\S]*?\|\|/', ' ', $s) ?? $s)
+        : (preg_replace('/\[spoiler(?:=[^\]]*)?\][\s\S]*?\[\/spoiler\]/i', ' ', $s) ?? $s);
+    $plain = listDescStrip($s, $fmt, true);
+    if (function_exists('richtextEmoji')) {
+        $map = richtextEmoji();
+        $plain = preg_replace_callback('/:([a-z0-9_+-]{1,24}):/', fn($m) => $map[$m[1]] ?? $m[0], $plain) ?? $plain;
+    }
+    if (str_contains($plain, ':fa-') && function_exists('emojiFaRenderHtml')) {
+        $html = emojiFaRenderHtml(htmlspecialchars($plain, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), array_merge($cfg, ['shout_emoji_fa' => 'off']));
+        $plain = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
+    $plain = str_replace("\u{2060}", '', $plain);
+    $plain = trim(preg_replace('/\s+/u', ' ', $plain) ?? $plain);
+    return mb_strlen($plain, 'UTF-8') > $len ? rtrim(mb_substr($plain, 0, $len - 1, 'UTF-8')) . '…' : $plain;
+}
+
+/** What a shelf is told about one list's description: the text as typed (the editor's), its format, the card's excerpt. */
+function listDescForClient(array $row, array $cfg): array
+{
+    $text = (string)($row['description'] ?? '');
+    $fmt = listDescFormatOf($row['description_format'] ?? null);
+    return ['description' => $text, 'description_format' => $fmt, 'excerpt' => listDescExcerpt($text, $fmt, $cfg)];
+}
+
+/**
+ * POST user_lists {op: 'edit', id, name, description, format} — the name and the description in ONE
+ * request (the Edit window), as ['status' => int, 'body' => array]. `describe` (the description alone,
+ * `value` or `description`) is the same without the name, so no second path writes a description.
+ *
+ * The endpoint has already asked everything every op asks — the token, somebody signed in, `lists.use`,
+ * the hourly rate limit — and found the row ($own) by id AND owner. This asks the rest in the order a
+ * person would: the name, the text's size and encoding before it is walked, whether it CHANGED, then (only
+ * then) a moderator's mute and the description's own rules. What is not changed is not judged again: a
+ * rename of a list whose description was written under a longer limit, or in a syntax Settings has since
+ * switched off, is still a rename. The slug is never rebuilt — a link somebody was sent keeps working.
+ */
+function listEditRequest(PDO $db, array $cfg, array $me, array $own, array $input, bool $withName = true): array
+{
+    $fail = static function (int $status, string $code, array $vars = []): array {
+        return ['status' => $status, 'body' => ['success' => false, 'error' => $code, 'message' => __('api.lists.' . $code, $vars)]];
+    };
+    $name = (string)$own['name'];
+    if ($withName) {
+        $rawName = $input['name'] ?? '';
+        if (!is_string($rawName)) return $fail(400, 'name_required');
+        if (!mb_check_encoding($rawName, 'UTF-8')) return $fail(400, 'bad_encoding');
+        $name = trim($rawName);
+        if ($name === '') return $fail(400, 'name_required');
+        if (mb_strlen($name, 'UTF-8') > LIST_NAME_MAX) return $fail(400, 'name_too_long', ['max' => LIST_NAME_MAX]);
+    }
+    $wasText = (string)($own['description'] ?? '');
+    $wasFmt = listDescFormatOf($own['description_format'] ?? null);
+    // Absent is "as it is" — a request that says nothing about the description does not wipe it.
+    $raw = $input['description'] ?? ($withName ? null : ($input['value'] ?? null)) ?? $wasText;
+    if (!is_string($raw)) return $fail(400, 'invalid');
+    if (strlen($raw) > LIST_DESC_RAW_BYTES) return $fail(413, 'too_long_source', ['max' => listDescSourceCap($cfg)]);
+    if (!mb_check_encoding($raw, 'UTF-8')) return $fail(400, 'bad_encoding');
+    $desc = listDescClean($raw);
+
+    $fmtIn = $input['format'] ?? null;
+    if ($fmtIn !== null && !is_string($fmtIn)) return $fail(400, 'bad_format');
+    $fmt = $fmtIn === null || $fmtIn === '' ? $wasFmt : $fmtIn;
+    if ($desc === '') {
+        // Nothing written has no syntax to refuse: kept in the one asked for when it is one the site takes.
+        $allowed = richtextFormats($cfg);
+        $fmt = in_array($fmt, $allowed, true) ? $fmt : ($allowed[0] ?? 'bbcode');
+    } elseif ($desc !== $wasText || $fmt !== $wasFmt) {
+        // Silenced by a moderator (messages, the room and the profile's description obey it already): a
+        // description is words other people read. Taking yours away never waits for anybody.
+        $until = function_exists('pmMutedUntil') ? pmMutedUntil($me) : null;
+        if ($until !== null) return $fail(403, 'muted', ['until' => $until]);
+        $bad = listDescProblem($desc, $fmt, $cfg);
+        if ($bad !== null) return $fail(400, $bad['code'], $bad['vars']);
+    }
+    $fmt = listDescFormatOf($fmt);
+    $db->prepare("UPDATE user_lists SET name = ?, description = ?, description_format = ? WHERE id = ? AND user_id = ?")
+       ->execute([$name, $desc, $fmt, (int)$own['id'], (int)$me['id']]);
+    return ['status' => 200, 'body' => [
+        'success'            => true,
+        'name'               => $name,
+        'slug'               => (string)$own['slug'],
+        'description'        => $desc,
+        'description_format' => $fmt,
+        'excerpt'            => listDescExcerpt($desc, $fmt, $cfg),
+        'chars'              => $desc === '' ? 0 : listDescVisible($desc, $fmt),
+        'max'                => listsDescMax($cfg),
+        'message'            => __('api.lists.saved'),
+    ]];
 }
 
 /**
@@ -230,50 +484,25 @@ function listItemsWithMeta(PDO $db, array $rows, bool $canWl = true, bool $isOwn
 }
 
 /**
- * The PUBLIC lists a hash appears on — "who has this", for collections.
+ * The PUBLIC lists a hash appears on — "who has this", for collections: the first $limit of them.
  *
- * Every gate the profile applies is applied here too, in SQL, for the reason
- * api/hash_favourites.php gives at length: filtering after the LIMIT makes the total a lie. A list
- * whose owner has since taken their section down, or whose group lost the permission, is not here.
+ * Since 1.70.0 the query is the "who has this" overlay's Lists section (whoListsPage(), includes/who.php),
+ * which pages and searches; this is its first page, as the 1.69.0 overlay asked for it. Every gate the
+ * profile applies is applied there, in SQL, for the reason api/hash_favourites.php gives at length:
+ * filtering after the LIMIT makes the total a lie. A list whose owner has since taken their section down,
+ * or whose group lost the permission, is not there — nor one whose owner has hidden their profile from
+ * $viewerId (`hide_profile`): a chip on a torrent's page that links straight into it would be the profile
+ * answering after all.
  *
- * $viewerId is who is asking, and it is here for one gate that cannot be asked without it: somebody
- * who blocked this reader with `hide_profile` has closed their profile to them, and a chip on a
- * torrent's page that links straight into it would be the profile answering after all.
+ * Who calls it: since 1.70.0 nothing on the site — the overlay asks api/hash_who.php, and
+ * api/hash_favourites.php (the 1.69.0 answer, kept) calls whoListsPage() itself. The TESTS do, and it
+ * is kept for them: tests/lists_test.php (the truth table of the five gates at the top of this file),
+ * tests/audit_lists_test.php (a reader the list is hidden from, a grant that has not started yet) and
+ * tests/who_test.php (that this is the Lists section's own first page, so the table holds there too).
  */
 function listsContainingHash(PDO $db, array $cfg, string $hash, int $limit = 20, int $viewerId = 0): array
 {
-    if (!listsPublicEnabled($cfg)) return [];
-    $groupIds = userGroupIdsWithPermission($db, 'lists.public');
-    if (!$groupIds) return [];
-    $in = implode(',', array_map('intval', $groupIds));
-    $sql = "SELECT l.id, l.name, l.slug, u.username, u.avatar_sha,
-                   (SELECT COUNT(*) FROM user_list_items x WHERE x.list_id = l.id) AS items
-              FROM user_list_items i
-              JOIN user_lists l ON l.id = i.list_id
-              JOIN users u ON u.id = l.user_id
-             WHERE i.info_hash = ? AND l.is_public = 1 AND u.lists_public = 1 AND u.status = 'active'
-               AND EXISTS (SELECT 1 FROM user_group_members m WHERE m.user_id = u.id AND m.group_id IN ($in)
-                             AND m.granted_at <= NOW() AND (m.expires_at IS NULL OR m.expires_at > NOW()))";
-    $params = [strtolower($hash)];
-    // The directory's clause, word for word: a membership that starts next week is not a membership
-    // today (userGroups() in includes/users.php reads it the same way), and a profile hidden from
-    // this reader takes its lists with it.
-    if ($viewerId > 0) {
-        $sql .= " AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id = u.id AND b.blocked_id = ? AND b.hide_profile = 1)";
-        $params[] = $viewerId;
-    }
-    if (userEmailVerifyRequired($cfg)) $sql .= " AND u.email_verified = 1";
-    $sql .= " ORDER BY l.updated_at DESC LIMIT " . max(1, min(100, $limit));
     try {
-        $st = $db->prepare($sql);
-        $st->execute($params);
-        // The owner's picture beside their name (1.63.0), as an ADDRESS built from the same join —
-        // never the owner's id, which this list has never carried.
-        $base = function_exists('getBaseUrl') ? getBaseUrl() : '/';
-        return array_map(static fn($r) => [
-            'name' => (string)$r['name'], 'slug' => (string)$r['slug'],
-            'username' => (string)$r['username'], 'items' => (int)$r['items'],
-            'avatar' => function_exists('userAvatarField') ? userAvatarField($r, 20, $base, $cfg) : '',
-        ], $st->fetchAll(PDO::FETCH_ASSOC));
+        return whoListsPage($db, $cfg, $hash, $viewerId, ['page' => 1, 'per_page' => max(1, min(100, $limit)), 'search' => ''])['rows'];
     } catch (\Throwable $e) { return []; }
 }

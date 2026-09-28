@@ -81,6 +81,9 @@ $MEMBER = array_merge($GUEST, [
     'profile.bio',
     // v75 (1.69.0): their likes or ratings may be listed on their profile — with their own yes.
     'rating.public',
+    // v81 (1.70.0): deleting a description they are the author of, and the list of the descriptions they
+    // wrote on their profile — with their own yes.
+    'content.delete_own', 'content.public',
 ]);
 // ONLY the extras. A premium account is a member as well, so repeating the member row here would
 // mean a membership that lapses takes the whole site with it.
@@ -98,7 +101,9 @@ $MODERATOR = ['panel.access', 'panel.reports.view', 'panel.reports.status', 'pan
               'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
               'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate',
               // v72 (1.66.0): editing anybody's line, to this group ONLY and never with shout.moderate.
-              'shout.edit_any'];
+              'shout.edit_any',
+              // v81 (1.70.0): taking down anybody's published description from the Info panel.
+              'content.delete_any'];
 
 /* ══ 1. the presets ════════════════════════════════════════════════════════ */
 // includes/users.php has claimed since 1.21.0 that "users_test.php checks every id here is real".
@@ -158,7 +163,8 @@ check('the premium SEED carries exactly the paid extras',
 $modSeedPlus = array_unique(array_merge($seedFor['moderator'] ?? [],
                                         ['shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'],
                                         ['content.view'],
-                                        ['shout.edit_any']));
+                                        ['shout.edit_any'],
+                                        ['content.delete_any']));
 check('the moderator preset and the moderator seed agree',
       array_values(array_diff($modSeedPlus, $presets['moderator']['perms'])) === []
       && array_values(array_diff($presets['moderator']['perms'], $modSeedPlus)) === [],
@@ -237,8 +243,9 @@ try {
     ])) . " WHERE slug = 'member'");
     $sdb->exec("DELETE FROM user_groups WHERE slug = 'premium'");
     // …and from before 1.66.0 as well: the v72 grant (shout.edit_own) has not happened on it yet, and
-    // neither have 1.69.0's v74 and v75 ones (profile.bio, rating.public).
-    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public')");
+    // neither have 1.69.0's v74 and v75 ones (profile.bio, rating.public) nor 1.70.0's v81 one
+    // (content.delete_own, content.public).
+    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public', 'schema_grant_v81_content')");
     trackerSchemaDataMigrations($sdb, $scfg);
     $after = $perms($sdb, 'member');
     check('the migration puts the missing matrix ids on an existing member group',

@@ -90,11 +90,11 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         // the sanitizer that decides what may be displayed is the same one the public side uses.
         'message'    => $r['msg_id'] ? [
             'id'   => (int)$r['msg_id'],
-            'html' => pmRenderBody((string)$r['msg_body'], (string)$r['msg_format'], $cfg, true),
+            'html' => pmRenderBody((string)$r['msg_body'], (string)$r['msg_format'], $cfg, true, $db),
             'at'   => (string)$r['msg_at'],
         ] : null,
         'context'    => $r['ctx_at'] ? [
-            'html' => pmRenderBody((string)$r['ctx_body'], (string)$r['ctx_format'], $cfg, true),
+            'html' => pmRenderBody((string)$r['ctx_body'], (string)$r['ctx_format'], $cfg, true, $db),
             'at'   => (string)$r['ctx_at'],
             // Whose line the context was, by NAME — a moderator reading two lines needs to know
             // which of the two people said which, and nothing else about either of them.
